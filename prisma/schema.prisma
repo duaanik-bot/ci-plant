@@ -1,0 +1,486 @@
+// ============================================================
+// COLOUR IMPRESSIONS — Plant Management System
+// Prisma Schema — PostgreSQL — 14 Core Tables
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// ROLES & USERS
+// ─────────────────────────────────────────
+
+model Role {
+  id                      String   @id @default(uuid())
+  roleName                String   @unique @map("role_name")
+  permissions             Json     // Module-level flags
+  wastageApproveLimitPct  Decimal  @default(0) @map("wastage_approve_limit_pct") @db.Decimal(5, 2)
+  canApproveArtwork       Boolean  @default(false) @map("can_approve_artwork")
+  canReleaseDispatch      Boolean  @default(false) @map("can_release_dispatch")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  users User[]
+
+  @@map("roles")
+}
+
+model User {
+  id              String    @id @default(uuid())
+  name            String    @db.VarChar(120)
+  email           String    @unique @db.VarChar(200)
+  pinHash         String    @map("pin_hash")
+  roleId          String    @map("role_id")
+  machineAccess   String[]  @default([]) @map("machine_access") // Array of machine IDs
+  active          Boolean   @default(true)
+  whatsappNumber  String?   @map("whatsapp_number") @db.VarChar(20)
+  lastLoginAt     DateTime? @map("last_login_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  role                Role               @relation(fields: [roleId], references: [id])
+  jobsCreated         Job[]              @relation("JobCreator")
+  jobsClosed          Job[]              @relation("JobCloser")
+  artworksUploaded    Artwork[]
+  artworkApprovals    ArtworkApproval[]
+  sheetIssuesApproved SheetIssue[]       @relation("SheetApprover")
+  sheetIssuesIssued   SheetIssue[]       @relation("SheetIssuer")
+  stagesStarted       JobStage[]         @relation("StageStarter")
+  stagesCompleted     JobStage[]         @relation("StageCompleter")
+  qcRecords           QcRecord[]
+  ncrsRaised          Ncr[]              @relation("NcrRaiser")
+  ncrsAssigned        Ncr[]              @relation("NcrAssignee")
+  ncrsClosed          Ncr[]              @relation("NcrCloser")
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────
+// MACHINES (CI-01 through CI-12)
+// ─────────────────────────────────────────
+
+model Machine {
+  id              String    @id @default(uuid())
+  machineCode     String    @unique @map("machine_code") @db.VarChar(10) // CI-01, CI-02...
+  name            String    @db.VarChar(120)
+  make            String?   @db.VarChar(80)
+  specification   String?   @db.VarChar(80)
+  capacityPerShift Int      @map("capacity_per_shift")
+  stdWastePct     Decimal   @map("std_waste_pct") @db.Decimal(5, 2)
+  status          String    @default("active") @db.VarChar(20) // active | under_maintenance | retired
+  lastPmDate      DateTime? @map("last_pm_date") @db.Date
+  nextPmDue       DateTime? @map("next_pm_due") @db.Date
+  notes           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  bomLines  BomLine[]
+  jobStages JobStage[]
+
+  @@map("machines")
+}
+
+// ─────────────────────────────────────────
+// SUPPLIERS
+// ─────────────────────────────────────────
+
+model Supplier {
+  id            String   @id @default(uuid())
+  name          String   @db.VarChar(200)
+  gstNumber     String?  @map("gst_number") @db.VarChar(20)
+  contactName   String?  @map("contact_name") @db.VarChar(120)
+  contactPhone  String?  @map("contact_phone") @db.VarChar(20)
+  email         String?  @db.VarChar(200)
+  address       String?
+  materialTypes String[] @map("material_types") // board | ink | foil | consumables etc
+  leadTimeDays  Int      @default(7) @map("lead_time_days")
+  paymentTerms  String?  @map("payment_terms") @db.VarChar(60)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  inventories Inventory[]
+
+  @@map("suppliers")
+}
+
+// ─────────────────────────────────────────
+// CUSTOMERS
+// ─────────────────────────────────────────
+
+model Customer {
+  id                      String   @id @default(uuid())
+  name                    String   @db.VarChar(200)
+  gstNumber               String?  @map("gst_number") @db.VarChar(20)
+  contactName             String?  @map("contact_name") @db.VarChar(120)
+  contactPhone            String?  @map("contact_phone") @db.VarChar(20)
+  email                   String?  @db.VarChar(200)
+  address                 String?
+  creditLimit             Decimal  @default(0) @map("credit_limit") @db.Decimal(12, 2)
+  requiresArtworkApproval Boolean  @default(true) @map("requires_artwork_approval")
+  active                  Boolean  @default(true)
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  jobs Job[]
+
+  @@map("customers")
+}
+
+// ─────────────────────────────────────────
+// INVENTORY / MATERIALS
+// ─────────────────────────────────────────
+
+model Inventory {
+  id              String   @id @default(uuid())
+  materialCode    String   @unique @map("material_code") @db.VarChar(30)
+  description     String
+  unit            String   @db.VarChar(20) // sheets | kg | litres | metres | pieces
+  supplierId      String?  @map("supplier_id")
+  qtyQuarantine   Decimal  @default(0) @map("qty_quarantine") @db.Decimal(12, 3)
+  qtyAvailable    Decimal  @default(0) @map("qty_available") @db.Decimal(12, 3)
+  qtyReserved     Decimal  @default(0) @map("qty_reserved") @db.Decimal(12, 3)
+  qtyFg           Decimal  @default(0) @map("qty_fg") @db.Decimal(12, 3)
+  weightedAvgCost Decimal  @default(0) @map("weighted_avg_cost") @db.Decimal(12, 4)
+  reorderPoint    Decimal  @default(0) @map("reorder_point") @db.Decimal(12, 3)
+  safetyStock     Decimal  @default(0) @map("safety_stock") @db.Decimal(12, 3)
+  storageLocation String?  @map("storage_location") @db.VarChar(60)
+  leadTimeDays    Int      @default(7) @map("lead_time_days")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  supplier   Supplier?  @relation(fields: [supplierId], references: [id])
+  bomLines   BomLine[]
+  sheetIssues SheetIssue[]
+
+  @@map("inventory")
+}
+
+// ─────────────────────────────────────────
+// JOBS (CENTRAL TABLE)
+// ─────────────────────────────────────────
+
+model Job {
+  id                 String    @id @default(uuid())
+  jobNumber          String    @unique @map("job_number") @db.VarChar(30) // CI-JOB-YYYY-NNNN
+  customerId         String    @map("customer_id")
+  productName        String    @map("product_name") @db.VarChar(200)
+  qtyOrdered         Int       @map("qty_ordered")
+  qtyProducedGood    Int       @default(0) @map("qty_produced_good")
+  qtyRejected        Int       @default(0) @map("qty_rejected")
+  imposition         Int       // Cartons per printed sheet
+  machineSequence    String[]  @map("machine_sequence") // Ordered array of machine IDs
+  artworkId          String?   @map("artwork_id")
+  status             String    @default("pending_artwork") @map("status") @db.VarChar(30)
+  // Status enum: pending_artwork | artwork_approved | in_production | 
+  //              folding | final_qc | packing | dispatched | closed
+  dueDate            DateTime  @map("due_date") @db.Date
+  specialInstructions String?  @map("special_instructions")
+  createdBy          String    @map("created_by")
+  closedBy           String?   @map("closed_by")
+  closedAt           DateTime? @map("closed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  customer   Customer  @relation(fields: [customerId], references: [id])
+  creator    User      @relation("JobCreator", fields: [createdBy], references: [id])
+  closer     User?     @relation("JobCloser", fields: [closedBy], references: [id])
+  artwork    Artwork?  @relation(fields: [artworkId], references: [id])
+
+  bomLines    BomLine[]
+  artworks    Artwork[]   @relation("JobArtworks")
+  stages      JobStage[]
+  qcRecords   QcRecord[]
+  ncrs        Ncr[]
+  dispatches  Dispatch[]
+  sheetIssues SheetIssue[]
+
+  @@map("jobs")
+}
+
+// ─────────────────────────────────────────
+// BOM LINES
+// ─────────────────────────────────────────
+
+model BomLine {
+  id            String   @id @default(uuid())
+  jobId         String   @map("job_id")
+  materialId    String   @map("material_id")
+  machineId     String?  @map("machine_id")
+  qtyApproved   Decimal  @map("qty_approved") @db.Decimal(12, 3)
+  qtyIssued     Decimal  @default(0) @map("qty_issued") @db.Decimal(12, 3)
+  qtyUsed       Decimal  @default(0) @map("qty_used") @db.Decimal(12, 3)
+  qtyWasteStd   Decimal  @map("qty_waste_std") @db.Decimal(12, 3)
+  netQty        Decimal  @map("net_qty") @db.Decimal(12, 3)
+  // variance_pct is computed: (qtyUsed - netQty) / netQty * 100
+  lockedAt      DateTime @map("locked_at") // No changes after this
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  job         Job         @relation(fields: [jobId], references: [id])
+  material    Inventory   @relation(fields: [materialId], references: [id])
+  machine     Machine?    @relation(fields: [machineId], references: [id])
+  sheetIssues SheetIssue[]
+
+  @@map("bom_lines")
+}
+
+// ─────────────────────────────────────────
+// SHEET ISSUES — SOLVES PROBLEM 1
+// Every single material issuance is recorded here.
+// Hard limit enforced via attemptSheetIssue() function.
+// ─────────────────────────────────────────
+
+model SheetIssue {
+  id              String    @id @default(uuid())
+  jobId           String    @map("job_id")
+  bomLineId       String    @map("bom_line_id")
+  materialId      String    @map("material_id")
+  qtyRequested    Decimal   @map("qty_requested") @db.Decimal(12, 3)
+  isExcess        Boolean   @default(false) @map("is_excess")
+  reasonCode      String?   @map("reason_code") @db.VarChar(60)
+  // reason_code enum: substrate_quality | machine_setting | colour_standard | die_cutting_waste | other
+  reasonDetail    String?   @map("reason_detail")
+  approvedBy      String?   @map("approved_by")
+  approvedAt      DateTime? @map("approved_at")
+  approvalTier    Int?      @map("approval_tier") // 1=Supervisor 2=ProdMgr 3=OpsHead 4=MD
+  rejectedAt      DateTime? @map("rejected_at")
+  rejectionReason String?   @map("rejection_reason")
+  issuedBy        String    @map("issued_by")
+  issuedAt        DateTime  @default(now()) @map("issued_at")
+  lotNumber       String?   @map("lot_number") @db.VarChar(60)
+
+  job       Job        @relation(fields: [jobId], references: [id])
+  bomLine   BomLine    @relation(fields: [bomLineId], references: [id])
+  material  Inventory  @relation(fields: [materialId], references: [id])
+  approver  User?      @relation("SheetApprover", fields: [approvedBy], references: [id])
+  issuer    User       @relation("SheetIssuer", fields: [issuedBy], references: [id])
+
+  @@map("sheet_issues")
+}
+
+// ─────────────────────────────────────────
+// ARTWORKS — SOLVES PROBLEM 2
+// ─────────────────────────────────────────
+
+model Artwork {
+  id             String    @id @default(uuid())
+  jobId          String    @map("job_id")
+  versionNumber  Int       @map("version_number")
+  filename       String    @db.VarChar(255)
+  fileUrl        String    @map("file_url") // Cloudflare R2 signed URL path
+  status         String    @default("pending") @db.VarChar(30)
+  // Status: pending | partially_approved | approved | superseded
+  locksCompleted Int       @default(0) @map("locks_completed") // 0-4
+  ctpReleaseAt   DateTime? @map("ctp_release_at")
+  plateBarcode   String?   @map("plate_barcode") @db.VarChar(60)
+  uploadedBy     String    @map("uploaded_by")
+  supersededBy   String?   @map("superseded_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  job      Job    @relation("JobArtworks", fields: [jobId], references: [id])
+  uploader User   @relation(fields: [uploadedBy], references: [id])
+  jobsMain Job[]  // Jobs where this is the current artwork
+
+  approvals ArtworkApproval[]
+
+  @@map("artworks")
+}
+
+// ─────────────────────────────────────────
+// ARTWORK APPROVALS — 4 LOCKS
+// ─────────────────────────────────────────
+
+model ArtworkApproval {
+  id               String    @id @default(uuid())
+  artworkId        String    @map("artwork_id")
+  lockNumber       Int       @map("lock_number") // 1 | 2 | 3 | 4
+  // Lock 1: Customer doc attached (Sales)
+  // Lock 2: QA Officer 12-point checklist
+  // Lock 3: QA Manager version sign-off
+  // Lock 4: System-generated CTP release
+  approvedBy       String    @map("approved_by")
+  approvedAt       DateTime  @map("approved_at")
+  checklistData    Json?     @map("checklist_data") // Lock 2 stores 12-point answers
+  comments         String?
+  rejected         Boolean   @default(false)
+  rejectionReason  String?   @map("rejection_reason")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  artwork  Artwork @relation(fields: [artworkId], references: [id])
+  approver User    @relation(fields: [approvedBy], references: [id])
+
+  @@unique([artworkId, lockNumber])
+  @@map("artwork_approvals")
+}
+
+// ─────────────────────────────────────────
+// JOB STAGES
+// ─────────────────────────────────────────
+
+model JobStage {
+  id           String    @id @default(uuid())
+  jobId        String    @map("job_id")
+  stageNumber  Int       @map("stage_number") // 1-11 matching workflow
+  machineId    String?   @map("machine_id")
+  startedBy    String    @map("started_by")
+  startedAt    DateTime  @map("started_at")
+  completedBy  String?   @map("completed_by")
+  completedAt  DateTime? @map("completed_at")
+  qtyIn        Int?      @map("qty_in")
+  qtyOut       Int?      @map("qty_out")
+  qtyWaste     Int       @default(0) @map("qty_waste")
+  notes        String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  job       Job      @relation(fields: [jobId], references: [id])
+  machine   Machine? @relation(fields: [machineId], references: [id])
+  starter   User     @relation("StageStarter", fields: [startedBy], references: [id])
+  completer User?    @relation("StageCompleter", fields: [completedBy], references: [id])
+
+  qcRecords QcRecord[]
+
+  @@map("job_stages")
+}
+
+// ─────────────────────────────────────────
+// QC RECORDS
+// ─────────────────────────────────────────
+
+model QcRecord {
+  id              String   @id @default(uuid())
+  jobId           String   @map("job_id")
+  stageId         String?  @map("stage_id")
+  checkType       String   @map("check_type") @db.VarChar(60)
+  // colour_delta_e | caliper | gsm | barcode_scan | gloss | burst_strength | crease | dimensional
+  instrumentName  String   @map("instrument_name") @db.VarChar(80)
+  measuredValue   String?  @map("measured_value") @db.VarChar(120)
+  specMin         String?  @map("spec_min") @db.VarChar(60)
+  specMax         String?  @map("spec_max") @db.VarChar(60)
+  result          String   @db.VarChar(10) // PASS | FAIL
+  checkedBy       String   @map("checked_by")
+  checkedAt       DateTime @default(now()) @map("checked_at")
+  isFirstArticle  Boolean  @default(false) @map("is_first_article")
+  notes           String?
+
+  job     Job       @relation(fields: [jobId], references: [id])
+  stage   JobStage? @relation(fields: [stageId], references: [id])
+  checker User      @relation(fields: [checkedBy], references: [id])
+
+  ncrs Ncr[]
+
+  @@map("qc_records")
+}
+
+// ─────────────────────────────────────────
+// NCR + CAPA
+// ─────────────────────────────────────────
+
+model Ncr {
+  id                String    @id @default(uuid())
+  jobId             String    @map("job_id")
+  qcRecordId        String?   @map("qc_record_id")
+  trigger           String    @db.VarChar(30)
+  // qc_fail | excess_wastage | customer_complaint | old_stock
+  severity          String    @db.VarChar(20) // critical | major | minor
+  description       String
+  quantityAffected  Int?      @map("quantity_affected")
+  raisedBy          String    @map("raised_by")
+  raisedAt          DateTime  @default(now()) @map("raised_at")
+  rootCause         String?   @map("root_cause")
+  correctiveAction  String?   @map("corrective_action")
+  preventiveAction  String?   @map("preventive_action")
+  assignedTo        String?   @map("assigned_to")
+  dueDate           DateTime? @map("due_date") @db.Date // Default: raisedAt + 15 days
+  closedBy          String?   @map("closed_by")
+  closedAt          DateTime? @map("closed_at")
+  status            String    @default("open") @db.VarChar(20)
+  // open | in_progress | closed | overdue
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  job       Job       @relation(fields: [jobId], references: [id])
+  qcRecord  QcRecord? @relation(fields: [qcRecordId], references: [id])
+  raiser    User      @relation("NcrRaiser", fields: [raisedBy], references: [id])
+  assignee  User?     @relation("NcrAssignee", fields: [assignedTo], references: [id])
+  closer    User?     @relation("NcrCloser", fields: [closedBy], references: [id])
+
+  @@map("ncrs")
+}
+
+// ─────────────────────────────────────────
+// DISPATCH
+// ─────────────────────────────────────────
+
+model Dispatch {
+  id              String    @id @default(uuid())
+  jobId           String    @map("job_id")
+  qtyDispatched   Int       @map("qty_dispatched")
+  vehicleNumber   String?   @map("vehicle_number") @db.VarChar(30)
+  driverName      String?   @map("driver_name") @db.VarChar(80)
+  ewayBillNumber  String?   @map("eway_bill_number") @db.VarChar(30)
+  ewayBillExpiry  DateTime? @map("eway_bill_expiry") @db.Date
+  qaReleaseBy     String?   @map("qa_release_by")
+  qaReleaseAt     DateTime? @map("qa_release_at")
+  dispatchedAt    DateTime? @map("dispatched_at")
+  podReceivedAt   DateTime? @map("pod_received_at")
+  podUrl          String?   @map("pod_url") // Cloudflare R2 path
+  status          String    @default("pending_qa") @db.VarChar(20)
+  // pending_qa | qa_released | dispatched | pod_received
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  job Job @relation(fields: [jobId], references: [id])
+
+  @@map("dispatches")
+}
+
+// ─────────────────────────────────────────
+// QC INSTRUMENTS MASTER
+// ─────────────────────────────────────────
+
+model QcInstrument {
+  id                  String    @id @default(uuid())
+  instrumentName      String    @unique @map("instrument_name") @db.VarChar(80)
+  specification       String?  @db.VarChar(120)
+  range               String?  @db.VarChar(60)
+  frequency           String?  @db.VarChar(60)
+  purpose             String?
+  lastCalibration     DateTime? @map("last_calibration") @db.Date
+  calibrationDue      DateTime? @map("calibration_due") @db.Date
+  calibrationFreqDays Int      @default(365) @map("calibration_freq_days")
+  certificateUrl      String?  @map("certificate_url")
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("qc_instruments")
+}
+
+// ─────────────────────────────────────────
+// AUDIT LOG (APPEND-ONLY — never update/delete)
+// ─────────────────────────────────────────
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  userId     String?  @map("user_id")
+  action     String   @db.VarChar(30) // INSERT | UPDATE | DELETE | LOGIN | LOGOUT
+  tableName  String   @map("table_name") @db.VarChar(60)
+  recordId   String?  @map("record_id")
+  oldValue   Json?    @map("old_value")
+  newValue   Json?    @map("new_value")
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  userAgent  String?  @map("user_agent")
+  timestamp  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("audit_log")
+}
