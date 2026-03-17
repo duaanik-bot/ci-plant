@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const UNITS = ['sheets', 'kg', 'litres', 'metres', 'pieces'] as const
 
 const createSchema = z.object({

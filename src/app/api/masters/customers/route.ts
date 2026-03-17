@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const createSchema = z.object({
   name: z.string().min(1, 'Company name is required'),
   gstNumber: z.string().optional(),

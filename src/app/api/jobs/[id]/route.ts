@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const updateJobSchema = z.object({
   status: z.string().optional(),
   productName: z.string().min(1).optional(),

@@ -41,7 +41,8 @@ npm install -g pnpm
 
 ### Vercel (Free)
 1. Go to vercel.com → Sign up with GitHub
-2. Will connect later when pushing code
+2. Will connect later when pushing code  
+3. **To deploy:** see **[DEPLOYMENT.md](./DEPLOYMENT.md)** for step-by-step Vercel deployment and required env vars.
 
 ### Cloudflare R2 (Free tier)
 1. Go to cloudflare.com → Sign up → R2 → Create bucket: "ci-plant-files"

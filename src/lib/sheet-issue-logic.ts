@@ -8,6 +8,7 @@
 import { db } from './db'
 import { sendWhatsApp } from './notifications'
 import { createAuditLog } from './audit'
+import { checkReorderPoints } from './reorder'
 
 export type IssueResult = {
   success: boolean
@@ -123,6 +124,17 @@ export async function attemptSheetIssue(params: {
       data: { qtyAvailable: { decrement: qtyRequested } },
     })
 
+    await tx.stockMovement.create({
+      data: {
+        materialId: bomLine.materialId,
+        movementType: 'issue',
+        qty: qtyRequested,
+        refType: 'sheet_issue',
+        refId: issue.id,
+        userId: issuedByUserId,
+      },
+    })
+
     await createAuditLog({
       userId: issuedByUserId,
       action: 'INSERT',
@@ -135,6 +147,10 @@ export async function attemptSheetIssue(params: {
     const warningMsg = newRemaining === 0
       ? ' ⚠️ All approved sheets now issued. No further issuance possible without excess approval.'
       : ''
+
+    try {
+      await checkReorderPoints(bomLine.materialId)
+    } catch (_) {}
 
     return {
       success: true,
@@ -220,6 +236,17 @@ export async function approveExcessRequest(params: {
       data: { qtyAvailable: { decrement: issue.qtyRequested } },
     })
 
+    await tx.stockMovement.create({
+      data: {
+        materialId: issue.materialId,
+        movementType: 'issue',
+        qty: issue.qtyRequested,
+        refType: 'sheet_issue',
+        refId: issue.id,
+        userId: approvedByUserId,
+      },
+    })
+
     // Auto-raise NCR if tier 3+ approval (systemic issue)
     if (approvalTier >= 3) {
       await tx.ncr.create({
@@ -260,7 +287,7 @@ Job: ${data.jobNumber} | ${data.productName}
 Material: ${data.materialCode}
 Approved: ${data.approvedQty} | Issued: ${data.alreadyIssued}
 Requesting: ${data.requestedQty} extra
-Approve: ${process.env.NEXT_PUBLIC_APP_URL}/approve/${data.excessRequestId}`
+Approve: ${process.env.NEXT_PUBLIC_APP_URL || 'https://ci-plant.vercel.app'}/stores/approve-excess/${data.excessRequestId}`
 
   // Get all shift supervisors and production managers
   const approvers = await db.user.findMany({
@@ -307,7 +334,7 @@ async function notifyEscalation(data: {
   const message = `🔴 ESCALATED EXCESS REQUEST
 Job: ${data.jobNumber}
 Excess: ${data.excessPct.toFixed(1)}% — needs your approval
-Approve: ${process.env.NEXT_PUBLIC_APP_URL}/approve/${data.excessRequestId}`
+Approve: ${process.env.NEXT_PUBLIC_APP_URL || 'https://ci-plant.vercel.app'}/stores/approve-excess/${data.excessRequestId}`
 
   for (const approver of approvers) {
     if (approver.whatsappNumber) {
@@ -348,12 +375,24 @@ export async function explodeBOM(params: {
   })
 
   // Reserve the material in inventory
-  await db.inventory.update({
-    where: { id: boardMaterialId },
-    data: {
-      qtyAvailable: { decrement: approvedSheets },
-      qtyReserved: { increment: approvedSheets },
-    },
+  await db.$transaction(async (tx) => {
+    await tx.inventory.update({
+      where: { id: boardMaterialId },
+      data: {
+        qtyAvailable: { decrement: approvedSheets },
+        qtyReserved: { increment: approvedSheets },
+      },
+    })
+    await tx.stockMovement.create({
+      data: {
+        materialId: boardMaterialId,
+        movementType: 'reserve',
+        qty: approvedSheets,
+        refType: 'job',
+        refId: jobId,
+        userId: null,
+      },
+    })
   })
 
   return bomLine

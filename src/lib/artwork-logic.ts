@@ -20,15 +20,15 @@ export const LOCK_NAMES: Record<number, string> = {
 export const LOCK_2_CHECKLIST = [
   { key: 'drug_name_spelling', label: 'Drug name spelled correctly' },
   { key: 'dosage_correct', label: 'Dosage matches approved specification' },
-  { key: 'batch_format', label: 'Batch number format correct' },
+  { key: 'batch_format', label: 'Batch number format correct (DD/MM/YYYY)' },
   { key: 'date_format', label: 'Manufacturing / expiry date format correct' },
   { key: 'warning_text', label: 'Warning text present and complete' },
   { key: 'storage_conditions', label: 'Storage conditions stated' },
   { key: 'manufacturer_details', label: 'Manufacturer name and address correct' },
-  { key: 'regulatory_text', label: 'Regulatory text (Schedule H / OTC) correct' },
-  { key: 'barcode_present', label: 'Barcode present and scannable' },
+  { key: 'regulatory_text', label: 'Regulatory text (Schedule H / OTC) present' },
+  { key: 'barcode_present', label: 'Barcode present and position correct' },
   { key: 'mrp_area', label: 'MRP / price area correct' },
-  { key: 'font_legibility', label: 'Font size legible (minimum 10pt)' },
+  { key: 'font_legibility', label: 'Minimum font size legible (10pt)' },
   { key: 'bleed_marks', label: 'Bleed and crop marks correct' },
 ] as const
 
@@ -255,39 +255,58 @@ CTP queue: ${process.env.NEXT_PUBLIC_APP_URL}/ctp`
 
 export async function validatePlateAtPress(params: {
   plateBarcode: string
-  jobId: string
-  machineCode: string
+  jobId?: string
+  machineCode?: string
   operatorUserId: string
-}): Promise<{ valid: boolean; message: string; artworkVersion?: number }> {
+}): Promise<{
+  valid: boolean
+  message: string
+  artworkVersion?: number
+  jobNumber?: string
+  productName?: string
+  approvedByName?: string
+  approvedAt?: string
+}> {
   const { plateBarcode, jobId, machineCode } = params
 
   const artwork = await db.artwork.findFirst({
     where: { plateBarcode },
-    include: { job: { select: { jobNumber: true } } },
+    include: {
+      job: { select: { jobNumber: true, productName: true } },
+    },
   })
 
   if (!artwork) {
-    return { valid: false, message: '❌ Plate barcode not recognised. Check plate is correct.' }
-  }
-
-  if (artwork.jobId !== jobId) {
-    return {
-      valid: false,
-      message: `❌ WRONG PLATE. This plate belongs to Job ${artwork.job.jobNumber}, not this job. Do not proceed.`,
-    }
+    return { valid: false, message: '❌ Plate barcode not recognised. Check plate is correct. Contact your supervisor immediately.' }
   }
 
   if (artwork.status !== 'approved' || artwork.locksCompleted < 4) {
     return {
       valid: false,
-      message: `❌ Artwork not fully approved. Locks completed: ${artwork.locksCompleted}/4. Cannot start press.`,
+      message: `❌ DO NOT RUN. Artwork not fully approved. Locks completed: ${artwork.locksCompleted}/4. Contact your supervisor immediately.`,
     }
   }
 
+  if (jobId && artwork.jobId !== jobId) {
+    return {
+      valid: false,
+      message: `❌ WRONG PLATE. This plate belongs to Job ${artwork.job.jobNumber}, not this job. Do not proceed. Contact your supervisor immediately.`,
+    }
+  }
+
+  const lock3 = await db.artworkApproval.findFirst({
+    where: { artworkId: artwork.id, lockNumber: 3, rejected: false },
+    include: { approver: { select: { name: true } } },
+  })
+
   return {
     valid: true,
-    message: `✅ Plate verified for Job ${artwork.job.jobNumber} — Version ${artwork.versionNumber}. Press cleared to run.`,
+    message: `✅ PRESS CLEARED\nJob: ${artwork.job.jobNumber}\nProduct: ${artwork.job.productName}\nArtwork Version ${artwork.versionNumber}\nApproved by ${lock3?.approver?.name ?? 'QA'} on ${lock3?.approvedAt ? new Date(lock3.approvedAt).toLocaleString() : '—'}`,
     artworkVersion: artwork.versionNumber,
+    jobNumber: artwork.job.jobNumber,
+    productName: artwork.job.productName,
+    approvedByName: lock3?.approver?.name,
+    approvedAt: lock3?.approvedAt ? new Date(lock3.approvedAt).toISOString() : undefined,
   }
 }
 

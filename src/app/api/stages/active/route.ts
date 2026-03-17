@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 
+export const dynamic = 'force-dynamic'
+
 /** GET ?machineId=xxx — active stage for this machine */
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth()

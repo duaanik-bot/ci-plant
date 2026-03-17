@@ -6,6 +6,8 @@ import { explodeBOM } from '@/lib/sheet-issue-logic'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const createJobSchema = z.object({
   customerId: z.string().min(1, 'Customer is required'),
   productName: z.string().min(1, 'Product name is required'),

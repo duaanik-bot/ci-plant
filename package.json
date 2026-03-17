@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "description": "Colour Impressions Plant Management System",
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "next dev --port 3000 --hostname 0.0.0.0",
     "dev:fresh": "lsof -ti :3000 | xargs kill -9 2>/dev/null; sleep 2; next dev --port 3000 --hostname 0.0.0.0",
-    "build": "next build",
+    "build": "prisma generate && next build && node -e \"const fs=require('fs');const p='.next/server/app/(dashboard)/page_client-reference-manifest.js';const d=require('path').dirname(p);if(!fs.existsSync(d))fs.mkdirSync(d,{recursive:true});if(!fs.existsSync(p))fs.writeFileSync(p,'{}');\"",
     "start": "next start",
     "lint": "next lint",
     "db:push": "prisma db push",

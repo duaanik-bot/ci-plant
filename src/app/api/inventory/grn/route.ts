@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const bodySchema = z.object({
   materialId: z.string().uuid(),
   qty: z.number().positive(),
@@ -33,19 +35,30 @@ export async function POST(req: NextRequest) {
   const inv = await db.inventory.findUnique({ where: { id: materialId } })
   if (!inv) return NextResponse.json({ error: 'Material not found' }, { status: 404 })
 
-  await db.inventory.update({
-    where: { id: materialId },
-    data: {
-      qtyQuarantine: { increment: qty },
-      ...(costPerUnit != null && costPerUnit > 0
-        ? {
-            weightedAvgCost: inv.weightedAvgCost
-              ? (Number(inv.weightedAvgCost) * Number(inv.qtyQuarantine) + costPerUnit * qty) /
-                (Number(inv.qtyQuarantine) + qty)
-              : costPerUnit,
-          }
-        : {}),
-    },
+  await db.$transaction(async (tx) => {
+    await tx.inventory.update({
+      where: { id: materialId },
+      data: {
+        qtyQuarantine: { increment: qty },
+        ...(costPerUnit != null && costPerUnit > 0
+          ? {
+              weightedAvgCost: inv.weightedAvgCost
+                ? (Number(inv.weightedAvgCost) * Number(inv.qtyQuarantine) + costPerUnit * qty) /
+                  (Number(inv.qtyQuarantine) + qty)
+                : costPerUnit,
+            }
+          : {}),
+      },
+    })
+    await tx.stockMovement.create({
+      data: {
+        materialId,
+        movementType: 'grn_quarantine',
+        qty,
+        refType: 'grn',
+        userId: user!.id,
+      },
+    })
   })
 
   await createAuditLog({
@@ -55,6 +68,11 @@ export async function POST(req: NextRequest) {
     recordId: materialId,
     newValue: { grn: true, qty, lotNumber },
   })
+
+  const { checkReorderPoints } = await import('@/lib/reorder')
+  try {
+    await checkReorderPoints(materialId)
+  } catch (_) {}
 
   return NextResponse.json({
     success: true,

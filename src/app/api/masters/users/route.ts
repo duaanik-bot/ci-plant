@@ -5,6 +5,8 @@ import { createAuditLog } from '@/lib/audit'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const pinSchema = z.string().length(6, 'PIN must be 6 digits').regex(/^\d+$/, 'PIN must be digits only')
 
 const createSchema = z.object({

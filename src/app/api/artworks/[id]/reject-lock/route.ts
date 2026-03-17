@@ -3,6 +3,8 @@ import { requireAuth } from '@/lib/helpers'
 import { rejectArtworkLock } from '@/lib/artwork-logic'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const bodySchema = z.object({
   lockNumber: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   rejectionReason: z.string().min(1, 'Rejection reason is required'),

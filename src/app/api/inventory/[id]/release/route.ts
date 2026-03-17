@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const bodySchema = z.object({
   qty: z.number().positive(),
   instrumentReadings: z.record(z.string()).optional(),
@@ -41,12 +43,23 @@ export async function POST(
     )
   }
 
-  await db.inventory.update({
-    where: { id },
-    data: {
-      qtyQuarantine: { decrement: parsed.data.qty },
-      qtyAvailable: { increment: parsed.data.qty },
-    },
+  await db.$transaction(async (tx) => {
+    await tx.inventory.update({
+      where: { id },
+      data: {
+        qtyQuarantine: { decrement: parsed.data.qty },
+        qtyAvailable: { increment: parsed.data.qty },
+      },
+    })
+    await tx.stockMovement.create({
+      data: {
+        materialId: id,
+        movementType: 'qa_release',
+        qty: parsed.data.qty,
+        refType: 'release',
+        userId: user!.id,
+      },
+    })
   })
 
   await createAuditLog({

@@ -2,7 +2,6 @@ import type { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
-import { createAuditLog } from '@/lib/audit'
 
 export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET || (process.env.NODE_ENV === 'development' ? 'dev-secret-change-in-production' : undefined),
@@ -15,27 +14,33 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.pin) return null
+
         try {
           const user = await db.user.findUnique({
-            where: { email: credentials.email },
+            where: { email: credentials.email.toLowerCase().trim() },
             include: { role: true },
           })
 
+          console.log('Login attempt:', credentials.email)
+          console.log('User found:', user ? 'yes' : 'no')
+          console.log('User active:', user?.active)
+
           if (!user || !user.active) return null
-          const valid = await bcrypt.compare(credentials.pin, user.pinHash)
+
+          // Try both hash formats
+          const hash2b = user.pinHash.replace('$2a$', '$2b$')
+          const hash2a = user.pinHash.replace('$2b$', '$2a$')
+
+          const valid2b = await bcrypt.compare(credentials.pin, hash2b)
+          const valid2a = await bcrypt.compare(credentials.pin, hash2a)
+          const validOriginal = await bcrypt.compare(credentials.pin, user.pinHash)
+
+          console.log('Valid (2b):', valid2b)
+          console.log('Valid (2a):', valid2a)
+          console.log('Valid (original):', validOriginal)
+
+          const valid = valid2b || valid2a || validOriginal
           if (!valid) return null
-
-          await db.user.update({
-            where: { id: user.id },
-            data: { lastLoginAt: new Date() },
-          })
-
-          await createAuditLog({
-            userId: user.id,
-            action: 'LOGIN',
-            tableName: 'users',
-            recordId: user.id,
-          })
 
           return {
             id: user.id,
@@ -45,8 +50,8 @@ export const authOptions: NextAuthOptions = {
             permissions: user.role.permissions,
             machineAccess: user.machineAccess,
           }
-        } catch (e) {
-          console.error('[Auth] authorize error:', e)
+        } catch (error) {
+          console.error('Auth error:', error)
           return null
         }
       },

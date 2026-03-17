@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -13,7 +15,13 @@ export async function GET(
 
   const job = await db.job.findUnique({
     where: { id: jobId },
-    select: { id: true, jobNumber: true, productName: true, artworkId: true },
+    select: {
+      id: true,
+      jobNumber: true,
+      productName: true,
+      artworkId: true,
+      customer: { select: { name: true } },
+    },
   })
   if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
 
@@ -29,7 +37,12 @@ export async function GET(
   const current = artworks.find((a) => a.id === job.artworkId) ?? artworks[0]
 
   return NextResponse.json({
-    job: { id: job.id, jobNumber: job.jobNumber, productName: job.productName },
+    job: {
+      id: job.id,
+      jobNumber: job.jobNumber,
+      productName: job.productName,
+      customerName: job.customer?.name ?? '',
+    },
     artworks,
     currentArtwork: current ?? null,
   })

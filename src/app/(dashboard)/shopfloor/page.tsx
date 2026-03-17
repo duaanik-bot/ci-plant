@@ -1,244 +1,326 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Html5Qrcode } from 'html5-qrcode'
+import Link from 'next/link'
 import { toast } from 'sonner'
+import { PRODUCTION_STAGES } from '@/lib/constants'
 
-type Job = {
+type Stage = {
   id: string
-  jobNumber: string
-  productName: string
-  qtyOrdered: number
-  qtyProducedGood: number
+  stageName: string
+  status: string
+  operator: string | null
+  counter: number | null
+  sheetSize: string | null
+  completedAt: string | null
 }
-type ActiveStage = {
+
+type JobCard = {
   id: string
-  stageNumber: number
-  job: Job
-  machine: { machineCode: string; name: string }
+  jobCardNumber: number
+  setNumber: string | null
+  customer: { id: string; name: string }
+  requiredSheets: number
+  totalSheets: number
+  sheetsIssued: number
+  status: string
+  stages: Stage[]
 }
-type SheetContext = {
-  jobNumber: string
-  bomLines: Array<{ remaining: number; qtyApproved?: number; unit: string }>
+
+type StageQueueItem = {
+  stageRecord: { id: string; stageName: string; status: string; operator: string | null; counter: number | null }
+  jobCard: { id: string; jobCardNumber: number; setNumber: string | null; customer: { name: string }; status: string } | null
 }
+
+const TABS = [
+  { id: 'jobs', label: 'Jobs', icon: '📋' },
+  { id: 'stages', label: 'Stages', icon: '⚙️' },
+  { id: 'more', label: 'More', icon: '⋯' },
+] as const
 
 export default function ShopfloorPage() {
-  const [machines, setMachines] = useState<Array<{ id: string; machineCode: string; name: string }>>([])
-  const [machineId, setMachineId] = useState('')
-  const [active, setActive] = useState<ActiveStage | null>(null)
-  const [sheetContext, setSheetContext] = useState<SheetContext | null>(null)
-  const [scanning, setScanning] = useState(false)
-  const [scanner, setScanner] = useState<Html5Qrcode | null>(null)
-  const [completing, setCompleting] = useState(false)
-  const [qtyOut, setQtyOut] = useState('')
-  const [qtyWaste, setQtyWaste] = useState('0')
+  const [tab, setTab] = useState<(typeof TABS)[number]['id']>('jobs')
+  const [jobCards, setJobCards] = useState<JobCard[]>([])
+  const [loading, setLoading] = useState(true)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [stageKey, setStageKey] = useState<string | null>(null)
+  const [stageQueue, setStageQueue] = useState<StageQueueItem[]>([])
+  const [saving, setSaving] = useState(false)
+  const [counterVal, setCounterVal] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    fetch('/api/machines')
+  const fetchJobCards = useCallback(() => {
+    fetch('/api/shopfloor/job-cards')
       .then((r) => r.json())
-      .then((data) => setMachines(Array.isArray(data) ? data : []))
-      .catch(() => {})
+      .then((data) => setJobCards(Array.isArray(data) ? data : []))
+      .catch(() => setJobCards([]))
+      .finally(() => setLoading(false))
   }, [])
 
-  const fetchActive = useCallback(() => {
-    if (!machineId) return
-    fetch(`/api/stages/active?machineId=${encodeURIComponent(machineId)}`)
+  useEffect(() => {
+    setLoading(true)
+    fetchJobCards()
+  }, [fetchJobCards])
+
+  const fetchStageQueue = useCallback((key: string) => {
+    fetch(`/api/production/stages/${key}`)
       .then((r) => r.json())
-      .then((data) => {
-        setActive(data.active ?? null)
-        if (data.active?.job?.id) {
-          fetch(`/api/jobs/${data.active.job.id}/sheet-context`)
-            .then((r) => r.json())
-            .then(setSheetContext)
-            .catch(() => setSheetContext(null))
-        } else {
-          setSheetContext(null)
-        }
-      })
-      .catch(() => setActive(null))
-  }, [machineId])
+      .then((data) => setStageQueue(data?.jobCards ?? []))
+      .catch(() => setStageQueue([]))
+  }, [])
 
   useEffect(() => {
-    fetchActive()
-    const t = setInterval(fetchActive, 15000)
-    return () => clearInterval(t)
-  }, [fetchActive])
+    if (stageKey) fetchStageQueue(stageKey)
+  }, [stageKey, fetchStageQueue])
 
-  const startScanner = () => {
-    setScanner(null)
-    const html5Qr = new Html5Qrcode('shopfloor-qr')
-    html5Qr
-      .start(
-        { facingMode: 'environment' },
-        { fps: 8, qrbox: { width: 260, height: 260 } },
-        (decodedText) => {
-          html5Qr.stop().then(() => {
-            setScanning(false)
-            setScanner(null)
-            const jobId = decodedText.trim()
-            if (!jobId) return
-            startStage(jobId)
-          })
-        },
-        () => {}
-      )
-      .then(() => {
-        setScanner(html5Qr)
-        setScanning(true)
-      })
-      .catch((err: Error) => toast.error(err.message || 'Camera error'))
-  }
-
-  async function startStage(jobId: string) {
-    if (!machineId) {
-      toast.error('Select machine first')
-      return
-    }
-    const stageNumber = 1
-    const res = await fetch('/api/stages/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId, machineId, stageNumber }),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      toast.error(data.error || 'Failed to start')
-      return
-    }
-    toast.success('Stage started')
-    fetchActive()
-  }
-
-  async function completeStage() {
-    if (!active) return
-    const out = parseInt(qtyOut, 10)
-    const waste = parseInt(qtyWaste, 10)
-    if (isNaN(out) || out < 0) {
-      toast.error('Enter valid qty out')
-      return
-    }
-    setCompleting(true)
+  async function updateStage(jobCardId: string, stageId: string, patch: { status?: string; counter?: number | null }) {
+    setSaving(true)
     try {
-      const res = await fetch(`/api/stages/${active.id}/complete`, {
+      const jc = jobCards.find((j) => j.id === jobCardId) || (await fetch(`/api/job-cards/${jobCardId}`).then((r) => r.json()))
+      const stages = (jc.stages || []).map((s: Stage) =>
+        s.id === stageId ? { ...s, ...patch } : s,
+      )
+      const res = await fetch(`/api/job-cards/${jobCardId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ qtyOut: out, qtyWaste: isNaN(waste) ? 0 : waste }),
+        body: JSON.stringify({
+          stages: stages.map((s: Stage) => ({
+            id: s.id,
+            status: s.status,
+            operator: s.operator,
+            counter: s.counter,
+            sheetSize: s.sheetSize,
+          })),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
-      toast.success('Stage completed')
-      setQtyOut('')
-      setQtyWaste('0')
-      fetchActive()
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed')
+      toast.success(patch.status === 'completed' ? 'Stage completed' : 'Stage started')
+      setCounterVal((prev) => ({ ...prev, [stageId]: '' }))
+      fetchJobCards()
+      if (stageKey) fetchStageQueue(stageKey)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed')
     } finally {
-      setCompleting(false)
+      setSaving(false)
     }
   }
 
-  useEffect(() => {
-    return () => { if (scanner?.isScanning) scanner.stop() }
-  }, [scanner])
-
-  const totalRemaining = sheetContext?.bomLines?.reduce((s, l) => s + l.remaining, 0) ?? 0
-  const totalApproved = sheetContext?.bomLines?.reduce((s, l) => s + (l.qtyApproved ?? 0), 0) ?? 1
-  const remainingPct = totalApproved > 0 ? (totalRemaining / totalApproved) * 100 : 100
+  const currentStage = (jc: JobCard) => jc.stages.find((s) => s.status === 'in_progress') || jc.stages.find((s) => s.status === 'ready')
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white p-4 flex flex-col">
-      <h1 className="text-2xl font-bold text-amber-400 mb-4">Shopfloor</h1>
+    <div className="min-h-screen bg-slate-900 text-white flex flex-col pb-20">
+      <header className="p-4 border-b border-slate-700 sticky top-0 bg-slate-900 z-10">
+        <h1 className="text-xl font-bold text-amber-400">Shopfloor</h1>
+        <p className="text-xs text-slate-500 mt-0.5">Production job cards</p>
+      </header>
 
-      <div className="mb-4">
-        <label className="block text-sm text-slate-400 mb-1">Machine</label>
-        <select
-          value={machineId}
-          onChange={(e) => setMachineId(e.target.value)}
-          className="w-full max-w-xs px-4 py-3 rounded-lg bg-slate-800 border border-slate-600 text-white text-lg"
-        >
-          <option value="">Select machine</option>
-          {machines.map((m) => (
-            <option key={m.id} value={m.id}>{m.machineCode} — {m.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {active ? (
-        <div className="flex-1 space-y-4">
-          <div className="bg-slate-800 rounded-xl p-6 text-center">
-            <p className="text-slate-400 text-sm">Current job</p>
-            <p className="text-2xl font-bold text-amber-400 mt-1">{active.job.jobNumber}</p>
-            <p className="text-lg mt-1">{active.job.productName}</p>
-            <p className="text-slate-400 mt-2">
-              Qty produced today: <strong className="text-white">{active.job.qtyProducedGood}</strong>
-            </p>
-            <p className="text-slate-400">
-              Qty remaining: <strong className="text-white">{active.job.qtyOrdered - active.job.qtyProducedGood}</strong>
-            </p>
-            <p className="text-sm text-slate-500 mt-2">Stage {active.stageNumber} · {active.machine.machineCode}</p>
+      <main className="flex-1 p-4 overflow-y-auto">
+        {tab === 'jobs' && (
+          <div className="space-y-3">
+            {loading ? (
+              <p className="text-slate-400">Loading…</p>
+            ) : (
+              jobCards.map((jc) => {
+                const stage = currentStage(jc)
+                const isExpanded = expandedId === jc.id
+                return (
+                  <div
+                    key={jc.id}
+                    className="rounded-xl border border-slate-700 bg-slate-800/80 overflow-hidden"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setExpandedId(isExpanded ? null : jc.id)}
+                      className="w-full p-4 text-left flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="font-mono font-semibold text-amber-400">JC#{jc.jobCardNumber}</p>
+                        <p className="text-sm text-slate-300">{jc.customer.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {jc.setNumber ? `Set ${jc.setNumber}` : ''} · Sheets: {jc.sheetsIssued}/{jc.totalSheets}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        {stage && (
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-xs ${
+                              stage.status === 'in_progress' ? 'bg-amber-600 text-white' : 'bg-slate-600 text-slate-200'
+                            }`}
+                          >
+                            {stage.stageName}
+                          </span>
+                        )}
+                        <span className="block text-xs text-slate-500 mt-1">{jc.status}</span>
+                        <span className="text-slate-400">{isExpanded ? '▼' : '▶'}</span>
+                      </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t border-slate-700 p-4 space-y-3 bg-slate-900/50">
+                        {jc.stages.map((s) => (
+                          <div
+                            key={s.id}
+                            className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 p-3"
+                          >
+                            <span className="font-medium text-slate-200 w-32">{s.stageName}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs ${
+                                s.status === 'completed'
+                                  ? 'bg-green-800 text-green-200'
+                                  : s.status === 'in_progress'
+                                    ? 'bg-amber-600 text-white'
+                                    : 'bg-slate-700 text-slate-400'
+                              }`}
+                            >
+                              {s.status}
+                            </span>
+                            {s.status === 'in_progress' && (
+                              <>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  placeholder="Counter"
+                                  value={counterVal[s.id] ?? ''}
+                                  onChange={(e) => setCounterVal((prev) => ({ ...prev, [s.id]: e.target.value }))}
+                                  className="w-24 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-sm"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={saving}
+                                  onClick={() =>
+                                    updateStage(jc.id, s.id, {
+                                      status: 'completed',
+                                      counter: counterVal[s.id] ? parseInt(counterVal[s.id], 10) : null,
+                                    })
+                                  }
+                                  className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium"
+                                >
+                                  Complete
+                                </button>
+                              </>
+                            )}
+                            {s.status === 'ready' && (
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => updateStage(jc.id, s.id, { status: 'in_progress' })}
+                                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+                              >
+                                Start
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        <Link
+                          href={`/production/job-cards/${jc.id}`}
+                          className="inline-block text-sm text-amber-400 hover:underline"
+                        >
+                          Open job card →
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+            {!loading && jobCards.length === 0 && (
+              <p className="text-slate-500 text-center py-8">No active job cards.</p>
+            )}
           </div>
+        )}
 
-          {sheetContext && sheetContext.bomLines?.length > 0 && (
-            <div className="bg-slate-800 rounded-xl p-4">
-              <p className="text-sm text-slate-400 mb-2">Sheets remaining</p>
-              <div className="h-4 rounded-full bg-slate-700 overflow-hidden">
-                <div
-                  className={`h-full transition-all ${
-                    remainingPct < 15 ? 'bg-red-500' : remainingPct < 30 ? 'bg-amber-500' : 'bg-green-500'
-                  }`}
-                  style={{ width: `${Math.min(100, remainingPct)}%` }}
-                />
-              </div>
-              <p className="text-sm mt-1">{totalRemaining} sheets</p>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Qty out</label>
-              <input
-                type="number"
-                min={0}
-                value={qtyOut}
-                onChange={(e) => setQtyOut(e.target.value)}
-                className="w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-600 text-white text-xl"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Waste</label>
-              <input
-                type="number"
-                min={0}
-                value={qtyWaste}
-                onChange={(e) => setQtyWaste(e.target.value)}
-                className="w-full px-4 py-3 rounded-lg bg-slate-800 border border-slate-600 text-white text-xl"
-              />
-            </div>
+        {tab === 'stages' && (
+          <div className="space-y-2">
+            {!stageKey ? (
+              PRODUCTION_STAGES.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => setStageKey(s.key)}
+                  className="w-full p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-left flex items-center justify-between"
+                >
+                  <span className="font-medium text-slate-200">{s.label}</span>
+                  <span className="text-slate-400">→</span>
+                </button>
+              ))
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setStageKey(null)}
+                  className="text-sm text-slate-400 hover:text-white mb-2"
+                >
+                  ← Back to stages
+                </button>
+                <div className="space-y-2">
+                  {stageQueue.map((item, i) => (
+                    <div
+                      key={item.stageRecord.id + i}
+                      className="p-4 rounded-xl border border-slate-700 bg-slate-800/80"
+                    >
+                      {item.jobCard && (
+                        <>
+                          <p className="font-mono text-amber-400">JC#{item.jobCard.jobCardNumber}</p>
+                          <p className="text-sm text-slate-300">{item.jobCard.customer.name}</p>
+                          <p className="text-xs text-slate-500">{item.stageRecord.status}</p>
+                          <Link
+                            href={`/production/job-cards/${item.jobCard.id}`}
+                            className="inline-block mt-2 text-sm text-amber-400 hover:underline"
+                          >
+                            Open
+                          </Link>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {stageQueue.length === 0 && <p className="text-slate-500 py-4">No jobs at this stage.</p>}
+                </div>
+              </>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={completeStage}
-            disabled={completing}
-            className="w-full py-4 rounded-xl bg-green-600 hover:bg-green-500 disabled:bg-slate-600 text-white font-bold text-xl"
-          >
-            {completing ? 'Completing…' : 'COMPLETE STAGE'}
-          </button>
-        </div>
-      ) : (
-        <div className="flex-1 flex flex-col items-center justify-center">
-          <p className="text-slate-400 text-lg mb-4">No active job on this machine</p>
-          <div id="shopfloor-qr" className="rounded-lg overflow-hidden bg-black mb-4" />
-          {!scanning && (
-            <button
-              type="button"
-              onClick={startScanner}
-              className="w-full max-w-sm py-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xl"
+        )}
+
+        {tab === 'more' && (
+          <div className="space-y-3">
+            <Link
+              href="/stores/issue"
+              className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-amber-400 font-medium"
             >
-              START STAGE (scan job card)
-            </button>
-          )}
-        </div>
-      )}
+              Sheet issue (Stores)
+            </Link>
+            <Link
+              href="/production/job-cards"
+              className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200"
+            >
+              All job cards
+            </Link>
+            <Link
+              href="/production/machine-flow"
+              className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200"
+            >
+              Machine flow
+            </Link>
+            <Link href="/" className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200">
+              Dashboard
+            </Link>
+          </div>
+        )}
+      </main>
+
+      <nav className="fixed bottom-0 left-0 right-0 border-t border-slate-700 bg-slate-900 flex justify-around py-2 safe-area-pb">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`flex flex-col items-center gap-0.5 px-6 py-2 rounded-lg text-sm ${
+              tab === t.id ? 'text-amber-400 bg-slate-800' : 'text-slate-400'
+            }`}
+          >
+            <span className="text-lg">{t.icon}</span>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </nav>
     </div>
   )
 }

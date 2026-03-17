@@ -5,6 +5,8 @@ import { createAuditLog } from '@/lib/audit'
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { nanoid } from 'nanoid'
 
+export const dynamic = 'force-dynamic'
+
 const R2_ACCOUNT = process.env.R2_ACCOUNT_ID
 const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY_ID
 const R2_SECRET = process.env.R2_SECRET_ACCESS_KEY

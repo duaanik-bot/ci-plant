@@ -1,0 +1,71 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { requireAuth } from '@/lib/helpers'
+
+export const dynamic = 'force-dynamic'
+
+export async function GET(req: NextRequest) {
+  const { error } = await requireAuth()
+  if (error) return error
+
+  const { searchParams } = new URL(req.url)
+  const customerId = searchParams.get('customerId')
+
+  const list = await db.poLineItem.findMany({
+    where: {
+      ...(customerId ? { po: { customerId } } : {}),
+      planningStatus: { in: ['planned', 'design_ready', 'job_card_created'] },
+    },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      po: {
+        select: {
+          id: true,
+          poNumber: true,
+          status: true,
+          poDate: true,
+          customer: { select: { id: true, name: true } },
+        },
+      },
+    },
+  })
+
+  // Attach minimal readiness flags on the server for stable UI
+  const mapped = await Promise.all(
+    list.map(async (li) => {
+      const hasSet = !!li.setNumber?.trim()
+      const hasJobCard = !!li.jobCardNumber
+      const jc = hasJobCard
+        ? await db.productionJobCard.findFirst({
+            where: { jobCardNumber: li.jobCardNumber! },
+            select: {
+              id: true,
+              jobCardNumber: true,
+              artworkApproved: true,
+              firstArticlePass: true,
+              finalQcPass: true,
+              qaReleased: true,
+              status: true,
+            },
+          })
+        : null
+
+      const readyForProduction = hasSet && !!jc?.artworkApproved && !!jc?.firstArticlePass
+
+      return {
+        ...li,
+        jobCard: jc,
+        readiness: {
+          hasSet,
+          hasJobCard,
+          artworkApproved: !!jc?.artworkApproved,
+          firstArticlePass: !!jc?.firstArticlePass,
+          readyForProduction,
+        },
+      }
+    })
+  )
+
+  return NextResponse.json(mapped)
+}
+

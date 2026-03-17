@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/helpers'
 import { approveExcessRequest } from '@/lib/sheet-issue-logic'
 
+export const dynamic = 'force-dynamic'
+
 const tierMap: Record<string, 1 | 2 | 3 | 4> = {
   shift_supervisor: 1,
   production_manager: 2,

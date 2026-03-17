@@ -3,10 +3,12 @@ import { requireRole } from '@/lib/helpers'
 import { validatePlateAtPress } from '@/lib/artwork-logic'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const bodySchema = z.object({
   plateBarcode: z.string().min(1),
-  jobId: z.string().uuid(),
-  machineCode: z.string().min(1),
+  jobId: z.string().uuid().optional(),
+  machineCode: z.string().min(1).optional(),
 })
 
 export async function POST(req: NextRequest) {
@@ -21,7 +23,7 @@ export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(await req.json())
   if (!parsed.success) {
     return NextResponse.json(
-      { error: 'plateBarcode, jobId and machineCode required' },
+      { error: 'plateBarcode required' },
       { status: 400 }
     )
   }

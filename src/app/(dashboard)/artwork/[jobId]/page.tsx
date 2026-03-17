@@ -29,7 +29,7 @@ type Artwork = {
 }
 
 type ArtworkData = {
-  job: { id: string; jobNumber: string; productName: string }
+  job: { id: string; jobNumber: string; productName: string; customerName: string }
   artworks: Artwork[]
   currentArtwork: Artwork | null
 }
@@ -123,12 +123,41 @@ export default function ArtworkJobPage() {
     )
   }
 
+  const statusBadge = art?.status === 'approved' ? 'bg-green-900/50 text-green-300' : art?.status === 'partially_approved' ? 'bg-amber-900/50 text-amber-300' : 'bg-slate-700 text-slate-300'
+
   return (
     <div className="p-4 max-w-3xl mx-auto space-y-6">
       <div className="bg-slate-800 rounded-lg p-4">
-        <h1 className="text-lg font-bold text-amber-400">{data.job.jobNumber}</h1>
-        <p className="text-slate-300">{data.job.productName}</p>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h1 className="text-lg font-bold text-amber-400">{data.job.jobNumber}</h1>
+            <p className="text-slate-300">{data.job.productName}</p>
+            <p className="text-slate-400 text-sm">{data.job.customerName}</p>
+          </div>
+          <span className={`px-3 py-1 rounded text-sm font-medium ${statusBadge}`}>
+            {art?.status ?? 'pending'}
+          </span>
+        </div>
       </div>
+
+      {art && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {[1, 2, 3, 4].map((n) => {
+            const done = n === 1 ? lock1Done : n === 2 ? lock2Done : n === 3 ? lock3Done : lock4Done
+            const current = n === 1 ? !lock1Done : n === 2 ? lock1Done && !lock2Done : n === 3 ? lock2Done && !lock3Done : lock3Done && !lock4Done
+            return (
+              <span
+                key={n}
+                className={`px-3 py-1 rounded text-sm ${
+                  done ? 'bg-green-700 text-white' : current ? 'bg-blue-700 text-white' : 'bg-slate-600 text-slate-400'
+                }`}
+              >
+                Lock {n} {done ? '✓' : current ? '●' : '○'}
+              </span>
+            )
+          })}
+        </div>
+      )}
 
       {!art && (
         <div className="bg-slate-800 rounded-lg p-4">

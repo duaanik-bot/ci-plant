@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * Returns job with BOM lines and for each line: approved qty, already issued, remaining.
  * Used by the stores issue tablet after scanning a job QR.

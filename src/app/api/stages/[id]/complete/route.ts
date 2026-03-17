@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const bodySchema = z.object({
   qtyIn: z.number().int().min(0).optional(),
   qtyOut: z.number().int().min(0).optional(),

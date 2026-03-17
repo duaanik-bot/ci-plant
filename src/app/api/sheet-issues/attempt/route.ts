@@ -3,6 +3,8 @@ import { requireRole } from '@/lib/helpers'
 import { attemptSheetIssue } from '@/lib/sheet-issue-logic'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const bodySchema = z.object({
   bomLineId: z.string().uuid(),
   qtyRequested: z.number().int().positive(),

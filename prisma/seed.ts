@@ -417,7 +417,7 @@ async function main() {
   // ADMIN USER
   // ─────────────────────────────────────────
   const mdRole = roles.find(r => r.roleName === 'md')!
-  const pinHash = await bcrypt.hash('123456', 10)
+  const pinHash = await bcrypt.hash('123456', 12)
 
   await prisma.user.upsert({
     where: { email: 'dua.anik@gmail.com' },
@@ -433,6 +433,219 @@ async function main() {
   })
   console.log('✅ Admin user created — email: dua.anik@gmail.com PIN: 123456')
   console.log('⚠️  CHANGE THE PIN on first login!')
+
+  // ─────────────────────────────────────────
+  // DYES (5 samples)
+  // ─────────────────────────────────────────
+  await prisma.dye.createMany({
+    skipDuplicates: true,
+    data: [
+      {
+        dyeNumber: 233,
+        dyeType: 'BSO',
+        ups: 8,
+        sheetSize: '10.5×20.75',
+        cartonSize: '100×12×48',
+        creaseDepthMm: 0.8,
+        nicksPerCarton: 4,
+        conditionRating: 'Good',
+      },
+      {
+        dyeNumber: 177,
+        dyeType: '4/lockbottom',
+        ups: 2,
+        sheetSize: '18×23',
+        cartonSize: '85×80×64',
+        creaseDepthMm: 1.0,
+        conditionRating: 'Good',
+      },
+      {
+        dyeNumber: 253,
+        dyeType: '3/lockbottom',
+        ups: 3,
+        sheetSize: '18×23',
+        cartonSize: '82×75×79',
+        creaseDepthMm: 1.0,
+        conditionRating: 'Good',
+      },
+      {
+        dyeNumber: 137,
+        dyeType: 'BSO',
+        ups: 8,
+        sheetSize: '10.5×20.75',
+        cartonSize: '100×12×50',
+        creaseDepthMm: 0.8,
+        conditionRating: 'Good',
+      },
+      {
+        dyeNumber: 166,
+        dyeType: '4/lockbottom',
+        ups: 4,
+        sheetSize: '13.75×25',
+        cartonSize: '85×80×64',
+        creaseDepthMm: 1.0,
+        conditionRating: 'Good',
+      },
+    ],
+  })
+  console.log('✅ 5 dyes seeded')
+
+  // ─────────────────────────────────────────
+  // CARTONS (3 pharma cartons with specs)
+  // ─────────────────────────────────────────
+  const sampleCustomer = await prisma.customer.findFirst()
+
+  if (sampleCustomer) {
+    await prisma.carton.createMany({
+      skipDuplicates: true,
+      data: [
+        {
+          cartonName: 'BISOJOY 2.5 TAB 10X10SALE-BSJ.2.5CT',
+          customerId: sampleCustomer.id,
+          gsm: 290,
+          boardGrade: 'SBS',
+          paperType: 'COLOUR YELLOW',
+          caliperMicrons: 320,
+          burstStrengthMin: 10.0,
+          whitenessMin: 78,
+          finishedLength: 100,
+          finishedWidth: 12,
+          finishedHeight: 48,
+          dimensionTol: 0.5,
+          numberOfColours: 4,
+          colourBreakdown: { C: 'process', M: 'process', Y: 'process', K: 'process' },
+          deltaEMax: 3.0,
+          registrationTol: 0.1,
+          aqlLevel: '1.0',
+          cartonConstruct: 'Straight Tuck End',
+          glueType: 'Hot Melt',
+          glueBondMinN: 2.0,
+          coatingType: 'Aqueous Varnish',
+          drugSchedule: 'Schedule H',
+          batchSpaceL: 25,
+          batchSpaceW: 10,
+          mrpSpaceL: 20,
+          mrpSpaceW: 8,
+          scheduleMRequired: true,
+          iso9001Required: true,
+        },
+        {
+          cartonName: 'GLISIMET M1 TABLET 10X14SALE',
+          customerId: sampleCustomer.id,
+          gsm: 320,
+          boardGrade: 'SBS',
+          paperType: 'COLOUR YELLOW',
+          caliperMicrons: 360,
+          finishedLength: 130,
+          finishedWidth: 34,
+          finishedHeight: 57,
+          numberOfColours: 4,
+          deltaEMax: 3.0,
+          aqlLevel: '1.0',
+          cartonConstruct: 'Lock Bottom',
+          glueType: 'Hot Melt',
+          coatingType: 'Drip off + UV',
+          drugSchedule: 'Schedule H',
+          batchSpaceL: 25,
+          batchSpaceW: 10,
+          scheduleMRequired: true,
+        },
+        {
+          cartonName: 'TELMICURE 40 TABLET 10X10SALE',
+          customerId: sampleCustomer.id,
+          gsm: 300,
+          boardGrade: 'SBS',
+          paperType: 'COLOUR WHITE',
+          caliperMicrons: 340,
+          finishedLength: 85,
+          finishedWidth: 80,
+          finishedHeight: 64,
+          numberOfColours: 4,
+          deltaEMax: 3.0,
+          aqlLevel: '1.0',
+          cartonConstruct: 'Lock Bottom',
+          glueType: 'Hot Melt',
+          coatingType: 'Aqueous Varnish',
+          drugSchedule: 'Schedule H',
+          batchSpaceL: 20,
+          batchSpaceW: 8,
+          scheduleMRequired: true,
+        },
+      ],
+    })
+    console.log('✅ 3 cartons seeded')
+  }
+
+  // ─────────────────────────────────────────
+  // EMBOSS BLOCKS (3 samples)
+  // ─────────────────────────────────────────
+  const embossBlockData = [
+    { blockCode: 'EB-0001', blockType: 'Registered Emboss', blockMaterial: 'Brass', condition: 'Good', storageLocation: 'Rack C-1', maxImpressions: 100000 },
+    { blockCode: 'EB-0002', blockType: 'Blind Emboss', blockMaterial: 'Magnesium', condition: 'Good', storageLocation: 'Rack C-2', maxImpressions: 80000 },
+    { blockCode: 'EB-0003', blockType: 'Deboss', blockMaterial: 'Steel', condition: 'Fair', storageLocation: 'Rack C-1', maxImpressions: 120000 },
+  ]
+  for (const row of embossBlockData) {
+    await prisma.embossBlock.upsert({
+      where: { blockCode: row.blockCode },
+      update: {},
+      create: { ...row, active: true },
+    })
+  }
+  console.log('✅ 3 emboss blocks seeded')
+
+  // ─────────────────────────────────────────
+  // PLATE STORE (3 samples)
+  // ─────────────────────────────────────────
+  const today = new Date()
+  const todayMinus30 = new Date(today)
+  todayMinus30.setDate(todayMinus30.getDate() - 30)
+
+  const plateStoreData = [
+    {
+      plateSetCode: 'PS-2026-0001',
+      cartonName: 'BISOJOY 2.5 TAB',
+      numberOfColours: 4,
+      colours: { C: 'old', M: 'old', Y: 'old', K: 'old' },
+      totalPlates: 4,
+      newPlates: 0,
+      oldPlates: 4,
+      storageLocation: 'Rack B-1',
+      status: 'stored',
+      ctpDate: todayMinus30,
+    },
+    {
+      plateSetCode: 'PS-2026-0002',
+      cartonName: 'GLISIMET M1 TABLET',
+      numberOfColours: 5,
+      colours: { C: 'new', M: 'old', Y: 'old', K: 'old', P1_485C: 'old' },
+      totalPlates: 5,
+      newPlates: 1,
+      oldPlates: 4,
+      storageLocation: 'Rack B-2',
+      status: 'in_use',
+      ctpDate: today,
+    },
+    {
+      plateSetCode: 'PS-2026-0003',
+      cartonName: 'TELMICURE 40 TABLET',
+      numberOfColours: 4,
+      colours: { C: 'new', M: 'new', Y: 'old', K: 'old' },
+      totalPlates: 4,
+      newPlates: 2,
+      oldPlates: 2,
+      storageLocation: 'Rack B-3',
+      status: 'stored',
+      ctpDate: todayMinus30,
+    },
+  ]
+  for (const row of plateStoreData) {
+    await prisma.plateStore.upsert({
+      where: { plateSetCode: row.plateSetCode },
+      update: {},
+      create: row,
+    })
+  }
+  console.log('✅ 3 plate store records seeded')
 
   console.log('\n🎉 Seed complete! Run: npx prisma studio to view data')
 }
