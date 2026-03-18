@@ -127,7 +127,7 @@ function dueDateClass(dueDate: string): string {
   return 'text-white'
 }
 
-export function DashboardClient() {
+export default function DashboardClient() {
   const { data: stats, isLoading: statsLoading } = useQuery<Stats>({
     queryKey: ['dashboard-stats'],
     queryFn: () => fetch('/api/dashboard/stats').then((r) => r.json()),

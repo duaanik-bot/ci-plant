@@ -10,6 +10,7 @@
     "dev": "next dev --port 3000 --hostname 0.0.0.0",
     "dev:fresh": "lsof -ti :3000 | xargs kill -9 2>/dev/null; sleep 2; next dev --port 3000 --hostname 0.0.0.0",
     "build": "prisma generate && next build",
+    "postbuild": "node -e \"const fs=require('fs');const f='.next/server/app/(dashboard)/page_client-reference-manifest.js';fs.mkdirSync(require('path').dirname(f),{recursive:true});fs.existsSync(f)||fs.writeFileSync(f,'{}');\"",
     "start": "next start",
     "lint": "next lint",
     "db:push": "prisma db push",

@@ -1,11 +1,8 @@
 export const dynamic = 'force-dynamic'
 
-import nextDynamic from 'next/dynamic'
+import dynamicImport from 'next/dynamic'
 
-const DashboardClient = nextDynamic(
-  () => import('./DashboardClient').then((m) => ({ default: m.DashboardClient })),
-  { ssr: false }
-)
+const DashboardClient = dynamicImport(() => import('./DashboardClient'), { ssr: false })
 
 export default function DashboardPage() {
   return <DashboardClient />
