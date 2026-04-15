@@ -52,6 +52,8 @@ type Row = {
     artworkStatusLabel?: string
     firstArticlePass: boolean
     readyForProduction: boolean
+    planningForwarded?: boolean
+    plateFlowStatus?: string | null
   }
 }
 
@@ -66,6 +68,8 @@ export default function DesigningQueuePage() {
   const [loading, setLoading] = useState(true)
   const [customerId, setCustomerId] = useState('')
   const [finalizingId, setFinalizingId] = useState<string | null>(null)
+  const [forwardingId, setForwardingId] = useState<string | null>(null)
+  const [recallingPlanningId, setRecallingPlanningId] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -97,6 +101,40 @@ export default function DesigningQueuePage() {
     () => rows.filter((r) => r.readiness?.readyForProduction).length,
     [rows],
   )
+
+  const forwardPlanning = async (r: Row) => {
+    setForwardingId(r.id)
+    try {
+      const res = await fetch(`/api/designing/po-lines/${r.id}/forward-planning`, { method: 'POST' })
+      const json = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(json.error || 'Forward failed')
+      toast.success('Forwarded to planning')
+      const linesRes = await fetch(`/api/designing/po-lines?${customerId ? `customerId=${customerId}` : ''}`)
+      const list = await linesRes.json()
+      setRows(Array.isArray(list) ? list : [])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Forward failed')
+    } finally {
+      setForwardingId(null)
+    }
+  }
+
+  const recallPlanning = async (r: Row) => {
+    setRecallingPlanningId(r.id)
+    try {
+      const res = await fetch(`/api/designing/po-lines/${r.id}/recall-planning`, { method: 'POST' })
+      const json = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(json.error || 'Recall failed')
+      toast.success('Recalled from planning')
+      const linesRes = await fetch(`/api/designing/po-lines?${customerId ? `customerId=${customerId}` : ''}`)
+      const list = await linesRes.json()
+      setRows(Array.isArray(list) ? list : [])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Recall failed')
+    } finally {
+      setRecallingPlanningId(null)
+    }
+  }
 
   const finalizeFromList = async (r: Row) => {
     const setN = (r.setNumber || '').trim()
@@ -139,7 +177,7 @@ export default function DesigningQueuePage() {
         return
       }
       if (!res.ok) throw new Error(json.error || 'Finalize failed')
-      toast.success(`Plate Hub · ${json.requirementCode || 'queued'}`)
+      toast.success('Data successfully routed to Tooling Hubs')
       const linesRes = await fetch(`/api/designing/po-lines?${customerId ? `customerId=${customerId}` : ''}`)
       const list = await linesRes.json()
       setRows(Array.isArray(list) ? list : [])
@@ -181,7 +219,7 @@ export default function DesigningQueuePage() {
             Customer orders / POs
           </Link>
           <Link
-            href="/pre-press/plate-store"
+            href="/hub/plates"
             className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-sm"
           >
             Plate Hub →
@@ -226,8 +264,12 @@ export default function DesigningQueuePage() {
               const label = r.readiness.artworkStatusLabel ?? 'Awaiting approval'
               const approvalsDone = !!r.readiness.approvalsComplete
               const finalized = !!r.readiness.prePressFinalized
+              const planningForwarded = !!r.readiness.planningForwarded
+              const spec = (r.specOverrides || {}) as Record<string, unknown>
+              const machineAllocated = !!String(spec.machineId || '').trim()
               const canFinalizeRow =
                 approvalsDone && !finalized && !!(r.setNumber || '').trim() && !!(r.artworkCode || '').trim()
+              const canRecallPlanning = planningForwarded && !machineAllocated && !['in_production', 'closed'].includes(r.planningStatus)
               return (
                 <tr key={r.id} className="hover:bg-slate-800/60">
                   <td className="px-3 py-3 align-top font-mono text-amber-300 break-all">{r.po.poNumber}</td>
@@ -240,11 +282,15 @@ export default function DesigningQueuePage() {
                   <td className="px-3 py-3 align-top text-xs text-slate-200">{designerName}</td>
                   <td className="px-3 py-3 align-top text-slate-100 text-xs leading-snug">{label}</td>
                   <td className="px-3 py-3 align-top text-slate-100 text-xs text-balance leading-snug break-words">
-                    {finalized
-                      ? 'Sent to Plate Hub — ready for planning'
-                      : approvalsDone
-                        ? 'Approvals complete — finalize or open plate hub'
-                        : 'Awaiting customer & QA text approvals'}
+                    {finalized && planningForwarded
+                      ? 'Plate Hub + Planning (parallel) — both tracks active'
+                      : finalized
+                        ? 'Sent to Plate Hub — planning can run in parallel'
+                        : planningForwarded
+                          ? 'Forwarded to planning — send to Plate Hub when ready'
+                          : approvalsDone
+                            ? 'Approvals complete — use Plate Hub and/or Planning'
+                            : 'Awaiting customer & QA text approvals'}
                   </td>
                   <td className="px-3 py-3 align-top">
                     <div className="flex flex-col gap-1.5">
@@ -262,16 +308,44 @@ export default function DesigningQueuePage() {
                             onClick={() => void finalizeFromList(r)}
                             className="inline-flex px-2 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-medium"
                           >
-                            {finalizingId === r.id ? '…' : 'Finalize'}
+                            {finalizingId === r.id ? '…' : 'Send to Plate Hub'}
+                          </button>
+                        )}
+                        {approvalsDone && !planningForwarded && (
+                          <button
+                            type="button"
+                            disabled={forwardingId === r.id}
+                            onClick={() => void forwardPlanning(r)}
+                            className="inline-flex px-2 py-1 rounded-md bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-xs font-medium"
+                          >
+                            {forwardingId === r.id ? '…' : 'Forward to Planning'}
                           </button>
                         )}
                         {finalized && (
                           <Link
+                            href="/hub/plates"
+                            className="inline-flex px-2 py-1 rounded-md border border-emerald-500/80 text-emerald-200 hover:bg-emerald-950 text-xs font-medium"
+                          >
+                            Open Plate Hub
+                          </Link>
+                        )}
+                        {planningForwarded && (
+                          <Link
                             href="/orders/planning"
                             className="inline-flex px-2 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium"
                           >
-                            Forward to planning
+                            Open Planning
                           </Link>
+                        )}
+                        {canRecallPlanning && (
+                          <button
+                            type="button"
+                            disabled={recallingPlanningId === r.id}
+                            onClick={() => void recallPlanning(r)}
+                            className="inline-flex px-2 py-1 rounded-md bg-rose-900/80 hover:bg-rose-800 border border-rose-700/60 disabled:opacity-50 text-rose-100 text-xs font-medium"
+                          >
+                            {recallingPlanningId === r.id ? '…' : 'Recall from Planning'}
+                          </button>
                         )}
                       </div>
                       <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs">

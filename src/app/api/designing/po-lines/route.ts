@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
+import { readOrchestration } from '@/lib/orchestration-spec'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,6 +62,12 @@ export async function GET(req: NextRequest) {
       if (prePressFinalized) artworkStatusLabel = 'Finalized'
       else if (approvalsComplete) artworkStatusLabel = 'Approved'
 
+      const orch = readOrchestration(spec)
+      const planningForwarded =
+        !!orch.planningForwardedAt ||
+        orch.planningFlowStatus === 'forwarded' ||
+        orch.planningFlowStatus === 'in_progress'
+
       return {
         ...li,
         jobCard: jc,
@@ -75,6 +82,8 @@ export async function GET(req: NextRequest) {
           artworkStatusLabel,
           firstArticlePass: !!jc?.firstArticlePass,
           readyForProduction,
+          planningForwarded,
+          plateFlowStatus: orch.plateFlowStatus ?? null,
         },
       }
     })

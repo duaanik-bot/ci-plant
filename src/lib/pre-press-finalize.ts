@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { createPlateRequirementFromPoLine } from '@/lib/plate-engine'
+import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
 import {
   designerCommandSchema,
   type DesignerCommand,
@@ -124,7 +125,7 @@ export async function executePrePressFinalize(
     }
 
     const finalSpec = {
-      ...nextSpec,
+      ...mergeOrchestrationIntoSpec(nextSpec, { plateFlowStatus: PLATE_FLOW.triage }),
       prePressSentToPlateHubAt: sentAt,
       lastPlateRequirementCode: requirementCode,
       plateHubPayload,

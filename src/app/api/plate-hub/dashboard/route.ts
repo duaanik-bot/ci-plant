@@ -40,6 +40,7 @@ export async function GET() {
 
     const triage = triageRows.map((r) => ({
       id: r.id,
+      poLineId: r.poLineId,
       requirementCode: r.requirementCode,
       cartonName: r.cartonName,
       artworkCode: r.artworkCode,
@@ -51,6 +52,7 @@ export async function GET() {
 
     const ctpQueue = ctpRows.map((r) => ({
       id: r.id,
+      poLineId: r.poLineId,
       requirementCode: r.requirementCode,
       jobCardId: r.jobCardId,
       cartonName: r.cartonName,

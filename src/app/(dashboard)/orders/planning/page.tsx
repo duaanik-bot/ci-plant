@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { isEmbossingRequired } from '@/lib/emboss-conditions'
+import { mergeOrchestrationIntoSpec, PLANNING_FLOW } from '@/lib/orchestration-spec'
 
 type PlanningSpec = {
   machineId?: string
@@ -172,10 +173,19 @@ export default function PlanningPage() {
     if (!li) return
     setSavingId(id)
     try {
-      const body: any = {
+      const rawSpec = {
+        ...(li.specOverrides && typeof li.specOverrides === 'object' ? li.specOverrides : {}),
+      } as Record<string, unknown>
+      let specOverrides: Record<string, unknown> = rawSpec
+      if (String(rawSpec.machineId || '').trim()) {
+        specOverrides = mergeOrchestrationIntoSpec(rawSpec, {
+          planningFlowStatus: PLANNING_FLOW.in_progress,
+        })
+      }
+      const body: Record<string, unknown> = {
         setNumber: li.setNumber,
         planningStatus: li.planningStatus,
-        specOverrides: li.specOverrides || undefined,
+        specOverrides,
       }
       const res = await fetch(`/api/planning/po-lines/${id}`, {
         method: 'PATCH',
@@ -487,6 +497,29 @@ export default function PlanningPage() {
                       <option value="new_required">❌ New required</option>
                     </select>
                     <p className={`text-[11px] mt-0.5 ${plate.cls}`}>{plate.label}</p>
+                    {(() => {
+                      const orch = (
+                        spec as {
+                          orchestration?: { plateFlowStatus?: string }
+                        }
+                      ).orchestration
+                      const pf = orch?.plateFlowStatus
+                      if (pf === 'ready_inventory')
+                        return (
+                          <p className="text-[11px] mt-1 font-medium text-emerald-400">
+                            Tooling: Ready
+                          </p>
+                        )
+                      if (pf === 'ctp_queue')
+                        return (
+                          <p className="text-[11px] mt-1 text-amber-300">Tooling: CTP queue</p>
+                        )
+                      if (pf === 'triage')
+                        return (
+                          <p className="text-[11px] mt-1 text-slate-400">Tooling: Plate triage</p>
+                        )
+                      return null
+                    })()}
                   </td>
                   <td className="px-3 py-2 align-top">
                     <select

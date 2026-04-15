@@ -1,12 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { safeJsonParse, safeJsonParseArray, safeJsonStringify } from '@/lib/safe-json'
 
 type TriageRow = {
   id: string
+  poLineId?: string | null
   requirementCode: string
   cartonName: string
   artworkCode: string | null
@@ -18,6 +19,7 @@ type TriageRow = {
 
 type CtpRow = {
   id: string
+  poLineId?: string | null
   requirementCode: string
   jobCardId: string | null
   cartonName: string
@@ -53,6 +55,21 @@ type DashboardPayload = {
 
 type MachineOpt = { id: string; machineCode: string; name: string }
 type UserOpt = { id: string; name: string }
+type CustomerOpt = { id: string; name: string }
+
+type PlateLookupColour = { name: string; type?: string }
+type PlateLookupOk = {
+  found: true
+  awCode: string
+  cartonName: string | null
+  cartonId: string | null
+  artworkId: string | null
+  artworkVersion: string | null
+  setNumber: string | null
+  sheetSize: string | null
+  colours: PlateLookupColour[]
+  customerId: string | null
+}
 
 function parseIssuedTo(issuedTo: string | null): { machine: string; operator: string } {
   if (!issuedTo?.trim()) return { machine: '—', operator: '—' }
@@ -86,6 +103,27 @@ export default function HubPlateDashboard() {
   })
   const [machines, setMachines] = useState<MachineOpt[]>([])
   const [users, setUsers] = useState<UserOpt[]>([])
+  const [customers, setCustomers] = useState<CustomerOpt[]>([])
+
+  const [addStockOpen, setAddStockOpen] = useState(false)
+  const [addAw, setAddAw] = useState('')
+  const [addCustomerId, setAddCustomerId] = useState('')
+  const [addCartonName, setAddCartonName] = useState('')
+  const [addSheetSize, setAddSheetSize] = useState('')
+  const [addSetNumber, setAddSetNumber] = useState('')
+  const [addArtworkId, setAddArtworkId] = useState('')
+  const [addCartonId, setAddCartonId] = useState('')
+  const [addColoursJson, setAddColoursJson] = useState<string>('[]')
+  const [addLookupError, setAddLookupError] = useState('')
+  const [addLookupLoading, setAddLookupLoading] = useState(false)
+  const lookupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [scrapOpen, setScrapOpen] = useState(false)
+  const [scrapPlateId, setScrapPlateId] = useState('')
+
+  const [issueAwCode, setIssueAwCode] = useState('')
+  const [issueLookupError, setIssueLookupError] = useState('')
+  const [issueLookupLoading, setIssueLookupLoading] = useState(false)
 
   const [invSearch, setInvSearch] = useState('')
   const [custSearch, setCustSearch] = useState('')
@@ -111,14 +149,16 @@ export default function HubPlateDashboard() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [dRes, mRes, uRes] = await Promise.all([
+      const [dRes, mRes, uRes, cRes] = await Promise.all([
         fetch('/api/plate-hub/dashboard'),
         fetch('/api/machines'),
         fetch('/api/users'),
+        fetch('/api/customers?limit=200'),
       ])
       const dText = await dRes.text()
       const mText = await mRes.text()
       const uText = await uRes.text()
+      const cText = await cRes.text()
 
       const parsed = safeReadDashboard(dText)
       if (!parsed) {
@@ -138,6 +178,7 @@ export default function HubPlateDashboard() {
 
       setMachines(safeJsonParseArray<MachineOpt>(mText, []))
       setUsers(safeJsonParseArray<UserOpt>(uText, []))
+      setCustomers(safeJsonParseArray<CustomerOpt>(cText, []))
     } catch (e) {
       console.error(e)
       toast.error('Failed to load plate hub')
@@ -149,6 +190,212 @@ export default function HubPlateDashboard() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!addStockOpen) return
+    const aw = addAw.trim()
+    if (!aw || aw.length < 2) {
+      setAddLookupError('')
+      return
+    }
+    if (lookupTimerRef.current) clearTimeout(lookupTimerRef.current)
+    lookupTimerRef.current = setTimeout(() => {
+      void (async () => {
+        setAddLookupLoading(true)
+        setAddLookupError('')
+        try {
+          const params = new URLSearchParams({ awCode: aw })
+          if (addCustomerId.trim()) params.set('customerId', addCustomerId.trim())
+          const r = await fetch(`/api/plate-hub/plate-lookup?${params}`)
+          const j = (await r.json()) as { found?: boolean; error?: string } & Partial<PlateLookupOk>
+          if (!r.ok || !j.found) {
+            setAddLookupError(j.error || 'AW Code not found in Master.')
+            return
+          }
+          const ok = j as PlateLookupOk
+          setAddCartonName(ok.cartonName || '')
+          setAddSheetSize(ok.sheetSize || '')
+          setAddSetNumber(ok.setNumber || '')
+          setAddArtworkId(ok.artworkId || '')
+          setAddCartonId(ok.cartonId || '')
+          setAddColoursJson(
+            safeJsonStringify(
+              (ok.colours || []).map((c) => ({ name: c.name, type: c.type || 'process' })),
+            ),
+          )
+        } catch {
+          setAddLookupError('Lookup failed')
+        } finally {
+          setAddLookupLoading(false)
+        }
+      })()
+    }, 450)
+    return () => {
+      if (lookupTimerRef.current) clearTimeout(lookupTimerRef.current)
+    }
+  }, [addStockOpen, addAw, addCustomerId])
+
+  function resetAddStockForm() {
+    setAddAw('')
+    setAddCustomerId('')
+    setAddCartonName('')
+    setAddSheetSize('')
+    setAddSetNumber('')
+    setAddArtworkId('')
+    setAddCartonId('')
+    setAddColoursJson('[]')
+    setAddLookupError('')
+  }
+
+  async function recallPrepress(requirementId: string) {
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/plate-requirements/${requirementId}/recall-prepress`, {
+        method: 'POST',
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Recall failed')
+        return
+      }
+      toast.success('Recalled to pre-press')
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function sendBackTriage(requirementId: string) {
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/plate-requirements/${requirementId}/send-back-triage`, {
+        method: 'POST',
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Send back failed')
+        return
+      }
+      toast.success('Sent back to triage')
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitAddStock() {
+    const aw = addAw.trim()
+    if (!aw) {
+      toast.error('AW code is required')
+      return
+    }
+    if (!addCartonName.trim()) {
+      toast.error('Carton name is required')
+      return
+    }
+    const coloursRaw = safeJsonParse<PlateLookupColour[]>(addColoursJson, [])
+    if (!coloursRaw.length) {
+      toast.error('At least one colour/plate channel is required')
+      return
+    }
+    const colours = coloursRaw.map((c) => ({
+      name: String(c.name || '').trim() || 'Plate',
+      type: c.type || 'process',
+      status: 'new' as const,
+    }))
+    setSaving(true)
+    try {
+      const r = await fetch('/api/plate-store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          cartonName: addCartonName.trim(),
+          artworkCode: aw,
+          customerId: addCustomerId.trim() || null,
+          cartonId: addCartonId.trim() || null,
+          artworkId: addArtworkId.trim() || null,
+          numberOfColours: colours.length,
+          colours,
+          rackLocation: addSheetSize.trim() || null,
+          slotNumber: addSetNumber.trim() || null,
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Save failed')
+        return
+      }
+      toast.success('Saved to rack')
+      setAddStockOpen(false)
+      resetAddStockForm()
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitScrapFromRack() {
+    const id = scrapPlateId.trim()
+    if (!id) {
+      toast.error('Select a plate set')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/plate-store/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ status: 'destroyed' }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Remove failed')
+        return
+      }
+      toast.success('Plate set removed / scrapped')
+      setScrapOpen(false)
+      setScrapPlateId('')
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function lookupIssueAw() {
+    const aw = issueAwCode.trim()
+    if (!aw) {
+      setIssueLookupError('')
+      return
+    }
+    setIssueLookupLoading(true)
+    setIssueLookupError('')
+    try {
+      const r = await fetch(`/api/plate-hub/plate-lookup?${new URLSearchParams({ awCode: aw })}`)
+      const j = (await r.json()) as { found?: boolean; error?: string } & Partial<PlateLookupOk>
+      if (!r.ok || !j.found) {
+        setIssueLookupError(j.error || 'AW Code not found in Master.')
+        return
+      }
+      const ok = j as PlateLookupOk
+      const match = data.inventory.find(
+        (p) =>
+          (p.artworkCode && p.artworkCode.toLowerCase() === aw.toLowerCase()) ||
+          (ok.artworkId && p.artworkId === ok.artworkId),
+      )
+      if (match) {
+        setIssueModal((prev) => (prev ? { ...prev, plateId: match.id } : prev))
+        toast.message(`Matched rack plate ${match.plateSetCode}`)
+      } else {
+        setIssueLookupError('No matching plate in live inventory for this AW code.')
+      }
+    } finally {
+      setIssueLookupLoading(false)
+    }
+  }
 
   const filteredInventory = useMemo(() => {
     const q = invSearch.trim().toLowerCase()
@@ -212,12 +459,16 @@ export default function HubPlateDashboard() {
       toast.error('Missing plate id')
       return
     }
+    setIssueAwCode('')
+    setIssueLookupError('')
     setIssueModal({ source: 'inventory', plateId })
     setIssueMachineId('')
     setIssueOperatorId('')
   }
 
   function openIssueFromCtp() {
+    setIssueAwCode('')
+    setIssueLookupError('')
     setIssueModal({ source: 'ctp', plateId: '' })
     setIssueMachineId('')
     setIssueOperatorId('')
@@ -394,6 +645,19 @@ export default function HubPlateDashboard() {
                         >
                           Send to vendor
                         </button>
+                        <button
+                          type="button"
+                          disabled={saving || row.status === 'plates_ready'}
+                          title={
+                            row.status === 'plates_ready'
+                              ? 'Plates already marked ready — cannot recall'
+                              : 'Send job back to designer queue'
+                          }
+                          onClick={() => void recallPrepress(row.id)}
+                          className="px-3 py-2 rounded-md border border-rose-700/80 bg-rose-950/80 text-rose-100 hover:bg-rose-900 text-sm font-medium disabled:opacity-40"
+                        >
+                          Recall to Pre-Press
+                        </button>
                       </div>
                     </div>
                   ))
@@ -423,6 +687,14 @@ export default function HubPlateDashboard() {
                         >
                           Issue to machine
                         </button>
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => void sendBackTriage(job.id)}
+                          className="mt-2 w-full px-2 py-2 rounded border border-amber-700/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                        >
+                          Send back to Triage
+                        </button>
                       </li>
                     ))
                   )}
@@ -432,6 +704,28 @@ export default function HubPlateDashboard() {
               {/* Inventory */}
               <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4 min-h-[280px] flex flex-col">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">Live inventory</h2>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetAddStockForm()
+                      setAddStockOpen(true)
+                    }}
+                    className="px-3 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold"
+                  >
+                    + Add Plate Stock
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScrapPlateId('')
+                      setScrapOpen(true)
+                    }}
+                    className="px-3 py-2 rounded-md border border-rose-700/80 bg-rose-950/60 text-rose-100 hover:bg-rose-900/80 text-xs font-bold"
+                  >
+                    − Remove / Scrap
+                  </button>
+                </div>
                 <input
                   value={invSearch}
                   onChange={(e) => setInvSearch(e.target.value)}
@@ -496,6 +790,19 @@ export default function HubPlateDashboard() {
                           >
                             Return to rack
                           </button>
+                          <button
+                            type="button"
+                            className="mt-1 w-full py-1.5 rounded border border-amber-700/70 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                            onClick={() => {
+                              setReturnModal(p)
+                              setReturnImpressions(0)
+                              setReturnCondition('Good')
+                              setReturnRackSlot(p.rackLocation ?? '')
+                              setReturnOperatorId('')
+                            }}
+                          >
+                            Recall to inventory
+                          </button>
                         </li>
                       )
                     })
@@ -506,6 +813,144 @@ export default function HubPlateDashboard() {
           </>
         )}
       </div>
+
+      {/* Add plate stock — tabular entry */}
+      {addStockOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-white">Add plate stock</h3>
+            <p className="text-zinc-500 text-xs">
+              Enter AW code — fields auto-fill from master when found. Edit before save.
+            </p>
+            <label className="block text-sm text-zinc-300">
+              Customer (optional — narrows lookup)
+              <select
+                value={addCustomerId}
+                onChange={(e) => setAddCustomerId(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+              >
+                <option value="">Any</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm text-zinc-300">
+              AW / product code
+              <input
+                value={addAw}
+                onChange={(e) => setAddAw(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                placeholder="e.g. R234"
+              />
+            </label>
+            {addLookupLoading ? (
+              <p className="text-xs text-zinc-500">Looking up…</p>
+            ) : null}
+            {addLookupError ? (
+              <p className="text-xs text-red-400">{addLookupError}</p>
+            ) : null}
+            <label className="block text-sm text-zinc-300">
+              Carton name
+              <input
+                value={addCartonName}
+                onChange={(e) => setAddCartonName(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+              />
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Sheet size
+              <input
+                value={addSheetSize}
+                onChange={(e) => setAddSheetSize(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                placeholder="e.g. 19x20"
+              />
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Set #
+              <input
+                value={addSetNumber}
+                onChange={(e) => setAddSetNumber(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+              />
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Colours JSON (C/M/Y/K/P — edit if needed)
+              <textarea
+                value={addColoursJson}
+                onChange={(e) => setAddColoursJson(e.target.value)}
+                rows={4}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white font-mono text-xs"
+              />
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => {
+                  setAddStockOpen(false)
+                  resetAddStockForm()
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="px-3 py-2 rounded bg-emerald-600 text-white font-medium disabled:opacity-50"
+                onClick={() => void submitAddStock()}
+              >
+                Save to rack
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove / scrap from rack */}
+      {scrapOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
+            <h3 className="text-lg font-semibold text-white">Remove / scrap plate set</h3>
+            <p className="text-zinc-500 text-xs">Marks the plate set as destroyed in the ledger.</p>
+            <label className="block text-sm text-zinc-300">
+              Plate set
+              <select
+                value={scrapPlateId}
+                onChange={(e) => setScrapPlateId(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+              >
+                <option value="">Select…</option>
+                {data.inventory.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.plateSetCode} — {p.cartonName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => setScrapOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saving || !scrapPlateId.trim()}
+                className="px-3 py-2 rounded bg-rose-700 text-white font-medium disabled:opacity-50"
+                onClick={() => void submitScrapFromRack()}
+              >
+                Confirm scrap
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stock modal */}
       {stockModal && (
@@ -566,6 +1011,26 @@ export default function HubPlateDashboard() {
           <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
             <h3 className="text-lg font-semibold text-white">Issue to machine</h3>
             <p className="text-zinc-500 text-xs">Custody update runs in a single DB transaction.</p>
+            <div className="rounded-lg border border-zinc-700 bg-black/60 p-2 space-y-2">
+              <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Quick AW lookup → pick rack plate</p>
+              <div className="flex gap-2">
+                <input
+                  value={issueAwCode}
+                  onChange={(e) => setIssueAwCode(e.target.value)}
+                  placeholder="AW code"
+                  className="flex-1 px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+                />
+                <button
+                  type="button"
+                  disabled={issueLookupLoading}
+                  onClick={() => void lookupIssueAw()}
+                  className="px-3 py-2 rounded-md bg-zinc-700 text-white text-xs font-medium"
+                >
+                  {issueLookupLoading ? '…' : 'Lookup'}
+                </button>
+              </div>
+              {issueLookupError ? <p className="text-xs text-red-400">{issueLookupError}</p> : null}
+            </div>
             {issueModal.source === 'ctp' ? (
               <label className="block text-sm text-zinc-300">
                 Plate set (from inventory)

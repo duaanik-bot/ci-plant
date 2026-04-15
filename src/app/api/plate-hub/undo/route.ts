@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
+import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,7 +58,11 @@ export async function POST(req: NextRequest) {
     // Clear finalize stamp from specOverrides
     await tx.poLineItem.update({
       where: { id: poLineId },
-      data: { specOverrides: restSpec as object },
+      data: {
+        specOverrides: mergeOrchestrationIntoSpec(restSpec as Record<string, unknown>, {
+          plateFlowStatus: PLATE_FLOW.idle,
+        }) as object,
+      },
     })
 
     // Cancel the plate requirement if one was created
