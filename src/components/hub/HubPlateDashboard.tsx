@@ -8,6 +8,7 @@ import {
   hubChannelRowsFromLabels,
   hubLivePlateBadgeCount,
   hubPlateBadgeCount,
+  plateColourCanonicalKey,
   stripPlateColourDisplaySuffix,
 } from '@/lib/hub-plate-card-ui'
 import { PLATE_SCRAP_REASONS, type PlateScrapReasonCode } from '@/lib/plate-scrap-reasons'
@@ -26,10 +27,38 @@ import {
 import { JobAuditModal, type PlateHubAuditContext } from '@/components/hub/JobAuditModal'
 import {
   MasterLedgerTable,
+  getFilteredMasterLedgerRows,
   LEDGER_ZONE_FILTER_OPTIONS,
   LedgerSizeFilterOptions,
   type MasterLedgerRow,
 } from '@/components/hub/MasterLedgerTable'
+import {
+  calculateZoneMetrics,
+  hubZonePlateVolumeCustodyCard,
+  hubZonePlateVolumeInventoryCard,
+  hubZonePlateVolumeShopfloorJob,
+  hubZonePlateVolumeTriage,
+  ledgerRowPlateVolume,
+} from '@/lib/hub-zone-metrics'
+import { TableExportMenu } from '@/components/hub/TableExportMenu'
+import {
+  plateMasterLedgerExportColumns,
+  plateMasterLedgerExcelExtraColumns,
+} from '@/lib/hub-ledger-export-columns'
+
+function ZoneCapacitySubheader({
+  jobCount,
+  plateCount,
+}: {
+  jobCount: number
+  plateCount: number
+}) {
+  return (
+    <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold tabular-nums leading-tight shrink-0">
+      {jobCount} jobs · {plateCount} total plates
+    </p>
+  )
+}
 
 const RETURN_SIZE_MOD_REASONS: {
   value: 'alternate_machine' | 'edge_damage' | 'prepress_error'
@@ -70,7 +99,9 @@ type CtpRow = {
   partialRemake?: boolean
   lastStatusUpdatedAt?: string
   plateSize?: HubPlateSize | null
-  reservedRackSlot?: string | null
+  /** Canonical keys (`plateColourCanonicalKey`) dimmed on shop floor (still in `plateColours`). */
+  shopfloorInactiveCanonicalKeys?: string[]
+  shopfloorActiveColourCount?: number
 }
 
 type PlateCard = {
@@ -146,7 +177,6 @@ type DashboardPayload = {
   triage: TriageRow[]
   ctpQueue: CtpRow[]
   vendorQueue: CtpRow[]
-  awaitingRack: CtpRow[]
   inventory: PlateCard[]
   custody: CustodyCard[]
   ledgerRows: MasterLedgerRow[]
@@ -293,6 +323,155 @@ function HubPlateSizeLine({ size }: { size: HubPlateSize | null | undefined }) {
   return <p className="text-xs font-medium text-zinc-400 leading-tight">{line}</p>
 }
 
+type ShopfloorSpecPatch = Partial<
+  Pick<
+    CtpRow,
+    | 'plateSize'
+    | 'plateColours'
+    | 'shopfloorInactiveCanonicalKeys'
+    | 'shopfloorActiveColourCount'
+    | 'numberOfColours'
+    | 'newPlatesNeeded'
+  >
+>
+
+function ShopfloorQueueSizeSelect({
+  job,
+  disabled,
+  mergePatch,
+}: {
+  job: CtpRow
+  disabled: boolean
+  mergePatch: (jobId: string, patch: ShopfloorSpecPatch) => void
+}) {
+  const value = (job.plateSize ?? 'SIZE_560_670') as HubPlateSize
+  return (
+    <div className="mt-0.5 inline-flex items-baseline gap-1 flex-wrap max-w-full">
+      <span className="text-xs font-medium text-zinc-400 shrink-0">Size:</span>
+      <select
+        disabled={disabled}
+        value={value}
+        onChange={(e) => {
+          const plateSize = e.target.value as HubPlateSize
+          void (async () => {
+            try {
+              const r = await fetch(`/api/plate-requirements/${job.id}/shopfloor-spec`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: safeJsonStringify({ plateSize }),
+              })
+              const t = await r.text()
+              const j = safeJsonParse<
+                ShopfloorSpecPatch & { error?: string; plateSize?: HubPlateSize | null }
+              >(t, {})
+              if (!r.ok) {
+                toast.error(j.error ?? 'Could not update size')
+                return
+              }
+              mergePatch(job.id, {
+                plateSize: (j.plateSize ?? plateSize) as HubPlateSize,
+                plateColours: j.plateColours,
+                shopfloorInactiveCanonicalKeys: j.shopfloorInactiveCanonicalKeys,
+                shopfloorActiveColourCount: j.shopfloorActiveColourCount,
+                numberOfColours: j.numberOfColours,
+                newPlatesNeeded: j.newPlatesNeeded,
+              })
+            } catch (err) {
+              console.error(err)
+              toast.error('Could not update size')
+            }
+          })()
+        }}
+        aria-label="Plate sheet size (shop floor)"
+        className="text-xs font-medium text-zinc-400 bg-transparent border-0 border-b border-dashed border-zinc-600/0 hover:border-zinc-500/60 hover:text-zinc-300 focus-visible:border-amber-500/70 focus-visible:text-zinc-200 focus:outline-none cursor-pointer py-0 pl-0 pr-5 -ml-0.5 max-w-[10rem] rounded-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
+        style={{ backgroundImage: 'none' }}
+      >
+        {HUB_PLATE_SIZE_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value} className="bg-zinc-900 text-zinc-200">
+            {opt.mm}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function ShopfloorQueueColourToggles({
+  job,
+  disabled,
+  mergePatch,
+}: {
+  job: CtpRow
+  disabled: boolean
+  mergePatch: (jobId: string, patch: ShopfloorSpecPatch) => void
+}) {
+  const inactive = new Set(job.shopfloorInactiveCanonicalKeys ?? [])
+  const rows = hubChannelRowsFromLabels(job.plateColours)
+  if (!rows.length) {
+    return <span className="text-xs text-zinc-500">—</span>
+  }
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-1.5 gap-y-0 min-h-[1rem] -mx-0.5"
+      title="Tap to include / exclude from burn list"
+    >
+      {rows.map(({ key, dot, short, label }) => {
+        const canon = plateColourCanonicalKey(stripPlateColourDisplaySuffix(label))
+        const isActive = !inactive.has(canon)
+        return (
+          <button
+            key={key}
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              void (async () => {
+                try {
+                  const r = await fetch(`/api/plate-requirements/${job.id}/shopfloor-spec`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: safeJsonStringify({
+                      colourToggle: { canonicalKey: canon, active: !isActive },
+                    }),
+                  })
+                  const t = await r.text()
+                  const j = safeJsonParse<ShopfloorSpecPatch & { error?: string }>(t, {})
+                  if (!r.ok) {
+                    toast.error(j.error ?? 'Could not update colours')
+                    return
+                  }
+                  mergePatch(job.id, {
+                    plateColours: j.plateColours,
+                    shopfloorInactiveCanonicalKeys: j.shopfloorInactiveCanonicalKeys,
+                    shopfloorActiveColourCount: j.shopfloorActiveColourCount,
+                    numberOfColours: j.numberOfColours,
+                    newPlatesNeeded: j.newPlatesNeeded,
+                  })
+                } catch (err) {
+                  console.error(err)
+                  toast.error('Could not update colours')
+                }
+              })()
+            }}
+            className={`inline-flex items-center gap-0.5 rounded px-0.5 py-0 border-0 bg-transparent cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+              isActive ? '' : 'opacity-40 grayscale'
+            }`}
+            title={isActive ? `${label} — active (click to exclude)` : `${label} — excluded (click to include)`}
+          >
+            <span
+              className={`inline-block h-3 w-3 rounded-full shrink-0 ${dot.bgClass} ${dot.ringClass}`}
+            />
+            <span
+              className={`text-[10px] font-semibold leading-none ${isActive ? 'text-zinc-400' : 'text-zinc-600'}`}
+            >
+              {short}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 /** Inline size correction on incoming triage — persists before CTP / vendor dispatch. */
 function TriageInlinePlateSize({
   row,
@@ -433,7 +612,6 @@ function safeReadDashboard(text: string): DashboardPayload | null {
       triage: Array.isArray(o.triage) ? (o.triage as TriageRow[]) : [],
       ctpQueue: Array.isArray(o.ctpQueue) ? (o.ctpQueue as CtpRow[]) : [],
       vendorQueue: Array.isArray(o.vendorQueue) ? (o.vendorQueue as CtpRow[]) : [],
-      awaitingRack: Array.isArray(o.awaitingRack) ? (o.awaitingRack as CtpRow[]) : [],
       inventory: Array.isArray(o.inventory) ? (o.inventory as PlateCard[]) : [],
       custody: Array.isArray(o.custody) ? (o.custody as CustodyCard[]) : [],
       ledgerRows: Array.isArray(o.ledgerRows) ? (o.ledgerRows as MasterLedgerRow[]) : [],
@@ -450,7 +628,6 @@ export default function HubPlateDashboard() {
     triage: [],
     ctpQueue: [],
     vendorQueue: [],
-    awaitingRack: [],
     inventory: [],
     custody: [],
     ledgerRows: [],
@@ -536,6 +713,28 @@ export default function HubPlateDashboard() {
   const [addStockFieldErrors, setAddStockFieldErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
 
+  const mergeQueueJobPatch = useCallback((jobId: string, patch: ShopfloorSpecPatch) => {
+    setData((d) => ({
+      ...d,
+      ctpQueue: d.ctpQueue.map((j) => (j.id === jobId ? { ...j, ...patch } : j)),
+      vendorQueue: d.vendorQueue.map((j) => (j.id === jobId ? { ...j, ...patch } : j)),
+      ledgerRows: d.ledgerRows.map((r) => {
+        if (r.entity !== 'requirement' || r.id !== jobId) return r
+        if (r.zoneKey !== 'ctp_queue' && r.zoneKey !== 'outside_vendor') return r
+        const nextColours = patch.plateColours ?? r.plateColours
+        const nextVol =
+          patch.shopfloorActiveColourCount !== undefined
+            ? patch.shopfloorActiveColourCount
+            : r.coloursRequired
+        return {
+          ...r,
+          plateColours: nextColours,
+          coloursRequired: nextVol,
+        }
+      }),
+    }))
+  }, [])
+
   const [manualCtpOpen, setManualCtpOpen] = useState(false)
   const [mCtpQuery, setMCtpQuery] = useState('')
   const [mCtpResults, setMCtpResults] = useState<CartonSearchHit[]>([])
@@ -582,7 +781,6 @@ export default function HubPlateDashboard() {
           triage: [],
           ctpQueue: [],
           vendorQueue: [],
-          awaitingRack: [],
           inventory: [],
           custody: [],
           ledgerRows: [],
@@ -1046,8 +1244,31 @@ export default function HubPlateDashboard() {
   }
 
   async function markPlateReadyRequirement(row: CtpRow, lane: 'ctp' | 'vendor') {
+    const inactive = new Set(row.shopfloorInactiveCanonicalKeys ?? [])
+    const activePlateColours = row.plateColours.filter(
+      (l) => !inactive.has(plateColourCanonicalKey(stripPlateColourDisplaySuffix(l))),
+    )
+    if (activePlateColours.length < 1) {
+      toast.error('At least one colour must be active for burning')
+      return
+    }
+    const mm =
+      HUB_PLATE_SIZE_OPTIONS.find((o) => o.value === (row.plateSize ?? 'SIZE_560_670'))?.mm ??
+      String(row.plateSize ?? '—')
+    const confirmMsg = `Confirming ${activePlateColours.length} plates (${activePlateColours.join(', ')}) at ${mm} mm.`
+    if (!window.confirm(confirmMsg)) return
+
     const prev = data
-    const nextCustody = custodyItemFromRequirement(row, lane)
+    const n = activePlateColours.length
+    const slim: CtpRow = {
+      ...row,
+      plateColours: activePlateColours,
+      numberOfColours: n,
+      newPlatesNeeded: n,
+      shopfloorInactiveCanonicalKeys: [],
+      shopfloorActiveColourCount: n,
+    }
+    const nextCustody = custodyItemFromRequirement(slim, lane)
     setData((d) => ({
       ...d,
       ctpQueue: lane === 'ctp' ? d.ctpQueue.filter((j) => j.id !== row.id) : d.ctpQueue,
@@ -1058,7 +1279,11 @@ export default function HubPlateDashboard() {
       const r = await fetch('/api/plate-hub/mark-plate-ready', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: safeJsonStringify({ kind: 'requirement', id: row.id }),
+        body: safeJsonStringify({
+          kind: 'requirement',
+          id: row.id,
+          ...(row.plateSize ? { plateSize: row.plateSize } : {}),
+        }),
       })
       const t = await r.text()
       const j = safeJsonParse<{ error?: string }>(t, {})
@@ -1116,6 +1341,12 @@ export default function HubPlateDashboard() {
         partialRemake: item.partialRemake,
         lastStatusUpdatedAt: new Date().toISOString(),
         plateSize: item.plateSize ?? null,
+        shopfloorInactiveCanonicalKeys: [],
+        shopfloorActiveColourCount: Math.max(
+          item.plateColours.length,
+          item.newPlatesNeeded ?? 0,
+          item.numberOfColours ?? 0,
+        ),
       }
       setData((d) => ({
         ...d,
@@ -1566,10 +1797,64 @@ export default function HubPlateDashboard() {
     )
   }, [data.custody, custSearch])
 
+  const triageZoneMetrics = useMemo(
+    () => calculateZoneMetrics(data.triage, hubZonePlateVolumeTriage),
+    [data.triage],
+  )
+  const ctpZoneMetrics = useMemo(
+    () => calculateZoneMetrics(filteredCtp, hubZonePlateVolumeShopfloorJob),
+    [filteredCtp],
+  )
+  const vendorZoneMetrics = useMemo(
+    () => calculateZoneMetrics(filteredVendor, hubZonePlateVolumeShopfloorJob),
+    [filteredVendor],
+  )
+  const inventoryZoneMetrics = useMemo(
+    () => calculateZoneMetrics(filteredInventory, hubZonePlateVolumeInventoryCard),
+    [filteredInventory],
+  )
+  const custodyZoneMetrics = useMemo(
+    () => calculateZoneMetrics(filteredCustody, hubZonePlateVolumeCustodyCard),
+    [filteredCustody],
+  )
+
+  const filteredLedgerForSummary = useMemo(
+    () =>
+      getFilteredMasterLedgerRows(
+        data.ledgerRows,
+        ledgerSearch,
+        ledgerZoneFilter,
+        ledgerSizeFilter,
+      ),
+    [data.ledgerRows, ledgerSearch, ledgerZoneFilter, ledgerSizeFilter],
+  )
+  const plateLedgerExportColumns = useMemo(() => plateMasterLedgerExportColumns(), [])
+  const plateLedgerExcelExtraColumns = useMemo(() => plateMasterLedgerExcelExtraColumns(), [])
+  const plateLedgerExportFilterSummary = useMemo(() => {
+    const parts: string[] = []
+    if (ledgerZoneFilter) {
+      const o = LEDGER_ZONE_FILTER_OPTIONS.find((x) => x.value === ledgerZoneFilter)
+      parts.push(o ? `Zone: ${o.label}` : `Zone: ${ledgerZoneFilter}`)
+    }
+    if (ledgerSizeFilter) {
+      const o = ledgerSizeOptions.find((x) => x.value === ledgerSizeFilter)
+      parts.push(o ? `Plate size: ${o.label}` : `Plate size: ${ledgerSizeFilter}`)
+    }
+    if (ledgerSearch.trim()) parts.push(`Search: "${ledgerSearch.trim()}"`)
+    return parts
+  }, [ledgerZoneFilter, ledgerSizeFilter, ledgerSearch, ledgerSizeOptions])
+  const ledgerFilteredTotals = useMemo(() => {
+    let plates = 0
+    for (const r of filteredLedgerForSummary) {
+      plates += ledgerRowPlateVolume(r)
+    }
+    return { jobs: filteredLedgerForSummary.length, plates }
+  }, [filteredLedgerForSummary])
+
   function dispatchTriageToProduction(row: TriageRow, channel: 'inhouse_ctp' | 'outside_vendor') {
     const resolved = row.plateSize ?? row.cartonMasterPlateSize ?? null
     if (resolved) {
-      void patchTriage(row.id, channel, undefined, resolved)
+      void patchTriage(row.id, channel, resolved)
       return
     }
     setTriageSizeModal({ rowId: row.id, channel })
@@ -1579,7 +1864,6 @@ export default function HubPlateDashboard() {
   async function patchTriage(
     id: string,
     channel: 'inhouse_ctp' | 'outside_vendor' | 'stock_available',
-    rackSlot?: string,
     plateSize?: HubPlateSize,
   ) {
     if (!id?.trim()) {
@@ -1589,9 +1873,8 @@ export default function HubPlateDashboard() {
     setSaving(true)
     try {
       const body: Record<string, unknown> = { channel }
-      if (channel === 'stock_available' && rackSlot?.trim()) body.rackSlot = rackSlot.trim()
       if (
-        (channel === 'inhouse_ctp' || channel === 'outside_vendor') &&
+        (channel === 'inhouse_ctp' || channel === 'outside_vendor' || channel === 'stock_available') &&
         plateSize
       ) {
         body.plateSize = plateSize
@@ -1728,50 +2011,75 @@ export default function HubPlateDashboard() {
           <p className="text-zinc-500">Loading…</p>
         ) : hubView === 'table' ? (
           <div className="space-y-4">
-            <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end">
-              <label className="block flex-1 min-w-[200px]">
-                <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
-                  Search (all columns)
-                </span>
-                <input
-                  value={ledgerSearch}
-                  onChange={(e) => setLedgerSearch(e.target.value)}
-                  placeholder="Job ID, carton, AW code, zone…"
-                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
-                />
-              </label>
-              <label className="block min-w-[180px]">
-                <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
-                  Zone
-                </span>
-                <select
-                  value={ledgerZoneFilter}
-                  onChange={(e) => setLedgerZoneFilter(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
-                >
-                  {LEDGER_ZONE_FILTER_OPTIONS.map((o) => (
-                    <option key={o.value || 'all'} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block min-w-[160px]">
-                <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
-                  Plate size
-                </span>
-                <select
-                  value={ledgerSizeFilter}
-                  onChange={(e) => setLedgerSizeFilter(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
-                >
-                  {ledgerSizeOptions.map((o) => (
-                    <option key={o.value || 'all-sz'} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div
+              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold tabular-nums"
+              role="status"
+            >
+              <span className="text-zinc-300">
+                Showing {ledgerFilteredTotals.jobs}{' '}
+                {ledgerFilteredTotals.jobs === 1 ? 'job' : 'jobs'}
+              </span>
+              <span className="text-zinc-600 mx-1">·</span>
+              <span>
+                {ledgerFilteredTotals.plates} total plates across selected filters
+              </span>
+            </div>
+            <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end lg:justify-between">
+              <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end flex-1 min-w-0">
+                <label className="block flex-1 min-w-[200px]">
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                    Search (all columns)
+                  </span>
+                  <input
+                    value={ledgerSearch}
+                    onChange={(e) => setLedgerSearch(e.target.value)}
+                    placeholder="Job ID, carton, AW code, zone…"
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
+                  />
+                </label>
+                <label className="block min-w-[180px]">
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                    Zone
+                  </span>
+                  <select
+                    value={ledgerZoneFilter}
+                    onChange={(e) => setLedgerZoneFilter(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+                  >
+                    {LEDGER_ZONE_FILTER_OPTIONS.map((o) => (
+                      <option key={o.value || 'all'} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block min-w-[160px]">
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                    Plate size
+                  </span>
+                  <select
+                    value={ledgerSizeFilter}
+                    onChange={(e) => setLedgerSizeFilter(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+                  >
+                    {ledgerSizeOptions.map((o) => (
+                      <option key={o.value || 'all-sz'} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <TableExportMenu
+                rows={filteredLedgerForSummary}
+                columns={plateLedgerExportColumns}
+                excelOnlyColumns={plateLedgerExcelExtraColumns}
+                fileBase="plate-hub-master-ledger"
+                reportTitle="Plate Hub — Master ledger"
+                sheetName="Plate Hub"
+                filterSummary={plateLedgerExportFilterSummary}
+                className="shrink-0"
+              />
             </div>
             <MasterLedgerTable
               rows={data.ledgerRows}
@@ -1785,7 +2093,15 @@ export default function HubPlateDashboard() {
           <>
             {/* ZONE 1 — Triage */}
             <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">Incoming triage</h2>
+              <div className="flex flex-col gap-1 mb-2 min-w-0">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                  Incoming triage
+                </h2>
+                <ZoneCapacitySubheader
+                  jobCount={triageZoneMetrics.jobCount}
+                  plateCount={triageZoneMetrics.plateCount}
+                />
+              </div>
               <pre className="sr-only">Designer queue — AW / job codes</pre>
               <div className="space-y-3">
                 {data.triage.length === 0 ? (
@@ -1906,70 +2222,27 @@ export default function HubPlateDashboard() {
               </div>
             </section>
 
-            {data.awaitingRack.length > 0 ? (
-              <section className="rounded-xl border-2 border-sky-800/70 bg-zinc-950 p-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-300 mb-2">
-                  Awaiting rack slot
-                </h2>
-                <ul className="space-y-2 text-sm">
-                  {data.awaitingRack.map((job) => (
-                    <li
-                      key={job.id}
-                      className="rounded-lg border border-sky-900/50 bg-black p-2 flex flex-col sm:flex-row sm:items-center gap-2"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="font-mono text-sky-200 text-xs">{job.requirementCode}</p>
-                        <HubCartonAuditTitle
-                          className="font-medium text-sm"
-                          onOpenAudit={() =>
-                            setJobAudit({
-                              entity: 'requirement',
-                              id: job.id,
-                              zoneLabel: 'Awaiting rack slot',
-                              cartonName: job.cartonName,
-                              artworkCode: job.artworkCode,
-                              displayCode: job.requirementCode,
-                              poLineId: job.poLineId,
-                              plateSize: job.plateSize ?? null,
-                              plateColours: job.plateColours,
-                              coloursRequired: Math.max(
-                                job.plateColours.length,
-                                job.newPlatesNeeded ?? job.numberOfColours ?? 0,
-                              ),
-                              platesInRackCount: null,
-                              statusLabel: job.status.replace(/_/g, ' '),
-                            })
-                          }
-                        >
-                          {job.cartonName}
-                        </HubCartonAuditTitle>
-                        <p className="text-xs text-zinc-500 mt-0.5">
-                          Reserved slot:{' '}
-                          <span className="text-sky-200 font-mono">
-                            {job.reservedRackSlot?.trim() || '—'}
-                          </span>
-                        </p>
-                        <HubPlateSizeLine size={job.plateSize} />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
             {/* Lanes: CTP · outside vendor · rack · custody */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6 xl:min-h-[min(70vh,calc(100vh-14rem))] xl:items-stretch">
               {/* CTP */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 min-h-[280px] flex flex-col">
-                <div className="flex flex-col gap-2 mb-2">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">CTP queue</h2>
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
+                <div className="flex flex-col gap-2 mb-2 min-w-0">
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                      CTP queue
+                    </h2>
+                    <ZoneCapacitySubheader
+                      jobCount={ctpZoneMetrics.jobCount}
+                      plateCount={ctpZoneMetrics.plateCount}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
                       resetManualCtpForm()
                       setManualCtpOpen(true)
                     }}
-                    className="w-full px-3 py-2 rounded-md border border-amber-600/80 bg-amber-950/40 text-amber-100 text-xs font-bold hover:bg-amber-950/70"
+                    className="w-full px-3 py-2 rounded-md border border-amber-600/80 bg-amber-950/40 text-amber-100 text-xs font-bold hover:bg-amber-950/70 shrink-0"
                   >
                     + Manual CTP Request
                   </button>
@@ -1980,7 +2253,7 @@ export default function HubPlateDashboard() {
                   placeholder="Search…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                 />
-                <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1 text-sm">
+                <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {filteredCtp.length === 0 ? (
                     <li className="text-zinc-500 text-sm">Empty.</li>
                   ) : (
@@ -1990,17 +2263,27 @@ export default function HubPlateDashboard() {
                         className="relative rounded-lg border border-zinc-700 bg-black p-2 pr-10"
                       >
                         <PlateCountBadge
-                          count={hubPlateBadgeCount({
-                            numberOfColours: job.numberOfColours,
-                            plateColours: job.plateColours,
-                            totalPlates: job.newPlatesNeeded,
-                          })}
+                          count={
+                            job.shopfloorActiveColourCount ??
+                            hubPlateBadgeCount({
+                              numberOfColours: job.numberOfColours,
+                              plateColours: job.plateColours,
+                              totalPlates: job.newPlatesNeeded,
+                            })
+                          }
                         />
                         <p className="font-mono text-amber-300 text-xs">{job.requirementCode}</p>
                         <div className="flex flex-wrap items-baseline gap-x-1 min-w-0 mt-0.5 pr-1">
                           <HubCartonAuditTitle
                             className="font-semibold text-sm"
-                            onOpenAudit={() =>
+                            onOpenAudit={() => {
+                              const inactive = new Set(job.shopfloorInactiveCanonicalKeys ?? [])
+                              const activeOnly = job.plateColours.filter(
+                                (l) =>
+                                  !inactive.has(
+                                    plateColourCanonicalKey(stripPlateColourDisplaySuffix(l)),
+                                  ),
+                              )
                               setJobAudit({
                                 entity: 'requirement',
                                 id: job.id,
@@ -2010,15 +2293,17 @@ export default function HubPlateDashboard() {
                                 displayCode: job.requirementCode,
                                 poLineId: job.poLineId,
                                 plateSize: job.plateSize ?? null,
-                                plateColours: job.plateColours,
-                                coloursRequired: Math.max(
-                                  job.plateColours.length,
-                                  job.newPlatesNeeded ?? job.numberOfColours ?? 0,
-                                ),
+                                plateColours: activeOnly.length ? activeOnly : job.plateColours,
+                                coloursRequired:
+                                  job.shopfloorActiveColourCount ??
+                                  Math.max(
+                                    job.plateColours.length,
+                                    job.newPlatesNeeded ?? job.numberOfColours ?? 0,
+                                  ),
                                 platesInRackCount: null,
                                 statusLabel: job.status.replace(/_/g, ' '),
                               })
-                            }
+                            }}
                           >
                             {job.cartonName}
                           </HubCartonAuditTitle>
@@ -2029,9 +2314,17 @@ export default function HubPlateDashboard() {
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
-                        <HubPlateSizeLine size={job.plateSize} />
+                        <ShopfloorQueueSizeSelect
+                          job={job}
+                          disabled={saving}
+                          mergePatch={mergeQueueJobPatch}
+                        />
                         <div className="mt-1">
-                          <ColourChannelsRow labels={job.plateColours} />
+                          <ShopfloorQueueColourToggles
+                            job={job}
+                            disabled={saving}
+                            mergePatch={mergeQueueJobPatch}
+                          />
                         </div>
                         <p className="text-xs text-zinc-400 mt-1 capitalize">
                           {job.status.replace(/_/g, ' ')}
@@ -2061,18 +2354,24 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Outside vendor */}
-              <section className="rounded-xl border-2 border-violet-900/80 bg-zinc-950 p-3 min-h-[280px] flex flex-col">
-                <div className="flex flex-col gap-2 mb-1">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-300">
-                    Outside vendor
-                  </h2>
+              <section className="rounded-xl border-2 border-violet-900/80 bg-zinc-950 p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
+                <div className="flex flex-col gap-2 mb-1 min-w-0">
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-300">
+                      Outside vendor
+                    </h2>
+                    <ZoneCapacitySubheader
+                      jobCount={vendorZoneMetrics.jobCount}
+                      plateCount={vendorZoneMetrics.plateCount}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
                       resetManualVendorForm()
                       setManualVendorOpen(true)
                     }}
-                    className="w-full px-3 py-2 rounded-md border border-violet-500/80 bg-violet-950/40 text-violet-100 text-xs font-bold hover:bg-violet-950/70"
+                    className="w-full px-3 py-2 rounded-md border border-violet-500/80 bg-violet-950/40 text-violet-100 text-xs font-bold hover:bg-violet-950/70 shrink-0"
                   >
                     + Manual Vendor PO
                   </button>
@@ -2084,7 +2383,7 @@ export default function HubPlateDashboard() {
                   placeholder="Search…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                 />
-                <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1 text-sm">
+                <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {filteredVendor.length === 0 ? (
                     <li className="text-zinc-500 text-sm">None at vendor.</li>
                   ) : (
@@ -2094,17 +2393,27 @@ export default function HubPlateDashboard() {
                         className="relative rounded-lg border border-violet-800/50 bg-black p-2 pr-10"
                       >
                         <PlateCountBadge
-                          count={hubPlateBadgeCount({
-                            numberOfColours: job.numberOfColours,
-                            plateColours: job.plateColours,
-                            totalPlates: job.newPlatesNeeded,
-                          })}
+                          count={
+                            job.shopfloorActiveColourCount ??
+                            hubPlateBadgeCount({
+                              numberOfColours: job.numberOfColours,
+                              plateColours: job.plateColours,
+                              totalPlates: job.newPlatesNeeded,
+                            })
+                          }
                         />
                         <p className="font-mono text-violet-200 text-xs">{job.requirementCode}</p>
                         <div className="flex flex-wrap items-baseline gap-x-1 min-w-0 mt-0.5 pr-1">
                           <HubCartonAuditTitle
                             className="font-semibold text-sm"
-                            onOpenAudit={() =>
+                            onOpenAudit={() => {
+                              const inactive = new Set(job.shopfloorInactiveCanonicalKeys ?? [])
+                              const activeOnly = job.plateColours.filter(
+                                (l) =>
+                                  !inactive.has(
+                                    plateColourCanonicalKey(stripPlateColourDisplaySuffix(l)),
+                                  ),
+                              )
                               setJobAudit({
                                 entity: 'requirement',
                                 id: job.id,
@@ -2114,15 +2423,17 @@ export default function HubPlateDashboard() {
                                 displayCode: job.requirementCode,
                                 poLineId: job.poLineId,
                                 plateSize: job.plateSize ?? null,
-                                plateColours: job.plateColours,
-                                coloursRequired: Math.max(
-                                  job.plateColours.length,
-                                  job.newPlatesNeeded ?? job.numberOfColours ?? 0,
-                                ),
+                                plateColours: activeOnly.length ? activeOnly : job.plateColours,
+                                coloursRequired:
+                                  job.shopfloorActiveColourCount ??
+                                  Math.max(
+                                    job.plateColours.length,
+                                    job.newPlatesNeeded ?? job.numberOfColours ?? 0,
+                                  ),
                                 platesInRackCount: null,
                                 statusLabel: job.status.replace(/_/g, ' '),
                               })
-                            }
+                            }}
                           >
                             {job.cartonName}
                           </HubCartonAuditTitle>
@@ -2133,9 +2444,17 @@ export default function HubPlateDashboard() {
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
-                        <HubPlateSizeLine size={job.plateSize} />
+                        <ShopfloorQueueSizeSelect
+                          job={job}
+                          disabled={saving}
+                          mergePatch={mergeQueueJobPatch}
+                        />
                         <div className="mt-1">
-                          <ColourChannelsRow labels={job.plateColours} />
+                          <ShopfloorQueueColourToggles
+                            job={job}
+                            disabled={saving}
+                            mergePatch={mergeQueueJobPatch}
+                          />
                         </div>
                         <p className="text-xs text-zinc-400 mt-1 capitalize">
                           {job.status.replace(/_/g, ' ')}
@@ -2165,8 +2484,16 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Inventory */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 min-h-[280px] flex flex-col">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">Live inventory</h2>
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
+                <div className="flex flex-col gap-1 mb-2 min-w-0">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                    Live inventory
+                  </h2>
+                  <ZoneCapacitySubheader
+                    jobCount={inventoryZoneMetrics.jobCount}
+                    plateCount={inventoryZoneMetrics.plateCount}
+                  />
+                </div>
                 <div className="flex flex-wrap gap-2 mb-2">
                   <button
                     type="button"
@@ -2185,7 +2512,7 @@ export default function HubPlateDashboard() {
                   placeholder="Search…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                 />
-                <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1">
+                <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {filteredInventory.length === 0 ? (
                     <li className="text-zinc-500 text-sm">No plates in rack.</li>
                   ) : (
@@ -2301,10 +2628,16 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Custody */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 min-h-[280px] flex flex-col">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-0.5">
-                  Custody floor
-                </h2>
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
+                <div className="flex flex-col gap-1 mb-0.5 min-w-0">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                    Custody floor
+                  </h2>
+                  <ZoneCapacitySubheader
+                    jobCount={custodyZoneMetrics.jobCount}
+                    plateCount={custodyZoneMetrics.plateCount}
+                  />
+                </div>
                 <p className="text-[11px] text-zinc-500 mb-2">Staging · plates marked ready</p>
                 <input
                   value={custSearch}
@@ -2312,7 +2645,7 @@ export default function HubPlateDashboard() {
                   placeholder="Search…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                 />
-                <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1">
+                <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {filteredCustody.length === 0 ? (
                     <li className="text-zinc-500 text-sm">Nothing in staging.</li>
                   ) : (
@@ -2860,12 +3193,7 @@ export default function HubPlateDashboard() {
                 className="px-3 py-2 rounded bg-amber-600 text-white font-semibold disabled:opacity-50"
                 onClick={() => {
                   if (!triageSizeModal) return
-                  void patchTriage(
-                    triageSizeModal.rowId,
-                    triageSizeModal.channel,
-                    undefined,
-                    triagePlateSizePick,
-                  )
+                  void patchTriage(triageSizeModal.rowId, triageSizeModal.channel, triagePlateSizePick)
                 }}
               >
                 Confirm dispatch

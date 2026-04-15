@@ -10,6 +10,7 @@ import {
 import { hubLastActionLine } from '@/lib/hub-card-time'
 import type { PlateHubAuditContext } from '@/components/hub/JobAuditModal'
 import type { LedgerZoneKey } from '@/lib/plate-hub-ledger'
+import { ledgerRowPlateVolume } from '@/lib/hub-zone-metrics'
 
 export type MasterLedgerRow = {
   entity: 'requirement' | 'plate'
@@ -28,6 +29,8 @@ export type MasterLedgerRow = {
   coloursRequired: number
   platesInRackCount: number | null
   lastStatusUpdatedAt: string
+  /** Plate requirement / plate store `createdAt` — Excel lead time only. */
+  ledgerEntryAt?: string
   statusLabel: string
   partialRemake?: boolean
   custodySource?: 'ctp' | 'vendor' | 'rack'
@@ -56,21 +59,14 @@ function hubSearchMatch(q: string, parts: Array<string | null | undefined>): boo
   return hay.includes(q)
 }
 
-export function MasterLedgerTable({
-  rows,
-  searchQuery,
-  zoneFilter,
-  sizeFilter,
-  onOpenAudit,
-}: {
-  rows: MasterLedgerRow[]
-  searchQuery: string
-  zoneFilter: string
-  sizeFilter: string
-  onOpenAudit: (ctx: PlateHubAuditContext) => void
-}) {
+export function getFilteredMasterLedgerRows(
+  rows: MasterLedgerRow[],
+  searchQuery: string,
+  zoneFilter: string,
+  sizeFilter: string,
+): MasterLedgerRow[] {
   const q = searchQuery.trim().toLowerCase()
-  const filtered = rows.filter((r) => {
+  return rows.filter((r) => {
     if (zoneFilter && r.zoneKey !== zoneFilter) return false
     if (sizeFilter && String(r.plateSize ?? '') !== sizeFilter) return false
     if (
@@ -87,6 +83,22 @@ export function MasterLedgerTable({
     }
     return true
   })
+}
+
+export function MasterLedgerTable({
+  rows,
+  searchQuery,
+  zoneFilter,
+  sizeFilter,
+  onOpenAudit,
+}: {
+  rows: MasterLedgerRow[]
+  searchQuery: string
+  zoneFilter: string
+  sizeFilter: string
+  onOpenAudit: (ctx: PlateHubAuditContext) => void
+}) {
+  const filtered = getFilteredMasterLedgerRows(rows, searchQuery, zoneFilter, sizeFilter)
 
   return (
     <div className="overflow-x-auto rounded-xl border border-zinc-700 bg-zinc-950">
@@ -96,6 +108,9 @@ export function MasterLedgerTable({
             <th className="px-3 py-2 font-semibold whitespace-nowrap">Job ID</th>
             <th className="px-3 py-2 font-semibold min-w-[140px]">Carton</th>
             <th className="px-3 py-2 font-semibold whitespace-nowrap">Zone</th>
+            <th className="px-3 py-2 font-semibold whitespace-nowrap text-right tabular-nums w-[1%]">
+              Plate volume
+            </th>
             <th className="px-3 py-2 font-semibold min-w-[160px]">Size &amp; colours</th>
             <th className="px-3 py-2 font-semibold whitespace-nowrap">Time in zone</th>
             <th className="px-3 py-2 font-semibold min-w-[180px]">Last action</th>
@@ -104,7 +119,7 @@ export function MasterLedgerTable({
         <tbody>
           {filtered.length === 0 ? (
             <tr>
-              <td colSpan={6} className="px-3 py-8 text-center text-zinc-500">
+              <td colSpan={7} className="px-3 py-8 text-center text-zinc-500">
                 No rows match the current filters.
               </td>
             </tr>
@@ -118,6 +133,7 @@ export function MasterLedgerTable({
                   : '—'
               const lastLine = hubLastActionLine(at) ?? '—'
               const sizeLine = hubPlateSizeCardLine(r.plateSize)
+              const vol = ledgerRowPlateVolume(r)
               return (
                 <tr key={`${r.entity}-${r.id}`} className="border-b border-zinc-800/80 hover:bg-zinc-900/50">
                   <td className="px-3 py-2 font-mono text-amber-200/90 text-xs whitespace-nowrap">
@@ -160,6 +176,9 @@ export function MasterLedgerTable({
                       {r.zoneLabel}
                     </span>
                   </td>
+                  <td className="px-3 py-2 text-right text-xs text-zinc-300 tabular-nums font-semibold whitespace-nowrap">
+                    {vol}
+                  </td>
                   <td className="px-3 py-2">
                     <p className="text-[11px] text-zinc-300 mb-1">{sizeLine}</p>
                     <LedgerColourStrip labels={r.plateColours} />
@@ -183,7 +202,6 @@ export function MasterLedgerTable({
 export const LEDGER_ZONE_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'All zones' },
   { value: 'incoming_triage', label: 'Incoming Triage' },
-  { value: 'awaiting_rack', label: 'Awaiting Rack' },
   { value: 'ctp_queue', label: 'CTP Queue' },
   { value: 'outside_vendor', label: 'Outside Vendor' },
   { value: 'live_inventory', label: 'Live Inventory' },

@@ -5,7 +5,6 @@ export type LedgerZoneKey =
   | 'incoming_triage'
   | 'ctp_queue'
   | 'outside_vendor'
-  | 'awaiting_rack'
   | 'live_inventory'
   | 'custody_floor'
   | 'other'
@@ -14,7 +13,6 @@ const LEDGER_ZONE_BADGE: Record<LedgerZoneKey, string> = {
   incoming_triage: 'border-amber-600/70 bg-amber-950/60 text-amber-100',
   ctp_queue: 'border-amber-500/60 bg-amber-950/40 text-amber-200',
   outside_vendor: 'border-violet-500/70 bg-violet-950/50 text-violet-100',
-  awaiting_rack: 'border-sky-500/70 bg-sky-950/40 text-sky-100',
   live_inventory: 'border-emerald-600/70 bg-emerald-950/40 text-emerald-100',
   custody_floor: 'border-orange-500/70 bg-orange-950/40 text-orange-100',
   other: 'border-zinc-600 bg-zinc-900 text-zinc-300',
@@ -32,8 +30,6 @@ export function ledgerZoneLabel(zoneKey: LedgerZoneKey): string {
       return HUB_ZONE.CTP_QUEUE
     case 'outside_vendor':
       return HUB_ZONE.OUTSIDE_VENDOR
-    case 'awaiting_rack':
-      return HUB_ZONE.AWAITING_RACK
     case 'live_inventory':
       return HUB_ZONE.LIVE_INVENTORY
     case 'custody_floor':
@@ -53,9 +49,6 @@ export function ledgerZoneKeyForRequirement(row: {
   }
   if (row.triageChannel === 'outside_vendor' && row.status === 'awaiting_vendor_delivery') {
     return 'outside_vendor'
-  }
-  if (row.triageChannel === 'stock_available' && row.status === 'awaiting_rack_slot') {
-    return 'awaiting_rack'
   }
   if (
     row.triageChannel == null &&
@@ -90,6 +83,8 @@ export type PlateHubLedgerRowJson = {
   coloursRequired: number
   platesInRackCount: number | null
   lastStatusUpdatedAt: string
+  /** Record creation time (requirement / plate store) — used for Excel lead-time only. */
+  ledgerEntryAt: string
   statusLabel: string
   partialRemake?: boolean
   custodySource?: 'ctp' | 'vendor' | 'rack'

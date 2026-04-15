@@ -79,6 +79,12 @@ export function humanizePlateHubEventDetail(actionType: string, details: unknown
         .filter(Boolean)
         .join(' · ')
     }
+    case PLATE_HUB_ACTION.SHOPFLOOR_SIZE_EDIT:
+    case PLATE_HUB_ACTION.SHOPFLOOR_COLOUR_TOGGLE: {
+      const m = str(d.message)
+      if (m) return m
+      return str(d.zoneName) ? `${actionType} (${str(d.zoneName)})` : actionType
+    }
     case PLATE_HUB_ACTION.TAKE_FROM_STOCK: {
       const src = str(d.sourcePlateStoreId)
       const ch = Array.isArray(d.colourNames)

@@ -10,8 +10,30 @@ import {
   CUSTODY_IN_STOCK,
 } from '@/lib/inventory-hub-custody'
 import { hubJobCardHubStatus } from '@/lib/hub-job-card-status'
+import {
+  dieLedgerZoneKeyFromCustody,
+  embossLedgerZoneKeyFromCustody,
+  toolingLedgerZoneBadge,
+  toolingLedgerZoneLabel,
+  type ToolingLedgerZoneKey,
+} from '@/lib/tooling-hub-zones'
 
 export const dynamic = 'force-dynamic'
+
+export type ToolingHubLedgerRowJson = {
+  kind: 'die' | 'emboss'
+  id: string
+  displayCode: string
+  title: string
+  zoneKey: ToolingLedgerZoneKey
+  zoneLabel: string
+  zoneBadgeClass: string
+  specSummary: string
+  units: number
+  lastStatusUpdatedAt: string
+  /** Tooling master record `createdAt` — Excel lead time only. */
+  ledgerEntryAt: string
+}
 
 function mapDie(d: {
   id: string
@@ -25,6 +47,7 @@ function mapDie(d: {
   creaseDepthMm: { toString(): string } | null
   impressionCount: number
   reuseCount: number
+  currentStock: number
   custodyStatus: string
   hubPreviousCustody: string | null
   updatedAt: Date
@@ -45,6 +68,7 @@ function mapDie(d: {
     knifeHeightMm: d.creaseDepthMm != null ? Number(d.creaseDepthMm) : null,
     impressionCount: d.impressionCount,
     reuseCount: d.reuseCount,
+    currentStock: d.currentStock,
     custodyStatus: d.custodyStatus,
     hubPreviousCustody: d.hubPreviousCustody,
     lastStatusUpdatedAt: d.updatedAt.toISOString(),
@@ -112,8 +136,25 @@ export async function GET(req: NextRequest) {
       const prep = mapped.filter((r) => r.custodyStatus === CUSTODY_AT_VENDOR)
       const inventory = mapped.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK)
       const custody = mapped.filter((r) => r.custodyStatus === CUSTODY_HUB_CUSTODY_READY)
+      const ledgerRows: ToolingHubLedgerRowJson[] = mapped.map((r) => {
+        const zoneKey = dieLedgerZoneKeyFromCustody(r.custodyStatus)
+        const units = Math.max(1, r.currentStock ?? 1)
+        return {
+          kind: 'die',
+          id: r.id,
+          displayCode: r.displayCode,
+          title: r.title,
+          zoneKey,
+          zoneLabel: toolingLedgerZoneLabel('dies', zoneKey),
+          zoneBadgeClass: toolingLedgerZoneBadge(zoneKey),
+          specSummary: `UPS ${r.ups} · ${r.dimensionsLabel} · ${r.materialLabel}`,
+          units,
+          lastStatusUpdatedAt: r.lastStatusUpdatedAt,
+          ledgerEntryAt: r.createdAt,
+        }
+      })
       return new NextResponse(
-        safeJsonStringify({ tool, triage, prep, inventory, custody }),
+        safeJsonStringify({ tool, triage, prep, inventory, custody, ledgerRows }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       )
     }
@@ -155,8 +196,25 @@ export async function GET(req: NextRequest) {
     const inventory = mapped.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK)
     const custody = mapped.filter((r) => r.custodyStatus === CUSTODY_HUB_CUSTODY_READY)
 
+    const ledgerRows: ToolingHubLedgerRowJson[] = mapped.map((r) => {
+      const zoneKey = embossLedgerZoneKeyFromCustody(r.custodyStatus)
+      return {
+        kind: 'emboss',
+        id: r.id,
+        displayCode: r.displayCode,
+        title: r.title,
+        zoneKey,
+        zoneLabel: toolingLedgerZoneLabel('blocks', zoneKey),
+        zoneBadgeClass: toolingLedgerZoneBadge(zoneKey),
+        specSummary: `${r.typeLabel} · ${r.materialLabel}${r.blockSize ? ` · ${r.blockSize}` : ''}`,
+        units: 1,
+        lastStatusUpdatedAt: r.lastStatusUpdatedAt,
+        ledgerEntryAt: r.createdAt,
+      }
+    })
+
     return new NextResponse(
-      safeJsonStringify({ tool, triage, prep, inventory, custody }),
+      safeJsonStringify({ tool, triage, prep, inventory, custody, ledgerRows }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )
   } catch (e) {

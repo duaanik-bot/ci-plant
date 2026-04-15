@@ -10,6 +10,43 @@ import {
   hubQueueAgeLabel,
   hubQueueStale,
 } from '@/lib/hub-card-time'
+import { calculateToolingZoneMetrics, toolingCardUnits } from '@/lib/tooling-hub-metrics'
+import {
+  ToolingHubLedgerTable,
+  TOOLING_LEDGER_ZONE_OPTIONS_BLOCKS,
+  TOOLING_LEDGER_ZONE_OPTIONS_DIES,
+  getFilteredToolingLedgerRows,
+  type ToolingLedgerRow,
+} from '@/components/hub/ToolingHubLedgerTable'
+import { ToolingJobAuditModal, type ToolingHubAuditContext } from '@/components/hub/ToolingJobAuditModal'
+import { TableExportMenu } from '@/components/hub/TableExportMenu'
+import {
+  toolingMasterLedgerExportColumns,
+  toolingMasterLedgerExcelExtraColumns,
+} from '@/lib/hub-ledger-export-columns'
+
+const TOOLING_RETURN_SIZE_REASONS: {
+  value: 'alternate_machine' | 'edge_damage' | 'prepress_error'
+  label: string
+}[] = [
+  { value: 'alternate_machine', label: 'Resized for alternate machine assignment' },
+  { value: 'edge_damage', label: 'Trimmed due to edge damage / wear' },
+  { value: 'prepress_error', label: 'Pre-press layout error / Manual correction' },
+]
+
+function ZoneCapacitySubheader({
+  jobCount,
+  unitCount,
+}: {
+  jobCount: number
+  unitCount: number
+}) {
+  return (
+    <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold tabular-nums leading-tight shrink-0">
+      {jobCount} jobs · {unitCount} units
+    </p>
+  )
+}
 
 type JobCardHub = { key: string; badgeLabel: string }
 
@@ -26,6 +63,8 @@ type DieRow = {
   knifeHeightMm: number | null
   impressionCount: number
   reuseCount: number
+  currentStock: number
+  custodyStatus: string
   lastStatusUpdatedAt: string
   createdAt: string
   jobCardHub: JobCardHub | null
@@ -42,6 +81,7 @@ type EmbossRow = {
   storageLocation: string | null
   impressionCount: number
   reuseCount: number
+  custodyStatus: string
   lastStatusUpdatedAt: string
   createdAt: string
   jobCardHub: JobCardHub | null
@@ -55,6 +95,7 @@ type DashboardPayload = {
   prep: ToolRow[]
   inventory: ToolRow[]
   custody: ToolRow[]
+  ledgerRows: ToolingLedgerRow[]
 }
 
 type MachineOpt = { id: string; machineCode: string; name: string }
@@ -143,6 +184,20 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const [scrapId, setScrapId] = useState<string | null>(null)
   const [scrapReason, setScrapReason] = useState('')
 
+  const [hubView, setHubView] = useState<'board' | 'table'>('board')
+  const [ledgerSearch, setLedgerSearch] = useState('')
+  const [ledgerZoneFilter, setLedgerZoneFilter] = useState('')
+  const [toolingAudit, setToolingAudit] = useState<ToolingHubAuditContext | null>(null)
+
+  const [returnModal, setReturnModal] = useState<ToolRow | null>(null)
+  const [returnDieCarton, setReturnDieCarton] = useState('')
+  const [returnDieSheet, setReturnDieSheet] = useState('')
+  const [returnEmbossSize, setReturnEmbossSize] = useState('')
+  const [returnSizeReason, setReturnSizeReason] = useState<
+    '' | 'alternate_machine' | 'edge_damage' | 'prepress_error'
+  >('')
+  const [returnSizeRemarks, setReturnSizeRemarks] = useState('')
+
   const [emergencyId, setEmergencyId] = useState<string | null>(null)
   const [machines, setMachines] = useState<MachineOpt[]>([])
   const [users, setUsers] = useState<UserOpt[]>([])
@@ -170,9 +225,12 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       const parsed = safeJsonParse<DashboardPayload | null>(t, null)
       if (!parsed || parsed.tool !== tool) {
         toast.error('Unexpected dashboard response')
-        setData({ tool, triage: [], prep: [], inventory: [], custody: [] })
+        setData({ tool, triage: [], prep: [], inventory: [], custody: [], ledgerRows: [] })
       } else {
-        setData(parsed)
+        setData({
+          ...parsed,
+          ledgerRows: Array.isArray(parsed.ledgerRows) ? parsed.ledgerRows : [],
+        })
       }
       if (!r.ok) {
         const err = safeJsonParse<{ error?: string }>(t, {})
@@ -230,6 +288,117 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     () => filterRows(data?.custody ?? [], custSearch),
     [data?.custody, custSearch],
   )
+
+  const triageMetrics = useMemo(
+    () => calculateToolingZoneMetrics(triageF, toolingCardUnits),
+    [triageF],
+  )
+  const prepMetrics = useMemo(
+    () => calculateToolingZoneMetrics(prepF, toolingCardUnits),
+    [prepF],
+  )
+  const invMetrics = useMemo(
+    () => calculateToolingZoneMetrics(invF, toolingCardUnits),
+    [invF],
+  )
+  const custMetrics = useMemo(
+    () => calculateToolingZoneMetrics(custF, toolingCardUnits),
+    [custF],
+  )
+
+  const ledgerZoneOptions =
+    mode === 'dies' ? TOOLING_LEDGER_ZONE_OPTIONS_DIES : TOOLING_LEDGER_ZONE_OPTIONS_BLOCKS
+
+  const filteredLedgerRows = useMemo(
+    () => getFilteredToolingLedgerRows(data?.ledgerRows ?? [], ledgerSearch, ledgerZoneFilter),
+    [data?.ledgerRows, ledgerSearch, ledgerZoneFilter],
+  )
+  const toolingLedgerExportColumns = useMemo(() => toolingMasterLedgerExportColumns(), [])
+  const toolingLedgerExcelExtraColumns = useMemo(() => toolingMasterLedgerExcelExtraColumns(), [])
+  const toolingLedgerExportFilterSummary = useMemo(() => {
+    const parts: string[] = []
+    if (ledgerZoneFilter) {
+      const o = ledgerZoneOptions.find((x) => x.value === ledgerZoneFilter)
+      parts.push(o ? `Zone: ${o.label}` : `Zone: ${ledgerZoneFilter}`)
+    }
+    if (ledgerSearch.trim()) parts.push(`Search: "${ledgerSearch.trim()}"`)
+    return parts
+  }, [ledgerZoneFilter, ledgerSearch, ledgerZoneOptions])
+  const filteredLedgerSummary = useMemo(() => {
+    const units = filteredLedgerRows.reduce((s, r) => s + (r.units ?? 1), 0)
+    return { jobs: filteredLedgerRows.length, units }
+  }, [filteredLedgerRows])
+
+  function openReturnModal(r: ToolRow) {
+    setReturnModal(r)
+    if (r.kind === 'die') {
+      setReturnDieCarton(r.dimensionsLabel === '—' ? '' : r.dimensionsLabel)
+      setReturnDieSheet(r.sheetSize ?? '')
+    } else {
+      setReturnEmbossSize(r.blockSize ?? '')
+    }
+    setReturnSizeReason('')
+    setReturnSizeRemarks('')
+  }
+
+  async function submitReturnToRack() {
+    if (!returnModal) return
+    const origDieCarton =
+      returnModal.kind === 'die'
+        ? returnModal.dimensionsLabel === '—'
+          ? ''
+          : returnModal.dimensionsLabel
+        : ''
+    const origDieSheet = returnModal.kind === 'die' ? returnModal.sheetSize ?? '' : ''
+    const origEmbossSize = returnModal.kind === 'emboss' ? returnModal.blockSize ?? '' : ''
+
+    const nextDieCarton = returnDieCarton.trim()
+    const nextDieSheet = returnDieSheet.trim()
+    const nextEmboss = returnEmbossSize.trim()
+
+    const sizeChanged =
+      returnModal.kind === 'die'
+        ? nextDieCarton !== origDieCarton.trim() || nextDieSheet !== origDieSheet.trim()
+        : nextEmboss !== origEmbossSize.trim()
+
+    if (sizeChanged && !returnSizeReason) {
+      toast.error('Select a reason when changing dimensions on return')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = {
+        tool: returnModal.kind === 'die' ? 'die' : 'emboss',
+        id: returnModal.id,
+      }
+      if (returnModal.kind === 'die') {
+        body.targetCartonSize = nextDieCarton
+        body.targetSheetSize = nextDieSheet
+      } else {
+        body.targetBlockSize = nextEmboss || undefined
+      }
+      if (returnSizeReason) {
+        body.sizeModificationReason = returnSizeReason
+        if (returnSizeRemarks.trim()) body.sizeModificationRemarks = returnSizeRemarks.trim()
+      }
+      const r = await fetch('/api/tooling-hub/return-to-rack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify(body),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Return failed')
+      toast.success('Returned to live inventory')
+      setReturnModal(null)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Return failed')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function runTransition(body: Record<string, unknown>, msg: string) {
     setSaving(true)
@@ -365,6 +534,20 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     setScrapReason('')
   }
 
+  function toolingSpecSummaryLine(r: ToolRow): string {
+    if (r.kind === 'die') {
+      return `UPS ${r.ups} · ${r.dimensionsLabel} · ${r.materialLabel}`
+    }
+    return `${r.typeLabel} · ${r.materialLabel}${r.blockSize ? ` · ${r.blockSize}` : ''}`
+  }
+
+  function zoneLabelForBoard(z: 'triage' | 'prep' | 'inventory' | 'custody'): string {
+    if (z === 'triage') return 'Incoming triage'
+    if (z === 'inventory') return 'Live inventory'
+    if (z === 'custody') return 'Custody floor'
+    return mode === 'dies' ? 'Outside vendor' : 'In-house engraving'
+  }
+
   function renderSpecs(r: ToolRow) {
     if (r.kind === 'die') {
       return (
@@ -421,7 +604,23 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         }`}
       >
         <p className="font-mono text-amber-300 text-xs">{r.displayCode}</p>
-        <p className="text-white font-semibold text-sm truncate mt-0.5 pr-1">{r.title}</p>
+        <button
+          type="button"
+          className="text-left w-full text-white font-semibold text-sm truncate mt-0.5 pr-1 hover:text-blue-300 hover:underline"
+          onClick={() =>
+            setToolingAudit({
+              tool: r.kind === 'die' ? 'die' : 'emboss',
+              id: r.id,
+              zoneLabel: zoneLabelForBoard(zone),
+              displayCode: r.displayCode,
+              title: r.title,
+              specSummary: toolingSpecSummaryLine(r),
+              units: toolingCardUnits(r),
+            })
+          }
+        >
+          {r.title}
+        </button>
         {zone === 'custody' ? (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
             <JobCardStatusBadge hub={r.jobCardHub} />
@@ -487,9 +686,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   ? 'bg-emerald-500 hover:bg-emerald-400 ring-2 ring-emerald-300/40'
                   : 'bg-emerald-700 hover:bg-emerald-600'
               }`}
-              onClick={() =>
-                void runTransition({ action: 'return_staging', tool: toolKind, id: r.id }, 'Returned to rack')
-              }
+              onClick={() => openReturnModal(r)}
             >
               Return to rack
             </button>
@@ -537,28 +734,131 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       <div className="max-w-[1400px] mx-auto space-y-6">
         <HubCategoryNav active={navActive} />
 
-        <header className="flex flex-col gap-1 border-b border-zinc-700 pb-4">
-          <h1 className="text-2xl font-bold tracking-tight text-white">{title}</h1>
-          <p className="text-sm text-zinc-400">
-            Preparation lanes → custody staging. High-contrast layout for floor speed.
-          </p>
+        <header className="flex flex-col gap-3 border-b border-zinc-700 pb-4">
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold tracking-tight text-white">{title}</h1>
+              <p className="text-sm text-zinc-400 mt-1">
+                Preparation lanes → custody staging. High-contrast layout for floor speed.
+              </p>
+            </div>
+            <div
+              className="flex rounded-lg border border-zinc-600 overflow-hidden p-0.5 bg-black/60 shrink-0"
+              role="tablist"
+              aria-label="Hub view"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={hubView === 'board'}
+                onClick={() => setHubView('board')}
+                className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
+                  hubView === 'board'
+                    ? 'bg-amber-600 text-white'
+                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                }`}
+              >
+                Board view
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={hubView === 'table'}
+                onClick={() => setHubView('table')}
+                className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
+                  hubView === 'table'
+                    ? 'bg-amber-600 text-white'
+                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                }`}
+              >
+                Table view
+              </button>
+            </div>
+          </div>
         </header>
 
         {loading || !data ? (
           <p className="text-zinc-500">Loading…</p>
+        ) : hubView === 'table' ? (
+          <div className="space-y-4">
+            <div
+              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold tabular-nums"
+              role="status"
+            >
+              <span className="text-zinc-300">
+                Showing {filteredLedgerSummary.jobs}{' '}
+                {filteredLedgerSummary.jobs === 1 ? 'job' : 'jobs'}
+              </span>
+              <span className="text-zinc-600 mx-1">·</span>
+              <span>{filteredLedgerSummary.units} total units across selected filters</span>
+            </div>
+            <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end lg:justify-between">
+              <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end flex-1 min-w-0">
+                <label className="block flex-1 min-w-[200px]">
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                    Search
+                  </span>
+                  <input
+                    value={ledgerSearch}
+                    onChange={(e) => setLedgerSearch(e.target.value)}
+                    placeholder="Code, title, specs, zone…"
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
+                  />
+                </label>
+                <label className="block min-w-[180px]">
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                    Zone
+                  </span>
+                  <select
+                    value={ledgerZoneFilter}
+                    onChange={(e) => setLedgerZoneFilter(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+                  >
+                    {ledgerZoneOptions.map((o) => (
+                      <option key={o.value || 'all'} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <TableExportMenu
+                rows={filteredLedgerRows}
+                columns={toolingLedgerExportColumns}
+                excelOnlyColumns={toolingLedgerExcelExtraColumns}
+                fileBase={mode === 'dies' ? 'die-hub-master-ledger' : 'emboss-hub-master-ledger'}
+                reportTitle={mode === 'dies' ? 'Die Hub — Master ledger' : 'Emboss Hub — Master ledger'}
+                sheetName={mode === 'dies' ? 'Die Hub' : 'Emboss Hub'}
+                filterSummary={toolingLedgerExportFilterSummary}
+                className="shrink-0"
+              />
+            </div>
+            <ToolingHubLedgerTable
+              rows={data.ledgerRows}
+              searchQuery={ledgerSearch}
+              zoneFilter={ledgerZoneFilter}
+              onOpenAudit={setToolingAudit}
+            />
+          </div>
         ) : (
           <>
             <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">
-                Incoming triage
-              </h2>
+              <div className="flex flex-col gap-1 mb-2 min-w-0">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                  Incoming triage
+                </h2>
+                <ZoneCapacitySubheader
+                  jobCount={triageMetrics.jobCount}
+                  unitCount={triageMetrics.unitCount}
+                />
+              </div>
               <input
                 value={triageSearch}
                 onChange={(e) => setTriageSearch(e.target.value)}
                 placeholder="Search…"
                 className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
               />
-              <ul className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+              <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                 {triageF.length === 0 ? (
                   <li className="text-zinc-500 text-sm">No jobs awaiting triage.</li>
                 ) : (
@@ -567,12 +867,18 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </ul>
             </section>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 min-h-[260px] flex flex-col">
-                <div className="flex flex-col gap-2 mb-2">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
-                    {prepHeading}
-                  </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6 xl:min-h-[min(70vh,calc(100vh-14rem))] xl:items-stretch">
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[260px] xl:min-h-0 xl:h-full">
+                <div className="flex flex-col gap-2 mb-2 min-w-0">
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                      {prepHeading}
+                    </h2>
+                    <ZoneCapacitySubheader
+                      jobCount={prepMetrics.jobCount}
+                      unitCount={prepMetrics.unitCount}
+                    />
+                  </div>
                   <p className="text-[11px] text-zinc-500">{prepSub}</p>
                   {mode === 'dies' ? (
                     <button
@@ -598,7 +904,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   placeholder="Search…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                 />
-                <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1 text-sm">
+                <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {prepF.length === 0 ? (
                     <li className="text-zinc-500 text-sm">Empty.</li>
                   ) : (
@@ -607,17 +913,23 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 </ul>
               </section>
 
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 min-h-[260px] flex flex-col">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">
-                  Live inventory
-                </h2>
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[260px] xl:min-h-0 xl:h-full">
+                <div className="flex flex-col gap-1 mb-2 min-w-0">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                    Live inventory
+                  </h2>
+                  <ZoneCapacitySubheader
+                    jobCount={invMetrics.jobCount}
+                    unitCount={invMetrics.unitCount}
+                  />
+                </div>
                 <input
                   value={invSearch}
                   onChange={(e) => setInvSearch(e.target.value)}
                   placeholder="Search…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                 />
-                <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1 text-sm">
+                <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {invF.length === 0 ? (
                     <li className="text-zinc-500 text-sm">No tools in rack.</li>
                   ) : (
@@ -626,10 +938,16 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 </ul>
               </section>
 
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 min-h-[260px] flex flex-col md:col-span-2 xl:col-span-1">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-0.5">
-                  Custody floor
-                </h2>
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[260px] xl:min-h-0 xl:h-full">
+                <div className="flex flex-col gap-1 mb-0.5 min-w-0">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                    Custody floor
+                  </h2>
+                  <ZoneCapacitySubheader
+                    jobCount={custMetrics.jobCount}
+                    unitCount={custMetrics.unitCount}
+                  />
+                </div>
                 <p className="text-[11px] text-zinc-500 mb-2">Staging · tools marked ready</p>
                 <input
                   value={custSearch}
@@ -637,7 +955,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   placeholder="Search…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                 />
-                <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1 text-sm">
+                <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {custF.length === 0 ? (
                     <li className="text-zinc-500 text-sm">Nothing in staging.</li>
                   ) : (
@@ -649,6 +967,115 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           </>
         )}
       </div>
+
+      <ToolingJobAuditModal context={toolingAudit} onClose={() => setToolingAudit(null)} />
+
+      {returnModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md rounded-xl border border-emerald-700/50 bg-zinc-950 p-4 space-y-3 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-white">Return to live inventory</h3>
+            <p className="text-xs text-zinc-500">
+              Confirm rack return. If you change dimensions vs. the master record, select a reason (same
+              policy as Plate Hub).
+            </p>
+            {returnModal.kind === 'die' ? (
+              <>
+                <label className="block text-sm text-zinc-300">
+                  Dimensions (carton / die outline)
+                  <input
+                    value={returnDieCarton}
+                    onChange={(e) => setReturnDieCarton(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                  />
+                </label>
+                <label className="block text-sm text-zinc-300">
+                  Sheet size
+                  <input
+                    value={returnDieSheet}
+                    onChange={(e) => setReturnDieSheet(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                  />
+                </label>
+              </>
+            ) : (
+              <label className="block text-sm text-zinc-300">
+                Block size
+                <input
+                  value={returnEmbossSize}
+                  onChange={(e) => setReturnEmbossSize(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                />
+              </label>
+            )}
+            {(() => {
+              const origDieCarton =
+                returnModal.kind === 'die'
+                  ? returnModal.dimensionsLabel === '—'
+                    ? ''
+                    : returnModal.dimensionsLabel
+                  : ''
+              const origDieSheet = returnModal.kind === 'die' ? returnModal.sheetSize ?? '' : ''
+              const origEmboss = returnModal.kind === 'emboss' ? returnModal.blockSize ?? '' : ''
+              const changed =
+                returnModal.kind === 'die'
+                  ? returnDieCarton.trim() !== origDieCarton.trim() ||
+                    returnDieSheet.trim() !== origDieSheet.trim()
+                  : returnEmbossSize.trim() !== origEmboss.trim()
+              return changed ? (
+                <div className="space-y-2 rounded-lg border border-amber-800/50 bg-amber-950/20 p-3">
+                  <p className="text-xs font-semibold text-amber-200">Size change on return</p>
+                  <label className="block text-sm text-zinc-300">
+                    Reason <span className="text-red-400">*</span>
+                    <select
+                      value={returnSizeReason}
+                      onChange={(e) =>
+                        setReturnSizeReason(
+                          e.target.value as '' | 'alternate_machine' | 'edge_damage' | 'prepress_error',
+                        )
+                      }
+                      className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                    >
+                      <option value="">Select…</option>
+                      {TOOLING_RETURN_SIZE_REASONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-sm text-zinc-300">
+                    Remarks (optional)
+                    <textarea
+                      value={returnSizeRemarks}
+                      onChange={(e) => setReturnSizeRemarks(e.target.value)}
+                      rows={2}
+                      className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+                    />
+                  </label>
+                </div>
+              ) : null
+            })()}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => setReturnModal(null)}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="px-3 py-2 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50"
+                onClick={() => void submitReturnToRack()}
+              >
+                Confirm return
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {manualDieOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">

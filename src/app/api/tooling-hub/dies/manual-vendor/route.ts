@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { CUSTODY_AT_VENDOR } from '@/lib/inventory-hub-custody'
+import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
+import { dieHubZoneLabelFromCustody } from '@/lib/tooling-hub-zones'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,16 +37,29 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const row = await db.dye.create({
-      data: {
-        dyeNumber,
-        dyeType: dyeType?.trim() || dieMaterial?.trim() || 'Laser',
-        ups: ups ?? 1,
-        sheetSize: sheetSize?.trim() || 'Standard',
-        cartonSize: cartonSize.trim(),
-        dieMaterial: dieMaterial?.trim() || null,
-        custodyStatus: CUSTODY_AT_VENDOR,
-      },
+    const row = await db.$transaction(async (tx) => {
+      const created = await tx.dye.create({
+        data: {
+          dyeNumber,
+          dyeType: dyeType?.trim() || dieMaterial?.trim() || 'Laser',
+          ups: ups ?? 1,
+          sheetSize: sheetSize?.trim() || 'Standard',
+          cartonSize: cartonSize.trim(),
+          dieMaterial: dieMaterial?.trim() || null,
+          custodyStatus: CUSTODY_AT_VENDOR,
+        },
+      })
+      await createDieHubEvent(tx, {
+        dyeId: created.id,
+        actionType: DIE_HUB_ACTION.MANUAL_VENDOR_CREATE,
+        fromZone: 'Manual entry',
+        toZone: dieHubZoneLabelFromCustody(CUSTODY_AT_VENDOR),
+        details: {
+          displayCode: `DYE-${created.dyeNumber}`,
+          dyeNumber: created.dyeNumber,
+        },
+      })
+      return created
     })
 
     await createAuditLog({

@@ -20,8 +20,10 @@ export const shadeCardCreateSchema = z
   .object({
     shadeCode: z.string().min(1).optional(),
     autoGenerateCode: z.boolean().optional().default(true),
-    productMaster: z.string().optional().nullable(),
-    masterArtworkRef: z.string().optional().nullable(),
+    productMaster: z.string().min(1, 'Product / client name is required'),
+    masterArtworkRef: z.string().min(1, 'AW code is required'),
+    quantity: z.number().int().min(1).max(99).optional().default(1),
+    remarks: z.string().max(2000).optional().nullable(),
     approvalDate: z.string().optional().nullable(),
     inkComponent: z.string().optional().nullable(),
     currentHolder: z.string().optional().nullable(),

@@ -657,8 +657,26 @@ model Dye {
   cartons          Carton[]
   usageLogs        DyeUsageLog[]
   maintenanceLogs  DyeMaintenanceLog[]
+  hubEvents        DieHubEvent[]
 
   @@map("dyes")
+}
+
+/// Append-only Die Hub audit trail (dual-written with hub state changes).
+model DieHubEvent {
+  id         String   @id @default(uuid())
+  dyeId      String   @map("dye_id")
+  actionType String   @map("action_type") @db.VarChar(64)
+  fromZone   String?  @map("from_zone") @db.VarChar(128)
+  toZone     String?  @map("to_zone") @db.VarChar(128)
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  dye Dye @relation(fields: [dyeId], references: [id], onDelete: Cascade)
+
+  @@index([dyeId])
+  @@index([createdAt(sort: Desc)])
+  @@map("die_hub_events")
 }
 
 model DyeUsageLog {
@@ -997,8 +1015,26 @@ model EmbossBlock {
   usageLogs        EmbossBlockUsageLog[]
   maintenanceLogs  EmbossBlockMaintenanceLog[]
   jobCards         ProductionJobCard[]
+  hubEvents        EmbossHubEvent[]
 
   @@map("emboss_blocks")
+}
+
+/// Append-only Emboss Block Hub audit trail (dual-written with hub state changes).
+model EmbossHubEvent {
+  id         String   @id @default(uuid())
+  blockId    String   @map("block_id")
+  actionType String   @map("action_type") @db.VarChar(64)
+  fromZone   String?  @map("from_zone") @db.VarChar(128)
+  toZone     String?  @map("to_zone") @db.VarChar(128)
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  block EmbossBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  @@index([blockId])
+  @@index([createdAt(sort: Desc)])
+  @@map("emboss_hub_events")
 }
 
 // ─────────────────────────────────────────
@@ -1012,6 +1048,7 @@ model ShadeCard {
   masterArtworkRef  String?   @map("master_artwork_ref")
   approvalDate      DateTime? @map("approval_date") @db.Date
   inkComponent      String?   @map("ink_component")
+  remarks           String?
   currentHolder     String?   @map("current_holder")
   impressionCount   Int       @default(0) @map("impression_count")
   custodyStatus     String    @default("in_stock") @map("custody_status") @db.VarChar(32)
@@ -1021,7 +1058,24 @@ model ShadeCard {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
+  events ShadeCardEvent[]
+
   @@map("shade_cards")
+}
+
+/// Append-only shade card ledger (issue / receive / create).
+model ShadeCardEvent {
+  id          String   @id @default(uuid())
+  shadeCardId String   @map("shade_card_id")
+  actionType  String   @map("action_type") @db.VarChar(64)
+  details     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  shadeCard ShadeCard @relation(fields: [shadeCardId], references: [id], onDelete: Cascade)
+
+  @@index([shadeCardId])
+  @@index([createdAt(sort: Desc)])
+  @@map("shade_card_events")
 }
 
 model EmbossBlockUsageLog {

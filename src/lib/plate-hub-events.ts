@@ -8,7 +8,6 @@ export const HUB_ZONE = {
   INCOMING_TRIAGE: 'Incoming Triage',
   CTP_QUEUE: 'CTP Queue',
   OUTSIDE_VENDOR: 'Outside Vendor',
-  AWAITING_RACK: 'Awaiting Rack Slot',
   LIVE_INVENTORY: 'Live Inventory',
   CUSTODY_FLOOR: 'Custody Floor',
   FULFILLED: 'Fulfilled',
@@ -40,6 +39,10 @@ export const PLATE_HUB_ACTION = {
   REISSUE_REQUEST: 'REISSUE_REQUEST',
   MATERIALIZED_TO_INVENTORY: 'MATERIALIZED_TO_INVENTORY',
   PREPRESS_FINALIZE: 'PREPRESS_FINALIZE',
+  /** CTP / vendor queue: operator changed plate sheet size from card. */
+  SHOPFLOOR_SIZE_EDIT: 'SHOPFLOOR_SIZE_EDIT',
+  /** CTP / vendor queue: operator toggled a colour off/on for burn list. */
+  SHOPFLOOR_COLOUR_TOGGLE: 'SHOPFLOOR_COLOUR_TOGGLE',
 } as const
 
 export type PlateHubActionType = (typeof PLATE_HUB_ACTION)[keyof typeof PLATE_HUB_ACTION]

@@ -14,9 +14,9 @@ export const dynamic = 'force-dynamic'
 
 const bodySchema = z.object({
   channel: z.enum(['stock_available', 'inhouse_ctp', 'outside_vendor']),
-  /** Row-col key (e.g. `2-3`) when assigning from Live Rack for stock path */
+  /** @deprecated Ignored — rack reservation lane removed; stock path goes to custody floor. */
   rackSlot: z.string().min(1).optional(),
-  /** Required for CTP/vendor when requirement and carton master have no size */
+  /** Required for CTP/vendor/stock when requirement and carton master have no size */
   plateSize: z.nativeEnum(PlateSize).optional(),
 })
 
@@ -50,7 +50,8 @@ export async function PATCH(
   let nextStatus = existing.status
   if (channel === 'inhouse_ctp') nextStatus = 'ctp_internal_queue'
   if (channel === 'outside_vendor') nextStatus = 'awaiting_vendor_delivery'
-  if (channel === 'stock_available') nextStatus = 'awaiting_rack_slot'
+  /** Stock path: skip "awaiting rack" — stage directly on custody floor (rack pull / burn prep). */
+  if (channel === 'stock_available') nextStatus = 'READY_ON_FLOOR'
 
   let resolvedPlateSize: PlateSize | null =
     parsed.data.plateSize ?? existing.plateSize ?? null
@@ -69,13 +70,13 @@ export async function PATCH(
   }
 
   if (
-    (channel === 'inhouse_ctp' || channel === 'outside_vendor') &&
+    (channel === 'inhouse_ctp' || channel === 'outside_vendor' || channel === 'stock_available') &&
     !resolvedPlateSize
   ) {
     return NextResponse.json(
       {
         error:
-          'Plate size is required — set it on the carton master or choose a size when dispatching to CTP/vendor.',
+          'Plate size is required — set it on the carton master or choose a size when dispatching.',
       },
       { status: 400 },
     )
@@ -86,7 +87,7 @@ export async function PATCH(
       ? PLATE_FLOW.ctp_queue
       : channel === 'outside_vendor'
         ? PLATE_FLOW.vendor_queue
-        : PLATE_FLOW.triage
+        : PLATE_FLOW.burning_complete
 
   let updated
   try {
@@ -95,7 +96,7 @@ export async function PATCH(
         ? HUB_ZONE.CTP_QUEUE
         : channel === 'outside_vendor'
           ? HUB_ZONE.OUTSIDE_VENDOR
-          : HUB_ZONE.AWAITING_RACK
+          : HUB_ZONE.CUSTODY_FLOOR
 
     updated = await db.$transaction(async (tx) => {
       const req = await tx.plateRequirement.update({
@@ -104,8 +105,8 @@ export async function PATCH(
           triageChannel: channel,
           status: nextStatus,
           lastStatusUpdatedAt: new Date(),
-          ...(channel === 'stock_available' && parsed.data.rackSlot
-            ? { reservedRackSlot: parsed.data.rackSlot.trim() }
+          ...(channel === 'stock_available'
+            ? { reservedRackSlot: null, plateSize: resolvedPlateSize! }
             : {}),
           ...((channel === 'inhouse_ctp' || channel === 'outside_vendor') && resolvedPlateSize
             ? { plateSize: resolvedPlateSize }

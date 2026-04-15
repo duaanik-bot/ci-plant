@@ -33,7 +33,6 @@ import {
   CheckSquare,
   Download,
   FlaskConical,
-  Wrench,
   Palette,
   ChevronDown,
   ChevronRight,
@@ -187,7 +186,6 @@ export function SidebarNav({
         { href: '/hub/dies', label: 'Dies', icon: Droplets },
         { href: '/hub/blocks', label: 'Embossing blocks', icon: Package },
         { href: '/hub/shade_cards', label: 'Shade cards', icon: Palette },
-        { href: '/tools', label: 'Pre-press tools', icon: Wrench },
       ],
     },
     {

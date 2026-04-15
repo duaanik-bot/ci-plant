@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
+import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
 import {
   createPlateHubEvent,
   HUB_ZONE,
@@ -38,12 +39,17 @@ export async function POST(req: NextRequest) {
 
       let nextStatus: string
       let toZone: string
+      let clearTriageChannel = false
       if (row.triageChannel === 'inhouse_ctp') {
         nextStatus = 'ctp_internal_queue'
         toZone = HUB_ZONE.CTP_QUEUE
       } else if (row.triageChannel === 'outside_vendor') {
         nextStatus = 'awaiting_vendor_delivery'
         toZone = HUB_ZONE.OUTSIDE_VENDOR
+      } else if (row.triageChannel === 'stock_available') {
+        nextStatus = 'pending'
+        toZone = HUB_ZONE.INCOMING_TRIAGE
+        clearTriageChannel = true
       } else {
         return NextResponse.json({ error: 'Cannot infer return lane' }, { status: 409 })
       }
@@ -51,8 +57,30 @@ export async function POST(req: NextRequest) {
       await db.$transaction(async (tx) => {
         await tx.plateRequirement.update({
           where: { id },
-          data: { status: nextStatus, lastStatusUpdatedAt: new Date() },
+          data: {
+            status: nextStatus,
+            ...(clearTriageChannel ? { triageChannel: null } : {}),
+            lastStatusUpdatedAt: new Date(),
+          },
         })
+        const poLineId = row.poLineId?.trim()
+        if (clearTriageChannel && poLineId) {
+          const line = await tx.poLineItem.findUnique({
+            where: { id: poLineId },
+            select: { specOverrides: true },
+          })
+          if (line) {
+            const spec = (line.specOverrides as Record<string, unknown> | null) || {}
+            await tx.poLineItem.update({
+              where: { id: poLineId },
+              data: {
+                specOverrides: mergeOrchestrationIntoSpec(spec, {
+                  plateFlowStatus: PLATE_FLOW.triage,
+                }) as object,
+              },
+            })
+          }
+        }
         await createPlateHubEvent(tx, {
           plateRequirementId: id,
           actionType: PLATE_HUB_ACTION.REVERSED_READY,

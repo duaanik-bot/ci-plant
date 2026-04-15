@@ -5,6 +5,7 @@ import {
   CUSTODY_IN_STOCK,
   CUSTODY_ON_FLOOR,
 } from '@/lib/inventory-hub-custody'
+import { createShadeCardEvent, SHADE_CARD_ACTION } from '@/lib/shade-card-events'
 
 export type InventoryToolKind = 'die' | 'emboss_block' | 'shade_card'
 
@@ -121,6 +122,16 @@ export async function issueToolToMachine(
         if (row.custodyStatus === CUSTODY_ON_FLOOR) throw Object.assign(new Error('ALREADY_ISSUED'), { code: 'ALREADY_ISSUED' })
         throw Object.assign(new Error('INVALID_STATE'), { code: 'INVALID_STATE' })
       }
+      await createShadeCardEvent(tx, {
+        shadeCardId: toolId,
+        actionType: SHADE_CARD_ACTION.ISSUED,
+        details: {
+          machineId,
+          machineCode: machine.machineCode,
+          machineName: machine.name,
+          operatorName: operator.name,
+        },
+      })
     })
     return { ok: true }
   } catch (e: unknown) {
@@ -220,6 +231,11 @@ export async function receiveToolFromFloor(
         if (!row) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
         throw Object.assign(new Error('NOT_ON_FLOOR'), { code: 'NOT_ON_FLOOR' })
       }
+      await createShadeCardEvent(tx, {
+        shadeCardId: toolId,
+        actionType: SHADE_CARD_ACTION.RECEIVED,
+        details: { finalImpressions, condition },
+      })
     })
     return { ok: true }
   } catch (e: unknown) {
@@ -318,6 +334,11 @@ export async function receiveToolFromVendor(
         if (!row) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
         throw Object.assign(new Error('NOT_AT_VENDOR'), { code: 'NOT_AT_VENDOR' })
       }
+      await createShadeCardEvent(tx, {
+        shadeCardId: toolId,
+        actionType: SHADE_CARD_ACTION.VENDOR_RECEIVED,
+        details: { notes: noteSuffix || null, condition: options?.condition ?? null },
+      })
     })
     return { ok: true }
   } catch (e: unknown) {

@@ -29,6 +29,7 @@ export async function GET() {
       issuedMachineId: b.issuedMachineId,
       issuedOperator: b.issuedOperator,
       issuedAt: b.issuedAt?.toISOString() ?? null,
+      createdAt: b.createdAt.toISOString(),
     }))
 
     return new NextResponse(safeJsonStringify(payload), {

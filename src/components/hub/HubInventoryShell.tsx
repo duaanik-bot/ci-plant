@@ -6,6 +6,15 @@ import type { HubToolType } from '@/lib/hub-types'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { custodyBadgeClass, custodyLabel } from '@/lib/inventory-hub-custody'
 import { safeJsonParse, safeJsonParseArray, safeJsonStringify } from '@/lib/safe-json'
+import { TableExportMenu } from '@/components/hub/TableExportMenu'
+import {
+  inventoryDieExportColumns,
+  inventoryDieExcelExtraColumns,
+  inventoryEmbossExportColumns,
+  inventoryEmbossExcelExtraColumns,
+  inventoryShadeExportColumns,
+  inventoryShadeExcelExtraColumns,
+} from '@/lib/hub-ledger-export-columns'
 
 type MachineOpt = { id: string; machineCode: string; name: string }
 type UserOpt = { id: string; name: string }
@@ -20,6 +29,8 @@ type DieRow = {
   knifeHeightMm: number | null
   impressionCount: number
   custodyStatus: string
+  issuedAt?: string | null
+  issuedOperator?: string | null
 }
 
 type EmbossRow = {
@@ -31,6 +42,9 @@ type EmbossRow = {
   storageLocation: string | null
   impressionCount: number
   custodyStatus: string
+  issuedAt?: string | null
+  issuedOperator?: string | null
+  createdAt?: string | null
 }
 
 type ShadeRow = {
@@ -38,11 +52,26 @@ type ShadeRow = {
   shadeCode: string
   productMaster: string | null
   masterArtworkRef: string | null
-  approvalDate: string | null
-  inkComponent: string | null
+  remarks: string | null
   currentHolder: string | null
   impressionCount: number
   custodyStatus: string
+  cardStatusLabel?: string
+  locationLabel?: string
+  entryDate?: string
+  createdAt?: string
+}
+
+type CartonHit = {
+  id: string
+  cartonName: string
+  customer: { name: string }
+  artworkCode: string | null
+}
+
+type ShadeAuditPayload = {
+  shadeCard: { id: string; shadeCode: string; productMaster: string | null }
+  events: Array<{ id: string; actionType: string; details: unknown; createdAt: string }>
 }
 
 const RECEIVE_CONDITIONS = ['Good', 'Damaged', 'Needs Repair'] as const
@@ -72,15 +101,18 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
   const [vendorNotes, setVendorNotes] = useState('')
   const [vendorCondition, setVendorCondition] = useState<(typeof RECEIVE_CONDITIONS)[number]>('Good')
 
-  const [shadeForm, setShadeForm] = useState({
-    manualCode: '',
-    autoGen: true,
-    productMaster: '',
-    masterArtworkRef: '',
-    approvalDate: '',
-    inkComponent: '',
-    currentHolder: '',
-  })
+  const [addShadeOpen, setAddShadeOpen] = useState(false)
+  const [addProductLabel, setAddProductLabel] = useState('')
+  const [addAwCode, setAddAwCode] = useState('')
+  const [addQuantity, setAddQuantity] = useState(1)
+  const [addRemarks, setAddRemarks] = useState('')
+  const [cartonQuery, setCartonQuery] = useState('')
+  const [cartonHits, setCartonHits] = useState<CartonHit[]>([])
+  const [cartonSearchLoading, setCartonSearchLoading] = useState(false)
+
+  const [auditOpen, setAuditOpen] = useState(false)
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditPayload, setAuditPayload] = useState<ShadeAuditPayload | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -128,6 +160,35 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (!addShadeOpen) {
+      setCartonHits([])
+      setCartonQuery('')
+      return
+    }
+    const q = cartonQuery.trim()
+    if (q.length < 2) {
+      setCartonHits([])
+      return
+    }
+    const t = setTimeout(() => {
+      void (async () => {
+        setCartonSearchLoading(true)
+        try {
+          const r = await fetch(`/api/cartons?q=${encodeURIComponent(q)}`)
+          const text = await r.text()
+          const list = safeJsonParseArray<CartonHit>(text, [])
+          setCartonHits(Array.isArray(list) ? list.slice(0, 12) : [])
+        } catch {
+          setCartonHits([])
+        } finally {
+          setCartonSearchLoading(false)
+        }
+      })()
+    }, 280)
+    return () => clearTimeout(t)
+  }, [cartonQuery, addShadeOpen])
+
   const title = useMemo(() => {
     if (toolType === 'dies') return 'Die inventory'
     if (toolType === 'blocks') return 'Emboss block inventory'
@@ -166,9 +227,23 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       (s) =>
         (s?.shadeCode ?? '').toLowerCase().includes(q) ||
         (s?.productMaster?.toLowerCase().includes(q) ?? false) ||
-        (s?.masterArtworkRef?.toLowerCase().includes(q) ?? false),
+        (s?.masterArtworkRef?.toLowerCase().includes(q) ?? false) ||
+        (s?.remarks?.toLowerCase().includes(q) ?? false) ||
+        (s?.locationLabel?.toLowerCase().includes(q) ?? false),
     )
   }, [shades, search])
+
+  const inventoryExportFilterSummary = useMemo(() => {
+    if (!search.trim()) return []
+    return [`Search: "${search.trim()}"`]
+  }, [search])
+
+  const dieExportColumns = useMemo(() => inventoryDieExportColumns(), [])
+  const dieExcelExtraColumns = useMemo(() => inventoryDieExcelExtraColumns(), [])
+  const embossExportColumns = useMemo(() => inventoryEmbossExportColumns(), [])
+  const embossExcelExtraColumns = useMemo(() => inventoryEmbossExcelExtraColumns(), [])
+  const shadeExportColumns = useMemo(() => inventoryShadeExportColumns(), [])
+  const shadeExcelExtraColumns = useMemo(() => inventoryShadeExcelExtraColumns(), [])
 
   function openIssue(id: string) {
     setIssueToolId(id)
@@ -179,9 +254,112 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
 
   function openReceive(id: string) {
     setReceiveToolId(id)
-    setFinalImpressions('')
+    setFinalImpressions(toolType === 'shade_cards' ? 0 : '')
     setReceiveCondition('Good')
     setReceiveOpen(true)
+  }
+
+  function openAddShadeModal() {
+    setAddProductLabel('')
+    setAddAwCode('')
+    setAddQuantity(1)
+    setAddRemarks('')
+    setCartonQuery('')
+    setCartonHits([])
+    setAddShadeOpen(true)
+  }
+
+  async function openShadeAudit(id: string) {
+    setAuditOpen(true)
+    setAuditLoading(true)
+    setAuditPayload(null)
+    try {
+      const r = await fetch(`/api/inventory-hub/shade-cards/${id}/events`)
+      const text = await r.text()
+      const j = safeJsonParse<ShadeAuditPayload & { error?: string }>(text, {} as ShadeAuditPayload)
+      if (!r.ok) {
+        toast.error((j as { error?: string }).error ?? 'Could not load history')
+        setAuditOpen(false)
+        return
+      }
+      setAuditPayload(j)
+    } catch (e) {
+      console.error(e)
+      toast.error('Could not load history')
+      setAuditOpen(false)
+    } finally {
+      setAuditLoading(false)
+    }
+  }
+
+  function shadeEventSummary(ev: { actionType: string; details: unknown }): string {
+    const d = ev.details && typeof ev.details === 'object' ? (ev.details as Record<string, unknown>) : {}
+    switch (ev.actionType) {
+      case 'CREATED':
+        return 'Recorded in ledger'
+      case 'ISSUED': {
+        const op = typeof d.operatorName === 'string' ? d.operatorName : '—'
+        const mc = typeof d.machineCode === 'string' ? d.machineCode : '—'
+        const mn = typeof d.machineName === 'string' ? d.machineName : ''
+        return `Issued to ${op} · machine ${mc}${mn ? ` (${mn})` : ''}`
+      }
+      case 'RECEIVED': {
+        const imp = typeof d.finalImpressions === 'number' ? d.finalImpressions : 0
+        const cond = typeof d.condition === 'string' ? d.condition : '—'
+        if (imp === 0 && cond === 'Good') return 'Received to rack'
+        return `Received to rack · +${imp} impressions · ${cond}`
+      }
+      case 'VENDOR_RECEIVED': {
+        const notes = typeof d.notes === 'string' && d.notes.trim() ? d.notes.trim() : null
+        return notes ? `Received from vendor · ${notes}` : 'Received from vendor'
+      }
+      default:
+        return ev.actionType
+    }
+  }
+
+  async function submitAddShade() {
+    const productMaster = addProductLabel.trim()
+    const masterArtworkRef = addAwCode.trim()
+    if (!productMaster) {
+      toast.error('Product name is required')
+      return
+    }
+    if (!masterArtworkRef) {
+      toast.error('AW code is required')
+      return
+    }
+    if (addQuantity < 1 || addQuantity > 99) {
+      toast.error('Quantity must be between 1 and 99')
+      return
+    }
+    try {
+      const r = await fetch('/api/inventory-hub/shade-cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          autoGenerateCode: true,
+          productMaster,
+          masterArtworkRef,
+          quantity: addQuantity,
+          remarks: addRemarks.trim() || null,
+        }),
+      })
+      const text = await r.text()
+      const j = safeJsonParse<{ error?: string; count?: number; shadeCode?: string }>(text, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Create failed')
+        return
+      }
+      toast.success(
+        (j.count ?? 1) > 1 ? `${j.count} shade cards created (${j.shadeCode ?? ''} …)` : `Shade card ${j.shadeCode ?? ''} created`,
+      )
+      setAddShadeOpen(false)
+      await load()
+    } catch (err) {
+      console.error(err)
+      toast.error('Create failed')
+    }
   }
 
   function openVendorReceive(id: string) {
@@ -238,9 +416,11 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       toast.error('Missing tool')
       return
     }
-    if (finalImpressions === '' || Number.isNaN(Number(finalImpressions)) || Number(finalImpressions) < 0) {
-      toast.error('Enter final impressions (non-negative number)')
-      return
+    if (toolType !== 'shade_cards') {
+      if (finalImpressions === '' || Number.isNaN(Number(finalImpressions)) || Number(finalImpressions) < 0) {
+        toast.error('Enter final impressions (non-negative number)')
+        return
+      }
     }
     const path =
       toolType === 'dies'
@@ -250,8 +430,8 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
           : `/api/inventory-hub/shade-cards/${receiveToolId}/receive`
     try {
       const body = safeJsonStringify({
-        finalImpressions: Number(finalImpressions),
-        condition: receiveCondition,
+        finalImpressions: toolType === 'shade_cards' ? 0 : Number(finalImpressions),
+        condition: toolType === 'shade_cards' ? 'Good' : receiveCondition,
       })
       const r = await fetch(path, {
         method: 'POST',
@@ -311,120 +491,84 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
     }
   }
 
-  async function createShade(e: React.FormEvent) {
-    e.preventDefault()
-    try {
-      const r = await fetch('/api/inventory-hub/shade-cards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeJsonStringify({
-          autoGenerateCode: shadeForm.autoGen,
-          shadeCode: shadeForm.autoGen ? undefined : shadeForm.manualCode.trim(),
-          productMaster: shadeForm.productMaster || null,
-          masterArtworkRef: shadeForm.masterArtworkRef || null,
-          approvalDate: shadeForm.approvalDate || null,
-          inkComponent: shadeForm.inkComponent || null,
-          currentHolder: shadeForm.currentHolder || null,
-        }),
-      })
-      const text = await r.text()
-      const j = safeJsonParse<{ error?: string; shadeCode?: string }>(text, {})
-      if (!r.ok) {
-        toast.error(j.error ?? 'Create failed')
-        return
-      }
-      toast.success(`Shade card ${j.shadeCode ?? ''} created`)
-      setShadeForm({
-        manualCode: '',
-        autoGen: true,
-        productMaster: '',
-        masterArtworkRef: '',
-        approvalDate: '',
-        inkComponent: '',
-        currentHolder: '',
-      })
-      await load()
-    } catch (err) {
-      console.error(err)
-      toast.error('Create failed')
-    }
-  }
-
   return (
     <div className="p-4 max-w-7xl mx-auto space-y-4">
       <HubCategoryNav active={toolType} />
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1 className="text-xl font-bold text-amber-400">{title}</h1>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search…"
-          className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm max-w-md"
-        />
-      </div>
-
-      <p className="text-sm text-slate-400">
-        Issue and Receive (floor) update custody in one transaction. Receive from vendor moves tools from At Vendor (yellow)
-        back to In Stock (green). Status: In Stock, On Floor, At Vendor.
-      </p>
-
-      {toolType === 'shade_cards' && (
-        <form
-          onSubmit={createShade}
-          className="rounded-lg border border-slate-700 bg-slate-900/50 p-4 grid md:grid-cols-3 lg:grid-cols-4 gap-2 text-xs"
-        >
-          <label className="flex items-center gap-2 md:col-span-2">
-            <input
-              type="checkbox"
-              checked={shadeForm.autoGen}
-              onChange={(e) => setShadeForm((s) => ({ ...s, autoGen: e.target.checked }))}
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center flex-wrap">
+          {toolType === 'shade_cards' && (
+            <button
+              type="button"
+              onClick={() => openAddShadeModal()}
+              className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium whitespace-nowrap"
+            >
+              + Add Shade Card
+            </button>
+          )}
+          {toolType === 'dies' ? (
+            <TableExportMenu
+              rows={filteredDies}
+              columns={dieExportColumns}
+              excelOnlyColumns={dieExcelExtraColumns}
+              fileBase="die-inventory-ledger"
+              reportTitle="Die inventory — Master ledger"
+              sheetName="Dies"
+              filterSummary={inventoryExportFilterSummary}
+              disabled={loading}
+              buttonClassName="!border-slate-600 !bg-slate-800 hover:!bg-slate-700 !text-slate-100"
+              menuClassName="!border-slate-600 !bg-slate-900 [&_button]:hover:!bg-slate-800"
             />
-            Auto-generate shade code
-          </label>
-          {!shadeForm.autoGen && (
-            <input
-              value={shadeForm.manualCode}
-              onChange={(e) => setShadeForm((s) => ({ ...s, manualCode: e.target.value }))}
-              placeholder="Manual SC number"
-              className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+          ) : toolType === 'blocks' ? (
+            <TableExportMenu
+              rows={filteredEmboss}
+              columns={embossExportColumns}
+              excelOnlyColumns={embossExcelExtraColumns}
+              fileBase="emboss-inventory-ledger"
+              reportTitle="Emboss block inventory — Master ledger"
+              sheetName="Emboss blocks"
+              filterSummary={inventoryExportFilterSummary}
+              disabled={loading}
+              buttonClassName="!border-slate-600 !bg-slate-800 hover:!bg-slate-700 !text-slate-100"
+              menuClassName="!border-slate-600 !bg-slate-900 [&_button]:hover:!bg-slate-800"
+            />
+          ) : (
+            <TableExportMenu
+              rows={filteredShades}
+              columns={shadeExportColumns}
+              excelOnlyColumns={shadeExcelExtraColumns}
+              fileBase="shade-cards-ledger"
+              reportTitle="Shade card inventory — Master ledger"
+              sheetName="Shade cards"
+              filterSummary={inventoryExportFilterSummary}
+              disabled={loading}
+              buttonClassName="!border-slate-600 !bg-slate-800 hover:!bg-slate-700 !text-slate-100"
+              menuClassName="!border-slate-600 !bg-slate-900 [&_button]:hover:!bg-slate-800"
             />
           )}
           <input
-            value={shadeForm.productMaster}
-            onChange={(e) => setShadeForm((s) => ({ ...s, productMaster: e.target.value }))}
-            placeholder="Product master"
-            className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm max-w-md"
           />
-          <input
-            value={shadeForm.masterArtworkRef}
-            onChange={(e) => setShadeForm((s) => ({ ...s, masterArtworkRef: e.target.value }))}
-            placeholder="Master ref artwork"
-            className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
-          />
-          <input
-            type="date"
-            value={shadeForm.approvalDate}
-            onChange={(e) => setShadeForm((s) => ({ ...s, approvalDate: e.target.value }))}
-            className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
-          />
-          <input
-            value={shadeForm.inkComponent}
-            onChange={(e) => setShadeForm((s) => ({ ...s, inkComponent: e.target.value }))}
-            placeholder="Ink component"
-            className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
-          />
-          <input
-            value={shadeForm.currentHolder}
-            onChange={(e) => setShadeForm((s) => ({ ...s, currentHolder: e.target.value }))}
-            placeholder="Current holder (optional)"
-            className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
-          />
-          <button type="submit" className="px-3 py-2 rounded bg-amber-600 text-white font-medium">
-            Add shade card
-          </button>
-        </form>
-      )}
+        </div>
+      </div>
+
+      <p className="text-sm text-slate-400">
+        {toolType === 'shade_cards' ? (
+          <>
+            Master ledger: one row per physical card. <span className="text-slate-300">Issue</span> and{' '}
+            <span className="text-slate-300">Receive</span> move custody between rack and floor. Click the product name for a history of when it was issued and to whom.
+          </>
+        ) : (
+          <>
+            Issue and Receive (floor) update custody in one transaction. Receive from vendor moves tools from At Vendor (yellow)
+            back to In Stock (green). Status: In Stock, On Floor, At Vendor.
+          </>
+        )}
+      </p>
 
       {loading ? (
         <p className="text-slate-400 text-sm">Loading…</p>
@@ -554,65 +698,74 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
         </div>
       ) : (
         <div className="rounded-lg border border-slate-700 overflow-x-auto">
-          <table className="w-full text-xs text-left">
+          <table className="w-full text-[11px] text-left leading-tight">
             <thead className="bg-slate-800 text-slate-300">
               <tr>
-                <th className="px-2 py-2">ID</th>
-                <th className="px-2 py-2">Product master</th>
-                <th className="px-2 py-2">Master artwork</th>
-                <th className="px-2 py-2">Approval</th>
-                <th className="px-2 py-2">Ink</th>
-                <th className="px-2 py-2">Holder</th>
-                <th className="px-2 py-2">Impressions</th>
-                <th className="px-2 py-2">Status</th>
-                <th className="px-2 py-2">Actions</th>
+                <th className="px-1.5 py-1.5 whitespace-nowrap">Entry date</th>
+                <th className="px-1.5 py-1.5 min-w-[9rem]">Client / product</th>
+                <th className="px-1.5 py-1.5 whitespace-nowrap">AW code</th>
+                <th className="px-1.5 py-1.5 whitespace-nowrap">Card status</th>
+                <th className="px-1.5 py-1.5 min-w-[7rem]">Current location</th>
+                <th className="px-1.5 py-1.5 min-w-[6rem]">Remarks</th>
+                <th className="px-1.5 py-1.5 whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filteredShades.map((s) => (
-                <tr key={s.id} className="border-t border-slate-800">
-                  <td className="px-2 py-2 font-mono text-amber-300">{s.shadeCode ?? '—'}</td>
-                  <td className="px-2 py-2">{s.productMaster ?? '—'}</td>
-                  <td className="px-2 py-2">{s.masterArtworkRef ?? '—'}</td>
-                  <td className="px-2 py-2">{s.approvalDate ?? '—'}</td>
-                  <td className="px-2 py-2">{s.inkComponent ?? '—'}</td>
-                  <td className="px-2 py-2">{s.currentHolder ?? '—'}</td>
-                  <td className="px-2 py-2">{(s.impressionCount ?? 0).toLocaleString()}</td>
-                  <td className="px-2 py-2">
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded border text-[10px] ${custodyBadgeClass(s.custodyStatus ?? '')}`}
-                    >
-                      {custodyLabel(s.custodyStatus ?? '')}
-                    </span>
-                  </td>
-                  <td className="px-2 py-2 space-x-1 whitespace-nowrap">
-                    <button
-                      type="button"
-                      onClick={() => openIssue(s.id)}
-                      disabled={(s.custodyStatus ?? '') !== 'in_stock'}
-                      className="text-blue-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Issue
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openReceive(s.id)}
-                      disabled={(s.custodyStatus ?? '') !== 'on_floor'}
-                      className="text-emerald-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Receive
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openVendorReceive(s.id)}
-                      disabled={(s.custodyStatus ?? '') !== 'at_vendor'}
-                      className="text-amber-300 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      From vendor
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filteredShades.map((s) => {
+                const status = s.custodyStatus ?? ''
+                const label =
+                  s.cardStatusLabel ??
+                  (status === 'in_stock' ? 'In-Stock' : status === 'on_floor' ? 'Issued' : custodyLabel(status))
+                const loc = s.locationLabel ?? (status === 'in_stock' ? 'Rack' : status === 'at_vendor' ? 'Vendor' : s.currentHolder ?? '—')
+                const entry = s.entryDate ?? (s.createdAt ? s.createdAt.slice(0, 10) : '—')
+                return (
+                  <tr key={s.id} className="border-t border-slate-800">
+                    <td className="px-1.5 py-1 text-slate-400 whitespace-nowrap">{entry}</td>
+                    <td className="px-1.5 py-1">
+                      <button
+                        type="button"
+                        onClick={() => void openShadeAudit(s.id)}
+                        className="text-left text-sky-300 hover:text-sky-200 hover:underline block w-full"
+                      >
+                        <span className="block">{s.productMaster?.trim() || '—'}</span>
+                        {s.shadeCode ? (
+                          <span className="block text-[10px] font-mono text-amber-300/80 font-normal">{s.shadeCode}</span>
+                        ) : null}
+                      </button>
+                    </td>
+                    <td className="px-1.5 py-1 font-mono text-slate-200">{s.masterArtworkRef ?? '—'}</td>
+                    <td className="px-1.5 py-1">
+                      <span
+                        className={`inline-block px-1.5 py-0.5 rounded border text-[10px] ${custodyBadgeClass(status)}`}
+                      >
+                        {label}
+                      </span>
+                    </td>
+                    <td className="px-1.5 py-1 text-slate-300">{loc}</td>
+                    <td className="px-1.5 py-1 text-slate-400 max-w-[10rem] truncate" title={s.remarks ?? ''}>
+                      {s.remarks?.trim() || '—'}
+                    </td>
+                    <td className="px-1.5 py-1 space-x-1 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => openIssue(s.id)}
+                        disabled={status !== 'in_stock'}
+                        className="text-blue-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Issue
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openReceive(s.id)}
+                        disabled={status !== 'on_floor'}
+                        className="text-emerald-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Receive
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -711,36 +864,162 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-900 p-4 space-y-3 text-sm">
             <h2 className="text-lg font-semibold text-white">Receive to rack</h2>
-            <label className="block text-slate-300">
-              Final impressions (added to total)
-              <input
-                type="number"
-                min={0}
-                value={finalImpressions}
-                onChange={(e) => setFinalImpressions(e.target.value === '' ? '' : Number(e.target.value))}
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
-              />
-            </label>
-            <label className="block text-slate-300">
-              Condition
-              <select
-                value={receiveCondition}
-                onChange={(e) => setReceiveCondition(e.target.value as (typeof RECEIVE_CONDITIONS)[number])}
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
-              >
-                {RECEIVE_CONDITIONS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {toolType !== 'shade_cards' && (
+              <>
+                <label className="block text-slate-300">
+                  Final impressions (added to total)
+                  <input
+                    type="number"
+                    min={0}
+                    value={finalImpressions}
+                    onChange={(e) => setFinalImpressions(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  />
+                </label>
+                <label className="block text-slate-300">
+                  Condition
+                  <select
+                    value={receiveCondition}
+                    onChange={(e) => setReceiveCondition(e.target.value as (typeof RECEIVE_CONDITIONS)[number])}
+                    className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  >
+                    {RECEIVE_CONDITIONS.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+            {toolType === 'shade_cards' && (
+              <p className="text-slate-400 text-xs">Confirms the shade card is back in rack stock (no extra fields required).</p>
+            )}
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setReceiveOpen(false)} className="px-3 py-1.5 rounded border border-slate-600 text-slate-200">
                 Cancel
               </button>
               <button type="button" onClick={() => void submitReceive()} className="px-3 py-1.5 rounded bg-emerald-600 text-white">
                 Receive
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {addShadeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg rounded-lg border border-slate-600 bg-slate-900 p-4 space-y-3 text-sm max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-semibold text-white">Add shade card</h2>
+            <p className="text-xs text-slate-500">Codes are auto-generated (SC-####). Add one row per physical card or set quantity for a batch.</p>
+            <label className="block text-slate-300">
+              Product name (search cartons)
+              <input
+                value={cartonQuery}
+                onChange={(e) => setCartonQuery(e.target.value)}
+                placeholder="Type at least 2 characters…"
+                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+              />
+            </label>
+            {cartonSearchLoading && <p className="text-xs text-slate-500">Searching…</p>}
+            {cartonHits.length > 0 && (
+              <ul className="max-h-36 overflow-y-auto rounded border border-slate-700 divide-y divide-slate-800 text-xs">
+                {cartonHits.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      className="w-full text-left px-2 py-1.5 hover:bg-slate-800 text-slate-200"
+                      onClick={() => {
+                        setAddProductLabel(`${c.customer.name} / ${c.cartonName}`)
+                        setAddAwCode((prev) => (prev.trim() ? prev : (c.artworkCode?.trim() ?? '')))
+                      }}
+                    >
+                      <span className="text-slate-400">{c.customer.name}</span> · {c.cartonName}
+                      {c.artworkCode ? <span className="ml-1 font-mono text-amber-200/80">({c.artworkCode})</span> : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label className="block text-slate-300">
+              Client / product name
+              <input
+                value={addProductLabel}
+                onChange={(e) => setAddProductLabel(e.target.value)}
+                placeholder="e.g. Acme Pharma / Carton SKU"
+                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+              />
+            </label>
+            <label className="block text-slate-300">
+              AW code
+              <input
+                value={addAwCode}
+                onChange={(e) => setAddAwCode(e.target.value)}
+                placeholder="Artwork / AW reference"
+                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white font-mono"
+              />
+            </label>
+            <label className="block text-slate-300">
+              Quantity
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={addQuantity}
+                onChange={(e) => setAddQuantity(Math.min(99, Math.max(1, Number(e.target.value) || 1)))}
+                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+              />
+            </label>
+            <label className="block text-slate-300">
+              Remarks
+              <textarea
+                value={addRemarks}
+                onChange={(e) => setAddRemarks(e.target.value)}
+                rows={2}
+                placeholder="Optional"
+                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white resize-y"
+              />
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setAddShadeOpen(false)} className="px-3 py-1.5 rounded border border-slate-600 text-slate-200">
+                Cancel
+              </button>
+              <button type="button" onClick={() => void submitAddShade()} className="px-3 py-1.5 rounded bg-amber-600 text-white">
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {auditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-900 p-4 space-y-3 text-sm max-h-[85vh] overflow-y-auto">
+            <h2 className="text-lg font-semibold text-white">Shade card history</h2>
+            {auditLoading && <p className="text-slate-400 text-xs">Loading…</p>}
+            {!auditLoading && auditPayload && (
+              <>
+                <p className="text-xs text-slate-400">
+                  <span className="font-mono text-amber-300">{auditPayload.shadeCard.shadeCode}</span>
+                  {auditPayload.shadeCard.productMaster ? ` · ${auditPayload.shadeCard.productMaster}` : ''}
+                </p>
+                {auditPayload.events.length === 0 ? (
+                  <p className="text-slate-500 text-xs">No events yet.</p>
+                ) : (
+                  <ul className="space-y-2 text-xs border-t border-slate-800 pt-2">
+                    {auditPayload.events.map((ev) => (
+                      <li key={ev.id} className="border-b border-slate-800/80 pb-2">
+                        <div className="text-slate-500">{new Date(ev.createdAt).toLocaleString()}</div>
+                        <div className="text-slate-200">{shadeEventSummary(ev)}</div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+            <div className="flex justify-end pt-2">
+              <button type="button" onClick={() => setAuditOpen(false)} className="px-3 py-1.5 rounded border border-slate-600 text-slate-200">
+                Close
               </button>
             </div>
           </div>

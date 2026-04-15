@@ -16,6 +16,10 @@ import {
   type LedgerZoneKey,
   type PlateHubLedgerRowJson,
 } from '@/lib/plate-hub-ledger'
+import {
+  countActiveShopfloorColours,
+  shopfloorInactiveCanonicalKeysFromJson,
+} from '@/lib/plate-shopfloor-spec'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,6 +45,7 @@ function ledgerRequirementRow(
     newPlatesNeeded: number
     numberOfColours?: number
     lastStatusUpdatedAt: string
+    ledgerEntryAt: string
     status: string
     plateSize?: HubPlateSize | null
     partialRemake?: boolean
@@ -61,12 +66,16 @@ function ledgerRequirementRow(
     zoneBadgeClass: ledgerZoneBadgeClass(zoneKey),
     plateSize: r.plateSize ?? null,
     plateColours: r.plateColours,
-    coloursRequired: Math.max(
-      r.plateColours.length,
-      r.newPlatesNeeded ?? r.numberOfColours ?? 0,
-    ),
+    coloursRequired:
+      zoneKey === 'ctp_queue' || zoneKey === 'outside_vendor'
+        ? Math.max(0, r.newPlatesNeeded ?? r.numberOfColours ?? 0)
+        : Math.max(
+            r.plateColours.length,
+            r.newPlatesNeeded ?? r.numberOfColours ?? 0,
+          ),
     platesInRackCount: null,
     lastStatusUpdatedAt: r.lastStatusUpdatedAt,
+    ledgerEntryAt: r.ledgerEntryAt,
     statusLabel: r.status.replace(/_/g, ' '),
     partialRemake: r.partialRemake,
     custodySource: undefined,
@@ -87,6 +96,7 @@ function ledgerPlateRow(
     totalPlates?: number
     platesInRackCount?: number
     lastStatusUpdatedAt: string
+    ledgerEntryAt: string
     status: string
     plateSize?: HubPlateSize | null
   },
@@ -112,6 +122,7 @@ function ledgerPlateRow(
     ),
     platesInRackCount: p.platesInRackCount ?? null,
     lastStatusUpdatedAt: p.lastStatusUpdatedAt,
+    ledgerEntryAt: p.ledgerEntryAt,
     statusLabel: p.status.replace(/_/g, ' '),
     partialRemake: undefined,
     custodySource: undefined,
@@ -134,6 +145,7 @@ function ledgerCustodyRow(c: {
   platesInRackCount?: number
   partialRemake?: boolean
   lastStatusUpdatedAt: string
+  ledgerEntryAt: string
   plateSize?: HubPlateSize | null
   jobCardId: string | null
 }): PlateHubLedgerRowJson {
@@ -162,6 +174,7 @@ function ledgerCustodyRow(c: {
     ),
     platesInRackCount: c.platesInRackCount ?? null,
     lastStatusUpdatedAt: c.lastStatusUpdatedAt,
+    ledgerEntryAt: c.ledgerEntryAt,
     statusLabel: `Staging · ${src}`,
     partialRemake: c.partialRemake,
     custodySource: c.custodySource,
@@ -181,7 +194,6 @@ export async function GET() {
       triageRows,
       ctpRows,
       vendorRows,
-      awaitingRackRows,
       inventoryRows,
       stagingReqRows,
       stagingPlateRows,
@@ -202,10 +214,6 @@ export async function GET() {
           triageChannel: 'outside_vendor',
           status: 'awaiting_vendor_delivery',
         },
-        orderBy: { createdAt: 'asc' },
-      }),
-      db.plateRequirement.findMany({
-        where: { triageChannel: 'stock_available', status: 'awaiting_rack_slot' },
         orderBy: { createdAt: 'asc' },
       }),
       db.plateStore.findMany({
@@ -297,6 +305,7 @@ export async function GET() {
         status: r.status,
         plateColours: plateNamesFromColoursNeededJson(activeNeeded),
         lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
+        ledgerEntryAt: r.createdAt.toISOString(),
         plateSize: r.plateSize,
         cartonMasterPlateSize: poKey ? cartonMasterPlateByPoLineId.get(poKey) ?? null : null,
       }
@@ -318,7 +327,10 @@ export async function GET() {
         newPlatesNeeded: r.newPlatesNeeded,
         partialRemake: r.partialRemake,
         lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
+        ledgerEntryAt: r.createdAt.toISOString(),
         plateSize: r.plateSize,
+        shopfloorInactiveCanonicalKeys: shopfloorInactiveCanonicalKeysFromJson(r.coloursNeeded),
+        shopfloorActiveColourCount: countActiveShopfloorColours(r.coloursNeeded),
       }
     })
 
@@ -338,28 +350,10 @@ export async function GET() {
         newPlatesNeeded: r.newPlatesNeeded,
         partialRemake: r.partialRemake,
         lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
+        ledgerEntryAt: r.createdAt.toISOString(),
         plateSize: r.plateSize,
-      }
-    })
-
-    const awaitingRack = awaitingRackRows.map((r) => {
-      const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
-      return {
-        id: r.id,
-        poLineId: r.poLineId,
-        requirementCode: r.requirementCode,
-        jobCardId: r.jobCardId,
-        cartonName: r.cartonName,
-        artworkCode: r.artworkCode,
-        artworkVersion: r.artworkVersion,
-        plateColours: plateNamesFromColoursNeededJson(activeNeeded),
-        status: r.status,
-        numberOfColours: r.numberOfColours,
-        newPlatesNeeded: r.newPlatesNeeded,
-        partialRemake: r.partialRemake,
-        lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
-        plateSize: r.plateSize,
-        reservedRackSlot: r.reservedRackSlot,
+        shopfloorInactiveCanonicalKeys: shopfloorInactiveCanonicalKeysFromJson(r.coloursNeeded),
+        shopfloorActiveColourCount: countActiveShopfloorColours(r.coloursNeeded),
       }
     })
 
@@ -414,11 +408,16 @@ export async function GET() {
         plateColours: plateNamesFromColoursNeededJson(activeNeeded),
         colourChannelNames,
         custodySource:
-          r.triageChannel === 'outside_vendor' ? ('vendor' as const) : ('ctp' as const),
+          r.triageChannel === 'outside_vendor'
+            ? ('vendor' as const)
+            : r.triageChannel === 'stock_available'
+              ? ('rack' as const)
+              : ('ctp' as const),
         numberOfColours: r.numberOfColours,
         newPlatesNeeded: r.newPlatesNeeded,
         partialRemake: r.partialRemake,
         lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
+        ledgerEntryAt: r.createdAt.toISOString(),
         jobCardId: r.jobCardId,
         jobCardHub,
         plateSize: r.plateSize,
@@ -456,6 +455,7 @@ export async function GET() {
         jobCardId: p.jobCardId,
         slotNumber: p.slotNumber,
         lastStatusUpdatedAt: p.lastStatusUpdatedAt.toISOString(),
+        ledgerEntryAt: p.createdAt.toISOString(),
         jobCardHub,
         plateSize: p.plateSize,
       }
@@ -479,32 +479,12 @@ export async function GET() {
             plateColours: r.plateColours,
             newPlatesNeeded: r.newPlatesNeeded,
             lastStatusUpdatedAt: r.lastStatusUpdatedAt ?? new Date().toISOString(),
+            ledgerEntryAt: r.ledgerEntryAt,
             status: r.status,
             plateSize: r.plateSize ?? null,
             partialRemake: undefined,
           },
           'incoming_triage',
-        ),
-      ),
-      ...awaitingRack.map((r) =>
-        ledgerRequirementRow(
-          {
-            id: r.id,
-            requirementCode: r.requirementCode,
-            poLineId: r.poLineId,
-            jobCardId: r.jobCardId,
-            cartonName: r.cartonName,
-            artworkCode: r.artworkCode,
-            artworkVersion: r.artworkVersion,
-            plateColours: r.plateColours,
-            newPlatesNeeded: r.newPlatesNeeded,
-            numberOfColours: r.numberOfColours,
-            lastStatusUpdatedAt: r.lastStatusUpdatedAt,
-            status: r.status,
-            plateSize: r.plateSize ?? null,
-            partialRemake: r.partialRemake,
-          },
-          'awaiting_rack',
         ),
       ),
       ...ctpQueue.map((r) =>
@@ -518,9 +498,10 @@ export async function GET() {
             artworkCode: r.artworkCode,
             artworkVersion: r.artworkVersion,
             plateColours: r.plateColours,
-            newPlatesNeeded: r.newPlatesNeeded ?? 0,
-            numberOfColours: r.numberOfColours,
+            newPlatesNeeded: r.shopfloorActiveColourCount ?? r.newPlatesNeeded ?? 0,
+            numberOfColours: r.shopfloorActiveColourCount ?? r.numberOfColours,
             lastStatusUpdatedAt: r.lastStatusUpdatedAt,
+            ledgerEntryAt: r.ledgerEntryAt,
             status: r.status,
             plateSize: r.plateSize ?? null,
             partialRemake: r.partialRemake,
@@ -539,9 +520,10 @@ export async function GET() {
             artworkCode: r.artworkCode,
             artworkVersion: r.artworkVersion,
             plateColours: r.plateColours,
-            newPlatesNeeded: r.newPlatesNeeded ?? 0,
-            numberOfColours: r.numberOfColours,
+            newPlatesNeeded: r.shopfloorActiveColourCount ?? r.newPlatesNeeded ?? 0,
+            numberOfColours: r.shopfloorActiveColourCount ?? r.numberOfColours,
             lastStatusUpdatedAt: r.lastStatusUpdatedAt,
+            ledgerEntryAt: r.ledgerEntryAt,
             status: r.status,
             plateSize: r.plateSize ?? null,
             partialRemake: r.partialRemake,
@@ -563,6 +545,7 @@ export async function GET() {
             totalPlates: p.totalPlates,
             platesInRackCount: p.platesInRackCount,
             lastStatusUpdatedAt: p.lastStatusUpdatedAt,
+            ledgerEntryAt: p.createdAt,
             status: p.status,
             plateSize: p.plateSize ?? null,
           },
@@ -585,7 +568,6 @@ export async function GET() {
         triage,
         ctpQueue,
         vendorQueue,
-        awaitingRack,
         inventory,
         custody,
         ledgerRows,
