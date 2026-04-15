@@ -16,7 +16,6 @@ import {
   HUB_TECHNICAL_DATA_MISSING_TOAST,
   validatePayload,
 } from '@/lib/validate-hub-payload'
-import { assertNonEmptyPayload, stringifyPayload } from '@/lib/defensive-payload'
 import { safeJsonStringify } from '@/lib/safe-json'
 
 type SpecOverrides = {
@@ -43,6 +42,9 @@ type CartonMasterDims = {
   finishedLength: unknown
   finishedWidth: unknown
   finishedHeight: unknown
+  /** Preprinted batch / pharma coding area (mm) from carton master */
+  batchSpaceL?: unknown
+  batchSpaceW?: unknown
 } | null
 
 type DesigningDetail = {
@@ -72,6 +74,34 @@ type DesigningDetail = {
   /** Production job card linked to this PO line (from API — use `.id` for hub APIs, not `links.jobCard` URL). */
   jobCard?: { id: string } | null
 }
+
+/** Batch coding area: explicit spec string, RFQ-style object, spec mm fields, or carton master L×W. */
+function formatPreprintedBatchSpace(line: DesigningDetail['line']): string {
+  const spec = (line.specOverrides || {}) as Record<string, unknown>
+  const direct = spec.batchSpace
+  if (typeof direct === 'string' && direct.trim()) return direct.trim()
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
+    const o = direct as Record<string, unknown>
+    const w = o.w ?? o.W ?? o.width
+    const h = o.h ?? o.H ?? o.length ?? o.l ?? o.L
+    if (w != null && h != null && String(w).trim() && String(h).trim()) {
+      return `${w} × ${h} mm`
+    }
+  }
+  const sl = spec.batchSpaceL
+  const sw = spec.batchSpaceW
+  if (sl != null && sw != null && String(sl).trim() && String(sw).trim()) {
+    return `${sl} × ${sw} mm`
+  }
+  const c = line.carton
+  if (c?.batchSpaceL != null && c?.batchSpaceW != null) {
+    const l = c.batchSpaceL
+    const w = c.batchSpaceW
+    if (String(l).trim() && String(w).trim()) return `${l} × ${w} mm`
+  }
+  return '-'
+}
+
 type User = { id: string; name: string }
 
 const manualInputClass =
@@ -127,9 +157,7 @@ export default function DesigningDetailPage() {
   const [historyDesignerCommand, setHistoryDesignerCommand] = useState<DesignerCommand | null>(null)
   const [savingDesignerCommand, setSavingDesignerCommand] = useState(false)
   const [jobType, setJobType] = useState<'new' | 'repeat'>('new')
-  const [sendingUnified, setSendingUnified] = useState(false)
   const [plateHubSent, setPlateHubSent] = useState(false)
-  const [unifiedSendSent, setUnifiedSendSent] = useState(false)
   /** Resolved from DB: artwork.filename matches AW code for this PO customer */
   const [resolvedArtworkId, setResolvedArtworkId] = useState<string | null>(null)
   const historyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -488,111 +516,6 @@ export default function DesigningDetailPage() {
       toast.error(e instanceof Error ? e.message : 'Dispatch failed')
     } finally {
       setSavingDesignerCommand(false)
-    }
-  }
-
-  const sendAllUnifiedToolingHub = async () => {
-    if (!data) return
-    const embossReq = isEmbossingRequired(data.line.embossingLeafing)
-    const artworkId =
-      String(data.line.specOverrides?.artworkId ?? '').trim() || resolvedArtworkId?.trim() || ''
-    const jobCardId = data.jobCard?.id?.trim() || ''
-    const setNumber = setNumberInput.trim()
-    if (!setNumberInput.trim()) {
-      toast.error('Set # is required before sending to the tooling hub.')
-      return
-    }
-    if (!jobCardId) {
-      toast.error(
-        'Create or link a job card for this PO line before sending to the unified tooling hub.',
-      )
-      return
-    }
-    if (!artworkId) {
-      toast.error(
-        'Link artwork first: enter an AW code that matches a job artwork file for this customer.',
-      )
-      return
-    }
-    if (!validatePayload({ artworkId, jobCardId, setNumber }).ok) {
-      toast.error(HUB_TECHNICAL_DATA_MISSING_TOAST)
-      return
-    }
-
-    const spec = data.line.specOverrides
-    const unifiedPayload = {
-      poLineId: data.line.id,
-      jobCardId,
-      artworkId,
-      setNumber,
-      dieId: data.line.dyeId ?? null,
-      embossBlockId: spec?.embossBlockId?.trim() || null,
-      plateSetId: null as string | null,
-      dispatchDie: !!designerCommand.dieSource,
-      dispatchEmboss: embossReq && !!designerCommand.embossSource,
-      dieSource: designerCommand.dieSource
-        ? designerCommand.dieSource === 'new'
-          ? ('NEW' as const)
-          : ('OLD' as const)
-        : null,
-      embossSource:
-        embossReq && designerCommand.embossSource
-          ? designerCommand.embossSource === 'new'
-            ? ('NEW' as const)
-            : ('OLD' as const)
-          : null,
-    }
-
-    if (!assertNonEmptyPayload(unifiedPayload, 'sendAllUnified')) {
-      toast.error(HUB_TECHNICAL_DATA_MISSING_TOAST)
-      return
-    }
-    const bodyStr = stringifyPayload(unifiedPayload, 'sendAllUnified')
-    if (!bodyStr) {
-      toast.error(HUB_TECHNICAL_DATA_MISSING_TOAST)
-      return
-    }
-
-    setSendingUnified(true)
-    try {
-      console.log('Dispatch Payload:', unifiedPayload)
-      const now = new Date().toISOString()
-      const res = await fetch('/api/tooling/dispatch-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: bodyStr,
-      })
-      const json = (await res.json()) as {
-        error?: string
-        fields?: Record<string, string>
-        ok?: boolean
-      }
-      if (!res.ok) throw new Error(apiErrorMessage(json))
-
-      const next: DesignerCommand = {
-        ...designerCommand,
-        plateHubDispatchAt: now,
-        ...(designerCommand.dieSource
-          ? {
-              dieLastIntent: designerCommand.dieSource === 'new' ? ('die_hub' as const) : ('store_retrieval' as const),
-              dieLastIntentAt: now,
-            }
-          : {}),
-        ...(embossReq && designerCommand.embossSource
-          ? {
-              embossLastIntent:
-                designerCommand.embossSource === 'new' ? ('emboss_hub' as const) : ('store_retrieval' as const),
-              embossLastIntentAt: now,
-            }
-          : {}),
-      }
-      await persistDesignerCommand(next, { skipLoading: true })
-      setUnifiedSendSent(true)
-      toast.success('Data successfully routed to Tooling Hubs')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Dispatch failed')
-    } finally {
-      setSendingUnified(false)
     }
   }
 
@@ -1027,11 +950,6 @@ export default function DesigningDetailPage() {
     [data?.line?.specOverrides, resolvedArtworkId],
   )
 
-  const canSendAllToHub =
-    !!setNumberInput.trim() &&
-    !!effectiveArtworkId &&
-    !!(data?.jobCard?.id && String(data.jobCard.id).trim())
-
   if (!data || !line) return <div className="p-4 text-slate-400">Loading...</div>
 
   const showNewProductSetHint =
@@ -1302,7 +1220,11 @@ export default function DesigningDetailPage() {
               <KV label="Coating" value={line.coatingType || '-'} />
               <KV label="Colours" value={String(line.specOverrides?.numberOfColours || 4)} />
               <KV label="Emboss / leaf" value={line.embossingLeafing || 'None'} />
-              <KV label="Batch space" value={String(line.specOverrides?.batchSpace || '-')} />
+              <KV
+                label="Preprinted batch area"
+                value={formatPreprintedBatchSpace(line)}
+                title="Reserved area for batch / coding print (typically L × W in mm from carton master or PO spec)."
+              />
             </div>
             <label className="block text-xs text-slate-400 mt-3 pt-3 border-t border-slate-700">
               Pre-press remarks
@@ -1602,28 +1524,6 @@ export default function DesigningDetailPage() {
           </div>
         </section>
 
-        <button
-          type="button"
-          disabled={
-            savingDesignerCommand || sendingUnified || !canSendAllToHub || unifiedSendSent
-          }
-          title={
-            unifiedSendSent
-              ? 'Already sent to unified tooling hub'
-              : !canSendAllToHub
-                ? 'Set #, linked artwork (AW code), and a job card for this line are required'
-                : undefined
-          }
-          onClick={() => void sendAllUnifiedToolingHub()}
-          className="w-full py-2 rounded-lg border border-emerald-500/80 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide disabled:opacity-45 disabled:cursor-not-allowed"
-        >
-          {unifiedSendSent
-            ? 'Sent ✅'
-            : sendingUnified
-              ? 'Sending…'
-              : 'SEND ALL TO UNIFIED TOOLING HUB'}
-        </button>
-
         <section className="rounded-xl bg-slate-900 border border-slate-700 px-3 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-[11px] font-semibold text-slate-200 shrink-0">Post-press routing</span>
@@ -1698,9 +1598,12 @@ function formatPlateHistorySummary(h: DesignerCommand): string {
   return parts.length ? parts.join(' · ') : '—'
 }
 
-function KV({ label, value }: { label: string; value: string }) {
+function KV({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 py-1 border-b border-slate-800/80 sm:border-0">
+    <div
+      className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 py-1 border-b border-slate-800/80 sm:border-0"
+      title={title}
+    >
       <span className="text-slate-500 shrink-0 text-xs sm:text-sm">{label}</span>
       <span className="text-slate-100 text-sm text-right text-balance break-words max-w-full sm:max-w-[min(100%,20rem)]">
         {value}

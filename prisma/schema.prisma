@@ -844,7 +844,7 @@ model PlateStore {
   storageLocation String?   @map("storage_location")
   ctpOperator     String?   @map("ctp_operator")
   ctpDate         DateTime? @map("ctp_date") @db.Date
-  status          String    @default("in_use") @map("status") @db.VarChar(20)
+  status          String    @default("in_use") @map("status") @db.VarChar(24)
   printedOn       DateTime? @map("printed_on") @db.Date
   collectedBy     String?   @map("collected_by")
   collectedAt     DateTime? @map("collected_at")
@@ -858,6 +858,10 @@ model PlateStore {
   destroyedAt     DateTime? @map("destroyed_at")
   totalImpressions Int      @default(0) @map("total_impressions")
   lastUsedDate    DateTime? @map("last_used_date") @db.Date
+  /// Plate Hub staging: ctp | vendor | rack — set when status is READY_ON_FLOOR
+  hubCustodySource   String?  @map("hub_custody_source") @db.VarChar(32)
+  /// Status before Mark Plate Ready (for reverse)
+  hubPreviousStatus  String?  @map("hub_previous_status") @db.VarChar(32)
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 

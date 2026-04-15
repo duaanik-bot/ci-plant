@@ -29,6 +29,8 @@ export async function GET(
           finishedLength: true,
           finishedWidth: true,
           finishedHeight: true,
+          batchSpaceL: true,
+          batchSpaceW: true,
         },
       })
     : null

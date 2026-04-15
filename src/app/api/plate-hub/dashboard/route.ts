@@ -14,36 +14,41 @@ export async function GET() {
     const { error } = await requireAuth()
     if (error) return error
 
-    const [triageRows, ctpRows, vendorRows, inventoryRows, custodyRows] = await Promise.all([
-      db.plateRequirement.findMany({
-        where: {
-          triageChannel: null,
-          status: { in: ['pending', 'ctp_notified', 'plates_ready'] },
-        },
-        orderBy: { createdAt: 'asc' },
-      }),
-      db.plateRequirement.findMany({
-        where: { status: 'ctp_internal_queue', triageChannel: 'inhouse_ctp' },
-        orderBy: { createdAt: 'asc' },
-      }),
-      db.plateRequirement.findMany({
-        where: {
-          triageChannel: 'outside_vendor',
-          status: 'awaiting_vendor_delivery',
-        },
-        orderBy: { createdAt: 'asc' },
-      }),
-      db.plateStore.findMany({
-        where: { status: { in: ['ready', 'returned', 'in_stock'] } },
-        orderBy: { updatedAt: 'desc' },
-        include: { customer: { select: { id: true, name: true } } },
-      }),
-      db.plateStore.findMany({
-        where: { status: 'issued' },
-        orderBy: { issuedAt: 'desc' },
-        include: { customer: { select: { id: true, name: true } } },
-      }),
-    ])
+    const [triageRows, ctpRows, vendorRows, inventoryRows, stagingReqRows, stagingPlateRows] =
+      await Promise.all([
+        db.plateRequirement.findMany({
+          where: {
+            triageChannel: null,
+            status: { in: ['pending', 'ctp_notified', 'plates_ready'] },
+          },
+          orderBy: { createdAt: 'asc' },
+        }),
+        db.plateRequirement.findMany({
+          where: { status: 'ctp_internal_queue', triageChannel: 'inhouse_ctp' },
+          orderBy: { createdAt: 'asc' },
+        }),
+        db.plateRequirement.findMany({
+          where: {
+            triageChannel: 'outside_vendor',
+            status: 'awaiting_vendor_delivery',
+          },
+          orderBy: { createdAt: 'asc' },
+        }),
+        db.plateStore.findMany({
+          where: { status: { in: ['ready', 'returned', 'in_stock'] } },
+          orderBy: { updatedAt: 'desc' },
+          include: { customer: { select: { id: true, name: true } } },
+        }),
+        db.plateRequirement.findMany({
+          where: { status: 'READY_ON_FLOOR' },
+          orderBy: { updatedAt: 'desc' },
+        }),
+        db.plateStore.findMany({
+          where: { status: 'READY_ON_FLOOR' },
+          orderBy: { updatedAt: 'desc' },
+          include: { customer: { select: { id: true, name: true } } },
+        }),
+      ])
 
     const triage = triageRows.map((r) => ({
       id: r.id,
@@ -100,7 +105,43 @@ export async function GET() {
       issuedAt: p.issuedAt?.toISOString() ?? null,
       totalImpressions: p.totalImpressions,
       customer: p.customer,
+      plateColours: plateNamesFromColoursNeededJson(p.colours),
     })
+
+    const custodyFromReqs = stagingReqRows.map((r) => ({
+      kind: 'requirement' as const,
+      id: r.id,
+      displayCode: r.requirementCode,
+      cartonName: r.cartonName,
+      artworkCode: r.artworkCode,
+      artworkVersion: r.artworkVersion,
+      plateColours: plateNamesFromColoursNeededJson(r.coloursNeeded),
+      custodySource:
+        r.triageChannel === 'outside_vendor' ? ('vendor' as const) : ('ctp' as const),
+    }))
+
+    const custodyFromPlates = stagingPlateRows.map((p) => {
+      const src = p.hubCustodySource
+      const custodySource =
+        src === 'vendor' || src === 'ctp' ? src : ('rack' as const)
+      return {
+        kind: 'plate' as const,
+        id: p.id,
+        displayCode: p.plateSetCode,
+        cartonName: p.cartonName,
+        artworkCode: p.artworkCode,
+        artworkVersion: p.artworkVersion,
+        plateColours: plateNamesFromColoursNeededJson(p.colours),
+        custodySource,
+        serialNumber: p.serialNumber,
+        rackNumber: p.rackNumber,
+        rackLocation: p.rackLocation,
+        ups: p.ups,
+        customer: p.customer,
+      }
+    })
+
+    const custody = [...custodyFromReqs, ...custodyFromPlates]
 
     return new NextResponse(
       safeJsonStringify({
@@ -108,7 +149,7 @@ export async function GET() {
         ctpQueue,
         vendorQueue,
         inventory: inventoryRows.map(mapPlate),
-        custody: custodyRows.map(mapPlate),
+        custody,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )

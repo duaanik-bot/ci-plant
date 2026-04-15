@@ -48,6 +48,23 @@ type PlateCard = {
   issuedAt: string | null
   totalImpressions: number
   customer: { id: string; name: string } | null
+  plateColours?: string[]
+}
+
+type CustodyCard = {
+  kind: 'requirement' | 'plate'
+  id: string
+  displayCode: string
+  cartonName: string
+  artworkCode: string | null
+  artworkVersion: string | null
+  plateColours: string[]
+  custodySource: 'ctp' | 'vendor' | 'rack'
+  serialNumber?: string | null
+  rackNumber?: string | null
+  rackLocation?: string | null
+  ups?: number | null
+  customer?: { id: string; name: string } | null
 }
 
 type CartonSearchHit = {
@@ -64,30 +81,22 @@ type DashboardPayload = {
   ctpQueue: CtpRow[]
   vendorQueue: CtpRow[]
   inventory: PlateCard[]
-  custody: PlateCard[]
+  custody: CustodyCard[]
 }
 
-type MachineOpt = { id: string; machineCode: string; name: string }
-type UserOpt = { id: string; name: string }
-
-type PlateLookupColour = { name: string; type?: string }
-type PlateLookupOk = {
-  found: true
-  awCode: string
-  cartonName: string | null
-  cartonId: string | null
-  artworkId: string | null
-  artworkVersion: string | null
-  setNumber: string | null
-  sheetSize: string | null
-  colours: PlateLookupColour[]
-  customerId: string | null
+function hubSearchMatch(
+  q: string,
+  parts: Array<string | null | undefined>,
+): boolean {
+  if (!q) return true
+  const hay = parts.map((p) => String(p ?? '').toLowerCase()).join(' ')
+  return hay.includes(q)
 }
 
-function parseIssuedTo(issuedTo: string | null): { machine: string; operator: string } {
-  if (!issuedTo?.trim()) return { machine: '—', operator: '—' }
-  const parts = issuedTo.split(/\s*\/\s*/)
-  return { machine: parts[0]?.trim() || '—', operator: parts[1]?.trim() || '—' }
+function sourceBadgeLabel(source: CustodyCard['custodySource']): string {
+  if (source === 'ctp') return 'Source: In-house CTP'
+  if (source === 'vendor') return 'Source: Vendor'
+  return 'Source: Rack'
 }
 
 function safeReadDashboard(text: string): DashboardPayload | null {
@@ -116,9 +125,6 @@ export default function HubPlateDashboard() {
     inventory: [],
     custody: [],
   })
-  const [machines, setMachines] = useState<MachineOpt[]>([])
-  const [users, setUsers] = useState<UserOpt[]>([])
-
   const [addStockOpen, setAddStockOpen] = useState(false)
   const [addCartonQuery, setAddCartonQuery] = useState('')
   const [addCartonResults, setAddCartonResults] = useState<CartonSearchHit[]>([])
@@ -129,7 +135,6 @@ export default function HubPlateDashboard() {
   const [addAutoSerial, setAddAutoSerial] = useState(true)
   const [addOutputNumber, setAddOutputNumber] = useState('')
   const [addRackNumber, setAddRackNumber] = useState('')
-  const [addSetNumber, setAddSetNumber] = useState('')
   const [addUps, setAddUps] = useState('')
   const [addArtworkId, setAddArtworkId] = useState('')
   const [stdC, setStdC] = useState(true)
@@ -143,10 +148,8 @@ export default function HubPlateDashboard() {
   const [scrapOpen, setScrapOpen] = useState(false)
   const [scrapPlateId, setScrapPlateId] = useState('')
 
-  const [issueAwCode, setIssueAwCode] = useState('')
-  const [issueLookupError, setIssueLookupError] = useState('')
-  const [issueLookupLoading, setIssueLookupLoading] = useState(false)
-
+  const [ctpSearch, setCtpSearch] = useState('')
+  const [vendorSearch, setVendorSearch] = useState('')
   const [invSearch, setInvSearch] = useState('')
   const [custSearch, setCustSearch] = useState('')
 
@@ -154,35 +157,14 @@ export default function HubPlateDashboard() {
   const [stockPlateId, setStockPlateId] = useState('')
   const [stockRackSlot, setStockRackSlot] = useState('')
 
-  const [issueModal, setIssueModal] = useState<{
-    source: 'ctp' | 'vendor' | 'inventory'
-    plateId: string
-  } | null>(null)
-  const [issueMachineId, setIssueMachineId] = useState('')
-  const [issueOperatorId, setIssueOperatorId] = useState('')
-
-  const [returnModal, setReturnModal] = useState<PlateCard | null>(null)
-  const [returnFlow, setReturnFlow] = useState<'return' | 'receive'>('return')
-  const [returnImpressions, setReturnImpressions] = useState<number | ''>('')
-  const [returnCondition, setReturnCondition] = useState<'Good' | 'Damaged' | 'Needs Repair'>('Good')
-  const [returnRackSlot, setReturnRackSlot] = useState('')
-  const [returnOperatorId, setReturnOperatorId] = useState('')
-  const [reverseModal, setReverseModal] = useState<PlateCard | null>(null)
-  const [reverseRack, setReverseRack] = useState('')
   const [addStockFieldErrors, setAddStockFieldErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     try {
-      const [dRes, mRes, uRes] = await Promise.all([
-        fetch('/api/plate-hub/dashboard'),
-        fetch('/api/machines'),
-        fetch('/api/users'),
-      ])
+      const dRes = await fetch('/api/plate-hub/dashboard')
       const dText = await dRes.text()
-      const mText = await mRes.text()
-      const uText = await uRes.text()
 
       const parsed = safeReadDashboard(dText)
       if (!parsed) {
@@ -199,14 +181,11 @@ export default function HubPlateDashboard() {
           toast.error(`Dashboard load failed (${dRes.status})`)
         }
       }
-
-      setMachines(safeJsonParseArray<MachineOpt>(mText, []))
-      setUsers(safeJsonParseArray<UserOpt>(uText, []))
     } catch (e) {
       console.error(e)
       toast.error('Failed to load plate hub')
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
   }, [])
 
@@ -260,7 +239,6 @@ export default function HubPlateDashboard() {
     setAddAutoSerial(true)
     setAddOutputNumber('')
     setAddRackNumber('')
-    setAddSetNumber('')
     setAddUps('')
     setAddArtworkId('')
     setStdC(true)
@@ -426,14 +404,22 @@ export default function HubPlateDashboard() {
           numberOfColours: colours.length,
           colours,
           rackLocation: addRackNumber.trim() || null,
-          slotNumber: addSetNumber.trim() || null,
         }),
       })
       const t = await r.text()
       const j = safeJsonParse<{ error?: string; fields?: Record<string, string> }>(t, {})
       if (!r.ok) {
         if (j.fields && typeof j.fields === 'object') setAddStockFieldErrors(j.fields)
-        toast.error(j.error ?? 'Save failed')
+        const firstField =
+          j.fields && typeof j.fields === 'object'
+            ? Object.values(j.fields).find(Boolean)
+            : undefined
+        toast.error(
+          firstField ||
+            j.error ||
+            (t.trim() && !t.trim().startsWith('{') ? t.slice(0, 120) : null) ||
+            `Save failed (${r.status})`,
+        )
         return
       }
       toast.success('Saved to rack')
@@ -443,40 +429,6 @@ export default function HubPlateDashboard() {
     } catch (e) {
       console.error(e)
       toast.error('Save failed — check connection and try again')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function submitReverseIssue() {
-    if (!reverseModal?.id?.trim()) {
-      toast.error('Missing plate id')
-      return
-    }
-    if (!reverseRack.trim()) {
-      toast.error('Rack number is required to reverse an issue')
-      return
-    }
-    setSaving(true)
-    try {
-      const r = await fetch(`/api/plate-store/${reverseModal.id}/reverse-issue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeJsonStringify({ rackNumber: reverseRack.trim() }),
-      })
-      const t = await r.text()
-      const j = safeJsonParse<{ error?: string }>(t, {})
-      if (!r.ok) {
-        toast.error(j.error ?? 'Reverse issue failed')
-        return
-      }
-      toast.success('Issue reversed — plate back on rack')
-      setReverseModal(null)
-      setReverseRack('')
-      await load()
-    } catch (e) {
-      console.error(e)
-      toast.error('Reverse issue failed')
     } finally {
       setSaving(false)
     }
@@ -510,35 +462,155 @@ export default function HubPlateDashboard() {
     }
   }
 
-  async function lookupIssueAw() {
-    const aw = issueAwCode.trim()
-    if (!aw) {
-      setIssueLookupError('')
-      return
+  function custodyItemFromRequirement(row: CtpRow, source: 'ctp' | 'vendor'): CustodyCard {
+    return {
+      kind: 'requirement',
+      id: row.id,
+      displayCode: row.requirementCode,
+      cartonName: row.cartonName,
+      artworkCode: row.artworkCode,
+      artworkVersion: row.artworkVersion,
+      plateColours: row.plateColours,
+      custodySource: source,
     }
-    setIssueLookupLoading(true)
-    setIssueLookupError('')
+  }
+
+  function custodyItemFromPlate(row: PlateCard): CustodyCard {
+    return {
+      kind: 'plate',
+      id: row.id,
+      displayCode: row.plateSetCode,
+      cartonName: row.cartonName,
+      artworkCode: row.artworkCode,
+      artworkVersion: row.artworkVersion,
+      plateColours: row.plateColours ?? [],
+      custodySource: 'rack',
+      serialNumber: row.serialNumber,
+      rackNumber: row.rackNumber,
+      rackLocation: row.rackLocation,
+      ups: row.ups,
+      customer: row.customer,
+    }
+  }
+
+  async function markPlateReadyRequirement(row: CtpRow, lane: 'ctp' | 'vendor') {
+    const prev = data
+    const nextCustody = custodyItemFromRequirement(row, lane)
+    setData((d) => ({
+      ...d,
+      ctpQueue: lane === 'ctp' ? d.ctpQueue.filter((j) => j.id !== row.id) : d.ctpQueue,
+      vendorQueue: lane === 'vendor' ? d.vendorQueue.filter((j) => j.id !== row.id) : d.vendorQueue,
+      custody: [nextCustody, ...d.custody],
+    }))
     try {
-      const r = await fetch(`/api/plate-hub/plate-lookup?${new URLSearchParams({ awCode: aw })}`)
-      const j = (await r.json()) as { found?: boolean; error?: string } & Partial<PlateLookupOk>
-      if (!r.ok || !j.found) {
-        setIssueLookupError(j.error || 'AW Code not found in Master.')
-        return
+      const r = await fetch('/api/plate-hub/mark-plate-ready', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ kind: 'requirement', id: row.id }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Mark ready failed')
+      toast.success('Moved to custody floor')
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      setData(prev)
+      toast.error(e instanceof Error ? e.message : 'Mark ready failed')
+    }
+  }
+
+  async function markPlateReadyPlate(row: PlateCard) {
+    const prev = data
+    setData((d) => ({
+      ...d,
+      inventory: d.inventory.filter((p) => p.id !== row.id),
+      custody: [custodyItemFromPlate(row), ...d.custody],
+    }))
+    try {
+      const r = await fetch('/api/plate-hub/mark-plate-ready', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ kind: 'plate', id: row.id }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Mark ready failed')
+      toast.success('Moved to custody floor')
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      setData(prev)
+      toast.error(e instanceof Error ? e.message : 'Mark ready failed')
+    }
+  }
+
+  async function reverseCustodyItem(item: CustodyCard) {
+    const prev = data
+    if (item.kind === 'requirement') {
+      const restored: CtpRow = {
+        id: item.id,
+        poLineId: null,
+        requirementCode: item.displayCode,
+        jobCardId: null,
+        cartonName: item.cartonName,
+        artworkCode: item.artworkCode,
+        artworkVersion: item.artworkVersion,
+        plateColours: item.plateColours,
+        status:
+          item.custodySource === 'vendor' ? 'awaiting_vendor_delivery' : 'ctp_internal_queue',
       }
-      const ok = j as PlateLookupOk
-      const match = data.inventory.find(
-        (p) =>
-          (p.artworkCode && p.artworkCode.toLowerCase() === aw.toLowerCase()) ||
-          (ok.artworkId && p.artworkId === ok.artworkId),
-      )
-      if (match) {
-        setIssueModal((prev) => (prev ? { ...prev, plateId: match.id } : prev))
-        toast.message(`Matched rack plate ${match.plateSetCode}`)
-      } else {
-        setIssueLookupError('No matching plate in live inventory for this AW code.')
+      setData((d) => ({
+        ...d,
+        custody: d.custody.filter((c) => c.id !== item.id),
+        ctpQueue:
+          item.custodySource === 'ctp' ? [restored, ...d.ctpQueue] : d.ctpQueue,
+        vendorQueue:
+          item.custodySource === 'vendor' ? [restored, ...d.vendorQueue] : d.vendorQueue,
+      }))
+    } else {
+      const restoredPlate: PlateCard = {
+        id: item.id,
+        plateSetCode: item.displayCode,
+        serialNumber: item.serialNumber,
+        outputNumber: null,
+        rackNumber: item.rackNumber,
+        ups: item.ups,
+        cartonName: item.cartonName,
+        artworkCode: item.artworkCode,
+        artworkVersion: item.artworkVersion,
+        artworkId: null,
+        jobCardId: null,
+        slotNumber: null,
+        rackLocation: item.rackLocation,
+        status: 'ready',
+        issuedTo: null,
+        issuedAt: null,
+        totalImpressions: 0,
+        customer: item.customer ?? null,
+        plateColours: item.plateColours,
       }
-    } finally {
-      setIssueLookupLoading(false)
+      setData((d) => ({
+        ...d,
+        custody: d.custody.filter((c) => c.id !== item.id),
+        inventory: [restoredPlate, ...d.inventory],
+      }))
+    }
+    try {
+      const r = await fetch('/api/plate-hub/reverse-plate-ready', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ kind: item.kind, id: item.id }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Reverse failed')
+      toast.success('Returned to previous lane')
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      setData(prev)
+      toast.error(e instanceof Error ? e.message : 'Reverse failed')
     }
   }
 
@@ -555,15 +627,26 @@ export default function HubPlateDashboard() {
     )
   }, [data.inventory, invSearch])
 
+  const filteredCtp = useMemo(() => {
+    const q = ctpSearch.trim().toLowerCase()
+    return data.ctpQueue.filter((job) =>
+      hubSearchMatch(q, [job.cartonName, job.artworkCode, job.requirementCode]),
+    )
+  }, [data.ctpQueue, ctpSearch])
+
+  const filteredVendor = useMemo(() => {
+    const q = vendorSearch.trim().toLowerCase()
+    return data.vendorQueue.filter((job) =>
+      hubSearchMatch(q, [job.cartonName, job.artworkCode, job.requirementCode]),
+    )
+  }, [data.vendorQueue, vendorSearch])
+
   const filteredCustody = useMemo(() => {
     const q = custSearch.trim().toLowerCase()
     const list = data.custody
     if (!q) return list
-    return list.filter(
-      (p) =>
-        p.plateSetCode.toLowerCase().includes(q) ||
-        p.cartonName.toLowerCase().includes(q) ||
-        (p.issuedTo?.toLowerCase().includes(q) ?? false),
+    return list.filter((c) =>
+      hubSearchMatch(q, [c.cartonName, c.artworkCode, c.displayCode]),
     )
   }, [data.custody, custSearch])
 
@@ -600,139 +683,6 @@ export default function HubPlateDashboard() {
     }
   }
 
-  function openIssueFromInventory(plateId: string) {
-    if (!plateId?.trim()) {
-      toast.error('Missing plate id')
-      return
-    }
-    setIssueAwCode('')
-    setIssueLookupError('')
-    setIssueModal({ source: 'inventory', plateId })
-    setIssueMachineId('')
-    setIssueOperatorId('')
-  }
-
-  function openIssueFromCtp() {
-    setIssueAwCode('')
-    setIssueLookupError('')
-    setIssueModal({ source: 'ctp', plateId: '' })
-    setIssueMachineId('')
-    setIssueOperatorId('')
-  }
-
-  function openIssueFromVendor() {
-    setIssueAwCode('')
-    setIssueLookupError('')
-    setIssueModal({ source: 'vendor', plateId: '' })
-    setIssueMachineId('')
-    setIssueOperatorId('')
-  }
-
-  async function submitCustodyIssue() {
-    if (!issueModal) return
-    const plateId = issueModal.plateId?.trim()
-    if (!plateId) {
-      toast.error('Select a plate set')
-      return
-    }
-    if (!issueMachineId.trim()) {
-      toast.error('Machine is required')
-      return
-    }
-    if (!issueOperatorId.trim()) {
-      toast.error('Operator is required')
-      return
-    }
-    const invPlate = data.inventory.find((p) => p.id === plateId)
-    if (!invPlate) {
-      toast.error('Plate not found in inventory')
-      return
-    }
-    if (!invPlate.artworkId?.trim()) {
-      toast.error('Plate set must have artwork linked before issue')
-      return
-    }
-    if (!invPlate.jobCardId?.trim()) {
-      toast.error('Plate set must have a job card linked before issue')
-      return
-    }
-    const setNum = (invPlate.slotNumber ?? '').trim() || '01'
-    setSaving(true)
-    try {
-      const r = await fetch(`/api/plate-store/${plateId}/custody-issue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeJsonStringify({
-          machineId: issueMachineId,
-          operatorUserId: issueOperatorId,
-          artworkId: invPlate.artworkId,
-          jobCardId: invPlate.jobCardId,
-          setNumber: setNum,
-        }),
-      })
-      const t = await r.text()
-      const j = safeJsonParse<{ error?: string }>(t, {})
-      if (!r.ok) {
-        toast.error(j.error ?? 'Issue failed')
-        return
-      }
-      toast.success('Issued to machine')
-      setIssueModal(null)
-      await load()
-    } catch (e) {
-      console.error(e)
-      toast.error('Issue failed')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function submitReturn() {
-    if (!returnModal?.id?.trim()) {
-      toast.error('Missing plate id')
-      return
-    }
-    if (returnImpressions === '' || Number(returnImpressions) < 0) {
-      toast.error('Enter impressions run (0 or more)')
-      return
-    }
-    if (!returnRackSlot.trim()) {
-      toast.error('Rack slot / location is required')
-      return
-    }
-    if (!returnOperatorId.trim()) {
-      toast.error('Operator is required')
-      return
-    }
-    setSaving(true)
-    try {
-      const r = await fetch(`/api/plate-store/${returnModal.id}/custody-return`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeJsonStringify({
-          impressionsRun: Number(returnImpressions),
-          plateCondition: returnCondition,
-          rackSlot: returnRackSlot.trim(),
-          operatorUserId: returnOperatorId,
-        }),
-      })
-      const t = await r.text()
-      const j = safeJsonParse<{ error?: string }>(t, {})
-      if (!r.ok) {
-        toast.error(j.error ?? 'Return failed')
-        return
-      }
-      toast.success('Returned to rack')
-      setReturnModal(null)
-      await load()
-    } catch (e) {
-      console.error(e)
-      toast.error('Return failed')
-    } finally {
-      setSaving(false)
-    }
-  }
-
   return (
     <div className="min-h-screen bg-black text-zinc-100 p-4 md:p-6">
       <div className="max-w-[1600px] mx-auto space-y-6">
@@ -741,7 +691,7 @@ export default function HubPlateDashboard() {
         <header className="flex flex-col gap-1 border-b border-zinc-700 pb-4">
           <h1 className="text-2xl font-bold tracking-tight text-white">Plate Hub</h1>
           <p className="text-sm text-zinc-400">
-            Triage → CTP / outside vendor / inventory / custody. High-contrast layout for floor speed.
+            Preparation lanes → custody floor staging (mark ready). High-contrast layout for floor speed.
           </p>
         </header>
 
@@ -824,24 +774,37 @@ export default function HubPlateDashboard() {
             {/* Lanes: CTP · outside vendor · rack · custody */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
               {/* CTP */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4 min-h-[280px]">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-3">CTP queue</h2>
-                <ul className="space-y-3 text-sm">
-                  {data.ctpQueue.length === 0 ? (
-                    <li className="text-zinc-500">Empty.</li>
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4 min-h-[280px] flex flex-col">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">CTP queue</h2>
+                <input
+                  value={ctpSearch}
+                  onChange={(e) => setCtpSearch(e.target.value)}
+                  placeholder="Search…"
+                  className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
+                />
+                <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1 text-sm">
+                  {filteredCtp.length === 0 ? (
+                    <li className="text-zinc-500 text-sm">Empty.</li>
                   ) : (
-                    data.ctpQueue.map((job) => (
+                    filteredCtp.map((job) => (
                       <li key={job.id} className="rounded-lg border border-zinc-700 bg-black p-3">
-                        <p className="font-mono text-amber-300">{job.requirementCode}</p>
-                        <p className="text-zinc-400 text-xs mt-1">
+                        <p className="font-mono text-amber-300 text-sm">{job.requirementCode}</p>
+                        <p className="text-white font-semibold truncate mt-0.5">{job.cartonName}</p>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          AW: {job.artworkCode?.trim() || '—'}
+                        </p>
+                        <p className="text-xs text-zinc-400 mt-1">
                           {job.plateColours.length > 0 ? job.plateColours.join(' · ') : '—'}
+                        </p>
+                        <p className="text-xs text-zinc-400 mt-0.5 capitalize">
+                          {job.status.replace(/_/g, ' ')}
                         </p>
                         <button
                           type="button"
-                          className="mt-2 w-full px-2 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
-                          onClick={() => openIssueFromCtp()}
+                          className="mt-2 w-full px-2 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
+                          onClick={() => void markPlateReadyRequirement(job, 'ctp')}
                         >
-                          Issue to machine
+                          Mark plate ready
                         </button>
                         <button
                           type="button"
@@ -858,31 +821,40 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Outside vendor */}
-              <section className="rounded-xl border-2 border-violet-900/80 bg-zinc-950 p-4 min-h-[280px]">
+              <section className="rounded-xl border-2 border-violet-900/80 bg-zinc-950 p-4 min-h-[280px] flex flex-col">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-300 mb-1">
                   Outside vendor
                 </h2>
-                <p className="text-[11px] text-zinc-500 mb-3">Awaiting delivery · two-way decisions</p>
-                <ul className="space-y-3 text-sm">
-                  {data.vendorQueue.length === 0 ? (
-                    <li className="text-zinc-500">None at vendor.</li>
+                <p className="text-[11px] text-zinc-500 mb-2">Awaiting delivery · two-way decisions</p>
+                <input
+                  value={vendorSearch}
+                  onChange={(e) => setVendorSearch(e.target.value)}
+                  placeholder="Search…"
+                  className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
+                />
+                <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1 text-sm">
+                  {filteredVendor.length === 0 ? (
+                    <li className="text-zinc-500 text-sm">None at vendor.</li>
                   ) : (
-                    data.vendorQueue.map((job) => (
+                    filteredVendor.map((job) => (
                       <li key={job.id} className="rounded-lg border border-violet-800/50 bg-black p-3">
-                        <p className="font-mono text-violet-200">{job.requirementCode}</p>
-                        <p className="text-white text-xs font-medium truncate mt-0.5">{job.cartonName}</p>
-                        <p className="text-zinc-400 text-xs mt-1">
+                        <p className="font-mono text-violet-200 text-sm">{job.requirementCode}</p>
+                        <p className="text-white font-semibold truncate mt-0.5">{job.cartonName}</p>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          AW: {job.artworkCode?.trim() || '—'}
+                        </p>
+                        <p className="text-xs text-zinc-400 mt-1">
                           {job.plateColours.length > 0 ? job.plateColours.join(' · ') : '—'}
                         </p>
-                        <p className="text-[10px] text-zinc-500 mt-1 capitalize">
+                        <p className="text-xs text-zinc-400 mt-0.5 capitalize">
                           {job.status.replace(/_/g, ' ')}
                         </p>
                         <button
                           type="button"
-                          className="mt-2 w-full px-2 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
-                          onClick={() => openIssueFromVendor()}
+                          className="mt-2 w-full px-2 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
+                          onClick={() => void markPlateReadyRequirement(job, 'vendor')}
                         >
-                          Issue to machine
+                          Mark plate ready
                         </button>
                         <button
                           type="button"
@@ -942,22 +914,30 @@ export default function HubPlateDashboard() {
                     <li className="text-zinc-500 text-sm">No plates in rack.</li>
                   ) : (
                     filteredInventory.map((p) => (
-                      <li key={p.id} className="rounded border border-zinc-800 bg-black p-2">
-                        <p className="font-mono text-amber-300 text-xs">{p.plateSetCode}</p>
+                      <li key={p.id} className="rounded-lg border border-zinc-800 bg-black p-3">
+                        <p className="font-mono text-amber-300 text-sm">{p.plateSetCode}</p>
                         {p.serialNumber ? (
-                          <p className="text-zinc-500 text-[10px] font-mono">SN {p.serialNumber}</p>
+                          <p className="text-zinc-400 text-xs font-mono">SN {p.serialNumber}</p>
                         ) : null}
-                        <p className="text-white text-xs truncate">{p.cartonName}</p>
-                        <p className="text-zinc-500 text-[10px]">
+                        <p className="text-white font-semibold truncate mt-0.5">{p.cartonName}</p>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          AW: {p.artworkCode?.trim() || '—'}
+                        </p>
+                        <p className="text-xs text-zinc-400 mt-1">
+                          {(p.plateColours?.length ?? 0) > 0
+                            ? (p.plateColours ?? []).join(' · ')
+                            : '—'}
+                        </p>
+                        <p className="text-xs text-zinc-400 mt-0.5">
                           Rack: {p.rackNumber ?? p.rackLocation ?? '—'}
                           {p.ups != null && p.ups > 0 ? ` · UPS ${p.ups}` : ''}
                         </p>
                         <button
                           type="button"
-                          className="mt-1 w-full py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
-                          onClick={() => openIssueFromInventory(p.id)}
+                          className="mt-2 w-full py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
+                          onClick={() => void markPlateReadyPlate(p)}
                         >
-                          Issue to machine
+                          Mark plate ready
                         </button>
                       </li>
                     ))
@@ -967,7 +947,10 @@ export default function HubPlateDashboard() {
 
               {/* Custody */}
               <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4 min-h-[280px] flex flex-col">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">Custody floor</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-0.5">
+                  Custody floor
+                </h2>
+                <p className="text-[11px] text-zinc-500 mb-2">Staging · plates marked ready</p>
                 <input
                   value={custSearch}
                   onChange={(e) => setCustSearch(e.target.value)}
@@ -976,63 +959,37 @@ export default function HubPlateDashboard() {
                 />
                 <ul className="space-y-2 flex-1 overflow-y-auto max-h-[420px] pr-1">
                   {filteredCustody.length === 0 ? (
-                    <li className="text-zinc-500 text-sm">Nothing on floor.</li>
+                    <li className="text-zinc-500 text-sm">Nothing in staging.</li>
                   ) : (
-                    filteredCustody.map((p) => {
-                      const { machine, operator } = parseIssuedTo(p.issuedTo)
-                      return (
-                        <li key={p.id} className="rounded border border-zinc-800 bg-black p-2">
-                          <p className="font-mono text-amber-300 text-xs">{p.plateSetCode}</p>
-                          <p className="text-white text-xs truncate">{p.cartonName}</p>
-                          <p className="text-zinc-400 text-[10px] mt-1">
-                            Machine: <span className="text-zinc-200">{machine}</span> · Op:{' '}
-                            <span className="text-zinc-200">{operator}</span>
+                    filteredCustody.map((c) => (
+                      <li key={`${c.kind}-${c.id}`} className="rounded-lg border border-zinc-800 bg-black p-3">
+                        <span className="inline-block px-2 py-0.5 rounded border border-emerald-700/60 bg-emerald-950/50 text-[10px] font-semibold text-emerald-200 mb-1.5">
+                          {sourceBadgeLabel(c.custodySource)}
+                        </span>
+                        <p className="font-mono text-amber-300 text-sm">{c.displayCode}</p>
+                        <p className="text-white font-semibold truncate mt-0.5">{c.cartonName}</p>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          AW: {c.artworkCode?.trim() || '—'}
+                        </p>
+                        <p className="text-xs text-zinc-400 mt-1">
+                          {c.plateColours.length > 0 ? c.plateColours.join(' · ') : '—'}
+                        </p>
+                        {c.kind === 'plate' ? (
+                          <p className="text-xs text-zinc-400 mt-0.5">
+                            {c.serialNumber ? `SN ${c.serialNumber} · ` : ''}
+                            Rack: {c.rackNumber ?? c.rackLocation ?? '—'}
+                            {c.ups != null && c.ups > 0 ? ` · UPS ${c.ups}` : ''}
                           </p>
-                          <button
-                            type="button"
-                            className="mt-1 w-full py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
-                            onClick={() => {
-                              setReturnFlow('receive')
-                              setReturnModal(p)
-                              setReturnImpressions('')
-                              setReturnCondition('Good')
-                              setReturnRackSlot(
-                                (p.rackNumber ?? p.rackLocation ?? '').trim() || '',
-                              )
-                              setReturnOperatorId('')
-                            }}
-                          >
-                            Receive from floor
-                          </button>
-                          <button
-                            type="button"
-                            className="mt-1 w-full py-1.5 rounded border border-rose-800/80 bg-rose-950/50 text-rose-100 hover:bg-rose-950 text-xs font-semibold"
-                            onClick={() => {
-                              setReverseModal(p)
-                              setReverseRack((p.rackNumber ?? p.rackLocation ?? '').trim())
-                            }}
-                          >
-                            Reverse issue
-                          </button>
-                          <button
-                            type="button"
-                            className="mt-1 w-full py-1.5 rounded border border-amber-700/70 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
-                            onClick={() => {
-                              setReturnFlow('return')
-                              setReturnModal(p)
-                              setReturnImpressions(0)
-                              setReturnCondition('Good')
-                              setReturnRackSlot(
-                                (p.rackNumber ?? p.rackLocation ?? '').trim() || '',
-                              )
-                              setReturnOperatorId('')
-                            }}
-                          >
-                            Quick return (0 impressions)
-                          </button>
-                        </li>
-                      )
-                    })
+                        ) : null}
+                        <button
+                          type="button"
+                          className="mt-2 w-full py-2 rounded border border-amber-800/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                          onClick={() => void reverseCustodyItem(c)}
+                        >
+                          Reverse / Undo
+                        </button>
+                      </li>
+                    ))
                   )}
                 </ul>
               </section>
@@ -1136,6 +1093,9 @@ export default function HubPlateDashboard() {
             </div>
             <label className="block text-sm text-zinc-300">
               Output number
+              <span className="block text-[11px] text-zinc-500 font-normal mt-0.5">
+                Also used as set / output reference in custody workflows.
+              </span>
               <input
                 value={addOutputNumber}
                 onChange={(e) => setAddOutputNumber(e.target.value)}
@@ -1147,14 +1107,6 @@ export default function HubPlateDashboard() {
               <input
                 value={addRackNumber}
                 onChange={(e) => setAddRackNumber(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              />
-            </label>
-            <label className="block text-sm text-zinc-300">
-              Set #
-              <input
-                value={addSetNumber}
-                onChange={(e) => setAddSetNumber(e.target.value)}
                 className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
               />
             </label>
@@ -1339,227 +1291,6 @@ export default function HubPlateDashboard() {
                 }}
               >
                 Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Issue modal (CTP picks plate from inventory; inventory pre-fills) */}
-      {issueModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Issue to machine</h3>
-            <p className="text-zinc-500 text-xs">Custody update runs in a single DB transaction.</p>
-            <div className="rounded-lg border border-zinc-700 bg-black/60 p-2 space-y-2">
-              <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Quick AW lookup → pick rack plate</p>
-              <div className="flex gap-2">
-                <input
-                  value={issueAwCode}
-                  onChange={(e) => setIssueAwCode(e.target.value)}
-                  placeholder="AW code"
-                  className="flex-1 px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
-                />
-                <button
-                  type="button"
-                  disabled={issueLookupLoading}
-                  onClick={() => void lookupIssueAw()}
-                  className="px-3 py-2 rounded-md bg-zinc-700 text-white text-xs font-medium"
-                >
-                  {issueLookupLoading ? '…' : 'Lookup'}
-                </button>
-              </div>
-              {issueLookupError ? <p className="text-xs text-red-400">{issueLookupError}</p> : null}
-            </div>
-            {issueModal.source === 'ctp' || issueModal.source === 'vendor' ? (
-              <label className="block text-sm text-zinc-300">
-                Plate set (from inventory)
-                <select
-                  value={issueModal.plateId}
-                  onChange={(e) => setIssueModal({ ...issueModal, plateId: e.target.value })}
-                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-                >
-                  <option value="">Select…</option>
-                  {data.inventory.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.plateSetCode} — {p.cartonName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <p className="text-xs text-zinc-400">
-                Plate set:{' '}
-                <span className="text-amber-300 font-mono">
-                  {data.inventory.find((p) => p.id === issueModal.plateId)?.plateSetCode ?? issueModal.plateId}
-                </span>
-                <span className="text-zinc-500">
-                  {' '}
-                  — {data.inventory.find((p) => p.id === issueModal.plateId)?.cartonName ?? ''}
-                </span>
-              </p>
-            )}
-            <label className="block text-sm text-zinc-300">
-              Machine
-              <select
-                value={issueMachineId}
-                onChange={(e) => setIssueMachineId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              >
-                <option value="">Select…</option>
-                {machines.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.machineCode} — {m.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm text-zinc-300">
-              Operator
-              <select
-                value={issueOperatorId}
-                onChange={(e) => setIssueOperatorId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              >
-                <option value="">Select…</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className="px-3 py-2 rounded border border-zinc-600 text-zinc-300" onClick={() => setIssueModal(null)}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                className="px-3 py-2 rounded bg-blue-600 text-white font-medium disabled:opacity-50"
-                onClick={() => void submitCustodyIssue()}
-              >
-                Issue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {returnModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">
-              {returnFlow === 'receive' ? 'Receive from floor' : 'Return to rack'}
-            </h3>
-            <p className="text-zinc-500 text-xs">
-              {returnFlow === 'receive'
-                ? 'Confirm rack number, impressions, and operator to move this set back into live inventory.'
-                : 'Updates impressions and returns plate to live inventory.'}
-            </p>
-            <label className="block text-sm text-zinc-300">
-              Impressions run
-              <input
-                type="number"
-                min={0}
-                value={returnImpressions}
-                onChange={(e) => setReturnImpressions(e.target.value === '' ? '' : Number(e.target.value))}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              />
-            </label>
-            <label className="block text-sm text-zinc-300">
-              Condition
-              <select
-                value={returnCondition}
-                onChange={(e) => setReturnCondition(e.target.value as 'Good' | 'Damaged' | 'Needs Repair')}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              >
-                <option value="Good">Good</option>
-                <option value="Damaged">Damaged</option>
-                <option value="Needs Repair">Needs Repair</option>
-              </select>
-            </label>
-            <label className="block text-sm text-zinc-300">
-              {returnFlow === 'receive' ? 'Rack number / slot' : 'Rack slot / location'}
-              <input
-                value={returnRackSlot}
-                onChange={(e) => setReturnRackSlot(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-                placeholder="e.g. A-12"
-              />
-            </label>
-            <label className="block text-sm text-zinc-300">
-              Recorded by (operator)
-              <select
-                value={returnOperatorId}
-                onChange={(e) => setReturnOperatorId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              >
-                <option value="">Select…</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
-                onClick={() => setReturnModal(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                className="px-3 py-2 rounded bg-emerald-600 text-white font-medium disabled:opacity-50"
-                onClick={() => void submitReturn()}
-              >
-                {returnFlow === 'receive' ? 'Receive to rack' : 'Return to rack'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {reverseModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Reverse issue</h3>
-            <p className="text-zinc-500 text-xs">
-              Undo a mistaken issue and put the plate set straight back on the rack (no custody return).
-            </p>
-            <p className="text-xs text-amber-300 font-mono">{reverseModal.plateSetCode}</p>
-            <p className="text-xs text-zinc-400 truncate">{reverseModal.cartonName}</p>
-            <label className="block text-sm text-zinc-300">
-              Rack number
-              <input
-                value={reverseRack}
-                onChange={(e) => setReverseRack(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-                placeholder="Where it should sit in live inventory"
-              />
-            </label>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
-                onClick={() => {
-                  setReverseModal(null)
-                  setReverseRack('')
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                className="px-3 py-2 rounded bg-rose-800 text-white font-medium disabled:opacity-50"
-                onClick={() => void submitReverseIssue()}
-              >
-                Reverse issue
               </button>
             </div>
           </div>

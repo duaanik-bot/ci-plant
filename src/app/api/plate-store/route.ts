@@ -58,7 +58,7 @@ const createSchema = z
     serialNumber: z.string().optional().nullable(),
     outputNumber: z.string().optional().nullable(),
     rackNumber: z.string().optional().nullable(),
-    ups: z.coerce.number().int().min(1).optional().nullable(),
+    ups: z.union([z.null(), z.number().int().min(1)]).optional(),
     numberOfColours: z.number().int().min(1).max(12),
     colours: z.array(colourSchema).min(1),
     rackLocation: z.string().optional().nullable(),
@@ -149,32 +149,44 @@ export async function POST(req: NextRequest) {
 
   const rackNum = String(data.rackNumber ?? '').trim() || null
   const rackLocation = data.rackLocation?.trim() || rackNum
+  const outputTrim = data.outputNumber?.trim() || null
+  const slotNum = data.slotNumber?.trim() || outputTrim || null
 
-  const created = await db.plateStore.create({
-    data: {
-      plateSetCode,
-      serialNumber,
-      outputNumber: data.outputNumber?.trim() || null,
-      rackNumber: rackNum,
-      ups: data.ups ?? null,
-      cartonName: data.cartonName.trim(),
-      customerId: data.customerId ?? null,
-      cartonId: data.cartonId ?? null,
-      artworkId: data.artworkId ?? null,
-      artworkCode: data.artworkCode ?? null,
-      artworkVersion: data.artworkVersion ?? null,
-      numberOfColours: data.numberOfColours,
-      colours,
-      totalPlates,
-      newPlates: newPlatesCount,
-      oldPlates: oldPlatesCount,
-      rackLocation,
-      slotNumber: data.slotNumber ?? null,
-      ctpOperator: data.ctpOperator ?? null,
-      ctpDate: data.ctpDate ? new Date(data.ctpDate) : null,
-      status: 'ready',
-    },
-  })
+  let created
+  try {
+    created = await db.plateStore.create({
+      data: {
+        plateSetCode,
+        serialNumber,
+        outputNumber: outputTrim,
+        rackNumber: rackNum,
+        ups: data.ups ?? null,
+        cartonName: data.cartonName.trim(),
+        customerId: data.customerId ?? null,
+        cartonId: data.cartonId ?? null,
+        artworkId: data.artworkId ?? null,
+        artworkCode: data.artworkCode ?? null,
+        artworkVersion: data.artworkVersion ?? null,
+        numberOfColours: data.numberOfColours,
+        colours,
+        totalPlates,
+        newPlates: newPlatesCount,
+        oldPlates: oldPlatesCount,
+        rackLocation,
+        slotNumber: slotNum,
+        ctpOperator: data.ctpOperator ?? null,
+        ctpDate: data.ctpDate ? new Date(data.ctpDate) : null,
+        status: 'ready',
+      },
+    })
+  } catch (e) {
+    console.error('[plate-store POST]', e)
+    const msg = e instanceof Error ? e.message : 'Database error'
+    return NextResponse.json(
+      { error: msg.includes('Unknown arg') || msg.includes('column') ? 'Database may need migration (plate fields).' : msg },
+      { status: 500 },
+    )
+  }
 
   await db.plateAuditLog.create({
     data: {
