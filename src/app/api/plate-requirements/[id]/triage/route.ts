@@ -39,7 +39,7 @@ export async function PATCH(
     channel === 'inhouse_ctp'
       ? PLATE_FLOW.ctp_queue
       : channel === 'outside_vendor'
-        ? PLATE_FLOW.triage
+        ? PLATE_FLOW.vendor_queue
         : PLATE_FLOW.triage
 
   const updated = await db.$transaction(async (tx) => {

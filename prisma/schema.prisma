@@ -830,6 +830,10 @@ model PlateStore {
   cartonName      String    @map("carton_name")
   customerId      String?   @map("customer_id")
   plateSetCode    String    @unique @map("plate_set_code")
+  serialNumber    String?   @map("serial_number")
+  outputNumber    String?   @map("output_number")
+  rackNumber      String?   @map("rack_number")
+  ups             Int?      @map("ups")
   numberOfColours Int       @map("number_of_colours")
   colours         Json
   totalPlates     Int       @map("total_plates")

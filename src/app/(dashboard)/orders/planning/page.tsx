@@ -518,6 +518,10 @@ export default function PlanningPage() {
                         return (
                           <p className="text-[11px] mt-1 text-slate-400">Tooling: Plate triage</p>
                         )
+                      if (pf === 'vendor_queue')
+                        return (
+                          <p className="text-[11px] mt-1 text-violet-300">Tooling: Outside vendor</p>
+                        )
                       return null
                     })()}
                   </td>

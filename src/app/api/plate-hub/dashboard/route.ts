@@ -7,14 +7,14 @@ import { plateNamesFromColoursNeededJson } from '@/lib/plate-triage-display'
 export const dynamic = 'force-dynamic'
 
 /**
- * Single payload for Plate Hub wireframe: triage strip + CTP queue + inventory + custody floor.
+ * Single payload for Plate Hub wireframe: triage + CTP + outside vendor + inventory + custody.
  */
 export async function GET() {
   try {
     const { error } = await requireAuth()
     if (error) return error
 
-    const [triageRows, ctpRows, inventoryRows, custodyRows] = await Promise.all([
+    const [triageRows, ctpRows, vendorRows, inventoryRows, custodyRows] = await Promise.all([
       db.plateRequirement.findMany({
         where: {
           triageChannel: null,
@@ -26,8 +26,15 @@ export async function GET() {
         where: { status: 'ctp_internal_queue', triageChannel: 'inhouse_ctp' },
         orderBy: { createdAt: 'asc' },
       }),
+      db.plateRequirement.findMany({
+        where: {
+          triageChannel: 'outside_vendor',
+          status: 'awaiting_vendor_delivery',
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
       db.plateStore.findMany({
-        where: { status: { in: ['ready', 'returned'] } },
+        where: { status: { in: ['ready', 'returned', 'in_stock'] } },
         orderBy: { updatedAt: 'desc' },
         include: { customer: { select: { id: true, name: true } } },
       }),
@@ -62,9 +69,25 @@ export async function GET() {
       status: r.status,
     }))
 
+    const vendorQueue = vendorRows.map((r) => ({
+      id: r.id,
+      poLineId: r.poLineId,
+      requirementCode: r.requirementCode,
+      jobCardId: r.jobCardId,
+      cartonName: r.cartonName,
+      artworkCode: r.artworkCode,
+      artworkVersion: r.artworkVersion,
+      plateColours: plateNamesFromColoursNeededJson(r.coloursNeeded),
+      status: r.status,
+    }))
+
     const mapPlate = (p: (typeof inventoryRows)[0]) => ({
       id: p.id,
       plateSetCode: p.plateSetCode,
+      serialNumber: p.serialNumber,
+      outputNumber: p.outputNumber,
+      rackNumber: p.rackNumber,
+      ups: p.ups,
       cartonName: p.cartonName,
       artworkCode: p.artworkCode,
       artworkVersion: p.artworkVersion,
@@ -83,6 +106,7 @@ export async function GET() {
       safeJsonStringify({
         triage,
         ctpQueue,
+        vendorQueue,
         inventory: inventoryRows.map(mapPlate),
         custody: custodyRows.map(mapPlate),
       }),

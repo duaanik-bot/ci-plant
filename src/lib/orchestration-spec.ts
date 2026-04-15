@@ -10,6 +10,7 @@ export const PLATE_FLOW = {
   idle: 'idle',
   triage: 'triage',
   ctp_queue: 'ctp_queue',
+  vendor_queue: 'vendor_queue',
   burning_complete: 'burning_complete',
   ready_inventory: 'ready_inventory',
 } as const

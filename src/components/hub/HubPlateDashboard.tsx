@@ -32,6 +32,10 @@ type CtpRow = {
 type PlateCard = {
   id: string
   plateSetCode: string
+  serialNumber?: string | null
+  outputNumber?: string | null
+  rackNumber?: string | null
+  ups?: number | null
   cartonName: string
   artworkCode: string | null
   artworkVersion: string | null
@@ -46,16 +50,25 @@ type PlateCard = {
   customer: { id: string; name: string } | null
 }
 
+type CartonSearchHit = {
+  id: string
+  cartonName: string
+  artworkCode: string | null
+  customerId: string
+  customer: { id: string; name: string }
+  ups: number | null
+}
+
 type DashboardPayload = {
   triage: TriageRow[]
   ctpQueue: CtpRow[]
+  vendorQueue: CtpRow[]
   inventory: PlateCard[]
   custody: PlateCard[]
 }
 
 type MachineOpt = { id: string; machineCode: string; name: string }
 type UserOpt = { id: string; name: string }
-type CustomerOpt = { id: string; name: string }
 
 type PlateLookupColour = { name: string; type?: string }
 type PlateLookupOk = {
@@ -85,6 +98,7 @@ function safeReadDashboard(text: string): DashboardPayload | null {
     return {
       triage: Array.isArray(o.triage) ? (o.triage as TriageRow[]) : [],
       ctpQueue: Array.isArray(o.ctpQueue) ? (o.ctpQueue as CtpRow[]) : [],
+      vendorQueue: Array.isArray(o.vendorQueue) ? (o.vendorQueue as CtpRow[]) : [],
       inventory: Array.isArray(o.inventory) ? (o.inventory as PlateCard[]) : [],
       custody: Array.isArray(o.custody) ? (o.custody as PlateCard[]) : [],
     }
@@ -98,25 +112,33 @@ export default function HubPlateDashboard() {
   const [data, setData] = useState<DashboardPayload>({
     triage: [],
     ctpQueue: [],
+    vendorQueue: [],
     inventory: [],
     custody: [],
   })
   const [machines, setMachines] = useState<MachineOpt[]>([])
   const [users, setUsers] = useState<UserOpt[]>([])
-  const [customers, setCustomers] = useState<CustomerOpt[]>([])
 
   const [addStockOpen, setAddStockOpen] = useState(false)
-  const [addAw, setAddAw] = useState('')
-  const [addCustomerId, setAddCustomerId] = useState('')
-  const [addCartonName, setAddCartonName] = useState('')
-  const [addSheetSize, setAddSheetSize] = useState('')
+  const [addCartonQuery, setAddCartonQuery] = useState('')
+  const [addCartonResults, setAddCartonResults] = useState<CartonSearchHit[]>([])
+  const [addCartonLoading, setAddCartonLoading] = useState(false)
+  const [addSelectedCarton, setAddSelectedCarton] = useState<CartonSearchHit | null>(null)
+  const [addAwCode, setAddAwCode] = useState('')
+  const [addSerial, setAddSerial] = useState('')
+  const [addAutoSerial, setAddAutoSerial] = useState(true)
+  const [addOutputNumber, setAddOutputNumber] = useState('')
+  const [addRackNumber, setAddRackNumber] = useState('')
   const [addSetNumber, setAddSetNumber] = useState('')
+  const [addUps, setAddUps] = useState('')
   const [addArtworkId, setAddArtworkId] = useState('')
-  const [addCartonId, setAddCartonId] = useState('')
-  const [addColoursJson, setAddColoursJson] = useState<string>('[]')
-  const [addLookupError, setAddLookupError] = useState('')
-  const [addLookupLoading, setAddLookupLoading] = useState(false)
-  const lookupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [stdC, setStdC] = useState(true)
+  const [stdM, setStdM] = useState(true)
+  const [stdY, setStdY] = useState(true)
+  const [stdK, setStdK] = useState(true)
+  const [pantoneOn, setPantoneOn] = useState(false)
+  const [pantoneCount, setPantoneCount] = useState(1)
+  const cartonSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [scrapOpen, setScrapOpen] = useState(false)
   const [scrapPlateId, setScrapPlateId] = useState('')
@@ -133,37 +155,39 @@ export default function HubPlateDashboard() {
   const [stockRackSlot, setStockRackSlot] = useState('')
 
   const [issueModal, setIssueModal] = useState<{
-    source: 'ctp' | 'inventory'
+    source: 'ctp' | 'vendor' | 'inventory'
     plateId: string
   } | null>(null)
   const [issueMachineId, setIssueMachineId] = useState('')
   const [issueOperatorId, setIssueOperatorId] = useState('')
 
   const [returnModal, setReturnModal] = useState<PlateCard | null>(null)
+  const [returnFlow, setReturnFlow] = useState<'return' | 'receive'>('return')
   const [returnImpressions, setReturnImpressions] = useState<number | ''>('')
   const [returnCondition, setReturnCondition] = useState<'Good' | 'Damaged' | 'Needs Repair'>('Good')
   const [returnRackSlot, setReturnRackSlot] = useState('')
   const [returnOperatorId, setReturnOperatorId] = useState('')
+  const [reverseModal, setReverseModal] = useState<PlateCard | null>(null)
+  const [reverseRack, setReverseRack] = useState('')
+  const [addStockFieldErrors, setAddStockFieldErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [dRes, mRes, uRes, cRes] = await Promise.all([
+      const [dRes, mRes, uRes] = await Promise.all([
         fetch('/api/plate-hub/dashboard'),
         fetch('/api/machines'),
         fetch('/api/users'),
-        fetch('/api/customers?limit=200'),
       ])
       const dText = await dRes.text()
       const mText = await mRes.text()
       const uText = await uRes.text()
-      const cText = await cRes.text()
 
       const parsed = safeReadDashboard(dText)
       if (!parsed) {
         toast.error('Unexpected dashboard response')
-        setData({ triage: [], ctpQueue: [], inventory: [], custody: [] })
+        setData({ triage: [], ctpQueue: [], vendorQueue: [], inventory: [], custody: [] })
       } else {
         setData(parsed)
       }
@@ -178,7 +202,6 @@ export default function HubPlateDashboard() {
 
       setMachines(safeJsonParseArray<MachineOpt>(mText, []))
       setUsers(safeJsonParseArray<UserOpt>(uText, []))
-      setCustomers(safeJsonParseArray<CustomerOpt>(cText, []))
     } catch (e) {
       console.error(e)
       toast.error('Failed to load plate hub')
@@ -193,58 +216,69 @@ export default function HubPlateDashboard() {
 
   useEffect(() => {
     if (!addStockOpen) return
-    const aw = addAw.trim()
-    if (!aw || aw.length < 2) {
-      setAddLookupError('')
+    const q = addCartonQuery.trim()
+    if (q.length < 2) {
+      setAddCartonResults([])
       return
     }
-    if (lookupTimerRef.current) clearTimeout(lookupTimerRef.current)
-    lookupTimerRef.current = setTimeout(() => {
+    if (cartonSearchTimerRef.current) clearTimeout(cartonSearchTimerRef.current)
+    cartonSearchTimerRef.current = setTimeout(() => {
       void (async () => {
-        setAddLookupLoading(true)
-        setAddLookupError('')
+        setAddCartonLoading(true)
         try {
-          const params = new URLSearchParams({ awCode: aw })
-          if (addCustomerId.trim()) params.set('customerId', addCustomerId.trim())
-          const r = await fetch(`/api/plate-hub/plate-lookup?${params}`)
-          const j = (await r.json()) as { found?: boolean; error?: string } & Partial<PlateLookupOk>
-          if (!r.ok || !j.found) {
-            setAddLookupError(j.error || 'AW Code not found in Master.')
-            return
-          }
-          const ok = j as PlateLookupOk
-          setAddCartonName(ok.cartonName || '')
-          setAddSheetSize(ok.sheetSize || '')
-          setAddSetNumber(ok.setNumber || '')
-          setAddArtworkId(ok.artworkId || '')
-          setAddCartonId(ok.cartonId || '')
-          setAddColoursJson(
-            safeJsonStringify(
-              (ok.colours || []).map((c) => ({ name: c.name, type: c.type || 'process' })),
-            ),
-          )
+          const r = await fetch(`/api/plate-hub/cartons-search?q=${encodeURIComponent(q)}`)
+          const list = safeJsonParseArray<CartonSearchHit>(await r.text(), [])
+          setAddCartonResults(Array.isArray(list) ? list : [])
         } catch {
-          setAddLookupError('Lookup failed')
+          setAddCartonResults([])
         } finally {
-          setAddLookupLoading(false)
+          setAddCartonLoading(false)
         }
       })()
-    }, 450)
+    }, 300)
     return () => {
-      if (lookupTimerRef.current) clearTimeout(lookupTimerRef.current)
+      if (cartonSearchTimerRef.current) clearTimeout(cartonSearchTimerRef.current)
     }
-  }, [addStockOpen, addAw, addCustomerId])
+  }, [addStockOpen, addCartonQuery])
+
+  const addStockTotalPlates = useMemo(() => {
+    let n = 0
+    if (stdC) n += 1
+    if (stdM) n += 1
+    if (stdY) n += 1
+    if (stdK) n += 1
+    if (pantoneOn) n += Math.max(0, Math.min(12, Math.floor(Number(pantoneCount) || 0)))
+    return n
+  }, [stdC, stdM, stdY, stdK, pantoneOn, pantoneCount])
 
   function resetAddStockForm() {
-    setAddAw('')
-    setAddCustomerId('')
-    setAddCartonName('')
-    setAddSheetSize('')
+    setAddCartonQuery('')
+    setAddCartonResults([])
+    setAddSelectedCarton(null)
+    setAddAwCode('')
+    setAddSerial('')
+    setAddAutoSerial(true)
+    setAddOutputNumber('')
+    setAddRackNumber('')
     setAddSetNumber('')
+    setAddUps('')
     setAddArtworkId('')
-    setAddCartonId('')
-    setAddColoursJson('[]')
-    setAddLookupError('')
+    setStdC(true)
+    setStdM(true)
+    setStdY(true)
+    setStdK(true)
+    setPantoneOn(false)
+    setPantoneCount(1)
+    setAddStockFieldErrors({})
+  }
+
+  function applyCartonSelection(hit: CartonSearchHit) {
+    setAddSelectedCarton(hit)
+    setAddCartonQuery(hit.cartonName)
+    setAddCartonResults([])
+    setAddAwCode(hit.artworkCode?.trim() || '')
+    setAddUps(hit.ups != null && hit.ups > 0 ? String(hit.ups) : '')
+    setAddArtworkId('')
   }
 
   async function recallPrepress(requirementId: string) {
@@ -285,46 +319,120 @@ export default function HubPlateDashboard() {
     }
   }
 
+  async function sendVendorBackTriage(requirementId: string) {
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/plate-requirements/${requirementId}/vendor-send-back-triage`, {
+        method: 'POST',
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Send back failed')
+        return
+      }
+      toast.success('Returned to triage (vendor path cleared)')
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function receiveVendorToTriage(requirementId: string) {
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/plate-requirements/${requirementId}/vendor-received`, {
+        method: 'POST',
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Receive failed')
+        return
+      }
+      toast.success('Received — job back in incoming triage')
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function buildAddStockColours(): { name: string; type: string; status: 'new' }[] {
+    const colours: { name: string; type: string; status: 'new' }[] = []
+    if (stdC) colours.push({ name: 'Cyan', type: 'process', status: 'new' })
+    if (stdM) colours.push({ name: 'Magenta', type: 'process', status: 'new' })
+    if (stdY) colours.push({ name: 'Yellow', type: 'process', status: 'new' })
+    if (stdK) colours.push({ name: 'Black', type: 'process', status: 'new' })
+    if (pantoneOn) {
+      const n = Math.max(1, Math.min(12, Math.floor(Number(pantoneCount) || 0)))
+      for (let i = 1; i <= n; i += 1) {
+        colours.push({ name: `Pantone ${i}`, type: 'pantone', status: 'new' })
+      }
+    }
+    return colours
+  }
+
   async function submitAddStock() {
-    const aw = addAw.trim()
+    setAddStockFieldErrors({})
+    if (!addSelectedCarton) {
+      toast.error('Select a carton from the search results')
+      return
+    }
+    const aw = addAwCode.trim()
     if (!aw) {
       toast.error('AW code is required')
       return
     }
-    if (!addCartonName.trim()) {
-      toast.error('Carton name is required')
+    if (!addAutoSerial) {
+      const sn = addSerial.trim()
+      if (!sn) {
+        toast.error('Serial number is required when auto-generate is off')
+        setAddStockFieldErrors({ serialNumber: 'Required when auto-generate is off' })
+        return
+      }
+    }
+    const colours = buildAddStockColours()
+    if (!colours.length) {
+      toast.error('Select at least one colour (C/M/Y/K or Pantone)')
       return
     }
-    const coloursRaw = safeJsonParse<PlateLookupColour[]>(addColoursJson, [])
-    if (!coloursRaw.length) {
-      toast.error('At least one colour/plate channel is required')
-      return
+    let ups: number | null = null
+    if (addUps.trim()) {
+      const u = parseInt(addUps, 10)
+      if (!Number.isFinite(u) || u < 1) {
+        toast.error('No. of UPS must be a positive whole number')
+        setAddStockFieldErrors({ ups: 'Must be a positive integer' })
+        return
+      }
+      ups = u
     }
-    const colours = coloursRaw.map((c) => ({
-      name: String(c.name || '').trim() || 'Plate',
-      type: c.type || 'process',
-      status: 'new' as const,
-    }))
+
     setSaving(true)
     try {
       const r = await fetch('/api/plate-store', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: safeJsonStringify({
-          cartonName: addCartonName.trim(),
+          cartonName: addSelectedCarton.cartonName,
           artworkCode: aw,
-          customerId: addCustomerId.trim() || null,
-          cartonId: addCartonId.trim() || null,
+          customerId: addSelectedCarton.customerId,
+          cartonId: addSelectedCarton.id,
           artworkId: addArtworkId.trim() || null,
+          autoGenerateSerial: addAutoSerial,
+          serialNumber: addAutoSerial ? null : addSerial.trim(),
+          outputNumber: addOutputNumber.trim() || null,
+          rackNumber: addRackNumber.trim() || null,
+          ups,
           numberOfColours: colours.length,
           colours,
-          rackLocation: addSheetSize.trim() || null,
+          rackLocation: addRackNumber.trim() || null,
           slotNumber: addSetNumber.trim() || null,
         }),
       })
       const t = await r.text()
-      const j = safeJsonParse<{ error?: string }>(t, {})
+      const j = safeJsonParse<{ error?: string; fields?: Record<string, string> }>(t, {})
       if (!r.ok) {
+        if (j.fields && typeof j.fields === 'object') setAddStockFieldErrors(j.fields)
         toast.error(j.error ?? 'Save failed')
         return
       }
@@ -332,6 +440,43 @@ export default function HubPlateDashboard() {
       setAddStockOpen(false)
       resetAddStockForm()
       await load()
+    } catch (e) {
+      console.error(e)
+      toast.error('Save failed — check connection and try again')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitReverseIssue() {
+    if (!reverseModal?.id?.trim()) {
+      toast.error('Missing plate id')
+      return
+    }
+    if (!reverseRack.trim()) {
+      toast.error('Rack number is required to reverse an issue')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/plate-store/${reverseModal.id}/reverse-issue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ rackNumber: reverseRack.trim() }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Reverse issue failed')
+        return
+      }
+      toast.success('Issue reversed — plate back on rack')
+      setReverseModal(null)
+      setReverseRack('')
+      await load()
+    } catch (e) {
+      console.error(e)
+      toast.error('Reverse issue failed')
     } finally {
       setSaving(false)
     }
@@ -405,7 +550,8 @@ export default function HubPlateDashboard() {
       (p) =>
         p.plateSetCode.toLowerCase().includes(q) ||
         p.cartonName.toLowerCase().includes(q) ||
-        (p.artworkCode?.toLowerCase().includes(q) ?? false),
+        (p.artworkCode?.toLowerCase().includes(q) ?? false) ||
+        (p.serialNumber?.toLowerCase().includes(q) ?? false),
     )
   }, [data.inventory, invSearch])
 
@@ -470,6 +616,14 @@ export default function HubPlateDashboard() {
     setIssueAwCode('')
     setIssueLookupError('')
     setIssueModal({ source: 'ctp', plateId: '' })
+    setIssueMachineId('')
+    setIssueOperatorId('')
+  }
+
+  function openIssueFromVendor() {
+    setIssueAwCode('')
+    setIssueLookupError('')
+    setIssueModal({ source: 'vendor', plateId: '' })
     setIssueMachineId('')
     setIssueOperatorId('')
   }
@@ -586,7 +740,9 @@ export default function HubPlateDashboard() {
 
         <header className="flex flex-col gap-1 border-b border-zinc-700 pb-4">
           <h1 className="text-2xl font-bold tracking-tight text-white">Plate Hub</h1>
-          <p className="text-sm text-zinc-400">Triage → CTP / Inventory / custody. High-contrast layout for floor speed.</p>
+          <p className="text-sm text-zinc-400">
+            Triage → CTP / outside vendor / inventory / custody. High-contrast layout for floor speed.
+          </p>
         </header>
 
         {loading ? (
@@ -665,8 +821,8 @@ export default function HubPlateDashboard() {
               </div>
             </section>
 
-            {/* 3 Lanes */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+            {/* Lanes: CTP · outside vendor · rack · custody */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
               {/* CTP */}
               <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4 min-h-[280px]">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-3">CTP queue</h2>
@@ -691,6 +847,55 @@ export default function HubPlateDashboard() {
                           type="button"
                           disabled={saving}
                           onClick={() => void sendBackTriage(job.id)}
+                          className="mt-2 w-full px-2 py-2 rounded border border-amber-700/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                        >
+                          Send back to Triage
+                        </button>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </section>
+
+              {/* Outside vendor */}
+              <section className="rounded-xl border-2 border-violet-900/80 bg-zinc-950 p-4 min-h-[280px]">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-300 mb-1">
+                  Outside vendor
+                </h2>
+                <p className="text-[11px] text-zinc-500 mb-3">Awaiting delivery · two-way decisions</p>
+                <ul className="space-y-3 text-sm">
+                  {data.vendorQueue.length === 0 ? (
+                    <li className="text-zinc-500">None at vendor.</li>
+                  ) : (
+                    data.vendorQueue.map((job) => (
+                      <li key={job.id} className="rounded-lg border border-violet-800/50 bg-black p-3">
+                        <p className="font-mono text-violet-200">{job.requirementCode}</p>
+                        <p className="text-white text-xs font-medium truncate mt-0.5">{job.cartonName}</p>
+                        <p className="text-zinc-400 text-xs mt-1">
+                          {job.plateColours.length > 0 ? job.plateColours.join(' · ') : '—'}
+                        </p>
+                        <p className="text-[10px] text-zinc-500 mt-1 capitalize">
+                          {job.status.replace(/_/g, ' ')}
+                        </p>
+                        <button
+                          type="button"
+                          className="mt-2 w-full px-2 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
+                          onClick={() => openIssueFromVendor()}
+                        >
+                          Issue to machine
+                        </button>
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => void receiveVendorToTriage(job.id)}
+                          className="mt-2 w-full px-2 py-2 rounded bg-emerald-900/80 hover:bg-emerald-800 border border-emerald-700/60 text-emerald-100 text-xs font-semibold"
+                        >
+                          Received → Triage
+                        </button>
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => void sendVendorBackTriage(job.id)}
                           className="mt-2 w-full px-2 py-2 rounded border border-amber-700/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
                         >
                           Send back to Triage
@@ -739,8 +944,14 @@ export default function HubPlateDashboard() {
                     filteredInventory.map((p) => (
                       <li key={p.id} className="rounded border border-zinc-800 bg-black p-2">
                         <p className="font-mono text-amber-300 text-xs">{p.plateSetCode}</p>
+                        {p.serialNumber ? (
+                          <p className="text-zinc-500 text-[10px] font-mono">SN {p.serialNumber}</p>
+                        ) : null}
                         <p className="text-white text-xs truncate">{p.cartonName}</p>
-                        <p className="text-zinc-500 text-[10px]">{p.rackLocation ?? '—'}</p>
+                        <p className="text-zinc-500 text-[10px]">
+                          Rack: {p.rackNumber ?? p.rackLocation ?? '—'}
+                          {p.ups != null && p.ups > 0 ? ` · UPS ${p.ups}` : ''}
+                        </p>
                         <button
                           type="button"
                           className="mt-1 w-full py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
@@ -781,27 +992,43 @@ export default function HubPlateDashboard() {
                             type="button"
                             className="mt-1 w-full py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
                             onClick={() => {
+                              setReturnFlow('receive')
                               setReturnModal(p)
                               setReturnImpressions('')
                               setReturnCondition('Good')
-                              setReturnRackSlot(p.rackLocation ?? '')
+                              setReturnRackSlot(
+                                (p.rackNumber ?? p.rackLocation ?? '').trim() || '',
+                              )
                               setReturnOperatorId('')
                             }}
                           >
-                            Return to rack
+                            Receive from floor
+                          </button>
+                          <button
+                            type="button"
+                            className="mt-1 w-full py-1.5 rounded border border-rose-800/80 bg-rose-950/50 text-rose-100 hover:bg-rose-950 text-xs font-semibold"
+                            onClick={() => {
+                              setReverseModal(p)
+                              setReverseRack((p.rackNumber ?? p.rackLocation ?? '').trim())
+                            }}
+                          >
+                            Reverse issue
                           </button>
                           <button
                             type="button"
                             className="mt-1 w-full py-1.5 rounded border border-amber-700/70 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
                             onClick={() => {
+                              setReturnFlow('return')
                               setReturnModal(p)
                               setReturnImpressions(0)
                               setReturnCondition('Good')
-                              setReturnRackSlot(p.rackLocation ?? '')
+                              setReturnRackSlot(
+                                (p.rackNumber ?? p.rackLocation ?? '').trim() || '',
+                              )
                               setReturnOperatorId('')
                             }}
                           >
-                            Recall to inventory
+                            Quick return (0 impressions)
                           </button>
                         </li>
                       )
@@ -814,59 +1041,113 @@ export default function HubPlateDashboard() {
         )}
       </div>
 
-      {/* Add plate stock — tabular entry */}
+      {/* Add plate stock — master-linked */}
       {addStockOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-lg rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3 max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-lg max-h-[90vh] rounded-xl border border-zinc-600 bg-zinc-950 flex flex-col shadow-2xl">
+            <div className="p-4 pb-2 shrink-0 border-b border-zinc-800 z-20 relative">
             <h3 className="text-lg font-semibold text-white">Add plate stock</h3>
             <p className="text-zinc-500 text-xs">
-              Enter AW code — fields auto-fill from master when found. Edit before save.
+              Search carton master first — AW code and UPS fill from the selected carton. Edit before save.
             </p>
+            <div className="relative mt-3">
+              <label className="block text-sm text-zinc-300">
+                Carton name
+                <input
+                  value={addCartonQuery}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setAddCartonQuery(v)
+                    if (addSelectedCarton && v.trim() !== addSelectedCarton.cartonName) {
+                      setAddSelectedCarton(null)
+                    }
+                  }}
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                  placeholder="Type at least 2 characters…"
+                  autoComplete="off"
+                />
+              </label>
+              {addCartonLoading ? <p className="text-xs text-zinc-500 mt-1">Searching…</p> : null}
+              {addCartonResults.length > 0 ? (
+                <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-600 bg-zinc-900 shadow-lg">
+                  {addCartonResults.map((hit) => (
+                    <li key={hit.id}>
+                      <button
+                        type="button"
+                        className="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-800 border-b border-zinc-800 last:border-0"
+                        onClick={() => applyCartonSelection(hit)}
+                      >
+                        <span className="font-medium block truncate">{hit.cartonName}</span>
+                        <span className="text-[11px] text-zinc-400">
+                          {hit.customer.name}
+                          {hit.artworkCode ? ` · ${hit.artworkCode}` : ''}
+                          {hit.ups != null && hit.ups > 0 ? ` · UPS ${hit.ups}` : ''}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            {addSelectedCarton ? (
+              <p className="text-[11px] text-emerald-400/90">
+                Linked: {addSelectedCarton.customer.name}
+              </p>
+            ) : (
+              <p className="text-[11px] text-zinc-500">Pick a row above to link carton + customer.</p>
+            )}
+            </div>
+            <div className="p-4 pt-3 space-y-3 overflow-y-auto flex-1 min-h-0">
             <label className="block text-sm text-zinc-300">
-              Customer (optional — narrows lookup)
-              <select
-                value={addCustomerId}
-                onChange={(e) => setAddCustomerId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              >
-                <option value="">Any</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm text-zinc-300">
-              AW / product code
+              AW code
               <input
-                value={addAw}
-                onChange={(e) => setAddAw(e.target.value)}
+                value={addAwCode}
+                onChange={(e) => setAddAwCode(e.target.value)}
                 className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
                 placeholder="e.g. R234"
               />
             </label>
-            {addLookupLoading ? (
-              <p className="text-xs text-zinc-500">Looking up…</p>
-            ) : null}
-            {addLookupError ? (
-              <p className="text-xs text-red-400">{addLookupError}</p>
-            ) : null}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <label className="block text-sm text-zinc-300 flex-1">
+                Serial number
+                <input
+                  value={addSerial}
+                  onChange={(e) => setAddSerial(e.target.value)}
+                  disabled={addAutoSerial}
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white disabled:opacity-50"
+                  placeholder={addAutoSerial ? 'Auto-generated on save' : 'Enter serial'}
+                />
+                {addStockFieldErrors.serialNumber ? (
+                  <span className="text-xs text-red-400">{addStockFieldErrors.serialNumber}</span>
+                ) : null}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-zinc-300 pb-2 sm:pb-0 shrink-0 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={addAutoSerial}
+                  onChange={(e) => {
+                    setAddAutoSerial(e.target.checked)
+                    if (e.target.checked) setAddSerial('')
+                  }}
+                  className="rounded border-zinc-600"
+                />
+                Auto-generate
+              </label>
+            </div>
             <label className="block text-sm text-zinc-300">
-              Carton name
+              Output number
               <input
-                value={addCartonName}
-                onChange={(e) => setAddCartonName(e.target.value)}
+                value={addOutputNumber}
+                onChange={(e) => setAddOutputNumber(e.target.value)}
                 className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
               />
             </label>
             <label className="block text-sm text-zinc-300">
-              Sheet size
+              Rack number
               <input
-                value={addSheetSize}
-                onChange={(e) => setAddSheetSize(e.target.value)}
+                value={addRackNumber}
+                onChange={(e) => setAddRackNumber(e.target.value)}
                 className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-                placeholder="e.g. 19x20"
               />
             </label>
             <label className="block text-sm text-zinc-300">
@@ -878,14 +1159,72 @@ export default function HubPlateDashboard() {
               />
             </label>
             <label className="block text-sm text-zinc-300">
-              Colours JSON (C/M/Y/K/P — edit if needed)
-              <textarea
-                value={addColoursJson}
-                onChange={(e) => setAddColoursJson(e.target.value)}
-                rows={4}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white font-mono text-xs"
+              No. of UPS
+              <input
+                value={addUps}
+                onChange={(e) => setAddUps(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                placeholder="From dye / carton master"
+                inputMode="numeric"
               />
+              {addStockFieldErrors.ups ? (
+                <span className="text-xs text-red-400">{addStockFieldErrors.ups}</span>
+              ) : null}
             </label>
+            <div>
+              <p className="text-sm text-zinc-300 mb-2">Colours on plate</p>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ['C', stdC, setStdC],
+                    ['M', stdM, setStdM],
+                    ['Y', stdY, setStdY],
+                    ['K', stdK, setStdK],
+                  ] as const
+                ).map(([label, on, setOn]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setOn(!on)}
+                    className={`min-w-[2.5rem] px-3 py-2 rounded-md text-sm font-bold border ${
+                      on
+                        ? 'bg-amber-600 border-amber-500 text-white'
+                        : 'bg-zinc-900 border-zinc-600 text-zinc-500'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setPantoneOn(!pantoneOn)}
+                  className={`px-3 py-2 rounded-md text-sm font-bold border ${
+                    pantoneOn
+                      ? 'bg-violet-700 border-violet-500 text-white'
+                      : 'bg-zinc-900 border-zinc-600 text-zinc-500'
+                  }`}
+                >
+                  Pantone
+                </button>
+              </div>
+              {pantoneOn ? (
+                <label className="block text-sm text-zinc-300 mt-3">
+                  How many Pantones?
+                  <input
+                    type="number"
+                    min={1}
+                    max={12}
+                    value={pantoneCount}
+                    onChange={(e) => setPantoneCount(Number(e.target.value) || 1)}
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                  />
+                </label>
+              ) : null}
+            </div>
+            <div className="rounded-lg border border-zinc-700 bg-black/50 px-3 py-2 flex items-center justify-between">
+              <span className="text-sm text-zinc-400">Total plates required</span>
+              <span className="text-lg font-bold text-amber-300 tabular-nums">{addStockTotalPlates}</span>
+            </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -905,6 +1244,7 @@ export default function HubPlateDashboard() {
               >
                 Save to rack
               </button>
+            </div>
             </div>
           </div>
         </div>
@@ -1031,7 +1371,7 @@ export default function HubPlateDashboard() {
               </div>
               {issueLookupError ? <p className="text-xs text-red-400">{issueLookupError}</p> : null}
             </div>
-            {issueModal.source === 'ctp' ? (
+            {issueModal.source === 'ctp' || issueModal.source === 'vendor' ? (
               <label className="block text-sm text-zinc-300">
                 Plate set (from inventory)
                 <select
@@ -1109,8 +1449,14 @@ export default function HubPlateDashboard() {
       {returnModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Return to rack</h3>
-            <p className="text-zinc-500 text-xs">Updates impressions and returns plate to live inventory.</p>
+            <h3 className="text-lg font-semibold text-white">
+              {returnFlow === 'receive' ? 'Receive from floor' : 'Return to rack'}
+            </h3>
+            <p className="text-zinc-500 text-xs">
+              {returnFlow === 'receive'
+                ? 'Confirm rack number, impressions, and operator to move this set back into live inventory.'
+                : 'Updates impressions and returns plate to live inventory.'}
+            </p>
             <label className="block text-sm text-zinc-300">
               Impressions run
               <input
@@ -1134,11 +1480,12 @@ export default function HubPlateDashboard() {
               </select>
             </label>
             <label className="block text-sm text-zinc-300">
-              Rack slot / location
+              {returnFlow === 'receive' ? 'Rack number / slot' : 'Rack slot / location'}
               <input
                 value={returnRackSlot}
                 onChange={(e) => setReturnRackSlot(e.target.value)}
                 className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                placeholder="e.g. A-12"
               />
             </label>
             <label className="block text-sm text-zinc-300">
@@ -1157,7 +1504,11 @@ export default function HubPlateDashboard() {
               </select>
             </label>
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className="px-3 py-2 rounded border border-zinc-600 text-zinc-300" onClick={() => setReturnModal(null)}>
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => setReturnModal(null)}
+              >
                 Cancel
               </button>
               <button
@@ -1166,7 +1517,49 @@ export default function HubPlateDashboard() {
                 className="px-3 py-2 rounded bg-emerald-600 text-white font-medium disabled:opacity-50"
                 onClick={() => void submitReturn()}
               >
-                Return to rack
+                {returnFlow === 'receive' ? 'Receive to rack' : 'Return to rack'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reverseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
+            <h3 className="text-lg font-semibold text-white">Reverse issue</h3>
+            <p className="text-zinc-500 text-xs">
+              Undo a mistaken issue and put the plate set straight back on the rack (no custody return).
+            </p>
+            <p className="text-xs text-amber-300 font-mono">{reverseModal.plateSetCode}</p>
+            <p className="text-xs text-zinc-400 truncate">{reverseModal.cartonName}</p>
+            <label className="block text-sm text-zinc-300">
+              Rack number
+              <input
+                value={reverseRack}
+                onChange={(e) => setReverseRack(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                placeholder="Where it should sit in live inventory"
+              />
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => {
+                  setReverseModal(null)
+                  setReverseRack('')
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="px-3 py-2 rounded bg-rose-800 text-white font-medium disabled:opacity-50"
+                onClick={() => void submitReverseIssue()}
+              >
+                Reverse issue
               </button>
             </div>
           </div>

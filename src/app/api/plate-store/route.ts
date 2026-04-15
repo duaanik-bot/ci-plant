@@ -20,6 +20,23 @@ function nextPlateSetCode(): Promise<string> {
     })
 }
 
+function nextPlateSerial(): Promise<string> {
+  const year = new Date().getFullYear()
+  const prefix = `PL-SN-${year}-`
+  return db.plateStore
+    .findFirst({
+      where: { serialNumber: { startsWith: prefix } },
+      orderBy: { serialNumber: 'desc' },
+      select: { serialNumber: true },
+    })
+    .then((last) => {
+      const lastSeq = last?.serialNumber
+        ? parseInt(last.serialNumber.replace(prefix, ''), 10) || 0
+        : 0
+      return `${prefix}${String(lastSeq + 1).padStart(4, '0')}`
+    })
+}
+
 const colourSchema = z.object({
   name: z.string().min(1),
   type: z.string().optional(),
@@ -29,20 +46,38 @@ const colourSchema = z.object({
   condition: z.string().optional().nullable(),
 })
 
-const createSchema = z.object({
-  cartonName: z.string().min(1, 'Carton name is required'),
-  artworkVersion: z.string().optional(),
-  artworkCode: z.string().optional(),
-  customerId: z.string().uuid().optional().nullable(),
-  cartonId: z.string().uuid().optional().nullable(),
-  artworkId: z.string().uuid().optional().nullable(),
-  numberOfColours: z.number().int().min(1).max(12),
-  colours: z.array(colourSchema).min(1),
-  rackLocation: z.string().optional().nullable(),
-  slotNumber: z.string().optional().nullable(),
-  ctpOperator: z.string().optional().nullable(),
-  ctpDate: z.string().optional().nullable(),
-})
+const createSchema = z
+  .object({
+    cartonName: z.string().min(1, 'Carton name is required'),
+    artworkVersion: z.string().optional(),
+    artworkCode: z.string().optional(),
+    customerId: z.string().uuid().optional().nullable(),
+    cartonId: z.string().uuid().optional().nullable(),
+    artworkId: z.string().uuid().optional().nullable(),
+    autoGenerateSerial: z.boolean().optional().default(false),
+    serialNumber: z.string().optional().nullable(),
+    outputNumber: z.string().optional().nullable(),
+    rackNumber: z.string().optional().nullable(),
+    ups: z.coerce.number().int().min(1).optional().nullable(),
+    numberOfColours: z.number().int().min(1).max(12),
+    colours: z.array(colourSchema).min(1),
+    rackLocation: z.string().optional().nullable(),
+    slotNumber: z.string().optional().nullable(),
+    ctpOperator: z.string().optional().nullable(),
+    ctpDate: z.string().optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.autoGenerateSerial) {
+      const s = String(data.serialNumber ?? '').trim()
+      if (!s) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['serialNumber'],
+          message: 'Serial number is required when auto-generate is off',
+        })
+      }
+    }
+  })
 
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
@@ -89,6 +124,7 @@ export async function POST(req: NextRequest) {
     ...body,
     numberOfColours: body.numberOfColours != null ? Number(body.numberOfColours) : undefined,
     artworkVersion: body.artworkVersion ?? undefined,
+    autoGenerateSerial: body.autoGenerateSerial === true,
   })
   if (!parsed.success) {
     const fields: Record<string, string> = {}
@@ -107,10 +143,20 @@ export async function POST(req: NextRequest) {
   // newPlatesCount / oldPlatesCount are local vars; Prisma fields are newPlates / oldPlates
 
   const plateSetCode = await nextPlateSetCode()
+  const serialNumber = data.autoGenerateSerial
+    ? await nextPlateSerial()
+    : String(data.serialNumber ?? '').trim()
+
+  const rackNum = String(data.rackNumber ?? '').trim() || null
+  const rackLocation = data.rackLocation?.trim() || rackNum
 
   const created = await db.plateStore.create({
     data: {
       plateSetCode,
+      serialNumber,
+      outputNumber: data.outputNumber?.trim() || null,
+      rackNumber: rackNum,
+      ups: data.ups ?? null,
       cartonName: data.cartonName.trim(),
       customerId: data.customerId ?? null,
       cartonId: data.cartonId ?? null,
@@ -122,7 +168,7 @@ export async function POST(req: NextRequest) {
       totalPlates,
       newPlates: newPlatesCount,
       oldPlates: oldPlatesCount,
-      rackLocation: data.rackLocation ?? null,
+      rackLocation,
       slotNumber: data.slotNumber ?? null,
       ctpOperator: data.ctpOperator ?? null,
       ctpDate: data.ctpDate ? new Date(data.ctpDate) : null,
