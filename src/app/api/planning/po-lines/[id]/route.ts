@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic'
 
 const updateSchema = z.object({
   setNumber: z.string().optional().nullable(),
+  artworkCode: z.string().optional().nullable(),
   planningStatus: z.string().optional(),
   specOverrides: z.any().optional(),
 })
@@ -57,6 +58,7 @@ export async function PATCH(
     where: { id },
     data: {
       ...(data.setNumber !== undefined ? { setNumber: data.setNumber || null } : {}),
+      ...(data.artworkCode !== undefined ? { artworkCode: data.artworkCode || null } : {}),
       ...(data.planningStatus !== undefined ? { planningStatus: data.planningStatus } : {}),
       ...(data.specOverrides !== undefined ? { specOverrides: data.specOverrides as any } : {}),
     },

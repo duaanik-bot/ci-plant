@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { PRODUCTION_STAGES } from '@/lib/constants'
+import { getPostPressRouting, isEmbossingRequired } from '@/lib/emboss-conditions'
 
 type Stage = {
   id: string
@@ -18,6 +19,7 @@ type Stage = {
 
 type CartonSpecs = {
   id?: string
+  artworkCode?: string | null
   coatingType: string | null
   laminateType: string | null
   foilType: string | null
@@ -89,16 +91,18 @@ const POST_PRESS_KEYS: { key: keyof PostPressRouting; label: string; hint: strin
 function suggestPostPressRouting(poLine: PoLine): PostPressRouting {
   if (!poLine) return {}
   const carton = poLine.carton
-  const coating = (carton?.coatingType ?? poLine.coatingType ?? '').toLowerCase()
-  const laminate = (carton?.laminateType ?? '').toLowerCase()
+  const routing = getPostPressRouting({
+    embossingLeafing: carton?.embossingLeafing ?? poLine.embossingLeafing,
+    coatingType: carton?.coatingType ?? poLine.coatingType,
+    laminateType: carton?.laminateType ?? null,
+  })
   const foil = (carton?.foilType ?? '').toLowerCase()
-  const emboss = (carton?.embossingLeafing ?? poLine.embossingLeafing ?? '').toLowerCase()
   return {
-    chemicalCoating: coating.includes('aqueous') || coating.includes('chemical coating'),
-    lamination: laminate !== '' && laminate !== 'none',
-    spotUv: coating.includes('uv'),
+    chemicalCoating: routing.needsChemicalCoating,
+    lamination: routing.needsLamination,
+    spotUv: routing.needsSpotUv,
     leafing: foil !== '' && foil !== 'none',
-    embossing: emboss !== '' && emboss !== 'none',
+    embossing: routing.needsEmbossing,
   }
 }
 
@@ -111,8 +115,11 @@ export default function JobCardDetailPage() {
   const [saving, setSaving] = useState(false)
   const [artworkVersion, setArtworkVersion] = useState('R0')
   const [plateCheck, setPlateCheck] = useState<{
-    hasPlates: boolean
-    plates: { plateSetCode: string; status: string; allAvailable: boolean }[]
+    status: 'all_new' | 'all_available' | 'partial'
+    plateSetCode: string | null
+    message: string
+    newNeeded: number
+    oldAvailable: number
   } | null>(null)
   const [dyeDetail, setDyeDetail] = useState<{
     dyeNumber: number
@@ -128,6 +135,16 @@ export default function JobCardDetailPage() {
     maxImpressions: number
     active: boolean
   } | null | 'unavailable'>(null)
+  const [dieStoreCheck, setDieStoreCheck] = useState<{
+    status: 'available' | 'needs_attention' | 'end_of_life' | 'not_available'
+    message: string
+    dieCode?: string
+    dieNumber?: number | null
+    lifeRemaining?: number
+  } | null>(null)
+  const [platesReturned, setPlatesReturned] = useState(false)
+  const [dieReturned, setDieReturned] = useState(false)
+  const [embossReturned, setEmbossReturned] = useState(false)
 
   useEffect(() => {
     fetch(`/api/job-cards/${id}`)
@@ -141,28 +158,22 @@ export default function JobCardDetailPage() {
 
   const cartonId = jc?.poLine?.cartonId ?? jc?.poLine?.carton?.id ?? null
   const embossBlockId = jc?.embossBlockId ?? jc?.poLine?.carton?.embossBlockId ?? null
+  const embossRequired = isEmbossingRequired(jc?.poLine?.carton?.embossingLeafing ?? jc?.poLine?.embossingLeafing)
 
   useEffect(() => {
     if (!cartonId || !artworkVersion.trim()) {
       setPlateCheck(null)
       return
     }
-    const encoded = encodeURIComponent(artworkVersion.trim())
-    fetch(`/api/plate-store/check/${cartonId}/${encoded}`)
+    const artworkCode = (jc?.poLine?.carton?.artworkCode || jc?.poLine?.cartonName || '').trim()
+    fetch(`/api/plate-store/check?${new URLSearchParams({ cartonId, artworkCode, artworkVersion: artworkVersion.trim() })}`)
       .then((r) => r.json())
       .then((data) => {
         if (data?.error) throw new Error(data.error)
-        setPlateCheck({
-          hasPlates: data.hasPlates ?? false,
-          plates: (data.plates ?? []).map((p: { plateSetCode: string; status: string; allAvailable: boolean }) => ({
-            plateSetCode: p.plateSetCode,
-            status: p.status,
-            allAvailable: p.allAvailable,
-          })),
-        })
+        setPlateCheck(data)
       })
       .catch(() => setPlateCheck(null))
-  }, [cartonId, artworkVersion])
+  }, [cartonId, artworkVersion, jc?.poLine?.carton?.artworkCode, jc?.poLine?.cartonName])
 
   useEffect(() => {
     const dyeId = jc?.poLine?.dyeId ?? null
@@ -184,6 +195,23 @@ export default function JobCardDetailPage() {
       })
       .catch(() => setDyeDetail(null))
   }, [jc?.poLine?.dyeId])
+
+  useEffect(() => {
+    if (!jc?.poLine) {
+      setDieStoreCheck(null)
+      return
+    }
+    fetch(`/api/die-store/check?${new URLSearchParams({
+      cartonId: cartonId ?? '',
+      cartonSize: jc.poLine.cartonSize ?? '',
+      dieType: 'BSO',
+      ups: '1',
+      sheetSize: '',
+    })}`)
+      .then((r) => r.json())
+      .then((data) => setDieStoreCheck(data))
+      .catch(() => setDieStoreCheck(null))
+  }, [cartonId, jc?.poLine?.cartonSize, jc?.poLine])
 
   useEffect(() => {
     if (!embossBlockId) {
@@ -345,25 +373,40 @@ export default function JobCardDetailPage() {
                 </div>
                 {plateCheck === null ? (
                   <p className="text-xs text-slate-500">Checking…</p>
-                ) : !plateCheck.hasPlates ? (
-                  <p className="text-xs text-amber-400">No plates found for this carton/version</p>
                 ) : (
-                  <ul className="space-y-1 text-xs text-slate-200">
-                    {plateCheck.plates.slice(0, 3).map((p) => (
-                      <li key={p.plateSetCode} className="flex items-center gap-2">
-                        <span className={p.allAvailable ? 'text-green-400' : 'text-amber-400'}>{p.allAvailable ? '✓' : '○'}</span>
-                        <span className="font-mono">{p.plateSetCode}</span>
-                        <span className="text-slate-500">{p.status}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className={`rounded p-2 text-xs ${
+                    plateCheck.status === 'all_available'
+                      ? 'bg-green-900/20 text-green-300'
+                      : plateCheck.status === 'partial'
+                        ? 'bg-amber-900/20 text-amber-300'
+                        : 'bg-red-900/20 text-red-300'
+                  }`}>
+                    <p>{plateCheck.message}</p>
+                    <p>Old Available: {plateCheck.oldAvailable} | New Needed: {plateCheck.newNeeded}</p>
+                    {plateCheck.plateSetCode ? <p className="font-mono">{plateCheck.plateSetCode}</p> : null}
+                  </div>
                 )}
-                <Link href="/pre-press/plate-store" className="text-xs text-amber-400 hover:underline mt-2 inline-block">Plate store →</Link>
+                <div className="flex gap-2 mt-2">
+                  <Link href="/pre-press/plate-store" className="text-xs text-amber-400 hover:underline inline-block">Plate store →</Link>
+                  <Link href={`/pre-press/plate-store`} className="text-xs text-blue-300 hover:underline inline-block">Issue Plates to Press</Link>
+                </div>
               </>
             )}
           </div>
           <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-            <h3 className="text-xs font-medium text-slate-400 mb-2">Dye</h3>
+            <h3 className="text-xs font-medium text-slate-400 mb-2">Die</h3>
+            {dieStoreCheck ? (
+              <div className={`rounded p-2 text-xs mb-2 ${
+                dieStoreCheck.status === 'available'
+                  ? 'bg-green-900/20 text-green-300'
+                  : dieStoreCheck.status === 'needs_attention'
+                    ? 'bg-amber-900/20 text-amber-300'
+                    : 'bg-red-900/20 text-red-300'
+              }`}>
+                <p>{dieStoreCheck.message}</p>
+                {dieStoreCheck.dieCode ? <p className="font-mono">{dieStoreCheck.dieCode}{dieStoreCheck.dieNumber ? ` · No. ${dieStoreCheck.dieNumber}` : ''}</p> : null}
+              </div>
+            ) : null}
             {!jc?.poLine?.dyeId ? (
               <p className="text-xs text-slate-500">No dye set for this PO line</p>
             ) : dyeDetail === null ? (
@@ -382,13 +425,20 @@ export default function JobCardDetailPage() {
                 </div>
                 <p className="text-xs text-slate-500 mt-1">{dyeDetail.impressionCount.toLocaleString()} / {dyeDetail.maxImpressions.toLocaleString()} imp.</p>
                 {!dyeDetail.active && <p className="text-xs text-amber-400">Inactive</p>}
-                <Link href={`/masters/dyes/${jc.poLine!.dyeId}`} className="text-xs text-amber-400 hover:underline mt-2 inline-block">Dye detail →</Link>
+                <div className="flex gap-2 mt-2">
+                  <Link href={`/masters/dyes/${jc.poLine!.dyeId}`} className="text-xs text-amber-400 hover:underline inline-block">Dye detail →</Link>
+                  <Link href="/masters/dies" className="text-xs text-blue-300 hover:underline inline-block">Issue/Return Die →</Link>
+                </div>
               </>
             )}
           </div>
           <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
             <h3 className="text-xs font-medium text-slate-400 mb-2">Emboss block</h3>
-            {!embossBlockId ? (
+            {!embossRequired ? (
+              <div className="text-xs text-slate-500 border border-slate-800 rounded p-3">
+                Embossing Block: Not applicable for this product
+              </div>
+            ) : !embossBlockId ? (
               (jc?.postPressRouting?.embossing || (jc?.poLine?.embossingLeafing && jc.poLine.embossingLeafing !== 'None')) ? (
                 <p className="text-xs text-amber-400">Embossing required — block not assigned</p>
               ) : (
@@ -426,7 +476,8 @@ export default function JobCardDetailPage() {
         <div className="space-y-2">
           {POST_PRESS_KEYS.map(({ key, label, hint }) => {
             const effective = jc.postPressRouting ?? suggestPostPressRouting(jc.poLine)
-            const checked = effective[key] ?? false
+            const checked = key === 'embossing' && !embossRequired ? false : (effective[key] ?? false)
+            const embossBypassed = key === 'embossing' && !embossRequired
             return (
               <label
                 key={key}
@@ -435,14 +486,15 @@ export default function JobCardDetailPage() {
                 <input
                   type="checkbox"
                   checked={checked}
+                  disabled={embossBypassed}
                   onChange={() => {
                     const next = { ...(jc.postPressRouting ?? suggestPostPressRouting(jc.poLine)), [key]: !checked }
                     update('postPressRouting', next)
                   }}
                   className="rounded border-slate-600 bg-slate-800 text-amber-500"
                 />
-                <span className="text-sm text-slate-200 font-medium">{label}</span>
-                <span className="text-xs text-slate-500">{hint}</span>
+                <span className={`text-sm font-medium ${embossBypassed ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{label}</span>
+                <span className="text-xs text-slate-500">{embossBypassed ? 'Not applicable - Embossing not required' : hint}</span>
               </label>
             )
           })}
@@ -468,6 +520,69 @@ export default function JobCardDetailPage() {
           <div><span className="text-slate-500">Total</span> <span className="text-amber-300 font-mono">{jc.totalSheets}</span></div>
           <div><span className="text-slate-500">Issued</span> <span className="text-slate-200 font-mono">{jc.sheetsIssued}</span></div>
         </div>
+      </div>
+
+      <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
+        <h2 className="text-sm font-semibold text-slate-200 mb-3">Tools Issued for This Job</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-slate-400">
+              <tr>
+                <th className="text-left py-2">Tool</th>
+                <th className="text-left py-2">Code</th>
+                <th className="text-left py-2">Location</th>
+                <th className="text-left py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              <tr>
+                <td className="py-2 text-slate-300">Plates</td>
+                <td className="py-2 font-mono text-slate-200">{plateCheck?.plateSetCode || '-'}</td>
+                <td className="py-2 text-slate-400">Rack B-1</td>
+                <td className="py-2">
+                  <Link href="/pre-press/plate-store" className="text-blue-300 hover:underline mr-3">Issue</Link>
+                  <Link href="/pre-press/plate-store" className="text-amber-300 hover:underline">View</Link>
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2 text-slate-300">Die</td>
+                <td className="py-2 font-mono text-slate-200">{dieStoreCheck?.dieCode || '-'}</td>
+                <td className="py-2 text-slate-400">Rack A-1</td>
+                <td className="py-2">
+                  <Link href="/masters/dies" className="text-blue-300 hover:underline mr-3">Issue</Link>
+                  <Link href="/masters/dies" className="text-amber-300 hover:underline">View</Link>
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2 text-slate-300">Emb. Block</td>
+                <td className="py-2 font-mono text-slate-200">{embossRequired ? embossDetail && embossDetail !== 'unavailable' ? embossDetail.blockCode : '-' : 'N/A'}</td>
+                <td className="py-2 text-slate-400">Rack C-1</td>
+                <td className="py-2">
+                  <Link href="/masters/emboss-blocks" className="text-blue-300 hover:underline mr-3">Issue</Link>
+                  <Link href="/masters/emboss-blocks" className="text-amber-300 hover:underline">View</Link>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
+        <h2 className="text-sm font-semibold text-slate-200 mb-2">Return All Tools</h2>
+        <p className="text-xs text-slate-500 mb-3">All tools must be returned before job can be closed.</p>
+        <div className="space-y-2 text-sm mb-3">
+          <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={platesReturned} onChange={(e) => setPlatesReturned(e.target.checked)} /> Plates returned to rack</label>
+          <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={dieReturned} onChange={(e) => setDieReturned(e.target.checked)} /> Die returned to location</label>
+          {embossRequired ? <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={embossReturned} onChange={(e) => setEmbossReturned(e.target.checked)} /> Emboss block returned</label> : null}
+        </div>
+        <button
+          type="button"
+          disabled={!platesReturned || !dieReturned || (embossRequired && !embossReturned)}
+          onClick={() => saveChanges({ status: 'closed' })}
+          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs"
+        >
+          Mark Job Complete
+        </button>
       </div>
 
       {/* Header controls */}

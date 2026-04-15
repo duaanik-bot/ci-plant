@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { DYE_TYPES } from '@/lib/constants'
-
 type DyeRow = {
   id: string
   dyeNumber: number
@@ -14,7 +12,6 @@ type DyeRow = {
   cartonSize: string
   location: string | null
   impressionCount: number
-  maxImpressions: number
   conditionRating: string | null
   active: boolean
 }
@@ -82,32 +79,15 @@ export default function DyeMasterPage() {
             </tr>
           </thead>
           <tbody className="text-white">
-            {filtered.map((d) => {
-              const lifePct =
-                d.maxImpressions > 0
-                  ? Math.min(100, Math.round((d.impressionCount / d.maxImpressions) * 100))
-                  : 0
-              let barColor = 'bg-green-500'
-              if (lifePct >= 70) barColor = 'bg-red-500'
-              else if (lifePct >= 40) barColor = 'bg-amber-500'
-
-              return (
+            {filtered.map((d) => (
                 <tr key={d.id} className="border-t border-slate-700">
                   <td className="px-4 py-2 font-mono">{d.dyeNumber}</td>
                   <td className="px-4 py-2 text-slate-300">{d.dyeType}</td>
                   <td className="px-4 py-2 text-slate-300">{d.ups}</td>
                   <td className="px-4 py-2 text-slate-300">{d.sheetSize}</td>
                   <td className="px-4 py-2 text-slate-300">{d.cartonSize}</td>
-                  <td className="px-4 py-2">
-                    <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-                      <div
-                        className={`h-full ${barColor}`}
-                        style={{ width: `${lifePct}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-slate-400">
-                      {d.impressionCount.toLocaleString()} / {d.maxImpressions.toLocaleString()}
-                    </span>
+                  <td className="px-4 py-2 text-slate-300">
+                    {d.impressionCount.toLocaleString()}
                   </td>
                   <td className="px-4 py-2 text-slate-300">
                     {d.conditionRating ?? 'Good'}
@@ -121,8 +101,7 @@ export default function DyeMasterPage() {
                     </Link>
                   </td>
                 </tr>
-              )
-            })}
+            ))}
           </tbody>
         </table>
       </div>

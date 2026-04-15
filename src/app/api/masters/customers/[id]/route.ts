@@ -3,14 +3,13 @@ import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
+import { customerSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
-const updateSchema = z.object({
-  name: z.string().min(1).optional(),
-  gstNumber: z.string().optional(),
-  contactName: z.string().optional(),
-  contactPhone: z.string().optional(),
+const updateSchema = customerSchema.partial().extend({
+  gstNumber: z.string().trim().max(32, 'GST number is too long').optional().or(z.literal('')),
+  contactPhone: z.string().trim().max(20, 'Phone number is too long').optional().or(z.literal('')),
   email: z.string().email().optional().or(z.literal('')),
   address: z.string().optional(),
   creditLimit: z.number().min(0).optional(),
@@ -69,5 +68,16 @@ export async function PUT(
     newValue: customer,
   })
 
-  return NextResponse.json(customer)
+  return NextResponse.json({
+    id: customer.id,
+    name: customer.name,
+    gstNumber: customer.gstNumber,
+    contactName: customer.contactName,
+    contactPhone: customer.contactPhone,
+    email: customer.email,
+    address: customer.address,
+    creditLimit: Number(customer.creditLimit),
+    requiresArtworkApproval: customer.requiresArtworkApproval,
+    active: customer.active,
+  })
 }

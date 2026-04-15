@@ -4,8 +4,8 @@ import { Toaster } from 'sonner'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: process.env.NEXT_PUBLIC_APP_NAME ?? 'Colour Impressions Plant System',
-  description: 'Plant Management System for Colour Impressions, Patiala',
+  title: process.env.NEXT_PUBLIC_APP_NAME ?? 'Salary & Employee Management',
+  description: 'Production-ready salary and employee management SaaS',
 }
 
 export default function RootLayout({
@@ -14,8 +14,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body>
+    <html lang="en" suppressHydrationWarning>
+      <body className="bg-background text-foreground">
         <Providers>{children}</Providers>
         <Toaster position="top-center" richColors />
       </body>

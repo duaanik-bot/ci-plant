@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
+import { jobCardSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -80,6 +81,21 @@ export async function POST(req: NextRequest) {
 
   const { poLineItemId, requiredSheets, wastageSheets, assignedOperator, batchNumber } =
     parsed.data
+
+  const shared = jobCardSchema.safeParse({
+    customerId: 'resolved-later',
+    requiredSheets,
+    wastageSheets,
+    assignedOperator,
+  })
+  if (!shared.success) {
+    const fields: Record<string, string> = {}
+    shared.error.issues.forEach((i) => {
+      const path = i.path[0] as string
+      if (path) fields[path] = i.message
+    })
+    return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+  }
 
   const li = await db.poLineItem.findUnique({
     where: { id: poLineItemId },

@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Html5Qrcode } from 'html5-qrcode'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
+import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 
 type IssueContextOption = { id: string; label: string }
 
@@ -425,42 +426,20 @@ export default function StoresIssuePage() {
               </button>
               <div className="pt-4 space-y-3">
                 <div>
-                  <label className="block text-sm text-slate-400 mb-1">Quick select job card</label>
-                  <input
-                    type="text"
-                    value={contextSearch.query}
-                    onChange={(e) => contextSearch.setQuery(e.target.value)}
-                    placeholder="Search JC# or customer…"
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                  <MasterSearchSelect
+                    label="Quick select job card"
+                    query={contextSearch.query}
+                    onQueryChange={contextSearch.setQuery}
+                    loading={contextSearch.loading}
+                    options={contextSearch.options}
+                    lastUsed={contextSearch.lastUsed}
+                    onSelect={applyContext}
+                    getOptionLabel={(x) => x.label}
+                    placeholder="Type JC# or customer..."
+                    emptyMessage="No matching job card found."
+                    recentLabel="Recent job cards"
+                    loadingMessage="Searching job cards..."
                   />
-                  {contextSearch.options.length > 0 && (
-                    <div className="mt-0.5 rounded border border-slate-700 bg-slate-900 max-h-40 overflow-y-auto">
-                      {contextSearch.options.map((x) => (
-                        <button
-                          key={x.id}
-                          type="button"
-                          onClick={() => applyContext(x)}
-                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-800 text-slate-100"
-                        >
-                          {x.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {contextSearch.lastUsed.length > 0 && !contextSearch.query && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {contextSearch.lastUsed.map((x) => (
-                        <button
-                          key={x.id}
-                          type="button"
-                          onClick={() => applyContext(x)}
-                          className="px-2 py-0.5 rounded-full bg-slate-800 text-xs text-slate-200 border border-slate-600 hover:border-amber-500"
-                        >
-                          {x.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 <div>
                   <label className="block text-sm text-slate-400 mb-1">Or enter job / job card number or ID</label>
@@ -483,7 +462,7 @@ export default function StoresIssuePage() {
               <p className="text-xs text-slate-500">
                 <Link href="/production/job-cards" className="text-amber-400 hover:underline">Job cards</Link>
                 {' · '}
-                <Link href="/production/machine-flow" className="text-amber-400 hover:underline">Machine flow</Link>
+                <Link href="/production/stages" className="text-amber-400 hover:underline">Production planning</Link>
               </p>
             </>
           )}

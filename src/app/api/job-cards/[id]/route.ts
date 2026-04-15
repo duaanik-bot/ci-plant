@@ -11,6 +11,7 @@ const stageUpdateSchema = z.object({
   operator: z.string().optional().nullable(),
   counter: z.number().int().optional().nullable(),
   sheetSize: z.string().optional().nullable(),
+  excessSheets: z.number().int().min(0).optional().nullable(),
 })
 
 const postPressRoutingSchema = z.object({
@@ -147,7 +148,22 @@ export async function PUT(
       },
     })
 
+    const stageOrder = [
+      'Cutting',
+      'Printing',
+      'Chemical Coating',
+      'Lamination',
+      'Embossing',
+      'Leafing',
+      'Spot UV',
+      'Dye Cutting',
+      'Pasting',
+    ]
+
     if (data.stages?.length) {
+      const completedStageIds = new Set(
+        data.stages.filter((s) => s.status === 'completed').map((s) => s.id),
+      )
       await Promise.all(
         data.stages.map((s) =>
           tx.productionStageRecord.update({
@@ -157,11 +173,32 @@ export async function PUT(
               ...(s.operator !== undefined ? { operator: s.operator } : {}),
               ...(s.counter !== undefined ? { counter: s.counter } : {}),
               ...(s.sheetSize !== undefined ? { sheetSize: s.sheetSize } : {}),
+              ...(s.excessSheets !== undefined ? { excessSheets: s.excessSheets } : {}),
               ...(s.status === 'completed' ? { completedAt: new Date() } : {}),
             },
           })
         )
       )
+
+      if (completedStageIds.size > 0) {
+        const orderedStages = [...existing.stages].sort(
+          (a, b) =>
+            stageOrder.indexOf(a.stageName) - stageOrder.indexOf(b.stageName) ||
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        )
+        for (const s of data.stages) {
+          if (s.status !== 'completed') continue
+          const rec = existing.stages.find((r) => r.id === s.id)
+          if (!rec) continue
+          const idx = orderedStages.findIndex((r) => r.id === rec.id)
+          if (idx < 0 || idx >= orderedStages.length - 1) continue
+          const nextRec = orderedStages[idx + 1]
+          await tx.productionStageRecord.update({
+            where: { id: nextRec.id },
+            data: { status: 'ready' },
+          })
+        }
+      }
     }
 
     return header

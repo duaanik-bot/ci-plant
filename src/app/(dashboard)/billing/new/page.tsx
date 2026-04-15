@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
+import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 
 type Customer = { id: string; name: string; contactName?: string | null }
 type JobCard = { id: string; jobCardNumber: number; setNumber: string | null; customerId: string }
@@ -29,14 +30,8 @@ export default function NewBillPage() {
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'billing-customer',
     search: async (query: string) => {
-      const res = await fetch('/api/customers')
-      const data = (await res.json()) as Customer[]
-      const q = query.toLowerCase()
-      return data.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          (c.contactName ?? '').toLowerCase().includes(q),
-      )
+      const res = await fetch(`/api/customers?q=${encodeURIComponent(query)}`)
+      return (await res.json()) as Customer[]
     },
     getId: (c) => c.id,
     getLabel: (c) => c.name,
@@ -118,48 +113,25 @@ export default function NewBillPage() {
 
       <div className="grid md:grid-cols-2 gap-4 rounded-xl bg-slate-900 border border-slate-700 p-4 text-sm">
         <div>
-          <label className="block text-slate-400 mb-1">Customer *</label>
-          <input
-            type="text"
-            value={customerSearch.query}
-            onChange={(e) => {
-              customerSearch.setQuery(e.target.value)
+          <MasterSearchSelect
+            label="Customer"
+            required
+            query={customerSearch.query}
+            onQueryChange={(value) => {
+              customerSearch.setQuery(value)
               setCustomerId('')
             }}
-            placeholder="Type customer name…"
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            loading={customerSearch.loading}
+            options={customerSearch.options}
+            lastUsed={customerSearch.lastUsed}
+            onSelect={applyCustomer}
+            getOptionLabel={(c) => c.name}
+            getOptionMeta={(c) => c.contactName ?? ''}
+            placeholder="Type 1-2 letters to search customers..."
+            recentLabel="Recent customers"
+            loadingMessage="Searching customers..."
+            emptyMessage="No customer found."
           />
-          {customerSearch.loading && (
-            <p className="text-xs text-slate-400 mt-0.5">Searching…</p>
-          )}
-          {customerSearch.options.length > 0 && (
-            <div className="mt-0.5 rounded border border-slate-700 bg-slate-900 max-h-40 overflow-y-auto">
-              {customerSearch.options.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => applyCustomer(c)}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-800 text-slate-100"
-                >
-                  {c.name}
-                </button>
-              ))}
-            </div>
-          )}
-          {customerSearch.lastUsed.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {customerSearch.lastUsed.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => applyCustomer(c)}
-                  className="px-2 py-0.5 rounded-full bg-slate-800 text-xs text-slate-200 border border-slate-600 hover:border-amber-500"
-                >
-                  {c.name}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
         <div>
           <label className="block text-slate-400 mb-1">Bill date</label>

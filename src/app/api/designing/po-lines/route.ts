@@ -51,6 +51,15 @@ export async function GET(req: NextRequest) {
         : null
 
       const readyForProduction = hasSet && !!jc?.artworkApproved && !!jc?.firstArticlePass
+      const spec = (li.specOverrides as Record<string, unknown> | null) || {}
+      const approvalsComplete = !!(
+        spec.customerApprovalPharma &&
+        spec.shadeCardQaTextApproval
+      )
+      const prePressFinalized = !!spec.prePressSentToPlateHubAt
+      let artworkStatusLabel = 'Awaiting approval'
+      if (prePressFinalized) artworkStatusLabel = 'Finalized'
+      else if (approvalsComplete) artworkStatusLabel = 'Approved'
 
       return {
         ...li,
@@ -59,6 +68,11 @@ export async function GET(req: NextRequest) {
           hasSet,
           hasJobCard,
           artworkApproved: !!jc?.artworkApproved,
+          /** @deprecated use approvalsComplete / artworkStatusLabel */
+          artworkLocksCompleted: approvalsComplete ? 2 : 0,
+          approvalsComplete,
+          prePressFinalized,
+          artworkStatusLabel,
           firstArticlePass: !!jc?.firstArticlePass,
           readyForProduction,
         },

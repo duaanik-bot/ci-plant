@@ -1,632 +1,181 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
-
-type UsageLog = {
-  id: string
-  impressions: number
-  usedOn: string
-  jobCardId: string | null
-  operatorName: string | null
-  conditionAfter: string | null
-  notes: string | null
-}
-
-type MaintenanceLog = {
-  id: string
-  actionType: string
-  performedAt: string
-  conditionBefore: string | null
-  conditionAfter: string | null
-  notes: string | null
-  cost: number | null
-}
 
 type BlockDetail = {
   id: string
   blockCode: string
-  cartonId: string | null
-  cartonName: string | null
-  customerId: string | null
+  blockNumber: number | null
   blockType: string
   blockMaterial: string
-  blockSize: string | null
-  embossDepth: number | null
+  blockSizeL: string | null
+  blockSizeW: string | null
+  embossDepth: string | null
+  embossArea: string | null
+  registerTolerance: string | null
   storageLocation: string | null
+  compartment: string | null
+  vendorName: string | null
+  vendorOrderRef: string | null
+  manufacturingCost: string | null
+  receivedDate: string | null
+  cartonName: string | null
+  customerId: string | null
+  artworkCode: string | null
   impressionCount: number
   maxImpressions: number
-  condition: string
-  lastPolishedDate: string | null
   polishCount: number
-  active: boolean
-  usageLogs: UsageLog[]
-  maintenanceLogs: MaintenanceLog[]
+  maxPolishCount: number
+  condition: string
+  status: string
+  issueRecords: Array<{ id: string; issuedTo: string; issuedAt: string; status: string; jobCardNumber: number | null }>
+  maintenanceLogV2: Array<{ id: string; actionType: string; performedAt: string; conditionBefore: string | null; conditionAfter: string | null; cost: string | null }>
+  vendorOrders: Array<{ id: string; orderCode: string; orderType: string; vendorName: string; status: string; orderedAt: string }>
+  auditLog: Array<{ id: string; action: string; performedBy: string; performedAt: string }>
 }
 
-const BLOCK_TYPES = ['Embossing', 'Leafing', 'Embossing + Leafing', 'Standard']
-const BLOCK_MATERIALS = ['Magnesium', 'Brass', 'Copper', 'Other']
-
 export default function EmbossBlockDetailPage() {
-  const params = useParams()
-  const router = useRouter()
-  const id = params.id as string
+  const { id } = useParams<{ id: string }>()
   const [block, setBlock] = useState<BlockDetail | null>(null)
-  const [tab, setTab] = useState<'overview' | 'usage' | 'maintenance'>('overview')
-  const [saving, setSaving] = useState(false)
-
-  // Modals for add usage / maintenance
-  const [showUsage, setShowUsage] = useState(false)
-  const [showMaintenance, setShowMaintenance] = useState(false)
-  const [usageForm, setUsageForm] = useState({
-    impressions: '',
-    usedOn: new Date().toISOString().slice(0, 10),
-    operatorName: '',
-    conditionAfter: '',
-    notes: '',
-  })
-  const [maintForm, setMaintForm] = useState({
-    actionType: 'Polish',
-    performedAt: new Date().toISOString().slice(0, 16),
-    conditionBefore: '',
-    conditionAfter: '',
-    notes: '',
-    cost: '',
-  })
+  const [tab, setTab] = useState<'overview' | 'issue' | 'vendor' | 'history' | 'audit'>('overview')
 
   useEffect(() => {
-    fetch(`/api/masters/emboss-blocks/${id}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!data || data.error) throw new Error(data.error || 'Failed to load block')
-        setBlock(data)
-      })
-      .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to load'))
+    fetch(`/api/emboss-blocks/${id}`).then((r) => r.json()).then((d) => setBlock(d))
   }, [id])
 
-  async function handleSaveOverview(e: React.FormEvent) {
-    e.preventDefault()
-    if (!block) return
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/masters/emboss-blocks/${block.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cartonName: block.cartonName,
-          blockType: block.blockType,
-          blockMaterial: block.blockMaterial,
-          blockSize: block.blockSize,
-          embossDepth: block.embossDepth,
-          storageLocation: block.storageLocation,
-          maxImpressions: block.maxImpressions,
-          condition: block.condition,
-          active: block.active,
-        }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Save failed')
-      toast.success('Block updated')
-      setBlock((b) => (b ? { ...b, ...json } : null))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to save')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleAddUsage(e: React.FormEvent) {
-    e.preventDefault()
-    const impressions = Number(usageForm.impressions)
-    if (impressions < 0) {
-      toast.error('Impressions must be ≥ 0')
-      return
-    }
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/masters/emboss-blocks/${id}/usage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          impressions,
-          usedOn: usageForm.usedOn || undefined,
-          operatorName: usageForm.operatorName.trim() || null,
-          conditionAfter: usageForm.conditionAfter.trim() || null,
-          notes: usageForm.notes.trim() || null,
-        }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Failed to add usage')
-      toast.success('Usage logged')
-      setShowUsage(false)
-      setUsageForm({ impressions: '', usedOn: new Date().toISOString().slice(0, 10), operatorName: '', conditionAfter: '', notes: '' })
-      const updated = await fetch(`/api/masters/emboss-blocks/${id}`).then((r) => r.json())
-      if (updated && !updated.error) setBlock(updated)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to add usage')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleAddMaintenance(e: React.FormEvent) {
-    e.preventDefault()
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/masters/emboss-blocks/${id}/maintenance`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          actionType: maintForm.actionType.trim(),
-          performedAt: maintForm.performedAt || undefined,
-          conditionBefore: maintForm.conditionBefore.trim() || null,
-          conditionAfter: maintForm.conditionAfter.trim() || null,
-          notes: maintForm.notes.trim() || null,
-          cost: maintForm.cost ? Number(maintForm.cost) : null,
-        }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Failed to add maintenance')
-      toast.success('Maintenance logged')
-      setShowMaintenance(false)
-      setMaintForm({
-        actionType: 'Polish',
-        performedAt: new Date().toISOString().slice(0, 16),
-        conditionBefore: '',
-        conditionAfter: '',
-        notes: '',
-        cost: '',
-      })
-      const updated = await fetch(`/api/masters/emboss-blocks/${id}`).then((r) => r.json())
-      if (updated && !updated.error) setBlock(updated)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to add maintenance')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (!block) return <div className="text-slate-400">Loading…</div>
-
-  const lifePct =
-    block.maxImpressions > 0
-      ? Math.min(100, Math.round((block.impressionCount / block.maxImpressions) * 100))
-      : 0
-  let barColor = 'bg-green-500'
-  if (lifePct >= 80) barColor = 'bg-red-500'
-  else if (lifePct >= 50) barColor = 'bg-amber-500'
+  if (!block) return <div className="p-4 text-slate-400">Loading...</div>
+  const lifePct = block.maxImpressions > 0 ? Math.min(100, Math.round((block.impressionCount / block.maxImpressions) * 100)) : 0
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/masters/emboss-blocks"
-            className="text-slate-400 hover:text-white text-sm"
-          >
-            ← Emboss blocks
-          </Link>
-          <h2 className="text-lg font-semibold text-white">{block.blockCode}</h2>
-          {!block.active && (
-            <span className="px-2 py-0.5 rounded text-xs bg-slate-600 text-slate-300">
-              Inactive
-            </span>
-          )}
-        </div>
+    <div className="p-4 max-w-6xl mx-auto space-y-4">
+      <Link href="/masters/emboss-blocks" className="text-slate-400 hover:text-white text-sm">← Emboss Blocks</Link>
+      <div>
+        <h1 className="text-xl font-bold text-amber-400">{block.blockCode}</h1>
+        <p className="text-slate-400 text-sm">Block No. {block.blockNumber ?? '-'} · {block.status}</p>
       </div>
-
-      <div className="flex gap-2 border-b border-slate-700 pb-2">
-        {(['overview', 'usage', 'maintenance'] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={`px-3 py-1.5 rounded-t text-sm capitalize ${
-              tab === t
-                ? 'bg-slate-700 text-white'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            {t}
-          </button>
+      <div className="flex gap-2">
+        {(['overview', 'issue', 'vendor', 'history', 'audit'] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded border text-xs ${tab === t ? 'bg-amber-600 border-amber-500 text-white' : 'border-slate-700 text-slate-300'}`}>{t}</button>
         ))}
       </div>
 
       {tab === 'overview' && (
-        <form onSubmit={handleSaveOverview} className="space-y-4 max-w-xl">
-          <div className="grid md:grid-cols-2 gap-4 bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm">
-            <div>
-              <label className="block text-slate-400 mb-1">Block code</label>
-              <input
-                type="text"
-                value={block.blockCode}
-                disabled
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-400"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 mb-1">Carton name</label>
-              <input
-                type="text"
-                value={block.cartonName ?? ''}
-                onChange={(e) => setBlock({ ...block, cartonName: e.target.value || null })}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 mb-1">Block type</label>
-              <select
-                value={block.blockType}
-                onChange={(e) => setBlock({ ...block, blockType: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-              >
-                {BLOCK_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-slate-400 mb-1">Material</label>
-              <select
-                value={block.blockMaterial}
-                onChange={(e) => setBlock({ ...block, blockMaterial: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-              >
-                {BLOCK_MATERIALS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-slate-400 mb-1">Block size</label>
-              <input
-                type="text"
-                value={block.blockSize ?? ''}
-                onChange={(e) => setBlock({ ...block, blockSize: e.target.value || null })}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 mb-1">Emboss depth (mm)</label>
-              <input
-                type="number"
-                step="0.1"
-                value={block.embossDepth ?? ''}
-                onChange={(e) =>
-                  setBlock({
-                    ...block,
-                    embossDepth: e.target.value ? Number(e.target.value) : null,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 mb-1">Storage location</label>
-              <input
-                type="text"
-                value={block.storageLocation ?? ''}
-                onChange={(e) =>
-                  setBlock({ ...block, storageLocation: e.target.value || null })
-                }
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 mb-1">Max impressions</label>
-              <input
-                type="number"
-                min={1}
-                value={block.maxImpressions}
-                onChange={(e) =>
-                  setBlock({
-                    ...block,
-                    maxImpressions: Number(e.target.value) || block.maxImpressions,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 mb-1">Condition</label>
-              <input
-                type="text"
-                value={block.condition}
-                onChange={(e) => setBlock({ ...block, condition: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="active"
-                checked={block.active}
-                onChange={(e) => setBlock({ ...block, active: e.target.checked })}
-                className="rounded border-slate-600"
-              />
-              <label htmlFor="active" className="text-slate-300">
-                Active
-              </label>
-            </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-3 text-sm">
+          <div className="grid md:grid-cols-4 gap-2">
+            <Info k="Type" v={block.blockType} /><Info k="Material" v={block.blockMaterial} />
+            <Info k="Size" v={`${block.blockSizeL ?? '-'} × ${block.blockSizeW ?? '-'}`} />
+            <Info k="Emboss Depth" v={block.embossDepth ?? '-'} />
+            <Info k="Emboss Area" v={block.embossArea ?? '-'} />
+            <Info k="Tolerance" v={block.registerTolerance ?? '-'} />
+            <Info k="Location" v={block.storageLocation ?? '-'} />
+            <Info k="Compartment" v={block.compartment ?? '-'} />
+            <Info k="Vendor" v={block.vendorName ?? '-'} />
+            <Info k="Vendor Ref" v={block.vendorOrderRef ?? '-'} />
+            <Info k="Cost" v={block.manufacturingCost ?? '-'} />
+            <Info k="Received" v={block.receivedDate ? new Date(block.receivedDate).toLocaleDateString('en-IN') : '-'} />
           </div>
-          <div className="mb-4">
-            <span className="text-slate-400 text-sm">Impressions </span>
-            <div className="h-3 rounded-full bg-slate-800 overflow-hidden mt-1">
-              <div
-                className={`h-full ${barColor}`}
-                style={{ width: `${lifePct}%` }}
-              />
-            </div>
-            <span className="text-xs text-slate-400">
-              {block.impressionCount.toLocaleString()} / {block.maxImpressions.toLocaleString()}
-              {block.lastPolishedDate && ` · Last polished: ${block.lastPolishedDate.slice(0, 10)} (${block.polishCount}×)`}
-            </span>
+          <div>
+            <p className="text-slate-300 mb-1">Impression Meter</p>
+            <div className="h-3 rounded bg-slate-700 overflow-hidden"><div className={`${lifePct > 85 ? 'bg-red-500' : lifePct > 70 ? 'bg-amber-500' : 'bg-green-500'} h-full`} style={{ width: `${lifePct}%` }} /></div>
+            <p className="text-xs text-slate-400 mt-1">
+              {block.impressionCount.toLocaleString()} / {block.maxImpressions.toLocaleString()} · Polish cycles {block.polishCount}/{block.maxPolishCount}
+            </p>
           </div>
-          <div className="flex justify-end gap-2">
-            <Link
-              href="/masters/emboss-blocks"
-              className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
-            >
-              Cancel
-            </Link>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {tab === 'usage' && (
-        <div>
-          <div className="flex justify-end mb-2">
-            <button
-              type="button"
-              onClick={() => setShowUsage(true)}
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
-            >
-              Add usage
-            </button>
-          </div>
-          <div className="overflow-x-auto rounded-lg border border-slate-700">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-800 text-slate-300">
-                <tr>
-                  <th className="px-4 py-2 text-left">Date</th>
-                  <th className="px-4 py-2 text-left">Impressions</th>
-                  <th className="px-4 py-2 text-left">Operator</th>
-                  <th className="px-4 py-2 text-left">Condition after</th>
-                  <th className="px-4 py-2 text-left">Notes</th>
-                </tr>
-              </thead>
-              <tbody className="text-white">
-                {block.usageLogs.map((u) => (
-                  <tr key={u.id} className="border-t border-slate-700">
-                    <td className="px-4 py-2">{u.usedOn.slice(0, 10)}</td>
-                    <td className="px-4 py-2">{u.impressions.toLocaleString()}</td>
-                    <td className="px-4 py-2 text-slate-300">{u.operatorName ?? '—'}</td>
-                    <td className="px-4 py-2 text-slate-300">{u.conditionAfter ?? '—'}</td>
-                    <td className="px-4 py-2 text-slate-300">{u.notes ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {block.usageLogs.length === 0 && (
-            <p className="text-slate-400 text-sm mt-2">No usage logged yet.</p>
-          )}
-
-          {showUsage && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-              <form
-                onSubmit={handleAddUsage}
-                className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-w-md w-full space-y-3"
-              >
-                <h3 className="text-white font-medium">Log usage</h3>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Impressions *</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={usageForm.impressions}
-                    onChange={(e) => setUsageForm((f) => ({ ...f, impressions: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Date</label>
-                  <input
-                    type="date"
-                    value={usageForm.usedOn}
-                    onChange={(e) => setUsageForm((f) => ({ ...f, usedOn: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Operator</label>
-                  <input
-                    type="text"
-                    value={usageForm.operatorName}
-                    onChange={(e) => setUsageForm((f) => ({ ...f, operatorName: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Condition after</label>
-                  <input
-                    type="text"
-                    value={usageForm.conditionAfter}
-                    onChange={(e) => setUsageForm((f) => ({ ...f, conditionAfter: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Notes</label>
-                  <input
-                    type="text"
-                    value={usageForm.notes}
-                    onChange={(e) => setUsageForm((f) => ({ ...f, notes: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowUsage(false)}
-                    className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
-                  >
-                    {saving ? 'Saving…' : 'Add'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
         </div>
       )}
 
-      {tab === 'maintenance' && (
-        <div>
-          <div className="flex justify-end mb-2">
-            <button
-              type="button"
-              onClick={() => setShowMaintenance(true)}
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
-            >
-              Add maintenance
-            </button>
-          </div>
-          <div className="overflow-x-auto rounded-lg border border-slate-700">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-800 text-slate-300">
-                <tr>
-                  <th className="px-4 py-2 text-left">Date</th>
-                  <th className="px-4 py-2 text-left">Action</th>
-                  <th className="px-4 py-2 text-left">Condition before</th>
-                  <th className="px-4 py-2 text-left">Condition after</th>
-                  <th className="px-4 py-2 text-left">Cost</th>
-                  <th className="px-4 py-2 text-left">Notes</th>
-                </tr>
-              </thead>
-              <tbody className="text-white">
-                {block.maintenanceLogs.map((m) => (
-                  <tr key={m.id} className="border-t border-slate-700">
-                    <td className="px-4 py-2">{m.performedAt.slice(0, 16).replace('T', ' ')}</td>
-                    <td className="px-4 py-2">{m.actionType}</td>
-                    <td className="px-4 py-2 text-slate-300">{m.conditionBefore ?? '—'}</td>
-                    <td className="px-4 py-2 text-slate-300">{m.conditionAfter ?? '—'}</td>
-                    <td className="px-4 py-2 text-slate-300">
-                      {m.cost != null ? `₹${m.cost}` : '—'}
-                    </td>
-                    <td className="px-4 py-2 text-slate-300">{m.notes ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {block.maintenanceLogs.length === 0 && (
-            <p className="text-slate-400 text-sm mt-2">No maintenance logged yet.</p>
-          )}
+      {tab === 'issue' && <IssueReturn block={block} />}
 
-          {showMaintenance && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-              <form
-                onSubmit={handleAddMaintenance}
-                className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-w-md w-full space-y-3"
-              >
-                <h3 className="text-white font-medium">Log maintenance</h3>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Action type *</label>
-                  <input
-                    type="text"
-                    value={maintForm.actionType}
-                    onChange={(e) => setMaintForm((f) => ({ ...f, actionType: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                    placeholder="e.g. Polish, Repair"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Performed at</label>
-                  <input
-                    type="datetime-local"
-                    value={maintForm.performedAt}
-                    onChange={(e) => setMaintForm((f) => ({ ...f, performedAt: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Condition before</label>
-                  <input
-                    type="text"
-                    value={maintForm.conditionBefore}
-                    onChange={(e) => setMaintForm((f) => ({ ...f, conditionBefore: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Condition after</label>
-                  <input
-                    type="text"
-                    value={maintForm.conditionAfter}
-                    onChange={(e) => setMaintForm((f) => ({ ...f, conditionAfter: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Cost (₹)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={maintForm.cost}
-                    onChange={(e) => setMaintForm((f) => ({ ...f, cost: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Notes</label>
-                  <input
-                    type="text"
-                    value={maintForm.notes}
-                    onChange={(e) => setMaintForm((f) => ({ ...f, notes: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-                  />
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowMaintenance(false)}
-                    className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
-                  >
-                    {saving ? 'Saving…' : 'Add'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
+      {tab === 'vendor' && (
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+          <table className="w-full text-xs">
+            <thead className="text-slate-400"><tr><th className="text-left">Order</th><th className="text-left">Type</th><th className="text-left">Vendor</th><th className="text-left">Status</th></tr></thead>
+            <tbody>{block.vendorOrders.map((o) => <tr key={o.id} className="border-t border-slate-800"><td className="py-1">{o.orderCode}</td><td>{o.orderType}</td><td>{o.vendorName}</td><td>{o.status}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === 'history' && (
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-2 text-sm">
+          {block.issueRecords.map((r) => <div key={r.id} className="border border-slate-800 rounded p-2">Issued to {r.issuedTo} · {new Date(r.issuedAt).toLocaleString('en-IN')} · {r.status}</div>)}
+        </div>
+      )}
+
+      {tab === 'audit' && (
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-2 text-xs">
+          {block.auditLog.map((a) => <div key={a.id} className="grid grid-cols-3 border-b border-slate-800 pb-1"><span>{new Date(a.performedAt).toLocaleString('en-IN')}</span><span>{a.action}</span><span>{a.performedBy}</span></div>)}
         </div>
       )}
     </div>
   )
 }
+
+function Info({ k, v }: { k: string; v: string }) {
+  return <div><span className="text-slate-500">{k}</span> <span className="text-slate-200">{v}</span></div>
+}
+
+function IssueReturn({ block }: { block: BlockDetail }) {
+  const [jobCardId, setJobCardId] = useState('')
+  const [jobCardNumber, setJobCardNumber] = useState('')
+  const [issuedTo, setIssuedTo] = useState('')
+  const [machineCode, setMachineCode] = useState('EMB-01')
+  const [impressionsThisRun, setImpressionsThisRun] = useState('')
+  const [returnCondition, setReturnCondition] = useState('Good')
+  const [actionTaken, setActionTaken] = useState('store')
+  const [returnNotes, setReturnNotes] = useState('')
+  const [storageLocation, setStorageLocation] = useState(block.storageLocation || '')
+
+  async function issue() {
+    await fetch(`/api/emboss-blocks/${block.id}/issue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobCardId, jobCardNumber: Number(jobCardNumber), machineCode, issuedTo }),
+    })
+    window.location.reload()
+  }
+  async function ret() {
+    const issueRecordId = block.issueRecords.find((r) => r.status === 'issued')?.id
+    if (!issueRecordId) return
+    await fetch(`/api/emboss-blocks/${block.id}/return`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        issueRecordId,
+        returnedBy: issuedTo || 'OPERATOR',
+        impressionsThisRun: Number(impressionsThisRun || 0),
+        returnCondition,
+        actionTaken,
+        returnNotes,
+        storageLocation,
+      }),
+    })
+    window.location.reload()
+  }
+
+  return block.status === 'issued' ? (
+    <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-2 text-sm">
+      <p className="text-slate-300">Currently issued. Return required.</p>
+      <input value={impressionsThisRun} onChange={(e) => setImpressionsThisRun(e.target.value)} placeholder="Impressions this run" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
+      <select value={returnCondition} onChange={(e) => setReturnCondition(e.target.value)} className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full">
+        <option>Good</option><option>Fair</option><option>Needs Polish</option><option>Damaged</option>
+      </select>
+      <select value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full">
+        <option value="store">store</option><option value="sent_for_polishing">sent_for_polishing</option><option value="scrapped">scrapped</option>
+      </select>
+      <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Storage location" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
+      <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
+      <button onClick={ret} className="px-3 py-2 rounded bg-amber-600 text-white text-xs">Confirm Return</button>
+    </div>
+  ) : (
+    <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-2 text-sm">
+      <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
+      <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
+      <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
+      <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full"><option>EMB-01</option><option>EMB-02</option></select>
+      <button onClick={issue} className="px-3 py-2 rounded bg-amber-600 text-white text-xs">Issue Block</button>
+    </div>
+  )
+}
+

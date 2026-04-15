@@ -21,6 +21,29 @@ export async function GET(
   })
   if (!li) return NextResponse.json({ error: 'PO line not found' }, { status: 404 })
 
+  const carton = li.cartonId
+    ? await db.carton.findUnique({
+        where: { id: li.cartonId },
+        select: { paperType: true },
+      })
+    : null
+  const paperForWac = (li.paperType || carton?.paperType || '').trim()
+  let boardWeightedAvgCost: number | null = null
+  if (paperForWac) {
+    const boardRow = await db.inventory.findFirst({
+      where: {
+        active: true,
+        OR: [
+          { description: { contains: paperForWac, mode: 'insensitive' } },
+          { materialCode: { contains: paperForWac.split(/\s+/)[0] ?? '', mode: 'insensitive' } },
+        ],
+      },
+      select: { weightedAvgCost: true },
+      orderBy: { updatedAt: 'desc' },
+    })
+    if (boardRow) boardWeightedAvgCost = Number(boardRow.weightedAvgCost)
+  }
+
   const spec = (li.specOverrides as Record<string, unknown> | null) || {}
   const model: JobSpecPdfModel = {
     poNumber: li.po.poNumber,
@@ -39,6 +62,7 @@ export async function GET(
     coatingType: li.coatingType,
     embossingLeafing: li.embossingLeafing,
     remarks: li.remarks,
+    boardWeightedAvgCost,
     specOverrides: {
       ups: spec.ups != null ? Number(spec.ups) : undefined,
       requiredSheets: spec.requiredSheets != null ? Number(spec.requiredSheets) : undefined,

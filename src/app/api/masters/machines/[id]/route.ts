@@ -6,6 +6,12 @@ import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
 
+function toOptionalNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
   make: z.string().optional(),
@@ -29,8 +35,8 @@ export async function PUT(
   const body = await req.json().catch(() => ({}))
   const parsed = updateSchema.safeParse({
     ...body,
-    capacityPerShift: body.capacityPerShift != null ? Number(body.capacityPerShift) : undefined,
-    stdWastePct: body.stdWastePct != null ? Number(body.stdWastePct) : undefined,
+    capacityPerShift: toOptionalNumber(body.capacityPerShift),
+    stdWastePct: toOptionalNumber(body.stdWastePct),
   })
   if (!parsed.success) {
     const fields: Record<string, string> = {}

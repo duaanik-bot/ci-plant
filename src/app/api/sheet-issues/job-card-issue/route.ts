@@ -3,6 +3,7 @@ import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
+import { sheetIssueSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +32,16 @@ export async function POST(req: NextRequest) {
   }
 
   const { jobCardId, qtyRequested, lotNumber } = parsed.data
+
+  const shared = sheetIssueSchema.safeParse({ jobCardId, qtyRequested, lotNumber })
+  if (!shared.success) {
+    const fields: Record<string, string> = {}
+    shared.error.issues.forEach((i) => {
+      const path = i.path[0] as string
+      if (path) fields[path] = i.message
+    })
+    return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+  }
 
   const result = await db.$transaction(async (tx) => {
     const jc = await tx.productionJobCard.findUnique({

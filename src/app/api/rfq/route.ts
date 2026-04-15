@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
-import { z } from 'zod'
+import { rfqSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
-const createSchema = z.object({
-  customerId: z.string().uuid(),
-  productName: z.string().min(1),
-  packType: z.string().min(1),
-  estimatedVolume: z.number().int().optional(),
-})
+function toOptionalNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
 
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
@@ -33,11 +32,25 @@ export async function POST(req: NextRequest) {
   const { error, user } = await requireAuth()
   if (error) return error
 
-  const body = await req.json()
-  const parsed = createSchema.safeParse(body)
+  const body = await req.json().catch(() => ({}))
+  const parsed = rfqSchema.safeParse({
+    ...body,
+    estimatedVolume: toOptionalNumber(body.estimatedVolume),
+    cartonLength: toOptionalNumber(body.cartonLength),
+    cartonWidth: toOptionalNumber(body.cartonWidth),
+    cartonHeight: toOptionalNumber(body.cartonHeight),
+    gsm: toOptionalNumber(body.gsm),
+    numberOfColours: toOptionalNumber(body.numberOfColours),
+    targetPrice: toOptionalNumber(body.targetPrice),
+  })
   if (!parsed.success) {
+    const fields: Record<string, string> = {}
+    parsed.error.issues.forEach((i) => {
+      const path = i.path[0] as string
+      if (path) fields[path] = i.message
+    })
     return NextResponse.json(
-      { error: 'Validation failed', details: parsed.error.flatten() },
+      { error: 'Validation failed', fields },
       { status: 400 }
     )
   }

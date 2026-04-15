@@ -8,6 +8,7 @@ import { db } from './db'
 import { sendWhatsApp } from './notifications'
 import { createAuditLog } from './audit'
 import { nanoid } from 'nanoid'
+import { onArtworkApproved } from './plate-engine'
 
 export const LOCK_NAMES: Record<number, string> = {
   1: 'Customer Approval Document',
@@ -125,6 +126,7 @@ export async function submitArtworkLock(params: {
   // If Lock 3 complete, trigger CTP release (Lock 4)
   if (lockNumber === 3) {
     await triggerCTPRelease(artworkId, artwork.job.jobNumber)
+    await onArtworkApproved(artworkId, artwork.jobId, approvedByUserId)
     return {
       success: true,
       message: `✅ Lock 3 approved. CTP release triggered. Plate imaging can now begin.`,

@@ -35,6 +35,10 @@ type SpecOverrides = {
   jobType?: 'new' | 'repeat'
   /** Linked emboss block (store) when resolved */
   embossBlockId?: string
+  /** Carton batch number preprinting (flexo / coding) */
+  batchNumberPreprinting?: boolean
+  batchPreprintingTotalBatches?: number | null
+  batchPreprintingBatchSize?: number | null
   [k: string]: unknown
 } | null
 
@@ -73,6 +77,36 @@ type DesigningDetail = {
   jobCard?: { id: string } | null
 }
 type User = { id: string; name: string }
+
+/** Merge batch preprinting from local form state; if enabled but values incomplete/invalid, returns {} so prior spec values stay. */
+function buildBatchPreprintingOverlay(
+  enabled: boolean,
+  totalStr: string,
+  sizeStr: string,
+): Partial<{
+  batchNumberPreprinting: boolean
+  batchPreprintingTotalBatches: number | null
+  batchPreprintingBatchSize: number | null
+}> {
+  if (!enabled) {
+    return {
+      batchNumberPreprinting: false,
+      batchPreprintingTotalBatches: null,
+      batchPreprintingBatchSize: null,
+    }
+  }
+  const t = totalStr.trim()
+  const s = sizeStr.trim()
+  if (!t || !s) return {}
+  const total = Math.floor(Number(t))
+  const size = Math.floor(Number(s))
+  if (!Number.isFinite(total) || total < 1 || !Number.isFinite(size) || size < 1) return {}
+  return {
+    batchNumberPreprinting: true,
+    batchPreprintingTotalBatches: total,
+    batchPreprintingBatchSize: size,
+  }
+}
 
 const manualInputClass =
   'mt-1 w-full px-2 py-1.5 rounded bg-slate-900 text-white text-sm border-2 border-slate-400/85 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-500/35 placeholder:text-slate-500'
@@ -115,6 +149,9 @@ export default function DesigningDetailPage() {
   const [actualSheetSizeInput, setActualSheetSizeInput] = useState('')
   const [numberOfUpsInput, setNumberOfUpsInput] = useState('')
   const [prePressRemarksInput, setPrePressRemarksInput] = useState('')
+  const [batchPreprintingEnabled, setBatchPreprintingEnabled] = useState(false)
+  const [batchTotalBatchesInput, setBatchTotalBatchesInput] = useState('')
+  const [batchBatchSizeInput, setBatchBatchSizeInput] = useState('')
   const [customerApproval, setCustomerApproval] = useState(false)
   const [qaTextApproval, setQaTextApproval] = useState(false)
   /** Smart set #: idle | loading | matched (history returned a set #) | empty (no history) */
@@ -157,6 +194,15 @@ export default function DesigningDetailPage() {
       typeof upsVal === 'number' && Number.isFinite(upsVal) ? String(upsVal) : '',
     )
     setPrePressRemarksInput(typeof spec.prePressRemarks === 'string' ? spec.prePressRemarks : '')
+    setBatchPreprintingEnabled(!!spec.batchNumberPreprinting)
+    const tb = spec.batchPreprintingTotalBatches
+    setBatchTotalBatchesInput(
+      tb != null && Number.isFinite(Number(tb)) ? String(Math.floor(Number(tb))) : '',
+    )
+    const bs = spec.batchPreprintingBatchSize
+    setBatchBatchSizeInput(
+      bs != null && Number.isFinite(Number(bs)) ? String(Math.floor(Number(bs))) : '',
+    )
     setCustomerApproval(!!spec.customerApprovalPharma)
     setQaTextApproval(!!spec.shadeCardQaTextApproval)
     setDesignerCommand(parseDesignerCommand(spec.designerCommand))
@@ -180,6 +226,11 @@ export default function DesigningDetailPage() {
     try {
       const specOverrides = {
         ...(data.line.specOverrides || {}),
+        ...buildBatchPreprintingOverlay(
+          batchPreprintingEnabled,
+          batchTotalBatchesInput,
+          batchBatchSizeInput,
+        ),
         assignedDesignerId: assignedDesignerId || undefined,
       }
       const res = await fetch(`/api/planning/po-lines/${poLineId}`, {
@@ -212,6 +263,11 @@ export default function DesigningDetailPage() {
       try {
         const specOverrides = {
           ...(data.line.specOverrides || {}),
+          ...buildBatchPreprintingOverlay(
+            batchPreprintingEnabled,
+            batchTotalBatchesInput,
+            batchBatchSizeInput,
+          ),
           customerApprovalPharma: next.customer,
           shadeCardQaTextApproval: next.qa,
         }
@@ -236,7 +292,7 @@ export default function DesigningDetailPage() {
         setSavingSpecs(false)
       }
     },
-    [data, poLineId],
+    [data, poLineId, batchPreprintingEnabled, batchTotalBatchesInput, batchBatchSizeInput],
   )
 
   const persistDesignerCommand = useCallback(
@@ -246,6 +302,11 @@ export default function DesigningDetailPage() {
       try {
         const specOverrides = {
           ...(data.line.specOverrides || {}),
+          ...buildBatchPreprintingOverlay(
+            batchPreprintingEnabled,
+            batchTotalBatchesInput,
+            batchBatchSizeInput,
+          ),
           jobType,
           designerCommand: next,
         }
@@ -271,7 +332,7 @@ export default function DesigningDetailPage() {
         if (!options?.skipLoading) setSavingDesignerCommand(false)
       }
     },
-    [data, poLineId, jobType],
+    [data, poLineId, jobType, batchPreprintingEnabled, batchTotalBatchesInput, batchBatchSizeInput],
   )
 
   const persistJobType = useCallback(
@@ -281,6 +342,11 @@ export default function DesigningDetailPage() {
       try {
         const specOverrides = {
           ...(data.line.specOverrides || {}),
+          ...buildBatchPreprintingOverlay(
+            batchPreprintingEnabled,
+            batchTotalBatchesInput,
+            batchBatchSizeInput,
+          ),
           jobType: next,
         }
         const res = await fetch(`/api/planning/po-lines/${poLineId}`, {
@@ -302,7 +368,7 @@ export default function DesigningDetailPage() {
         toast.error(e instanceof Error ? e.message : 'Failed to save job type')
       }
     },
-    [data, poLineId],
+    [data, poLineId, batchPreprintingEnabled, batchTotalBatchesInput, batchBatchSizeInput],
   )
 
   type ToolingApiBody = {
@@ -676,7 +742,15 @@ export default function DesigningDetailPage() {
     async (artworkId: string) => {
       if (!data?.line) return
       if (String(data.line.specOverrides?.artworkId ?? '').trim()) return
-      const specOverrides = { ...(data.line.specOverrides || {}), artworkId }
+      const specOverrides = {
+        ...(data.line.specOverrides || {}),
+        ...buildBatchPreprintingOverlay(
+          batchPreprintingEnabled,
+          batchTotalBatchesInput,
+          batchBatchSizeInput,
+        ),
+        artworkId,
+      }
       try {
         const res = await fetch(`/api/planning/po-lines/${poLineId}`, {
           method: 'PATCH',
@@ -692,7 +766,13 @@ export default function DesigningDetailPage() {
         /* non-fatal — effective id still works from resolvedArtworkId */
       }
     },
-    [data?.line, poLineId],
+    [
+      data?.line,
+      poLineId,
+      batchPreprintingEnabled,
+      batchTotalBatchesInput,
+      batchBatchSizeInput,
+    ],
   )
 
   useEffect(() => {
@@ -734,6 +814,40 @@ export default function DesigningDetailPage() {
     }
   }, [artworkCodeInput, fetchHistorySmartSet, jobType])
 
+  const resolveBatchPreprintingForSave = useCallback(():
+    | { error: string }
+    | {
+        batchNumberPreprinting: boolean
+        batchPreprintingTotalBatches: number | null
+        batchPreprintingBatchSize: number | null
+      } => {
+    if (!batchPreprintingEnabled) {
+      return {
+        batchNumberPreprinting: false,
+        batchPreprintingTotalBatches: null,
+        batchPreprintingBatchSize: null,
+      }
+    }
+    const t = batchTotalBatchesInput.trim()
+    const s = batchBatchSizeInput.trim()
+    if (!t || !s) {
+      return {
+        error:
+          'Total batches and batch size are required when batch number preprinting is enabled.',
+      }
+    }
+    const total = Math.floor(Number(t))
+    const size = Math.floor(Number(s))
+    if (!Number.isFinite(total) || total < 1 || !Number.isFinite(size) || size < 1) {
+      return { error: 'Total batches and batch size must be positive whole numbers.' }
+    }
+    return {
+      batchNumberPreprinting: true,
+      batchPreprintingTotalBatches: total,
+      batchPreprintingBatchSize: size,
+    }
+  }, [batchPreprintingEnabled, batchTotalBatchesInput, batchBatchSizeInput])
+
   const saveSetAndAwCode = async () => {
     if (!data) return
     const setTrim = setNumberInput.trim()
@@ -748,6 +862,12 @@ export default function DesigningDetailPage() {
     }
     setSavingSetAw(true)
     try {
+      const batchPart = resolveBatchPreprintingForSave()
+      if ('error' in batchPart) {
+        toast.error(batchPart.error)
+        setSavingSetAw(false)
+        return
+      }
       const upsRaw = numberOfUpsInput.trim()
       const upsNum = upsRaw ? Number(upsRaw) : null
       if (upsRaw !== '' && (Number.isNaN(upsNum) || upsNum === null || upsNum < 0)) {
@@ -762,6 +882,7 @@ export default function DesigningDetailPage() {
         ups: upsRaw === '' ? null : upsNum,
         prePressRemarks: prePressRemarksInput.trim() || null,
         designerCommand,
+        ...batchPart,
       }
       const res = await fetch(`/api/planning/po-lines/${poLineId}`, {
         method: 'PATCH',
@@ -809,6 +930,12 @@ export default function DesigningDetailPage() {
     }
     setSavingSpecs(true)
     try {
+      const batchPart = resolveBatchPreprintingForSave()
+      if ('error' in batchPart) {
+        toast.error(batchPart.error)
+        setSavingSpecs(false)
+        return
+      }
       const upsRaw = numberOfUpsInput.trim()
       const upsNum = upsRaw ? Number(upsRaw) : null
       if (upsRaw !== '' && (Number.isNaN(upsNum) || upsNum === null || upsNum < 0)) {
@@ -825,6 +952,7 @@ export default function DesigningDetailPage() {
         ups: upsRaw === '' ? null : upsNum,
         prePressRemarks: prePressRemarksInput.trim() || null,
         designerCommand,
+        ...batchPart,
       }
       const res = await fetch(`/api/planning/po-lines/${poLineId}`, {
         method: 'PATCH',
@@ -1303,6 +1431,64 @@ export default function DesigningDetailPage() {
               <KV label="Colours" value={String(line.specOverrides?.numberOfColours || 4)} />
               <KV label="Emboss / leaf" value={line.embossingLeafing || 'None'} />
               <KV label="Batch space" value={String(line.specOverrides?.batchSpace || '-')} />
+              {line.specOverrides?.batchNumberPreprinting ? (
+                <KV
+                  label="Batch preprinting"
+                  value={`${line.specOverrides.batchPreprintingTotalBatches ?? '—'} batches · size ${line.specOverrides.batchPreprintingBatchSize ?? '—'}`}
+                />
+              ) : null}
+            </div>
+            <div className="mt-3 pt-3 border-t border-slate-700 space-y-3">
+              <label className="flex items-start gap-2 text-xs text-slate-200 cursor-pointer max-w-xl">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-600 mt-0.5 shrink-0"
+                  checked={batchPreprintingEnabled}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    setBatchPreprintingEnabled(on)
+                    if (!on) {
+                      setBatchTotalBatchesInput('')
+                      setBatchBatchSizeInput('')
+                    }
+                  }}
+                />
+                <span>
+                  <span className="font-medium text-slate-100">Carton has batch number preprinting</span>
+                  <span className="block text-[11px] text-slate-500 font-normal mt-0.5">
+                    Enable if batch / lot coding is printed on the carton; save with &quot;Save set &amp; AW code&quot;
+                    or &quot;Save specs&quot;.
+                  </span>
+                </span>
+              </label>
+              {batchPreprintingEnabled ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:max-w-md pl-0 sm:pl-7">
+                  <label className="block text-xs text-slate-400">
+                    Total batches
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={batchTotalBatchesInput}
+                      onChange={(e) => setBatchTotalBatchesInput(e.target.value.replace(/\D/g, ''))}
+                      className={manualInputClass}
+                      placeholder="e.g. 12"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="block text-xs text-slate-400">
+                    Batch size
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={batchBatchSizeInput}
+                      onChange={(e) => setBatchBatchSizeInput(e.target.value.replace(/\D/g, ''))}
+                      className={manualInputClass}
+                      placeholder="e.g. 5000"
+                      autoComplete="off"
+                    />
+                  </label>
+                </div>
+              ) : null}
             </div>
             <label className="block text-xs text-slate-400 mt-3 pt-3 border-t border-slate-700">
               Pre-press remarks

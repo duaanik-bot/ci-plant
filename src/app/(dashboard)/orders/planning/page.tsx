@@ -4,11 +4,17 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
+import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
+import { isEmbossingRequired } from '@/lib/emboss-conditions'
 
 type PlanningSpec = {
   machineId?: string
   shift?: string
   plannedDate?: string
+  artworkLocksCompleted?: number
+  platesStatus?: 'available' | 'partial' | 'new_required'
+  dieStatus?: 'good' | 'attention' | 'not_available'
+  embossStatus?: 'ready' | 'vendor_ordered' | 'na'
 }
 
 type Line = {
@@ -34,6 +40,17 @@ type Line = {
     poDate: string
     customer: { id: string; name: string }
   }
+  jobCard?: {
+    id: string
+    jobCardNumber: number
+    status: string
+  } | null
+  readiness?: {
+    artworkLocksCompleted: number
+    platesStatus: string
+    dieStatus: string
+    machineAllocated: boolean
+  }
 }
 
 type Customer = { id: string; name: string; contactName?: string | null }
@@ -50,6 +67,23 @@ const PLANNING_STATUSES = [
 
 const SHIFTS = ['A', 'B', 'C'] as const
 
+function artworkBadge(locks: number) {
+  if (locks >= 2) return { label: '✅ 2/2', cls: 'bg-green-900/40 text-green-300 border border-green-700' }
+  return { label: `⏳ ${locks}/2`, cls: 'bg-amber-900/40 text-amber-300 border border-amber-700' }
+}
+
+function platesBadge(status: string) {
+  if (status === 'available') return { label: '✅ Available', cls: 'text-green-300' }
+  if (status === 'partial') return { label: '⚠ Partial', cls: 'text-amber-300' }
+  return { label: '❌ New required', cls: 'text-red-300' }
+}
+
+function dieBadge(status: string) {
+  if (status === 'good') return { label: '✅ Good', cls: 'text-green-300' }
+  if (status === 'attention') return { label: '⚠ Attention', cls: 'text-amber-300' }
+  return { label: '❌ Not available', cls: 'text-red-300' }
+}
+
 export default function PlanningPage() {
   const [rows, setRows] = useState<Line[]>([])
   const [machines, setMachines] = useState<Machine[]>([])
@@ -57,18 +91,13 @@ export default function PlanningPage() {
   const [planningStatus, setPlanningStatus] = useState('')
   const [customerId, setCustomerId] = useState('')
   const [savingId, setSavingId] = useState<string | null>(null)
+  const [queueTab, setQueueTab] = useState<'all' | 'ready' | 'awaiting_tools' | 'awaiting_artwork'>('all')
 
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'planning-customer',
     search: async (query: string) => {
-      const res = await fetch('/api/masters/customers')
-      const data = (await res.json()) as Customer[]
-      const q = query.toLowerCase()
-      return data.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          (c.contactName ?? '').toLowerCase().includes(q),
-      )
+      const res = await fetch(`/api/customers?q=${encodeURIComponent(query)}`)
+      return (await res.json()) as Customer[]
     },
     getId: (c) => c.id,
     getLabel: (c) => c.name,
@@ -164,10 +193,48 @@ export default function PlanningPage() {
     }
   }
 
+  const canMakeProcessing = (r: Line) => {
+    const spec = r.specOverrides || {}
+    const artworkLocks = Number(spec.artworkLocksCompleted ?? r.readiness?.artworkLocksCompleted ?? 0)
+    if (artworkLocks < 2) return { ok: false, reason: `Pre-press approvals pending (${artworkLocks}/2)` }
+
+    const plateStatus = String(spec.platesStatus ?? r.readiness?.platesStatus ?? 'new_required')
+    if (plateStatus === 'new_required') return { ok: false, reason: 'Plates not verified' }
+
+    const currentDieStatus = String(spec.dieStatus ?? r.readiness?.dieStatus ?? (r.dyeId ? 'good' : 'not_available'))
+    if (currentDieStatus === 'not_available') return { ok: false, reason: 'Die needs inspection' }
+
+    const embossRequired = isEmbossingRequired(r.embossingLeafing)
+    const embossStatus = embossRequired ? String(spec.embossStatus ?? 'vendor_ordered') : 'na'
+    if (embossRequired && embossStatus !== 'ready') return { ok: false, reason: 'Emboss block pending' }
+
+    if (!spec.machineId) return { ok: false, reason: 'Machine not allocated' }
+
+    return { ok: true, reason: '' }
+  }
+
   const totalQty = useMemo(
     () => rows.reduce((sum, r) => sum + (r.quantity || 0), 0),
     [rows],
   )
+
+  const tabFilteredRows = useMemo(() => {
+    return rows.filter((r) => {
+      const spec = r.specOverrides || {}
+      const artworkLocks = Number(spec.artworkLocksCompleted ?? r.readiness?.artworkLocksCompleted ?? 0)
+      const plateStatus = String(spec.platesStatus ?? r.readiness?.platesStatus ?? 'new_required')
+      const currentDieStatus = String(spec.dieStatus ?? r.readiness?.dieStatus ?? (r.dyeId ? 'good' : 'not_available'))
+      const embossRequired = isEmbossingRequired(r.embossingLeafing)
+      const embossStatus = embossRequired ? String(spec.embossStatus ?? 'vendor_ordered') : 'na'
+      const isReady = artworkLocks >= 2 && plateStatus === 'available' && currentDieStatus === 'good' && (embossStatus === 'ready' || embossStatus === 'na')
+      const awaitingTools = artworkLocks >= 2 && !isReady
+      const awaitingArtwork = artworkLocks < 2
+      if (queueTab === 'ready') return isReady
+      if (queueTab === 'awaiting_tools') return awaitingTools
+      if (queueTab === 'awaiting_artwork') return awaitingArtwork
+      return true
+    })
+  }, [rows, queueTab])
 
   if (loading) return <div className="p-4 text-slate-400">Loading…</div>
 
@@ -194,7 +261,7 @@ export default function PlanningPage() {
             href="/orders/designing"
             className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-sm"
           >
-            Designing
+            Artwork Queue
           </Link>
           <Link
             href="/production/job-cards"
@@ -202,7 +269,20 @@ export default function PlanningPage() {
           >
             Job Cards
           </Link>
+          <Link
+            href="/production/stages"
+            className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-sm"
+          >
+            Production Planning →
+          </Link>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setQueueTab('all')} className={`px-3 py-1.5 rounded border text-xs ${queueTab === 'all' ? 'bg-amber-600 border-amber-500 text-white' : 'border-slate-700 text-slate-300'}`}>All</button>
+        <button onClick={() => setQueueTab('ready')} className={`px-3 py-1.5 rounded border text-xs ${queueTab === 'ready' ? 'bg-amber-600 border-amber-500 text-white' : 'border-slate-700 text-slate-300'}`}>Ready to Process</button>
+        <button onClick={() => setQueueTab('awaiting_tools')} className={`px-3 py-1.5 rounded border text-xs ${queueTab === 'awaiting_tools' ? 'bg-amber-600 border-amber-500 text-white' : 'border-slate-700 text-slate-300'}`}>Awaiting Tools</button>
+        <button onClick={() => setQueueTab('awaiting_artwork')} className={`px-3 py-1.5 rounded border text-xs ${queueTab === 'awaiting_artwork' ? 'bg-amber-600 border-amber-500 text-white' : 'border-slate-700 text-slate-300'}`}>Awaiting Artwork</button>
       </div>
 
       <div className="flex flex-wrap gap-3 text-sm items-end">
@@ -218,53 +298,34 @@ export default function PlanningPage() {
             </option>
           ))}
         </select>
-        <div className="relative min-w-[200px]">
-          <label className="block text-xs text-slate-400 mb-0.5">Customer</label>
-          <input
-            type="text"
-            value={customerSearch.query}
-            onChange={(e) => {
-              customerSearch.setQuery(e.target.value)
+        <div className="min-w-[260px]">
+          <MasterSearchSelect
+            label="Customer"
+            query={customerSearch.query}
+            onQueryChange={(value) => {
+              customerSearch.setQuery(value)
               setCustomerId('')
             }}
-            placeholder="All customers or type to search…"
-            className="w-full px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+            loading={customerSearch.loading}
+            options={customerSearch.options}
+            lastUsed={customerSearch.lastUsed}
+            onSelect={applyCustomer}
+            getOptionLabel={(c) => c.name}
+            getOptionMeta={(c) => c.contactName ?? ''}
+            placeholder="Type 1-2 letters to filter customers..."
+            recentLabel="Recent customers"
+            loadingMessage="Searching customers..."
+            emptyMessage="No customer found."
           />
-          {customerSearch.options.length > 0 && (
-            <div className="absolute z-10 mt-0.5 w-full rounded border border-slate-700 bg-slate-900 max-h-40 overflow-y-auto">
-              {customerSearch.options.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => applyCustomer(c)}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-800 text-slate-100"
-                >
-                  {c.name}
-                </button>
-              ))}
-            </div>
-          )}
-          {customerSearch.lastUsed.length > 0 && !customerSearch.query && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {customerSearch.lastUsed.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => applyCustomer(c)}
-                  className="px-2 py-0.5 rounded-full bg-slate-800 text-xs text-slate-200 border border-slate-600 hover:border-amber-500"
-                >
-                  {c.name}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => applyCustomer(null)}
-                className="px-2 py-0.5 rounded-full bg-slate-700 text-xs text-slate-400 hover:text-white"
-              >
-                Clear
-              </button>
-            </div>
-          )}
+          {customerId ? (
+            <button
+              type="button"
+              onClick={() => applyCustomer(null)}
+              className="mt-1 text-xs text-slate-400 hover:text-white"
+            >
+              Clear customer filter
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -281,12 +342,25 @@ export default function PlanningPage() {
               <th className="px-3 py-2">Shift</th>
               <th className="px-3 py-2">Planned date</th>
               <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">AW Status</th>
+              <th className="px-3 py-2">Plates</th>
+              <th className="px-3 py-2">Die</th>
+              <th className="px-3 py-2">Emboss</th>
               <th className="px-3 py-2">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700">
-            {rows.map((r) => {
+            {tabFilteredRows.map((r) => {
               const spec = r.specOverrides || {}
+              const gate = canMakeProcessing(r)
+              const artworkLocks = Number(spec.artworkLocksCompleted ?? r.readiness?.artworkLocksCompleted ?? 0)
+              const plateStatus = String(spec.platesStatus ?? r.readiness?.platesStatus ?? 'new_required')
+              const currentDieStatus = String(spec.dieStatus ?? r.readiness?.dieStatus ?? (r.dyeId ? 'good' : 'not_available'))
+              const embossRequired = isEmbossingRequired(r.embossingLeafing)
+              const embossStatus = embossRequired ? String(spec.embossStatus ?? 'vendor_ordered') : 'na'
+              const art = artworkBadge(artworkLocks)
+              const plate = platesBadge(plateStatus)
+              const die = dieBadge(currentDieStatus)
               const machine = spec.machineId
                 ? machines.find((m) => m.id === spec.machineId)
                 : null
@@ -393,6 +467,55 @@ export default function PlanningPage() {
                       ))}
                     </select>
                   </td>
+                  <td className="px-3 py-2 align-top">
+                    <span className={`px-2 py-1 rounded text-[11px] ${art.cls}`}>
+                      {artworkLocks >= 2 ? '✅ 2/2' : `⏳ ${artworkLocks}/2`}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 align-top">
+                    <select
+                      value={plateStatus}
+                      onChange={(e) =>
+                        updateSpec(r.id, {
+                          platesStatus: e.target.value as PlanningSpec['platesStatus'],
+                        })
+                      }
+                      className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
+                    >
+                      <option value="available">✅ Available</option>
+                      <option value="partial">⚠ Partial</option>
+                      <option value="new_required">❌ New required</option>
+                    </select>
+                    <p className={`text-[11px] mt-0.5 ${plate.cls}`}>{plate.label}</p>
+                  </td>
+                  <td className="px-3 py-2 align-top">
+                    <select
+                      value={currentDieStatus}
+                      onChange={(e) =>
+                        updateSpec(r.id, {
+                          dieStatus: e.target.value as PlanningSpec['dieStatus'],
+                        })
+                      }
+                      className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
+                    >
+                      <option value="good">✅ Good</option>
+                      <option value="attention">⚠ Attention</option>
+                      <option value="not_available">❌ Not available</option>
+                    </select>
+                    <p className={`text-[11px] mt-0.5 ${die.cls}`}>{die.label}</p>
+                  </td>
+                  <td className="px-3 py-2 align-top">
+                    <select
+                      value={embossStatus}
+                      disabled={!embossRequired}
+                      onChange={(e) => updateSpec(r.id, { embossStatus: e.target.value })}
+                      className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs disabled:opacity-70"
+                    >
+                      <option value="na">⊘ N/A</option>
+                      <option value="ready">✅ Ready</option>
+                      <option value="vendor_ordered">🔴 Vendor Ordered</option>
+                    </select>
+                  </td>
                   <td className="px-3 py-2 align-top space-y-1">
                     <div className="flex flex-wrap gap-1">
                       <button
@@ -403,12 +526,21 @@ export default function PlanningPage() {
                       >
                         {savingId === r.id ? 'Saving…' : 'Save'}
                       </button>
-                      <Link
-                        href={`/orders/designing/${r.id}`}
-                        className="px-3 py-1 rounded-lg border border-slate-700 text-slate-200 text-[11px]"
+                      <button
+                        type="button"
+                        title={gate.ok ? 'Ready to make processing' : gate.reason}
+                        onClick={() => {
+                          if (!gate.ok) {
+                            toast.error(gate.reason)
+                            return
+                          }
+                          window.location.href = `/production/job-cards/new?lineId=${r.id}&poId=${r.po.id}`
+                        }}
+                        className="px-3 py-1 rounded-lg border border-slate-700 text-slate-200 text-[11px] disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={!gate.ok || queueTab !== 'ready'}
                       >
                         Make Processing
-                      </Link>
+                      </button>
                     </div>
                     <div className="flex flex-wrap gap-2 text-[11px] text-slate-400 mt-1">
                       <Link
@@ -417,30 +549,25 @@ export default function PlanningPage() {
                       >
                         PO
                       </Link>
-                      {r.jobCardNumber ? (
+                      {r.jobCard?.id ? (
                         <Link
-                          href="/production/job-cards"
+                          href={`/production/job-cards/${r.jobCard.id}`}
                           className="hover:text-amber-300"
                         >
-                          JC#{r.jobCardNumber}
+                          Open Job Card →
                         </Link>
                       ) : (
-                        <Link
-                          href={`/production/job-cards/new?lineId=${r.id}&poId=${r.po.id}`}
-                          className="hover:text-amber-300"
-                        >
-                          Create JC
-                        </Link>
+                        <span className="text-slate-500">No job card yet</span>
                       )}
                     </div>
                   </td>
                 </tr>
               )
             })}
-            {rows.length === 0 && (
+            {tabFilteredRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={14}
                   className="px-4 py-6 text-center text-slate-500 text-sm"
                 >
                   No items in planning queue.
@@ -453,4 +580,3 @@ export default function PlanningPage() {
     </div>
   )
 }
-

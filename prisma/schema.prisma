@@ -635,6 +635,10 @@ model Dye {
   scrapReason         String?   @map("scrap_reason")
   scrappedBy         String?   @map("scrapped_by")
   scrappedAt          DateTime? @map("scrapped_at")
+  custodyStatus       String    @default("in_stock") @map("custody_status") @db.VarChar(32)
+  issuedMachineId     String?   @map("issued_machine_id")
+  issuedOperator      String?   @map("issued_operator")
+  issuedAt            DateTime? @map("issued_at")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -817,9 +821,11 @@ model SheetIssueRecord {
 
 model PlateStore {
   id              String    @id @default(uuid())
-  jobCardId       String?   @map("job_card_id")
+  /// DB column `current_job_card_id` (see initial migration); links plate set to production job card.
+  jobCardId       String?   @map("current_job_card_id")
   cartonId        String?   @map("carton_id")
   artworkId       String?   @map("artwork_id")
+  artworkCode     String?   @map("artwork_code")
   artworkVersion  String?   @map("artwork_version")
   cartonName      String    @map("carton_name")
   customerId      String?   @map("customer_id")
@@ -829,6 +835,8 @@ model PlateStore {
   totalPlates     Int       @map("total_plates")
   newPlates       Int       @default(0) @map("new_plates")
   oldPlates       Int       @default(0) @map("old_plates")
+  rackLocation    String?   @map("rack_location")
+  slotNumber      String?   @map("slot_number")
   storageLocation String?   @map("storage_location")
   ctpOperator     String?   @map("ctp_operator")
   ctpDate         DateTime? @map("ctp_date") @db.Date
@@ -836,10 +844,16 @@ model PlateStore {
   printedOn       DateTime? @map("printed_on") @db.Date
   collectedBy     String?   @map("collected_by")
   collectedAt     DateTime? @map("collected_at")
+  issuedTo        String?   @map("issued_to")
+  issuedAt        DateTime? @map("issued_at")
+  returnedBy      String?   @map("returned_by")
+  returnedAt      DateTime? @map("returned_at")
   storageNotes    String?   @map("storage_notes")
   destroyedReason String?   @map("destroyed_reason")
   destroyedBy     String?   @map("destroyed_by")
   destroyedAt     DateTime? @map("destroyed_at")
+  totalImpressions Int      @default(0) @map("total_impressions")
+  lastUsedDate    DateTime? @map("last_used_date") @db.Date
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -849,6 +863,32 @@ model PlateStore {
   jobCardsUsingThis ProductionJobCard[] @relation("PlateSetUsedBy")
 
   @@map("plate_store")
+}
+
+model PlateRequirement {
+  id                 String    @id @default(uuid())
+  requirementCode    String    @unique @map("requirement_code")
+  jobCardId          String?   @map("job_card_id")
+  cartonName         String    @map("carton_name")
+  artworkCode        String?   @map("artwork_code")
+  artworkVersion     String?   @map("artwork_version")
+  customerId         String?   @map("customer_id")
+  numberOfColours    Int       @map("number_of_colours")
+  coloursNeeded      Json      @map("colours_needed")
+  newPlatesNeeded    Int       @map("new_plates_needed")
+  oldPlatesAvailable Int       @map("old_plates_available")
+  ctpTriggeredAt     DateTime? @map("ctp_triggered_at")
+  ctpOperator        String?   @map("ctp_operator")
+  ctpPriority        String    @default("Normal") @map("ctp_priority")
+  status             String    @default("pending")
+  triageChannel      String?   @map("triage_channel") @db.VarChar(40)
+  reservedRackSlot   String?   @map("reserved_rack_slot")
+  poLineId           String?   @map("po_line_id")
+  createdBy          String    @map("created_by")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@map("plate_requirements")
 }
 
 // ─────────────────────────────────────────
@@ -875,6 +915,10 @@ model EmbossBlock {
   scrappedBy       String?   @map("scrapped_by")
   scrappedAt       DateTime? @map("scrapped_at")
   active           Boolean   @default(true)
+  custodyStatus    String    @default("in_stock") @map("custody_status") @db.VarChar(32)
+  issuedMachineId  String?   @map("issued_machine_id")
+  issuedOperator   String?   @map("issued_operator")
+  issuedAt         DateTime? @map("issued_at")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
@@ -884,6 +928,29 @@ model EmbossBlock {
   jobCards         ProductionJobCard[]
 
   @@map("emboss_blocks")
+}
+
+// ─────────────────────────────────────────
+// SHADE CARDS (Ink lab / reference cards)
+// ─────────────────────────────────────────
+
+model ShadeCard {
+  id                String    @id @default(uuid())
+  shadeCode         String    @unique @map("shade_code")
+  productMaster     String?   @map("product_master")
+  masterArtworkRef  String?   @map("master_artwork_ref")
+  approvalDate      DateTime? @map("approval_date") @db.Date
+  inkComponent      String?   @map("ink_component")
+  currentHolder     String?   @map("current_holder")
+  impressionCount   Int       @default(0) @map("impression_count")
+  custodyStatus     String    @default("in_stock") @map("custody_status") @db.VarChar(32)
+  issuedMachineId   String?   @map("issued_machine_id")
+  issuedOperator    String?   @map("issued_operator")
+  issuedAt          DateTime? @map("issued_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("shade_cards")
 }
 
 model EmbossBlockUsageLog {

@@ -2,30 +2,40 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
+import { purchaseOrderSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
-const lineItemUpdateSchema = z.object({
+const lineItemUpdateSchema = purchaseOrderSchema.shape.lineItems.element.extend({
   id: z.string().uuid().optional(),
   cartonId: z.string().uuid().optional().nullable(),
-  cartonName: z.string().min(1),
   cartonSize: z.string().optional(),
-  quantity: z.number().int().positive(),
-  rate: z.number().min(0).optional(),
-  gsm: z.number().int().optional(),
-  gstPct: z.number().int().min(0).max(28).default(12),
+  artworkCode: z.string().optional().nullable(),
+  backPrint: z.string().optional(),
+  gstPct: z.number().int().min(0).max(28).default(5),
   coatingType: z.string().optional(),
   otherCoating: z.string().optional(),
   embossingLeafing: z.string().optional(),
   paperType: z.string().optional(),
-  dyeId: z.string().uuid().optional().nullable(),
+  dyeId: z.string().optional().nullable(),
   remarks: z.string().optional(),
   setNumber: z.string().optional(),
   planningStatus: z.string().optional(),
+  specOverrides: z.object({
+    wastagePct: z.number().optional(),
+    boardGrade: z.string().optional(),
+    foilType: z.string().optional(),
+  }).optional().nullable(),
 })
 
-const updateSchema = z.object({
-  customerId: z.string().uuid().optional(),
+const updateSchema = purchaseOrderSchema.partial().omit({
+  deliveryRequiredBy: true,
+  paymentTerms: true,
+  priority: true,
+  specialInstructions: true,
+  lineItems: true,
+}).extend({
+  poNumber: z.string().min(1).max(100).optional(),
   poDate: z.string().optional(),
   remarks: z.string().optional(),
   status: z.string().optional(),
@@ -94,16 +104,39 @@ export async function PUT(
 
   const data = parsed.data
 
+  // If poNumber is being changed, check it's not already taken by another PO
+  if (data.poNumber && data.poNumber !== existing.poNumber) {
+    const conflict = await db.purchaseOrder.findUnique({
+      where: { poNumber: data.poNumber },
+      select: { id: true },
+    })
+    if (conflict && conflict.id !== id) {
+      return NextResponse.json(
+        { error: 'PO number already exists', fields: { poNumber: 'This PO number is already in use' } },
+        { status: 400 }
+      )
+    }
+  }
+
   const updated = await db.$transaction(async (tx) => {
     const header = await tx.purchaseOrder.update({
       where: { id },
       data: {
+        ...(data.poNumber ? { poNumber: data.poNumber } : {}),
         ...(data.customerId ? { customerId: data.customerId } : {}),
         ...(data.poDate ? { poDate: new Date(data.poDate) } : {}),
         ...(data.remarks !== undefined ? { remarks: data.remarks || null } : {}),
         ...(data.status ? { status: data.status } : {}),
       },
     })
+
+    // When confirming a PO, push all pending line items into the artwork queue
+    if (data.status === 'confirmed' && existing.status !== 'confirmed') {
+      await tx.poLineItem.updateMany({
+        where: { poId: id, planningStatus: 'pending' },
+        data: { planningStatus: 'planned' },
+      })
+    }
 
     if (data.lineItems) {
       // Simple approach: delete existing and recreate from payload
@@ -117,8 +150,8 @@ export async function PUT(
               cartonName: li.cartonName,
               cartonSize: li.cartonSize || null,
               quantity: li.quantity,
-              artworkCode: null,
-              backPrint: 'No',
+              artworkCode: li.artworkCode || null,
+              backPrint: li.backPrint || 'No',
               rate: li.rate != null ? li.rate : null,
               gsm: li.gsm ?? null,
               gstPct: li.gstPct,
@@ -130,6 +163,9 @@ export async function PUT(
               remarks: li.remarks || null,
               setNumber: li.setNumber || null,
               planningStatus: li.planningStatus || 'pending',
+              specOverrides: li.specOverrides && Object.keys(li.specOverrides).length > 0
+                ? (li.specOverrides as object)
+                : null,
             },
           })
         )
@@ -150,3 +186,35 @@ export async function PUT(
   return NextResponse.json(updated)
 }
 
+export async function DELETE(
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const { error, user } = await requireAuth()
+  if (error) return error
+
+  const { id } = await context.params
+
+  try {
+    const existing = await db.purchaseOrder.findUnique({ where: { id }, select: { id: true, poNumber: true } })
+    if (!existing) return NextResponse.json({ error: 'PO not found' }, { status: 404 })
+
+    await db.$transaction(async (tx) => {
+      await tx.poLineItem.deleteMany({ where: { poId: id } })
+      await tx.purchaseOrder.delete({ where: { id } })
+    })
+
+    await createAuditLog({
+      userId: user!.id,
+      action: 'DELETE',
+      tableName: 'purchase_orders',
+      recordId: id,
+      oldValue: { poNumber: existing.poNumber },
+    })
+
+    return NextResponse.json({ success: true })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to delete PO'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}

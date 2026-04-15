@@ -55,6 +55,22 @@ export async function GET(
     },
   })
 
+  const jcNumbers = records
+    .map((r) => r.jobCard?.jobCardNumber)
+    .filter((n): n is number => n != null)
+  const uniqJcNumbers = Array.from(new Set(jcNumbers))
+  const poLines =
+    uniqJcNumbers.length > 0
+      ? await db.poLineItem.findMany({
+          where: { jobCardNumber: { in: uniqJcNumbers } },
+          select: { jobCardNumber: true, cartonName: true },
+        })
+      : []
+  const productNameByJc = new Map<number, string>()
+  poLines.forEach((l) => {
+    if (l.jobCardNumber != null) productNameByJc.set(l.jobCardNumber, l.cartonName)
+  })
+
   const jobCards = records.map((r) => ({
     stageRecord: {
       id: r.id,
@@ -75,6 +91,10 @@ export async function GET(
           totalSheets: r.jobCard.totalSheets,
           status: r.jobCard.status,
           customer: r.jobCard.customer,
+          productName:
+            r.jobCard.jobCardNumber != null
+              ? productNameByJc.get(r.jobCard.jobCardNumber) ?? null
+              : null,
         }
       : null,
   }))

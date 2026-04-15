@@ -1,0 +1,20 @@
+import { notFound } from 'next/navigation'
+import { parseHubToolType } from '@/lib/hub-types'
+import HubPlatesShell from '@/components/hub/HubPlatesShell'
+import HubInventoryShell from '@/components/hub/HubInventoryShell'
+
+export default async function HubToolTypePage({
+  params,
+}: {
+  params: Promise<{ toolType: string }>
+}) {
+  const { toolType: raw } = await params
+  const toolType = parseHubToolType(raw)
+  if (!toolType) notFound()
+
+  if (toolType === 'plates') {
+    return <HubPlatesShell />
+  }
+
+  return <HubInventoryShell toolType={toolType} />
+}

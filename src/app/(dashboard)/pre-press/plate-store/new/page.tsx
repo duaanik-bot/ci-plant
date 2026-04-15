@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
+import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 
 type Customer = { id: string; name: string }
 type CartonOption = { id: string; cartonName: string; customerId?: string }
@@ -14,13 +15,15 @@ export default function NewPlateStorePage() {
   const [cartonName, setCartonName] = useState('')
   const [customerId, setCustomerId] = useState('')
   const [cartonId, setCartonId] = useState('')
+  const [artworkCode, setArtworkCode] = useState('')
   const [artworkVersion, setArtworkVersion] = useState('')
   const [numberOfColours, setNumberOfColours] = useState(2)
   const [colourRows, setColourRows] = useState<{ name: string; status: 'new' | 'old' | 'destroyed' }[]>([
     { name: 'C', status: 'new' },
     { name: 'M', status: 'new' },
   ])
-  const [storageLocation, setStorageLocation] = useState('')
+  const [rackLocation, setRackLocation] = useState('')
+  const [slotNumber, setSlotNumber] = useState('')
   const [ctpOperator, setCtpOperator] = useState('')
   const [ctpDate, setCtpDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [notes, setNotes] = useState('')
@@ -75,10 +78,14 @@ export default function NewPlateStorePage() {
       toast.error('Carton name is required')
       return
     }
-    const colours: Record<string, string> = {}
-    colourRows.forEach((r) => {
-      colours[r.name.trim() || `Colour${Object.keys(colours).length + 1}`] = r.status
-    })
+    const colours = colourRows.map((r, idx) => ({
+      name: r.name.trim() || `Colour${idx + 1}`,
+      type: ['C', 'M', 'Y', 'K'].includes(r.name.toUpperCase()) ? 'process' : 'pantone',
+      status: r.status,
+      rackLocation: rackLocation.trim() || null,
+      slotNumber: slotNumber.trim() || null,
+      condition: r.status === 'destroyed' ? 'Destroyed' : r.status === 'new' ? 'New' : 'Good',
+    }))
     setSaving(true)
     try {
       const res = await fetch('/api/plate-store', {
@@ -88,13 +95,15 @@ export default function NewPlateStorePage() {
           cartonName: cartonName.trim(),
           customerId: customerId || null,
           cartonId: cartonId || null,
+          artworkCode: artworkCode.trim() || null,
           artworkVersion: artworkVersion.trim() || null,
           numberOfColours: colourRows.length,
           colours,
-          storageLocation: storageLocation.trim() || null,
+          rackLocation: rackLocation.trim() || null,
+          slotNumber: slotNumber.trim() || null,
           ctpOperator: ctpOperator.trim() || null,
           ctpDate: ctpDate || null,
-          storageNotes: notes.trim() || null,
+          ctpJobReference: notes.trim() || null,
         }),
       })
       const data = await res.json()
@@ -117,32 +126,36 @@ export default function NewPlateStorePage() {
 
       <form onSubmit={handleSubmit} className="space-y-4 rounded-xl bg-slate-900 border border-slate-700 p-4">
         <div>
-          <label className="block text-slate-400 mb-1">Carton name *</label>
-          <input
-            type="text"
-            value={cartonSearch.query || cartonName}
-            onChange={(e) => {
-              cartonSearch.setQuery(e.target.value)
-              setCartonName(e.target.value)
+          <MasterSearchSelect
+            label="Carton name"
+            required
+            query={cartonSearch.query || cartonName}
+            onQueryChange={(value) => {
+              cartonSearch.setQuery(value)
+              setCartonName(value)
               setCartonId('')
             }}
-            placeholder="Search or type carton name…"
+            loading={cartonSearch.loading}
+            options={cartonSearch.options}
+            lastUsed={cartonSearch.lastUsed}
+            onSelect={applyCarton}
+            getOptionLabel={(c) => c.cartonName}
+            placeholder="Type carton name..."
+            recentLabel="Recent cartons"
+            loadingMessage="Searching cartons..."
+            emptyMessage="No carton found."
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-400 mb-1">Artwork code</label>
+          <input
+            type="text"
+            value={artworkCode}
+            onChange={(e) => setArtworkCode(e.target.value)}
+            placeholder="e.g. BSJ.2.5CT-0325"
             className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
           />
-          {cartonSearch.options.length > 0 && (
-            <div className="mt-0.5 rounded border border-slate-700 bg-slate-900 max-h-40 overflow-y-auto">
-              {cartonSearch.options.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => applyCarton(c)}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-800 text-slate-100"
-                >
-                  {c.cartonName}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         <div>
@@ -205,12 +218,23 @@ export default function NewPlateStorePage() {
         </div>
 
         <div>
-          <label className="block text-slate-400 mb-1">Storage location</label>
+          <label className="block text-slate-400 mb-1">Rack location</label>
           <input
             type="text"
-            value={storageLocation}
-            onChange={(e) => setStorageLocation(e.target.value)}
-            placeholder="e.g. Rack B-3, Slot 12"
+            value={rackLocation}
+            onChange={(e) => setRackLocation(e.target.value)}
+            placeholder="e.g. Rack B-3"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-400 mb-1">Slot number</label>
+          <input
+            type="text"
+            value={slotNumber}
+            onChange={(e) => setSlotNumber(e.target.value)}
+            placeholder="e.g. Slot 12"
             className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
           />
         </div>

@@ -63,6 +63,25 @@ type PipelineJob = {
   dueDate: string
 }
 
+type DashboardSummary = {
+  stats: Stats
+  presses: PressStatus[]
+  alerts: AlertItem[]
+  pipeline: PipelineJob[]
+  rfqList: { id: string; status: string }[]
+  stockAlerts: { materialCode: string; description: string; qtyAvailable: number; reorderPoint: number }[]
+  jobsList: {
+    id: string
+    jobNumber: string
+    productName: string
+    qtyOrdered: number
+    dueDate: string
+    status: string
+    artwork?: { locksCompleted?: number } | null
+  }[]
+  openNcrs: { id: string; severity: string }[]
+}
+
 const STAT_CARDS: {
   key: keyof Stats
   label: string
@@ -128,67 +147,25 @@ function dueDateClass(dueDate: string): string {
 }
 
 export default function DashboardClient() {
-  const { data: stats, isLoading: statsLoading } = useQuery<Stats>({
-    queryKey: ['dashboard-stats'],
-    queryFn: () => fetch('/api/dashboard/stats').then((r) => r.json()),
-    refetchInterval: 30000,
+  const { data: summary, isLoading } = useQuery<DashboardSummary>({
+    queryKey: ['dashboard-summary'],
+    queryFn: async () => {
+      const res = await fetch('/api/dashboard/summary')
+      if (!res.ok) throw new Error('Failed to load dashboard')
+      return res.json()
+    },
+    refetchInterval: 60000,
+    staleTime: 30000,
   })
 
-  const { data: presses, isLoading: pressesLoading } = useQuery<PressStatus[]>({
-    queryKey: ['dashboard-press-status'],
-    queryFn: () => fetch('/api/dashboard/press-status').then((r) => r.json()),
-    refetchInterval: 30000,
-  })
-
-  const { data: alerts } = useQuery<AlertItem[]>({
-    queryKey: ['dashboard-alerts'],
-    queryFn: () => fetch('/api/dashboard/alerts').then((r) => r.json()),
-    refetchInterval: 30000,
-  })
-
-  const { data: pipeline } = useQuery<PipelineJob[]>({
-    queryKey: ['dashboard-active-jobs'],
-    queryFn: () => fetch('/api/dashboard/active-jobs-pipeline').then((r) => r.json()),
-    refetchInterval: 30000,
-  })
-
-  const { data: rfqList } = useQuery<{ id: string; status: string }[]>({
-    queryKey: ['dashboard-rfq'],
-    queryFn: () => fetch('/api/rfq').then((r) => r.json()),
-    refetchInterval: 30000,
-  })
-
-  const { data: stockAlerts } = useQuery<
-    { materialCode: string; description: string; qtyAvailable: number; reorderPoint: number }[]
-  >({
-    queryKey: ['dashboard-inventory-alerts'],
-    queryFn: () => fetch('/api/inventory/alerts').then((r) => r.json()),
-    refetchInterval: 30000,
-  })
-
-  const { data: jobsList } = useQuery<
-    {
-      id: string
-      jobNumber: string
-      productName: string
-      qtyOrdered: number
-      dueDate: string
-      status: string
-      artwork?: { locksCompleted?: number } | null
-    }[]
-  >({
-    queryKey: ['dashboard-jobs'],
-    queryFn: () => fetch('/api/jobs').then((r) => r.json()),
-    refetchInterval: 30000,
-  })
-
-  const { data: openNcrs } = useQuery<
-    { id: string; severity: string }[]
-  >({
-    queryKey: ['dashboard-ncrs-open'],
-    queryFn: () => fetch('/api/ncrs?status=open').then((r) => r.json()),
-    refetchInterval: 30000,
-  })
+  const stats = summary?.stats
+  const presses = summary?.presses
+  const alerts = summary?.alerts
+  const pipeline = summary?.pipeline
+  const rfqList = summary?.rfqList
+  const stockAlerts = summary?.stockAlerts
+  const jobsList = summary?.jobsList
+  const openNcrs = summary?.openNcrs
 
   const rfqCountByStatus = (() => {
     const counts: Record<string, number> = {}
@@ -232,7 +209,7 @@ export default function DashboardClient() {
           const value = stats ? stats[card.key] : 0
           const display = typeof value === 'number' && card.key === 'avgOee' ? card.format(value) : card.format(Number(value))
 
-          if (statsLoading) {
+          if (isLoading) {
             return <StatCardSkeleton key={card.key} />
           }
 
@@ -257,7 +234,7 @@ export default function DashboardClient() {
         {/* LEFT — Press Status — Live */}
         <div className="rounded-xl bg-slate-800 border border-slate-700 p-4">
           <h2 className="text-sm font-semibold text-slate-200 mb-3">Press Status — Live</h2>
-          {pressesLoading ? (
+          {isLoading ? (
             <div className="space-y-2">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="rounded-lg border border-slate-700 bg-slate-800/60 p-3 animate-pulse">

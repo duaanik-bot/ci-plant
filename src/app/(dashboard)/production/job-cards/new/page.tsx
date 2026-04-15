@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
+import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 
 type PurchaseOrder = {
   id: string
@@ -124,49 +125,26 @@ export default function NewJobCardPage() {
 
       <div className="grid md:grid-cols-2 gap-4 bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm">
         <div>
-          <label className="block text-slate-400 mb-1">Purchase order*</label>
-          <input
-            type="text"
-            value={poSearch.query}
-            onChange={(e) => {
-              poSearch.setQuery(e.target.value)
+          <MasterSearchSelect
+            label="Purchase order"
+            required
+            query={poSearch.query}
+            onQueryChange={(value) => {
+              poSearch.setQuery(value)
               setPoId('')
               setLineId('')
             }}
-            placeholder="Search PO number or customer…"
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            loading={poSearch.loading}
+            options={poSearch.options}
+            lastUsed={poSearch.lastUsed}
+            onSelect={applyPo}
+            getOptionLabel={(p) => p.poNumber}
+            getOptionMeta={(p) => p.customer?.name ?? ''}
+            placeholder="Type PO number or customer..."
+            recentLabel="Recent purchase orders"
+            loadingMessage="Searching purchase orders..."
+            emptyMessage="No purchase order found."
           />
-          {poSearch.loading && (
-            <p className="text-xs text-slate-400 mt-0.5">Searching…</p>
-          )}
-          {poSearch.options.length > 0 && (
-            <div className="mt-0.5 rounded border border-slate-700 bg-slate-900 max-h-40 overflow-y-auto">
-              {poSearch.options.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => applyPo(p)}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-800 text-slate-100"
-                >
-                  {p.poNumber} — {p.customer?.name}
-                </button>
-              ))}
-            </div>
-          )}
-          {poSearch.lastUsed.length > 0 && !poSearch.query && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {poSearch.lastUsed.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => applyPo(p)}
-                  className="px-2 py-0.5 rounded-full bg-slate-800 text-xs text-slate-200 border border-slate-600 hover:border-amber-500"
-                >
-                  {p.poNumber}
-                </button>
-              ))}
-            </div>
-          )}
           {selectedPo && (
             <p className="text-xs text-slate-500 mt-1">Selected: {selectedPo.poNumber}</p>
           )}
@@ -255,4 +233,3 @@ export default function NewJobCardPage() {
     </form>
   )
 }
-

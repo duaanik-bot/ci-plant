@@ -3,49 +3,103 @@ import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
+import { cartonSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
-const createSchema = z.object({
-  cartonName: z.string().min(1, 'Carton name is required'),
-  customerId: z.string().uuid('Customer is required'),
+function toOptionalNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+const createSchema = cartonSchema.extend({
   productType: z.string().optional(),
   category: z.string().optional(),
   rate: z.number().min(0).optional(),
-  gstPct: z.number().int().min(0).max(28).default(12),
+  gstPct: z.number().int().min(0).max(28).default(5),
   active: z.boolean().default(true),
+  remarks: z.string().optional(),
+  cartonSize: z.string().optional(),
+  printSize: z.string().optional(),
   boardGrade: z.string().optional(),
-  gsm: z.number().int().optional(),
+  gsm: z.number().int().min(150).max(600).optional(),
   caliperMicrons: z.number().int().optional(),
   paperType: z.string().optional(),
   plyCount: z.number().int().min(1).max(3).optional(),
   finishedLength: z.number().positive().optional(),
   finishedWidth: z.number().positive().optional(),
   finishedHeight: z.number().positive().optional(),
+  blankLength: z.number().positive().optional(),
+  blankWidth: z.number().positive().optional(),
+  printingType: z.string().optional(),
   coatingType: z.string().optional(),
   embossingLeafing: z.string().optional(),
   foilType: z.string().optional(),
   artworkCode: z.string().optional(),
   backPrint: z.string().optional(),
+  pastingType: z.string().optional(),
+  glueType: z.string().optional(),
+  cartonConstruct: z.string().optional(),
+  dyeId: z.string().uuid().optional().nullable(),
+  dyeCondition: z.string().optional(),
+  drugSchedule: z.string().optional(),
+  regulatoryText: z.string().optional(),
+  specialInstructions: z.string().optional(),
 })
 
 export async function GET() {
   const { error } = await requireRole('operations_head', 'md')
   if (error) return error
 
-  const list = await db.carton.findMany({
-    include: { customer: { select: { id: true, name: true } } },
-    orderBy: { cartonName: 'asc' },
-  })
+  const list = await db.$queryRawUnsafe<Array<{
+    id: string
+    cartonName: string
+    customerId: string
+    customerName: string
+    gsm: number | null
+    boardGrade: string | null
+    paperType: string | null
+    coatingType: string | null
+    finishedLength: number | null
+    finishedWidth: number | null
+    finishedHeight: number | null
+    rate: number | null
+    active: boolean
+  }>>(`
+    select
+      c.id,
+      c.carton_name as "cartonName",
+      c.customer_id as "customerId",
+      cu.name as "customerName",
+      c.gsm,
+      c.board_grade as "boardGrade",
+      c.paper_type as "paperType",
+      c.coating_type as "coatingType",
+      c.finished_length::float8 as "finishedLength",
+      c.finished_width::float8 as "finishedWidth",
+      c.finished_height::float8 as "finishedHeight",
+      c.rate::float8 as rate,
+      c.active
+    from cartons c
+    join customers cu on cu.id = c.customer_id
+    order by c.carton_name asc
+  `)
   return NextResponse.json(
     list.map((c) => ({
-      ...c,
-      rate: c.rate != null ? Number(c.rate) : null,
-      burstStrengthMin: c.burstStrengthMin != null ? Number(c.burstStrengthMin) : null,
-      moistureMaxPct: c.moistureMaxPct != null ? Number(c.moistureMaxPct) : null,
-      finishedLength: c.finishedLength != null ? Number(c.finishedLength) : null,
-      finishedWidth: c.finishedWidth != null ? Number(c.finishedWidth) : null,
-      finishedHeight: c.finishedHeight != null ? Number(c.finishedHeight) : null,
+      id: c.id,
+      cartonName: c.cartonName,
+      customerId: c.customerId,
+      customer: { id: c.customerId, name: c.customerName },
+      gsm: c.gsm,
+      boardGrade: c.boardGrade,
+      paperType: c.paperType,
+      coatingType: c.coatingType,
+      finishedLength: c.finishedLength,
+      finishedWidth: c.finishedWidth,
+      finishedHeight: c.finishedHeight,
+      rate: c.rate,
+      active: c.active,
     }))
   )
 }
@@ -57,11 +111,13 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
   const parsed = createSchema.safeParse({
     ...body,
-    rate: body.rate != null ? Number(body.rate) : undefined,
-    gstPct: body.gstPct != null ? Number(body.gstPct) : 12,
-    finishedLength: body.finishedLength != null ? Number(body.finishedLength) : undefined,
-    finishedWidth: body.finishedWidth != null ? Number(body.finishedWidth) : undefined,
-    finishedHeight: body.finishedHeight != null ? Number(body.finishedHeight) : undefined,
+    rate: toOptionalNumber(body.rate),
+    gstPct: toOptionalNumber(body.gstPct) ?? 5,
+    finishedLength: toOptionalNumber(body.finishedLength),
+    finishedWidth: toOptionalNumber(body.finishedWidth),
+    finishedHeight: toOptionalNumber(body.finishedHeight),
+    blankLength: toOptionalNumber(body.blankLength),
+    blankWidth: toOptionalNumber(body.blankWidth),
   })
   if (!parsed.success) {
     const fields: Record<string, string> = {}
@@ -83,6 +139,9 @@ export async function POST(req: NextRequest) {
       rate: data.rate ?? null,
       gstPct: data.gstPct,
       active: data.active,
+      remarks: data.remarks || null,
+      cartonSize: data.cartonSize || null,
+      printSize: data.printSize || null,
       boardGrade: data.boardGrade || null,
       gsm: data.gsm ?? null,
       caliperMicrons: data.caliperMicrons ?? null,
@@ -91,11 +150,22 @@ export async function POST(req: NextRequest) {
       finishedLength: data.finishedLength ?? null,
       finishedWidth: data.finishedWidth ?? null,
       finishedHeight: data.finishedHeight ?? null,
+      blankLength: data.blankLength ?? null,
+      blankWidth: data.blankWidth ?? null,
+      printingType: data.printingType || null,
       coatingType: data.coatingType || null,
       embossingLeafing: data.embossingLeafing || null,
       foilType: data.foilType || null,
       artworkCode: data.artworkCode || null,
       backPrint: data.backPrint || 'No',
+      pastingType: data.pastingType || null,
+      glueType: data.glueType || null,
+      cartonConstruct: data.cartonConstruct || null,
+      dyeId: data.dyeId || null,
+      dyeCondition: data.dyeCondition || null,
+      drugSchedule: data.drugSchedule || null,
+      regulatoryText: data.regulatoryText || null,
+      specialInstructions: data.specialInstructions || null,
     },
   })
 
@@ -109,4 +179,3 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(carton, { status: 201 })
 }
-

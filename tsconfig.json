@@ -33,6 +33,13 @@
     "**/*.tsx"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "prisma/seed.ts",
+    "scripts/**/*.ts",
+    "src/app/(dashboard)/employees/**/*",
+    "src/app/(dashboard)/payroll/**/*",
+    "src/app/api/employees/**/*",
+    "src/app/api/payroll/**/*",
+    "src/components/payroll/**/*"
   ]
 }

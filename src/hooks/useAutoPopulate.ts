@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 type AutoPopulateConfig<T> = {
   storageKey: string
   search: (query: string) => Promise<T[]>
   getId: (item: T) => string
   getLabel: (item: T) => string
+  minQueryLength?: number
 }
 
 type AutoPopulateState<T> = {
@@ -21,12 +22,17 @@ type AutoPopulateState<T> = {
 const LAST_USED_LIMIT = 5
 
 export function useAutoPopulate<T>(config: AutoPopulateConfig<T>): AutoPopulateState<T> {
-  const { storageKey, search, getId, getLabel } = config
+  const { storageKey, search, getId, getLabel, minQueryLength = 1 } = config
 
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [options, setOptions] = useState<T[]>([])
   const [lastUsed, setLastUsed] = useState<T[]>([])
+  const searchRef = useRef(search)
+
+  useEffect(() => {
+    searchRef.current = search
+  }, [search])
 
   // Load last-used from localStorage
   useEffect(() => {
@@ -49,15 +55,17 @@ export function useAutoPopulate<T>(config: AutoPopulateConfig<T>): AutoPopulateS
 
   // Debounced search
   useEffect(() => {
-    if (!query || query.length < 2) {
+    const normalizedQuery = query.trim()
+    if (!normalizedQuery || normalizedQuery.length < minQueryLength) {
       setOptions([])
+      setLoading(false)
       return
     }
     let cancelled = false
     const handle = setTimeout(async () => {
       setLoading(true)
       try {
-        const res = await search(query)
+        const res = await searchRef.current(normalizedQuery)
         if (!cancelled) {
           setOptions(res)
         }
@@ -71,7 +79,7 @@ export function useAutoPopulate<T>(config: AutoPopulateConfig<T>): AutoPopulateS
       cancelled = true
       clearTimeout(handle)
     }
-  }, [query, search])
+  }, [minQueryLength, query])
 
   const select = (item: T) => {
     setOptions([])
@@ -109,4 +117,3 @@ export function useAutoPopulate<T>(config: AutoPopulateConfig<T>): AutoPopulateS
 
   return state
 }
-

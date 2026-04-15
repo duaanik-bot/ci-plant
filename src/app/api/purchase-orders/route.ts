@@ -2,8 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
+import { purchaseOrderSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
+
+function toOptionalNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
 
 const specOverridesSchema = z
   .object({
@@ -16,29 +23,30 @@ const specOverridesSchema = z
   })
   .optional()
 
-const lineItemSchema = z.object({
+const lineItemSchema = purchaseOrderSchema.shape.lineItems.element.extend({
   cartonId: z.string().uuid().optional().nullable(),
-  cartonName: z.string().min(1, 'Carton name is required'),
   cartonSize: z.string().optional(),
-  quantity: z.number().int().positive('Quantity must be positive'),
-  artworkCode: z.string().optional(),
   backPrint: z.string().optional(),
-  rate: z.number().min(0).optional(),
-  gsm: z.number().int().optional(),
-  gstPct: z.number().int().min(0).max(28).default(12),
+  gstPct: z.number().int().min(0).max(28).default(5),
   coatingType: z.string().optional(),
   otherCoating: z.string().optional(),
   embossingLeafing: z.string().optional(),
   paperType: z.string().optional(),
-  dyeId: z.string().uuid().optional().nullable(),
   remarks: z.string().optional(),
   setNumber: z.string().optional(),
   specOverrides: specOverridesSchema,
 })
 
-const createSchema = z.object({
-  customerId: z.string().uuid('Customer is required'),
+const createSchema = purchaseOrderSchema.omit({
+  poNumber: true,
+  deliveryRequiredBy: true,
+  paymentTerms: true,
+  priority: true,
+  specialInstructions: true,
+  lineItems: true,
+}).extend({
   poDate: z.string().min(1, 'PO date is required'),
+  poNumber: z.string().min(1).max(100).optional(),
   remarks: z.string().optional(),
   status: z.string().optional(),
   lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
@@ -91,6 +99,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  try {
   const { error, user } = await requireAuth()
   if (error) return error
 
@@ -100,27 +109,18 @@ export async function POST(req: NextRequest) {
     lineItems: Array.isArray(body.lineItems)
       ? body.lineItems.map((li: any) => ({
           ...li,
-          quantity: li.quantity != null ? Number(li.quantity) : undefined,
-          rate: li.rate != null ? Number(li.rate) : undefined,
-          gsm: li.gsm != null ? Number(li.gsm) : undefined,
-          gstPct: li.gstPct != null ? Number(li.gstPct) : undefined,
+          quantity: toOptionalNumber(li.quantity),
+          rate: toOptionalNumber(li.rate),
+          gsm: toOptionalNumber(li.gsm),
+          gstPct: toOptionalNumber(li.gstPct),
           specOverrides:
             li.specOverrides && typeof li.specOverrides === 'object'
               ? {
                   ...li.specOverrides,
-                  ups: li.specOverrides.ups != null ? Number(li.specOverrides.ups) : undefined,
-                  wastagePct:
-                    li.specOverrides.wastagePct != null
-                      ? Number(li.specOverrides.wastagePct)
-                      : undefined,
-                  requiredSheets:
-                    li.specOverrides.requiredSheets != null
-                      ? Number(li.specOverrides.requiredSheets)
-                      : undefined,
-                  totalSheets:
-                    li.specOverrides.totalSheets != null
-                      ? Number(li.specOverrides.totalSheets)
-                      : undefined,
+                  ups: toOptionalNumber(li.specOverrides.ups),
+                  wastagePct: toOptionalNumber(li.specOverrides.wastagePct),
+                  requiredSheets: toOptionalNumber(li.specOverrides.requiredSheets),
+                  totalSheets: toOptionalNumber(li.specOverrides.totalSheets),
                 }
               : undefined,
         }))
@@ -138,56 +138,79 @@ export async function POST(req: NextRequest) {
 
   const data = parsed.data
 
-  const lastPo = await db.purchaseOrder.findFirst({
-    orderBy: { poNumber: 'desc' },
-    select: { poNumber: true },
-  })
-  const poNumber = buildPoNumber(lastPo?.poNumber ?? null)
-
-  const created = await db.$transaction(async (tx) => {
-    const po = await tx.purchaseOrder.create({
-      data: {
-        poNumber,
-        customerId: data.customerId,
-        poDate: new Date(data.poDate),
-        remarks: data.remarks || null,
-        status: data.status || 'draft',
-        createdBy: user!.id,
-      },
+  const rawPoNumber = data.poNumber?.trim()
+  let poNumber: string
+  if (rawPoNumber) {
+    const existing = await db.purchaseOrder.findUnique({
+      where: { poNumber: rawPoNumber },
+      select: { id: true },
     })
-
-    await Promise.all(
-      data.lineItems.map((li) =>
-        tx.poLineItem.create({
-          data: {
-            poId: po.id,
-            cartonId: li.cartonId || null,
-            cartonName: li.cartonName,
-            cartonSize: li.cartonSize || null,
-            quantity: li.quantity,
-            artworkCode: li.artworkCode || null,
-            backPrint: li.backPrint || 'No',
-            rate: li.rate != null ? li.rate : null,
-            gsm: li.gsm ?? null,
-            gstPct: li.gstPct,
-            coatingType: li.coatingType || null,
-            otherCoating: li.otherCoating || null,
-            embossingLeafing: li.embossingLeafing || null,
-            paperType: li.paperType || null,
-            dyeId: li.dyeId || null,
-            remarks: li.remarks || null,
-            setNumber: li.setNumber || null,
-            specOverrides:
-              li.specOverrides && Object.keys(li.specOverrides).length > 0
-                ? (li.specOverrides as object)
-                : null,
-          },
-        })
+    if (existing) {
+      return NextResponse.json(
+        { error: 'PO number already exists', fields: { poNumber: 'This PO number is already in use' } },
+        { status: 400 }
       )
-    )
+    }
+    poNumber = rawPoNumber
+  } else {
+    const lastPo = await db.purchaseOrder.findFirst({
+      orderBy: { poNumber: 'desc' },
+      select: { poNumber: true },
+    })
+    poNumber = buildPoNumber(lastPo?.poNumber ?? null)
+  }
 
-    return po
-  })
+  let created: Awaited<ReturnType<typeof db.purchaseOrder.create>>
+  try {
+    created = await db.$transaction(async (tx) => {
+      const po = await tx.purchaseOrder.create({
+        data: {
+          poNumber,
+          customerId: data.customerId,
+          poDate: new Date(data.poDate),
+          remarks: data.remarks || null,
+          status: data.status || 'draft',
+          createdBy: user!.id,
+        },
+      })
+
+      await Promise.all(
+        data.lineItems.map((li) =>
+          tx.poLineItem.create({
+            data: {
+              poId: po.id,
+              cartonId: li.cartonId || null,
+              cartonName: li.cartonName,
+              cartonSize: li.cartonSize || null,
+              quantity: li.quantity,
+              artworkCode: li.artworkCode || null,
+              backPrint: li.backPrint || 'No',
+              rate: li.rate != null ? li.rate : null,
+              gsm: li.gsm ?? null,
+              gstPct: li.gstPct,
+              coatingType: li.coatingType || null,
+              otherCoating: li.otherCoating || null,
+              embossingLeafing: li.embossingLeafing || null,
+              paperType: li.paperType || null,
+              dyeId: li.dyeId || null,
+              remarks: li.remarks || null,
+              setNumber: li.setNumber || null,
+              specOverrides:
+                li.specOverrides && Object.keys(li.specOverrides).length > 0
+                  ? (li.specOverrides as object)
+                  : null,
+            },
+          })
+        )
+      )
+
+      return po
+    })
+  } catch (err) {
+    console.error('[POST /api/purchase-orders] DB error:', err)
+    const message = err instanceof Error ? err.message : 'Database error while saving PO'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
 
   await createAuditLog({
     userId: user!.id,
@@ -198,5 +221,9 @@ export async function POST(req: NextRequest) {
   })
 
   return NextResponse.json(created, { status: 201 })
+  } catch (err) {
+    console.error('[POST /api/purchase-orders] Unhandled error:', err)
+    const message = err instanceof Error ? err.message : 'Unexpected server error'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
 }
-

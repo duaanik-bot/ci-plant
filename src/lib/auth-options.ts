@@ -16,39 +16,52 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.pin) return null
 
         try {
-          const user = await db.user.findUnique({
-            where: { email: credentials.email.toLowerCase().trim() },
-            include: { role: true },
-          })
+          const rows = await db.$queryRawUnsafe<Array<{
+            id: string
+            name: string
+            email: string
+            pinHash: string
+            active: boolean
+            roleName: string
+            permissions: unknown
+            machineAccess: string[] | null
+          }>>(
+            `
+              select
+                u.id,
+                u.name,
+                u.email,
+                u.pin_hash as "pinHash",
+                u.active,
+                r.role_name as "roleName",
+                r.permissions,
+                u.machine_access as "machineAccess"
+              from users u
+              join roles r on r.id = u.role_id
+              where lower(u.email) = lower($1)
+              limit 1
+            `,
+            credentials.email.toLowerCase().trim(),
+          )
 
-          console.log('Login attempt:', credentials.email)
-          console.log('User found:', user ? 'yes' : 'no')
-          console.log('User active:', user?.active)
-
+          const user = rows[0]
           if (!user || !user.active) return null
 
-          // Try both hash formats
           const hash2b = user.pinHash.replace('$2a$', '$2b$')
           const hash2a = user.pinHash.replace('$2b$', '$2a$')
-
-          const valid2b = await bcrypt.compare(credentials.pin, hash2b)
-          const valid2a = await bcrypt.compare(credentials.pin, hash2a)
-          const validOriginal = await bcrypt.compare(credentials.pin, user.pinHash)
-
-          console.log('Valid (2b):', valid2b)
-          console.log('Valid (2a):', valid2a)
-          console.log('Valid (original):', validOriginal)
-
-          const valid = valid2b || valid2a || validOriginal
+          const valid =
+            (await bcrypt.compare(credentials.pin, hash2b)) ||
+            (await bcrypt.compare(credentials.pin, hash2a)) ||
+            (await bcrypt.compare(credentials.pin, user.pinHash))
           if (!valid) return null
 
           return {
             id: user.id,
             name: user.name,
             email: user.email,
-            role: user.role.roleName,
-            permissions: user.role.permissions,
-            machineAccess: user.machineAccess,
+            role: user.roleName,
+            permissions: user.permissions,
+            machineAccess: user.machineAccess ?? [],
           }
         } catch (error) {
           console.error('Auth error:', error)

@@ -6,10 +6,10 @@ import { z } from 'zod'
 export const dynamic = 'force-dynamic'
 
 const storeSchema = z.object({
-  collectedBy: z.string().min(1),
-  storageLocation: z.string().optional().nullable(),
-  storageNotes: z.string().optional().nullable(),
-  colourConditions: z.record(z.string(), z.enum(['good', 'fair', 'degraded'])).optional(),
+  returnedBy: z.string().min(1),
+  rackLocation: z.string().optional().nullable(),
+  slotNumber: z.string().optional().nullable(),
+  returnCondition: z.string().optional().nullable(),
 })
 
 export async function POST(
@@ -38,11 +38,26 @@ export async function POST(
   const updated = await db.plateStore.update({
     where: { id },
     data: {
-      status: 'stored',
-      collectedBy: parsed.data.collectedBy,
-      collectedAt: now,
-      storageLocation: parsed.data.storageLocation ?? existing.storageLocation,
-      storageNotes: parsed.data.storageNotes ?? existing.storageNotes,
+      status: 'returned',
+      returnedBy: parsed.data.returnedBy,
+      returnedAt: now,
+      rackLocation: parsed.data.rackLocation ?? existing.rackLocation,
+      slotNumber: parsed.data.slotNumber ?? existing.slotNumber,
+      returnCondition: parsed.data.returnCondition ?? existing.returnCondition,
+    },
+  })
+
+  await db.plateAuditLog.create({
+    data: {
+      plateStoreId: id,
+      plateSetCode: updated.plateSetCode,
+      action: 'returned',
+      performedBy: user!.id,
+      details: {
+        returnedBy: parsed.data.returnedBy,
+        rackLocation: updated.rackLocation,
+        slotNumber: updated.slotNumber,
+      },
     },
   })
 
@@ -52,7 +67,7 @@ export async function POST(
     tableName: 'plate_store',
     recordId: id,
     oldValue: { status: existing.status },
-    newValue: { status: updated.status, collectedBy: updated.collectedBy, collectedAt: updated.collectedAt },
+    newValue: { status: updated.status, returnedBy: updated.returnedBy, returnedAt: updated.returnedAt },
   })
 
   return NextResponse.json(updated)

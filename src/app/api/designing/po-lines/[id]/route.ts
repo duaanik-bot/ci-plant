@@ -21,6 +21,18 @@ export async function GET(
   })
   if (!li) return NextResponse.json({ error: 'PO line not found' }, { status: 404 })
 
+  const carton = li.cartonId
+    ? await db.carton.findUnique({
+        where: { id: li.cartonId },
+        select: {
+          id: true,
+          finishedLength: true,
+          finishedWidth: true,
+          finishedHeight: true,
+        },
+      })
+    : null
+
   const jc = li.jobCardNumber
     ? await db.productionJobCard.findFirst({
         where: { jobCardNumber: li.jobCardNumber },
@@ -39,7 +51,7 @@ export async function GET(
   }
 
   return NextResponse.json({
-    line: li,
+    line: { ...li, carton },
     jobCard: jc,
     checks,
     links: {

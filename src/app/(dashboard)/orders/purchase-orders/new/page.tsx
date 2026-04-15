@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -12,6 +12,7 @@ import {
 } from '@/lib/constants'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
+import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 
 type Customer = {
   id: string
@@ -39,6 +40,7 @@ type CartonOption = {
   artworkCode?: string | null
   backPrint?: string | null
   dyeId?: string | null
+  specialInstructions?: string | null
 }
 
 type Line = {
@@ -48,7 +50,6 @@ type Line = {
   quantity: string
   artworkCode: string
   backPrint: string
-  ups: string
   wastagePct: string
   rate: string
   gstPct: string
@@ -61,6 +62,15 @@ type Line = {
   remarks: string
 }
 
+type CartonLookupFieldProps = {
+  line: Line
+  customerId: string
+  error?: string
+  onLineChange: (patch: Partial<Line>) => void
+  onSelect: (carton: CartonOption) => void
+  onCreate: (suggestedName: string) => void
+}
+
 const defaultLine = (): Line => ({
   cartonId: '',
   cartonName: '',
@@ -68,10 +78,9 @@ const defaultLine = (): Line => ({
   quantity: '',
   artworkCode: '',
   backPrint: 'No',
-  ups: '1',
-  wastagePct: '5',
+  wastagePct: '10',
   rate: '',
-  gstPct: '12',
+  gstPct: '5',
   gsm: '',
   coatingType: '',
   embossingLeafing: '',
@@ -81,32 +90,166 @@ const defaultLine = (): Line => ({
   remarks: '',
 })
 
-function requiredSheets(qty: number, ups: number): number {
-  if (ups < 1) return 0
-  return Math.ceil(qty / ups)
+function hasLineInput(line: Line): boolean {
+  return Object.entries(line).some(([key, value]) => {
+    if (key === 'backPrint') return value !== 'No'
+    if (key === 'wastagePct') return value !== '10'
+    if (key === 'gstPct') return value !== '5'
+    return String(value).trim() !== ''
+  })
 }
 
-function totalSheets(req: number, wastagePct: number): number {
-  return Math.ceil(req * (1 + wastagePct / 100))
+function resetAutofillFields(line: Line, cartonName: string): Line {
+  if (!line.cartonId) return { ...line, cartonName }
+  return {
+    ...line,
+    cartonId: '',
+    cartonName,
+    cartonSize: '',
+    artworkCode: '',
+    backPrint: 'No',
+    wastagePct: '10',
+    rate: '',
+    gstPct: '5',
+    gsm: '',
+    coatingType: '',
+    embossingLeafing: '',
+    paperType: '',
+    boardGrade: '',
+    foilType: '',
+  }
 }
 
-function lineAmount(rate: number, totalSh: number, gstPct: number): { beforeGst: number; gst: number } {
-  const beforeGst = (rate / 1000) * totalSh
+function lineAmount(rate: number, chargeableQty: number, gstPct: number): { beforeGst: number; gst: number } {
+  const beforeGst = rate * chargeableQty
   const gst = beforeGst * (gstPct / 100)
   return { beforeGst, gst }
 }
 
+function deriveCartonDecorations(carton: CartonOption): Pick<Line, 'coatingType' | 'embossingLeafing' | 'foilType'> {
+  let coatingType = carton.coatingType || ''
+  let embossingLeafing = carton.embossingLeafing || ''
+  let foilType = carton.foilType || ''
+
+  if (carton.specialInstructions) {
+    try {
+      const parsed = JSON.parse(carton.specialInstructions) as {
+        notes?: string
+        brailleEnabled?: boolean
+        leafingEnabled?: boolean
+        embossingEnabled?: boolean
+        spotUvEnabled?: boolean
+      }
+      if (!coatingType && parsed.spotUvEnabled) coatingType = 'Full UV'
+      if (!embossingLeafing) {
+        if (parsed.embossingEnabled && parsed.leafingEnabled) embossingLeafing = 'Embossing + Leafing'
+        else if (parsed.embossingEnabled) embossingLeafing = 'Embossing'
+        else if (parsed.leafingEnabled) embossingLeafing = 'Leafing'
+      }
+      if (!foilType && parsed.leafingEnabled) foilType = 'Hot Gold'
+    } catch {}
+  }
+
+  return { coatingType, embossingLeafing, foilType }
+}
+
+function CartonLookupField({
+  line,
+  customerId,
+  error,
+  onLineChange,
+  onSelect,
+  onCreate,
+}: CartonLookupFieldProps) {
+  const cartonSearch = useAutoPopulate<CartonOption>({
+    storageKey: `po-carton-${customerId || 'all'}`,
+    search: async (query: string) => {
+      if (!customerId) return []
+      const res = await fetch(`/api/cartons?customerId=${encodeURIComponent(customerId)}&q=${encodeURIComponent(query)}`)
+      return (await res.json()) as CartonOption[]
+    },
+    getId: (c) => c.id,
+    getLabel: (c) => c.cartonName,
+  })
+
+  const recentCartons = cartonSearch.lastUsed.filter((carton) => !customerId || carton.customerId === customerId)
+  const cartonQuery = cartonSearch.query || line.cartonName
+
+  useEffect(() => {
+    if (line.cartonId || !line.cartonName.trim() || cartonSearch.loading) return
+    const normalizedName = line.cartonName.trim().toLowerCase()
+    const exactMatches = cartonSearch.options.filter(
+      (carton) => carton.cartonName.trim().toLowerCase() === normalizedName,
+    )
+    if (exactMatches.length !== 1) return
+    const [match] = exactMatches
+    cartonSearch.select(match)
+    onSelect(match)
+  }, [cartonSearch, line.cartonId, line.cartonName, onSelect])
+
+  return (
+    <div className="min-w-[180px]">
+      <MasterSearchSelect
+        label="Carton name"
+        hideLabel
+        query={cartonQuery}
+        onQueryChange={(value) => {
+          cartonSearch.setQuery(value)
+          onLineChange(resetAutofillFields(line, value))
+        }}
+        loading={cartonSearch.loading}
+        options={cartonSearch.options}
+        lastUsed={recentCartons}
+        onSelect={(carton) => {
+          cartonSearch.select(carton)
+          onSelect(carton)
+        }}
+        getOptionLabel={(carton) => carton.cartonName}
+        getOptionMeta={(carton) =>
+          [
+            carton.artworkCode ? `AW: ${carton.artworkCode}` : null,
+            carton.cartonSize || null,
+            carton.boardGrade || null,
+            carton.gsm ? `${carton.gsm} GSM` : null,
+            carton.rate != null ? `₹${Number(carton.rate).toLocaleString('en-IN')}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        }
+        error={error}
+        disabled={!customerId}
+        placeholder={customerId ? 'Search or type carton...' : 'Select customer first'}
+        emptyMessage={customerId ? 'No carton found for this customer.' : 'Select customer first.'}
+        recentLabel="Recent cartons"
+        loadingMessage="Searching cartons..."
+        emptyActionLabel={customerId && cartonQuery.trim() ? `Create "${cartonQuery.trim()}" as new carton` : undefined}
+        onEmptyAction={() => {
+          const suggestedName = cartonQuery.trim()
+          if (suggestedName) onCreate(suggestedName)
+        }}
+        inputClassName="min-w-[180px] px-2 py-1 text-xs"
+        inputClassName="min-w-[260px] px-2 py-1 text-xs"
+        dropdownClassName="min-w-[320px]"
+      />
+      {!line.cartonId && line.cartonName.trim() ? (
+        <span className="mt-1 inline-block text-[10px] text-amber-400">Unsaved carton name</span>
+      ) : null}
+    </div>
+  )
+}
+
 export default function NewPurchaseOrderPage() {
   const router = useRouter()
-  const customerIdRef = useRef('')
   const [customerId, setCustomerId] = useState('')
   const [poDate, setPoDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [customPoNumber, setCustomPoNumber] = useState('')
   const [deliveryRequiredBy, setDeliveryRequiredBy] = useState('')
   const [paymentTerms, setPaymentTerms] = useState('')
   const [remarks, setRemarks] = useState('')
   const [lines, setLines] = useState<Line[]>([defaultLine()])
   const [saving, setSaving] = useState(false)
   const [activeCartonLineIndex, setActiveCartonLineIndex] = useState<number | null>(null)
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
 
   const [qcCustomerOpen, setQcCustomerOpen] = useState(false)
   const [qcCustomer, setQcCustomer] = useState({
@@ -124,11 +267,12 @@ export default function NewPurchaseOrderPage() {
   const [qcCartonOpen, setQcCartonOpen] = useState(false)
   const [qcCarton, setQcCarton] = useState({
     cartonName: '',
+    artworkCode: '',
     sizeL: '',
     sizeW: '',
     sizeH: '',
     rate: '',
-    gstPct: '12',
+    gstPct: '5',
     boardGrade: '',
     gsm: '',
     paperType: '',
@@ -141,43 +285,49 @@ export default function NewPurchaseOrderPage() {
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
-  customerIdRef.current = customerId
-
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'po-customer',
     search: async (query: string) => {
-      const res = await fetch('/api/customers')
-      const data = (await res.json()) as Customer[]
-      const q = query.toLowerCase()
-      return data.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          (c.contactName ?? '').toLowerCase().includes(q),
-      )
+      const res = await fetch(`/api/customers?q=${encodeURIComponent(query)}`)
+      return (await res.json()) as Customer[]
     },
     getId: (c) => c.id,
     getLabel: (c) => c.name,
   })
 
-  const cartonSearch = useAutoPopulate<CartonOption>({
-    storageKey: 'po-carton',
-    search: async (query: string) => {
-      const cid = customerIdRef.current
-      const url = `/api/cartons?${cid ? `customerId=${cid}&` : ''}q=${encodeURIComponent(query)}`
-      const res = await fetch(url)
-      return res.json()
-    },
-    getId: (c) => c.id,
-    getLabel: (c) => c.cartonName,
-  })
+  const loadCustomerDefaults = async (nextCustomerId: string) => {
+    try {
+      const res = await fetch(`/api/customers/${nextCustomerId}/po-defaults`)
+      if (!res.ok) {
+        setPaymentTerms('')
+        return
+      }
+      const data = (await res.json()) as { paymentTerms?: string | null }
+      setPaymentTerms(data.paymentTerms?.trim() || '')
+    } catch {
+      setPaymentTerms('')
+    }
+  }
 
   const applyCustomer = (c: Customer) => {
     customerSearch.select(c)
+    const switchingCustomer = customerId && customerId !== c.id
     setCustomerId(c.id)
+    setSelectedCustomer(c)
+    void loadCustomerDefaults(c.id)
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      delete next.customerId
+      return next
+    })
+    if (switchingCustomer && lines.some(hasLineInput)) {
+      setLines([defaultLine()])
+      toast.info('Line items were reset for the newly selected customer.')
+    }
   }
 
   const applyCartonToLine = (idx: number, c: CartonOption) => {
-    cartonSearch.select(c)
+    const decorations = deriveCartonDecorations(c)
     updateLine(idx, {
       cartonId: c.id,
       cartonName: c.cartonName,
@@ -186,14 +336,18 @@ export default function NewPurchaseOrderPage() {
       backPrint: c.backPrint || 'No',
       rate: c.rate != null ? String(c.rate) : '',
       gsm: c.gsm != null ? String(c.gsm) : '',
-      gstPct: String(c.gstPct ?? 12),
-      coatingType: c.coatingType || '',
-      embossingLeafing: c.embossingLeafing || '',
+      gstPct: String(c.gstPct ?? 5),
+      coatingType: decorations.coatingType,
+      embossingLeafing: decorations.embossingLeafing,
       paperType: c.paperType || '',
       boardGrade: c.boardGrade || '',
-      foilType: c.foilType || '',
+      foilType: decorations.foilType,
     })
-    setActiveCartonLineIndex(null)
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      delete next.lines
+      return next
+    })
   }
 
   const updateLine = (idx: number, patch: Partial<Line>) => {
@@ -213,34 +367,20 @@ export default function NewPurchaseOrderPage() {
   )
   const subtotal = validLines.reduce((sum, l) => {
     const qty = Number(l.quantity) || 0
-    const ups = Math.max(1, Number(l.ups) || 1)
-    const wastage = Number(l.wastagePct) || 0
-    const req = requiredSheets(qty, ups)
-    const tot = totalSheets(req, wastage)
     const rate = Number(l.rate) || 0
     const gstPct = Number(l.gstPct) || 0
-    const { beforeGst } = lineAmount(rate, tot, gstPct)
+    const { beforeGst } = lineAmount(rate, qty, gstPct)
     return sum + beforeGst
   }, 0)
   const totalGst = validLines.reduce((sum, l) => {
     const qty = Number(l.quantity) || 0
-    const ups = Math.max(1, Number(l.ups) || 1)
-    const wastage = Number(l.wastagePct) || 0
-    const req = requiredSheets(qty, ups)
-    const tot = totalSheets(req, wastage)
     const rate = Number(l.rate) || 0
     const gstPct = Number(l.gstPct) || 0
-    const { gst } = lineAmount(rate, tot, gstPct)
+    const { gst } = lineAmount(rate, qty, gstPct)
     return sum + gst
   }, 0)
   const grandTotal = subtotal + totalGst
   const totalQty = validLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
-  const totalSheetsSum = validLines.reduce((s, l) => {
-    const qty = Number(l.quantity) || 0
-    const ups = Math.max(1, Number(l.ups) || 1)
-    const wastage = Number(l.wastagePct) || 0
-    return s + totalSheets(requiredSheets(qty, ups), wastage)
-  }, 0)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -266,13 +406,11 @@ export default function NewPurchaseOrderPage() {
         body: JSON.stringify({
           customerId,
           poDate,
+          ...(customPoNumber.trim() ? { poNumber: customPoNumber.trim() } : {}),
           remarks: combinedRemarks || undefined,
           lineItems: validLines.map((l) => {
             const qty = Number(l.quantity)
-            const ups = Math.max(1, Number(l.ups) || 1)
             const wastage = Number(l.wastagePct) || 0
-            const req = requiredSheets(qty, ups)
-            const tot = totalSheets(req, wastage)
             return {
               cartonId: l.cartonId || undefined,
               cartonName: l.cartonName.trim(),
@@ -288,10 +426,7 @@ export default function NewPurchaseOrderPage() {
               paperType: l.paperType || undefined,
               remarks: l.remarks.trim() || undefined,
               specOverrides: {
-                ups,
                 wastagePct: wastage,
-                requiredSheets: req,
-                totalSheets: tot,
                 boardGrade: l.boardGrade.trim() || undefined,
                 foilType: l.foilType.trim() || undefined,
               },
@@ -299,8 +434,14 @@ export default function NewPurchaseOrderPage() {
           }),
         }),
       })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Failed to save PO')
+      let json: Record<string, unknown> = {}
+      try { json = await res.json() } catch { /* non-JSON body */ }
+      if (!res.ok) {
+        if (json.fields && typeof json.fields === 'object') {
+          setFieldErrors((prev) => ({ ...prev, ...(json.fields as Record<string, string>) }))
+        }
+        throw new Error((json.error as string) || 'Failed to save PO')
+      }
       toast.success(`PO saved. ${validLines.length} item(s) added to Planning queue.`)
       router.push('/orders/purchase-orders')
     } catch (e) {
@@ -360,9 +501,10 @@ export default function NewPurchaseOrderPage() {
     try {
       const body: Record<string, unknown> = {
         cartonName: qcCarton.cartonName.trim(),
+        artworkCode: qcCarton.artworkCode.trim() || undefined,
         customerId,
         rate: qcCarton.rate ? Number(qcCarton.rate) : undefined,
-        gstPct: qcCarton.gstPct ? Number(qcCarton.gstPct) : 12,
+        gstPct: qcCarton.gstPct ? Number(qcCarton.gstPct) : 5,
         boardGrade: qcCarton.boardGrade || undefined,
         gsm: qcCarton.gsm ? Number(qcCarton.gsm) : undefined,
         paperType: qcCarton.paperType || undefined,
@@ -400,20 +542,21 @@ export default function NewPurchaseOrderPage() {
         gsm: created.gsm ?? (qcCarton.gsm ? Number(qcCarton.gsm) : null),
         paperType: (created.paperType ?? qcCarton.paperType) || null,
         rate: created.rate ?? (qcCarton.rate ? Number(qcCarton.rate) : null),
-        gstPct: created.gstPct ?? Number(qcCarton.gstPct),
+        gstPct: created.gstPct ?? Number(qcCarton.gstPct || '5'),
         coatingType: (created.coatingType ?? qcCarton.coatingType) || null,
         embossingLeafing: (created.embossingLeafing ?? qcCarton.embossingLeafing) || null,
         foilType: (created.foilType ?? qcCarton.foilType) || null,
         artworkCode: created.artworkCode ?? null,
         backPrint: created.backPrint ?? 'No',
         dyeId: created.dyeId ?? null,
+        specialInstructions: created.specialInstructions ?? null,
       }
       if (activeCartonLineIndex != null) {
         applyCartonToLine(activeCartonLineIndex, formatted)
       }
       setQcCartonOpen(false)
       setActiveCartonLineIndex(null)
-      setQcCarton({ cartonName: '', sizeL: '', sizeW: '', sizeH: '', rate: '', gstPct: '12', boardGrade: '', gsm: '', paperType: '', coatingType: '', embossingLeafing: '', foilType: '' })
+      setQcCarton({ cartonName: '', artworkCode: '', sizeL: '', sizeW: '', sizeH: '', rate: '', gstPct: '5', boardGrade: '', gsm: '', paperType: '', coatingType: '', embossingLeafing: '', foilType: '' })
       toast.success('Carton created')
     } catch {
       toast.error('Failed to create carton')
@@ -429,94 +572,121 @@ export default function NewPurchaseOrderPage() {
     <form onSubmit={handleSubmit} className="p-4 max-w-[1600px] mx-auto space-y-4">
       <h1 className="text-xl font-bold text-amber-400">New Purchase Order</h1>
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm">
-        <div>
-          <label className="block text-slate-400 mb-1">
-            Customer<span className="text-red-400">*</span>
-          </label>
-          <input
-            type="text"
-            value={customerSearch.query}
-            onChange={(e) => {
-              customerSearch.setQuery(e.target.value)
-              setCustomerId('')
-            }}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${fieldErrors.customerId ? 'border-red-500' : 'border-slate-600'}`}
-            placeholder="Type customer name…"
-          />
-          {customerSearch.loading && <p className="text-[11px] text-slate-400 mt-1">Searching…</p>}
-          {customerSearch.options.length > 0 && (
-            <div className="mt-1 rounded border border-slate-700 bg-slate-900 max-h-40 overflow-y-auto text-xs">
-              {customerSearch.options.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => applyCustomer(c)}
-                  className="w-full text-left px-3 py-1.5 hover:bg-slate-800 text-slate-100"
-                >
-                  {c.name}
-                </button>
-              ))}
-            </div>
-          )}
-          {customerSearch.lastUsed.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {customerSearch.lastUsed.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => applyCustomer(c)}
-                  className="px-2 py-0.5 rounded-full bg-slate-800 text-xs text-slate-200 border border-slate-600 hover:border-amber-500"
-                >
-                  {c.name}
-                </button>
-              ))}
-            </div>
-          )}
-          <button type="button" onClick={() => setQcCustomerOpen(true)} className="mt-1 text-xs text-amber-400 hover:underline">
-            Create New Customer
-          </button>
-          {fieldErrors.customerId && <p className="text-xs text-red-400 mt-1">{fieldErrors.customerId}</p>}
+      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm space-y-3">
+        {/* Row 1: Customer (wide) + PO date + Delivery by */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-1">
+            <MasterSearchSelect
+              label="Customer"
+              required
+              query={customerSearch.query}
+              onQueryChange={(value) => {
+                customerSearch.setQuery(value)
+                setCustomerId('')
+                setSelectedCustomer(null)
+              }}
+              loading={customerSearch.loading}
+              options={customerSearch.options}
+              lastUsed={customerSearch.lastUsed}
+              onSelect={applyCustomer}
+              getOptionLabel={(c) => c.name}
+              getOptionMeta={(c) =>
+                [c.contactName, c.contactPhone].filter(Boolean).join(' · ')
+              }
+              error={fieldErrors.customerId}
+              placeholder="Type to search customers..."
+              emptyMessage="No customer found in master."
+              recentLabel="Recent customers"
+              loadingMessage="Searching customers..."
+              emptyActionLabel={
+                customerSearch.query.trim()
+                  ? `Create "${customerSearch.query.trim()}" as new customer`
+                  : undefined
+              }
+              onEmptyAction={() => {
+                const suggestedName = customerSearch.query.trim()
+                setQcCustomer((prev) => ({
+                  ...prev,
+                  name: suggestedName || prev.name,
+                }))
+                setQcCustomerOpen(true)
+              }}
+            />
+            <button type="button" onClick={() => setQcCustomerOpen(true)} className="mt-1 text-xs text-amber-400 hover:underline">
+              Create New Customer
+            </button>
+            {selectedCustomer ? (
+              <p className="mt-1 text-[11px] text-slate-500">
+                {[selectedCustomer.contactName, selectedCustomer.contactPhone].filter(Boolean).join(' · ')}
+              </p>
+            ) : null}
+          </div>
+          <div>
+            <label className="block text-slate-400 mb-1">PO date*</label>
+            <input
+              type="date"
+              value={poDate}
+              onChange={(e) => setPoDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            />
+          </div>
+          <div>
+            <label className="block text-slate-400 mb-1">Delivery required by</label>
+            <input
+              type="date"
+              value={deliveryRequiredBy}
+              onChange={(e) => setDeliveryRequiredBy(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            />
+          </div>
         </div>
-        <div>
-          <label className="block text-slate-400 mb-1">PO date*</label>
-          <input
-            type="date"
-            value={poDate}
-            onChange={(e) => setPoDate(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-          />
+        {/* Row 2: Custom PO# + Payment terms */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-slate-400 mb-1">Custom PO number <span className="text-slate-500">(optional)</span></label>
+            <input
+              type="text"
+              value={customPoNumber}
+              onChange={(e) => {
+                setCustomPoNumber(e.target.value)
+                setFieldErrors((prev) => {
+                  const next = { ...prev }
+                  delete next.poNumber
+                  return next
+                })
+              }}
+              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${fieldErrors.poNumber ? 'border-red-500' : 'border-slate-600'}`}
+              placeholder="Leave blank to auto-generate"
+            />
+            {fieldErrors.poNumber ? (
+              <p className="mt-1 text-xs text-red-400">{fieldErrors.poNumber}</p>
+            ) : null}
+          </div>
+          <div>
+            <label className="block text-slate-400 mb-1">Payment terms</label>
+            <input
+              type="text"
+              value={paymentTerms}
+              onChange={(e) => setPaymentTerms(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              placeholder="e.g. 30 days"
+            />
+          </div>
         </div>
-        <div>
-          <label className="block text-slate-400 mb-1">Delivery required by</label>
-          <input
-            type="date"
-            value={deliveryRequiredBy}
-            onChange={(e) => setDeliveryRequiredBy(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-          />
-        </div>
-        <div>
-          <label className="block text-slate-400 mb-1">Payment terms</label>
-          <input
-            type="text"
-            value={paymentTerms}
-            onChange={(e) => setPaymentTerms(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-            placeholder="e.g. 30 days"
-          />
-        </div>
-        <div className="md:col-span-2 lg:col-span-4">
-          <label className="block text-slate-400 mb-1">Remarks</label>
-          <input
-            type="text"
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-          />
-        </div>
-        <div className="md:col-span-2 lg:col-span-4 text-slate-400 text-sm">
-          PO value (computed): ₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+        {/* Row 3: Remarks + PO value */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <div className="md:col-span-2">
+            <label className="block text-slate-400 mb-1">Remarks</label>
+            <input
+              type="text"
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            />
+          </div>
+          <div className="text-slate-400 text-sm pb-2">
+            PO value: <span className="text-white font-medium">₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          </div>
         </div>
       </div>
 
@@ -529,7 +699,7 @@ export default function NewPurchaseOrderPage() {
         </div>
         {fieldErrors.lines && <p className="text-red-400 text-xs">{fieldErrors.lines}</p>}
         <div className="overflow-x-auto">
-          <table className="w-full text-left min-w-[1200px]">
+          <table className="w-full text-left min-w-[1720px]">
             <thead className="bg-slate-800 text-slate-300">
               <tr>
                 <th className="px-2 py-1">Carton name</th>
@@ -537,10 +707,7 @@ export default function NewPurchaseOrderPage() {
                 <th className="px-2 py-1">Qty*</th>
                 <th className="px-2 py-1">Artwork</th>
                 <th className="px-2 py-1">Back</th>
-                <th className="px-2 py-1">UPS</th>
-                <th className="px-2 py-1">Req sheets</th>
                 <th className="px-2 py-1">Wastage%</th>
-                <th className="px-2 py-1">Total sheets</th>
                 <th className="px-2 py-1">Rate</th>
                 <th className="px-2 py-1">GST%</th>
                 <th className="px-2 py-1">Amount</th>
@@ -557,70 +724,33 @@ export default function NewPurchaseOrderPage() {
             <tbody>
               {lines.map((ln, idx) => {
                 const qty = Number(ln.quantity) || 0
-                const ups = Math.max(1, Number(ln.ups) || 1)
-                const wastage = Number(ln.wastagePct) || 0
-                const req = requiredSheets(qty, ups)
-                const tot = totalSheets(req, wastage)
                 const rate = Number(ln.rate) || 0
                 const gstPct = Number(ln.gstPct) || 0
-                const { beforeGst, gst } = lineAmount(rate, tot, gstPct)
-                const amount = beforeGst + gst
-                const isActiveCarton = activeCartonLineIndex === idx
+                const { beforeGst } = lineAmount(rate, qty, gstPct)
+                const amount = beforeGst
                 return (
                   <tr key={idx} className="border-t border-slate-800">
-                    <td className="px-2 py-1 align-top relative">
-                      <input
-                        type="text"
-                        value={isActiveCarton ? cartonSearch.query : ln.cartonName}
-                        onChange={(e) => {
+                    <td className="px-2 py-1 align-top">
+                      <CartonLookupField
+                        line={ln}
+                        customerId={customerId}
+                        error={!ln.cartonName && fieldErrors.lines ? 'Carton name is required' : undefined}
+                        onLineChange={(patch) => updateLine(idx, patch)}
+                        onSelect={(carton) => applyCartonToLine(idx, carton)}
+                        onCreate={(suggestedName) => {
                           setActiveCartonLineIndex(idx)
-                          cartonSearch.setQuery(e.target.value)
+                          setQcCarton((prev) => ({ ...prev, cartonName: suggestedName }))
+                          setQcCartonOpen(true)
                         }}
-                        onFocus={() => setActiveCartonLineIndex(idx)}
-                        className={`min-w-[120px] ${inputCls} ${!ln.cartonName && fieldErrors.lines ? inputErr : ''}`}
-                        placeholder="Search carton…"
                       />
-                      {isActiveCarton && (
-                        <>
-                          {cartonSearch.loading && <span className="absolute right-2 top-1.5 text-slate-500 text-[10px]">…</span>}
-                          {cartonSearch.options.length > 0 && (
-                            <div className="absolute z-10 left-0 top-full mt-0.5 rounded border border-slate-600 bg-slate-900 shadow-lg max-h-32 overflow-y-auto min-w-[200px]">
-                              {cartonSearch.options.map((c) => (
-                                <button
-                                  key={c.id}
-                                  type="button"
-                                  onClick={() => applyCartonToLine(idx, c)}
-                                  className="w-full text-left px-2 py-1.5 hover:bg-slate-800 text-slate-100 text-xs"
-                                >
-                                  {c.cartonName} {c.cartonSize ? `(${c.cartonSize})` : ''}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          {customerId && cartonSearch.query.length >= 2 && !cartonSearch.loading && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setQcCarton((prev) => ({ ...prev, cartonName: cartonSearch.query.trim() }))
-                                setQcCartonOpen(true)
-                              }}
-                              className="mt-1 text-[10px] text-amber-400 hover:underline"
-                            >
-                              Create new carton
-                            </button>
-                          )}
-                        </>
-                      )}
-                      {!ln.cartonId && ln.cartonName.trim() && (
-                        <span className="ml-1 text-[10px] text-amber-400">(new)</span>
-                      )}
                     </td>
                     <td className="px-2 py-1">
                       <input
                         type="text"
                         value={ln.cartonSize}
                         onChange={(e) => updateLine(idx, { cartonSize: e.target.value })}
-                        className={`w-24 ${inputCls}`}
+                        className={inputCls}
+                        style={{ minWidth: '6rem', width: `${Math.max(6, (ln.cartonSize || '').length + 3) * 0.6}rem` }}
                         placeholder="L×W×H"
                       />
                     </td>
@@ -630,11 +760,11 @@ export default function NewPurchaseOrderPage() {
                         min={1}
                         value={ln.quantity}
                         onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                        className={`w-16 ${inputCls} ${fieldErrors[`line${idx}_rate`] ? inputErr : ''}`}
+                        className={`w-20 ${inputCls} ${fieldErrors[`line${idx}_rate`] ? inputErr : ''}`}
                       />
                     </td>
                     <td className="px-2 py-1">
-                      <input type="text" value={ln.artworkCode} onChange={(e) => updateLine(idx, { artworkCode: e.target.value })} className={`w-20 ${inputCls}`} />
+                      <input type="text" value={ln.artworkCode} onChange={(e) => updateLine(idx, { artworkCode: e.target.value })} className={`w-28 ${inputCls}`} />
                     </td>
                     <td className="px-2 py-1">
                       <select value={ln.backPrint} onChange={(e) => updateLine(idx, { backPrint: e.target.value })} className={inputCls}>
@@ -643,13 +773,8 @@ export default function NewPurchaseOrderPage() {
                       </select>
                     </td>
                     <td className="px-2 py-1">
-                      <input type="number" min={1} value={ln.ups} onChange={(e) => updateLine(idx, { ups: e.target.value })} className={`w-14 ${inputCls}`} />
+                      <input type="number" min={0} step={0.5} value={ln.wastagePct} onChange={(e) => updateLine(idx, { wastagePct: e.target.value })} className={`w-20 ${inputCls}`} />
                     </td>
-                    <td className="px-2 py-1 text-slate-400 tabular-nums">{req}</td>
-                    <td className="px-2 py-1">
-                      <input type="number" min={0} step={0.5} value={ln.wastagePct} onChange={(e) => updateLine(idx, { wastagePct: e.target.value })} className={`w-14 ${inputCls}`} />
-                    </td>
-                    <td className="px-2 py-1 text-slate-300 tabular-nums">{tot}</td>
                     <td className="px-2 py-1">
                       <input
                         type="number"
@@ -661,7 +786,7 @@ export default function NewPurchaseOrderPage() {
                       />
                     </td>
                     <td className="px-2 py-1">
-                      <input type="number" min={0} max={28} value={ln.gstPct} onChange={(e) => updateLine(idx, { gstPct: e.target.value })} className={`w-14 ${inputCls}`} />
+                      <input type="number" min={0} max={28} value={ln.gstPct} onChange={(e) => updateLine(idx, { gstPct: e.target.value })} className={`w-16 ${inputCls}`} />
                     </td>
                     <td className="px-2 py-1 text-slate-300 tabular-nums">{amount.toFixed(2)}</td>
                     <td className="px-2 py-1">
@@ -684,31 +809,16 @@ export default function NewPurchaseOrderPage() {
                       </select>
                     </td>
                     <td className="px-2 py-1">
-                      <select value={ln.coatingType} onChange={(e) => updateLine(idx, { coatingType: e.target.value })} className={inputCls}>
-                        <option value="">—</option>
-                        {COATING_TYPES.filter((c) => c !== 'None').map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
+                      <input type="text" value={ln.coatingType} readOnly className={`w-32 ${inputCls} text-slate-300`} placeholder="—" />
                     </td>
                     <td className="px-2 py-1">
-                      <select value={ln.embossingLeafing} onChange={(e) => updateLine(idx, { embossingLeafing: e.target.value })} className={inputCls}>
-                        <option value="">—</option>
-                        {EMBOSSING_TYPES.filter((e) => e !== 'None').map((x) => (
-                          <option key={x} value={x}>{x}</option>
-                        ))}
-                      </select>
+                      <input type="text" value={ln.embossingLeafing} readOnly className={`w-32 ${inputCls} text-slate-300`} placeholder="—" />
                     </td>
                     <td className="px-2 py-1">
-                      <select value={ln.foilType} onChange={(e) => updateLine(idx, { foilType: e.target.value })} className={inputCls}>
-                        <option value="">—</option>
-                        {FOIL_TYPES.filter((f) => f !== 'None').map((f) => (
-                          <option key={f} value={f}>{f}</option>
-                        ))}
-                      </select>
+                      <input type="text" value={ln.foilType} readOnly className={`w-32 ${inputCls} text-slate-300`} placeholder="—" />
                     </td>
                     <td className="px-2 py-1">
-                      <input type="text" value={ln.remarks} onChange={(e) => updateLine(idx, { remarks: e.target.value })} className={`min-w-[80px] ${inputCls}`} />
+                      <input type="text" value={ln.remarks} onChange={(e) => updateLine(idx, { remarks: e.target.value })} className={`w-40 ${inputCls}`} />
                     </td>
                     <td className="px-2 py-1">
                       {lines.length > 1 && (
@@ -726,8 +836,6 @@ export default function NewPurchaseOrderPage() {
                 <td colSpan={2} className="px-2 py-2">Total</td>
                 <td className="px-2 py-2 tabular-nums">{totalQty}</td>
                 <td colSpan={5} />
-                <td className="px-2 py-2 tabular-nums">{totalSheetsSum}</td>
-                <td colSpan={2} />
                 <td className="px-2 py-2 tabular-nums">Subtotal ₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                 <td colSpan={4} />
                 <td className="px-2 py-2 tabular-nums">GST ₹ {totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
@@ -792,6 +900,16 @@ export default function NewPurchaseOrderPage() {
               className={`w-full px-3 py-2 rounded bg-slate-800 border ${qcCartonErrors.cartonName ? 'border-red-500' : 'border-slate-600'} text-white`}
             />
             {qcCartonErrors.cartonName && <p className="text-xs text-red-400 mt-1">{qcCartonErrors.cartonName}</p>}
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Artwork Code (AW)</label>
+            <input
+              type="text"
+              value={qcCarton.artworkCode}
+              onChange={(e) => setQcCarton((prev) => ({ ...prev, artworkCode: e.target.value.toUpperCase() }))}
+              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white font-mono"
+              placeholder="e.g. AW-12345"
+            />
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div>

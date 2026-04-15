@@ -116,8 +116,11 @@ export default function EditCustomerPage() {
           <input
             value={gstNumber}
             onChange={(e) => setGstNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+              fieldErrors.gstNumber ? 'border-red-500' : 'border-slate-600'
+            }`}
           />
+          {fieldErrors.gstNumber && <p className="mt-1 text-sm text-red-400">{fieldErrors.gstNumber}</p>}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -133,8 +136,11 @@ export default function EditCustomerPage() {
             <input
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+                fieldErrors.contactPhone ? 'border-red-500' : 'border-slate-600'
+              }`}
             />
+            {fieldErrors.contactPhone && <p className="mt-1 text-sm text-red-400">{fieldErrors.contactPhone}</p>}
           </div>
         </div>
         <div>
@@ -143,8 +149,11 @@ export default function EditCustomerPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+              fieldErrors.email ? 'border-red-500' : 'border-slate-600'
+            }`}
           />
+          {fieldErrors.email && <p className="mt-1 text-sm text-red-400">{fieldErrors.email}</p>}
         </div>
         <div>
           <label className="block text-sm text-slate-400 mb-1">Billing address</label>

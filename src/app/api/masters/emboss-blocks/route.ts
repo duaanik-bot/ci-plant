@@ -18,6 +18,8 @@ const createSchema = z.object({
   storageLocation: z.string().optional().nullable(),
   maxImpressions: z.number().int().min(1).optional(),
   condition: z.string().optional(),
+  manufactureDate: z.string().optional().nullable(),
+  replacesBlockId: z.string().uuid().optional().nullable(),
 })
 
 export async function GET(req: NextRequest) {
@@ -40,8 +42,18 @@ export async function GET(req: NextRequest) {
   const list = await db.embossBlock.findMany({
     where,
     orderBy: { blockCode: 'asc' },
+    include: {
+      _count: { select: { usageLogs: true } },
+    },
   })
-  return NextResponse.json(list)
+
+  const mapped = list.map((b) => ({
+    ...b,
+    totalTimesUsed: b._count.usageLogs,
+    _count: undefined,
+  }))
+
+  return NextResponse.json(mapped)
 }
 
 export async function POST(req: NextRequest) {
@@ -69,7 +81,7 @@ export async function POST(req: NextRequest) {
   if (exists) {
     return NextResponse.json(
       { error: 'Block code already exists', fields: { blockCode: 'Block code already exists' } },
-      { status: 400 }
+      { status: 400 },
     )
   }
 
@@ -87,6 +99,8 @@ export async function POST(req: NextRequest) {
       storageLocation: data.storageLocation?.trim() ?? null,
       maxImpressions: data.maxImpressions ?? 100000,
       condition: (data.condition?.trim() || 'Good') as string,
+      manufactureDate: data.manufactureDate ? new Date(data.manufactureDate) : null,
+      replacesBlockId: data.replacesBlockId ?? null,
     },
   })
 

@@ -34,11 +34,15 @@ type Payload = {
   jobCards: { stageRecord: StageRecord; jobCard: JobCardSummary }[]
 }
 
+type SortKey = 'jobCardNumber' | 'customer' | 'sheets' | 'stageStatus' | 'completedAt'
+
 export default function ProductionStagePage() {
   const params = useParams()
   const stageKey = params.stageKey as string
   const [data, setData] = useState<Payload | null>(null)
   const [loading, setLoading] = useState(true)
+  const [sortBy, setSortBy] = useState<SortKey>('jobCardNumber')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   const stageMeta = PRODUCTION_STAGES.find((s) => s.key === stageKey)
 
@@ -68,10 +72,6 @@ export default function ProductionStagePage() {
 
   const label = data?.stageLabel ?? stageMeta?.label ?? stageKey
   const rawList = data?.jobCards ?? []
-
-  type SortKey = 'jobCardNumber' | 'customer' | 'sheets' | 'stageStatus' | 'completedAt'
-  const [sortBy, setSortBy] = useState<SortKey>('jobCardNumber')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   const list = useMemo(() => {
     const arr = [...rawList]
@@ -213,6 +213,30 @@ export default function ProductionStagePage() {
           </tbody>
         </table>
       </div>
+
+      {stageKey === 'dye_cutting' && list.some((x) => x.stageRecord.status === 'completed') ? (
+        <div className="rounded-xl border border-amber-700 bg-amber-950/30 p-4">
+          <p className="text-amber-200 font-medium">⚠ DIE RETURN REQUIRED</p>
+          <p className="text-xs text-amber-300 mt-1">
+            Die Cutting completed jobs should return dies immediately with run impressions and condition.
+          </p>
+          <p className="text-xs text-slate-300 mt-2">
+            Open the job card, use the Die panel, then click <span className="font-semibold">Confirm Return</span>.
+          </p>
+        </div>
+      ) : null}
+
+      {stageKey === 'embossing' && list.some((x) => x.stageRecord.status === 'completed') ? (
+        <div className="rounded-xl border border-amber-700 bg-amber-950/30 p-4">
+          <p className="text-amber-200 font-medium">⚠ EMBOSS BLOCK RETURN REQUIRED</p>
+          <p className="text-xs text-amber-300 mt-1">
+            Embossing completed jobs should return blocks immediately with impressions and condition.
+          </p>
+          <p className="text-xs text-slate-300 mt-2">
+            Open the job card and complete block return from the Emboss Block panel.
+          </p>
+        </div>
+      ) : null}
 
       {list.length === 0 && (
         <p className="text-slate-500 text-center py-8 text-sm">

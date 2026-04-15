@@ -2,12 +2,22 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { parseDesignerCommand } from '@/lib/designer-command'
 
-type SpecOverrides = { assignedDesignerId?: string; [k: string]: unknown } | null
+type SpecOverrides = {
+  assignedDesignerId?: string
+  customerApprovalPharma?: boolean
+  shadeCardQaTextApproval?: boolean
+  prePressSentToPlateHubAt?: string
+  [k: string]: unknown
+} | null
+
 type Row = {
   id: string
   cartonName: string
+  artworkCode?: string | null
   quantity: number
   paperType: string | null
   coatingType: string | null
@@ -36,6 +46,10 @@ type Row = {
     hasSet: boolean
     hasJobCard: boolean
     artworkApproved: boolean
+    artworkLocksCompleted?: number
+    approvalsComplete?: boolean
+    prePressFinalized?: boolean
+    artworkStatusLabel?: string
     firstArticlePass: boolean
     readyForProduction: boolean
   }
@@ -44,26 +58,14 @@ type Row = {
 type Customer = { id: string; name: string }
 type User = { id: string; name: string }
 
-function Pill({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <span
-      className={`px-2 py-0.5 rounded-full text-[11px] border ${
-        ok
-          ? 'bg-green-900/30 text-green-300 border-green-700'
-          : 'bg-slate-900 text-slate-400 border-slate-700'
-      }`}
-    >
-      {label}
-    </span>
-  )
-}
-
 export default function DesigningQueuePage() {
+  const router = useRouter()
   const [rows, setRows] = useState<Row[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [customerId, setCustomerId] = useState('')
+  const [finalizingId, setFinalizingId] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -93,16 +95,79 @@ export default function DesigningQueuePage() {
 
   const readyCount = useMemo(
     () => rows.filter((r) => r.readiness?.readyForProduction).length,
-    [rows]
+    [rows],
   )
+
+  const finalizeFromList = async (r: Row) => {
+    const setN = (r.setNumber || '').trim()
+    const aw = (r.artworkCode || '').trim()
+    if (!setN || !/^\d+$/.test(setN)) {
+      toast.error('Set # must be filled (numeric) on the edit screen')
+      return
+    }
+    if (!aw) {
+      toast.error('Artwork code is required — open Edit to enter it')
+      return
+    }
+    const spec = r.specOverrides || {}
+    if (!spec.customerApprovalPharma || !spec.shadeCardQaTextApproval) {
+      toast.error('Both approvals must be checked')
+      return
+    }
+    const designerId = (spec.assignedDesignerId as string | undefined) || null
+    const designerCommand = parseDesignerCommand(spec.designerCommand)
+    setFinalizingId(r.id)
+    try {
+      const res = await fetch('/api/plate-hub', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          poLineId: r.id,
+          setNumber: setN,
+          awCode: aw,
+          customerApproval: true,
+          qaTextCheckApproval: true,
+          assignedDesignerId: designerId,
+          designerCommand,
+          status: 'PUSH_TO_PRODUCTION_QUEUE',
+        }),
+      })
+      const json = (await res.json()) as { error?: string; requirementCode?: string }
+      if (res.status === 409) {
+        toast.info(json.error || 'Already finalized')
+        router.refresh()
+        return
+      }
+      if (!res.ok) throw new Error(json.error || 'Finalize failed')
+      toast.success(`Plate Hub · ${json.requirementCode || 'queued'}`)
+      const linesRes = await fetch(`/api/designing/po-lines?${customerId ? `customerId=${customerId}` : ''}`)
+      const list = await linesRes.json()
+      setRows(Array.isArray(list) ? list : [])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Finalize failed')
+    } finally {
+      setFinalizingId(null)
+    }
+  }
 
   if (loading) return <div className="p-4 text-slate-400">Loading…</div>
 
   return (
     <div className="p-4 max-w-7xl mx-auto space-y-4">
+      <div className="rounded-xl border border-slate-700 bg-slate-900 p-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="px-2 py-1 rounded border border-green-700 text-green-300">Customer PO ✓</span>
+          <span className="text-slate-500">→</span>
+          <span className="px-2 py-1 rounded border border-blue-700 bg-blue-900/30 text-blue-200">Artwork queue</span>
+          <span className="text-slate-500">→</span>
+          <span className="px-2 py-1 rounded border border-slate-700 text-slate-300">Plate Hub</span>
+          <span className="text-slate-500">→</span>
+          <span className="px-2 py-1 rounded border border-slate-700 text-slate-300">Planning</span>
+        </div>
+      </div>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-amber-400">Designing Queue</h1>
+          <h1 className="text-xl font-bold text-amber-400">Artwork queue</h1>
           <p className="text-xs text-slate-500">
             Ready for production: <span className="text-amber-300 font-semibold">{readyCount}</span> /{' '}
             {rows.length}
@@ -110,16 +175,16 @@ export default function DesigningQueuePage() {
         </div>
         <div className="flex gap-2">
           <Link
-            href="/orders/planning"
+            href="/orders/purchase-orders"
             className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-sm"
           >
-            Planning
+            Customer orders / POs
           </Link>
           <Link
-            href="/production/job-cards"
+            href="/pre-press/plate-store"
             className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-sm"
           >
-            Job Cards
+            Plate Hub →
           </Link>
         </div>
       </div>
@@ -140,79 +205,94 @@ export default function DesigningQueuePage() {
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-slate-700">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-slate-800 text-slate-300">
+        <table className="w-full text-sm text-left table-fixed">
+          <thead className="bg-slate-800 text-slate-200">
             <tr>
-              <th className="px-4 py-2">PO</th>
-              <th className="px-4 py-2">Customer</th>
-              <th className="px-4 py-2">Carton</th>
-              <th className="px-4 py-2">Qty</th>
-              <th className="px-4 py-2">Set</th>
-              <th className="px-4 py-2">Designer</th>
-              <th className="px-4 py-2">Artwork</th>
-              <th className="px-4 py-2">Checks</th>
-              <th className="px-4 py-2">Links</th>
+              <th className="px-3 py-2 w-[9rem]">PO</th>
+              <th className="px-3 py-2 w-[7rem]">Customer</th>
+              <th className="px-3 py-2 min-w-[12rem]">Carton</th>
+              <th className="px-3 py-2 w-[5rem]">Qty</th>
+              <th className="px-3 py-2 w-[4rem]">Set</th>
+              <th className="px-3 py-2 w-[6rem]">Designer</th>
+              <th className="px-3 py-2 w-[8rem]">Artwork</th>
+              <th className="px-3 py-2 min-w-[10rem]">Pre-press status</th>
+              <th className="px-3 py-2 min-w-[14rem]">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700">
             {rows.map((r) => {
               const designerId = r.specOverrides?.assignedDesignerId
               const designerName = designerId ? (userById[designerId]?.name ?? '—') : '—'
+              const label = r.readiness.artworkStatusLabel ?? 'Awaiting approval'
+              const approvalsDone = !!r.readiness.approvalsComplete
+              const finalized = !!r.readiness.prePressFinalized
+              const canFinalizeRow =
+                approvalsDone && !finalized && !!(r.setNumber || '').trim() && !!(r.artworkCode || '').trim()
               return (
                 <tr key={r.id} className="hover:bg-slate-800/60">
-                  <td className="px-4 py-2 font-mono text-amber-300">{r.po.poNumber}</td>
-                  <td className="px-4 py-2 text-slate-200">{r.po.customer.name}</td>
-                  <td className="px-4 py-2 text-slate-200">{r.cartonName}</td>
-                  <td className="px-4 py-2 text-slate-300">{r.quantity}</td>
-                  <td className="px-4 py-2 text-slate-300">{r.setNumber ?? '—'}</td>
-                  <td className="px-4 py-2 text-slate-300 text-xs">{designerName}</td>
-                  <td className="px-4 py-2">
-                    <Pill ok={r.readiness.artworkApproved} label={r.readiness.artworkApproved ? 'Approved' : 'Pending'} />
+                  <td className="px-3 py-3 align-top font-mono text-amber-300 break-all">{r.po.poNumber}</td>
+                  <td className="px-3 py-3 align-top text-slate-100">{r.po.customer.name}</td>
+                  <td className="px-3 py-3 align-top text-slate-100 text-balance break-words">
+                    {r.cartonName}
                   </td>
-                  <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      <Pill ok={r.readiness.hasSet} label="Set#" />
-                      <Pill ok={r.readiness.hasJobCard} label="JC" />
-                      <Pill ok={r.readiness.firstArticlePass} label="FA" />
-                      <Pill ok={r.readiness.readyForProduction} label="Ready" />
+                  <td className="px-3 py-3 align-top text-slate-200 tabular-nums">{r.quantity}</td>
+                  <td className="px-3 py-3 align-top text-slate-200">{r.setNumber ?? '—'}</td>
+                  <td className="px-3 py-3 align-top text-xs text-slate-200">{designerName}</td>
+                  <td className="px-3 py-3 align-top text-slate-100 text-xs leading-snug">{label}</td>
+                  <td className="px-3 py-3 align-top text-slate-100 text-xs text-balance leading-snug break-words">
+                    {finalized
+                      ? 'Sent to Plate Hub — ready for planning'
+                      : approvalsDone
+                        ? 'Approvals complete — finalize or open plate hub'
+                        : 'Awaiting customer & QA text approvals'}
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex flex-wrap gap-1">
+                        <Link
+                          href={`/orders/designing/${r.id}`}
+                          className="inline-flex px-2 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium"
+                        >
+                          Edit
+                        </Link>
+                        {canFinalizeRow && (
+                          <button
+                            type="button"
+                            disabled={finalizingId === r.id}
+                            onClick={() => void finalizeFromList(r)}
+                            className="inline-flex px-2 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-medium"
+                          >
+                            {finalizingId === r.id ? '…' : 'Finalize'}
+                          </button>
+                        )}
+                        {finalized && (
+                          <Link
+                            href="/orders/planning"
+                            className="inline-flex px-2 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium"
+                          >
+                            Forward to planning
+                          </Link>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs">
+                        <a
+                          href={`/api/designing/po-lines/${r.id}/job-spec-pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-amber-300 hover:underline"
+                        >
+                          Spec PDF
+                        </a>
+                        <Link
+                          href={`/orders/purchase-orders/${r.po.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-slate-300 hover:underline"
+                        >
+                          PO
+                        </Link>
+                      </div>
                     </div>
-                  </td>
-                  <td className="px-4 py-2 space-x-2">
-                    <Link
-                      href={`/orders/designing/${r.id}`}
-                      className="text-amber-400 hover:underline"
-                    >
-                      Open
-                    </Link>
-                    <a
-                      href={`/api/designing/po-lines/${r.id}/job-spec-pdf`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-slate-400 hover:underline"
-                    >
-                      Spec PDF
-                    </a>
-                    <Link
-                      href={`/orders/purchase-orders/${r.po.id}`}
-                      className="text-slate-400 hover:underline"
-                    >
-                      PO
-                    </Link>
-                    {r.jobCard ? (
-                      <Link
-                        href={`/production/job-cards/${r.jobCard.id}`}
-                        className="text-slate-300 hover:underline"
-                      >
-                        JC#{r.jobCard.jobCardNumber}
-                      </Link>
-                    ) : (
-                      <Link
-                        href={`/production/job-cards/new?poId=${r.po.id}&lineId=${r.id}`}
-                        className="text-slate-300 hover:underline"
-                      >
-                        Create JC
-                      </Link>
-                    )}
                   </td>
                 </tr>
               )
@@ -227,4 +307,3 @@ export default function DesigningQueuePage() {
     </div>
   )
 }
-

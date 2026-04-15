@@ -49,6 +49,26 @@ export const DYE_TYPES = [
 
 export const INK_COLORS = ['CMYK', 'CMYKP', 'CMYKB', 'PANTONE', 'Color', 'Black only']
 
+export const PRINTING_TYPES = [
+  'Offset',
+  'Digital',
+  'Flexo',
+  'Screen',
+  'Gravure',
+]
+
+export const PASTING_TYPES = [
+  'Single wall',
+  'Double wall',
+  'Straight line',
+  'Crash lock',
+  'Lock bottom',
+  'Window pasting',
+  'None',
+]
+
+export const DYE_CONDITIONS = ['Old', 'New']
+
 export const BOARD_GRADES = ['SBS', 'FBB', 'Duplex', 'Art Card', 'Kraft', 'Metpet', 'Cup Stock']
 
 export const CARTON_CONSTRUCTIONS = [

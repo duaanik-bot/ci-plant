@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
+import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { DRUG_SCHEDULES, COATING_TYPES, LAMINATE_TYPES, FOIL_TYPES, EMBOSSING_TYPES, CARTON_CONSTRUCTIONS, BARCODE_TYPES } from '@/lib/constants'
 
 type Customer = {
@@ -14,6 +15,47 @@ type Customer = {
   contactPhone?: string | null
   email?: string | null
   address?: string | null
+}
+
+type CartonTemplate = {
+  id: string
+  cartonName: string
+  customerId: string
+  productType?: string | null
+  cartonSize: string
+  boardGrade?: string | null
+  gsm?: number | null
+  paperType?: string | null
+  coatingType?: string | null
+  foilType?: string | null
+  laminateType?: string | null
+  embossingLeafing?: string | null
+  cartonConstruct?: string | null
+  barcodeType?: string | null
+  artworkCode?: string | null
+  finishedLength?: number | null
+  finishedWidth?: number | null
+  finishedHeight?: number | null
+  numberOfColours?: number | null
+  colourBreakdown?: unknown
+  drugSchedule?: string | null
+  regulatoryText?: string | null
+  batchSpaceL?: number | null
+  batchSpaceW?: number | null
+  mrpSpaceL?: number | null
+  mrpSpaceW?: number | null
+  specialInstructions?: string | null
+  whoGmpRequired?: boolean
+  scheduleMRequired?: boolean
+  fssaiRequired?: boolean
+}
+
+type Supplier = {
+  id: string
+  name: string
+  contactName?: string | null
+  contactPhone?: string | null
+  email?: string | null
 }
 
 type RfqCoreForm = {
@@ -62,6 +104,7 @@ type RfqComplianceForm = {
 
 type RfqCommercialForm = {
   existingSupplier: 'yes' | 'no' | ''
+  existingSupplierId: string
   existingSupplierName: string
   targetPricePerThousand: string
   competitorRef: string
@@ -119,6 +162,7 @@ export default function NewRfqPage() {
 
   const [commercial, setCommercial] = useState<RfqCommercialForm>({
     existingSupplier: '',
+    existingSupplierId: '',
     existingSupplierName: '',
     targetPricePerThousand: '',
     competitorRef: '',
@@ -144,21 +188,46 @@ export default function NewRfqPage() {
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'rfq-customer',
     search: async (query: string) => {
-      const res = await fetch('/api/customers')
-      const data = (await res.json()) as Customer[]
-      const q = query.toLowerCase()
-      return data.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          (c.contactName ?? '').toLowerCase().includes(q),
-      )
+      const res = await fetch(`/api/customers?q=${encodeURIComponent(query)}`)
+      return (await res.json()) as Customer[]
     },
     getId: (c) => c.id,
     getLabel: (c) => c.name,
   })
 
+  const cartonSearch = useAutoPopulate<CartonTemplate>({
+    storageKey: 'rfq-carton-template',
+    search: async (query: string) => {
+      const params = new URLSearchParams()
+      if (core.customerId) params.set('customerId', core.customerId)
+      params.set('q', query)
+      const res = await fetch(`/api/cartons?${params.toString()}`)
+      const data = (await res.json()) as CartonTemplate[]
+      return data
+    },
+    getId: (c) => c.id,
+    getLabel: (c) => c.cartonName,
+  })
+
+  const supplierSearch = useAutoPopulate<Supplier>({
+    storageKey: 'rfq-supplier',
+    search: async (query: string) => {
+      const res = await fetch('/api/masters/suppliers')
+      const data = (await res.json()) as Supplier[]
+      const q = query.toLowerCase()
+      return data.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          (s.contactName ?? '').toLowerCase().includes(q),
+      )
+    },
+    getId: (s) => s.id,
+    getLabel: (s) => s.name,
+  })
+
   const applyCustomer = (c: Customer) => {
     customerSearch.select(c)
+    cartonSearch.setQuery('')
     setCore((prev) => ({
       ...prev,
       customerId: c.id,
@@ -166,6 +235,69 @@ export default function NewRfqPage() {
       contactPerson: c.contactName ?? '',
       contactPhone: c.contactPhone ?? '',
       contactEmail: c.email ?? '',
+    }))
+  }
+
+  const colorBreakdownToText = (value: unknown): string => {
+    if (Array.isArray(value)) return value.map((item) => String(item)).join(', ')
+    if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).map(String).join(', ')
+    return typeof value === 'string' ? value : ''
+  }
+
+  const colourCountToLabel = (value?: number | null): string => {
+    if (!value || value < 1) return ''
+    return `${value}C`
+  }
+
+  const yesNoFromRegulatoryText = (value?: string | null): 'yes' | 'no' | '' => {
+    if (!value) return ''
+    return value.toLowerCase() === 'no' ? 'no' : 'yes'
+  }
+
+  const applyCartonTemplate = (carton: CartonTemplate) => {
+    cartonSearch.select(carton)
+    setCore((prev) => ({
+      ...prev,
+      packType: carton.productType ?? prev.packType,
+      drugSchedule: carton.drugSchedule ?? prev.drugSchedule,
+      specialRequirements: carton.specialInstructions ?? prev.specialRequirements,
+    }))
+    setSpec((prev) => ({
+      ...prev,
+      boardGrade: carton.boardGrade ?? prev.boardGrade,
+      gsm: carton.gsm != null ? String(carton.gsm) : prev.gsm,
+      colours: colourCountToLabel(carton.numberOfColours) || prev.colours,
+      colourBreakdown: colorBreakdownToText(carton.colourBreakdown) || prev.colourBreakdown,
+      coatingType: carton.coatingType ?? prev.coatingType,
+      lamination: carton.laminateType ?? prev.lamination,
+      foil: carton.foilType ?? prev.foil,
+      embossing: carton.embossingLeafing ?? prev.embossing,
+      construction: carton.cartonConstruct ?? prev.construction,
+      barcodeType: carton.barcodeType ?? prev.barcodeType,
+      sizeL: carton.finishedLength != null ? String(carton.finishedLength) : prev.sizeL,
+      sizeW: carton.finishedWidth != null ? String(carton.finishedWidth) : prev.sizeW,
+      sizeH: carton.finishedHeight != null ? String(carton.finishedHeight) : prev.sizeH,
+    }))
+    setCompliance((prev) => ({
+      ...prev,
+      regulatoryText: yesNoFromRegulatoryText(carton.regulatoryText),
+      batchSpaceW: carton.batchSpaceW != null ? String(carton.batchSpaceW) : prev.batchSpaceW,
+      batchSpaceH: carton.batchSpaceL != null ? String(carton.batchSpaceL) : prev.batchSpaceH,
+      mrpSpaceW: carton.mrpSpaceW != null ? String(carton.mrpSpaceW) : prev.mrpSpaceW,
+      mrpSpaceH: carton.mrpSpaceL != null ? String(carton.mrpSpaceL) : prev.mrpSpaceH,
+      whoGmp: carton.whoGmpRequired ?? prev.whoGmp,
+      scheduleM: carton.scheduleMRequired ?? prev.scheduleM,
+      fssai: carton.fssaiRequired ?? prev.fssai,
+    }))
+  }
+
+  const applySupplier = (supplier: Supplier) => {
+    supplierSearch.select(supplier)
+    setCommercial((prev) => ({
+      ...prev,
+      existingSupplier: 'yes',
+      existingSupplierId: supplier.id,
+      existingSupplierName: supplier.name,
     }))
   }
 
@@ -325,58 +457,41 @@ export default function NewRfqPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div className="md:col-span-2">
-              <label className="block text-xs text-slate-400 mb-1">
-                Customer<span className="text-red-400">*</span>
-              </label>
-              <input
-                type="text"
-                value={customerSearch.query}
-                onChange={(e) => {
-                  customerSearch.setQuery(e.target.value)
+              <MasterSearchSelect
+                label="Customer"
+                required
+                query={customerSearch.query}
+                onQueryChange={(value) => {
+                  customerSearch.setQuery(value)
                   setCore((prev) => ({ ...prev, customerId: '', customerName: '' }))
                 }}
-                className={`w-full px-3 py-2 rounded bg-slate-800 border ${
-                  errors.customerId ? 'border-red-500' : 'border-slate-600'
-                } text-white`}
-                placeholder="Type customer name…"
+                loading={customerSearch.loading}
+                options={customerSearch.options}
+                lastUsed={customerSearch.lastUsed}
+                onSelect={applyCustomer}
+                getOptionLabel={(c) => c.name}
+                getOptionMeta={(c) =>
+                  [c.contactName, c.contactPhone].filter(Boolean).join(' · ')
+                }
+                error={errors.customerId}
+                placeholder="Type 1-2 letters to search customers..."
+                emptyMessage="No customer found in master."
+                recentLabel="Recent customers"
+                loadingMessage="Searching customers..."
+                emptyActionLabel={
+                  customerSearch.query.trim()
+                    ? `Create "${customerSearch.query.trim()}" as new customer`
+                    : undefined
+                }
+                onEmptyAction={() => {
+                  const suggestedName = customerSearch.query.trim()
+                  setQcCustomer((prev) => ({
+                    ...prev,
+                    name: suggestedName || prev.name,
+                  }))
+                  setQuickCreateOpen(true)
+                }}
               />
-              {errors.customerId && (
-                <p className="text-xs text-red-400 mt-1">{errors.customerId}</p>
-              )}
-              {customerSearch.loading && (
-                <p className="text-xs text-slate-400 mt-1">Searching…</p>
-              )}
-              {customerSearch.options.length > 0 && (
-                <div className="mt-1 rounded border border-slate-700 bg-slate-900 max-h-40 overflow-y-auto">
-                  {customerSearch.options.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => applyCustomer(c)}
-                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-800 text-slate-100"
-                    >
-                      {c.name}
-                      {c.contactName ? (
-                        <span className="text-slate-500"> · {c.contactName}</span>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {customerSearch.lastUsed.length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {customerSearch.lastUsed.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => applyCustomer(c)}
-                      className="px-2 py-0.5 rounded-full bg-slate-800 text-xs text-slate-200 border border-slate-600 hover:border-amber-500"
-                    >
-                      {c.name}
-                    </button>
-                  ))}
-                </div>
-              )}
               <button
                 type="button"
                 className="mt-1 text-xs text-amber-400 hover:underline"
@@ -431,6 +546,30 @@ export default function NewRfqPage() {
             SECTION 2 — PRODUCT REQUIREMENT
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div className="md:col-span-2">
+              <MasterSearchSelect
+                label="Product Template From Carton Master"
+                query={cartonSearch.query}
+                onQueryChange={cartonSearch.setQuery}
+                loading={cartonSearch.loading}
+                options={cartonSearch.options}
+                lastUsed={cartonSearch.lastUsed}
+                onSelect={applyCartonTemplate}
+                getOptionLabel={(carton) => carton.cartonName}
+                getOptionMeta={(carton) =>
+                  [carton.productType, carton.cartonSize].filter(Boolean).join(' · ')
+                }
+                placeholder={
+                  core.customerId
+                    ? 'Type 1-2 letters to search carton templates...'
+                    : 'Select customer first to filter carton templates'
+                }
+                disabled={!core.customerId}
+                emptyMessage="No carton template found for this customer."
+                recentLabel="Recent carton templates"
+                loadingMessage="Searching carton master..."
+              />
+            </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">
                 Product Name<span className="text-red-400">*</span>
@@ -914,6 +1053,10 @@ export default function NewRfqPage() {
                   setCommercial((prev) => ({
                     ...prev,
                     existingSupplier: e.target.value as 'yes' | 'no' | '',
+                    existingSupplierId:
+                      e.target.value === 'yes' ? prev.existingSupplierId : '',
+                    existingSupplierName:
+                      e.target.value === 'yes' ? prev.existingSupplierName : '',
                   }))
                 }
                 className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
@@ -924,17 +1067,30 @@ export default function NewRfqPage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Existing Supplier Name</label>
-              <input
-                type="text"
-                value={commercial.existingSupplierName}
-                onChange={(e) =>
+              <MasterSearchSelect
+                label="Existing Supplier Name"
+                query={supplierSearch.query}
+                onQueryChange={(value) => {
+                  supplierSearch.setQuery(value)
                   setCommercial((prev) => ({
                     ...prev,
-                    existingSupplierName: e.target.value,
+                    existingSupplier: value ? 'yes' : prev.existingSupplier,
+                    existingSupplierId: '',
+                    existingSupplierName: value,
                   }))
+                }}
+                loading={supplierSearch.loading}
+                options={supplierSearch.options}
+                lastUsed={supplierSearch.lastUsed}
+                onSelect={applySupplier}
+                getOptionLabel={(supplier) => supplier.name}
+                getOptionMeta={(supplier) =>
+                  [supplier.contactName, supplier.contactPhone].filter(Boolean).join(' · ')
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                placeholder="Type 1-2 letters to search suppliers..."
+                emptyMessage="No supplier found in master."
+                recentLabel="Recent suppliers"
+                loadingMessage="Searching suppliers..."
               />
             </div>
             <div>
@@ -1109,5 +1265,3 @@ export default function NewRfqPage() {
     </div>
   )
 }
-
-

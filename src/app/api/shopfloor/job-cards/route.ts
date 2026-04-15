@@ -22,5 +22,23 @@ export async function GET() {
     },
   })
 
-  return NextResponse.json(list)
+  const jobCardNumbers = list.map((j) => j.jobCardNumber).filter((n): n is number => n != null)
+  const poLines =
+    jobCardNumbers.length > 0
+      ? await db.poLineItem.findMany({
+          where: { jobCardNumber: { in: jobCardNumbers } },
+          select: { jobCardNumber: true, cartonName: true },
+        })
+      : []
+  const productNameByJc = new Map<number, string>()
+  poLines.forEach((l) => {
+    if (l.jobCardNumber != null) productNameByJc.set(l.jobCardNumber, l.cartonName)
+  })
+
+  const mapped = list.map((jc) => ({
+    ...jc,
+    productName: jc.jobCardNumber != null ? productNameByJc.get(jc.jobCardNumber) ?? null : null,
+  }))
+
+  return NextResponse.json(mapped)
 }

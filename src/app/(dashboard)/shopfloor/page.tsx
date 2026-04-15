@@ -12,6 +12,7 @@ type Stage = {
   operator: string | null
   counter: number | null
   sheetSize: string | null
+  excessSheets: number | null
   completedAt: string | null
 }
 
@@ -19,6 +20,7 @@ type JobCard = {
   id: string
   jobCardNumber: number
   setNumber: string | null
+  productName: string | null
   customer: { id: string; name: string }
   requiredSheets: number
   totalSheets: number
@@ -29,7 +31,14 @@ type JobCard = {
 
 type StageQueueItem = {
   stageRecord: { id: string; stageName: string; status: string; operator: string | null; counter: number | null }
-  jobCard: { id: string; jobCardNumber: number; setNumber: string | null; customer: { name: string }; status: string } | null
+  jobCard: {
+    id: string
+    jobCardNumber: number
+    setNumber: string | null
+    customer: { name: string }
+    status: string
+    productName?: string | null
+  } | null
 }
 
 const TABS = [
@@ -47,6 +56,7 @@ export default function ShopfloorPage() {
   const [stageQueue, setStageQueue] = useState<StageQueueItem[]>([])
   const [saving, setSaving] = useState(false)
   const [counterVal, setCounterVal] = useState<Record<string, string>>({})
+  const [excessSheetsVal, setExcessSheetsVal] = useState<Record<string, string>>({})
 
   const fetchJobCards = useCallback(() => {
     fetch('/api/shopfloor/job-cards')
@@ -72,7 +82,11 @@ export default function ShopfloorPage() {
     if (stageKey) fetchStageQueue(stageKey)
   }, [stageKey, fetchStageQueue])
 
-  async function updateStage(jobCardId: string, stageId: string, patch: { status?: string; counter?: number | null }) {
+  async function updateStage(
+    jobCardId: string,
+    stageId: string,
+    patch: { status?: string; counter?: number | null; excessSheets?: number | null },
+  ) {
     setSaving(true)
     try {
       const jc = jobCards.find((j) => j.id === jobCardId) || (await fetch(`/api/job-cards/${jobCardId}`).then((r) => r.json()))
@@ -89,13 +103,15 @@ export default function ShopfloorPage() {
             operator: s.operator,
             counter: s.counter,
             sheetSize: s.sheetSize,
+            excessSheets: s.excessSheets,
           })),
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
-      toast.success(patch.status === 'completed' ? 'Stage completed' : 'Stage started')
+      toast.success(patch.status === 'completed' ? 'Stage completed — moved to next queue' : 'Stage started')
       setCounterVal((prev) => ({ ...prev, [stageId]: '' }))
+      setExcessSheetsVal((prev) => ({ ...prev, [stageId]: '' }))
       fetchJobCards()
       if (stageKey) fetchStageQueue(stageKey)
     } catch (e) {
@@ -134,7 +150,10 @@ export default function ShopfloorPage() {
                       className="w-full p-4 text-left flex items-center justify-between"
                     >
                       <div>
-                        <p className="font-mono font-semibold text-amber-400">JC#{jc.jobCardNumber}</p>
+                        <p className="font-mono font-semibold text-amber-400">
+                          JC#{jc.jobCardNumber}
+                          {jc.productName ? ` · ${jc.productName}` : ''}
+                        </p>
                         <p className="text-sm text-slate-300">{jc.customer.name}</p>
                         <p className="text-xs text-slate-500">
                           {jc.setNumber ? `Set ${jc.setNumber}` : ''} · Sheets: {jc.sheetsIssued}/{jc.totalSheets}
@@ -183,6 +202,16 @@ export default function ShopfloorPage() {
                                   onChange={(e) => setCounterVal((prev) => ({ ...prev, [s.id]: e.target.value }))}
                                   className="w-24 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-sm"
                                 />
+                                <input
+                                  type="number"
+                                  min={0}
+                                  placeholder="Excess sheets"
+                                  value={excessSheetsVal[s.id] ?? ''}
+                                  onChange={(e) =>
+                                    setExcessSheetsVal((prev) => ({ ...prev, [s.id]: e.target.value }))
+                                  }
+                                  className="w-28 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-sm"
+                                />
                                 <button
                                   type="button"
                                   disabled={saving}
@@ -190,6 +219,8 @@ export default function ShopfloorPage() {
                                     updateStage(jc.id, s.id, {
                                       status: 'completed',
                                       counter: counterVal[s.id] ? parseInt(counterVal[s.id], 10) : null,
+                                      excessSheets: excessSheetsVal[s.id]
+                                        ? parseInt(excessSheetsVal[s.id], 10) : null,
                                     })
                                   }
                                   className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium"
@@ -259,7 +290,10 @@ export default function ShopfloorPage() {
                     >
                       {item.jobCard && (
                         <>
-                          <p className="font-mono text-amber-400">JC#{item.jobCard.jobCardNumber}</p>
+                          <p className="font-mono text-amber-400">
+                            JC#{item.jobCard.jobCardNumber}
+                            {item.jobCard.productName ? ` · ${item.jobCard.productName}` : ''}
+                          </p>
                           <p className="text-sm text-slate-300">{item.jobCard.customer.name}</p>
                           <p className="text-xs text-slate-500">{item.stageRecord.status}</p>
                           <Link
@@ -294,10 +328,10 @@ export default function ShopfloorPage() {
               All job cards
             </Link>
             <Link
-              href="/production/machine-flow"
+              href="/production/stages"
               className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200"
             >
-              Machine flow
+              Production planning
             </Link>
             <Link href="/" className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200">
               Dashboard

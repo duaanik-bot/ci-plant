@@ -1,30 +1,16 @@
 'use client'
 
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import {
   LayoutDashboard,
-  Users,
-  Truck,
-  Package,
-  Droplets,
-  Box,
-  Cpu,
-  UserCog,
-  FlaskConical,
   FileText,
   ShoppingCart,
   CalendarCheck,
-  Palette,
-  ClipboardList,
-  GitBranch,
   Image,
   ClipboardCheck,
   AlertTriangle,
-  PackageCheck,
-  CheckSquare,
-  Download,
   Factory,
   Layers,
   Tablet,
@@ -32,12 +18,23 @@ import {
   Warehouse,
   RefreshCw,
   FileStack,
-  Briefcase,
   Receipt,
   MapPin,
+  Users,
+  Truck,
+  Package,
+  Droplets,
+  Cpu,
+  UserCog,
   BarChart3,
   Flame,
   FileSpreadsheet,
+  PackageCheck,
+  CheckSquare,
+  Download,
+  FlaskConical,
+  Wrench,
+  Palette,
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
@@ -45,15 +42,18 @@ import {
 const STORAGE_KEY = 'ci-plant-sidebar-sections'
 
 const defaultOpen: Record<string, boolean> = {
-  overview: true,
-  masters: true,
-  prepress: true,
-  artwork: true,
-  stores: true,
+  dashboard: true,
+  orders: true,
+  design: true,
+  tools: true,
+  planning: true,
   production: true,
   inventory: true,
+  stores: true,
+  quality: true,
   dispatch: true,
   reports: true,
+  masters: true,
 }
 
 function loadStored(): Record<string, boolean> {
@@ -98,6 +98,7 @@ function NavItem({
   isActive: boolean
   external?: boolean
 }) {
+  const router = useRouter()
   const className = isActive
     ? 'flex items-center gap-2 px-2 py-1.5 rounded-md bg-blue-600 text-white'
     : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-slate-300 hover:bg-slate-700 hover:text-white'
@@ -115,7 +116,13 @@ function NavItem({
     )
   }
   return (
-    <Link href={href} className={className}>
+    <Link
+      href={href}
+      prefetch={false}
+      onMouseEnter={() => router.prefetch(href)}
+      onFocus={() => router.prefetch(href)}
+      className={className}
+    >
       <Icon className="h-4 w-4 shrink-0" />
       <span>{label}</span>
     </Link>
@@ -150,99 +157,97 @@ export function SidebarNav({
 
   const sections: NavSection[] = [
     {
-      key: 'overview',
-      title: '📊 OVERVIEW',
+      key: 'dashboard',
+      title: '📊 DASHBOARD',
       borderColor: 'border-l-blue-500',
       links: [{ href: '/', label: 'Dashboard', icon: LayoutDashboard }],
     },
     {
-      key: 'masters',
-      title: '⚙️ MASTERS',
-      subtitle: 'Foundation — set up before anything else',
-      borderColor: 'border-l-violet-500',
-      links: [
-        { href: '/masters/customers', label: 'Customers', icon: Users },
-        { href: '/masters/suppliers', label: 'Suppliers', icon: Truck },
-        { href: '/masters/cartons', label: 'Cartons', icon: Package },
-        { href: '/masters/dyes', label: 'Dye Details', icon: Droplets },
-        { href: '/masters/emboss-blocks', label: 'Emboss Blocks', icon: Package },
-        { href: '/masters/materials', label: 'Materials', icon: Box },
-        { href: '/masters/machines', label: 'Machines', icon: Cpu },
-        { href: '/masters/users', label: 'Users', icon: UserCog },
-        { href: '/masters/instruments', label: 'QC Instruments', icon: FlaskConical },
-      ],
-      show: canSeeMasters,
-    },
-    {
-      key: 'prepress',
-      title: '📋 PRE-PRESS',
-      subtitle: 'Order intake → Job creation',
-      borderColor: 'border-l-amber-500',
+      key: 'orders',
+      title: '📋 ORDERS',
+      borderColor: 'border-l-cyan-500',
       links: [
         { href: '/rfq', label: 'RFQ Pipeline', icon: FileText },
         { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart },
-        { href: '/orders/planning', label: 'Planning', icon: CalendarCheck },
-        { href: '/orders/designing', label: 'Designing', icon: Palette },
-        { href: '/pre-press/plate-store', label: 'Plate Store', icon: Layers },
-        { href: '/production/job-cards', label: 'Job Cards', icon: ClipboardList },
-        { href: '/workflow', label: 'Workflow', icon: GitBranch },
       ],
     },
     {
-      key: 'artwork',
-      title: '🎨 ARTWORK & COMPLIANCE',
-      subtitle: 'Must be approved before press starts',
+      key: 'design',
+      title: '🎨 ARTWORK QUEUE',
+      borderColor: 'border-l-amber-500',
+      links: [{ href: '/orders/designing', label: 'Artwork Queue', icon: Image }],
+    },
+    {
+      key: 'tools',
+      title: '🔧 TOOLING HUB',
+      subtitle: 'Plates, dies, blocks, and shade cards',
       borderColor: 'border-l-emerald-500',
       links: [
-        { href: '/artwork', label: 'Artwork Gate', icon: Image },
-        { href: '/qms/qc', label: 'QC Records', icon: ClipboardCheck },
-        { href: '/qms/ncr', label: 'NCR / CAPA', icon: AlertTriangle },
+        { href: '/hub/plates', label: 'Plates', icon: Layers },
+        { href: '/hub/dies', label: 'Dies', icon: Droplets },
+        { href: '/hub/blocks', label: 'Embossing blocks', icon: Package },
+        { href: '/hub/shade_cards', label: 'Shade cards', icon: Palette },
+        { href: '/tools', label: 'Pre-press tools', icon: Wrench },
       ],
     },
     {
-      key: 'stores',
-      title: '🏪 STORES',
-      subtitle: 'Material issuance — happens before production',
+      key: 'planning',
+      title: '📅 PLANNING',
       borderColor: 'border-l-orange-500',
       links: [
-        { href: '/stores/issue', label: 'Issue Sheets', icon: PackageCheck },
-        { href: '/stores/approve-excess', label: 'Approve Excess', icon: CheckSquare },
-        { href: '/inventory/grn', label: 'GRN', icon: Download },
+        { href: '/orders/planning', label: 'Planning Queue', icon: CalendarCheck },
+        { href: '/production/job-cards', label: 'Job Cards', icon: FileStack },
+        { href: '/production/stages', label: 'Production Planning', icon: Cpu },
       ],
     },
     {
       key: 'production',
       title: '🏭 PRODUCTION',
-      subtitle: 'Actual manufacturing stages',
       borderColor: 'border-l-rose-500',
       links: [
-        { href: '/production/machine-flow', label: 'Machine Flow', icon: Factory },
-        { href: '/production/stages', label: 'Production Stages', icon: Layers },
+        { href: '/production/stages', label: 'Live Production', icon: Factory },
+        { href: '/workflow', label: 'Job Tracking', icon: RefreshCw },
         { href: '/shopfloor', label: 'Shop Floor Tablet', icon: Tablet },
-        { href: '/oee', label: 'OEE Live', icon: Gauge, external: true },
+        { href: '/oee', label: 'OEE Live', icon: Gauge },
       ],
     },
     {
       key: 'inventory',
       title: '📦 INVENTORY',
-      subtitle: 'Stock management',
       borderColor: 'border-l-teal-500',
       links: [
-        { href: '/inventory', label: 'Stock Overview', icon: Warehouse },
+        { href: '/inventory', label: 'Raw Materials', icon: Warehouse },
         { href: '/inventory/flow', label: 'Inventory Flow', icon: RefreshCw },
-        { href: '/inventory/purchase-requisitions', label: 'Purchase Requisitions', icon: FileStack },
+        { href: '/inventory/purchase-requisitions', label: 'Purchase Requests', icon: FileStack },
+        { href: '/inventory/grn', label: 'GRN', icon: Download },
+      ],
+    },
+    {
+      key: 'stores',
+      title: '🏪 STORES',
+      borderColor: 'border-l-orange-500',
+      links: [
+        { href: '/stores/issue', label: 'Issue Sheets', icon: PackageCheck },
+        { href: '/stores/approve-excess', label: 'Approve Excess', icon: CheckSquare },
+      ],
+    },
+    {
+      key: 'quality',
+      title: '✅ QUALITY',
+      borderColor: 'border-l-lime-500',
+      links: [
+        { href: '/qms/qc', label: 'QC Records', icon: ClipboardCheck },
+        { href: '/qms/ncr', label: 'NCR / CAPA', icon: AlertTriangle },
       ],
     },
     {
       key: 'dispatch',
-      title: '🚚 DISPATCH & BILLING',
-      subtitle: 'After production completes',
+      title: '🚚 DISPATCH',
       borderColor: 'border-l-indigo-500',
       links: [
-        { href: '/jobs', label: 'Active Jobs', icon: Briefcase },
         { href: '/dispatch', label: 'Dispatch Planning', icon: Truck },
-        { href: '/dispatch/tracking', label: 'Delivery Tracking', icon: MapPin },
-        { href: '/billing', label: 'Bills', icon: Receipt },
+        { href: '/dispatch/tracking', label: 'Deliveries', icon: MapPin },
+        { href: '/billing', label: 'Invoices', icon: Receipt },
       ],
     },
     {
@@ -250,11 +255,26 @@ export function SidebarNav({
       title: '📈 REPORTS',
       borderColor: 'border-l-purple-500',
       links: [
-        { href: '/reports/dashboard', label: 'MD Dashboard', icon: LayoutDashboard },
+        { href: '/reports/dashboard', label: 'MD Dashboard', icon: BarChart3 },
         { href: '/reports/production', label: 'Production Summary', icon: BarChart3 },
         { href: '/reports/wastage', label: 'Wastage Report', icon: Flame },
-        { href: '/reports/schedule-m', label: 'Schedule M Report', icon: FileSpreadsheet },
+        { href: '/reports/schedule-m', label: 'Schedule M', icon: FileSpreadsheet },
       ],
+    },
+    {
+      key: 'masters',
+      title: '⚙️ MASTERS',
+      borderColor: 'border-l-violet-500',
+      links: [
+        { href: '/masters/customers', label: 'Customers', icon: Users },
+        { href: '/masters/suppliers', label: 'Suppliers', icon: Truck },
+        { href: '/masters/cartons', label: 'Cartons', icon: Package },
+        { href: '/masters/materials', label: 'Materials', icon: Package },
+        { href: '/masters/machines', label: 'Machines', icon: Cpu },
+        { href: '/masters/users', label: 'Users', icon: UserCog },
+        { href: '/masters/instruments', label: 'QC Instruments', icon: FlaskConical },
+      ],
+      show: canSeeMasters,
     },
   ]
 

@@ -105,7 +105,32 @@ export async function completeWorkflowStage(params: {
       data: updateData,
     })
 
-    const next = stages.find((s) => s.stageNumber === stageNumber + 1)
+    let nextStageNumber = stageNumber + 1
+
+    // Auto-skip embossing stage in conditional routing flows.
+    if (stageNumber === 13) {
+      const checklist = (checklistData && typeof checklistData === 'object')
+        ? (checklistData as { postPressRouting?: { embossing?: boolean }; embossing?: boolean })
+        : null
+      const embossRequired = checklist?.postPressRouting?.embossing ?? checklist?.embossing
+      if (embossRequired === false) {
+        const embossStage = stages.find((s) => s.stageNumber === 14)
+        if (embossStage) {
+          await tx.workflowStage.update({
+            where: { id: embossStage.id },
+            data: {
+              status: 'not_applicable',
+              notes: 'Auto-skipped: Embossing not required for this product',
+              actualStart: new Date(),
+              actualEnd: new Date(),
+            },
+          })
+        }
+        nextStageNumber = 15
+      }
+    }
+
+    const next = stages.find((s) => s.stageNumber === nextStageNumber)
     if (next && next.status === 'pending') {
       await tx.workflowStage.update({
         where: { id: next.id },

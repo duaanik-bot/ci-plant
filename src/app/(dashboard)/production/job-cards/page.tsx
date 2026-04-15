@@ -69,13 +69,21 @@ export default function JobCardsPage() {
   return (
     <div className="p-4 max-w-6xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-amber-400">Production Job Cards</h1>
-        <Link
-          href="/production/job-cards/new"
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
-        >
-          New job card
-        </Link>
+        <h1 className="text-xl font-bold text-amber-400">Job Cards</h1>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/orders/planning"
+            className="px-3 py-2 rounded-lg border border-slate-600 text-slate-200 text-sm"
+          >
+            Planning Queue
+          </Link>
+          <Link
+            href="/production/job-cards/new"
+            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
+          >
+            New job card
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3 text-sm">

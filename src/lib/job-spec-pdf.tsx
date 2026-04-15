@@ -30,6 +30,8 @@ export type JobSpecPdfModel = {
   coatingType: string | null
   embossingLeafing: string | null
   remarks: string | null
+  /** Latest weighted average cost from Board / inventory master (₹), when matched to paper type. */
+  boardWeightedAvgCost: number | null
   specOverrides?: { totalSheets?: number; requiredSheets?: number; ups?: number; wastagePct?: number } | null
 }
 
@@ -102,6 +104,12 @@ export function JobSpecDocument({ model }: { model: JobSpecPdfModel }) {
           <View style={styles.row}>
             <Text style={styles.label}>Rate (₹/1000)</Text>
             <Text style={styles.value}>{model.rate != null ? String(model.rate) : '—'}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Board WAC (₹/u)</Text>
+            <Text style={styles.value}>
+              {model.boardWeightedAvgCost != null ? String(model.boardWeightedAvgCost) : '—'}
+            </Text>
           </View>
           <View style={styles.row}>
             <Text style={styles.label}>GST %</Text>

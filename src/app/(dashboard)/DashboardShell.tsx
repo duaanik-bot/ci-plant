@@ -1,22 +1,48 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
 import { Menu, X } from 'lucide-react'
+import { useSession } from 'next-auth/react'
 import { SidebarNav } from './SidebarNav'
 
 export function DashboardShell({
   children,
-  canSeeMasters,
-  userName,
-  userRole,
 }: {
   children: React.ReactNode
-  canSeeMasters: boolean
-  userName: string | null
-  userRole: string | undefined
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const pathname = usePathname()
+  const router = useRouter()
+  const { data: session, status } = useSession()
+  const userName = session?.user?.name ?? null
+  const userRole = session?.user?.role as string | undefined
+  const canSeeMasters = userRole === 'operations_head' || userRole === 'md'
+
+  useEffect(() => {
+    setMobileMenuOpen(false)
+  }, [pathname])
+
+  useEffect(() => {
+    if (status === 'unauthenticated') router.replace('/login')
+  }, [status, router])
+
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-400 flex items-center justify-center">
+        Loading workspace...
+      </div>
+    )
+  }
+
+  if (status === 'unauthenticated') {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-400 flex items-center justify-center">
+        Redirecting to login...
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 text-white flex">
@@ -39,11 +65,11 @@ export function DashboardShell({
         `}
       >
         <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between shrink-0">
-          <Link href="/" className="flex flex-col" onClick={() => setMobileMenuOpen(false)}>
+          <Link href="/dashboard" className="flex flex-col" onClick={() => setMobileMenuOpen(false)}>
             <span className="text-sm font-semibold tracking-wide text-amber-400">
               COLOUR IMPRESSIONS
             </span>
-            <span className="text-xs text-slate-500">Plant System</span>
+            <span className="text-xs text-slate-500">Production Planning System</span>
           </Link>
           <button
             type="button"
@@ -66,8 +92,8 @@ export function DashboardShell({
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile header */}
         <header className="md:hidden border-b border-slate-800 px-4 py-2 flex items-center justify-between shrink-0">
-          <Link href="/" className="font-semibold text-amber-400">
-            CI Plant
+          <Link href="/dashboard" className="font-semibold text-amber-400">
+            Colour Impressions
           </Link>
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-400 truncate max-w-[120px]">
