@@ -78,6 +78,36 @@ export type HubColourChannelRow = {
 }
 
 /** One row per plate channel with CMYK / P1-style short tags for hub cards. */
+/** Visual channel bucket for Plate Hub CMYK + spot swatches (not the same as canonical keys). */
+export type PlateHubSwatchKind =
+  | 'cyan'
+  | 'magenta'
+  | 'yellow'
+  | 'black'
+  | 'spotOrange'
+  | 'spotPurple'
+  | 'other'
+
+/** Map hub `short` + label to a high-contrast swatch kind (P1/P2 alternate spot colours). */
+export function plateHubSwatchKind(short: string, label: string): PlateHubSwatchKind {
+  const s = String(short ?? '').trim().toUpperCase()
+  const low = String(label ?? '').toLowerCase().trim()
+  if (s === 'C') return 'cyan'
+  if (s === 'M') return 'magenta'
+  if (s === 'Y') return 'yellow'
+  if (s === 'K') return 'black'
+  const pNum = /^P(\d+)$/.exec(s)
+  if (pNum) {
+    const n = parseInt(pNum[1]!, 10)
+    return n % 2 === 1 ? 'spotOrange' : 'spotPurple'
+  }
+  if (low.includes('pantone') || /^p\d/.test(low)) {
+    return low.length % 2 === 0 ? 'spotOrange' : 'spotPurple'
+  }
+  if (s === 'S' || low.includes('special') || low.includes('spot colour')) return 'spotOrange'
+  return 'other'
+}
+
 export function hubChannelRowsFromLabels(labels: string[]): HubColourChannelRow[] {
   let pIdx = 0
   return labels.map((raw, i) => {

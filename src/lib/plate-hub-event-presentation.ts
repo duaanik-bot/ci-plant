@@ -34,6 +34,11 @@ export function humanizePlateHubEventDetail(actionType: string, details: unknown
         str(d.reasonLabel) ||
         (str(d.reasonCode) ? plateScrapReasonLabel(str(d.reasonCode)) : '')
       const head = names.length ? `Scrapped ${names.join(', ')}` : 'Scrapped channels'
+      const lifetime = str(d.lifetimePerformance)
+      if (lifetime) {
+        const ch = names.length ? ` Channels: ${names.join(', ')}.` : ''
+        return reason ? `${lifetime}${ch} Reason: ${reason}.` : `${lifetime}${ch}`
+      }
       return reason ? `${head} — ${reason}` : head
     }
     case PLATE_HUB_ACTION.RESIZED: {
@@ -80,7 +85,8 @@ export function humanizePlateHubEventDetail(actionType: string, details: unknown
         .join(' · ')
     }
     case PLATE_HUB_ACTION.SHOPFLOOR_SIZE_EDIT:
-    case PLATE_HUB_ACTION.SHOPFLOOR_COLOUR_TOGGLE: {
+    case PLATE_HUB_ACTION.SHOPFLOOR_COLOUR_TOGGLE:
+    case PLATE_HUB_ACTION.PARTIAL_MANUFACTURING_ADJUST: {
       const m = str(d.message)
       if (m) return m
       return str(d.zoneName) ? `${actionType} (${str(d.zoneName)})` : actionType
@@ -98,6 +104,11 @@ export function humanizePlateHubEventDetail(actionType: string, details: unknown
       ]
         .filter(Boolean)
         .join(' ')
+    }
+    case PLATE_HUB_ACTION.BATCH_INVENTORY_PULL: {
+      const m = str(d.message)
+      if (m) return m
+      return 'Batch inventory pull'
     }
     case PLATE_HUB_ACTION.MARKED_READY: {
       const kind = str(d.kind)

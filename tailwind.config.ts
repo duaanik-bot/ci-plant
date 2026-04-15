@@ -44,6 +44,8 @@ const config: Config = {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        /** Plate Hub — process magenta (matches industry CMYK “M” on dark UI) */
+        plateMagenta: '#FF00FF',
       },
     },
   },

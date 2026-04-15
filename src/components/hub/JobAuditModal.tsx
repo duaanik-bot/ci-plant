@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { hubChannelRowsFromLabels } from '@/lib/hub-plate-card-ui'
+import { PlateHubColourSwatchStrip } from '@/components/hub/PlateHubColourSwatch'
 import { HUB_PLATE_SIZE_OPTIONS, type HubPlateSize } from '@/lib/plate-size'
 import { safeJsonParse } from '@/lib/safe-json'
 
@@ -26,23 +26,6 @@ type TimelineEntry = {
   action: string
   detail: string
   performedBy: string | null
-}
-
-function ModalColourStrip({ labels }: { labels: string[] }) {
-  const rows = hubChannelRowsFromLabels(labels)
-  if (!rows.length) return <span className="text-xs text-zinc-500">—</span>
-  return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      {rows.map(({ key, dot, short, label }) => (
-        <span key={key} className="inline-flex items-center gap-1" title={label}>
-          <span
-            className={`inline-block h-3 w-3 rounded-full shrink-0 ${dot.bgClass} ${dot.ringClass}`}
-          />
-          <span className="text-[10px] font-semibold text-zinc-400">{short}</span>
-        </span>
-      ))}
-    </div>
-  )
 }
 
 export function JobAuditModal({
@@ -128,15 +111,20 @@ export function JobAuditModal({
         <div className="p-4 border-b border-zinc-800 shrink-0">
           <div className="flex justify-between gap-2 items-start">
             <div className="min-w-0">
-              <h2 id="job-audit-title" className="text-lg font-semibold text-white truncate">
+              <h2 id="job-audit-title" className="text-lg font-semibold text-white">
                 Job details &amp; history
               </h2>
-              <p className="text-sm font-medium text-blue-300/90 mt-1 truncate">{context.cartonName}</p>
-              <p className="text-xs text-zinc-400 mt-0.5">
+              <p className="text-sm font-bold leading-snug tracking-tight text-blue-400 mt-1 break-words whitespace-normal">
+                {context.cartonName}
+              </p>
+              <p className="text-[11px] font-medium text-gray-300 opacity-90 mt-0.5 break-words whitespace-normal leading-snug">
                 AW: {context.artworkCode?.trim() || '—'} · {context.displayCode}
               </p>
               {context.poLineId ? (
-                <p className="text-[10px] text-zinc-500 font-mono truncate mt-0.5" title={context.poLineId}>
+                <p
+                  className="text-[11px] font-medium text-gray-300 opacity-90 font-mono mt-0.5 break-all whitespace-normal"
+                  title={context.poLineId}
+                >
                   PO line: {context.poLineId}
                 </p>
               ) : null}
@@ -175,7 +163,7 @@ export function JobAuditModal({
               </div>
               <div className="sm:col-span-2">
                 <p className="text-[10px] text-zinc-500 uppercase mb-1">Colour channels</p>
-                <ModalColourStrip labels={context.plateColours} />
+                <PlateHubColourSwatchStrip labels={context.plateColours} />
               </div>
               {context.statusLabel ? (
                 <div className="sm:col-span-2">

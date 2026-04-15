@@ -895,6 +895,8 @@ model PlateStore {
   hubPreviousStatus  String?  @map("hub_previous_status") @db.VarChar(32)
   /// Hub analytics: last time this row entered its current workflow column (queue / rack / custody).
   lastStatusUpdatedAt DateTime @default(now()) @map("last_status_updated_at")
+  /// Per-channel rack usage cycles for star ledger, e.g. `{ "C": 3, "M": 2, "P1": 1 }` (keys match hub shorts).
+  cycleData       Json      @default("{}") @map("cycle_data")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 

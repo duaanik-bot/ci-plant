@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Plate Hub — printing-industry channel colours (active swatches use Tailwind in components):
+ * C → cyan-500 + white text | M → plateMagenta (#FF00FF) + white
+ * Y → yellow-400 + gray-900 | K → black + white + border
+ * Pantone / special → orange-500 vs purple-600 (alternating by spot index)
+ * Ghost (excluded / partial) → gray-700 + opacity-30
+ */
+
 @layer base {
   :root {
     --background: 0 0% 100%;

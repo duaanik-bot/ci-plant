@@ -25,6 +25,8 @@ export const PLATE_HUB_ACTION = {
   MARKED_READY: 'MARKED_READY',
   REVERSED_READY: 'REVERSED_READY',
   TAKE_FROM_STOCK: 'TAKE_FROM_STOCK',
+  /** One transaction: pull channels from multiple rack rows into custody. */
+  BATCH_INVENTORY_PULL: 'BATCH_INVENTORY_PULL',
   FULFILLED: 'FULFILLED',
   CANCELLED: 'CANCELLED',
   SEND_BACK_TRIAGE: 'SEND_BACK_TRIAGE',
@@ -43,6 +45,8 @@ export const PLATE_HUB_ACTION = {
   SHOPFLOOR_SIZE_EDIT: 'SHOPFLOOR_SIZE_EDIT',
   /** CTP / vendor queue: operator toggled a colour off/on for burn list. */
   SHOPFLOOR_COLOUR_TOGGLE: 'SHOPFLOOR_COLOUR_TOGGLE',
+  /** CTP / vendor: batch partial fulfillment — colours removed from manufacturing run. */
+  PARTIAL_MANUFACTURING_ADJUST: 'PARTIAL_MANUFACTURING_ADJUST',
 } as const
 
 export type PlateHubActionType = (typeof PLATE_HUB_ACTION)[keyof typeof PLATE_HUB_ACTION]

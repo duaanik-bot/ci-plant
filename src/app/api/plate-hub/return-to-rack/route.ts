@@ -10,6 +10,11 @@ import {
   HUB_ZONE,
   PLATE_HUB_ACTION,
 } from '@/lib/plate-hub-events'
+import {
+  incrementCycleDataForReturns,
+  initialCycleDataForChannelNames,
+  mergeEffectiveCycleData,
+} from '@/lib/plate-cycle-ledger'
 export const dynamic = 'force-dynamic'
 
 async function nextPlateSetCode(tx: Prisma.TransactionClient): Promise<string> {
@@ -82,6 +87,7 @@ type ColourRow = {
   lastReturnAt?: string
   destroyReason?: string
   destroyedAt?: string
+  hubShopfloorActive?: boolean
 }
 
 function recountPlateMetrics(colours: ColourRow[]) {
@@ -138,28 +144,40 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const needed = Array.isArray(reqRow.coloursNeeded)
+      ? (reqRow.coloursNeeded as {
+          name: string
+          isNew?: boolean
+          hubShopfloorActive?: boolean
+        }[])
+      : []
+
     if (!returnedColourNames.length) {
-      const rawNeeded = Array.isArray(reqRow.coloursNeeded) ? reqRow.coloursNeeded : []
-      returnedColourNames = rawNeeded
-        .filter(
-          (row) =>
-            row &&
-            typeof row === 'object' &&
-            String((row as ColourRow).status ?? '').toLowerCase() !== 'destroyed',
-        )
-        .map((row) => String((row as { name?: string }).name ?? '').trim())
+      returnedColourNames = needed
+        .filter((row) => {
+          if (!row || typeof row !== 'object') return false
+          const st = String((row as ColourRow).status ?? '').toLowerCase()
+          if (st === 'destroyed') return false
+          if (row.hubShopfloorActive === false) return false
+          return true
+        })
+        .map((row) => String(row.name ?? '').trim())
         .filter(Boolean)
     }
+
+    returnedColourNames = returnedColourNames.filter((n) => {
+      const canon = plateColourCanonicalKey(n)
+      const row = needed.find((x) => plateColourCanonicalKey(x.name) === canon)
+      if (!row) return false
+      return row.hubShopfloorActive !== false
+    })
+
     if (!returnedColourNames.length) {
       return NextResponse.json(
         { error: 'No channels to return — requirement has no active colours.' },
         { status: 400 },
       )
     }
-
-    const needed = Array.isArray(reqRow.coloursNeeded)
-      ? (reqRow.coloursNeeded as { name: string; isNew?: boolean }[])
-      : []
     const wantedCanon = new Set(
       returnedColourNames.map((n) => plateColourCanonicalKey(n)).filter(Boolean),
     )
@@ -218,10 +236,10 @@ export async function POST(req: NextRequest) {
       type: 'process',
       status: r.isNew ? 'new' : 'returned',
       firstOrigin,
-      reuseCount: 1,
       lastReturnAt: nowIso,
     }))
     const { numberOfColours, totalPlates, newPlates, oldPlates } = recountPlateMetrics(newColourJson)
+    const initialCycleData = initialCycleDataForChannelNames(rowsForRack.map((r) => String(r.name)))
 
     const created = await db.$transaction(async (tx) => {
       const plateSetCode = await nextPlateSetCode(tx)
@@ -241,6 +259,7 @@ export async function POST(req: NextRequest) {
           newPlates,
           oldPlates,
           colours: newColourJson as object[],
+          cycleData: initialCycleData as object,
           status: 'in_stock',
           plateSize: resolvedTargetSize,
           storageNotes,
@@ -403,6 +422,16 @@ export async function POST(req: NextRequest) {
   const scrapReasonLabel = plateScrapReasonLabel(scrapReasonCode)
   const omittedNames: string[] = []
 
+  const effectiveCycle = mergeEffectiveCycleData({
+    cycleData: plate.cycleData,
+    colours: plate.colours,
+  })
+  const nextCycleData = incrementCycleDataForReturns(
+    effectiveCycle,
+    activeNames,
+    returnedColourNames,
+  )
+
   const nextColours = colours.map((row) => {
     const name = String(row?.name ?? '').trim()
     const st = String(row?.status ?? '').toLowerCase()
@@ -418,10 +447,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const prevReuse = Math.max(0, Math.floor(Number(row.reuseCount) || 0))
     return {
       ...row,
-      reuseCount: prevReuse + 1,
       firstOrigin,
       lastReturnAt: nowIso,
     }
@@ -441,6 +468,7 @@ export async function POST(req: NextRequest) {
         plateSize: resolvedTargetSize,
         ...(plateSizeChanged ? { storageNotes: nextStorageNotes || null } : {}),
         colours: nextColours as object[],
+        cycleData: nextCycleData as object,
         numberOfColours,
         totalPlates,
         newPlates,

@@ -11,6 +11,7 @@ import {
   PLATE_SCRAP_REASON_CODE_LIST,
   plateScrapReasonLabel,
 } from '@/lib/plate-scrap-reasons'
+import { formatLifetimePerformanceSummary, mergeEffectiveCycleData } from '@/lib/plate-cycle-ledger'
 
 export const dynamic = 'force-dynamic'
 
@@ -103,6 +104,16 @@ export async function POST(req: NextRequest) {
   const fromZone =
     plate.status === 'READY_ON_FLOOR' ? HUB_ZONE.CUSTODY_FLOOR : HUB_ZONE.LIVE_INVENTORY
 
+  const lifetimeCycle = mergeEffectiveCycleData({
+    cycleData: plate.cycleData,
+    colours: plate.colours,
+  })
+  const perf = formatLifetimePerformanceSummary(lifetimeCycle)
+  const lifetimePerformance =
+    perf.length > 0
+      ? `Plate scrapped. Lifetime performance: ${perf}.`
+      : 'Plate scrapped. Lifetime performance: (no cycle data).'
+
   const updated = await db.$transaction(async (tx) => {
     const u = await tx.plateStore.update({
       where: { id: plateStoreId },
@@ -147,6 +158,8 @@ export async function POST(req: NextRequest) {
         reasonCode,
         reasonLabel,
         fullyDestroyed: fullyGone,
+        lifetimePerformance,
+        cycleDataSnapshot: lifetimeCycle,
       },
     })
 

@@ -95,3 +95,58 @@ export function countActiveShopfloorColours(json: unknown): number {
   }
   return n
 }
+
+/**
+ * Set shop-floor burn list in one shot (CTP / vendor queue). Each non-destroyed channel
+ * is active iff its canonical key is in `activeCanonicalKeys`.
+ */
+export function applyShopfloorActiveByCanonicalKeys(
+  coloursNeeded: unknown,
+  activeCanonicalKeys: string[],
+): { nextRows: Record<string, unknown>[]; error?: string } {
+  const nextRows = cloneColoursNeededJson(coloursNeeded)
+  const trimmedActive: string[] = []
+  const dedupe = new Set<string>()
+  for (let i = 0; i < activeCanonicalKeys.length; i++) {
+    const t = activeCanonicalKeys[i]!.trim()
+    if (!t || dedupe.has(t)) continue
+    dedupe.add(t)
+    trimmedActive.push(t)
+  }
+  if (trimmedActive.length < 1) {
+    return { nextRows, error: 'At least one colour must be selected' }
+  }
+  const activeSet = new Set(trimmedActive)
+
+  const keysOnJob = new Set<string>()
+  for (const row of nextRows) {
+    const st = String(row.status ?? '').toLowerCase()
+    if (st === 'destroyed') continue
+    const k = plateColourCanonicalKey(String(row.name ?? ''))
+    if (k) keysOnJob.add(k)
+  }
+  for (let i = 0; i < trimmedActive.length; i++) {
+    const ak = trimmedActive[i]!
+    if (!keysOnJob.has(ak)) {
+      return { nextRows, error: 'Selection includes a colour that is not on this job' }
+    }
+  }
+
+  for (const row of nextRows) {
+    const st = String(row.status ?? '').toLowerCase()
+    if (st === 'destroyed') continue
+    const k = plateColourCanonicalKey(String(row.name ?? ''))
+    if (!k) continue
+    if (activeSet.has(k)) {
+      delete row.hubShopfloorActive
+    } else {
+      row.hubShopfloorActive = false
+    }
+  }
+
+  if (countShopfloorActiveRows(nextRows) < 1) {
+    return { nextRows, error: 'At least one colour must stay active for burning' }
+  }
+
+  return { nextRows }
+}

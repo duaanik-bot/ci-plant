@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { plateNamesFromColoursNeededJson } from '@/lib/plate-triage-display'
 import {
+  applyShopfloorActiveByCanonicalKeys,
   cloneColoursNeededJson,
   countActiveShopfloorColours,
   countShopfloorActiveRows,
@@ -16,6 +17,7 @@ import {
   HUB_ZONE,
   PLATE_HUB_ACTION,
 } from '@/lib/plate-hub-events'
+import { plateColourCanonicalKey, stripPlateColourDisplaySuffix } from '@/lib/hub-plate-card-ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,9 +30,19 @@ const bodySchema = z
         active: z.boolean(),
       })
       .optional(),
+    /** Batch: canonical keys that remain in the manufacturing / burn list. */
+    activeCanonicalKeys: z.array(z.string().min(1)).optional(),
+    partialReason: z.string().max(500).optional().nullable(),
   })
-  .refine((b) => b.plateSize !== undefined || b.colourToggle !== undefined, {
-    message: 'Send plateSize and/or colourToggle',
+  .refine(
+    (b) =>
+      b.plateSize !== undefined ||
+      b.colourToggle !== undefined ||
+      (Array.isArray(b.activeCanonicalKeys) && b.activeCanonicalKeys.length > 0),
+    { message: 'Send plateSize, colourToggle, or activeCanonicalKeys' },
+  )
+  .refine((b) => !(b.colourToggle && b.activeCanonicalKeys != null && b.activeCanonicalKeys.length > 0), {
+    message: 'Use either activeCanonicalKeys or colourToggle, not both',
   })
 
 function zoneMeta(row: { triageChannel: string | null; status: string }) {
@@ -73,7 +85,7 @@ export async function PATCH(
   req: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
-  const { error } = await requireAuth()
+  const { error, user } = await requireAuth()
   if (error) return error
 
   const { id } = await context.params
@@ -99,12 +111,17 @@ export async function PATCH(
 
   const nextSize = parsed.data.plateSize
   const colourToggle = parsed.data.colourToggle
+  const batchKeys = parsed.data.activeCanonicalKeys
+  const partialReason = parsed.data.partialReason?.trim() || null
   const sizeChanging = nextSize !== undefined && nextSize !== row.plateSize
   const toggling = Boolean(colourToggle)
+  const batching = Array.isArray(batchKeys) && batchKeys.length > 0
 
-  if (!sizeChanging && !toggling) {
+  if (!sizeChanging && !toggling && !batching) {
     return NextResponse.json({ ok: true, ...jsonSnapshot(row) })
   }
+
+  const userName = user?.name?.trim() || (user as { email?: string })?.email?.trim() || 'Operator'
 
   try {
     await db.$transaction(async (tx) => {
@@ -127,7 +144,51 @@ export async function PATCH(
         })
       }
 
-      if (colourToggle) {
+      if (batching && batchKeys) {
+        const beforeRows = cloneColoursNeededJson(row.coloursNeeded)
+        const activeSet = new Set(batchKeys)
+        const removedNames: string[] = []
+        for (const r of beforeRows) {
+          const st = String(r.status ?? '').toLowerCase()
+          if (st === 'destroyed') continue
+          const k = plateColourCanonicalKey(stripPlateColourDisplaySuffix(String(r.name ?? '')))
+          if (!k) continue
+          if (!activeSet.has(k)) {
+            const nm = String(r.name ?? '').trim()
+            if (nm) removedNames.push(nm)
+          }
+        }
+        const { nextRows, error: batchErr } = applyShopfloorActiveByCanonicalKeys(
+          coloursNeeded,
+          batchKeys,
+        )
+        if (batchErr) {
+          throw Object.assign(new Error(batchErr), {
+            code: batchErr.includes('At least one') ? 'LAST_COLOUR' : 'BATCH_INVALID',
+          })
+        }
+        coloursNeeded = nextRows
+        const afterActive = activeColourLabels(coloursNeeded)
+        const reasonPhrase = partialReason || 'Using existing stock / Job change'
+        const msg = `Partial manufacturing authorized: ${userName} removed ${removedNames.length ? removedNames.join(', ') : '(none)'} from run. Reason: ${reasonPhrase}.`
+
+        await createPlateHubEvent(tx, {
+          plateRequirementId: id,
+          actionType: PLATE_HUB_ACTION.PARTIAL_MANUFACTURING_ADJUST,
+          fromZone: zm.hubZone,
+          toZone: zm.hubZone,
+          details: {
+            message: msg,
+            zoneName: zm.zoneName,
+            performedBy: userName,
+            removedColourNames: removedNames,
+            activeColourNamesAfter: afterActive,
+            activeCanonicalKeys: batchKeys,
+            partialReason: reasonPhrase,
+            requirementCode: row.requirementCode,
+          },
+        })
+      } else if (colourToggle) {
         const { canonicalKey, active } = colourToggle
         const before = activeColourLabels(coloursNeeded)
         const idx = findColourRowIndexByCanonicalKey(coloursNeeded, canonicalKey)
@@ -170,7 +231,7 @@ export async function PATCH(
         where: { id },
         data: {
           ...(sizeChanging && nextSize !== undefined ? { plateSize: nextSize } : {}),
-          ...(toggling ? { coloursNeeded: coloursNeeded as object[] } : {}),
+          ...(toggling || batching ? { coloursNeeded: coloursNeeded as object[] } : {}),
           lastStatusUpdatedAt: new Date(),
         },
       })
@@ -180,11 +241,20 @@ export async function PATCH(
     if (msg === 'COLOUR_NOT_FOUND') {
       return NextResponse.json({ error: 'Colour channel not found on this job' }, { status: 400 })
     }
-    if (msg === 'LAST_COLOUR') {
+    const code = (e as { code?: string }).code
+    if (msg === 'LAST_COLOUR' || code === 'LAST_COLOUR') {
       return NextResponse.json(
-        { error: 'At least one colour must stay active for burning' },
+        {
+          error:
+            msg.includes('At least one colour must be selected') || msg.includes('must stay active')
+              ? msg
+              : 'At least one colour must stay active for burning',
+        },
         { status: 400 },
       )
+    }
+    if (code === 'BATCH_INVALID') {
+      return NextResponse.json({ error: msg }, { status: 400 })
     }
     console.error('[shopfloor-spec]', e)
     return NextResponse.json({ error: 'Update failed' }, { status: 500 })

@@ -9,13 +9,26 @@ import {
   HUB_ZONE,
   PLATE_HUB_ACTION,
 } from '@/lib/plate-hub-events'
+import {
+  activeColourNamesInOrder,
+  mergeEffectiveCycleData,
+  pruneCycleDataForActiveLabels,
+} from '@/lib/plate-cycle-ledger'
 
 export const dynamic = 'force-dynamic'
 
+const RACK_STATUSES = ['ready', 'returned', 'in_stock'] as const
+
 const bodySchema = z.object({
   requirementId: z.string().uuid(),
-  plateStoreId: z.string().uuid(),
-  colourNames: z.array(z.string().min(1)).min(1),
+  selections: z
+    .array(
+      z.object({
+        plateStoreId: z.string().uuid(),
+        colourNames: z.array(z.string().min(1)).min(1),
+      }),
+    )
+    .min(1),
 })
 
 type ColourRow = {
@@ -77,9 +90,47 @@ class TakeStockHttpError extends Error {
   }
 }
 
+/** Merge duplicate plate IDs; dedupe colour names per plate by canonical key. */
+function mergeSelections(selections: z.infer<typeof bodySchema>['selections']) {
+  const acc = new Map<string, string[]>()
+  for (const s of selections) {
+    const cur = acc.get(s.plateStoreId) ?? []
+    acc.set(s.plateStoreId, [...cur, ...s.colourNames])
+  }
+  const out = new Map<string, string[]>()
+  for (const [plateStoreId, raw] of Array.from(acc.entries())) {
+    const seen = new Set<string>()
+    const names: string[] = []
+    for (const n of raw) {
+      const t = String(n ?? '').trim()
+      if (!t) continue
+      const k = plateColourCanonicalKey(t)
+      if (!k || seen.has(k)) continue
+      seen.add(k)
+      names.push(t)
+    }
+    if (names.length) out.set(plateStoreId, names)
+  }
+  return out
+}
+
+function rackSlotLabel(plate: {
+  rackLocation: string | null
+  rackNumber: string | null
+  slotNumber: string | null
+  plateSetCode: string
+}): string {
+  const loc = plate.rackLocation?.trim()
+  if (loc) return loc
+  const parts = [plate.rackNumber?.trim(), plate.slotNumber?.trim()].filter(Boolean)
+  if (parts.length) return parts.join(' · ')
+  return plate.plateSetCode
+}
+
 /**
- * Pull selected colour channels from a live rack plate set into a new READY_ON_FLOOR custody row,
- * update or retire the source set, and shrink / complete the triage requirement.
+ * Batch-pull colour channels from multiple rack rows into custody plate rows (one new row per source),
+ * shrink triage requirement in one transaction. Optimistic locks on each `plate_store` and
+ * `plate_requirements` row prevent double-allocation if two operators confirm concurrently.
  */
 export async function POST(req: NextRequest) {
   const { error, user } = await requireAuth()
@@ -91,14 +142,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          'Invalid request: requirement id, plate set id, and at least one colour name are required.',
+          'Invalid request: requirement id and a non-empty selections array (plateStoreId + colourNames each) are required.',
       },
       { status: 400 },
     )
   }
 
-  const { requirementId, plateStoreId, colourNames } = parsed.data
-  const wantedCanon = new Set(colourNames.map((n) => plateColourCanonicalKey(n)).filter(Boolean))
+  const { requirementId, selections } = parsed.data
 
   try {
     const result = await db.$transaction(async (tx) => {
@@ -117,158 +167,218 @@ export async function POST(req: NextRequest) {
         throw new TakeStockHttpError('This requirement cannot take stock in its current status.', 409)
       }
 
-      const plate = await tx.plateStore.findUnique({ where: { id: plateStoreId } })
-      if (!plate) throw new TakeStockHttpError('Plate set not found', 404)
-
-      const rackOk = ['ready', 'returned', 'in_stock'].includes(plate.status)
-      if (!rackOk) {
-        throw new TakeStockHttpError('Plate set is not in live inventory.', 409)
-      }
-
-      const jobAw = normHubKey(reqRow.artworkCode)
-      if (jobAw) {
-        if (normHubKey(plate.artworkCode) !== jobAw) {
-          throw new TakeStockHttpError('Plate set AW code does not match this triage job.', 409)
-        }
-      } else if (normHubKey(plate.cartonName) !== normHubKey(reqRow.cartonName)) {
-        throw new TakeStockHttpError('Plate set carton does not match this triage job.', 409)
-      }
-
       const needed = Array.isArray(reqRow.coloursNeeded)
         ? (reqRow.coloursNeeded as { name: string; isNew?: boolean }[])
         : []
-      const neededCanon = new Set(needed.map((x) => plateColourCanonicalKey(x.name)))
-      for (const wCanon of Array.from(wantedCanon)) {
-        if (!neededCanon.has(wCanon)) {
-          const display =
-            colourNames.find((n) => plateColourCanonicalKey(n) === wCanon) ?? wCanon
-          console.log('[plate-hub/take-from-stock] Colour not in job requirement', {
-            payloadColours: colourNames,
-            payloadCanonical: Array.from(wantedCanon),
-            jobColours: needed.map((x) => x.name),
-            jobCanonical: Array.from(neededCanon),
-          })
+      const initialNeededCanon = new Set(needed.map((x) => plateColourCanonicalKey(x.name)))
+
+      const merged = mergeSelections(selections)
+      if (merged.size === 0) {
+        throw new TakeStockHttpError('No valid colour selections after merge.', 400)
+      }
+
+      const batchUnion = new Set<string>()
+      for (const names of Array.from(merged.values())) {
+        for (const n of names) {
+          const k = plateColourCanonicalKey(n)
+          if (batchUnion.has(k)) {
+            throw new TakeStockHttpError(
+              'Duplicate channel in batch — each required colour can only be pulled once.',
+              400,
+            )
+          }
+          batchUnion.add(k)
+        }
+      }
+
+      for (const k of Array.from(batchUnion)) {
+        if (!initialNeededCanon.has(k)) {
           throw new TakeStockHttpError(
-            `Colour is not part of this job's requirement: ${display}`,
+            `Colour is not part of this job's requirement: ${k}`,
             400,
           )
         }
       }
 
-      const sourceColours = (Array.isArray(plate.colours) ? plate.colours : []) as ColourRow[]
+      const reqSnap = reqRow.updatedAt
 
-      const pulledForCustody: ColourRow[] = []
-      for (const row of sourceColours) {
-        const name = String(row?.name ?? '').trim()
-        const st = String(row?.status ?? '').toLowerCase()
-        if (!name || st === 'destroyed') continue
-        if (!wantedCanon.has(plateColourCanonicalKey(name))) continue
-        pulledForCustody.push({
-          ...row,
-          rackLocation: null,
-          slotNumber: null,
-        })
-      }
+      const jobAw = normHubKey(reqRow.artworkCode)
+      const jobCarton = normHubKey(reqRow.cartonName)
 
-      const pulledCanon = new Set(pulledForCustody.map((r) => plateColourCanonicalKey(String(r.name))))
-      for (const wCanon of Array.from(wantedCanon)) {
-        if (!pulledCanon.has(wCanon)) {
-          console.log('[plate-hub/take-from-stock] Colour not on plate set', {
-            payloadColours: colourNames,
-            payloadCanonical: Array.from(wantedCanon),
-            plateChannelNames: sourceColours.map((r) => String(r?.name ?? '')),
-            plateCanonical: Array.from(pulledCanon),
-          })
+      const custodyPlateIds: string[] = []
+      const custodyPlateCodes: string[] = []
+      const slotLabels: string[] = []
+      let totalChannelMoves = 0
+
+      const sortedPlateIds = Array.from(merged.keys()).sort()
+
+      for (const plateStoreId of sortedPlateIds) {
+        const colourNames = merged.get(plateStoreId)!
+        const wantedCanon = new Set(colourNames.map((n) => plateColourCanonicalKey(n)).filter(Boolean))
+
+        const plate = await tx.plateStore.findUnique({ where: { id: plateStoreId } })
+        if (!plate) throw new TakeStockHttpError('Plate set not found', 404)
+
+        if (!RACK_STATUSES.includes(plate.status as (typeof RACK_STATUSES)[number])) {
           throw new TakeStockHttpError(
-            'One or more colours are not available on this plate set (check rack / partial scrap).',
-            400,
+            'One or more plate sets are no longer in live inventory — refresh and try again.',
+            409,
           )
         }
-      }
 
-      const nowIso = new Date().toISOString()
-      const nextSource = sourceColours.map((row) => {
-        const name = String(row?.name ?? '').trim()
-        const st = String(row?.status ?? '').toLowerCase()
-        if (!name || st === 'destroyed') return row
-        if (wantedCanon.has(plateColourCanonicalKey(name))) {
-          return {
+        if (jobAw) {
+          if (normHubKey(plate.artworkCode) !== jobAw) {
+            throw new TakeStockHttpError('Plate set AW code does not match this triage job.', 409)
+          }
+        } else if (normHubKey(plate.cartonName) !== jobCarton) {
+          throw new TakeStockHttpError('Plate set carton does not match this triage job.', 409)
+        }
+
+        const sourceColours = (Array.isArray(plate.colours) ? plate.colours : []) as ColourRow[]
+
+        const pulledForCustody: ColourRow[] = []
+        for (const row of sourceColours) {
+          const name = String(row?.name ?? '').trim()
+          const st = String(row?.status ?? '').toLowerCase()
+          if (!name || st === 'destroyed') continue
+          if (!wantedCanon.has(plateColourCanonicalKey(name))) continue
+          pulledForCustody.push({
             ...row,
-            status: 'destroyed',
-            destroyedAt: nowIso,
-            destroyReason: 'issued_from_rack_to_custody',
+            rackLocation: null,
+            slotNumber: null,
+          })
+        }
+
+        const pulledCanon = new Set(
+          pulledForCustody.map((r) => plateColourCanonicalKey(String(r.name))),
+        )
+        for (const wCanon of Array.from(wantedCanon)) {
+          if (!pulledCanon.has(wCanon)) {
+            throw new TakeStockHttpError(
+              'One or more colours are not available on a selected plate set (check rack / partial scrap).',
+              400,
+            )
           }
         }
-        return row
-      })
 
-      const srcMetrics = recountPlateMetrics(nextSource)
-      const fullyGone = srcMetrics.numberOfColours === 0
+        slotLabels.push(rackSlotLabel(plate))
 
-      const plateSetCode = await nextPlateSetCode(tx)
-      const serialNumber = await nextPlateSerial(tx)
-      const custodyMetrics = recountPlateMetrics(pulledForCustody)
+        const nowIso = new Date().toISOString()
+        const nextSource = sourceColours.map((row) => {
+          const name = String(row?.name ?? '').trim()
+          const st = String(row?.status ?? '').toLowerCase()
+          if (!name || st === 'destroyed') return row
+          if (wantedCanon.has(plateColourCanonicalKey(name))) {
+            return {
+              ...row,
+              status: 'destroyed',
+              destroyedAt: nowIso,
+              destroyReason: 'issued_from_rack_to_custody',
+            }
+          }
+          return row
+        })
 
-      await tx.plateStore.update({
-        where: { id: plateStoreId },
-        data: {
-          colours: nextSource as object[],
-          numberOfColours: srcMetrics.numberOfColours,
-          totalPlates: srcMetrics.totalPlates,
-          newPlates: srcMetrics.newPlates,
-          oldPlates: srcMetrics.oldPlates,
-          ...(fullyGone
-            ? {
-                status: 'destroyed',
-                destroyedAt: new Date(),
-                destroyedBy: user!.id,
-                destroyedReason: 'All channels moved to custody floor from rack',
-                hubCustodySource: null,
-                hubPreviousStatus: null,
-              }
-            : {
-                lastStatusUpdatedAt: new Date(),
-              }),
+        const srcMetrics = recountPlateMetrics(nextSource)
+        const fullyGone = srcMetrics.numberOfColours === 0
+
+        const plateSetCode = await nextPlateSetCode(tx)
+        const serialNumber = await nextPlateSerial(tx)
+        const custodyMetrics = recountPlateMetrics(pulledForCustody)
+
+        const effectiveCycle = mergeEffectiveCycleData({
+          cycleData: plate.cycleData,
+          colours: plate.colours,
+        })
+        const parentActiveAfter = activeColourNamesInOrder(nextSource)
+        const childCycle = pruneCycleDataForActiveLabels(effectiveCycle, colourNames)
+        const parentCycle = pruneCycleDataForActiveLabels(effectiveCycle, parentActiveAfter)
+
+        const snapPlateUpdatedAt = plate.updatedAt
+
+        const updSrc = await tx.plateStore.updateMany({
+          where: {
+            id: plateStoreId,
+            updatedAt: snapPlateUpdatedAt,
+            status: { in: [...RACK_STATUSES] },
+          },
+          data: {
+            colours: nextSource as object[],
+            cycleData: parentCycle as object,
+            numberOfColours: srcMetrics.numberOfColours,
+            totalPlates: srcMetrics.totalPlates,
+            newPlates: srcMetrics.newPlates,
+            oldPlates: srcMetrics.oldPlates,
+            ...(fullyGone
+              ? {
+                  status: 'destroyed',
+                  destroyedAt: new Date(),
+                  destroyedBy: user!.id,
+                  destroyedReason: 'All channels moved to custody floor from rack',
+                  hubCustodySource: null,
+                  hubPreviousStatus: null,
+                }
+              : {
+                  lastStatusUpdatedAt: new Date(),
+                }),
+          },
+        })
+
+        if (updSrc.count !== 1) {
+          throw new TakeStockHttpError(
+            'Another operator updated this inventory row — refresh and try again.',
+            409,
+          )
+        }
+
+        const custodyPlate = await tx.plateStore.create({
+          data: {
+            plateSetCode,
+            serialNumber,
+            cartonName: plate.cartonName,
+            artworkCode: plate.artworkCode,
+            artworkVersion: plate.artworkVersion,
+            cartonId: plate.cartonId,
+            artworkId: plate.artworkId,
+            customerId: plate.customerId,
+            plateSize: plate.plateSize,
+            numberOfColours: custodyMetrics.numberOfColours,
+            totalPlates: custodyMetrics.totalPlates,
+            newPlates: custodyMetrics.newPlates,
+            oldPlates: custodyMetrics.oldPlates,
+            colours: pulledForCustody as object[],
+            cycleData: childCycle as object,
+            status: 'READY_ON_FLOOR',
+            hubCustodySource: 'rack',
+            hubPreviousStatus: plate.status,
+            jobCardId: reqRow.jobCardId ?? null,
+            rackLocation: null,
+            slotNumber: null,
+            rackNumber: null,
+            ups: plate.ups,
+            lastStatusUpdatedAt: new Date(),
+          },
+        })
+
+        custodyPlateIds.push(custodyPlate.id)
+        custodyPlateCodes.push(custodyPlate.plateSetCode)
+        totalChannelMoves += pulledForCustody.length
+      }
+
+      const finalNeeded = needed.filter(
+        (item) => !batchUnion.has(plateColourCanonicalKey(item.name)),
+      )
+      const fullyFulfilled = finalNeeded.length === 0
+
+      const updReq = await tx.plateRequirement.updateMany({
+        where: {
+          id: requirementId,
+          updatedAt: reqSnap,
         },
-      })
-
-      const custodyPlate = await tx.plateStore.create({
         data: {
-          plateSetCode,
-          serialNumber,
-          cartonName: plate.cartonName,
-          artworkCode: plate.artworkCode,
-          artworkVersion: plate.artworkVersion,
-          cartonId: plate.cartonId,
-          artworkId: plate.artworkId,
-          customerId: plate.customerId,
-          plateSize: plate.plateSize,
-          numberOfColours: custodyMetrics.numberOfColours,
-          totalPlates: custodyMetrics.totalPlates,
-          newPlates: custodyMetrics.newPlates,
-          oldPlates: custodyMetrics.oldPlates,
-          colours: pulledForCustody as object[],
-          status: 'READY_ON_FLOOR',
-          hubCustodySource: 'rack',
-          hubPreviousStatus: plate.status,
-          jobCardId: reqRow.jobCardId ?? null,
-          rackLocation: null,
-          slotNumber: null,
-          rackNumber: null,
-          ups: plate.ups,
-          lastStatusUpdatedAt: new Date(),
-        },
-      })
-
-      const nextNeeded = needed.filter((item) => !wantedCanon.has(plateColourCanonicalKey(item.name)))
-      const fullyFulfilled = nextNeeded.length === 0
-
-      await tx.plateRequirement.update({
-        where: { id: requirementId },
-        data: {
-          coloursNeeded: nextNeeded as object[],
-          numberOfColours: nextNeeded.length,
-          newPlatesNeeded: nextNeeded.length,
+          coloursNeeded: finalNeeded as object[],
+          numberOfColours: finalNeeded.length,
+          newPlatesNeeded: finalNeeded.length,
           lastStatusUpdatedAt: new Date(),
           ...(fullyFulfilled
             ? {
@@ -279,46 +389,39 @@ export async function POST(req: NextRequest) {
         },
       })
 
+      if (updReq.count !== 1) {
+        throw new TakeStockHttpError(
+          'Triage requirement changed while saving — refresh and try again.',
+          409,
+        )
+      }
+
+      const uniqueSlots = Array.from(new Set(slotLabels))
+      const batchMsg = `Batch inventory pull: ${totalChannelMoves} channel(s) moved to custody floor from ${custodyPlateIds.length} set(s) (${custodyPlateCodes.join(', ')}). Slots: ${uniqueSlots.join('; ')}.`
+
       await createPlateHubEvent(tx, {
         plateRequirementId: requirementId,
-        actionType: PLATE_HUB_ACTION.TAKE_FROM_STOCK,
+        actionType: PLATE_HUB_ACTION.BATCH_INVENTORY_PULL,
         fromZone: HUB_ZONE.INCOMING_TRIAGE,
         toZone: fullyFulfilled ? HUB_ZONE.FULFILLED : HUB_ZONE.INCOMING_TRIAGE,
         details: {
-          sourcePlateStoreId: plateStoreId,
-          colourNames,
-          custodyPlateId: custodyPlate.id,
+          message: batchMsg,
+          totalChannelMoves,
+          setCount: custodyPlateIds.length,
+          custodyPlateIds,
+          custodyPlateCodes,
+          slotLabels: uniqueSlots,
+          selections,
           fulfilled: fullyFulfilled,
         },
       })
 
-      await createPlateHubEvent(tx, {
-        plateStoreId: plateStoreId,
-        actionType: PLATE_HUB_ACTION.TAKE_FROM_STOCK,
-        fromZone: HUB_ZONE.LIVE_INVENTORY,
-        toZone: HUB_ZONE.LIVE_INVENTORY,
-        details: {
-          requirementId,
-          colourNames,
-          custodyPlateId: custodyPlate.id,
-          role: 'source_depleted_channels',
-        },
-      })
-
-      await createPlateHubEvent(tx, {
-        plateStoreId: custodyPlate.id,
-        actionType: PLATE_HUB_ACTION.TAKE_FROM_STOCK,
-        fromZone: HUB_ZONE.LIVE_INVENTORY,
-        toZone: HUB_ZONE.CUSTODY_FLOOR,
-        details: {
-          requirementId,
-          colourNames,
-          sourcePlateStoreId: plateStoreId,
-          role: 'custody_set',
-        },
-      })
-
-      return { custodyPlateId: custodyPlate.id, fulfilled: fullyFulfilled }
+      return {
+        custodyPlateIds,
+        custodyPlateCodes,
+        fulfilled: fullyFulfilled,
+        totalChannelMoves,
+      }
     })
 
     await createAuditLog({
@@ -327,11 +430,9 @@ export async function POST(req: NextRequest) {
       tableName: 'plate_requirements',
       recordId: requirementId,
       newValue: {
-        takeFromStock: true,
-        plateStoreId,
-        colourNames,
-        custodyPlateId: result.custodyPlateId,
-        fulfilled: result.fulfilled,
+        batchTakeFromStock: true,
+        selections,
+        ...result,
       } as Record<string, unknown>,
     })
 

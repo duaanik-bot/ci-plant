@@ -1,7 +1,7 @@
 'use client'
 
 import { formatDistanceToNow } from 'date-fns'
-import { hubChannelRowsFromLabels } from '@/lib/hub-plate-card-ui'
+import { PlateHubColourSwatchStrip } from '@/components/hub/PlateHubColourSwatch'
 import {
   HUB_PLATE_SIZE_OPTIONS,
   hubPlateSizeCardLine,
@@ -34,23 +34,6 @@ export type MasterLedgerRow = {
   statusLabel: string
   partialRemake?: boolean
   custodySource?: 'ctp' | 'vendor' | 'rack'
-}
-
-function LedgerColourStrip({ labels }: { labels: string[] }) {
-  const rows = hubChannelRowsFromLabels(labels)
-  if (!rows.length) return <span className="text-xs text-zinc-500">—</span>
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {rows.map(({ key, dot, short, label }) => (
-        <span key={key} className="inline-flex items-center gap-0.5" title={label}>
-          <span
-            className={`inline-block h-2.5 w-2.5 rounded-full shrink-0 ${dot.bgClass} ${dot.ringClass}`}
-          />
-          <span className="text-[9px] font-semibold text-zinc-500">{short}</span>
-        </span>
-      ))}
-    </div>
-  )
 }
 
 function hubSearchMatch(q: string, parts: Array<string | null | undefined>): boolean {
@@ -158,15 +141,21 @@ export function MasterLedgerTable({
                           statusLabel: r.statusLabel,
                         })
                       }
-                      className="text-left text-blue-400 hover:text-blue-300 hover:underline font-medium truncate max-w-[220px] block"
+                      className="text-left text-blue-400 hover:text-blue-300 hover:underline text-sm font-bold leading-snug tracking-tight break-words whitespace-normal min-w-0 w-full max-w-md block"
                     >
                       {r.cartonName}
                       {r.partialRemake ? (
                         <span className="text-rose-400 font-bold ml-1">(Remake)</span>
                       ) : null}
                     </button>
-                    <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+                    <p className="text-[11px] font-medium text-gray-300 opacity-90 whitespace-normal break-words mt-0.5">
                       AW: {r.artworkCode?.trim() || '—'}
+                      {r.poLineId ? (
+                        <>
+                          <span className="text-zinc-600"> · </span>
+                          PO: {r.poLineId}
+                        </>
+                      ) : null}
                     </p>
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
@@ -180,13 +169,19 @@ export function MasterLedgerTable({
                     {vol}
                   </td>
                   <td className="px-3 py-2">
-                    <p className="text-[11px] text-zinc-300 mb-1">{sizeLine}</p>
-                    <LedgerColourStrip labels={r.plateColours} />
+                    <p className="text-[11px] text-zinc-300 mb-1 break-words whitespace-normal">
+                      {sizeLine}
+                    </p>
+                    <PlateHubColourSwatchStrip
+                      labels={r.plateColours}
+                      size="sm"
+                      className="flex flex-wrap gap-1 content-start"
+                    />
                   </td>
                   <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap tabular-nums">
                     {timeInZone}
                   </td>
-                  <td className="px-3 py-2 text-[11px] text-zinc-500 leading-snug max-w-[240px]">
+                  <td className="px-3 py-2 text-[11px] text-zinc-500 leading-snug max-w-[240px] break-words whitespace-normal">
                     {lastLine}
                   </td>
                 </tr>

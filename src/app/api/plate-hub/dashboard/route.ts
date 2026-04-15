@@ -3,11 +3,8 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { safeJsonStringify } from '@/lib/safe-json'
 import { plateNamesFromColoursNeededJson } from '@/lib/plate-triage-display'
-import {
-  activeColourRowsFromJson,
-  countPlatesInRack,
-  hubReuseCyclesFromColoursJson,
-} from '@/lib/hub-plate-card-ui'
+import { activeColourRowsFromJson, countPlatesInRack } from '@/lib/hub-plate-card-ui'
+import { mergeEffectiveCycleData } from '@/lib/plate-cycle-ledger'
 import { hubJobCardHubStatus } from '@/lib/hub-job-card-status'
 import type { HubPlateSize } from '@/lib/plate-size'
 import {
@@ -361,7 +358,7 @@ export async function GET() {
       const activeJson = activeColourRowsFromJson(p.colours)
       const plateColours = plateNamesFromColoursNeededJson(activeJson)
       const colourChannelNames = channelNamesFromActiveJson(activeJson)
-      const { max: reuseCyclesMax } = hubReuseCyclesFromColoursJson(p.colours)
+      const cycleData = mergeEffectiveCycleData({ cycleData: p.cycleData, colours: p.colours })
       return {
         id: p.id,
         plateSetCode: p.plateSetCode,
@@ -388,7 +385,7 @@ export async function GET() {
         colourChannelNames,
         createdAt: p.createdAt.toISOString(),
         lastStatusUpdatedAt: p.lastStatusUpdatedAt.toISOString(),
-        reuseCyclesMax,
+        cycleData,
         plateSize: p.plateSize,
       }
     }
@@ -431,6 +428,7 @@ export async function GET() {
       const activeJson = activeColourRowsFromJson(p.colours)
       const plateColours = plateNamesFromColoursNeededJson(activeJson)
       const colourChannelNames = channelNamesFromActiveJson(activeJson)
+      const cycleData = mergeEffectiveCycleData({ cycleData: p.cycleData, colours: p.colours })
       const jobCardHub =
         p.jobCardId && jcHubById.has(p.jobCardId) ? jcHubById.get(p.jobCardId)! : null
       return {
@@ -458,6 +456,7 @@ export async function GET() {
         ledgerEntryAt: p.createdAt.toISOString(),
         jobCardHub,
         plateSize: p.plateSize,
+        cycleData,
       }
     })
 
