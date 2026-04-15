@@ -148,6 +148,13 @@ export async function GET() {
       const src = p.hubCustodySource
       const custodySource =
         src === 'vendor' || src === 'ctp' ? src : ('rack' as const)
+      const raw = Array.isArray(p.colours) ? p.colours : []
+      const colourChannelNames = raw
+        .map((c: { name?: string; status?: string }) => {
+          if (String(c?.status ?? '').toLowerCase() === 'destroyed') return ''
+          return String(c?.name ?? '').trim()
+        })
+        .filter(Boolean) as string[]
       return {
         kind: 'plate' as const,
         id: p.id,
@@ -156,6 +163,8 @@ export async function GET() {
         artworkCode: p.artworkCode,
         artworkVersion: p.artworkVersion,
         plateColours: plateNamesFromColoursNeededJson(p.colours),
+        colourChannelNames,
+        platesInRackCount: countPlatesInRack(p.colours),
         custodySource,
         serialNumber: p.serialNumber,
         rackNumber: p.rackNumber,

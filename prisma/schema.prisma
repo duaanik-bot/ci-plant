@@ -869,8 +869,25 @@ model PlateStore {
   createdForJobCard ProductionJobCard? @relation("PlateSetCreatedFor", fields: [jobCardId], references: [id])
   customer          Customer?          @relation(fields: [customerId], references: [id])
   jobCardsUsingThis ProductionJobCard[] @relation("PlateSetUsedBy")
+  scrapEvents     PlateStoreScrapEvent[]
 
   @@map("plate_store")
+}
+
+/// Audit log for partial / channel-level plate scrapping from Plate Hub.
+model PlateStoreScrapEvent {
+  id            String   @id @default(uuid())
+  plateStoreId  String   @map("plate_store_id")
+  scrappedNames Json     @map("scrapped_names")
+  reasonCode    String   @map("reason_code")
+  reasonLabel   String   @map("reason_label")
+  performedBy   String   @map("performed_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  plateStore PlateStore @relation(fields: [plateStoreId], references: [id], onDelete: Cascade)
+
+  @@index([plateStoreId])
+  @@map("plate_store_scrap_events")
 }
 
 model PlateRequirement {

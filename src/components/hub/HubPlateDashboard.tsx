@@ -5,9 +5,12 @@ import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { safeJsonParse, safeJsonParseArray, safeJsonStringify } from '@/lib/safe-json'
 import {
-  colourDotFromLabel,
+  hubChannelRowsFromLabels,
+  hubLivePlateBadgeCount,
   hubPlateBadgeCount,
+  stripPlateColourDisplaySuffix,
 } from '@/lib/hub-plate-card-ui'
+import { PLATE_SCRAP_REASONS, type PlateScrapReasonCode } from '@/lib/plate-scrap-reasons'
 
 type TriageRow = {
   id: string
@@ -70,6 +73,8 @@ type CustodyCard = {
   artworkCode: string | null
   artworkVersion: string | null
   plateColours: string[]
+  colourChannelNames?: string[]
+  platesInRackCount?: number
   custodySource: 'ctp' | 'vendor' | 'rack'
   serialNumber?: string | null
   rackNumber?: string | null
@@ -121,7 +126,7 @@ function PlateCountBadge({ count }: { count: number }) {
   const n = Math.max(0, Math.min(99, count))
   return (
     <div
-      className="pointer-events-none absolute top-2 right-2 flex h-9 w-9 items-center justify-center rounded-full border-2 border-amber-500 bg-zinc-950 text-sm font-extrabold text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.35)] tabular-nums z-10"
+      className="pointer-events-none absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-amber-500 bg-zinc-950 text-[11px] font-extrabold text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.3)] tabular-nums z-10"
       aria-label={`${n} plates`}
     >
       {n}
@@ -129,24 +134,31 @@ function PlateCountBadge({ count }: { count: number }) {
   )
 }
 
-function ColourDots({ labels }: { labels: string[] }) {
-  if (!labels.length) {
+function ColourChannelsRow({ labels }: { labels: string[] }) {
+  const rows = hubChannelRowsFromLabels(labels)
+  if (!rows.length) {
     return <span className="text-xs text-zinc-500">—</span>
   }
   return (
-    <div className="flex flex-wrap items-center gap-1.5 min-h-[1rem]" title={labels.join(' · ')}>
-      {labels.map((lab, i) => {
-        const d = colourDotFromLabel(lab, i)
-        return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-h-[1rem]" title={labels.join(' · ')}>
+      {rows.map(({ key, dot, short, label }) => (
+        <span key={key} className="inline-flex items-center gap-1" title={label}>
           <span
-            key={d.key}
-            title={d.title}
-            className={`inline-block h-3.5 w-3.5 rounded-full shrink-0 ${d.bgClass} ${d.ringClass}`}
+            className={`inline-block h-3 w-3 rounded-full shrink-0 ${dot.bgClass} ${dot.ringClass}`}
           />
-        )
-      })}
+          <span className="text-[10px] font-semibold text-zinc-400">{short}</span>
+        </span>
+      ))}
     </div>
   )
+}
+
+function plateColourNamesForScrap(p: {
+  plateColours?: string[] | null
+  colourChannelNames?: string[] | null
+}): string[] {
+  if (p.colourChannelNames?.length) return p.colourChannelNames
+  return (p.plateColours ?? []).map((x) => stripPlateColourDisplaySuffix(x)).filter(Boolean)
 }
 
 type MachineOpt = { id: string; machineCode: string; name: string }
@@ -198,9 +210,28 @@ export default function HubPlateDashboard() {
   const [pantoneCount, setPantoneCount] = useState(1)
   const cartonSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mCtpSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mvSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const [scrapOpen, setScrapOpen] = useState(false)
-  const [scrapPlateId, setScrapPlateId] = useState('')
+  const [manualVendorOpen, setManualVendorOpen] = useState(false)
+  const [mvQuery, setMvQuery] = useState('')
+  const [mvResults, setMvResults] = useState<CartonSearchHit[]>([])
+  const [mvLoading, setMvLoading] = useState(false)
+  const [mvSelected, setMvSelected] = useState<CartonSearchHit | null>(null)
+  const [mvC, setMvC] = useState(true)
+  const [mvM, setMvM] = useState(true)
+  const [mvY, setMvY] = useState(true)
+  const [mvK, setMvK] = useState(true)
+  const [mvPantone, setMvPantone] = useState(false)
+  const [mvPantoneN, setMvPantoneN] = useState(1)
+
+  const [scrapModal, setScrapModal] = useState<{
+    plateStoreId: string
+    plateSetCode: string
+    cartonName: string
+    colourNames: string[]
+  } | null>(null)
+  const [scrapChannelPick, setScrapChannelPick] = useState<Record<string, boolean>>({})
+  const [scrapReasonCode, setScrapReasonCode] = useState<PlateScrapReasonCode | ''>('')
 
   const [ctpSearch, setCtpSearch] = useState('')
   const [vendorSearch, setVendorSearch] = useState('')
@@ -325,6 +356,41 @@ export default function HubPlateDashboard() {
       if (mCtpSearchTimerRef.current) clearTimeout(mCtpSearchTimerRef.current)
     }
   }, [manualCtpOpen, mCtpQuery])
+
+  useEffect(() => {
+    if (!manualVendorOpen) return
+    const q = mvQuery.trim()
+    if (q.length < 2) {
+      setMvResults([])
+      return
+    }
+    if (mvSearchTimerRef.current) clearTimeout(mvSearchTimerRef.current)
+    mvSearchTimerRef.current = setTimeout(() => {
+      void (async () => {
+        setMvLoading(true)
+        try {
+          const r = await fetch(`/api/plate-hub/cartons-search?q=${encodeURIComponent(q)}`)
+          const list = safeJsonParseArray<CartonSearchHit>(await r.text(), [])
+          setMvResults(Array.isArray(list) ? list : [])
+        } catch {
+          setMvResults([])
+        } finally {
+          setMvLoading(false)
+        }
+      })()
+    }, 300)
+    return () => {
+      if (mvSearchTimerRef.current) clearTimeout(mvSearchTimerRef.current)
+    }
+  }, [manualVendorOpen, mvQuery])
+
+  useEffect(() => {
+    if (!scrapModal) return
+    const next: Record<string, boolean> = {}
+    for (const n of scrapModal.colourNames) next[n] = false
+    setScrapChannelPick(next)
+    setScrapReasonCode('')
+  }, [scrapModal])
 
   useEffect(() => {
     if (!remakePlate) return
@@ -569,34 +635,6 @@ export default function HubPlateDashboard() {
     }
   }
 
-  async function submitScrapFromRack() {
-    const id = scrapPlateId.trim()
-    if (!id) {
-      toast.error('Select a plate set')
-      return
-    }
-    setSaving(true)
-    try {
-      const r = await fetch(`/api/plate-store/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeJsonStringify({ status: 'destroyed' }),
-      })
-      const t = await r.text()
-      const j = safeJsonParse<{ error?: string }>(t, {})
-      if (!r.ok) {
-        toast.error(j.error ?? 'Remove failed')
-        return
-      }
-      toast.success('Plate set removed / scrapped')
-      setScrapOpen(false)
-      setScrapPlateId('')
-      await load()
-    } finally {
-      setSaving(false)
-    }
-  }
-
   function custodyItemFromRequirement(row: CtpRow, source: 'ctp' | 'vendor'): CustodyCard {
     return {
       kind: 'requirement',
@@ -622,6 +660,8 @@ export default function HubPlateDashboard() {
       artworkCode: row.artworkCode,
       artworkVersion: row.artworkVersion,
       plateColours: row.plateColours ?? [],
+      colourChannelNames: row.colourChannelNames,
+      platesInRackCount: row.platesInRackCount,
       custodySource: 'rack',
       serialNumber: row.serialNumber,
       rackNumber: row.rackNumber,
@@ -735,6 +775,8 @@ export default function HubPlateDashboard() {
         totalImpressions: 0,
         customer: item.customer ?? null,
         plateColours: item.plateColours,
+        colourChannelNames: item.colourChannelNames,
+        platesInRackCount: item.platesInRackCount,
         numberOfColours: item.numberOfColours,
         totalPlates: item.totalPlates,
       }
@@ -774,6 +816,18 @@ export default function HubPlateDashboard() {
     setMCtpPantoneN(1)
   }
 
+  function resetManualVendorForm() {
+    setMvQuery('')
+    setMvResults([])
+    setMvSelected(null)
+    setMvC(true)
+    setMvM(true)
+    setMvY(true)
+    setMvK(true)
+    setMvPantone(false)
+    setMvPantoneN(1)
+  }
+
   async function submitManualCtpRequest() {
     if (!mCtpSelected) {
       toast.error('Select a carton')
@@ -804,6 +858,79 @@ export default function HubPlateDashboard() {
     } catch (e) {
       console.error(e)
       toast.error(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitManualVendorRequest() {
+    if (!mvSelected) {
+      toast.error('Select a carton')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/plate-hub/manual-vendor-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          cartonId: mvSelected.id,
+          stdC: mvC,
+          stdM: mvM,
+          stdY: mvY,
+          stdK: mvK,
+          pantoneOn: mvPantone,
+          ...(mvPantone ? { pantoneCount: mvPantoneN } : {}),
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Request failed')
+      toast.success('Manual vendor PO created')
+      setManualVendorOpen(false)
+      resetManualVendorForm()
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitScrapPlateChannels() {
+    if (!scrapModal) return
+    const picked = Object.entries(scrapChannelPick)
+      .filter(([, v]) => v)
+      .map(([k]) => k)
+    if (!picked.length) {
+      toast.error('Select at least one plate channel to scrap')
+      return
+    }
+    if (!scrapReasonCode) {
+      toast.error('Select a scrap reason')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/plate-hub/scrap-plate-channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          plateStoreId: scrapModal.plateStoreId,
+          colourNames: picked,
+          reasonCode: scrapReasonCode,
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Scrap failed')
+      toast.success('Scrap recorded')
+      setScrapModal(null)
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Scrap failed')
     } finally {
       setSaving(false)
     }
@@ -969,8 +1096,8 @@ export default function HubPlateDashboard() {
         ) : (
           <>
             {/* ZONE 1 — Triage */}
-            <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-3">Incoming triage</h2>
+            <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">Incoming triage</h2>
               <pre className="sr-only">Designer queue — AW / job codes</pre>
               <div className="space-y-3">
                 {data.triage.length === 0 ? (
@@ -979,7 +1106,7 @@ export default function HubPlateDashboard() {
                   data.triage.map((row) => (
                     <div
                       key={row.id}
-                      className="relative flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4 rounded-lg border border-zinc-700 bg-black px-3 py-3 pr-14 lg:pr-16"
+                      className="relative flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-3 rounded-lg border border-zinc-700 bg-black p-2 pr-12 lg:pr-14"
                     >
                       <PlateCountBadge
                         count={hubPlateBadgeCount({
@@ -994,8 +1121,8 @@ export default function HubPlateDashboard() {
                           Plates required:{' '}
                           <span className="text-white font-semibold">{row.newPlatesNeeded}</span>
                         </p>
-                        <div className="mt-1.5">
-                          <ColourDots labels={row.plateColours} />
+                        <div className="mt-1">
+                          <ColourChannelsRow labels={row.plateColours} />
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -1050,7 +1177,7 @@ export default function HubPlateDashboard() {
             {/* Lanes: CTP · outside vendor · rack · custody */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
               {/* CTP */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4 min-h-[280px] flex flex-col">
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 min-h-[280px] flex flex-col">
                 <div className="flex flex-col gap-2 mb-2">
                   <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">CTP queue</h2>
                   <button
@@ -1077,7 +1204,7 @@ export default function HubPlateDashboard() {
                     filteredCtp.map((job) => (
                       <li
                         key={job.id}
-                        className="relative rounded-lg border border-zinc-700 bg-black p-3 pr-12 min-h-[4.5rem]"
+                        className="relative rounded-lg border border-zinc-700 bg-black p-2 pr-10 min-h-[4rem]"
                       >
                         <PlateCountBadge
                           count={hubPlateBadgeCount({
@@ -1086,8 +1213,8 @@ export default function HubPlateDashboard() {
                             totalPlates: job.newPlatesNeeded,
                           })}
                         />
-                        <p className="font-mono text-amber-300 text-sm">{job.requirementCode}</p>
-                        <p className="text-white font-semibold truncate mt-0.5 pr-1">
+                        <p className="font-mono text-amber-300 text-xs">{job.requirementCode}</p>
+                        <p className="text-white font-semibold text-sm truncate mt-0.5 pr-1">
                           {job.cartonName}
                           {job.partialRemake ? (
                             <span className="text-rose-400 font-bold"> (Remake)</span>
@@ -1097,14 +1224,14 @@ export default function HubPlateDashboard() {
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
                         <div className="mt-1">
-                          <ColourDots labels={job.plateColours} />
+                          <ColourChannelsRow labels={job.plateColours} />
                         </div>
                         <p className="text-xs text-zinc-400 mt-1 capitalize">
                           {job.status.replace(/_/g, ' ')}
                         </p>
                         <button
                           type="button"
-                          className="mt-2 w-full px-2 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
+                          className="mt-1.5 w-full px-2 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
                           onClick={() => void markPlateReadyRequirement(job, 'ctp')}
                         >
                           Mark plate ready
@@ -1113,7 +1240,7 @@ export default function HubPlateDashboard() {
                           type="button"
                           disabled={saving}
                           onClick={() => void sendBackTriage(job.id)}
-                          className="mt-2 w-full px-2 py-2 rounded border border-amber-700/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                          className="mt-1.5 w-full px-2 py-1.5 rounded border border-amber-700/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
                         >
                           Send back to Triage
                         </button>
@@ -1124,10 +1251,22 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Outside vendor */}
-              <section className="rounded-xl border-2 border-violet-900/80 bg-zinc-950 p-4 min-h-[280px] flex flex-col">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-300 mb-1">
-                  Outside vendor
-                </h2>
+              <section className="rounded-xl border-2 border-violet-900/80 bg-zinc-950 p-3 min-h-[280px] flex flex-col">
+                <div className="flex flex-col gap-2 mb-1">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-300">
+                    Outside vendor
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetManualVendorForm()
+                      setManualVendorOpen(true)
+                    }}
+                    className="w-full px-3 py-2 rounded-md border border-violet-500/80 bg-violet-950/40 text-violet-100 text-xs font-bold hover:bg-violet-950/70"
+                  >
+                    + Manual Vendor PO
+                  </button>
+                </div>
                 <p className="text-[11px] text-zinc-500 mb-2">Awaiting delivery · two-way decisions</p>
                 <input
                   value={vendorSearch}
@@ -1142,7 +1281,7 @@ export default function HubPlateDashboard() {
                     filteredVendor.map((job) => (
                       <li
                         key={job.id}
-                        className="relative rounded-lg border border-violet-800/50 bg-black p-3 pr-12 min-h-[4.5rem]"
+                        className="relative rounded-lg border border-violet-800/50 bg-black p-2 pr-10 min-h-[4rem]"
                       >
                         <PlateCountBadge
                           count={hubPlateBadgeCount({
@@ -1151,8 +1290,8 @@ export default function HubPlateDashboard() {
                             totalPlates: job.newPlatesNeeded,
                           })}
                         />
-                        <p className="font-mono text-violet-200 text-sm">{job.requirementCode}</p>
-                        <p className="text-white font-semibold truncate mt-0.5 pr-1">
+                        <p className="font-mono text-violet-200 text-xs">{job.requirementCode}</p>
+                        <p className="text-white font-semibold text-sm truncate mt-0.5 pr-1">
                           {job.cartonName}
                           {job.partialRemake ? (
                             <span className="text-rose-400 font-bold"> (Remake)</span>
@@ -1162,14 +1301,14 @@ export default function HubPlateDashboard() {
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
                         <div className="mt-1">
-                          <ColourDots labels={job.plateColours} />
+                          <ColourChannelsRow labels={job.plateColours} />
                         </div>
                         <p className="text-xs text-zinc-400 mt-1 capitalize">
                           {job.status.replace(/_/g, ' ')}
                         </p>
                         <button
                           type="button"
-                          className="mt-2 w-full px-2 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
+                          className="mt-1.5 w-full px-2 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
                           onClick={() => void markPlateReadyRequirement(job, 'vendor')}
                         >
                           Mark plate ready
@@ -1178,7 +1317,7 @@ export default function HubPlateDashboard() {
                           type="button"
                           disabled={saving}
                           onClick={() => void receiveVendorToTriage(job.id)}
-                          className="mt-2 w-full px-2 py-2 rounded bg-emerald-900/80 hover:bg-emerald-800 border border-emerald-700/60 text-emerald-100 text-xs font-semibold"
+                          className="mt-1.5 w-full px-2 py-1.5 rounded bg-emerald-900/80 hover:bg-emerald-800 border border-emerald-700/60 text-emerald-100 text-xs font-semibold"
                         >
                           Received → Triage
                         </button>
@@ -1186,7 +1325,7 @@ export default function HubPlateDashboard() {
                           type="button"
                           disabled={saving}
                           onClick={() => void sendVendorBackTriage(job.id)}
-                          className="mt-2 w-full px-2 py-2 rounded border border-amber-700/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                          className="mt-1.5 w-full px-2 py-1.5 rounded border border-amber-700/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
                         >
                           Send back to Triage
                         </button>
@@ -1197,7 +1336,7 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Inventory */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4 min-h-[280px] flex flex-col">
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 min-h-[280px] flex flex-col">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">Live inventory</h2>
                 <div className="flex flex-wrap gap-2 mb-2">
                   <button
@@ -1209,16 +1348,6 @@ export default function HubPlateDashboard() {
                     className="px-3 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold"
                   >
                     + Add Plate Stock
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setScrapPlateId('')
-                      setScrapOpen(true)
-                    }}
-                    className="px-3 py-2 rounded-md border border-rose-700/80 bg-rose-950/60 text-rose-100 hover:bg-rose-900/80 text-xs font-bold"
-                  >
-                    − Remove / Scrap
                   </button>
                 </div>
                 <input
@@ -1245,48 +1374,63 @@ export default function HubPlateDashboard() {
                       return (
                         <li
                           key={p.id}
-                          className="relative rounded-lg border border-zinc-800 bg-black p-3 pr-12"
+                          className="relative rounded-lg border border-zinc-800 bg-black p-2 pr-10"
                         >
                           <PlateCountBadge
-                            count={hubPlateBadgeCount({
+                            count={hubLivePlateBadgeCount({
+                              platesInRackCount: p.platesInRackCount,
                               numberOfColours: p.numberOfColours,
                               plateColours: p.plateColours,
                               totalPlates: p.totalPlates,
                             })}
                           />
-                          <p className="font-mono text-amber-300 text-sm">{p.plateSetCode}</p>
+                          <p className="font-mono text-amber-300 text-xs">{p.plateSetCode}</p>
                           {p.serialNumber ? (
                             <p className="text-zinc-400 text-xs font-mono">SN {p.serialNumber}</p>
                           ) : null}
-                          <p className="text-white font-semibold truncate mt-0.5">{p.cartonName}</p>
+                          <p className="text-white font-semibold text-sm truncate mt-0.5">{p.cartonName}</p>
                           <p className="text-xs text-zinc-400 mt-0.5">
                             AW: {p.artworkCode?.trim() || '—'}
                           </p>
                           <div className="mt-1">
-                            <ColourDots labels={p.plateColours ?? []} />
+                            <ColourChannelsRow labels={p.plateColours ?? []} />
                           </div>
                           {short > 0 ? (
-                            <p className="text-xs font-bold text-red-500 mt-1.5">
+                            <p className="text-xs font-bold text-red-500 mt-1">
                               ⚠️ Shortage: {short} Plates Missing
                             </p>
                           ) : null}
-                          <p className="mt-2 text-3xl sm:text-4xl font-black text-white leading-none tracking-tight">
+                          <p className="mt-1.5 text-sm font-semibold text-white leading-snug">
                             {locPrimary || '—'}
                           </p>
-                          <p className="text-xs text-zinc-400 mt-1.5 font-semibold uppercase tracking-wide">
+                          <p className="text-xs text-zinc-400 mt-0.5 uppercase tracking-wide">
                             Rack / slot
                             {p.ups != null && p.ups > 0 ? ` · UPS ${p.ups}` : ''}
                           </p>
                           <button
                             type="button"
-                            className="mt-2 w-full py-2 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-xs font-semibold hover:bg-rose-950/70"
-                            onClick={() => setRemakePlate(p)}
+                            className="mt-1.5 w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-[11px] font-semibold hover:bg-rose-950/70"
+                            onClick={() =>
+                              setScrapModal({
+                                plateStoreId: p.id,
+                                plateSetCode: p.plateSetCode,
+                                cartonName: p.cartonName,
+                                colourNames: plateColourNamesForScrap(p),
+                              })
+                            }
                           >
-                            Report Damage / Remake
+                            Scrap / Report Damage
                           </button>
                           <button
                             type="button"
-                            className="mt-2 w-full py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
+                            className="mt-1.5 w-full py-1.5 rounded border border-zinc-600 bg-zinc-900 text-zinc-200 text-[11px] font-semibold hover:bg-zinc-800"
+                            onClick={() => setRemakePlate(p)}
+                          >
+                            Partial remake (CTP / vendor)
+                          </button>
+                          <button
+                            type="button"
+                            className="mt-1.5 w-full py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
                             onClick={() => void markPlateReadyPlate(p)}
                           >
                             Mark plate ready
@@ -1299,7 +1443,7 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Custody */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4 min-h-[280px] flex flex-col">
+              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 min-h-[280px] flex flex-col">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-0.5">
                   Custody floor
                 </h2>
@@ -1317,21 +1461,29 @@ export default function HubPlateDashboard() {
                     filteredCustody.map((c) => (
                       <li
                         key={`${c.kind}-${c.id}`}
-                        className="relative rounded-lg border border-zinc-800 bg-black p-3 pr-12"
+                        className="relative rounded-lg border border-zinc-800 bg-black p-2 pr-10"
                       >
                         <PlateCountBadge
-                          count={hubPlateBadgeCount({
-                            numberOfColours: c.numberOfColours,
-                            plateColours: c.plateColours,
-                            totalPlates:
-                              c.kind === 'plate' ? c.totalPlates : c.newPlatesNeeded,
-                          })}
+                          count={
+                            c.kind === 'plate'
+                              ? hubLivePlateBadgeCount({
+                                  platesInRackCount: c.platesInRackCount,
+                                  numberOfColours: c.numberOfColours,
+                                  plateColours: c.plateColours,
+                                  totalPlates: c.totalPlates,
+                                })
+                              : hubPlateBadgeCount({
+                                  numberOfColours: c.numberOfColours,
+                                  plateColours: c.plateColours,
+                                  totalPlates: c.newPlatesNeeded,
+                                })
+                          }
                         />
-                        <span className="inline-block px-2 py-0.5 rounded border border-emerald-700/60 bg-emerald-950/50 text-[10px] font-semibold text-emerald-200 mb-1.5">
+                        <span className="inline-block px-1.5 py-0.5 rounded border border-emerald-700/60 bg-emerald-950/50 text-[10px] font-semibold text-emerald-200 mb-1">
                           {sourceBadgeLabel(c.custodySource)}
                         </span>
-                        <p className="font-mono text-amber-300 text-sm">{c.displayCode}</p>
-                        <p className="text-white font-semibold truncate mt-0.5 pr-1">
+                        <p className="font-mono text-amber-300 text-xs">{c.displayCode}</p>
+                        <p className="text-white font-semibold text-sm truncate mt-0.5 pr-1">
                           {c.cartonName}
                           {c.kind === 'requirement' && c.partialRemake ? (
                             <span className="text-rose-400 font-bold"> (Remake)</span>
@@ -1341,7 +1493,7 @@ export default function HubPlateDashboard() {
                           AW: {c.artworkCode?.trim() || '—'}
                         </p>
                         <div className="mt-1">
-                          <ColourDots labels={c.plateColours} />
+                          <ColourChannelsRow labels={c.plateColours} />
                         </div>
                         {c.kind === 'plate' ? (
                           <p className="text-xs text-zinc-400 mt-1">
@@ -1352,7 +1504,23 @@ export default function HubPlateDashboard() {
                         {c.kind === 'plate' ? (
                           <button
                             type="button"
-                            className="mt-2 w-full py-2 rounded border-2 border-red-600/90 bg-gradient-to-b from-red-950/95 to-orange-950/90 text-orange-50 text-xs font-bold hover:from-red-900 hover:to-orange-900 shadow-[0_0_12px_rgba(220,38,38,0.25)]"
+                            className="mt-1.5 w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-[11px] font-semibold hover:bg-rose-950/70"
+                            onClick={() =>
+                              setScrapModal({
+                                plateStoreId: c.id,
+                                plateSetCode: c.displayCode,
+                                cartonName: c.cartonName,
+                                colourNames: plateColourNamesForScrap(c),
+                              })
+                            }
+                          >
+                            Scrap / Report Damage
+                          </button>
+                        ) : null}
+                        {c.kind === 'plate' ? (
+                          <button
+                            type="button"
+                            className="mt-1.5 w-full py-1.5 rounded border-2 border-red-600/90 bg-gradient-to-b from-red-950/95 to-orange-950/90 text-orange-50 text-[11px] font-bold hover:from-red-900 hover:to-orange-900 shadow-[0_0_12px_rgba(220,38,38,0.25)]"
                             onClick={() => setEmergencyTarget(c)}
                           >
                             Emergency Issue (Bypass)
@@ -1360,7 +1528,7 @@ export default function HubPlateDashboard() {
                         ) : null}
                         <button
                           type="button"
-                          className="mt-2 w-full py-2 rounded border border-amber-800/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                          className="mt-1.5 w-full py-1.5 rounded border border-amber-800/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
                           onClick={() => void reverseCustodyItem(c)}
                         >
                           Reverse / Undo
@@ -1579,48 +1747,6 @@ export default function HubPlateDashboard() {
         </div>
       )}
 
-      {/* Remove / scrap from rack */}
-      {scrapOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Remove / scrap plate set</h3>
-            <p className="text-zinc-500 text-xs">Marks the plate set as destroyed in the ledger.</p>
-            <label className="block text-sm text-zinc-300">
-              Plate set
-              <select
-                value={scrapPlateId}
-                onChange={(e) => setScrapPlateId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              >
-                <option value="">Select…</option>
-                {data.inventory.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.plateSetCode} — {p.cartonName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
-                onClick={() => setScrapOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={saving || !scrapPlateId.trim()}
-                className="px-3 py-2 rounded bg-rose-700 text-white font-medium disabled:opacity-50"
-                onClick={() => void submitScrapFromRack()}
-              >
-                Confirm scrap
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Stock modal */}
       {stockModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
@@ -1809,6 +1935,229 @@ export default function HubPlateDashboard() {
         </div>
       )}
 
+      {/* Manual vendor PO */}
+      {manualVendorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-lg max-h-[90vh] rounded-xl border border-violet-600/60 bg-zinc-950 flex flex-col shadow-2xl">
+            <div className="p-4 border-b border-zinc-800 shrink-0">
+              <h3 className="text-lg font-semibold text-white">Manual vendor PO</h3>
+              <p className="text-zinc-500 text-xs mt-1">
+                Bypass triage. Job goes to Outside vendor (awaiting delivery).
+              </p>
+              <div className="relative mt-3">
+                <label className="block text-sm text-zinc-300">
+                  Carton name
+                  <input
+                    value={mvQuery}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setMvQuery(v)
+                      if (mvSelected && v.trim() !== mvSelected.cartonName) {
+                        setMvSelected(null)
+                      }
+                    }}
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                    placeholder="Type at least 2 characters…"
+                    autoComplete="off"
+                  />
+                </label>
+                {mvLoading ? <p className="text-xs text-zinc-500 mt-1">Searching…</p> : null}
+                {mvResults.length > 0 ? (
+                  <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-600 bg-zinc-900 shadow-lg">
+                    {mvResults.map((hit) => (
+                      <li key={hit.id}>
+                        <button
+                          type="button"
+                          className="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-800 border-b border-zinc-800 last:border-0"
+                          onClick={() => {
+                            setMvSelected(hit)
+                            setMvQuery(hit.cartonName)
+                            setMvResults([])
+                          }}
+                        >
+                          <span className="font-medium block truncate">{hit.cartonName}</span>
+                          <span className="text-[11px] text-zinc-400">
+                            {hit.customer.name}
+                            {hit.artworkCode ? ` · ${hit.artworkCode}` : ''}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+              {mvSelected ? (
+                <p className="text-[11px] text-emerald-400/90 mt-2">
+                  Linked: {mvSelected.customer.name}
+                </p>
+              ) : (
+                <p className="text-[11px] text-zinc-500 mt-2">Pick a carton from search results.</p>
+              )}
+            </div>
+            <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <div>
+                <p className="text-sm text-zinc-300 mb-2">Colours (vendor will supply)</p>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      ['C', mvC, setMvC],
+                      ['M', mvM, setMvM],
+                      ['Y', mvY, setMvY],
+                      ['K', mvK, setMvK],
+                    ] as const
+                  ).map(([label, on, setOn]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setOn(!on)}
+                      className={`min-w-[2.5rem] px-3 py-2 rounded-md text-sm font-bold border ${
+                        on
+                          ? 'bg-violet-600 border-violet-400 text-white'
+                          : 'bg-zinc-900 border-zinc-600 text-zinc-500'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setMvPantone(!mvPantone)}
+                    className={`px-3 py-2 rounded-md text-sm font-bold border ${
+                      mvPantone
+                        ? 'bg-violet-700 border-violet-500 text-white'
+                        : 'bg-zinc-900 border-zinc-600 text-zinc-500'
+                    }`}
+                  >
+                    Pantone
+                  </button>
+                </div>
+                {mvPantone ? (
+                  <label className="block text-sm text-zinc-300 mt-3">
+                    How many Pantones?
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={mvPantoneN}
+                      onChange={(e) => setMvPantoneN(Number(e.target.value) || 1)}
+                      className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                    />
+                  </label>
+                ) : null}
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+                <button
+                  type="button"
+                  className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                  onClick={() => {
+                    setManualVendorOpen(false)
+                    resetManualVendorForm()
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={saving || !mvSelected}
+                  className="px-3 py-2 rounded bg-violet-600 text-white font-semibold disabled:opacity-50"
+                  onClick={() => void submitManualVendorRequest()}
+                >
+                  Create vendor job
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scrap & damage — per channel */}
+      {scrapModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md rounded-xl border border-rose-800/50 bg-zinc-950 p-4 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div>
+              <h3 className="text-lg font-semibold text-white">Scrap &amp; damage report</h3>
+              <p className="text-zinc-500 text-xs mt-1">
+                Step 1 — which plates are scrapped? Step 2 — reason. Counts update immediately.
+              </p>
+              <p className="text-xs font-mono text-amber-300 mt-2">{scrapModal.plateSetCode}</p>
+              <p className="text-sm text-white font-medium truncate">{scrapModal.cartonName}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+                Step 1 — Which plate?
+              </p>
+              <div className="space-y-2 rounded-lg border border-zinc-700 bg-black/40 p-3">
+                {scrapModal.colourNames.length === 0 ? (
+                  <p className="text-xs text-zinc-500">No active channels on this set.</p>
+                ) : (
+                  scrapModal.colourNames.map((name) => (
+                    <label
+                      key={name}
+                      className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={scrapChannelPick[name] ?? false}
+                        onChange={(e) =>
+                          setScrapChannelPick((prev) => ({ ...prev, [name]: e.target.checked }))
+                        }
+                        className="rounded border-zinc-600"
+                      />
+                      <span className="flex items-center gap-2 min-w-0">
+                        <ColourChannelsRow labels={[name]} />
+                        <span className="truncate text-xs">{name}</span>
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+                Step 2 — Reason for scrapping?
+              </p>
+              <select
+                value={scrapReasonCode}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setScrapReasonCode(v ? (v as PlateScrapReasonCode) : '')
+                }}
+                className="w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+              >
+                <option value="">Select reason…</option>
+                {PLATE_SCRAP_REASONS.map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => setScrapModal(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  saving ||
+                  !scrapModal.colourNames.length ||
+                  !Object.values(scrapChannelPick).some(Boolean) ||
+                  !scrapReasonCode
+                }
+                className="px-3 py-2 rounded bg-rose-700 text-white font-semibold disabled:opacity-50"
+                onClick={() => void submitScrapPlateChannels()}
+              >
+                Confirm scrap
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Partial remake from live inventory */}
       {remakePlate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
@@ -1865,8 +2214,8 @@ export default function HubPlateDashboard() {
                         className="rounded border-zinc-600"
                       />
                       <span className="flex items-center gap-2 min-w-0">
-                        <ColourDots labels={[name]} />
-                        <span className="truncate">{name}</span>
+                        <ColourChannelsRow labels={[name]} />
+                        <span className="truncate text-xs text-zinc-300">{name}</span>
                       </span>
                     </label>
                   ))
