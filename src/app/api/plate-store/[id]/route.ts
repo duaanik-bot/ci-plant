@@ -6,9 +6,10 @@ import { z } from 'zod'
 export const dynamic = 'force-dynamic'
 
 const updateSchema = z.object({
-  storageLocation: z.string().optional().nullable(),
-  storageNotes: z.string().optional().nullable(),
+  rackLocation: z.string().optional().nullable(),
+  slotNumber: z.string().optional().nullable(),
   status: z.string().optional(),
+  expectedReturn: z.string().optional().nullable(),
 })
 
 export async function GET(
@@ -21,7 +22,11 @@ export async function GET(
   const { id } = await context.params
   const plate = await db.plateStore.findUnique({
     where: { id },
-    include: { customer: { select: { id: true, name: true } } },
+    include: {
+      customer: { select: { id: true, name: true } },
+      issueRecords: { orderBy: { issuedAt: 'desc' } },
+      auditLog: { orderBy: { performedAt: 'desc' } },
+    },
   })
   if (!plate) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -53,13 +58,37 @@ export async function PUT(
   const updated = await db.plateStore.update({
     where: { id },
     data: {
-      ...(parsed.data.storageLocation !== undefined
-        ? { storageLocation: parsed.data.storageLocation }
+      ...(parsed.data.rackLocation !== undefined
+        ? { rackLocation: parsed.data.rackLocation }
         : {}),
-      ...(parsed.data.storageNotes !== undefined
-        ? { storageNotes: parsed.data.storageNotes }
+      ...(parsed.data.slotNumber !== undefined
+        ? { slotNumber: parsed.data.slotNumber }
         : {}),
       ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
+      ...(parsed.data.expectedReturn !== undefined
+        ? { expectedReturn: parsed.data.expectedReturn ? new Date(parsed.data.expectedReturn) : null }
+        : {}),
+    },
+  })
+
+  await db.plateAuditLog.create({
+    data: {
+      plateStoreId: id,
+      plateSetCode: updated.plateSetCode,
+      action: 'rack_updated',
+      performedBy: user!.id,
+      details: {
+        before: {
+          rackLocation: existing.rackLocation,
+          slotNumber: existing.slotNumber,
+          status: existing.status,
+        },
+        after: {
+          rackLocation: updated.rackLocation,
+          slotNumber: updated.slotNumber,
+          status: updated.status,
+        },
+      },
     },
   })
 
@@ -69,11 +98,11 @@ export async function PUT(
     tableName: 'plate_store',
     recordId: id,
     oldValue: {
-      storageLocation: existing.storageLocation,
+      rackLocation: existing.rackLocation,
       status: existing.status,
     },
     newValue: {
-      storageLocation: updated.storageLocation,
+      rackLocation: updated.rackLocation,
       status: updated.status,
     },
   })

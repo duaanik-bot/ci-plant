@@ -20,19 +20,28 @@ function nextPlateSetCode(): Promise<string> {
     })
 }
 
+const colourSchema = z.object({
+  name: z.string().min(1),
+  type: z.string().optional(),
+  status: z.enum(['new', 'old', 'issued', 'returned', 'destroyed']).default('new'),
+  rackLocation: z.string().optional().nullable(),
+  slotNumber: z.string().optional().nullable(),
+  condition: z.string().optional().nullable(),
+})
+
 const createSchema = z.object({
-  cartonName: z.string().min(1),
+  cartonName: z.string().min(1, 'Carton name is required'),
+  artworkVersion: z.string().optional(),
+  artworkCode: z.string().optional(),
   customerId: z.string().uuid().optional().nullable(),
   cartonId: z.string().uuid().optional().nullable(),
   artworkId: z.string().uuid().optional().nullable(),
-  artworkVersion: z.string().optional().nullable(),
-  numberOfColours: z.number().int().min(1).max(6),
-  colours: z.record(z.string(), z.enum(['new', 'old', 'destroyed'])),
-  storageLocation: z.string().optional().nullable(),
-  storageNotes: z.string().optional().nullable(),
+  numberOfColours: z.number().int().min(1).max(12),
+  colours: z.array(colourSchema).min(1),
+  rackLocation: z.string().optional().nullable(),
+  slotNumber: z.string().optional().nullable(),
   ctpOperator: z.string().optional().nullable(),
   ctpDate: z.string().optional().nullable(),
-  jobCardId: z.string().uuid().optional().nullable(),
 })
 
 export async function GET(req: NextRequest) {
@@ -42,16 +51,23 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const customerId = searchParams.get('customerId')
   const status = searchParams.get('status')
-  const q = searchParams.get('q')?.trim()
+  const q = searchParams.get('search')?.trim()
+  const rackLocation = searchParams.get('rackLocation')?.trim()
 
-  const where: { customerId?: string; status?: string; OR?: object[] } = {}
+  const where: {
+    customerId?: string
+    status?: string
+    rackLocation?: { contains: string; mode: 'insensitive' }
+    OR?: object[]
+  } = {}
   if (customerId) where.customerId = customerId
   if (status) where.status = status
+  if (rackLocation) where.rackLocation = { contains: rackLocation, mode: 'insensitive' }
   if (q && q.length >= 2) {
     where.OR = [
       { cartonName: { contains: q, mode: 'insensitive' as const } },
       { plateSetCode: { contains: q, mode: 'insensitive' as const } },
-      { artworkVersion: { contains: q, mode: 'insensitive' as const } },
+      { artworkCode: { contains: q, mode: 'insensitive' as const } },
     ]
   }
 
@@ -72,6 +88,7 @@ export async function POST(req: NextRequest) {
   const parsed = createSchema.safeParse({
     ...body,
     numberOfColours: body.numberOfColours != null ? Number(body.numberOfColours) : undefined,
+    artworkVersion: body.artworkVersion ?? undefined,
   })
   if (!parsed.success) {
     const fields: Record<string, string> = {}
@@ -83,10 +100,11 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data
-  const colours = data.colours as Record<string, string>
-  const totalPlates = Object.keys(colours).length
-  const newPlates = Object.values(colours).filter((v) => v === 'new').length
-  const oldPlates = Object.values(colours).filter((v) => v === 'old').length
+  const colours = data.colours
+  const totalPlates = colours.length
+  const newPlatesCount = colours.filter((v) => v.status === 'new').length
+  const oldPlatesCount = colours.filter((v) => v.status === 'old' || v.status === 'returned').length
+  // newPlatesCount / oldPlatesCount are local vars; Prisma fields are newPlates / oldPlates
 
   const plateSetCode = await nextPlateSetCode()
 
@@ -97,18 +115,32 @@ export async function POST(req: NextRequest) {
       customerId: data.customerId ?? null,
       cartonId: data.cartonId ?? null,
       artworkId: data.artworkId ?? null,
+      artworkCode: data.artworkCode ?? null,
       artworkVersion: data.artworkVersion ?? null,
-      jobCardId: data.jobCardId ?? null,
       numberOfColours: data.numberOfColours,
-      colours: colours as object,
+      colours,
       totalPlates,
-      newPlates,
-      oldPlates,
-      storageLocation: data.storageLocation ?? null,
+      newPlates: newPlatesCount,
+      oldPlates: oldPlatesCount,
+      rackLocation: data.rackLocation ?? null,
+      slotNumber: data.slotNumber ?? null,
       ctpOperator: data.ctpOperator ?? null,
       ctpDate: data.ctpDate ? new Date(data.ctpDate) : null,
-      storageNotes: data.storageNotes ?? null,
-      status: 'in_use',
+      status: 'ready',
+    },
+  })
+
+  await db.plateAuditLog.create({
+    data: {
+      plateStoreId: created.id,
+      plateSetCode: created.plateSetCode,
+      action: 'created',
+      performedBy: user!.id,
+      details: {
+        cartonName: created.cartonName,
+        numberOfColours: created.numberOfColours,
+        rackLocation: created.rackLocation,
+      },
     },
   })
 

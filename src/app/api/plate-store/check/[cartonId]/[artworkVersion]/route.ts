@@ -24,12 +24,13 @@ export async function GET(
   })
 
   const available = plates.map((p) => {
-    const colours = (p.colours as Record<string, string>) ?? {}
-    const colourList = Object.entries(colours).map(([name, status]) => ({
-      name,
-      status,
-      available: status !== 'destroyed',
-    }))
+    const colourList = Array.isArray(p.colours)
+      ? (p.colours as Array<{ name?: string; status?: string }>).map((c) => ({
+          name: c.name ?? 'Unknown',
+          status: c.status ?? 'new',
+          available: (c.status ?? 'new') !== 'destroyed',
+        }))
+      : []
     const allAvailable = colourList.every((c) => c.available)
     const oldCount = colourList.filter((c) => c.status === 'old').length
     const newCount = colourList.filter((c) => c.status === 'new').length
@@ -43,10 +44,10 @@ export async function GET(
       newPlates: p.newPlates,
       oldPlates: p.oldPlates,
       totalPlates: p.totalPlates,
-      storageLocation: p.storageLocation,
+      storageLocation: p.rackLocation,
       status: p.status,
       ctpDate: p.ctpDate?.toISOString().slice(0, 10) ?? null,
-      collectedAt: p.collectedAt?.toISOString() ?? null,
+      collectedAt: p.returnedAt?.toISOString() ?? null,
       allAvailable,
       oldCount,
       newCount,
