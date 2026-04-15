@@ -892,6 +892,8 @@ model PlateRequirement {
   triageChannel      String?   @map("triage_channel") @db.VarChar(40)
   reservedRackSlot   String?   @map("reserved_rack_slot")
   poLineId           String?   @map("po_line_id")
+  /// Ad-hoc / partial remake from hub — show (Remake) in UI
+  partialRemake      Boolean   @default(false) @map("partial_remake")
   createdBy          String    @map("created_by")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")

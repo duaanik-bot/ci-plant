@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { safeJsonParse, safeJsonParseArray, safeJsonStringify } from '@/lib/safe-json'
+import {
+  colourDotFromLabel,
+  hubPlateBadgeCount,
+} from '@/lib/hub-plate-card-ui'
 
 type TriageRow = {
   id: string
@@ -27,6 +31,9 @@ type CtpRow = {
   artworkVersion: string | null
   plateColours: string[]
   status: string
+  numberOfColours?: number
+  newPlatesNeeded?: number
+  partialRemake?: boolean
 }
 
 type PlateCard = {
@@ -49,6 +56,10 @@ type PlateCard = {
   totalImpressions: number
   customer: { id: string; name: string } | null
   plateColours?: string[]
+  numberOfColours?: number
+  totalPlates?: number
+  platesInRackCount?: number
+  colourChannelNames?: string[]
 }
 
 type CustodyCard = {
@@ -65,6 +76,13 @@ type CustodyCard = {
   rackLocation?: string | null
   ups?: number | null
   customer?: { id: string; name: string } | null
+  numberOfColours?: number
+  newPlatesNeeded?: number
+  partialRemake?: boolean
+  totalPlates?: number
+  artworkId?: string | null
+  jobCardId?: string | null
+  slotNumber?: string | null
 }
 
 type CartonSearchHit = {
@@ -99,6 +117,41 @@ function sourceBadgeLabel(source: CustodyCard['custodySource']): string {
   return 'Source: Rack'
 }
 
+function PlateCountBadge({ count }: { count: number }) {
+  const n = Math.max(0, Math.min(99, count))
+  return (
+    <div
+      className="pointer-events-none absolute top-2 right-2 flex h-9 w-9 items-center justify-center rounded-full border-2 border-amber-500 bg-zinc-950 text-sm font-extrabold text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.35)] tabular-nums z-10"
+      aria-label={`${n} plates`}
+    >
+      {n}
+    </div>
+  )
+}
+
+function ColourDots({ labels }: { labels: string[] }) {
+  if (!labels.length) {
+    return <span className="text-xs text-zinc-500">—</span>
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 min-h-[1rem]" title={labels.join(' · ')}>
+      {labels.map((lab, i) => {
+        const d = colourDotFromLabel(lab, i)
+        return (
+          <span
+            key={d.key}
+            title={d.title}
+            className={`inline-block h-3.5 w-3.5 rounded-full shrink-0 ${d.bgClass} ${d.ringClass}`}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+type MachineOpt = { id: string; machineCode: string; name: string }
+type UserOpt = { id: string; name: string }
+
 function safeReadDashboard(text: string): DashboardPayload | null {
   try {
     const v = JSON.parse(text) as unknown
@@ -109,7 +162,7 @@ function safeReadDashboard(text: string): DashboardPayload | null {
       ctpQueue: Array.isArray(o.ctpQueue) ? (o.ctpQueue as CtpRow[]) : [],
       vendorQueue: Array.isArray(o.vendorQueue) ? (o.vendorQueue as CtpRow[]) : [],
       inventory: Array.isArray(o.inventory) ? (o.inventory as PlateCard[]) : [],
-      custody: Array.isArray(o.custody) ? (o.custody as PlateCard[]) : [],
+      custody: Array.isArray(o.custody) ? (o.custody as CustodyCard[]) : [],
     }
   } catch {
     return null
@@ -144,6 +197,7 @@ export default function HubPlateDashboard() {
   const [pantoneOn, setPantoneOn] = useState(false)
   const [pantoneCount, setPantoneCount] = useState(1)
   const cartonSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mCtpSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [scrapOpen, setScrapOpen] = useState(false)
   const [scrapPlateId, setScrapPlateId] = useState('')
@@ -159,6 +213,31 @@ export default function HubPlateDashboard() {
 
   const [addStockFieldErrors, setAddStockFieldErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+
+  const [manualCtpOpen, setManualCtpOpen] = useState(false)
+  const [mCtpQuery, setMCtpQuery] = useState('')
+  const [mCtpResults, setMCtpResults] = useState<CartonSearchHit[]>([])
+  const [mCtpLoading, setMCtpLoading] = useState(false)
+  const [mCtpSelected, setMCtpSelected] = useState<CartonSearchHit | null>(null)
+  const [mCtpC, setMCtpC] = useState(true)
+  const [mCtpM, setMCtpM] = useState(true)
+  const [mCtpY, setMCtpY] = useState(true)
+  const [mCtpK, setMCtpK] = useState(true)
+  const [mCtpPantone, setMCtpPantone] = useState(false)
+  const [mCtpPantoneN, setMCtpPantoneN] = useState(1)
+
+  const [remakePlate, setRemakePlate] = useState<PlateCard | null>(null)
+  const [remakeLane, setRemakeLane] = useState<'inhouse_ctp' | 'outside_vendor'>('inhouse_ctp')
+  const [remakePick, setRemakePick] = useState<Record<string, boolean>>({})
+
+  const [emergencyTarget, setEmergencyTarget] = useState<CustodyCard | null>(null)
+  const [machines, setMachines] = useState<MachineOpt[]>([])
+  const [users, setUsers] = useState<UserOpt[]>([])
+  const [emergencyMachineId, setEmergencyMachineId] = useState('')
+  const [emergencyOperatorId, setEmergencyOperatorId] = useState('')
+  const [emergencyArtworkId, setEmergencyArtworkId] = useState('')
+  const [emergencyJobCardId, setEmergencyJobCardId] = useState('')
+  const [emergencySetNum, setEmergencySetNum] = useState('')
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true)
@@ -219,6 +298,62 @@ export default function HubPlateDashboard() {
       if (cartonSearchTimerRef.current) clearTimeout(cartonSearchTimerRef.current)
     }
   }, [addStockOpen, addCartonQuery])
+
+  useEffect(() => {
+    if (!manualCtpOpen) return
+    const q = mCtpQuery.trim()
+    if (q.length < 2) {
+      setMCtpResults([])
+      return
+    }
+    if (mCtpSearchTimerRef.current) clearTimeout(mCtpSearchTimerRef.current)
+    mCtpSearchTimerRef.current = setTimeout(() => {
+      void (async () => {
+        setMCtpLoading(true)
+        try {
+          const r = await fetch(`/api/plate-hub/cartons-search?q=${encodeURIComponent(q)}`)
+          const list = safeJsonParseArray<CartonSearchHit>(await r.text(), [])
+          setMCtpResults(Array.isArray(list) ? list : [])
+        } catch {
+          setMCtpResults([])
+        } finally {
+          setMCtpLoading(false)
+        }
+      })()
+    }, 300)
+    return () => {
+      if (mCtpSearchTimerRef.current) clearTimeout(mCtpSearchTimerRef.current)
+    }
+  }, [manualCtpOpen, mCtpQuery])
+
+  useEffect(() => {
+    if (!remakePlate) return
+    const names = remakePlate.colourChannelNames?.length
+      ? remakePlate.colourChannelNames
+      : remakePlate.plateColours ?? []
+    const next: Record<string, boolean> = {}
+    for (const n of names) next[n] = false
+    setRemakePick(next)
+  }, [remakePlate])
+
+  useEffect(() => {
+    if (!emergencyTarget || emergencyTarget.kind !== 'plate') return
+    void (async () => {
+      try {
+        const [mRes, uRes] = await Promise.all([fetch('/api/machines'), fetch('/api/users')])
+        setMachines(safeJsonParseArray<MachineOpt>(await mRes.text(), []))
+        setUsers(safeJsonParseArray<UserOpt>(await uRes.text(), []))
+      } catch {
+        setMachines([])
+        setUsers([])
+      }
+      setEmergencyMachineId('')
+      setEmergencyOperatorId('')
+      setEmergencyArtworkId(String(emergencyTarget.artworkId ?? '').trim())
+      setEmergencyJobCardId(String(emergencyTarget.jobCardId ?? '').trim())
+      setEmergencySetNum(String(emergencyTarget.slotNumber ?? '').trim() || '01')
+    })()
+  }, [emergencyTarget])
 
   const addStockTotalPlates = useMemo(() => {
     let n = 0
@@ -472,6 +607,9 @@ export default function HubPlateDashboard() {
       artworkVersion: row.artworkVersion,
       plateColours: row.plateColours,
       custodySource: source,
+      numberOfColours: row.numberOfColours,
+      newPlatesNeeded: row.newPlatesNeeded,
+      partialRemake: row.partialRemake,
     }
   }
 
@@ -490,6 +628,11 @@ export default function HubPlateDashboard() {
       rackLocation: row.rackLocation,
       ups: row.ups,
       customer: row.customer,
+      numberOfColours: row.numberOfColours,
+      totalPlates: row.totalPlates,
+      artworkId: row.artworkId,
+      jobCardId: row.jobCardId,
+      slotNumber: row.slotNumber,
     }
   }
 
@@ -559,6 +702,9 @@ export default function HubPlateDashboard() {
         plateColours: item.plateColours,
         status:
           item.custodySource === 'vendor' ? 'awaiting_vendor_delivery' : 'ctp_internal_queue',
+        numberOfColours: item.numberOfColours,
+        newPlatesNeeded: item.newPlatesNeeded,
+        partialRemake: item.partialRemake,
       }
       setData((d) => ({
         ...d,
@@ -579,9 +725,9 @@ export default function HubPlateDashboard() {
         cartonName: item.cartonName,
         artworkCode: item.artworkCode,
         artworkVersion: item.artworkVersion,
-        artworkId: null,
-        jobCardId: null,
-        slotNumber: null,
+        artworkId: item.artworkId ?? null,
+        jobCardId: item.jobCardId ?? null,
+        slotNumber: item.slotNumber ?? null,
         rackLocation: item.rackLocation,
         status: 'ready',
         issuedTo: null,
@@ -589,6 +735,8 @@ export default function HubPlateDashboard() {
         totalImpressions: 0,
         customer: item.customer ?? null,
         plateColours: item.plateColours,
+        numberOfColours: item.numberOfColours,
+        totalPlates: item.totalPlates,
       }
       setData((d) => ({
         ...d,
@@ -611,6 +759,127 @@ export default function HubPlateDashboard() {
       console.error(e)
       setData(prev)
       toast.error(e instanceof Error ? e.message : 'Reverse failed')
+    }
+  }
+
+  function resetManualCtpForm() {
+    setMCtpQuery('')
+    setMCtpResults([])
+    setMCtpSelected(null)
+    setMCtpC(true)
+    setMCtpM(true)
+    setMCtpY(true)
+    setMCtpK(true)
+    setMCtpPantone(false)
+    setMCtpPantoneN(1)
+  }
+
+  async function submitManualCtpRequest() {
+    if (!mCtpSelected) {
+      toast.error('Select a carton')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/plate-hub/manual-ctp-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          cartonId: mCtpSelected.id,
+          stdC: mCtpC,
+          stdM: mCtpM,
+          stdY: mCtpY,
+          stdK: mCtpK,
+          pantoneOn: mCtpPantone,
+          ...(mCtpPantone ? { pantoneCount: mCtpPantoneN } : {}),
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Request failed')
+      toast.success('Manual CTP job created')
+      setManualCtpOpen(false)
+      resetManualCtpForm()
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitPartialRemake() {
+    if (!remakePlate) return
+    const missing = Object.entries(remakePick)
+      .filter(([, v]) => v)
+      .map(([k]) => k)
+    if (!missing.length) {
+      toast.error('Select at least one missing or damaged plate')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/plate-hub/partial-remake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          plateStoreId: remakePlate.id,
+          lane: remakeLane,
+          missingColourNames: missing,
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Remake request failed')
+      toast.success(
+        remakeLane === 'inhouse_ctp' ? 'Partial remake sent to CTP' : 'Partial remake sent to vendor',
+      )
+      setRemakePlate(null)
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Remake request failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitEmergencyIssue() {
+    if (!emergencyTarget || emergencyTarget.kind !== 'plate') return
+    if (!emergencyMachineId.trim() || !emergencyOperatorId.trim()) {
+      toast.error('Machine and operator are required')
+      return
+    }
+    if (!emergencyArtworkId.trim() || !emergencyJobCardId.trim()) {
+      toast.error('Artwork ID and job card ID are required for issue')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/plate-hub/emergency-issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          plateStoreId: emergencyTarget.id,
+          machineId: emergencyMachineId,
+          operatorUserId: emergencyOperatorId,
+          artworkId: emergencyArtworkId.trim(),
+          jobCardId: emergencyJobCardId.trim(),
+          setNumber: emergencySetNum.trim() || '01',
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Emergency issue failed')
+      toast.success('Plate issued (bypass)')
+      setEmergencyTarget(null)
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Emergency issue failed')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -710,17 +979,24 @@ export default function HubPlateDashboard() {
                   data.triage.map((row) => (
                     <div
                       key={row.id}
-                      className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4 rounded-lg border border-zinc-700 bg-black px-3 py-3"
+                      className="relative flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4 rounded-lg border border-zinc-700 bg-black px-3 py-3 pr-14 lg:pr-16"
                     >
+                      <PlateCountBadge
+                        count={hubPlateBadgeCount({
+                          totalPlates: row.newPlatesNeeded,
+                          plateColours: row.plateColours,
+                        })}
+                      />
                       <div className="flex-1 min-w-0">
                         <p className="font-mono text-amber-300 text-sm">{row.requirementCode}</p>
-                        <p className="text-white font-medium truncate">{row.cartonName}</p>
+                        <p className="text-white font-medium truncate pr-1">{row.cartonName}</p>
                         <p className="text-zinc-400 text-xs mt-1">
-                          Plates required: <span className="text-white font-semibold">{row.newPlatesNeeded}</span>
-                          {row.plateColours.length > 0 && (
-                            <span className="text-zinc-500"> · {row.plateColours.join(' · ')}</span>
-                          )}
+                          Plates required:{' '}
+                          <span className="text-white font-semibold">{row.newPlatesNeeded}</span>
                         </p>
+                        <div className="mt-1.5">
+                          <ColourDots labels={row.plateColours} />
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <button
@@ -775,7 +1051,19 @@ export default function HubPlateDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
               {/* CTP */}
               <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-4 min-h-[280px] flex flex-col">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 mb-2">CTP queue</h2>
+                <div className="flex flex-col gap-2 mb-2">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">CTP queue</h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetManualCtpForm()
+                      setManualCtpOpen(true)
+                    }}
+                    className="w-full px-3 py-2 rounded-md border border-amber-600/80 bg-amber-950/40 text-amber-100 text-xs font-bold hover:bg-amber-950/70"
+                  >
+                    + Manual CTP Request
+                  </button>
+                </div>
                 <input
                   value={ctpSearch}
                   onChange={(e) => setCtpSearch(e.target.value)}
@@ -787,16 +1075,31 @@ export default function HubPlateDashboard() {
                     <li className="text-zinc-500 text-sm">Empty.</li>
                   ) : (
                     filteredCtp.map((job) => (
-                      <li key={job.id} className="rounded-lg border border-zinc-700 bg-black p-3">
+                      <li
+                        key={job.id}
+                        className="relative rounded-lg border border-zinc-700 bg-black p-3 pr-12 min-h-[4.5rem]"
+                      >
+                        <PlateCountBadge
+                          count={hubPlateBadgeCount({
+                            numberOfColours: job.numberOfColours,
+                            plateColours: job.plateColours,
+                            totalPlates: job.newPlatesNeeded,
+                          })}
+                        />
                         <p className="font-mono text-amber-300 text-sm">{job.requirementCode}</p>
-                        <p className="text-white font-semibold truncate mt-0.5">{job.cartonName}</p>
+                        <p className="text-white font-semibold truncate mt-0.5 pr-1">
+                          {job.cartonName}
+                          {job.partialRemake ? (
+                            <span className="text-rose-400 font-bold"> (Remake)</span>
+                          ) : null}
+                        </p>
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
-                        <p className="text-xs text-zinc-400 mt-1">
-                          {job.plateColours.length > 0 ? job.plateColours.join(' · ') : '—'}
-                        </p>
-                        <p className="text-xs text-zinc-400 mt-0.5 capitalize">
+                        <div className="mt-1">
+                          <ColourDots labels={job.plateColours} />
+                        </div>
+                        <p className="text-xs text-zinc-400 mt-1 capitalize">
                           {job.status.replace(/_/g, ' ')}
                         </p>
                         <button
@@ -837,16 +1140,31 @@ export default function HubPlateDashboard() {
                     <li className="text-zinc-500 text-sm">None at vendor.</li>
                   ) : (
                     filteredVendor.map((job) => (
-                      <li key={job.id} className="rounded-lg border border-violet-800/50 bg-black p-3">
+                      <li
+                        key={job.id}
+                        className="relative rounded-lg border border-violet-800/50 bg-black p-3 pr-12 min-h-[4.5rem]"
+                      >
+                        <PlateCountBadge
+                          count={hubPlateBadgeCount({
+                            numberOfColours: job.numberOfColours,
+                            plateColours: job.plateColours,
+                            totalPlates: job.newPlatesNeeded,
+                          })}
+                        />
                         <p className="font-mono text-violet-200 text-sm">{job.requirementCode}</p>
-                        <p className="text-white font-semibold truncate mt-0.5">{job.cartonName}</p>
+                        <p className="text-white font-semibold truncate mt-0.5 pr-1">
+                          {job.cartonName}
+                          {job.partialRemake ? (
+                            <span className="text-rose-400 font-bold"> (Remake)</span>
+                          ) : null}
+                        </p>
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
-                        <p className="text-xs text-zinc-400 mt-1">
-                          {job.plateColours.length > 0 ? job.plateColours.join(' · ') : '—'}
-                        </p>
-                        <p className="text-xs text-zinc-400 mt-0.5 capitalize">
+                        <div className="mt-1">
+                          <ColourDots labels={job.plateColours} />
+                        </div>
+                        <p className="text-xs text-zinc-400 mt-1 capitalize">
                           {job.status.replace(/_/g, ' ')}
                         </p>
                         <button
@@ -913,34 +1231,69 @@ export default function HubPlateDashboard() {
                   {filteredInventory.length === 0 ? (
                     <li className="text-zinc-500 text-sm">No plates in rack.</li>
                   ) : (
-                    filteredInventory.map((p) => (
-                      <li key={p.id} className="rounded-lg border border-zinc-800 bg-black p-3">
-                        <p className="font-mono text-amber-300 text-sm">{p.plateSetCode}</p>
-                        {p.serialNumber ? (
-                          <p className="text-zinc-400 text-xs font-mono">SN {p.serialNumber}</p>
-                        ) : null}
-                        <p className="text-white font-semibold truncate mt-0.5">{p.cartonName}</p>
-                        <p className="text-xs text-zinc-400 mt-0.5">
-                          AW: {p.artworkCode?.trim() || '—'}
-                        </p>
-                        <p className="text-xs text-zinc-400 mt-1">
-                          {(p.plateColours?.length ?? 0) > 0
-                            ? (p.plateColours ?? []).join(' · ')
-                            : '—'}
-                        </p>
-                        <p className="text-xs text-zinc-400 mt-0.5">
-                          Rack: {p.rackNumber ?? p.rackLocation ?? '—'}
-                          {p.ups != null && p.ups > 0 ? ` · UPS ${p.ups}` : ''}
-                        </p>
-                        <button
-                          type="button"
-                          className="mt-2 w-full py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
-                          onClick={() => void markPlateReadyPlate(p)}
+                    filteredInventory.map((p) => {
+                      const reqN = p.totalPlates ?? p.numberOfColours ?? 0
+                      const actN = p.platesInRackCount ?? 0
+                      const short = reqN > 0 && actN < reqN ? reqN - actN : 0
+                      const locPrimary = [
+                        p.rackNumber?.trim(),
+                        p.rackLocation?.trim(),
+                        p.slotNumber?.trim(),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')
+                      return (
+                        <li
+                          key={p.id}
+                          className="relative rounded-lg border border-zinc-800 bg-black p-3 pr-12"
                         >
-                          Mark plate ready
-                        </button>
-                      </li>
-                    ))
+                          <PlateCountBadge
+                            count={hubPlateBadgeCount({
+                              numberOfColours: p.numberOfColours,
+                              plateColours: p.plateColours,
+                              totalPlates: p.totalPlates,
+                            })}
+                          />
+                          <p className="font-mono text-amber-300 text-sm">{p.plateSetCode}</p>
+                          {p.serialNumber ? (
+                            <p className="text-zinc-400 text-xs font-mono">SN {p.serialNumber}</p>
+                          ) : null}
+                          <p className="text-white font-semibold truncate mt-0.5">{p.cartonName}</p>
+                          <p className="text-xs text-zinc-400 mt-0.5">
+                            AW: {p.artworkCode?.trim() || '—'}
+                          </p>
+                          <div className="mt-1">
+                            <ColourDots labels={p.plateColours ?? []} />
+                          </div>
+                          {short > 0 ? (
+                            <p className="text-xs font-bold text-red-500 mt-1.5">
+                              ⚠️ Shortage: {short} Plates Missing
+                            </p>
+                          ) : null}
+                          <p className="mt-2 text-3xl sm:text-4xl font-black text-white leading-none tracking-tight">
+                            {locPrimary || '—'}
+                          </p>
+                          <p className="text-xs text-zinc-400 mt-1.5 font-semibold uppercase tracking-wide">
+                            Rack / slot
+                            {p.ups != null && p.ups > 0 ? ` · UPS ${p.ups}` : ''}
+                          </p>
+                          <button
+                            type="button"
+                            className="mt-2 w-full py-2 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-xs font-semibold hover:bg-rose-950/70"
+                            onClick={() => setRemakePlate(p)}
+                          >
+                            Report Damage / Remake
+                          </button>
+                          <button
+                            type="button"
+                            className="mt-2 w-full py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
+                            onClick={() => void markPlateReadyPlate(p)}
+                          >
+                            Mark plate ready
+                          </button>
+                        </li>
+                      )
+                    })
                   )}
                 </ul>
               </section>
@@ -962,24 +1315,48 @@ export default function HubPlateDashboard() {
                     <li className="text-zinc-500 text-sm">Nothing in staging.</li>
                   ) : (
                     filteredCustody.map((c) => (
-                      <li key={`${c.kind}-${c.id}`} className="rounded-lg border border-zinc-800 bg-black p-3">
+                      <li
+                        key={`${c.kind}-${c.id}`}
+                        className="relative rounded-lg border border-zinc-800 bg-black p-3 pr-12"
+                      >
+                        <PlateCountBadge
+                          count={hubPlateBadgeCount({
+                            numberOfColours: c.numberOfColours,
+                            plateColours: c.plateColours,
+                            totalPlates:
+                              c.kind === 'plate' ? c.totalPlates : c.newPlatesNeeded,
+                          })}
+                        />
                         <span className="inline-block px-2 py-0.5 rounded border border-emerald-700/60 bg-emerald-950/50 text-[10px] font-semibold text-emerald-200 mb-1.5">
                           {sourceBadgeLabel(c.custodySource)}
                         </span>
                         <p className="font-mono text-amber-300 text-sm">{c.displayCode}</p>
-                        <p className="text-white font-semibold truncate mt-0.5">{c.cartonName}</p>
+                        <p className="text-white font-semibold truncate mt-0.5 pr-1">
+                          {c.cartonName}
+                          {c.kind === 'requirement' && c.partialRemake ? (
+                            <span className="text-rose-400 font-bold"> (Remake)</span>
+                          ) : null}
+                        </p>
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {c.artworkCode?.trim() || '—'}
                         </p>
-                        <p className="text-xs text-zinc-400 mt-1">
-                          {c.plateColours.length > 0 ? c.plateColours.join(' · ') : '—'}
-                        </p>
+                        <div className="mt-1">
+                          <ColourDots labels={c.plateColours} />
+                        </div>
                         {c.kind === 'plate' ? (
-                          <p className="text-xs text-zinc-400 mt-0.5">
-                            {c.serialNumber ? `SN ${c.serialNumber} · ` : ''}
-                            Rack: {c.rackNumber ?? c.rackLocation ?? '—'}
+                          <p className="text-xs text-zinc-400 mt-1">
+                            {c.serialNumber ? `SN ${c.serialNumber}` : null}
                             {c.ups != null && c.ups > 0 ? ` · UPS ${c.ups}` : ''}
                           </p>
+                        ) : null}
+                        {c.kind === 'plate' ? (
+                          <button
+                            type="button"
+                            className="mt-2 w-full py-2 rounded border-2 border-red-600/90 bg-gradient-to-b from-red-950/95 to-orange-950/90 text-orange-50 text-xs font-bold hover:from-red-900 hover:to-orange-900 shadow-[0_0_12px_rgba(220,38,38,0.25)]"
+                            onClick={() => setEmergencyTarget(c)}
+                          >
+                            Emergency Issue (Bypass)
+                          </button>
                         ) : null}
                         <button
                           type="button"
@@ -1291,6 +1668,316 @@ export default function HubPlateDashboard() {
                 }}
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual CTP — bypass triage */}
+      {manualCtpOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-lg max-h-[90vh] rounded-xl border border-zinc-600 bg-zinc-950 flex flex-col shadow-2xl">
+            <div className="p-4 border-b border-zinc-800 shrink-0">
+              <h3 className="text-lg font-semibold text-white">Manual CTP request</h3>
+              <p className="text-zinc-500 text-xs mt-1">
+                Bypass designer triage. Job drops straight into the CTP queue.
+              </p>
+              <div className="relative mt-3">
+                <label className="block text-sm text-zinc-300">
+                  Carton name
+                  <input
+                    value={mCtpQuery}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setMCtpQuery(v)
+                      if (mCtpSelected && v.trim() !== mCtpSelected.cartonName) {
+                        setMCtpSelected(null)
+                      }
+                    }}
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                    placeholder="Type at least 2 characters…"
+                    autoComplete="off"
+                  />
+                </label>
+                {mCtpLoading ? <p className="text-xs text-zinc-500 mt-1">Searching…</p> : null}
+                {mCtpResults.length > 0 ? (
+                  <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-600 bg-zinc-900 shadow-lg">
+                    {mCtpResults.map((hit) => (
+                      <li key={hit.id}>
+                        <button
+                          type="button"
+                          className="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-800 border-b border-zinc-800 last:border-0"
+                          onClick={() => {
+                            setMCtpSelected(hit)
+                            setMCtpQuery(hit.cartonName)
+                            setMCtpResults([])
+                          }}
+                        >
+                          <span className="font-medium block truncate">{hit.cartonName}</span>
+                          <span className="text-[11px] text-zinc-400">
+                            {hit.customer.name}
+                            {hit.artworkCode ? ` · ${hit.artworkCode}` : ''}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+              {mCtpSelected ? (
+                <p className="text-[11px] text-emerald-400/90 mt-2">
+                  Linked: {mCtpSelected.customer.name}
+                </p>
+              ) : (
+                <p className="text-[11px] text-zinc-500 mt-2">Pick a carton from search results.</p>
+              )}
+            </div>
+            <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <div>
+                <p className="text-sm text-zinc-300 mb-2">Colours to burn</p>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      ['C', mCtpC, setMCtpC],
+                      ['M', mCtpM, setMCtpM],
+                      ['Y', mCtpY, setMCtpY],
+                      ['K', mCtpK, setMCtpK],
+                    ] as const
+                  ).map(([label, on, setOn]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setOn(!on)}
+                      className={`min-w-[2.5rem] px-3 py-2 rounded-md text-sm font-bold border ${
+                        on
+                          ? 'bg-amber-600 border-amber-500 text-white'
+                          : 'bg-zinc-900 border-zinc-600 text-zinc-500'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setMCtpPantone(!mCtpPantone)}
+                    className={`px-3 py-2 rounded-md text-sm font-bold border ${
+                      mCtpPantone
+                        ? 'bg-violet-700 border-violet-500 text-white'
+                        : 'bg-zinc-900 border-zinc-600 text-zinc-500'
+                    }`}
+                  >
+                    Pantone
+                  </button>
+                </div>
+                {mCtpPantone ? (
+                  <label className="block text-sm text-zinc-300 mt-3">
+                    How many Pantones?
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={mCtpPantoneN}
+                      onChange={(e) => setMCtpPantoneN(Number(e.target.value) || 1)}
+                      className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                    />
+                  </label>
+                ) : null}
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+                <button
+                  type="button"
+                  className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                  onClick={() => {
+                    setManualCtpOpen(false)
+                    resetManualCtpForm()
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={saving || !mCtpSelected}
+                  className="px-3 py-2 rounded bg-amber-600 text-white font-semibold disabled:opacity-50"
+                  onClick={() => void submitManualCtpRequest()}
+                >
+                  Create CTP job
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Partial remake from live inventory */}
+      {remakePlate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div>
+              <h3 className="text-lg font-semibold text-white">Report damage / remake</h3>
+              <p className="text-zinc-500 text-xs mt-1">
+                Which plate is missing or damaged? The rack set stays; a new{' '}
+                <span className="text-rose-400 font-semibold">(Remake)</span> job is created for only the
+                selected colours.
+              </p>
+              <p className="text-sm text-amber-200/90 font-mono mt-2">{remakePlate.plateSetCode}</p>
+              <p className="text-white text-sm font-medium truncate">{remakePlate.cartonName}</p>
+            </div>
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+                Send partial job to
+              </legend>
+              <label className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer">
+                <input
+                  type="radio"
+                  name="remakeLane"
+                  checked={remakeLane === 'inhouse_ctp'}
+                  onChange={() => setRemakeLane('inhouse_ctp')}
+                  className="border-zinc-600"
+                />
+                In-house CTP queue
+              </label>
+              <label className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer">
+                <input
+                  type="radio"
+                  name="remakeLane"
+                  checked={remakeLane === 'outside_vendor'}
+                  onChange={() => setRemakeLane('outside_vendor')}
+                  className="border-zinc-600"
+                />
+                Outside vendor
+              </label>
+            </fieldset>
+            <div>
+              <p className="text-sm text-zinc-300 mb-2">Missing / damaged colours</p>
+              <div className="space-y-2 rounded-lg border border-zinc-700 bg-black/40 p-3">
+                {Object.keys(remakePick).length === 0 ? (
+                  <p className="text-xs text-zinc-500">No colour channels on this set.</p>
+                ) : (
+                  Object.keys(remakePick).map((name) => (
+                    <label key={name} className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={remakePick[name] ?? false}
+                        onChange={(e) =>
+                          setRemakePick((prev) => ({ ...prev, [name]: e.target.checked }))
+                        }
+                        className="rounded border-zinc-600"
+                      />
+                      <span className="flex items-center gap-2 min-w-0">
+                        <ColourDots labels={[name]} />
+                        <span className="truncate">{name}</span>
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => setRemakePlate(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  saving ||
+                  Object.keys(remakePick).length === 0 ||
+                  !Object.values(remakePick).some(Boolean)
+                }
+                className="px-3 py-2 rounded bg-rose-800 text-white font-semibold disabled:opacity-50"
+                onClick={() => void submitPartialRemake()}
+              >
+                Create partial request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Emergency issue (bypass planning) */}
+      {emergencyTarget && emergencyTarget.kind === 'plate' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md rounded-xl border border-orange-700/50 bg-zinc-950 p-4 space-y-3">
+            <h3 className="text-lg font-semibold text-white">Emergency issue (bypass)</h3>
+            <p className="text-zinc-500 text-xs">
+              Issue this staged plate directly to the machine. Use for on-the-fly remakes or floor
+              urgency.
+            </p>
+            <p className="text-sm font-mono text-amber-300">{emergencyTarget.displayCode}</p>
+            <label className="block text-sm text-zinc-300">
+              Machine
+              <select
+                value={emergencyMachineId}
+                onChange={(e) => setEmergencyMachineId(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+              >
+                <option value="">Select…</option>
+                {machines.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.machineCode} — {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Operator
+              <select
+                value={emergencyOperatorId}
+                onChange={(e) => setEmergencyOperatorId(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+              >
+                <option value="">Select…</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Artwork ID
+              <input
+                value={emergencyArtworkId}
+                onChange={(e) => setEmergencyArtworkId(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white font-mono text-sm"
+              />
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Job card ID
+              <input
+                value={emergencyJobCardId}
+                onChange={(e) => setEmergencyJobCardId(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white font-mono text-sm"
+              />
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Set #
+              <input
+                value={emergencySetNum}
+                onChange={(e) => setEmergencySetNum(e.target.value)}
+                placeholder="01"
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+              />
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => setEmergencyTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="px-3 py-2 rounded bg-gradient-to-b from-red-800 to-orange-800 text-white font-semibold disabled:opacity-50"
+                onClick={() => void submitEmergencyIssue()}
+              >
+                Issue now
               </button>
             </div>
           </div>

@@ -44,7 +44,7 @@ function normaliseArtworkVersion(v: string): string {
   return t.toUpperCase().startsWith('R') ? t.toUpperCase() : `R${t}`
 }
 
-async function generateRequirementCode(client: DbOrTx = db): Promise<string> {
+export async function generateRequirementCode(client: DbOrTx = db): Promise<string> {
   const year = new Date().getFullYear()
   const prefix = `PR-${year}-`
   const last = await client.plateRequirement.findFirst({

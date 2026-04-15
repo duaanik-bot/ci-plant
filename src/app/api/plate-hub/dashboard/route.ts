@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { safeJsonStringify } from '@/lib/safe-json'
 import { plateNamesFromColoursNeededJson } from '@/lib/plate-triage-display'
+import { countPlatesInRack } from '@/lib/hub-plate-card-ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,6 +73,9 @@ export async function GET() {
       artworkVersion: r.artworkVersion,
       plateColours: plateNamesFromColoursNeededJson(r.coloursNeeded),
       status: r.status,
+      numberOfColours: r.numberOfColours,
+      newPlatesNeeded: r.newPlatesNeeded,
+      partialRemake: r.partialRemake,
     }))
 
     const vendorQueue = vendorRows.map((r) => ({
@@ -84,29 +88,46 @@ export async function GET() {
       artworkVersion: r.artworkVersion,
       plateColours: plateNamesFromColoursNeededJson(r.coloursNeeded),
       status: r.status,
+      numberOfColours: r.numberOfColours,
+      newPlatesNeeded: r.newPlatesNeeded,
+      partialRemake: r.partialRemake,
     }))
 
-    const mapPlate = (p: (typeof inventoryRows)[0]) => ({
-      id: p.id,
-      plateSetCode: p.plateSetCode,
-      serialNumber: p.serialNumber,
-      outputNumber: p.outputNumber,
-      rackNumber: p.rackNumber,
-      ups: p.ups,
-      cartonName: p.cartonName,
-      artworkCode: p.artworkCode,
-      artworkVersion: p.artworkVersion,
-      artworkId: p.artworkId,
-      jobCardId: p.jobCardId,
-      slotNumber: p.slotNumber,
-      rackLocation: p.rackLocation,
-      status: p.status,
-      issuedTo: p.issuedTo,
-      issuedAt: p.issuedAt?.toISOString() ?? null,
-      totalImpressions: p.totalImpressions,
-      customer: p.customer,
-      plateColours: plateNamesFromColoursNeededJson(p.colours),
-    })
+    const mapPlate = (p: (typeof inventoryRows)[0]) => {
+      const plateColours = plateNamesFromColoursNeededJson(p.colours)
+      const raw = Array.isArray(p.colours) ? p.colours : []
+      const colourChannelNames = raw
+        .map((c: { name?: string; status?: string }) => {
+          if (String(c?.status ?? '').toLowerCase() === 'destroyed') return ''
+          return String(c?.name ?? '').trim()
+        })
+        .filter(Boolean) as string[]
+      return {
+        id: p.id,
+        plateSetCode: p.plateSetCode,
+        serialNumber: p.serialNumber,
+        outputNumber: p.outputNumber,
+        rackNumber: p.rackNumber,
+        ups: p.ups,
+        cartonName: p.cartonName,
+        artworkCode: p.artworkCode,
+        artworkVersion: p.artworkVersion,
+        artworkId: p.artworkId,
+        jobCardId: p.jobCardId,
+        slotNumber: p.slotNumber,
+        rackLocation: p.rackLocation,
+        status: p.status,
+        issuedTo: p.issuedTo,
+        issuedAt: p.issuedAt?.toISOString() ?? null,
+        totalImpressions: p.totalImpressions,
+        customer: p.customer,
+        plateColours,
+        numberOfColours: p.numberOfColours,
+        totalPlates: p.totalPlates,
+        platesInRackCount: countPlatesInRack(p.colours),
+        colourChannelNames,
+      }
+    }
 
     const custodyFromReqs = stagingReqRows.map((r) => ({
       kind: 'requirement' as const,
@@ -118,6 +139,9 @@ export async function GET() {
       plateColours: plateNamesFromColoursNeededJson(r.coloursNeeded),
       custodySource:
         r.triageChannel === 'outside_vendor' ? ('vendor' as const) : ('ctp' as const),
+      numberOfColours: r.numberOfColours,
+      newPlatesNeeded: r.newPlatesNeeded,
+      partialRemake: r.partialRemake,
     }))
 
     const custodyFromPlates = stagingPlateRows.map((p) => {
@@ -138,6 +162,11 @@ export async function GET() {
         rackLocation: p.rackLocation,
         ups: p.ups,
         customer: p.customer,
+        numberOfColours: p.numberOfColours,
+        totalPlates: p.totalPlates,
+        artworkId: p.artworkId,
+        jobCardId: p.jobCardId,
+        slotNumber: p.slotNumber,
       }
     })
 
