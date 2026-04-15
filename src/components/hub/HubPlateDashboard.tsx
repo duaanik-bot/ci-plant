@@ -24,9 +24,19 @@ import {
 } from '@/lib/hub-plate-origin'
 import {
   HUB_PLATE_SIZE_OPTIONS,
+  HUB_PLATE_SIZE_VALUES,
   hubPlateSizeCardLine,
   type HubPlateSize,
 } from '@/lib/plate-size'
+
+const RETURN_SIZE_MOD_REASONS: {
+  value: 'alternate_machine' | 'edge_damage' | 'prepress_error'
+  label: string
+}[] = [
+  { value: 'alternate_machine', label: 'Resized for alternate machine assignment' },
+  { value: 'edge_damage', label: 'Trimmed due to edge damage / wear' },
+  { value: 'prepress_error', label: 'Pre-press layout error / Manual correction' },
+]
 
 type TriageRow = {
   id: string
@@ -179,9 +189,11 @@ function sortUnionStockLabels(labelSet: Set<string>): string[] {
     .map((r) => r.label)
 }
 
-type TriageStockInfo =
-  | { matchCount: 0 }
-  | { matchCount: number; labels: string[]; locationLabel: string | null }
+type TriageStockInfo = {
+  matchCount: number
+  labels: string[]
+  locationLabel: string | null
+}
 
 function TriageStockColourDots({ labels }: { labels: string[] }) {
   if (!labels.length) return null
@@ -443,10 +455,17 @@ export default function HubPlateDashboard() {
     cartonName: string
     colourNames: string[]
     custodySource: CustodyCard['custodySource']
+    plateSize?: HubPlateSize | null
   } | null>(null)
   const [returnAuditPick, setReturnAuditPick] = useState<Record<string, boolean>>({})
   const [returnAuditOrigin, setReturnAuditOrigin] = useState<PlateColourFirstOrigin>('legacy_unknown')
   const [returnAuditStep, setReturnAuditStep] = useState<1 | 2>(1)
+  const [returnSizePick, setReturnSizePick] = useState<HubPlateSize>('SIZE_560_670')
+  const [returnSizeOriginal, setReturnSizeOriginal] = useState<HubPlateSize>('SIZE_560_670')
+  const [returnSizeModReason, setReturnSizeModReason] = useState<
+    '' | 'alternate_machine' | 'edge_damage' | 'prepress_error'
+  >('')
+  const [returnSizeRemarks, setReturnSizeRemarks] = useState('')
 
   const [ctpSearch, setCtpSearch] = useState('')
   const [vendorSearch, setVendorSearch] = useState('')
@@ -455,7 +474,7 @@ export default function HubPlateDashboard() {
 
   const [stockModal, setStockModal] = useState<TriageRow | null>(null)
   const [stockPlateId, setStockPlateId] = useState('')
-  const [stockRackSlot, setStockRackSlot] = useState('')
+  const [stockColourPick, setStockColourPick] = useState<Record<string, boolean>>({})
 
   const [addStockFieldErrors, setAddStockFieldErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -622,6 +641,13 @@ export default function HubPlateDashboard() {
     setReturnAuditPick(next)
     setReturnAuditOrigin(defaultFirstOriginFromCustody(returnAuditModal.custodySource))
     setReturnAuditStep(1)
+    const ps = returnAuditModal.plateSize
+    const orig =
+      ps && (HUB_PLATE_SIZE_VALUES as readonly string[]).includes(ps) ? ps : 'SIZE_560_670'
+    setReturnSizeOriginal(orig)
+    setReturnSizePick(orig)
+    setReturnSizeModReason('')
+    setReturnSizeRemarks('')
   }, [returnAuditModal])
 
   useEffect(() => {
@@ -1197,6 +1223,10 @@ export default function HubPlateDashboard() {
       toast.error('Select at least one plate returning to rack')
       return
     }
+    if (returnSizePick !== returnSizeOriginal && !returnSizeModReason) {
+      toast.error('Select a reason for the size modification')
+      return
+    }
     setSaving(true)
     try {
       const r = await fetch('/api/plate-hub/return-to-rack', {
@@ -1206,6 +1236,15 @@ export default function HubPlateDashboard() {
           plateStoreId: returnAuditModal.plateStoreId,
           returnedColourNames: returned,
           firstOrigin: returnAuditOrigin,
+          targetPlateSize: returnSizePick,
+          ...(returnSizePick !== returnSizeOriginal
+            ? {
+                sizeModificationReason: returnSizeModReason,
+                ...(returnSizeRemarks.trim()
+                  ? { sizeModificationRemarks: returnSizeRemarks.trim() }
+                  : {}),
+              }
+            : {}),
         }),
       })
       const t = await r.text()
@@ -1310,6 +1349,32 @@ export default function HubPlateDashboard() {
   }, [data.inventory, invSearch])
 
   /** One-pass index: Live Inventory plate cards → triage row (carton name or AW code). */
+  const stockModalPlateOptions = useMemo(() => {
+    if (!stockModal) return []
+    const jobAw = stockModal.artworkCode?.trim()
+    if (jobAw) {
+      const aw = normHubKey(stockModal.artworkCode)
+      return data.inventory.filter((p) => normHubKey(p.artworkCode) === aw)
+    }
+    const carton = normHubKey(stockModal.cartonName)
+    return data.inventory.filter((p) => normHubKey(p.cartonName) === carton)
+  }, [stockModal, data.inventory])
+
+  useEffect(() => {
+    if (!stockPlateId) {
+      setStockColourPick({})
+      return
+    }
+    const p = data.inventory.find((x) => x.id === stockPlateId)
+    if (!p?.plateColours?.length) {
+      setStockColourPick({})
+      return
+    }
+    const init: Record<string, boolean> = {}
+    for (const c of p.plateColours) init[c] = false
+    setStockColourPick(init)
+  }, [stockPlateId, data.inventory])
+
   const triageRackStockById = useMemo(() => {
     const inv = data.inventory
     const byCarton = new Map<string, PlateCard[]>()
@@ -1350,7 +1415,7 @@ export default function HubPlateDashboard() {
         }
       }
       if (matches.length === 0) {
-        map.set(row.id, { matchCount: 0 })
+        map.set(row.id, { matchCount: 0, labels: [], locationLabel: null })
         continue
       }
       const labelSet = new Set<string>()
@@ -1365,8 +1430,9 @@ export default function HubPlateDashboard() {
       }
       const labels = sortUnionStockLabels(labelSet)
       let locationLabel: string | null = null
-      if (locs.size === 1) locationLabel = [...locs][0]
-      else if (locs.size > 1) locationLabel = `${[...locs][0]} +${locs.size - 1}`
+      const locArr = Array.from(locs)
+      if (locArr.length === 1) locationLabel = locArr[0]
+      else if (locArr.length > 1) locationLabel = `${locArr[0]} +${locArr.length - 1}`
       map.set(row.id, { matchCount: matches.length, labels, locationLabel })
     }
     return map
@@ -1439,12 +1505,66 @@ export default function HubPlateDashboard() {
       toast.success('Updated')
       setStockModal(null)
       setStockPlateId('')
-      setStockRackSlot('')
+      setStockColourPick({})
       setTriageSizeModal(null)
       await load()
     } catch (e) {
       console.error(e)
-      toast.error('Triage update failed')
+      toast.error(
+        e instanceof Error && e.message
+          ? e.message
+          : 'Triage update failed — check connection or try again.',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitTakeFromStock() {
+    if (!stockModal?.id || !stockPlateId) {
+      toast.error('Select a plate set from the list')
+      return
+    }
+    const names = Object.entries(stockColourPick)
+      .filter(([, on]) => on)
+      .map(([name]) => name)
+    if (names.length === 0) {
+      toast.error('Select at least one colour channel to pull from the rack')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/plate-hub/take-from-stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          requirementId: stockModal.id,
+          plateStoreId: stockPlateId,
+          colourNames: names,
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string; fulfilled?: boolean }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? `Failed to move inventory (${r.status})`)
+        return
+      }
+      toast.success(
+        j.fulfilled
+          ? 'Moved to custody floor — triage job completed from rack'
+          : 'Moved to custody floor — triage updated for remaining plates',
+      )
+      setStockModal(null)
+      setStockPlateId('')
+      setStockColourPick({})
+      await load()
+    } catch (e) {
+      console.error(e)
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : 'Failed to move inventory — network or server error.',
+      )
     } finally {
       setSaving(false)
     }
@@ -1500,7 +1620,13 @@ export default function HubPlateDashboard() {
                           <ColourChannelsRow labels={row.plateColours} />
                         </div>
                         <TriageInventoryStockLine
-                          stock={triageRackStockById.get(row.id) ?? { matchCount: 0 }}
+                          stock={
+                            triageRackStockById.get(row.id) ?? {
+                              matchCount: 0,
+                              labels: [],
+                              locationLabel: null,
+                            }
+                          }
                         />
                         {row.lastStatusUpdatedAt ? (
                           <HubTriageTime at={row.lastStatusUpdatedAt} />
@@ -1521,7 +1647,7 @@ export default function HubPlateDashboard() {
                           onClick={() => {
                             setStockModal(row)
                             setStockPlateId('')
-                            setStockRackSlot('')
+                            setStockColourPick({})
                           }}
                           className="px-3 py-2 rounded-md border border-zinc-500 bg-zinc-900 hover:bg-zinc-800 text-sm font-medium"
                         >
@@ -1915,6 +2041,7 @@ export default function HubPlateDashboard() {
                                   cartonName: c.cartonName,
                                   colourNames: plateColourNamesForScrap(c),
                                   custodySource: c.custodySource,
+                                  plateSize: c.plateSize ?? null,
                                 })
                               }
                             >
@@ -2199,9 +2326,18 @@ export default function HubPlateDashboard() {
       {/* Stock modal */}
       {stockModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
+          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold text-white">Take from stock</h3>
-            <p className="text-slate-400 text-sm">Link a plate set from rack to this job.</p>
+            <p className="text-slate-400 text-sm">
+              Pull channels from live inventory into custody floor (
+              <span className="text-amber-200/90">Source: Rack</span>). Plate sets match this job’s{' '}
+              {stockModal.artworkCode?.trim() ? 'AW code' : 'carton name'}.
+            </p>
+            {stockModalPlateOptions.length === 0 ? (
+              <p className="text-sm text-rose-400">
+                No matching plate sets in live inventory for this AW / carton.
+              </p>
+            ) : null}
             <label className="block text-sm text-zinc-300">
               Plate set
               <select
@@ -2210,37 +2346,104 @@ export default function HubPlateDashboard() {
                 className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
               >
                 <option value="">Select…</option>
-                {data.inventory.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.plateSetCode} — {p.cartonName}
-                  </option>
-                ))}
+                {stockModalPlateOptions.map((p) => {
+                  const cols =
+                    p.plateColours?.length && p.plateColours.length > 0
+                      ? p.plateColours.join(', ')
+                      : '—'
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {p.plateSetCode} — (In stock: {cols})
+                    </option>
+                  )
+                })}
               </select>
             </label>
             <label className="block text-sm text-zinc-300">
-              Rack slot (optional)
+              Rack / slot (from master data)
               <input
-                value={stockRackSlot}
-                onChange={(e) => setStockRackSlot(e.target.value)}
-                placeholder="e.g. 2-3"
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                readOnly
+                value={
+                  stockPlateId
+                    ? (() => {
+                        const rp = data.inventory.find((p) => p.id === stockPlateId)
+                        return rp ? formatPlateCardRackLocation(rp) ?? '—' : ''
+                      })()
+                    : ''
+                }
+                placeholder="Select a plate set"
+                className="mt-1 w-full px-3 py-2 rounded-md bg-zinc-900/80 border border-zinc-600 text-zinc-400 cursor-not-allowed"
               />
             </label>
+            {stockPlateId &&
+            data.inventory.find((p) => p.id === stockPlateId)?.plateColours?.length ? (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  Pull colours (at least one)
+                </p>
+                <div className="flex flex-col gap-2 rounded-lg border border-zinc-700 bg-black/60 p-2">
+                  {(data.inventory.find((p) => p.id === stockPlateId)?.plateColours ?? []).map(
+                    (raw) => {
+                      const rows = hubChannelRowsFromLabels([raw])
+                      const row = rows[0]
+                      return (
+                        <label
+                          key={raw}
+                          className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            className="rounded border-zinc-600"
+                            checked={!!stockColourPick[raw]}
+                            onChange={(e) =>
+                              setStockColourPick((prev) => ({
+                                ...prev,
+                                [raw]: e.target.checked,
+                              }))
+                            }
+                          />
+                          {row ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <span
+                                className={`inline-block h-3 w-3 rounded-full shrink-0 ${row.dot.bgClass} ${row.dot.ringClass}`}
+                              />
+                              <span className="font-medium text-zinc-200">{row.short}</span>
+                              <span className="text-zinc-500 text-xs truncate max-w-[10rem]">
+                                {row.label}
+                              </span>
+                            </span>
+                          ) : (
+                            raw
+                          )}
+                        </label>
+                      )
+                    },
+                  )}
+                </div>
+              </div>
+            ) : null}
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className="px-3 py-2 rounded border border-zinc-600 text-zinc-300" onClick={() => setStockModal(null)}>
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => {
+                  setStockModal(null)
+                  setStockPlateId('')
+                  setStockColourPick({})
+                }}
+              >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={saving || !stockPlateId.trim()}
+                disabled={
+                  saving ||
+                  !stockPlateId.trim() ||
+                  !Object.values(stockColourPick).some(Boolean) ||
+                  stockModalPlateOptions.length === 0
+                }
                 className="px-3 py-2 rounded bg-amber-600 text-white font-medium disabled:opacity-50"
-                onClick={() => {
-                  if (!stockModal?.id) {
-                    toast.error('Missing requirement id')
-                    return
-                  }
-                  void patchTriage(stockModal.id, 'stock_available', stockRackSlot)
-                }}
+                onClick={() => void submitTakeFromStock()}
               >
                 Confirm
               </button>
@@ -2759,6 +2962,66 @@ export default function HubPlateDashboard() {
               </>
             ) : (
               <>
+                <div className="rounded-lg border border-zinc-700 bg-black/40 p-2.5 space-y-2">
+                  <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+                    Verify plate dimensions
+                  </p>
+                  <p className="text-[11px] text-zinc-500 leading-snug">
+                    Current:{' '}
+                    <span className="text-zinc-300">
+                      {HUB_PLATE_SIZE_OPTIONS.find((o) => o.value === returnSizeOriginal)?.mm ??
+                        returnSizeOriginal}
+                    </span>
+                    . Toggle only if the physical plate was sheared or resized.
+                  </p>
+                  <HubPlateSizeSegmented
+                    value={returnSizePick}
+                    onChange={(v) => {
+                      setReturnSizePick(v)
+                      if (v === returnSizeOriginal) {
+                        setReturnSizeModReason('')
+                        setReturnSizeRemarks('')
+                      }
+                    }}
+                    accent="emerald"
+                  />
+                  {returnSizePick !== returnSizeOriginal ? (
+                    <div className="mt-2 pt-2 border-t border-zinc-700/80 space-y-2 transition-all">
+                      <p className="text-xs font-semibold text-amber-200/90">
+                        Reason for size modification?{' '}
+                        <span className="text-red-400">*</span>
+                      </p>
+                      <fieldset className="space-y-1.5">
+                        {RETURN_SIZE_MOD_REASONS.map((opt) => (
+                          <label
+                            key={opt.value}
+                            className="flex items-start gap-2 text-sm text-zinc-200 cursor-pointer leading-tight"
+                          >
+                            <input
+                              type="radio"
+                              name="returnSizeModReason"
+                              checked={returnSizeModReason === opt.value}
+                              onChange={() => setReturnSizeModReason(opt.value)}
+                              className="border-zinc-600 mt-0.5 shrink-0"
+                            />
+                            <span>{opt.label}</span>
+                          </label>
+                        ))}
+                      </fieldset>
+                      <label className="block text-[11px] text-zinc-400">
+                        Remarks (optional)
+                        <input
+                          type="text"
+                          value={returnSizeRemarks}
+                          onChange={(e) => setReturnSizeRemarks(e.target.value)}
+                          placeholder="e.g. Cut by Team B for Machine 2"
+                          className="mt-1 w-full px-2 py-1.5 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-600"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
+
                 <div>
                   <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
                     Step 2 — Confirm plate origin (for analytics)
@@ -2795,7 +3058,10 @@ export default function HubPlateDashboard() {
                   </button>
                   <button
                     type="button"
-                    disabled={saving}
+                    disabled={
+                      saving ||
+                      (returnSizePick !== returnSizeOriginal && !returnSizeModReason)
+                    }
                     className="px-3 py-2 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50"
                     onClick={() => void submitReturnToRack()}
                   >

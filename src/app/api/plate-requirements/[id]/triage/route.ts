@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { PlateSize } from '@prisma/client'
+import { PlateSize, Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
@@ -26,7 +26,16 @@ export async function PATCH(
   const body = await req.json().catch(() => ({}))
   const parsed = bodySchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid channel' }, { status: 400 })
+    const first = parsed.error.flatten().fieldErrors
+    const hint = [first.channel, first.plateSize].flat().filter(Boolean)[0]
+    return NextResponse.json(
+      {
+        error:
+          hint ??
+          'Invalid triage payload — use channel inhouse_ctp | outside_vendor | stock_available, and plateSize when required.',
+      },
+      { status: 400 },
+    )
   }
 
   const existing = await db.plateRequirement.findUnique({ where: { id } })
@@ -74,47 +83,69 @@ export async function PATCH(
         ? PLATE_FLOW.vendor_queue
         : PLATE_FLOW.triage
 
-  const updated = await db.$transaction(async (tx) => {
-    const req = await tx.plateRequirement.update({
-      where: { id },
-      data: {
-        triageChannel: channel,
-        status: nextStatus,
-        lastStatusUpdatedAt: new Date(),
-        ...(channel === 'stock_available' && parsed.data.rackSlot
-          ? { reservedRackSlot: parsed.data.rackSlot.trim() }
-          : {}),
-        ...((channel === 'inhouse_ctp' || channel === 'outside_vendor') && resolvedPlateSize
-          ? { plateSize: resolvedPlateSize }
-          : {}),
-      },
-    })
-
-    const poLineId = existing.poLineId?.trim()
-    if (poLineId) {
-      const line = await tx.poLineItem.findUnique({
-        where: { id: poLineId },
-        select: { specOverrides: true },
-      })
-      const spec = (line?.specOverrides as Record<string, unknown> | null) || {}
-      await tx.poLineItem.update({
-        where: { id: poLineId },
+  let updated
+  try {
+    updated = await db.$transaction(async (tx) => {
+      const req = await tx.plateRequirement.update({
+        where: { id },
         data: {
-          specOverrides: mergeOrchestrationIntoSpec(spec, { plateFlowStatus }) as object,
+          triageChannel: channel,
+          status: nextStatus,
+          lastStatusUpdatedAt: new Date(),
+          ...(channel === 'stock_available' && parsed.data.rackSlot
+            ? { reservedRackSlot: parsed.data.rackSlot.trim() }
+            : {}),
+          ...((channel === 'inhouse_ctp' || channel === 'outside_vendor') && resolvedPlateSize
+            ? { plateSize: resolvedPlateSize }
+            : {}),
         },
       })
+
+      const poLineId = existing.poLineId?.trim()
+      if (poLineId) {
+        const line = await tx.poLineItem.findUnique({
+          where: { id: poLineId },
+          select: { specOverrides: true },
+        })
+        if (line) {
+          const spec = (line.specOverrides as Record<string, unknown> | null) || {}
+          await tx.poLineItem.update({
+            where: { id: poLineId },
+            data: {
+              specOverrides: mergeOrchestrationIntoSpec(spec, { plateFlowStatus }) as object,
+            },
+          })
+        }
+      }
+
+      return req
+    })
+  } catch (e) {
+    console.error('[plate-requirements/triage]', e)
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+      return NextResponse.json(
+        { error: 'Triage dispatch failed: linked PO line is missing. Hub state was not changed.' },
+        { status: 409 },
+      )
     }
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json(
+      { error: msg || 'Triage dispatch failed due to a database error.' },
+      { status: 500 },
+    )
+  }
 
-    return req
-  })
-
-  await createAuditLog({
-    userId: user!.id,
-    action: 'UPDATE',
-    tableName: 'plate_requirements',
-    recordId: id,
-    newValue: { triageChannel: channel, status: nextStatus, plateFlowStatus },
-  })
+  try {
+    await createAuditLog({
+      userId: user!.id,
+      action: 'UPDATE',
+      tableName: 'plate_requirements',
+      recordId: id,
+      newValue: { triageChannel: channel, status: nextStatus, plateFlowStatus },
+    })
+  } catch (e) {
+    console.error('[plate-requirements/triage] audit log', e)
+  }
 
   return NextResponse.json({ ok: true, requirement: updated })
 }

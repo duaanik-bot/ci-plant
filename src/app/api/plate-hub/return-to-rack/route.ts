@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { PlateSize } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { plateScrapReasonLabel } from '@/lib/plate-scrap-reasons'
@@ -7,10 +8,29 @@ export const dynamic = 'force-dynamic'
 
 const firstOriginSchema = z.enum(['inhouse_ctp', 'outside_vendor', 'legacy_unknown'])
 
+const sizeModificationReasonSchema = z.enum([
+  'alternate_machine',
+  'edge_damage',
+  'prepress_error',
+])
+
+export const SIZE_MODIFICATION_REASON_LABELS: Record<
+  z.infer<typeof sizeModificationReasonSchema>,
+  string
+> = {
+  alternate_machine: 'Resized for alternate machine assignment',
+  edge_damage: 'Trimmed due to edge damage / wear',
+  prepress_error: 'Pre-press layout error / Manual correction',
+}
+
 const bodySchema = z.object({
   plateStoreId: z.string().uuid(),
   returnedColourNames: z.array(z.string().min(1)).min(1),
   firstOrigin: firstOriginSchema,
+  /** If omitted, existing DB plate size is kept. */
+  targetPlateSize: z.nativeEnum(PlateSize).optional(),
+  sizeModificationReason: sizeModificationReasonSchema.optional(),
+  sizeModificationRemarks: z.string().max(500).optional(),
 })
 
 type ColourRow = {
@@ -47,7 +67,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
   }
 
-  const { plateStoreId, returnedColourNames, firstOrigin } = parsed.data
+  const {
+    plateStoreId,
+    returnedColourNames,
+    firstOrigin,
+    targetPlateSize,
+    sizeModificationReason,
+    sizeModificationRemarks,
+  } = parsed.data
   const returnedSet = new Set(returnedColourNames.map((n) => n.trim().toLowerCase()).filter(Boolean))
   if (returnedSet.size === 0) {
     return NextResponse.json({ error: 'Select at least one plate returning to rack' }, { status: 400 })
@@ -75,7 +102,31 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const resolvedTargetSize = targetPlateSize ?? plate.plateSize
+  const plateSizeChanged = resolvedTargetSize !== plate.plateSize
+  if (plateSizeChanged && !sizeModificationReason) {
+    return NextResponse.json(
+      { error: 'Reason for size modification is required when plate dimensions are changed.' },
+      { status: 400 },
+    )
+  }
+
   const nowIso = new Date().toISOString()
+  const reasonLabel = sizeModificationReason
+    ? SIZE_MODIFICATION_REASON_LABELS[sizeModificationReason]
+    : null
+  const remarksTrimmed = sizeModificationRemarks?.trim() || ''
+  let nextStorageNotes = plate.storageNotes?.trim() ?? ''
+  if (plateSizeChanged && reasonLabel) {
+    const line = `[${nowIso}] Plate size ${plate.plateSize} → ${resolvedTargetSize}: ${reasonLabel}${
+      remarksTrimmed ? `. Remarks: ${remarksTrimmed}` : ''
+    }`
+    nextStorageNotes = nextStorageNotes ? `${nextStorageNotes}\n${line}` : line
+    if (nextStorageNotes.length > 8000) {
+      nextStorageNotes = nextStorageNotes.slice(-8000)
+    }
+  }
+
   const scrapReasonCode = 'custody_not_returned' as const
   const scrapReasonLabel = plateScrapReasonLabel(scrapReasonCode)
   const omittedNames: string[] = []
@@ -115,6 +166,8 @@ export async function POST(req: NextRequest) {
     const u = await tx.plateStore.update({
       where: { id: plateStoreId },
       data: {
+        plateSize: resolvedTargetSize,
+        ...(plateSizeChanged ? { storageNotes: nextStorageNotes || null } : {}),
         colours: nextColours as object[],
         numberOfColours,
         totalPlates,
@@ -173,7 +226,12 @@ export async function POST(req: NextRequest) {
       omittedToScrap: omittedNames,
       fullyDestroyed: fullyGone,
       returnedAt: nowIso,
-    },
+      plateSizeChanged,
+      previousPlateSize: plateSizeChanged ? plate.plateSize : undefined,
+      targetPlateSize: plateSizeChanged ? resolvedTargetSize : undefined,
+      sizeModificationReason: sizeModificationReason ?? undefined,
+      sizeModificationRemarks: remarksTrimmed || undefined,
+    } as Record<string, unknown>,
   })
 
   return NextResponse.json({ ok: true, plate: updated })
