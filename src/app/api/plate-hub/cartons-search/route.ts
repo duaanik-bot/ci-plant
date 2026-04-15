@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
       cartonName: true,
       artworkCode: true,
       customerId: true,
+      plateSize: true,
       customer: { select: { id: true, name: true } },
       dye: { select: { ups: true } },
     },
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
       customerId: c.customerId,
       customer: c.customer,
       ups: c.dye?.ups ?? null,
+      plateSize: c.plateSize,
     })),
   )
 }

@@ -68,6 +68,7 @@ export async function POST(req: NextRequest) {
       poLineId: null,
       partialRemake: true,
       createdBy: user!.id,
+      plateSize: plate.plateSize,
     },
   })
 

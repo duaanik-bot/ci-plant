@@ -11,6 +11,22 @@ import {
   stripPlateColourDisplaySuffix,
 } from '@/lib/hub-plate-card-ui'
 import { PLATE_SCRAP_REASONS, type PlateScrapReasonCode } from '@/lib/plate-scrap-reasons'
+import {
+  hubAddedToRackLabel,
+  hubMarkedReadyLabel,
+  hubQueueAgeLabel,
+  hubQueueStale,
+} from '@/lib/hub-card-time'
+import {
+  PLATE_FIRST_ORIGIN_OPTIONS,
+  defaultFirstOriginFromCustody,
+  type PlateColourFirstOrigin,
+} from '@/lib/hub-plate-origin'
+import {
+  HUB_PLATE_SIZE_OPTIONS,
+  hubPlateSizeCardLine,
+  type HubPlateSize,
+} from '@/lib/plate-size'
 
 type TriageRow = {
   id: string
@@ -22,6 +38,9 @@ type TriageRow = {
   newPlatesNeeded: number
   status: string
   plateColours: string[]
+  lastStatusUpdatedAt?: string
+  plateSize?: HubPlateSize | null
+  cartonMasterPlateSize?: HubPlateSize | null
 }
 
 type CtpRow = {
@@ -37,6 +56,8 @@ type CtpRow = {
   numberOfColours?: number
   newPlatesNeeded?: number
   partialRemake?: boolean
+  lastStatusUpdatedAt?: string
+  plateSize?: HubPlateSize | null
 }
 
 type PlateCard = {
@@ -63,6 +84,10 @@ type PlateCard = {
   totalPlates?: number
   platesInRackCount?: number
   colourChannelNames?: string[]
+  createdAt?: string
+  lastStatusUpdatedAt?: string
+  reuseCyclesMax?: number
+  plateSize?: HubPlateSize | null
 }
 
 type CustodyCard = {
@@ -88,6 +113,10 @@ type CustodyCard = {
   artworkId?: string | null
   jobCardId?: string | null
   slotNumber?: string | null
+  lastStatusUpdatedAt?: string
+  jobCardHub?: { key: string; badgeLabel: string } | null
+  /** Canonical `SIZE_*` for planning / press matching */
+  plateSize?: HubPlateSize | null
 }
 
 type CartonSearchHit = {
@@ -97,6 +126,7 @@ type CartonSearchHit = {
   customerId: string
   customer: { id: string; name: string }
   ups: number | null
+  plateSize?: HubPlateSize | null
 }
 
 type DashboardPayload = {
@@ -114,6 +144,74 @@ function hubSearchMatch(
   if (!q) return true
   const hay = parts.map((p) => String(p ?? '').toLowerCase()).join(' ')
   return hay.includes(q)
+}
+
+function normHubKey(s: string | null | undefined): string {
+  return String(s ?? '').trim().toLowerCase()
+}
+
+function formatPlateCardRackLocation(p: PlateCard): string | null {
+  const primary = p.rackLocation?.trim()
+  if (primary) return primary
+  const parts = [p.rackNumber?.trim(), p.slotNumber?.trim()].filter(Boolean)
+  if (parts.length) return parts.join(' · ')
+  return null
+}
+
+/** Stable CMYK-first ordering for merged rack colour labels (matches hub dot palette). */
+function sortUnionStockLabels(labelSet: Set<string>): string[] {
+  const unique = Array.from(labelSet).filter((s) => s.trim())
+  if (!unique.length) return []
+  const rows = hubChannelRowsFromLabels(unique)
+  const rank = (short: string): number => {
+    const order = ['C', 'M', 'Y', 'K', 'P1', 'P2', 'P3', 'P4'] as const
+    const i = order.indexOf(short as (typeof order)[number])
+    return i >= 0 ? i : 50
+  }
+  return [...rows]
+    .sort((a, b) => {
+      const d = rank(a.short) - rank(b.short)
+      if (d !== 0) return d
+      return stripPlateColourDisplaySuffix(a.label).localeCompare(
+        stripPlateColourDisplaySuffix(b.label),
+      )
+    })
+    .map((r) => r.label)
+}
+
+type TriageStockInfo =
+  | { matchCount: 0 }
+  | { matchCount: number; labels: string[]; locationLabel: string | null }
+
+function TriageStockColourDots({ labels }: { labels: string[] }) {
+  if (!labels.length) return null
+  const rows = hubChannelRowsFromLabels(labels)
+  return (
+    <span className="inline-flex items-center gap-1" aria-label={labels.join(', ')}>
+      {rows.map(({ key, dot, label }) => (
+        <span
+          key={key}
+          title={label}
+          className={`inline-block h-3 w-3 rounded-full shrink-0 ${dot.bgClass} ${dot.ringClass}`}
+        />
+      ))}
+    </span>
+  )
+}
+
+function TriageInventoryStockLine({ stock }: { stock: TriageStockInfo }) {
+  if (stock.matchCount === 0) {
+    return <p className="text-xs text-gray-500 mt-1">Inventory: Not in stock</p>
+  }
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+      <span className="text-xs text-zinc-400">In rack:</span>
+      {stock.labels.length > 0 ? <TriageStockColourDots labels={stock.labels} /> : null}
+      {stock.locationLabel ? (
+        <span className="text-xs text-zinc-500">({stock.locationLabel})</span>
+      ) : null}
+    </div>
+  )
 }
 
 function sourceBadgeLabel(source: CustodyCard['custodySource']): string {
@@ -150,6 +248,112 @@ function ColourChannelsRow({ labels }: { labels: string[] }) {
         </span>
       ))}
     </div>
+  )
+}
+
+function HubPlateSizeLine({ size }: { size: HubPlateSize | null | undefined }) {
+  const line = hubPlateSizeCardLine(size)
+  if (!line) return null
+  return <p className="text-xs font-medium text-zinc-400 leading-tight">{line}</p>
+}
+
+function HubPlateSizeSegmented({
+  value,
+  onChange,
+  accent,
+}: {
+  value: HubPlateSize
+  onChange: (v: HubPlateSize) => void
+  accent: 'amber' | 'violet' | 'emerald'
+}) {
+  const on =
+    accent === 'violet'
+      ? 'bg-violet-600 border-violet-500 text-white'
+      : accent === 'emerald'
+        ? 'bg-emerald-600 border-emerald-500 text-white'
+        : 'bg-amber-600 border-amber-500 text-white'
+  const off = 'text-zinc-400 hover:text-white hover:bg-zinc-800 border-transparent'
+  return (
+    <div
+      className="flex rounded-lg border border-zinc-600 overflow-hidden p-0.5 bg-black/60"
+      role="radiogroup"
+      aria-label="Plate size"
+    >
+      {HUB_PLATE_SIZE_OPTIONS.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          role="radio"
+          aria-checked={value === opt.value}
+          className={`flex-1 px-1.5 py-1.5 text-center text-[10px] font-bold border rounded-md transition-colors ${
+            value === opt.value ? on : off
+          }`}
+          onClick={() => onChange(opt.value)}
+        >
+          {opt.mm}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function HubStaleQueueTime({ at }: { at: string | null | undefined }) {
+  const stale = hubQueueStale(at)
+  const age = hubQueueAgeLabel(at)
+  return (
+    <p
+      className={`mt-1.5 text-[10px] leading-tight ${
+        stale ? 'text-red-400 font-medium' : 'text-zinc-500'
+      }`}
+    >
+      Time in queue: {age}
+    </p>
+  )
+}
+
+function HubTriageTime({ at }: { at: string | null | undefined }) {
+  return (
+    <p className="mt-1.5 text-[10px] leading-tight text-zinc-500">
+      Time in triage: {hubQueueAgeLabel(at)}
+    </p>
+  )
+}
+
+function HubRackAdded({ createdAt }: { createdAt: string | null | undefined }) {
+  if (!createdAt) return null
+  return (
+    <p className="mt-1.5 text-[10px] leading-tight text-zinc-500">
+      Added to rack: {hubAddedToRackLabel(createdAt)}
+    </p>
+  )
+}
+
+function HubCustodyReady({ at }: { at: string | null | undefined }) {
+  return (
+    <p className="mt-1.5 text-[10px] leading-tight text-zinc-500">
+      Marked ready: {hubMarkedReadyLabel(at)}
+    </p>
+  )
+}
+
+function JobCardStatusBadge({
+  hub,
+}: {
+  hub: { key: string; badgeLabel: string } | null | undefined
+}) {
+  if (!hub) return null
+  const tone =
+    hub.key === 'printed'
+      ? 'border-emerald-600/60 bg-emerald-950/50 text-emerald-200'
+      : hub.key === 'planning'
+        ? 'border-amber-600/60 bg-amber-950/50 text-amber-200'
+        : 'border-sky-600/60 bg-sky-950/50 text-sky-200'
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold shrink-0 ${tone}`}
+    >
+      Status: {hub.badgeLabel}
+    </span>
   )
 }
 
@@ -233,6 +437,17 @@ export default function HubPlateDashboard() {
   const [scrapChannelPick, setScrapChannelPick] = useState<Record<string, boolean>>({})
   const [scrapReasonCode, setScrapReasonCode] = useState<PlateScrapReasonCode | ''>('')
 
+  const [returnAuditModal, setReturnAuditModal] = useState<{
+    plateStoreId: string
+    plateSetCode: string
+    cartonName: string
+    colourNames: string[]
+    custodySource: CustodyCard['custodySource']
+  } | null>(null)
+  const [returnAuditPick, setReturnAuditPick] = useState<Record<string, boolean>>({})
+  const [returnAuditOrigin, setReturnAuditOrigin] = useState<PlateColourFirstOrigin>('legacy_unknown')
+  const [returnAuditStep, setReturnAuditStep] = useState<1 | 2>(1)
+
   const [ctpSearch, setCtpSearch] = useState('')
   const [vendorSearch, setVendorSearch] = useState('')
   const [invSearch, setInvSearch] = useState('')
@@ -256,6 +471,14 @@ export default function HubPlateDashboard() {
   const [mCtpK, setMCtpK] = useState(true)
   const [mCtpPantone, setMCtpPantone] = useState(false)
   const [mCtpPantoneN, setMCtpPantoneN] = useState(1)
+  const [mCtpPlateSize, setMCtpPlateSize] = useState<HubPlateSize>('SIZE_560_670')
+  const [mvPlateSize, setMvPlateSize] = useState<HubPlateSize>('SIZE_560_670')
+  const [addStockPlateSize, setAddStockPlateSize] = useState<HubPlateSize>('SIZE_560_670')
+  const [triageSizeModal, setTriageSizeModal] = useState<{
+    rowId: string
+    channel: 'inhouse_ctp' | 'outside_vendor'
+  } | null>(null)
+  const [triagePlateSizePick, setTriagePlateSizePick] = useState<HubPlateSize>('SIZE_560_670')
 
   const [remakePlate, setRemakePlate] = useState<PlateCard | null>(null)
   const [remakeLane, setRemakeLane] = useState<'inhouse_ctp' | 'outside_vendor'>('inhouse_ctp')
@@ -393,6 +616,15 @@ export default function HubPlateDashboard() {
   }, [scrapModal])
 
   useEffect(() => {
+    if (!returnAuditModal) return
+    const next: Record<string, boolean> = {}
+    for (const n of returnAuditModal.colourNames) next[n] = true
+    setReturnAuditPick(next)
+    setReturnAuditOrigin(defaultFirstOriginFromCustody(returnAuditModal.custodySource))
+    setReturnAuditStep(1)
+  }, [returnAuditModal])
+
+  useEffect(() => {
     if (!remakePlate) return
     const names = remakePlate.colourChannelNames?.length
       ? remakePlate.colourChannelNames
@@ -449,6 +681,7 @@ export default function HubPlateDashboard() {
     setPantoneOn(false)
     setPantoneCount(1)
     setAddStockFieldErrors({})
+    setAddStockPlateSize('SIZE_560_670')
   }
 
   function applyCartonSelection(hit: CartonSearchHit) {
@@ -458,6 +691,7 @@ export default function HubPlateDashboard() {
     setAddAwCode(hit.artworkCode?.trim() || '')
     setAddUps(hit.ups != null && hit.ups > 0 ? String(hit.ups) : '')
     setAddArtworkId('')
+    setAddStockPlateSize(hit.plateSize ?? 'SIZE_560_670')
   }
 
   async function recallPrepress(requirementId: string) {
@@ -605,6 +839,7 @@ export default function HubPlateDashboard() {
           numberOfColours: colours.length,
           colours,
           rackLocation: addRackNumber.trim() || null,
+          plateSize: addStockPlateSize,
         }),
       })
       const t = await r.text()
@@ -636,6 +871,7 @@ export default function HubPlateDashboard() {
   }
 
   function custodyItemFromRequirement(row: CtpRow, source: 'ctp' | 'vendor'): CustodyCard {
+    const now = new Date().toISOString()
     return {
       kind: 'requirement',
       id: row.id,
@@ -648,10 +884,15 @@ export default function HubPlateDashboard() {
       numberOfColours: row.numberOfColours,
       newPlatesNeeded: row.newPlatesNeeded,
       partialRemake: row.partialRemake,
+      lastStatusUpdatedAt: now,
+      jobCardId: row.jobCardId ?? null,
+      jobCardHub: null,
+      plateSize: row.plateSize ?? null,
     }
   }
 
   function custodyItemFromPlate(row: PlateCard): CustodyCard {
+    const now = new Date().toISOString()
     return {
       kind: 'plate',
       id: row.id,
@@ -673,6 +914,9 @@ export default function HubPlateDashboard() {
       artworkId: row.artworkId,
       jobCardId: row.jobCardId,
       slotNumber: row.slotNumber,
+      lastStatusUpdatedAt: now,
+      jobCardHub: null,
+      plateSize: row.plateSize ?? null,
     }
   }
 
@@ -735,7 +979,7 @@ export default function HubPlateDashboard() {
         id: item.id,
         poLineId: null,
         requirementCode: item.displayCode,
-        jobCardId: null,
+        jobCardId: item.jobCardId ?? null,
         cartonName: item.cartonName,
         artworkCode: item.artworkCode,
         artworkVersion: item.artworkVersion,
@@ -745,6 +989,8 @@ export default function HubPlateDashboard() {
         numberOfColours: item.numberOfColours,
         newPlatesNeeded: item.newPlatesNeeded,
         partialRemake: item.partialRemake,
+        lastStatusUpdatedAt: new Date().toISOString(),
+        plateSize: item.plateSize ?? null,
       }
       setData((d) => ({
         ...d,
@@ -779,6 +1025,8 @@ export default function HubPlateDashboard() {
         platesInRackCount: item.platesInRackCount,
         numberOfColours: item.numberOfColours,
         totalPlates: item.totalPlates,
+        lastStatusUpdatedAt: new Date().toISOString(),
+        plateSize: item.plateSize ?? null,
       }
       setData((d) => ({
         ...d,
@@ -814,6 +1062,7 @@ export default function HubPlateDashboard() {
     setMCtpK(true)
     setMCtpPantone(false)
     setMCtpPantoneN(1)
+    setMCtpPlateSize('SIZE_560_670')
   }
 
   function resetManualVendorForm() {
@@ -826,6 +1075,7 @@ export default function HubPlateDashboard() {
     setMvK(true)
     setMvPantone(false)
     setMvPantoneN(1)
+    setMvPlateSize('SIZE_560_670')
   }
 
   async function submitManualCtpRequest() {
@@ -840,6 +1090,7 @@ export default function HubPlateDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: safeJsonStringify({
           cartonId: mCtpSelected.id,
+          plateSize: mCtpPlateSize,
           stdC: mCtpC,
           stdM: mCtpM,
           stdY: mCtpY,
@@ -875,6 +1126,7 @@ export default function HubPlateDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: safeJsonStringify({
           cartonId: mvSelected.id,
+          plateSize: mvPlateSize,
           stdC: mvC,
           stdM: mvM,
           stdY: mvY,
@@ -931,6 +1183,40 @@ export default function HubPlateDashboard() {
     } catch (e) {
       console.error(e)
       toast.error(e instanceof Error ? e.message : 'Scrap failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitReturnToRack() {
+    if (!returnAuditModal) return
+    const returned = Object.entries(returnAuditPick)
+      .filter(([, v]) => v)
+      .map(([k]) => k)
+    if (!returned.length) {
+      toast.error('Select at least one plate returning to rack')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/plate-hub/return-to-rack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          plateStoreId: returnAuditModal.plateStoreId,
+          returnedColourNames: returned,
+          firstOrigin: returnAuditOrigin,
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Return failed')
+      toast.success('Return to rack recorded')
+      setReturnAuditModal(null)
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Return failed')
     } finally {
       setSaving(false)
     }
@@ -1023,6 +1309,69 @@ export default function HubPlateDashboard() {
     )
   }, [data.inventory, invSearch])
 
+  /** One-pass index: Live Inventory plate cards → triage row (carton name or AW code). */
+  const triageRackStockById = useMemo(() => {
+    const inv = data.inventory
+    const byCarton = new Map<string, PlateCard[]>()
+    const byAw = new Map<string, PlateCard[]>()
+    for (const p of inv) {
+      const c = normHubKey(p.cartonName)
+      if (c) {
+        const arr = byCarton.get(c) ?? []
+        arr.push(p)
+        byCarton.set(c, arr)
+      }
+      const aw = p.artworkCode?.trim()
+      if (aw) {
+        const k = normHubKey(aw)
+        const arr = byAw.get(k) ?? []
+        arr.push(p)
+        byAw.set(k, arr)
+      }
+    }
+    const map = new Map<string, TriageStockInfo>()
+    for (const row of data.triage) {
+      const cartonKey = normHubKey(row.cartonName)
+      const awKey = row.artworkCode?.trim() ? normHubKey(row.artworkCode) : ''
+      const seen = new Set<string>()
+      const matches: PlateCard[] = []
+      for (const p of byCarton.get(cartonKey) ?? []) {
+        if (!seen.has(p.id)) {
+          seen.add(p.id)
+          matches.push(p)
+        }
+      }
+      if (awKey) {
+        for (const p of byAw.get(awKey) ?? []) {
+          if (!seen.has(p.id)) {
+            seen.add(p.id)
+            matches.push(p)
+          }
+        }
+      }
+      if (matches.length === 0) {
+        map.set(row.id, { matchCount: 0 })
+        continue
+      }
+      const labelSet = new Set<string>()
+      const locs = new Set<string>()
+      for (const p of matches) {
+        for (const lab of p.plateColours ?? []) {
+          const t = String(lab ?? '').trim()
+          if (t) labelSet.add(t)
+        }
+        const loc = formatPlateCardRackLocation(p)
+        if (loc) locs.add(loc)
+      }
+      const labels = sortUnionStockLabels(labelSet)
+      let locationLabel: string | null = null
+      if (locs.size === 1) locationLabel = [...locs][0]
+      else if (locs.size > 1) locationLabel = `${[...locs][0]} +${locs.size - 1}`
+      map.set(row.id, { matchCount: matches.length, labels, locationLabel })
+    }
+    return map
+  }, [data.inventory, data.triage])
+
   const filteredCtp = useMemo(() => {
     const q = ctpSearch.trim().toLowerCase()
     return data.ctpQueue.filter((job) =>
@@ -1046,7 +1395,22 @@ export default function HubPlateDashboard() {
     )
   }, [data.custody, custSearch])
 
-  async function patchTriage(id: string, channel: 'inhouse_ctp' | 'outside_vendor' | 'stock_available', rackSlot?: string) {
+  function dispatchTriageToProduction(row: TriageRow, channel: 'inhouse_ctp' | 'outside_vendor') {
+    const resolved = row.plateSize ?? row.cartonMasterPlateSize ?? null
+    if (resolved) {
+      void patchTriage(row.id, channel, undefined, resolved)
+      return
+    }
+    setTriageSizeModal({ rowId: row.id, channel })
+    setTriagePlateSizePick('SIZE_560_670')
+  }
+
+  async function patchTriage(
+    id: string,
+    channel: 'inhouse_ctp' | 'outside_vendor' | 'stock_available',
+    rackSlot?: string,
+    plateSize?: HubPlateSize,
+  ) {
     if (!id?.trim()) {
       toast.error('Missing requirement id')
       return
@@ -1055,6 +1419,12 @@ export default function HubPlateDashboard() {
     try {
       const body: Record<string, unknown> = { channel }
       if (channel === 'stock_available' && rackSlot?.trim()) body.rackSlot = rackSlot.trim()
+      if (
+        (channel === 'inhouse_ctp' || channel === 'outside_vendor') &&
+        plateSize
+      ) {
+        body.plateSize = plateSize
+      }
       const r = await fetch(`/api/plate-requirements/${id}/triage`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -1070,6 +1440,7 @@ export default function HubPlateDashboard() {
       setStockModal(null)
       setStockPlateId('')
       setStockRackSlot('')
+      setTriageSizeModal(null)
       await load()
     } catch (e) {
       console.error(e)
@@ -1121,15 +1492,25 @@ export default function HubPlateDashboard() {
                           Plates required:{' '}
                           <span className="text-white font-semibold">{row.newPlatesNeeded}</span>
                         </p>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          AW: {row.artworkCode?.trim() || '—'}
+                        </p>
+                        <HubPlateSizeLine size={row.plateSize ?? row.cartonMasterPlateSize} />
                         <div className="mt-1">
                           <ColourChannelsRow labels={row.plateColours} />
                         </div>
+                        <TriageInventoryStockLine
+                          stock={triageRackStockById.get(row.id) ?? { matchCount: 0 }}
+                        />
+                        {row.lastStatusUpdatedAt ? (
+                          <HubTriageTime at={row.lastStatusUpdatedAt} />
+                        ) : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           disabled={saving}
-                          onClick={() => void patchTriage(row.id, 'inhouse_ctp')}
+                          onClick={() => dispatchTriageToProduction(row, 'inhouse_ctp')}
                           className="px-3 py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold disabled:opacity-50"
                         >
                           In-house CTP
@@ -1149,7 +1530,7 @@ export default function HubPlateDashboard() {
                         <button
                           type="button"
                           disabled={saving}
-                          onClick={() => void patchTriage(row.id, 'outside_vendor')}
+                          onClick={() => dispatchTriageToProduction(row, 'outside_vendor')}
                           className="px-3 py-2 rounded-md border border-zinc-600 text-zinc-300 hover:bg-zinc-900 text-sm"
                         >
                           Send to vendor
@@ -1204,7 +1585,7 @@ export default function HubPlateDashboard() {
                     filteredCtp.map((job) => (
                       <li
                         key={job.id}
-                        className="relative rounded-lg border border-zinc-700 bg-black p-2 pr-10 min-h-[4rem]"
+                        className="relative rounded-lg border border-zinc-700 bg-black p-2 pr-10"
                       >
                         <PlateCountBadge
                           count={hubPlateBadgeCount({
@@ -1223,6 +1604,7 @@ export default function HubPlateDashboard() {
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
+                        <HubPlateSizeLine size={job.plateSize} />
                         <div className="mt-1">
                           <ColourChannelsRow labels={job.plateColours} />
                         </div>
@@ -1244,6 +1626,7 @@ export default function HubPlateDashboard() {
                         >
                           Send back to Triage
                         </button>
+                        <HubStaleQueueTime at={job.lastStatusUpdatedAt} />
                       </li>
                     ))
                   )}
@@ -1281,7 +1664,7 @@ export default function HubPlateDashboard() {
                     filteredVendor.map((job) => (
                       <li
                         key={job.id}
-                        className="relative rounded-lg border border-violet-800/50 bg-black p-2 pr-10 min-h-[4rem]"
+                        className="relative rounded-lg border border-violet-800/50 bg-black p-2 pr-10"
                       >
                         <PlateCountBadge
                           count={hubPlateBadgeCount({
@@ -1300,6 +1683,7 @@ export default function HubPlateDashboard() {
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
+                        <HubPlateSizeLine size={job.plateSize} />
                         <div className="mt-1">
                           <ColourChannelsRow labels={job.plateColours} />
                         </div>
@@ -1329,6 +1713,7 @@ export default function HubPlateDashboard() {
                         >
                           Send back to Triage
                         </button>
+                        <HubStaleQueueTime at={job.lastStatusUpdatedAt} />
                       </li>
                     ))
                   )}
@@ -1392,6 +1777,7 @@ export default function HubPlateDashboard() {
                           <p className="text-xs text-zinc-400 mt-0.5">
                             AW: {p.artworkCode?.trim() || '—'}
                           </p>
+                          <HubPlateSizeLine size={p.plateSize} />
                           <div className="mt-1">
                             <ColourChannelsRow labels={p.plateColours ?? []} />
                           </div>
@@ -1406,6 +1792,9 @@ export default function HubPlateDashboard() {
                           <p className="text-xs text-zinc-400 mt-0.5 uppercase tracking-wide">
                             Rack / slot
                             {p.ups != null && p.ups > 0 ? ` · UPS ${p.ups}` : ''}
+                          </p>
+                          <p className="text-[10px] text-zinc-500 mt-0.5 tabular-nums">
+                            Max cycles: {p.reuseCyclesMax ?? 0}
                           </p>
                           <button
                             type="button"
@@ -1435,6 +1824,7 @@ export default function HubPlateDashboard() {
                           >
                             Mark plate ready
                           </button>
+                          <HubRackAdded createdAt={p.createdAt} />
                         </li>
                       )
                     })
@@ -1461,7 +1851,11 @@ export default function HubPlateDashboard() {
                     filteredCustody.map((c) => (
                       <li
                         key={`${c.kind}-${c.id}`}
-                        className="relative rounded-lg border border-zinc-800 bg-black p-2 pr-10"
+                        className={`relative rounded-lg bg-black p-2 pr-10 ${
+                          c.kind === 'plate' && c.jobCardHub?.key === 'printed'
+                            ? 'border border-emerald-600/70 shadow-[0_0_14px_rgba(16,185,129,0.12)]'
+                            : 'border border-zinc-800'
+                        }`}
                       >
                         <PlateCountBadge
                           count={
@@ -1489,9 +1883,13 @@ export default function HubPlateDashboard() {
                             <span className="text-rose-400 font-bold"> (Remake)</span>
                           ) : null}
                         </p>
-                        <p className="text-xs text-zinc-400 mt-0.5">
-                          AW: {c.artworkCode?.trim() || '—'}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+                          <span className="text-xs text-zinc-400">
+                            AW: {c.artworkCode?.trim() || '—'}
+                          </span>
+                          <JobCardStatusBadge hub={c.jobCardHub} />
+                        </div>
+                        <HubPlateSizeLine size={c.plateSize} />
                         <div className="mt-1">
                           <ColourChannelsRow labels={c.plateColours} />
                         </div>
@@ -1501,38 +1899,79 @@ export default function HubPlateDashboard() {
                             {c.ups != null && c.ups > 0 ? ` · UPS ${c.ups}` : ''}
                           </p>
                         ) : null}
-                        {c.kind === 'plate' ? (
+                        <div className="mt-1.5 flex flex-col gap-2">
+                          {c.kind === 'plate' && plateColourNamesForScrap(c).length > 0 ? (
+                            <button
+                              type="button"
+                              className={`w-full py-1.5 rounded text-white text-[11px] font-bold shadow-sm ${
+                                c.jobCardHub?.key === 'printed'
+                                  ? 'bg-emerald-500 hover:bg-emerald-400 ring-2 ring-emerald-300/40'
+                                  : 'bg-emerald-700 hover:bg-emerald-600'
+                              }`}
+                              onClick={() =>
+                                setReturnAuditModal({
+                                  plateStoreId: c.id,
+                                  plateSetCode: c.displayCode,
+                                  cartonName: c.cartonName,
+                                  colourNames: plateColourNamesForScrap(c),
+                                  custodySource: c.custodySource,
+                                })
+                              }
+                            >
+                              Return to Rack
+                            </button>
+                          ) : null}
                           <button
                             type="button"
-                            className="mt-1.5 w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-[11px] font-semibold hover:bg-rose-950/70"
-                            onClick={() =>
+                            className="w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-[11px] font-semibold hover:bg-rose-950/70"
+                            onClick={() => {
+                              if (c.kind !== 'plate') {
+                                toast.error(
+                                  'Scrap applies to physical plate sets. Use Reverse / Undo to send this requirement back to CTP or vendor.',
+                                )
+                                return
+                              }
+                              const colourNames = plateColourNamesForScrap(c)
+                              if (!colourNames.length) {
+                                toast.error('No active plate channels on this set.')
+                                return
+                              }
                               setScrapModal({
                                 plateStoreId: c.id,
                                 plateSetCode: c.displayCode,
                                 cartonName: c.cartonName,
-                                colourNames: plateColourNamesForScrap(c),
+                                colourNames,
                               })
-                            }
+                            }}
                           >
                             Scrap / Report Damage
                           </button>
-                        ) : null}
-                        {c.kind === 'plate' ? (
                           <button
                             type="button"
-                            className="mt-1.5 w-full py-1.5 rounded border-2 border-red-600/90 bg-gradient-to-b from-red-950/95 to-orange-950/90 text-orange-50 text-[11px] font-bold hover:from-red-900 hover:to-orange-900 shadow-[0_0_12px_rgba(220,38,38,0.25)]"
-                            onClick={() => setEmergencyTarget(c)}
+                            className="w-full py-1.5 rounded border-2 border-red-600/90 bg-gradient-to-b from-red-950/95 to-orange-950/90 text-orange-50 text-[11px] font-bold hover:from-red-900 hover:to-orange-900 shadow-[0_0_12px_rgba(220,38,38,0.25)]"
+                            onClick={() => {
+                              if (c.kind !== 'plate') {
+                                toast.error(
+                                  'Emergency issue applies to rack plate sets. This row is a CTP/vendor requirement — use Reverse / Undo or finish burning plates first.',
+                                )
+                                return
+                              }
+                              setEmergencyTarget(c)
+                            }}
                           >
                             Emergency Issue (Bypass)
                           </button>
+                          <button
+                            type="button"
+                            className="w-full py-1.5 rounded border border-amber-800/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                            onClick={() => void reverseCustodyItem(c)}
+                          >
+                            Reverse / Undo
+                          </button>
+                        </div>
+                        {c.lastStatusUpdatedAt ? (
+                          <HubCustodyReady at={c.lastStatusUpdatedAt} />
                         ) : null}
-                        <button
-                          type="button"
-                          className="mt-1.5 w-full py-1.5 rounded border border-amber-800/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
-                          onClick={() => void reverseCustodyItem(c)}
-                        >
-                          Reverse / Undo
-                        </button>
                       </li>
                     ))
                   )}
@@ -1669,6 +2108,16 @@ export default function HubPlateDashboard() {
               ) : null}
             </label>
             <div>
+              <p className="text-sm text-zinc-300 mb-2">
+                Plate size <span className="text-red-400">*</span>
+              </p>
+              <HubPlateSizeSegmented
+                value={addStockPlateSize}
+                onChange={setAddStockPlateSize}
+                accent="emerald"
+              />
+            </div>
+            <div>
               <p className="text-sm text-zinc-300 mb-2">Colours on plate</p>
               <div className="flex flex-wrap gap-2">
                 {(
@@ -1800,6 +2249,57 @@ export default function HubPlateDashboard() {
         </div>
       )}
 
+      {triageSizeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md rounded-xl border border-amber-700/50 bg-zinc-950 p-4 space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold text-white">Confirm plate size</h3>
+              <p className="text-zinc-500 text-xs mt-1">
+                No plate size is set on this requirement or the linked carton master. Pick the sheet size
+                before sending to{' '}
+                {triageSizeModal.channel === 'inhouse_ctp' ? 'in-house CTP' : 'outside vendor'}.
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-zinc-300 mb-2">
+                Plate size <span className="text-red-400">*</span>
+              </p>
+              <HubPlateSizeSegmented
+                value={triagePlateSizePick}
+                onChange={setTriagePlateSizePick}
+                accent="amber"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => setTriageSizeModal(null)}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                className="px-3 py-2 rounded bg-amber-600 text-white font-semibold disabled:opacity-50"
+                onClick={() => {
+                  if (!triageSizeModal) return
+                  void patchTriage(
+                    triageSizeModal.rowId,
+                    triageSizeModal.channel,
+                    undefined,
+                    triagePlateSizePick,
+                  )
+                }}
+              >
+                Confirm dispatch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Manual CTP — bypass triage */}
       {manualCtpOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
@@ -1838,6 +2338,7 @@ export default function HubPlateDashboard() {
                             setMCtpSelected(hit)
                             setMCtpQuery(hit.cartonName)
                             setMCtpResults([])
+                            setMCtpPlateSize(hit.plateSize ?? 'SIZE_560_670')
                           }}
                         >
                           <span className="font-medium block truncate">{hit.cartonName}</span>
@@ -1860,6 +2361,16 @@ export default function HubPlateDashboard() {
               )}
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <div>
+                <p className="text-sm text-zinc-300 mb-2">
+                  Plate size <span className="text-red-400">*</span>
+                </p>
+                <HubPlateSizeSegmented
+                  value={mCtpPlateSize}
+                  onChange={setMCtpPlateSize}
+                  accent="amber"
+                />
+              </div>
               <div>
                 <p className="text-sm text-zinc-300 mb-2">Colours to burn</p>
                 <div className="flex flex-wrap gap-2">
@@ -1973,6 +2484,7 @@ export default function HubPlateDashboard() {
                             setMvSelected(hit)
                             setMvQuery(hit.cartonName)
                             setMvResults([])
+                            setMvPlateSize(hit.plateSize ?? 'SIZE_560_670')
                           }}
                         >
                           <span className="font-medium block truncate">{hit.cartonName}</span>
@@ -1995,6 +2507,16 @@ export default function HubPlateDashboard() {
               )}
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <div>
+                <p className="text-sm text-zinc-300 mb-2">
+                  Plate size <span className="text-red-400">*</span>
+                </p>
+                <HubPlateSizeSegmented
+                  value={mvPlateSize}
+                  onChange={setMvPlateSize}
+                  accent="violet"
+                />
+              </div>
               <div>
                 <p className="text-sm text-zinc-300 mb-2">Colours (vendor will supply)</p>
                 <div className="flex flex-wrap gap-2">
@@ -2154,6 +2676,134 @@ export default function HubPlateDashboard() {
                 Confirm scrap
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Return to rack — custody audit */}
+      {returnAuditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md rounded-xl border border-emerald-800/50 bg-zinc-950 p-4 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div>
+              <h3 className="text-lg font-semibold text-white">Return &amp; audit</h3>
+              <p className="text-zinc-500 text-xs mt-1">
+                Confirm which plates go back to live inventory. Unchecked channels are logged as not
+                returned and follow the scrap workflow.
+              </p>
+              <p className="text-xs font-mono text-amber-300 mt-2">{returnAuditModal.plateSetCode}</p>
+              <p className="text-sm text-white font-medium truncate">{returnAuditModal.cartonName}</p>
+            </div>
+
+            {returnAuditStep === 1 ? (
+              <>
+                <div>
+                  <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+                    Step 1 — Select plates safely returning to rack
+                  </p>
+                  <div className="space-y-2 rounded-lg border border-zinc-700 bg-black/40 p-3">
+                    {returnAuditModal.colourNames.length === 0 ? (
+                      <p className="text-xs text-zinc-500">No active channels on this set.</p>
+                    ) : (
+                      returnAuditModal.colourNames.map((name) => (
+                        <label
+                          key={name}
+                          className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={returnAuditPick[name] ?? false}
+                            onChange={(e) =>
+                              setReturnAuditPick((prev) => ({ ...prev, [name]: e.target.checked }))
+                            }
+                            className="rounded border-zinc-600"
+                          />
+                          <span className="flex items-center gap-2 min-w-0">
+                            <ColourChannelsRow labels={[name]} />
+                            <span className="truncate text-xs">{name}</span>
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-2 leading-snug">
+                    Any plate left unchecked is flagged for the scrap / damage workflow automatically.
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                    onClick={() => setReturnAuditModal(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      saving ||
+                      !returnAuditModal.colourNames.length ||
+                      !Object.values(returnAuditPick).some(Boolean)
+                    }
+                    className="px-3 py-2 rounded bg-emerald-700 text-white font-semibold disabled:opacity-50"
+                    onClick={() => {
+                      if (!Object.values(returnAuditPick).some(Boolean)) {
+                        toast.error('Select at least one plate returning to rack')
+                        return
+                      }
+                      setReturnAuditStep(2)
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+                    Step 2 — Confirm plate origin (for analytics)
+                  </p>
+                  <p className="text-[11px] text-zinc-500 mb-3">
+                    Default follows custody source; override if needed for reporting accuracy.
+                  </p>
+                  <fieldset className="space-y-2 rounded-lg border border-zinc-700 bg-black/40 p-3">
+                    {PLATE_FIRST_ORIGIN_OPTIONS.map((opt) => (
+                      <label
+                        key={opt.value}
+                        className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer"
+                      >
+                        <input
+                          type="radio"
+                          name="returnAuditOrigin"
+                          checked={returnAuditOrigin === opt.value}
+                          onChange={() => setReturnAuditOrigin(opt.value)}
+                          className="border-zinc-600"
+                        />
+                        {opt.label}
+                      </label>
+                    ))}
+                  </fieldset>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                    onClick={() => setReturnAuditStep(1)}
+                    disabled={saving}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    className="px-3 py-2 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50"
+                    onClick={() => void submitReturnToRack()}
+                  >
+                    Confirm return
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

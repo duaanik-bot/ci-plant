@@ -33,6 +33,7 @@ export async function POST(
           status: 'pending',
           ctpTriggeredAt: null,
           ctpOperator: null,
+          lastStatusUpdatedAt: new Date(),
         },
       })
 

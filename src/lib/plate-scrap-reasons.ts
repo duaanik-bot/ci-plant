@@ -4,6 +4,7 @@ export const PLATE_SCRAP_REASONS = [
   { code: 'edge_cracking', label: 'Edge cracking / Bending fatigue' },
   { code: 'oxidation_storage', label: 'Oxidation / Storage wear' },
   { code: 'burn_calibration', label: 'Image / Burn calibration error' },
+  { code: 'custody_not_returned', label: 'Not returned from custody floor' },
 ] as const
 
 export type PlateScrapReasonCode = (typeof PLATE_SCRAP_REASONS)[number]['code']

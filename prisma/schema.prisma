@@ -13,6 +13,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Standard litho plate sheet sizes (Plate Hub, press matching). Stored as enum literals only.
+enum PlateSize {
+  SIZE_560_670
+  SIZE_630_700
+}
+
 // ─────────────────────────────────────────
 // ROLES & USERS
 // ─────────────────────────────────────────
@@ -556,6 +562,8 @@ model Carton {
   barcodeType      String?  @map("barcode_type")
   barcodePosition  String?  @map("barcode_position")
   artworkCode      String?  @map("artwork_code")
+  /// Default plate sheet size for new plate requirements (optional).
+  plateSize        PlateSize? @map("plate_size")
   // FINISHING
   laminateType     String?  @map("laminate_type")
   laminateMicrons  Int?     @map("laminate_microns")
@@ -636,6 +644,10 @@ model Dye {
   scrappedBy         String?   @map("scrapped_by")
   scrappedAt          DateTime? @map("scrapped_at")
   custodyStatus       String    @default("in_stock") @map("custody_status") @db.VarChar(32)
+  /// Hub Kanban: reuse cycles when returning from custody staging to rack
+  reuseCount          Int       @default(0) @map("reuse_count")
+  /// Undo mark-ready: previous custody_status before hub_custody_ready
+  hubPreviousCustody  String?   @map("hub_previous_custody") @db.VarChar(32)
   issuedMachineId     String?   @map("issued_machine_id")
   issuedOperator      String?   @map("issued_operator")
   issuedAt            DateTime? @map("issued_at")
@@ -827,6 +839,7 @@ model PlateStore {
   artworkId       String?   @map("artwork_id")
   artworkCode     String?   @map("artwork_code")
   artworkVersion  String?   @map("artwork_version")
+  plateSize       PlateSize @default(SIZE_560_670) @map("plate_size")
   cartonName      String    @map("carton_name")
   customerId      String?   @map("customer_id")
   plateSetCode    String    @unique @map("plate_set_code")
@@ -862,6 +875,8 @@ model PlateStore {
   hubCustodySource   String?  @map("hub_custody_source") @db.VarChar(32)
   /// Status before Mark Plate Ready (for reverse)
   hubPreviousStatus  String?  @map("hub_previous_status") @db.VarChar(32)
+  /// Hub analytics: last time this row entered its current workflow column (queue / rack / custody).
+  lastStatusUpdatedAt DateTime @default(now()) @map("last_status_updated_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -911,7 +926,11 @@ model PlateRequirement {
   poLineId           String?   @map("po_line_id")
   /// Ad-hoc / partial remake from hub — show (Remake) in UI
   partialRemake      Boolean   @default(false) @map("partial_remake")
+  /// Set from carton master, manual hub entry, or triage dispatch; null = must resolve before CTP/vendor lane.
+  plateSize          PlateSize? @map("plate_size")
   createdBy          String    @map("created_by")
+  /// Hub analytics: last time this requirement entered its current column (triage / CTP / vendor / custody).
+  lastStatusUpdatedAt DateTime @default(now()) @map("last_status_updated_at")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
@@ -943,6 +962,8 @@ model EmbossBlock {
   scrappedAt       DateTime? @map("scrapped_at")
   active           Boolean   @default(true)
   custodyStatus    String    @default("in_stock") @map("custody_status") @db.VarChar(32)
+  reuseCount       Int       @default(0) @map("reuse_count")
+  hubPreviousCustody String? @map("hub_previous_custody") @db.VarChar(32)
   issuedMachineId  String?   @map("issued_machine_id")
   issuedOperator   String?   @map("issued_operator")
   issuedAt         DateTime? @map("issued_at")

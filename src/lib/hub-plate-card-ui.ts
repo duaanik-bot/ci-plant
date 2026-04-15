@@ -91,10 +91,42 @@ export function hubLivePlateBadgeCount(args: {
 
 type PlateColourRow = { name?: string; status?: string }
 
+/** Colour JSON rows that are not scrapped/destroyed — use for hub display + counts. */
+export function activeColourRowsFromJson(json: unknown): unknown[] {
+  if (!Array.isArray(json)) return []
+  return json.filter((item) => {
+    if (!item || typeof item !== 'object') return false
+    const st = String((item as PlateColourRow).status ?? '').toLowerCase()
+    return st !== 'destroyed'
+  })
+}
+
 export function countPlatesInRack(coloursJson: unknown): number {
   if (!Array.isArray(coloursJson)) return 0
   return (coloursJson as PlateColourRow[]).filter((c) => {
     const st = String(c?.status ?? '').toLowerCase()
     return st !== 'destroyed'
   }).length
+}
+
+type ColourRowReuse = PlateColourRow & { reuseCount?: number }
+
+/** Max reuse cycles among active channels (per-colour JSON `reuseCount`). */
+export function hubReuseCyclesFromColoursJson(coloursJson: unknown): {
+  max: number
+  byName: Record<string, number>
+} {
+  if (!Array.isArray(coloursJson)) return { max: 0, byName: {} }
+  let max = 0
+  const byName: Record<string, number> = {}
+  for (const item of coloursJson as ColourRowReuse[]) {
+    const st = String(item?.status ?? '').toLowerCase()
+    if (st === 'destroyed') continue
+    const name = String(item?.name ?? '').trim()
+    if (!name) continue
+    const n = Math.max(0, Math.floor(Number(item.reuseCount) || 0))
+    byName[name] = n
+    if (n > max) max = n
+  }
+  return { max, byName }
 }

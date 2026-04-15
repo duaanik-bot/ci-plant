@@ -3,9 +3,23 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { safeJsonStringify } from '@/lib/safe-json'
 import { plateNamesFromColoursNeededJson } from '@/lib/plate-triage-display'
-import { countPlatesInRack } from '@/lib/hub-plate-card-ui'
+import {
+  activeColourRowsFromJson,
+  countPlatesInRack,
+  hubReuseCyclesFromColoursJson,
+} from '@/lib/hub-plate-card-ui'
+import { hubJobCardHubStatus } from '@/lib/hub-job-card-status'
 
 export const dynamic = 'force-dynamic'
+
+function channelNamesFromActiveJson(activeJson: unknown[]): string[] {
+  return activeJson
+    .map((item) => {
+      if (!item || typeof item !== 'object') return ''
+      return String((item as { name?: string }).name ?? '').trim()
+    })
+    .filter(Boolean) as string[]
+}
 
 /**
  * Single payload for Plate Hub wireframe: triage + CTP + outside vendor + inventory + custody.
@@ -51,57 +65,129 @@ export async function GET() {
         }),
       ])
 
-    const triage = triageRows.map((r) => ({
-      id: r.id,
-      poLineId: r.poLineId,
-      requirementCode: r.requirementCode,
-      cartonName: r.cartonName,
-      artworkCode: r.artworkCode,
-      artworkVersion: r.artworkVersion,
-      newPlatesNeeded: r.newPlatesNeeded,
-      status: r.status,
-      plateColours: plateNamesFromColoursNeededJson(r.coloursNeeded),
-    }))
+    const custodyJobCardIds = [
+      ...stagingReqRows.map((r) => r.jobCardId).filter(Boolean),
+      ...stagingPlateRows.map((p) => p.jobCardId).filter(Boolean),
+    ] as string[]
+    const uniqCustodyJc = Array.from(new Set(custodyJobCardIds))
+    const jobCardsForCustody =
+      uniqCustodyJc.length > 0
+        ? await db.productionJobCard.findMany({
+            where: { id: { in: uniqCustodyJc } },
+            select: { id: true, status: true, finalQcPass: true, qaReleased: true },
+          })
+        : []
+    const jcHubById = new Map(
+      jobCardsForCustody.map((j) => [j.id, hubJobCardHubStatus(j)] as const),
+    )
 
-    const ctpQueue = ctpRows.map((r) => ({
-      id: r.id,
-      poLineId: r.poLineId,
-      requirementCode: r.requirementCode,
-      jobCardId: r.jobCardId,
-      cartonName: r.cartonName,
-      artworkCode: r.artworkCode,
-      artworkVersion: r.artworkVersion,
-      plateColours: plateNamesFromColoursNeededJson(r.coloursNeeded),
-      status: r.status,
-      numberOfColours: r.numberOfColours,
-      newPlatesNeeded: r.newPlatesNeeded,
-      partialRemake: r.partialRemake,
-    }))
+    const triagePoLineIds = Array.from(
+      new Set(
+        triageRows
+          .map((r) => r.poLineId)
+          .filter((id): id is string => Boolean(id && String(id).trim())),
+      ),
+    )
+    const triageLinesForMaster =
+      triagePoLineIds.length > 0
+        ? await db.poLineItem.findMany({
+            where: { id: { in: triagePoLineIds } },
+            select: { id: true, cartonId: true },
+          })
+        : []
+    const triageCartonIds = Array.from(
+      new Set(
+        triageLinesForMaster
+          .map((l) => l.cartonId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    )
+    const triageCartonsMaster =
+      triageCartonIds.length > 0
+        ? await db.carton.findMany({
+            where: { id: { in: triageCartonIds } },
+            select: { id: true, plateSize: true },
+          })
+        : []
+    const cartonPlateById = new Map(
+      triageCartonsMaster.map((c) => [c.id, c.plateSize] as const),
+    )
+    const cartonMasterPlateByPoLineId = new Map<
+      string,
+      (typeof triageCartonsMaster)[0]['plateSize']
+    >()
+    for (const line of triageLinesForMaster) {
+      if (!line.cartonId) {
+        cartonMasterPlateByPoLineId.set(line.id, null)
+        continue
+      }
+      cartonMasterPlateByPoLineId.set(line.id, cartonPlateById.get(line.cartonId) ?? null)
+    }
 
-    const vendorQueue = vendorRows.map((r) => ({
-      id: r.id,
-      poLineId: r.poLineId,
-      requirementCode: r.requirementCode,
-      jobCardId: r.jobCardId,
-      cartonName: r.cartonName,
-      artworkCode: r.artworkCode,
-      artworkVersion: r.artworkVersion,
-      plateColours: plateNamesFromColoursNeededJson(r.coloursNeeded),
-      status: r.status,
-      numberOfColours: r.numberOfColours,
-      newPlatesNeeded: r.newPlatesNeeded,
-      partialRemake: r.partialRemake,
-    }))
+    const triage = triageRows.map((r) => {
+      const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
+      const poKey = r.poLineId?.trim()
+      return {
+        id: r.id,
+        poLineId: r.poLineId,
+        requirementCode: r.requirementCode,
+        cartonName: r.cartonName,
+        artworkCode: r.artworkCode,
+        artworkVersion: r.artworkVersion,
+        newPlatesNeeded: r.newPlatesNeeded,
+        status: r.status,
+        plateColours: plateNamesFromColoursNeededJson(activeNeeded),
+        lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
+        plateSize: r.plateSize,
+        cartonMasterPlateSize: poKey ? cartonMasterPlateByPoLineId.get(poKey) ?? null : null,
+      }
+    })
+
+    const ctpQueue = ctpRows.map((r) => {
+      const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
+      return {
+        id: r.id,
+        poLineId: r.poLineId,
+        requirementCode: r.requirementCode,
+        jobCardId: r.jobCardId,
+        cartonName: r.cartonName,
+        artworkCode: r.artworkCode,
+        artworkVersion: r.artworkVersion,
+        plateColours: plateNamesFromColoursNeededJson(activeNeeded),
+        status: r.status,
+        numberOfColours: r.numberOfColours,
+        newPlatesNeeded: r.newPlatesNeeded,
+        partialRemake: r.partialRemake,
+        lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
+        plateSize: r.plateSize,
+      }
+    })
+
+    const vendorQueue = vendorRows.map((r) => {
+      const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
+      return {
+        id: r.id,
+        poLineId: r.poLineId,
+        requirementCode: r.requirementCode,
+        jobCardId: r.jobCardId,
+        cartonName: r.cartonName,
+        artworkCode: r.artworkCode,
+        artworkVersion: r.artworkVersion,
+        plateColours: plateNamesFromColoursNeededJson(activeNeeded),
+        status: r.status,
+        numberOfColours: r.numberOfColours,
+        newPlatesNeeded: r.newPlatesNeeded,
+        partialRemake: r.partialRemake,
+        lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
+        plateSize: r.plateSize,
+      }
+    })
 
     const mapPlate = (p: (typeof inventoryRows)[0]) => {
-      const plateColours = plateNamesFromColoursNeededJson(p.colours)
-      const raw = Array.isArray(p.colours) ? p.colours : []
-      const colourChannelNames = raw
-        .map((c: { name?: string; status?: string }) => {
-          if (String(c?.status ?? '').toLowerCase() === 'destroyed') return ''
-          return String(c?.name ?? '').trim()
-        })
-        .filter(Boolean) as string[]
+      const activeJson = activeColourRowsFromJson(p.colours)
+      const plateColours = plateNamesFromColoursNeededJson(activeJson)
+      const colourChannelNames = channelNamesFromActiveJson(activeJson)
+      const { max: reuseCyclesMax } = hubReuseCyclesFromColoursJson(p.colours)
       return {
         id: p.id,
         plateSetCode: p.plateSetCode,
@@ -126,35 +212,46 @@ export async function GET() {
         totalPlates: p.totalPlates,
         platesInRackCount: countPlatesInRack(p.colours),
         colourChannelNames,
+        createdAt: p.createdAt.toISOString(),
+        lastStatusUpdatedAt: p.lastStatusUpdatedAt.toISOString(),
+        reuseCyclesMax,
+        plateSize: p.plateSize,
       }
     }
 
-    const custodyFromReqs = stagingReqRows.map((r) => ({
-      kind: 'requirement' as const,
-      id: r.id,
-      displayCode: r.requirementCode,
-      cartonName: r.cartonName,
-      artworkCode: r.artworkCode,
-      artworkVersion: r.artworkVersion,
-      plateColours: plateNamesFromColoursNeededJson(r.coloursNeeded),
-      custodySource:
-        r.triageChannel === 'outside_vendor' ? ('vendor' as const) : ('ctp' as const),
-      numberOfColours: r.numberOfColours,
-      newPlatesNeeded: r.newPlatesNeeded,
-      partialRemake: r.partialRemake,
-    }))
+    const custodyFromReqs = stagingReqRows.map((r) => {
+      const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
+      const jobCardHub =
+        r.jobCardId && jcHubById.has(r.jobCardId) ? jcHubById.get(r.jobCardId)! : null
+      return {
+        kind: 'requirement' as const,
+        id: r.id,
+        displayCode: r.requirementCode,
+        cartonName: r.cartonName,
+        artworkCode: r.artworkCode,
+        artworkVersion: r.artworkVersion,
+        plateColours: plateNamesFromColoursNeededJson(activeNeeded),
+        custodySource:
+          r.triageChannel === 'outside_vendor' ? ('vendor' as const) : ('ctp' as const),
+        numberOfColours: r.numberOfColours,
+        newPlatesNeeded: r.newPlatesNeeded,
+        partialRemake: r.partialRemake,
+        lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
+        jobCardId: r.jobCardId,
+        jobCardHub,
+        plateSize: r.plateSize,
+      }
+    })
 
     const custodyFromPlates = stagingPlateRows.map((p) => {
       const src = p.hubCustodySource
       const custodySource =
         src === 'vendor' || src === 'ctp' ? src : ('rack' as const)
-      const raw = Array.isArray(p.colours) ? p.colours : []
-      const colourChannelNames = raw
-        .map((c: { name?: string; status?: string }) => {
-          if (String(c?.status ?? '').toLowerCase() === 'destroyed') return ''
-          return String(c?.name ?? '').trim()
-        })
-        .filter(Boolean) as string[]
+      const activeJson = activeColourRowsFromJson(p.colours)
+      const plateColours = plateNamesFromColoursNeededJson(activeJson)
+      const colourChannelNames = channelNamesFromActiveJson(activeJson)
+      const jobCardHub =
+        p.jobCardId && jcHubById.has(p.jobCardId) ? jcHubById.get(p.jobCardId)! : null
       return {
         kind: 'plate' as const,
         id: p.id,
@@ -162,7 +259,7 @@ export async function GET() {
         cartonName: p.cartonName,
         artworkCode: p.artworkCode,
         artworkVersion: p.artworkVersion,
-        plateColours: plateNamesFromColoursNeededJson(p.colours),
+        plateColours,
         colourChannelNames,
         platesInRackCount: countPlatesInRack(p.colours),
         custodySource,
@@ -176,6 +273,9 @@ export async function GET() {
         artworkId: p.artworkId,
         jobCardId: p.jobCardId,
         slotNumber: p.slotNumber,
+        lastStatusUpdatedAt: p.lastStatusUpdatedAt.toISOString(),
+        jobCardHub,
+        plateSize: p.plateSize,
       }
     })
 

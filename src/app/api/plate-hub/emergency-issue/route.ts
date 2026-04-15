@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
         artworkId: artworkId || plate.artworkId,
         jobCardId: jobCardId || plate.jobCardId,
         slotNumber: setNumber || plate.slotNumber,
+        lastStatusUpdatedAt: new Date(),
       },
     })
     await tx.auditLog.create({

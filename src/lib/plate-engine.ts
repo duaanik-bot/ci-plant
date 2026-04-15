@@ -190,6 +190,7 @@ export async function onArtworkApproved(
       status: availability.newNeeded > 0 ? 'ctp_notified' : 'plates_ready',
       createdBy: userId,
       ctpTriggeredAt: availability.newNeeded > 0 ? new Date() : null,
+      plateSize: carton?.plateSize ?? null,
     },
   })
 
@@ -273,6 +274,7 @@ export async function createPlateRequirementFromPoLine(
       status: availability.newNeeded > 0 ? 'ctp_notified' : 'plates_ready',
       createdBy: userId,
       ctpTriggeredAt: availability.newNeeded > 0 ? new Date() : null,
+      plateSize: carton?.plateSize ?? null,
     },
   })
 

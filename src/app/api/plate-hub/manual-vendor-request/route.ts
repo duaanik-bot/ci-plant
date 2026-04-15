@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { PlateSize } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { generateRequirementCode } from '@/lib/plate-engine'
@@ -8,6 +9,7 @@ export const dynamic = 'force-dynamic'
 
 const bodySchema = z.object({
   cartonId: z.string().uuid(),
+  plateSize: z.nativeEnum(PlateSize),
   stdC: z.boolean(),
   stdM: z.boolean(),
   stdY: z.boolean(),
@@ -47,7 +49,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
   }
 
-  const { cartonId, stdC, stdM, stdY, stdK, pantoneOn, pantoneCount } = parsed.data
+  const { cartonId, plateSize, stdC, stdM, stdY, stdK, pantoneOn, pantoneCount } = parsed.data
   const coloursNeeded = buildColours(
     stdC,
     stdM,
@@ -90,6 +92,7 @@ export async function POST(req: NextRequest) {
       poLineId: null,
       partialRemake: false,
       createdBy: user!.id,
+      plateSize,
     },
   })
 

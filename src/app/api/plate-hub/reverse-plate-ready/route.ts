@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
 
       await db.plateRequirement.update({
         where: { id },
-        data: { status: nextStatus },
+        data: { status: nextStatus, lastStatusUpdatedAt: new Date() },
       })
       return NextResponse.json({ ok: true })
     }
@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
         status: prev,
         hubCustodySource: null,
         hubPreviousStatus: null,
+        lastStatusUpdatedAt: new Date(),
       },
     })
     return NextResponse.json({ ok: true })

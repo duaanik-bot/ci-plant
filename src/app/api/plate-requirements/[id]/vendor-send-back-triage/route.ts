@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
@@ -33,23 +34,27 @@ export async function POST(
           status: 'pending',
           ctpTriggeredAt: null,
           ctpOperator: null,
+          lastStatusUpdatedAt: new Date(),
         },
       })
 
-      if (reqRow.poLineId?.trim()) {
+      const poLineId = reqRow.poLineId?.trim()
+      if (poLineId) {
         const line = await tx.poLineItem.findUnique({
-          where: { id: reqRow.poLineId },
+          where: { id: poLineId },
           select: { specOverrides: true },
         })
-        const spec = (line?.specOverrides as Record<string, unknown> | null) || {}
-        await tx.poLineItem.update({
-          where: { id: reqRow.poLineId },
-          data: {
-            specOverrides: mergeOrchestrationIntoSpec(spec, {
-              plateFlowStatus: PLATE_FLOW.triage,
-            }) as object,
-          },
-        })
+        if (line) {
+          const spec = (line.specOverrides as Record<string, unknown> | null) || {}
+          await tx.poLineItem.update({
+            where: { id: poLineId },
+            data: {
+              specOverrides: mergeOrchestrationIntoSpec(spec, {
+                plateFlowStatus: PLATE_FLOW.triage,
+              }) as object,
+            },
+          })
+        }
       }
 
       await tx.auditLog.create({
@@ -63,6 +68,15 @@ export async function POST(
       })
     })
   } catch (e) {
+    console.error('[plate-requirements/vendor-send-back-triage]', e)
+    if (e instanceof Prisma.PrismaClientKnownRequestError) {
+      if (e.code === 'P2025') {
+        return NextResponse.json(
+          { error: 'Failed to revert: a linked PO line or record is missing.' },
+          { status: 409 },
+        )
+      }
+    }
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: msg }, { status: 500 })
   }

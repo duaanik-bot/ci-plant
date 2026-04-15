@@ -1,5 +1,10 @@
 import { db } from '@/lib/db'
-import { CUSTODY_AT_VENDOR, CUSTODY_IN_STOCK, CUSTODY_ON_FLOOR } from '@/lib/inventory-hub-custody'
+import {
+  CUSTODY_AT_VENDOR,
+  CUSTODY_HUB_CUSTODY_READY,
+  CUSTODY_IN_STOCK,
+  CUSTODY_ON_FLOOR,
+} from '@/lib/inventory-hub-custody'
 
 export type InventoryToolKind = 'die' | 'emboss_block' | 'shade_card'
 
@@ -40,7 +45,11 @@ export async function issueToolToMachine(
     await db.$transaction(async (tx) => {
       if (kind === 'die') {
         const upd = await tx.dye.updateMany({
-          where: { id: toolId, custodyStatus: CUSTODY_IN_STOCK, active: true },
+          where: {
+            id: toolId,
+            custodyStatus: { in: [CUSTODY_IN_STOCK, CUSTODY_HUB_CUSTODY_READY] },
+            active: true,
+          },
           data: {
             custodyStatus: CUSTODY_ON_FLOOR,
             issuedMachineId: machineId,
@@ -67,7 +76,11 @@ export async function issueToolToMachine(
 
       if (kind === 'emboss_block') {
         const upd = await tx.embossBlock.updateMany({
-          where: { id: toolId, custodyStatus: CUSTODY_IN_STOCK, active: true },
+          where: {
+            id: toolId,
+            custodyStatus: { in: [CUSTODY_IN_STOCK, CUSTODY_HUB_CUSTODY_READY] },
+            active: true,
+          },
           data: {
             custodyStatus: CUSTODY_ON_FLOOR,
             issuedMachineId: machineId,

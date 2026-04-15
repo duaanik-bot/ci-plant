@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { PlateSize } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
@@ -65,6 +66,7 @@ const createSchema = z
     slotNumber: z.string().optional().nullable(),
     ctpOperator: z.string().optional().nullable(),
     ctpDate: z.string().optional().nullable(),
+    plateSize: z.nativeEnum(PlateSize),
   })
   .superRefine((data, ctx) => {
     if (!data.autoGenerateSerial) {
@@ -177,6 +179,7 @@ export async function POST(req: NextRequest) {
         ctpOperator: data.ctpOperator ?? null,
         ctpDate: data.ctpDate ? new Date(data.ctpDate) : null,
         status: 'ready',
+        plateSize: data.plateSize,
       },
     })
   } catch (e) {

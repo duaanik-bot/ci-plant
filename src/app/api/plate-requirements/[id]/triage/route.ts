@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { PlateSize } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
@@ -10,6 +11,8 @@ const bodySchema = z.object({
   channel: z.enum(['stock_available', 'inhouse_ctp', 'outside_vendor']),
   /** Row-col key (e.g. `2-3`) when assigning from Live Rack for stock path */
   rackSlot: z.string().min(1).optional(),
+  /** Required for CTP/vendor when requirement and carton master have no size */
+  plateSize: z.nativeEnum(PlateSize).optional(),
 })
 
 export async function PATCH(
@@ -35,6 +38,35 @@ export async function PATCH(
   if (channel === 'outside_vendor') nextStatus = 'awaiting_vendor_delivery'
   if (channel === 'stock_available') nextStatus = 'awaiting_rack_slot'
 
+  let resolvedPlateSize: PlateSize | null =
+    parsed.data.plateSize ?? existing.plateSize ?? null
+  if (!resolvedPlateSize && existing.poLineId?.trim()) {
+    const line = await db.poLineItem.findUnique({
+      where: { id: existing.poLineId.trim() },
+      select: { cartonId: true },
+    })
+    if (line?.cartonId) {
+      const carton = await db.carton.findUnique({
+        where: { id: line.cartonId },
+        select: { plateSize: true },
+      })
+      resolvedPlateSize = carton?.plateSize ?? null
+    }
+  }
+
+  if (
+    (channel === 'inhouse_ctp' || channel === 'outside_vendor') &&
+    !resolvedPlateSize
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'Plate size is required — set it on the carton master or choose a size when dispatching to CTP/vendor.',
+      },
+      { status: 400 },
+    )
+  }
+
   const plateFlowStatus =
     channel === 'inhouse_ctp'
       ? PLATE_FLOW.ctp_queue
@@ -48,8 +80,12 @@ export async function PATCH(
       data: {
         triageChannel: channel,
         status: nextStatus,
+        lastStatusUpdatedAt: new Date(),
         ...(channel === 'stock_available' && parsed.data.rackSlot
           ? { reservedRackSlot: parsed.data.rackSlot.trim() }
+          : {}),
+        ...((channel === 'inhouse_ctp' || channel === 'outside_vendor') && resolvedPlateSize
+          ? { plateSize: resolvedPlateSize }
           : {}),
       },
     })
