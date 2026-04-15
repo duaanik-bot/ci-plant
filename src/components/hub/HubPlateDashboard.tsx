@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { safeJsonParse, safeJsonParseArray, safeJsonStringify } from '@/lib/safe-json'
@@ -11,12 +11,7 @@ import {
   stripPlateColourDisplaySuffix,
 } from '@/lib/hub-plate-card-ui'
 import { PLATE_SCRAP_REASONS, type PlateScrapReasonCode } from '@/lib/plate-scrap-reasons'
-import {
-  hubAddedToRackLabel,
-  hubMarkedReadyLabel,
-  hubQueueAgeLabel,
-  hubQueueStale,
-} from '@/lib/hub-card-time'
+import { hubLastActionLine } from '@/lib/hub-card-time'
 import {
   PLATE_FIRST_ORIGIN_OPTIONS,
   defaultFirstOriginFromCustody,
@@ -28,6 +23,13 @@ import {
   hubPlateSizeCardLine,
   type HubPlateSize,
 } from '@/lib/plate-size'
+import { JobAuditModal, type PlateHubAuditContext } from '@/components/hub/JobAuditModal'
+import {
+  MasterLedgerTable,
+  LEDGER_ZONE_FILTER_OPTIONS,
+  LedgerSizeFilterOptions,
+  type MasterLedgerRow,
+} from '@/components/hub/MasterLedgerTable'
 
 const RETURN_SIZE_MOD_REASONS: {
   value: 'alternate_machine' | 'edge_damage' | 'prepress_error'
@@ -68,6 +70,7 @@ type CtpRow = {
   partialRemake?: boolean
   lastStatusUpdatedAt?: string
   plateSize?: HubPlateSize | null
+  reservedRackSlot?: string | null
 }
 
 type PlateCard = {
@@ -143,8 +146,10 @@ type DashboardPayload = {
   triage: TriageRow[]
   ctpQueue: CtpRow[]
   vendorQueue: CtpRow[]
+  awaitingRack: CtpRow[]
   inventory: PlateCard[]
   custody: CustodyCard[]
+  ledgerRows: MasterLedgerRow[]
 }
 
 function hubSearchMatch(
@@ -166,6 +171,25 @@ function formatPlateCardRackLocation(p: PlateCard): string | null {
   const parts = [p.rackNumber?.trim(), p.slotNumber?.trim()].filter(Boolean)
   if (parts.length) return parts.join(' · ')
   return null
+}
+
+/**
+ * Checkbox keys / API payload must use `plate_store.colours[].name` when the dashboard
+ * exposes parallel `colourChannelNames`; labels stay human-readable (`plateColours`).
+ */
+function stockPullChannelRows(p: PlateCard): { submitKey: string; displayLabel: string }[] {
+  const labels = p.plateColours ?? []
+  const rawNames = p.colourChannelNames ?? []
+  if (rawNames.length > 0 && rawNames.length === labels.length) {
+    return rawNames.map((submitKey, i) => ({
+      submitKey,
+      displayLabel: labels[i] ?? submitKey,
+    }))
+  }
+  return labels.map((displayLabel) => ({
+    submitKey: displayLabel,
+    displayLabel,
+  }))
 }
 
 /** Stable CMYK-first ordering for merged rack colour labels (matches hub dot palette). */
@@ -269,6 +293,38 @@ function HubPlateSizeLine({ size }: { size: HubPlateSize | null | undefined }) {
   return <p className="text-xs font-medium text-zinc-400 leading-tight">{line}</p>
 }
 
+/** Inline size correction on incoming triage — persists before CTP / vendor dispatch. */
+function TriageInlinePlateSize({
+  row,
+  disabled,
+  onSizeChange,
+}: {
+  row: TriageRow
+  disabled?: boolean
+  onSizeChange: (requirementId: string, plateSize: HubPlateSize) => void
+}) {
+  const value = row.plateSize ?? row.cartonMasterPlateSize ?? 'SIZE_560_670'
+  return (
+    <div className="mt-0.5 inline-flex items-baseline gap-1 flex-wrap">
+      <span className="text-xs font-medium text-zinc-400 shrink-0">Size:</span>
+      <select
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onSizeChange(row.id, e.target.value as HubPlateSize)}
+        aria-label="Plate sheet size"
+        className="text-xs font-medium text-zinc-400 bg-transparent border-0 border-b border-dashed border-zinc-600/0 hover:border-zinc-500/60 hover:text-zinc-300 focus-visible:border-amber-500/70 focus-visible:text-zinc-200 focus:outline-none cursor-pointer py-0.5 pl-0 pr-5 -ml-0.5 max-w-[10rem] rounded-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
+        style={{ backgroundImage: 'none' }}
+      >
+        {HUB_PLATE_SIZE_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value} className="bg-zinc-900 text-zinc-200">
+            {opt.mm}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 function HubPlateSizeSegmented({
   value,
   onChange,
@@ -309,42 +365,30 @@ function HubPlateSizeSegmented({
   )
 }
 
-function HubStaleQueueTime({ at }: { at: string | null | undefined }) {
-  const stale = hubQueueStale(at)
-  const age = hubQueueAgeLabel(at)
+function HubLastActionFooter({ at }: { at: string | null | undefined }) {
+  const line = hubLastActionLine(at)
+  if (!line) return null
+  return <p className="mt-1.5 text-[10px] leading-tight text-gray-500">{line}</p>
+}
+
+/** Clickable carton title — opens job audit modal. */
+function HubCartonAuditTitle({
+  children,
+  onOpenAudit,
+  className,
+}: {
+  children: ReactNode
+  onOpenAudit: () => void
+  className?: string
+}) {
   return (
-    <p
-      className={`mt-1.5 text-[10px] leading-tight ${
-        stale ? 'text-red-400 font-medium' : 'text-zinc-500'
-      }`}
+    <button
+      type="button"
+      onClick={onOpenAudit}
+      className={`text-left cursor-pointer hover:underline text-blue-400 hover:text-blue-300 transition-colors truncate ${className ?? ''}`}
     >
-      Time in queue: {age}
-    </p>
-  )
-}
-
-function HubTriageTime({ at }: { at: string | null | undefined }) {
-  return (
-    <p className="mt-1.5 text-[10px] leading-tight text-zinc-500">
-      Time in triage: {hubQueueAgeLabel(at)}
-    </p>
-  )
-}
-
-function HubRackAdded({ createdAt }: { createdAt: string | null | undefined }) {
-  if (!createdAt) return null
-  return (
-    <p className="mt-1.5 text-[10px] leading-tight text-zinc-500">
-      Added to rack: {hubAddedToRackLabel(createdAt)}
-    </p>
-  )
-}
-
-function HubCustodyReady({ at }: { at: string | null | undefined }) {
-  return (
-    <p className="mt-1.5 text-[10px] leading-tight text-zinc-500">
-      Marked ready: {hubMarkedReadyLabel(at)}
-    </p>
+      {children}
+    </button>
   )
 }
 
@@ -389,8 +433,10 @@ function safeReadDashboard(text: string): DashboardPayload | null {
       triage: Array.isArray(o.triage) ? (o.triage as TriageRow[]) : [],
       ctpQueue: Array.isArray(o.ctpQueue) ? (o.ctpQueue as CtpRow[]) : [],
       vendorQueue: Array.isArray(o.vendorQueue) ? (o.vendorQueue as CtpRow[]) : [],
+      awaitingRack: Array.isArray(o.awaitingRack) ? (o.awaitingRack as CtpRow[]) : [],
       inventory: Array.isArray(o.inventory) ? (o.inventory as PlateCard[]) : [],
       custody: Array.isArray(o.custody) ? (o.custody as CustodyCard[]) : [],
+      ledgerRows: Array.isArray(o.ledgerRows) ? (o.ledgerRows as MasterLedgerRow[]) : [],
     }
   } catch {
     return null
@@ -399,12 +445,15 @@ function safeReadDashboard(text: string): DashboardPayload | null {
 
 export default function HubPlateDashboard() {
   const [loading, setLoading] = useState(true)
+  const [jobAudit, setJobAudit] = useState<PlateHubAuditContext | null>(null)
   const [data, setData] = useState<DashboardPayload>({
     triage: [],
     ctpQueue: [],
     vendorQueue: [],
+    awaitingRack: [],
     inventory: [],
     custody: [],
+    ledgerRows: [],
   })
   const [addStockOpen, setAddStockOpen] = useState(false)
   const [addCartonQuery, setAddCartonQuery] = useState('')
@@ -450,7 +499,9 @@ export default function HubPlateDashboard() {
   const [scrapReasonCode, setScrapReasonCode] = useState<PlateScrapReasonCode | ''>('')
 
   const [returnAuditModal, setReturnAuditModal] = useState<{
-    plateStoreId: string
+    kind: 'plate' | 'requirement'
+    plateStoreId?: string
+    requirementId?: string
     plateSetCode: string
     cartonName: string
     colourNames: string[]
@@ -471,6 +522,12 @@ export default function HubPlateDashboard() {
   const [vendorSearch, setVendorSearch] = useState('')
   const [invSearch, setInvSearch] = useState('')
   const [custSearch, setCustSearch] = useState('')
+
+  const [hubView, setHubView] = useState<'board' | 'table'>('board')
+  const [ledgerZoneFilter, setLedgerZoneFilter] = useState('')
+  const [ledgerSizeFilter, setLedgerSizeFilter] = useState('')
+  const [ledgerSearch, setLedgerSearch] = useState('')
+  const ledgerSizeOptions = useMemo(() => LedgerSizeFilterOptions(), [])
 
   const [stockModal, setStockModal] = useState<TriageRow | null>(null)
   const [stockPlateId, setStockPlateId] = useState('')
@@ -521,7 +578,15 @@ export default function HubPlateDashboard() {
       const parsed = safeReadDashboard(dText)
       if (!parsed) {
         toast.error('Unexpected dashboard response')
-        setData({ triage: [], ctpQueue: [], vendorQueue: [], inventory: [], custody: [] })
+        setData({
+          triage: [],
+          ctpQueue: [],
+          vendorQueue: [],
+          awaitingRack: [],
+          inventory: [],
+          custody: [],
+          ledgerRows: [],
+        })
       } else {
         setData(parsed)
       }
@@ -777,20 +842,54 @@ export default function HubPlateDashboard() {
     }
   }
 
-  async function receiveVendorToTriage(requirementId: string) {
+  async function patchIncomingTriagePlateSize(requirementId: string, plateSize: HubPlateSize) {
+    if (!requirementId?.trim()) return
+    let revertPlateSize: HubPlateSize | null | undefined
+    let shouldPatch = false
+    setData((prev) => {
+      const row = prev.triage.find((r) => r.id === requirementId)
+      if (!row || row.plateSize === plateSize) return prev
+      revertPlateSize = row.plateSize
+      shouldPatch = true
+      return {
+        ...prev,
+        triage: prev.triage.map((r) =>
+          r.id === requirementId ? { ...r, plateSize } : r,
+        ),
+      }
+    })
+    if (!shouldPatch) return
+
     setSaving(true)
     try {
-      const r = await fetch(`/api/plate-requirements/${requirementId}/vendor-received`, {
-        method: 'POST',
+      const r = await fetch(`/api/plate-requirements/${requirementId}/plate-size`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ plateSize }),
       })
       const t = await r.text()
       const j = safeJsonParse<{ error?: string }>(t, {})
       if (!r.ok) {
-        toast.error(j.error ?? 'Receive failed')
+        setData((prev) => ({
+          ...prev,
+          triage: prev.triage.map((row) =>
+            row.id === requirementId ? { ...row, plateSize: revertPlateSize ?? null } : row,
+          ),
+        }))
+        toast.error(j.error ?? 'Could not update size')
         return
       }
-      toast.success('Received — job back in incoming triage')
-      await load()
+      const mm = HUB_PLATE_SIZE_OPTIONS.find((o) => o.value === plateSize)?.mm ?? plateSize
+      toast.success(`Size updated to ${mm}`, { duration: 2000 })
+    } catch (e) {
+      console.error(e)
+      setData((prev) => ({
+        ...prev,
+        triage: prev.triage.map((row) =>
+          row.id === requirementId ? { ...row, plateSize: revertPlateSize ?? null } : row,
+        ),
+      }))
+      toast.error(e instanceof Error ? e.message : 'Could not update size')
     } finally {
       setSaving(false)
     }
@@ -1216,10 +1315,13 @@ export default function HubPlateDashboard() {
 
   async function submitReturnToRack() {
     if (!returnAuditModal) return
-    const returned = Object.entries(returnAuditPick)
-      .filter(([, v]) => v)
-      .map(([k]) => k)
-    if (!returned.length) {
+    const returned =
+      returnAuditModal.colourNames.length === 0
+        ? []
+        : Object.entries(returnAuditPick)
+            .filter(([, v]) => v)
+            .map(([k]) => k)
+    if (returnAuditModal.colourNames.length > 0 && !returned.length) {
       toast.error('Select at least one plate returning to rack')
       return
     }
@@ -1233,7 +1335,9 @@ export default function HubPlateDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: safeJsonStringify({
-          plateStoreId: returnAuditModal.plateStoreId,
+          ...(returnAuditModal.kind === 'plate'
+            ? { plateStoreId: returnAuditModal.plateStoreId }
+            : { requirementId: returnAuditModal.requirementId }),
           returnedColourNames: returned,
           firstOrigin: returnAuditOrigin,
           targetPlateSize: returnSizePick,
@@ -1366,12 +1470,13 @@ export default function HubPlateDashboard() {
       return
     }
     const p = data.inventory.find((x) => x.id === stockPlateId)
-    if (!p?.plateColours?.length) {
+    const rows = p ? stockPullChannelRows(p) : []
+    if (!rows.length) {
       setStockColourPick({})
       return
     }
     const init: Record<string, boolean> = {}
-    for (const c of p.plateColours) init[c] = false
+    for (const r of rows) init[r.submitKey] = false
     setStockColourPick(init)
   }, [stockPlateId, data.inventory])
 
@@ -1575,15 +1680,107 @@ export default function HubPlateDashboard() {
       <div className="max-w-[1600px] mx-auto space-y-6">
         <HubCategoryNav active="plates" />
 
-        <header className="flex flex-col gap-1 border-b border-zinc-700 pb-4">
-          <h1 className="text-2xl font-bold tracking-tight text-white">Plate Hub</h1>
-          <p className="text-sm text-zinc-400">
-            Preparation lanes → custody floor staging (mark ready). High-contrast layout for floor speed.
-          </p>
+        <header className="flex flex-col gap-3 border-b border-zinc-700 pb-4">
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold tracking-tight text-white">Plate Hub</h1>
+              <p className="text-sm text-zinc-400 mt-1">
+                Preparation lanes → custody floor staging (mark ready). High-contrast layout for floor
+                speed.
+              </p>
+            </div>
+            <div
+              className="flex rounded-lg border border-zinc-600 overflow-hidden p-0.5 bg-black/60 shrink-0"
+              role="tablist"
+              aria-label="Hub view"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={hubView === 'board'}
+                onClick={() => setHubView('board')}
+                className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
+                  hubView === 'board'
+                    ? 'bg-amber-600 text-white'
+                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                }`}
+              >
+                📊 Board view
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={hubView === 'table'}
+                onClick={() => setHubView('table')}
+                className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
+                  hubView === 'table'
+                    ? 'bg-amber-600 text-white'
+                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                }`}
+              >
+                ≡ Table view
+              </button>
+            </div>
+          </div>
         </header>
 
         {loading ? (
           <p className="text-zinc-500">Loading…</p>
+        ) : hubView === 'table' ? (
+          <div className="space-y-4">
+            <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end">
+              <label className="block flex-1 min-w-[200px]">
+                <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                  Search (all columns)
+                </span>
+                <input
+                  value={ledgerSearch}
+                  onChange={(e) => setLedgerSearch(e.target.value)}
+                  placeholder="Job ID, carton, AW code, zone…"
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
+                />
+              </label>
+              <label className="block min-w-[180px]">
+                <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                  Zone
+                </span>
+                <select
+                  value={ledgerZoneFilter}
+                  onChange={(e) => setLedgerZoneFilter(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+                >
+                  {LEDGER_ZONE_FILTER_OPTIONS.map((o) => (
+                    <option key={o.value || 'all'} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block min-w-[160px]">
+                <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                  Plate size
+                </span>
+                <select
+                  value={ledgerSizeFilter}
+                  onChange={(e) => setLedgerSizeFilter(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+                >
+                  {ledgerSizeOptions.map((o) => (
+                    <option key={o.value || 'all-sz'} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <MasterLedgerTable
+              rows={data.ledgerRows}
+              searchQuery={ledgerSearch}
+              zoneFilter={ledgerZoneFilter}
+              sizeFilter={ledgerSizeFilter}
+              onOpenAudit={setJobAudit}
+            />
+          </div>
         ) : (
           <>
             {/* ZONE 1 — Triage */}
@@ -1607,7 +1804,31 @@ export default function HubPlateDashboard() {
                       />
                       <div className="flex-1 min-w-0">
                         <p className="font-mono text-amber-300 text-sm">{row.requirementCode}</p>
-                        <p className="text-white font-medium truncate pr-1">{row.cartonName}</p>
+                        <HubCartonAuditTitle
+                          className="font-medium text-sm w-full block"
+                          onOpenAudit={() =>
+                            setJobAudit({
+                              entity: 'requirement',
+                              id: row.id,
+                              zoneLabel: 'Incoming triage',
+                              cartonName: row.cartonName,
+                              artworkCode: row.artworkCode,
+                              displayCode: row.requirementCode,
+                              poLineId: row.poLineId,
+                              plateSize: row.plateSize ?? row.cartonMasterPlateSize ?? null,
+                              plateColours: row.plateColours,
+                              coloursRequired: Math.max(
+                                row.plateColours.length,
+                                row.newPlatesNeeded,
+                              ),
+                              platesInRackCount:
+                                triageRackStockById.get(row.id)?.matchCount ?? null,
+                              statusLabel: row.status.replace(/_/g, ' '),
+                            })
+                          }
+                        >
+                          {row.cartonName}
+                        </HubCartonAuditTitle>
                         <p className="text-zinc-400 text-xs mt-1">
                           Plates required:{' '}
                           <span className="text-white font-semibold">{row.newPlatesNeeded}</span>
@@ -1615,7 +1836,11 @@ export default function HubPlateDashboard() {
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {row.artworkCode?.trim() || '—'}
                         </p>
-                        <HubPlateSizeLine size={row.plateSize ?? row.cartonMasterPlateSize} />
+                        <TriageInlinePlateSize
+                          row={row}
+                          disabled={saving}
+                          onSizeChange={(id, ps) => void patchIncomingTriagePlateSize(id, ps)}
+                        />
                         <div className="mt-1">
                           <ColourChannelsRow labels={row.plateColours} />
                         </div>
@@ -1629,7 +1854,7 @@ export default function HubPlateDashboard() {
                           }
                         />
                         {row.lastStatusUpdatedAt ? (
-                          <HubTriageTime at={row.lastStatusUpdatedAt} />
+                          <HubLastActionFooter at={row.lastStatusUpdatedAt} />
                         ) : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -1681,6 +1906,57 @@ export default function HubPlateDashboard() {
               </div>
             </section>
 
+            {data.awaitingRack.length > 0 ? (
+              <section className="rounded-xl border-2 border-sky-800/70 bg-zinc-950 p-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-300 mb-2">
+                  Awaiting rack slot
+                </h2>
+                <ul className="space-y-2 text-sm">
+                  {data.awaitingRack.map((job) => (
+                    <li
+                      key={job.id}
+                      className="rounded-lg border border-sky-900/50 bg-black p-2 flex flex-col sm:flex-row sm:items-center gap-2"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="font-mono text-sky-200 text-xs">{job.requirementCode}</p>
+                        <HubCartonAuditTitle
+                          className="font-medium text-sm"
+                          onOpenAudit={() =>
+                            setJobAudit({
+                              entity: 'requirement',
+                              id: job.id,
+                              zoneLabel: 'Awaiting rack slot',
+                              cartonName: job.cartonName,
+                              artworkCode: job.artworkCode,
+                              displayCode: job.requirementCode,
+                              poLineId: job.poLineId,
+                              plateSize: job.plateSize ?? null,
+                              plateColours: job.plateColours,
+                              coloursRequired: Math.max(
+                                job.plateColours.length,
+                                job.newPlatesNeeded ?? job.numberOfColours ?? 0,
+                              ),
+                              platesInRackCount: null,
+                              statusLabel: job.status.replace(/_/g, ' '),
+                            })
+                          }
+                        >
+                          {job.cartonName}
+                        </HubCartonAuditTitle>
+                        <p className="text-xs text-zinc-500 mt-0.5">
+                          Reserved slot:{' '}
+                          <span className="text-sky-200 font-mono">
+                            {job.reservedRackSlot?.trim() || '—'}
+                          </span>
+                        </p>
+                        <HubPlateSizeLine size={job.plateSize} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
             {/* Lanes: CTP · outside vendor · rack · custody */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
               {/* CTP */}
@@ -1721,12 +1997,35 @@ export default function HubPlateDashboard() {
                           })}
                         />
                         <p className="font-mono text-amber-300 text-xs">{job.requirementCode}</p>
-                        <p className="text-white font-semibold text-sm truncate mt-0.5 pr-1">
-                          {job.cartonName}
+                        <div className="flex flex-wrap items-baseline gap-x-1 min-w-0 mt-0.5 pr-1">
+                          <HubCartonAuditTitle
+                            className="font-semibold text-sm"
+                            onOpenAudit={() =>
+                              setJobAudit({
+                                entity: 'requirement',
+                                id: job.id,
+                                zoneLabel: 'CTP queue',
+                                cartonName: job.cartonName,
+                                artworkCode: job.artworkCode,
+                                displayCode: job.requirementCode,
+                                poLineId: job.poLineId,
+                                plateSize: job.plateSize ?? null,
+                                plateColours: job.plateColours,
+                                coloursRequired: Math.max(
+                                  job.plateColours.length,
+                                  job.newPlatesNeeded ?? job.numberOfColours ?? 0,
+                                ),
+                                platesInRackCount: null,
+                                statusLabel: job.status.replace(/_/g, ' '),
+                              })
+                            }
+                          >
+                            {job.cartonName}
+                          </HubCartonAuditTitle>
                           {job.partialRemake ? (
-                            <span className="text-rose-400 font-bold"> (Remake)</span>
+                            <span className="text-rose-400 font-bold shrink-0 text-sm">(Remake)</span>
                           ) : null}
-                        </p>
+                        </div>
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
@@ -1752,7 +2051,9 @@ export default function HubPlateDashboard() {
                         >
                           Send back to Triage
                         </button>
-                        <HubStaleQueueTime at={job.lastStatusUpdatedAt} />
+                        {job.lastStatusUpdatedAt ? (
+                          <HubLastActionFooter at={job.lastStatusUpdatedAt} />
+                        ) : null}
                       </li>
                     ))
                   )}
@@ -1800,12 +2101,35 @@ export default function HubPlateDashboard() {
                           })}
                         />
                         <p className="font-mono text-violet-200 text-xs">{job.requirementCode}</p>
-                        <p className="text-white font-semibold text-sm truncate mt-0.5 pr-1">
-                          {job.cartonName}
+                        <div className="flex flex-wrap items-baseline gap-x-1 min-w-0 mt-0.5 pr-1">
+                          <HubCartonAuditTitle
+                            className="font-semibold text-sm"
+                            onOpenAudit={() =>
+                              setJobAudit({
+                                entity: 'requirement',
+                                id: job.id,
+                                zoneLabel: 'Outside vendor',
+                                cartonName: job.cartonName,
+                                artworkCode: job.artworkCode,
+                                displayCode: job.requirementCode,
+                                poLineId: job.poLineId,
+                                plateSize: job.plateSize ?? null,
+                                plateColours: job.plateColours,
+                                coloursRequired: Math.max(
+                                  job.plateColours.length,
+                                  job.newPlatesNeeded ?? job.numberOfColours ?? 0,
+                                ),
+                                platesInRackCount: null,
+                                statusLabel: job.status.replace(/_/g, ' '),
+                              })
+                            }
+                          >
+                            {job.cartonName}
+                          </HubCartonAuditTitle>
                           {job.partialRemake ? (
-                            <span className="text-rose-400 font-bold"> (Remake)</span>
+                            <span className="text-rose-400 font-bold shrink-0 text-sm">(Remake)</span>
                           ) : null}
-                        </p>
+                        </div>
                         <p className="text-xs text-zinc-400 mt-0.5">
                           AW: {job.artworkCode?.trim() || '—'}
                         </p>
@@ -1821,15 +2145,7 @@ export default function HubPlateDashboard() {
                           className="mt-1.5 w-full px-2 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
                           onClick={() => void markPlateReadyRequirement(job, 'vendor')}
                         >
-                          Mark plate ready
-                        </button>
-                        <button
-                          type="button"
-                          disabled={saving}
-                          onClick={() => void receiveVendorToTriage(job.id)}
-                          className="mt-1.5 w-full px-2 py-1.5 rounded bg-emerald-900/80 hover:bg-emerald-800 border border-emerald-700/60 text-emerald-100 text-xs font-semibold"
-                        >
-                          Received → Triage
+                          Receive &amp; Mark Ready
                         </button>
                         <button
                           type="button"
@@ -1839,7 +2155,9 @@ export default function HubPlateDashboard() {
                         >
                           Send back to Triage
                         </button>
-                        <HubStaleQueueTime at={job.lastStatusUpdatedAt} />
+                        {job.lastStatusUpdatedAt ? (
+                          <HubLastActionFooter at={job.lastStatusUpdatedAt} />
+                        ) : null}
                       </li>
                     ))
                   )}
@@ -1899,7 +2217,31 @@ export default function HubPlateDashboard() {
                           {p.serialNumber ? (
                             <p className="text-zinc-400 text-xs font-mono">SN {p.serialNumber}</p>
                           ) : null}
-                          <p className="text-white font-semibold text-sm truncate mt-0.5">{p.cartonName}</p>
+                          <HubCartonAuditTitle
+                            className="font-semibold text-sm w-full block mt-0.5"
+                            onOpenAudit={() =>
+                              setJobAudit({
+                                entity: 'plate',
+                                id: p.id,
+                                zoneLabel: 'Live inventory',
+                                cartonName: p.cartonName,
+                                artworkCode: p.artworkCode,
+                                displayCode: p.plateSetCode,
+                                poLineId: null,
+                                plateSize: p.plateSize ?? null,
+                                plateColours: p.plateColours ?? [],
+                                coloursRequired:
+                                  p.numberOfColours ??
+                                  p.plateColours?.length ??
+                                  p.totalPlates ??
+                                  0,
+                                platesInRackCount: p.platesInRackCount ?? null,
+                                statusLabel: p.status.replace(/_/g, ' '),
+                              })
+                            }
+                          >
+                            {p.cartonName}
+                          </HubCartonAuditTitle>
                           <p className="text-xs text-zinc-400 mt-0.5">
                             AW: {p.artworkCode?.trim() || '—'}
                           </p>
@@ -1950,7 +2292,7 @@ export default function HubPlateDashboard() {
                           >
                             Mark plate ready
                           </button>
-                          <HubRackAdded createdAt={p.createdAt} />
+                          <HubLastActionFooter at={p.lastStatusUpdatedAt ?? p.createdAt} />
                         </li>
                       )
                     })
@@ -2003,12 +2345,37 @@ export default function HubPlateDashboard() {
                           {sourceBadgeLabel(c.custodySource)}
                         </span>
                         <p className="font-mono text-amber-300 text-xs">{c.displayCode}</p>
-                        <p className="text-white font-semibold text-sm truncate mt-0.5 pr-1">
-                          {c.cartonName}
+                        <div className="flex flex-wrap items-baseline gap-x-1 min-w-0 mt-0.5 pr-1">
+                          <HubCartonAuditTitle
+                            className="font-semibold text-sm"
+                            onOpenAudit={() =>
+                              setJobAudit({
+                                entity: c.kind === 'requirement' ? 'requirement' : 'plate',
+                                id: c.id,
+                                zoneLabel: `Custody floor (${sourceBadgeLabel(c.custodySource)})`,
+                                cartonName: c.cartonName,
+                                artworkCode: c.artworkCode,
+                                displayCode: c.displayCode,
+                                poLineId: null,
+                                plateSize: c.plateSize ?? null,
+                                plateColours: c.plateColours,
+                                coloursRequired: Math.max(
+                                  c.plateColours.length,
+                                  c.kind === 'requirement'
+                                    ? (c.newPlatesNeeded ?? 0)
+                                    : (c.numberOfColours ?? c.totalPlates ?? 0),
+                                ),
+                                platesInRackCount: c.platesInRackCount ?? null,
+                                statusLabel: `Staging · ${sourceBadgeLabel(c.custodySource)}`,
+                              })
+                            }
+                          >
+                            {c.cartonName}
+                          </HubCartonAuditTitle>
                           {c.kind === 'requirement' && c.partialRemake ? (
-                            <span className="text-rose-400 font-bold"> (Remake)</span>
+                            <span className="text-rose-400 font-bold shrink-0 text-sm">(Remake)</span>
                           ) : null}
-                        </p>
+                        </div>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
                           <span className="text-xs text-zinc-400">
                             AW: {c.artworkCode?.trim() || '—'}
@@ -2026,28 +2393,28 @@ export default function HubPlateDashboard() {
                           </p>
                         ) : null}
                         <div className="mt-1.5 flex flex-col gap-2">
-                          {c.kind === 'plate' && plateColourNamesForScrap(c).length > 0 ? (
-                            <button
-                              type="button"
-                              className={`w-full py-1.5 rounded text-white text-[11px] font-bold shadow-sm ${
-                                c.jobCardHub?.key === 'printed'
-                                  ? 'bg-emerald-500 hover:bg-emerald-400 ring-2 ring-emerald-300/40'
-                                  : 'bg-emerald-700 hover:bg-emerald-600'
-                              }`}
-                              onClick={() =>
-                                setReturnAuditModal({
-                                  plateStoreId: c.id,
-                                  plateSetCode: c.displayCode,
-                                  cartonName: c.cartonName,
-                                  colourNames: plateColourNamesForScrap(c),
-                                  custodySource: c.custodySource,
-                                  plateSize: c.plateSize ?? null,
-                                })
-                              }
-                            >
-                              Return to Rack
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            className={`w-full py-1.5 rounded text-white text-[11px] font-bold shadow-sm ${
+                              c.jobCardHub?.key === 'printed'
+                                ? 'bg-emerald-500 hover:bg-emerald-400 ring-2 ring-emerald-300/40'
+                                : 'bg-emerald-700 hover:bg-emerald-600'
+                            }`}
+                            onClick={() =>
+                              setReturnAuditModal({
+                                kind: c.kind,
+                                plateStoreId: c.kind === 'plate' ? c.id : undefined,
+                                requirementId: c.kind === 'requirement' ? c.id : undefined,
+                                plateSetCode: c.displayCode,
+                                cartonName: c.cartonName,
+                                colourNames: plateColourNamesForScrap(c),
+                                custodySource: c.custodySource,
+                                plateSize: c.plateSize ?? null,
+                              })
+                            }
+                          >
+                            Return to Rack
+                          </button>
                           <button
                             type="button"
                             className="w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-[11px] font-semibold hover:bg-rose-950/70"
@@ -2097,7 +2464,7 @@ export default function HubPlateDashboard() {
                           </button>
                         </div>
                         {c.lastStatusUpdatedAt ? (
-                          <HubCustodyReady at={c.lastStatusUpdatedAt} />
+                          <HubLastActionFooter at={c.lastStatusUpdatedAt} />
                         ) : null}
                       </li>
                     ))
@@ -2108,6 +2475,8 @@ export default function HubPlateDashboard() {
           </>
         )}
       </div>
+
+      <JobAuditModal context={jobAudit} onClose={() => setJobAudit(null)} />
 
       {/* Add plate stock — master-linked */}
       {addStockOpen && (
@@ -2376,29 +2745,32 @@ export default function HubPlateDashboard() {
               />
             </label>
             {stockPlateId &&
-            data.inventory.find((p) => p.id === stockPlateId)?.plateColours?.length ? (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Pull colours (at least one)
-                </p>
-                <div className="flex flex-col gap-2 rounded-lg border border-zinc-700 bg-black/60 p-2">
-                  {(data.inventory.find((p) => p.id === stockPlateId)?.plateColours ?? []).map(
-                    (raw) => {
-                      const rows = hubChannelRowsFromLabels([raw])
+            (() => {
+              const sp = data.inventory.find((p) => p.id === stockPlateId)
+              const chRows = sp ? stockPullChannelRows(sp) : []
+              if (!chRows.length) return null
+              return (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Pull colours (at least one)
+                  </p>
+                  <div className="flex flex-col gap-2 rounded-lg border border-zinc-700 bg-black/60 p-2">
+                    {chRows.map(({ submitKey, displayLabel }) => {
+                      const rows = hubChannelRowsFromLabels([displayLabel])
                       const row = rows[0]
                       return (
                         <label
-                          key={raw}
+                          key={submitKey}
                           className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer"
                         >
                           <input
                             type="checkbox"
                             className="rounded border-zinc-600"
-                            checked={!!stockColourPick[raw]}
+                            checked={!!stockColourPick[submitKey]}
                             onChange={(e) =>
                               setStockColourPick((prev) => ({
                                 ...prev,
-                                [raw]: e.target.checked,
+                                [submitKey]: e.target.checked,
                               }))
                             }
                           />
@@ -2413,15 +2785,15 @@ export default function HubPlateDashboard() {
                               </span>
                             </span>
                           ) : (
-                            raw
+                            displayLabel
                           )}
                         </label>
                       )
-                    },
-                  )}
+                    })}
+                  </div>
                 </div>
-              </div>
-            ) : null}
+              )
+            })()}
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -2905,7 +3277,10 @@ export default function HubPlateDashboard() {
                   </p>
                   <div className="space-y-2 rounded-lg border border-zinc-700 bg-black/40 p-3">
                     {returnAuditModal.colourNames.length === 0 ? (
-                      <p className="text-xs text-zinc-500">No active channels on this set.</p>
+                      <p className="text-xs text-zinc-400 leading-snug">
+                        No channel list on this card. On confirm, all active plates for this custody
+                        row are returned to live inventory (same as selecting every channel).
+                      </p>
                     ) : (
                       returnAuditModal.colourNames.map((name) => (
                         <label
@@ -2944,12 +3319,15 @@ export default function HubPlateDashboard() {
                     type="button"
                     disabled={
                       saving ||
-                      !returnAuditModal.colourNames.length ||
-                      !Object.values(returnAuditPick).some(Boolean)
+                      (returnAuditModal.colourNames.length > 0 &&
+                        !Object.values(returnAuditPick).some(Boolean))
                     }
                     className="px-3 py-2 rounded bg-emerald-700 text-white font-semibold disabled:opacity-50"
                     onClick={() => {
-                      if (!Object.values(returnAuditPick).some(Boolean)) {
+                      if (
+                        returnAuditModal.colourNames.length > 0 &&
+                        !Object.values(returnAuditPick).some(Boolean)
+                      ) {
                         toast.error('Select at least one plate returning to rack')
                         return
                       }

@@ -41,13 +41,13 @@ function missingDelegate(modelName: string) {
   }
 }
 
-export const db = new Proxy(prisma as Record<string, unknown>, {
+export const db = new Proxy(prisma as unknown as Record<string, unknown>, {
   get(target, prop, receiver) {
     if (Reflect.has(target, prop)) {
       const value = Reflect.get(target, prop, receiver)
-      return typeof value === 'function' ? value.bind(target) : value
+      return typeof value === 'function' ? value.bind(prisma) : value
     }
     if (typeof prop === 'string') return missingDelegate(prop)
     return undefined
   },
-}) as PrismaClient
+}) as unknown as PrismaClient

@@ -3,6 +3,11 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
+import {
   PLATE_SCRAP_REASON_CODE_LIST,
   plateScrapReasonLabel,
 } from '@/lib/plate-scrap-reasons'
@@ -95,6 +100,9 @@ export async function POST(req: NextRequest) {
   const { numberOfColours, totalPlates, newPlates, oldPlates } = recountPlateMetrics(nextColours)
   const fullyGone = numberOfColours === 0
 
+  const fromZone =
+    plate.status === 'READY_ON_FLOOR' ? HUB_ZONE.CUSTODY_FLOOR : HUB_ZONE.LIVE_INVENTORY
+
   const updated = await db.$transaction(async (tx) => {
     const u = await tx.plateStore.update({
       where: { id: plateStoreId },
@@ -104,6 +112,7 @@ export async function POST(req: NextRequest) {
         totalPlates,
         newPlates,
         oldPlates,
+        ...(!fullyGone ? { lastStatusUpdatedAt: new Date() } : {}),
         ...(fullyGone
           ? {
               status: 'destroyed',
@@ -124,6 +133,20 @@ export async function POST(req: NextRequest) {
         reasonCode,
         reasonLabel,
         performedBy: user!.id,
+      },
+    })
+
+    await createPlateHubEvent(tx, {
+      plateStoreId,
+      actionType: PLATE_HUB_ACTION.SCRAPPED,
+      fromZone,
+      toZone: fullyGone ? HUB_ZONE.OTHER : fromZone,
+      details: {
+        scrappedColourNames: colourNames,
+        colourNames,
+        reasonCode,
+        reasonLabel,
+        fullyDestroyed: fullyGone,
       },
     })
 

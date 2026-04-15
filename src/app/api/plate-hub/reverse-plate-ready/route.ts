@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,15 +37,29 @@ export async function POST(req: NextRequest) {
       }
 
       let nextStatus: string
-      if (row.triageChannel === 'inhouse_ctp') nextStatus = 'ctp_internal_queue'
-      else if (row.triageChannel === 'outside_vendor') nextStatus = 'awaiting_vendor_delivery'
-      else {
+      let toZone: string
+      if (row.triageChannel === 'inhouse_ctp') {
+        nextStatus = 'ctp_internal_queue'
+        toZone = HUB_ZONE.CTP_QUEUE
+      } else if (row.triageChannel === 'outside_vendor') {
+        nextStatus = 'awaiting_vendor_delivery'
+        toZone = HUB_ZONE.OUTSIDE_VENDOR
+      } else {
         return NextResponse.json({ error: 'Cannot infer return lane' }, { status: 409 })
       }
 
-      await db.plateRequirement.update({
-        where: { id },
-        data: { status: nextStatus, lastStatusUpdatedAt: new Date() },
+      await db.$transaction(async (tx) => {
+        await tx.plateRequirement.update({
+          where: { id },
+          data: { status: nextStatus, lastStatusUpdatedAt: new Date() },
+        })
+        await createPlateHubEvent(tx, {
+          plateRequirementId: id,
+          actionType: PLATE_HUB_ACTION.REVERSED_READY,
+          fromZone: HUB_ZONE.CUSTODY_FLOOR,
+          toZone,
+          details: { kind: 'requirement', requirementCode: row.requirementCode, nextStatus },
+        })
       })
       return NextResponse.json({ ok: true })
     }
@@ -52,14 +71,28 @@ export async function POST(req: NextRequest) {
     }
 
     const prev = String(plate.hubPreviousStatus ?? '').trim() || 'ready'
-    await db.plateStore.update({
-      where: { id },
-      data: {
-        status: prev,
-        hubCustodySource: null,
-        hubPreviousStatus: null,
-        lastStatusUpdatedAt: new Date(),
-      },
+
+    await db.$transaction(async (tx) => {
+      await tx.plateStore.update({
+        where: { id },
+        data: {
+          status: prev,
+          hubCustodySource: null,
+          hubPreviousStatus: null,
+          lastStatusUpdatedAt: new Date(),
+        },
+      })
+      await createPlateHubEvent(tx, {
+        plateStoreId: id,
+        actionType: PLATE_HUB_ACTION.REVERSED_READY,
+        fromZone: HUB_ZONE.CUSTODY_FLOOR,
+        toZone: HUB_ZONE.LIVE_INVENTORY,
+        details: {
+          kind: 'plate',
+          plateSetCode: plate.plateSetCode,
+          restoredStatus: prev,
+        },
+      })
     })
     return NextResponse.json({ ok: true })
   } catch (e) {

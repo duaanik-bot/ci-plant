@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +24,7 @@ export async function POST(
   const updated = await db.$transaction(async (tx) => {
     const u = await tx.plateRequirement.update({
       where: { id },
-      data: { status: 'fulfilled' },
+      data: { status: 'fulfilled', lastStatusUpdatedAt: new Date() },
     })
 
     const poLineId = existing.poLineId?.trim()
@@ -38,6 +43,17 @@ export async function POST(
         },
       })
     }
+
+    await createPlateHubEvent(tx, {
+      plateRequirementId: id,
+      actionType: PLATE_HUB_ACTION.FULFILLED,
+      fromZone: HUB_ZONE.INCOMING_TRIAGE,
+      toZone: HUB_ZONE.FULFILLED,
+      details: {
+        previousStatus: existing.status,
+        requirementCode: existing.requirementCode,
+      },
+    })
 
     return u
   })

@@ -227,7 +227,6 @@ function CartonLookupField({
           const suggestedName = cartonQuery.trim()
           if (suggestedName) onCreate(suggestedName)
         }}
-        inputClassName="min-w-[180px] px-2 py-1 text-xs"
         inputClassName="min-w-[260px] px-2 py-1 text-xs"
         dropdownClassName="min-w-[320px]"
       />

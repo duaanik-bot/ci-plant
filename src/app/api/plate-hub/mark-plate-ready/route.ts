@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,9 +44,24 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      await db.plateRequirement.update({
-        where: { id },
-        data: { status: 'READY_ON_FLOOR', lastStatusUpdatedAt: new Date() },
+      const fromZone = okCtp ? HUB_ZONE.CTP_QUEUE : HUB_ZONE.OUTSIDE_VENDOR
+
+      await db.$transaction(async (tx) => {
+        await tx.plateRequirement.update({
+          where: { id },
+          data: { status: 'READY_ON_FLOOR', lastStatusUpdatedAt: new Date() },
+        })
+        await createPlateHubEvent(tx, {
+          plateRequirementId: id,
+          actionType: PLATE_HUB_ACTION.MARKED_READY,
+          fromZone,
+          toZone: HUB_ZONE.CUSTODY_FLOOR,
+          details: {
+            kind: 'requirement',
+            requirementCode: row.requirementCode,
+            previousStatus: row.status,
+          },
+        })
       })
       return NextResponse.json({ ok: true })
     }
@@ -57,16 +77,29 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    await db.plateStore.update({
-      where: { id },
-      data: {
-        status: 'READY_ON_FLOOR',
-        hubCustodySource: 'rack',
-        hubPreviousStatus: plate.status,
-        issuedTo: null,
-        issuedAt: null,
-        lastStatusUpdatedAt: new Date(),
-      },
+    await db.$transaction(async (tx) => {
+      await tx.plateStore.update({
+        where: { id },
+        data: {
+          status: 'READY_ON_FLOOR',
+          hubCustodySource: 'rack',
+          hubPreviousStatus: plate.status,
+          issuedTo: null,
+          issuedAt: null,
+          lastStatusUpdatedAt: new Date(),
+        },
+      })
+      await createPlateHubEvent(tx, {
+        plateStoreId: id,
+        actionType: PLATE_HUB_ACTION.MARKED_READY,
+        fromZone: HUB_ZONE.LIVE_INVENTORY,
+        toZone: HUB_ZONE.CUSTODY_FLOOR,
+        details: {
+          kind: 'plate',
+          plateSetCode: plate.plateSetCode,
+          previousStatus: plate.status,
+        },
+      })
     })
     return NextResponse.json({ ok: true })
   } catch (e) {

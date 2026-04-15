@@ -191,20 +191,6 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  await db.plateAuditLog.create({
-    data: {
-      plateStoreId: created.id,
-      plateSetCode: created.plateSetCode,
-      action: 'created',
-      performedBy: user!.id,
-      details: {
-        cartonName: created.cartonName,
-        numberOfColours: created.numberOfColours,
-        rackLocation: created.rackLocation,
-      },
-    },
-  })
-
   await createAuditLog({
     userId: user!.id,
     action: 'INSERT',

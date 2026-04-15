@@ -1,10 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { PlateSize } from '@prisma/client'
+import { PlateSize, type Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
+import { plateColourCanonicalKey } from '@/lib/hub-plate-card-ui'
 import { plateScrapReasonLabel } from '@/lib/plate-scrap-reasons'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 export const dynamic = 'force-dynamic'
+
+async function nextPlateSetCode(tx: Prisma.TransactionClient): Promise<string> {
+  const year = new Date().getFullYear()
+  const prefix = `PS-${year}-`
+  const last = await tx.plateStore.findFirst({
+    where: { plateSetCode: { startsWith: prefix } },
+    orderBy: { plateSetCode: 'desc' },
+    select: { plateSetCode: true },
+  })
+  const lastSeq = last ? parseInt(last.plateSetCode.replace(prefix, ''), 10) || 0 : 0
+  return `${prefix}${String(lastSeq + 1).padStart(4, '0')}`
+}
+
+async function nextPlateSerial(tx: Prisma.TransactionClient): Promise<string> {
+  const year = new Date().getFullYear()
+  const prefix = `PL-SN-${year}-`
+  const last = await tx.plateStore.findFirst({
+    where: { serialNumber: { startsWith: prefix } },
+    orderBy: { serialNumber: 'desc' },
+    select: { serialNumber: true },
+  })
+  const lastSeq = last?.serialNumber ? parseInt(last.serialNumber.replace(prefix, ''), 10) || 0 : 0
+  return `${prefix}${String(lastSeq + 1).padStart(4, '0')}`
+}
 
 const firstOriginSchema = z.enum(['inhouse_ctp', 'outside_vendor', 'legacy_unknown'])
 
@@ -23,15 +53,23 @@ export const SIZE_MODIFICATION_REASON_LABELS: Record<
   prepress_error: 'Pre-press layout error / Manual correction',
 }
 
-const bodySchema = z.object({
-  plateStoreId: z.string().uuid(),
-  returnedColourNames: z.array(z.string().min(1)).min(1),
-  firstOrigin: firstOriginSchema,
-  /** If omitted, existing DB plate size is kept. */
-  targetPlateSize: z.nativeEnum(PlateSize).optional(),
-  sizeModificationReason: sizeModificationReasonSchema.optional(),
-  sizeModificationRemarks: z.string().max(500).optional(),
-})
+const bodySchema = z
+  .object({
+    /** Physical plate set on custody floor (Source: Rack, or plate row from vendor/CTP path). */
+    plateStoreId: z.string().uuid().optional(),
+    /** CTP/vendor requirement row on custody floor (`READY_ON_FLOOR`) — materializes inventory. */
+    requirementId: z.string().uuid().optional(),
+    /** When empty, server treats as “all active / needed channels” for the plate or requirement. */
+    returnedColourNames: z.array(z.string().min(1)).default([]),
+    firstOrigin: firstOriginSchema,
+    /** If omitted, existing DB plate size is kept. */
+    targetPlateSize: z.nativeEnum(PlateSize).optional(),
+    sizeModificationReason: sizeModificationReasonSchema.optional(),
+    sizeModificationRemarks: z.string().max(500).optional(),
+  })
+  .refine((d) => Boolean(d.plateStoreId) !== Boolean(d.requirementId), {
+    message: 'Provide exactly one of plateStoreId or requirementId',
+  })
 
 type ColourRow = {
   name?: string
@@ -42,6 +80,8 @@ type ColourRow = {
   reuseCount?: number
   firstOrigin?: string
   lastReturnAt?: string
+  destroyReason?: string
+  destroyedAt?: string
 }
 
 function recountPlateMetrics(colours: ColourRow[]) {
@@ -64,20 +104,242 @@ export async function POST(req: NextRequest) {
   const raw = await req.json().catch(() => ({}))
   const parsed = bodySchema.safeParse(raw)
   if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+    return NextResponse.json(
+      {
+        error:
+          parsed.error.flatten().formErrors[0] ??
+          'Invalid request — send exactly one of plateStoreId or requirementId, plus returnedColourNames.',
+      },
+      { status: 400 },
+    )
   }
 
-  const {
+  let {
     plateStoreId,
+    requirementId,
     returnedColourNames,
     firstOrigin,
     targetPlateSize,
     sizeModificationReason,
     sizeModificationRemarks,
   } = parsed.data
-  const returnedSet = new Set(returnedColourNames.map((n) => n.trim().toLowerCase()).filter(Boolean))
-  if (returnedSet.size === 0) {
-    return NextResponse.json({ error: 'Select at least one plate returning to rack' }, { status: 400 })
+
+  const nowIso = new Date().toISOString()
+  const remarksTrimmed = sizeModificationRemarks?.trim() || ''
+
+  // ── Custody requirement (vendor / in-house CTP) → new live inventory plate set ──
+  if (requirementId) {
+    const reqRow = await db.plateRequirement.findUnique({ where: { id: requirementId } })
+    if (!reqRow) return NextResponse.json({ error: 'Requirement not found' }, { status: 404 })
+    if (reqRow.status !== 'READY_ON_FLOOR') {
+      return NextResponse.json(
+        { error: 'Only custody floor requirements can return to rack' },
+        { status: 409 },
+      )
+    }
+
+    if (!returnedColourNames.length) {
+      const rawNeeded = Array.isArray(reqRow.coloursNeeded) ? reqRow.coloursNeeded : []
+      returnedColourNames = rawNeeded
+        .filter(
+          (row) =>
+            row &&
+            typeof row === 'object' &&
+            String((row as ColourRow).status ?? '').toLowerCase() !== 'destroyed',
+        )
+        .map((row) => String((row as { name?: string }).name ?? '').trim())
+        .filter(Boolean)
+    }
+    if (!returnedColourNames.length) {
+      return NextResponse.json(
+        { error: 'No channels to return — requirement has no active colours.' },
+        { status: 400 },
+      )
+    }
+
+    const needed = Array.isArray(reqRow.coloursNeeded)
+      ? (reqRow.coloursNeeded as { name: string; isNew?: boolean }[])
+      : []
+    const wantedCanon = new Set(
+      returnedColourNames.map((n) => plateColourCanonicalKey(n)).filter(Boolean),
+    )
+    const neededCanonSet = new Set(needed.map((r) => plateColourCanonicalKey(r.name)))
+
+    for (const w of Array.from(wantedCanon)) {
+      if (!neededCanonSet.has(w)) {
+        console.log('[plate-hub/return-to-rack] Requirement colour mismatch', {
+          returnedColourNames,
+          wantedCanon: Array.from(wantedCanon),
+          jobColours: needed.map((x) => x.name),
+          jobCanon: Array.from(neededCanonSet),
+        })
+        const display =
+          returnedColourNames.find((n) => plateColourCanonicalKey(n) === w) ?? w
+        return NextResponse.json(
+          { error: `Colour is not part of this requirement: ${display}` },
+          { status: 400 },
+        )
+      }
+    }
+
+    const rowsForRack = needed.filter((row) =>
+      wantedCanon.has(plateColourCanonicalKey(row.name)),
+    )
+    const rowsRemain = needed.filter(
+      (row) => !wantedCanon.has(plateColourCanonicalKey(row.name)),
+    )
+    if (!rowsForRack.length) {
+      return NextResponse.json({ error: 'No matching channels to move to inventory' }, { status: 400 })
+    }
+
+    const baselineSize = reqRow.plateSize ?? PlateSize.SIZE_560_670
+    const resolvedTargetSize = targetPlateSize ?? reqRow.plateSize ?? PlateSize.SIZE_560_670
+    const plateSizeChanged = resolvedTargetSize !== baselineSize
+    if (plateSizeChanged && !sizeModificationReason) {
+      return NextResponse.json(
+        { error: 'Reason for size modification is required when plate dimensions are changed.' },
+        { status: 400 },
+      )
+    }
+
+    const reasonLabel = sizeModificationReason
+      ? SIZE_MODIFICATION_REASON_LABELS[sizeModificationReason]
+      : null
+    let storageNotes: string | null = null
+    if (plateSizeChanged && reasonLabel) {
+      const line = `[${nowIso}] Plate size (custody requirement ${reqRow.requirementCode}): ${baselineSize} → ${resolvedTargetSize}: ${reasonLabel}${
+        remarksTrimmed ? `. Remarks: ${remarksTrimmed}` : ''
+      }`
+      storageNotes = line
+    }
+
+    const newColourJson: ColourRow[] = rowsForRack.map((r) => ({
+      name: r.name,
+      type: 'process',
+      status: r.isNew ? 'new' : 'returned',
+      firstOrigin,
+      reuseCount: 1,
+      lastReturnAt: nowIso,
+    }))
+    const { numberOfColours, totalPlates, newPlates, oldPlates } = recountPlateMetrics(newColourJson)
+
+    const created = await db.$transaction(async (tx) => {
+      const plateSetCode = await nextPlateSetCode(tx)
+      const serialNumber = await nextPlateSerial(tx)
+
+      const plate = await tx.plateStore.create({
+        data: {
+          plateSetCode,
+          serialNumber,
+          cartonName: reqRow.cartonName,
+          artworkCode: reqRow.artworkCode,
+          artworkVersion: reqRow.artworkVersion,
+          customerId: reqRow.customerId,
+          jobCardId: reqRow.jobCardId,
+          numberOfColours,
+          totalPlates,
+          newPlates,
+          oldPlates,
+          colours: newColourJson as object[],
+          status: 'in_stock',
+          plateSize: resolvedTargetSize,
+          storageNotes,
+          lastStatusUpdatedAt: new Date(),
+        },
+      })
+
+      const fullyDone = rowsRemain.length === 0
+      await tx.plateRequirement.update({
+        where: { id: requirementId },
+        data: {
+          coloursNeeded: rowsRemain as object[],
+          numberOfColours: rowsRemain.length,
+          newPlatesNeeded: rowsRemain.length,
+          lastStatusUpdatedAt: new Date(),
+          ...(fullyDone
+            ? { status: 'fulfilled_from_rack', triageChannel: null }
+            : {}),
+        },
+      })
+
+      await createPlateHubEvent(tx, {
+        plateRequirementId: requirementId,
+        actionType: PLATE_HUB_ACTION.RETURNED,
+        fromZone: HUB_ZONE.CUSTODY_FLOOR,
+        toZone: fullyDone ? HUB_ZONE.FULFILLED : HUB_ZONE.CUSTODY_FLOOR,
+        details: {
+          returnedColourNames,
+          firstOrigin,
+          materializedPlateStoreId: plate.id,
+          plateSetCode: plate.plateSetCode,
+          channelsToRack: rowsForRack.map((r) => r.name),
+          remainingChannels: rowsRemain.length,
+          fulfilled: fullyDone,
+          plateSizeChanged,
+          previousPlateSize: baselineSize,
+          targetPlateSize: resolvedTargetSize,
+          sizeModificationReason: sizeModificationReason ?? undefined,
+          sizeModificationRemarks: remarksTrimmed || undefined,
+        },
+      })
+
+      await createPlateHubEvent(tx, {
+        plateStoreId: plate.id,
+        actionType: PLATE_HUB_ACTION.MATERIALIZED_TO_INVENTORY,
+        fromZone: HUB_ZONE.CUSTODY_FLOOR,
+        toZone: HUB_ZONE.LIVE_INVENTORY,
+        details: {
+          requirementId,
+          requirementCode: reqRow.requirementCode,
+          channels: rowsForRack.map((r) => r.name),
+          plateSizeChanged,
+          oldSize: String(baselineSize),
+          newSize: String(resolvedTargetSize),
+          firstOrigin,
+        },
+      })
+
+      return plate
+    })
+
+    await createAuditLog({
+      userId: user!.id,
+      action: 'INSERT',
+      tableName: 'plate_store',
+      recordId: created.id,
+      newValue: {
+        custodyRequirementReturn: true,
+        requirementId,
+        requirementCode: reqRow.requirementCode,
+        plateSetCode: created.plateSetCode,
+        returnedColourNames,
+        firstOrigin,
+        plateSizeChanged,
+        targetPlateSize: resolvedTargetSize,
+        sizeModificationReason: sizeModificationReason ?? undefined,
+        sizeModificationRemarks: remarksTrimmed || undefined,
+      } as Record<string, unknown>,
+    })
+
+    await createAuditLog({
+      userId: user!.id,
+      action: 'UPDATE',
+      tableName: 'plate_requirements',
+      recordId: requirementId,
+      newValue: {
+        custodyReturnToRack: true,
+        channelsToInventory: rowsForRack.map((r) => r.name),
+        remainingChannels: rowsRemain.length,
+        fulfilled: rowsRemain.length === 0,
+      } as Record<string, unknown>,
+    })
+
+    return NextResponse.json({ ok: true, plate: created, fromRequirement: true })
+  }
+
+  // ── Physical plate set on custody ──
+  if (!plateStoreId) {
+    return NextResponse.json({ error: 'plateStoreId required' }, { status: 400 })
   }
 
   const plate = await db.plateStore.findUnique({ where: { id: plateStoreId } })
@@ -91,6 +353,18 @@ export async function POST(req: NextRequest) {
   const activeNames = activeRows
     .map((c) => String(c?.name ?? '').trim())
     .filter(Boolean)
+
+  if (!returnedColourNames.length) {
+    returnedColourNames = [...activeNames]
+  }
+  if (!returnedColourNames.length) {
+    return NextResponse.json(
+      { error: 'No channels to return — plate set has no active colours.' },
+      { status: 400 },
+    )
+  }
+
+  const returnedSet = new Set(returnedColourNames.map((n) => n.trim().toLowerCase()).filter(Boolean))
   const activeLower = new Set(activeNames.map((n) => n.toLowerCase()))
 
   for (const r of Array.from(returnedSet)) {
@@ -111,11 +385,9 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const nowIso = new Date().toISOString()
   const reasonLabel = sizeModificationReason
     ? SIZE_MODIFICATION_REASON_LABELS[sizeModificationReason]
     : null
-  const remarksTrimmed = sizeModificationRemarks?.trim() || ''
   let nextStorageNotes = plate.storageNotes?.trim() ?? ''
   if (plateSizeChanged && reasonLabel) {
     const line = `[${nowIso}] Plate size ${plate.plateSize} → ${resolvedTargetSize}: ${reasonLabel}${
@@ -210,6 +482,26 @@ export async function POST(req: NextRequest) {
         },
       })
     }
+
+    await createPlateHubEvent(tx, {
+      plateStoreId,
+      actionType: PLATE_HUB_ACTION.RETURNED,
+      fromZone: HUB_ZONE.CUSTODY_FLOOR,
+      toZone: fullyGone ? HUB_ZONE.OTHER : HUB_ZONE.LIVE_INVENTORY,
+      details: {
+        returnedColourNames,
+        firstOrigin,
+        omittedToScrap: omittedNames,
+        fullyDestroyed: fullyGone,
+        plateSizeChanged,
+        previousPlateSize: plateSizeChanged ? plate.plateSize : undefined,
+        targetPlateSize: plateSizeChanged ? resolvedTargetSize : undefined,
+        sizeModificationReason: sizeModificationReason ?? undefined,
+        sizeModificationRemarks: remarksTrimmed || undefined,
+        scrapReasonCode: omittedNames.length ? scrapReasonCode : undefined,
+        scrapReasonLabel: omittedNames.length ? scrapReasonLabel : undefined,
+      },
+    })
 
     return u
   })

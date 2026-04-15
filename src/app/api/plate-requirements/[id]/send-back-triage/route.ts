@@ -3,6 +3,11 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,6 +70,14 @@ export async function POST(
           recordId: id,
           newValue: { sendBackTriage: true } as object,
         },
+      })
+
+      await createPlateHubEvent(tx, {
+        plateRequirementId: id,
+        actionType: PLATE_HUB_ACTION.SEND_BACK_TRIAGE,
+        fromZone: HUB_ZONE.CTP_QUEUE,
+        toZone: HUB_ZONE.INCOMING_TRIAGE,
+        details: { requirementCode: reqRow.requirementCode },
       })
     })
   } catch (e) {

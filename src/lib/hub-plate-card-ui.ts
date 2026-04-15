@@ -11,6 +11,38 @@ export function stripPlateColourDisplaySuffix(s: string): string {
   return s.replace(/\s*\((new|existing)\)\s*$/i, '').trim()
 }
 
+/**
+ * Stable key for matching colours across `plate_requirements.colours_needed`,
+ * `plate_store.colours[].name`, and hub UI (e.g. `C` vs `Cyan`, `M` vs `Magenta`).
+ * Pantones / spot colours use `spot:<normalized>` so "Pantone 185" stays distinct.
+ */
+export function plateColourCanonicalKey(raw: string): string {
+  const s = stripPlateColourDisplaySuffix(raw).trim()
+  if (!s) return ''
+  const low = s.toLowerCase()
+  if (low.includes('pantone') || /^p\d/.test(low.trim())) {
+    return `spot:${low.replace(/\s+/g, ' ')}`
+  }
+  if (low === 'c' || low === 'cyan' || low.startsWith('c ') || low.includes('cyan')) {
+    return 'cmyk:c'
+  }
+  if (low === 'm' || low === 'magenta' || low.startsWith('m ') || low.includes('magenta')) {
+    return 'cmyk:m'
+  }
+  if (
+    low === 'y' ||
+    low === 'yellow' ||
+    low.startsWith('y ') ||
+    (low.includes('yellow') && !low.includes('pantone'))
+  ) {
+    return 'cmyk:y'
+  }
+  if (low === 'k' || low.includes('black') || low.includes('key')) {
+    return 'cmyk:k'
+  }
+  return `other:${low.replace(/\s+/g, ' ')}`
+}
+
 export function colourDotFromLabel(label: string, index: number): HubColourDot {
   const raw = label.toLowerCase()
   const title = label.trim() || `Colour ${index + 1}`

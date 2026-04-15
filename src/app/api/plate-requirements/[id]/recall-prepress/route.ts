@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -94,6 +99,14 @@ export async function POST(
             requirementCode: reqRow.requirementCode,
           } as object,
         },
+      })
+
+      await createPlateHubEvent(tx, {
+        plateRequirementId: id,
+        actionType: PLATE_HUB_ACTION.RECALL_PREPRESS,
+        fromZone: HUB_ZONE.INCOMING_TRIAGE,
+        toZone: HUB_ZONE.CANCELLED,
+        details: { poLineId, requirementCode: reqRow.requirementCode },
       })
     })
   } catch (e) {

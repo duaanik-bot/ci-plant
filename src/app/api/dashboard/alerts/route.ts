@@ -8,94 +8,67 @@ export async function GET() {
   const { error } = await requireAuth()
   if (error) return error
 
-  const [excess, artworkPending, overduePlates, pendingCtp, partialDestroyed, issuedCount, overdueDies, sharpenDies, endOfLifeDies, overdueOrders, receivedOrders, overdueEmboss, polishEmboss, overdueEmbossOrders, receivedEmbossOrders] = await Promise.all([
-    db.sheetIssue.findMany({
-      where: { isExcess: true, approvedAt: null, rejectedAt: null },
-      take: 5,
-      include: { job: { select: { jobNumber: true } } },
-    }),
-    db.artwork.findMany({
-      where: { status: { in: ['pending', 'partially_approved'] } },
-      take: 5,
-      include: { job: { select: { jobNumber: true, productName: true } } },
-    }),
-    db.plateIssueRecord.findMany({
-      where: { status: 'overdue' },
-      take: 5,
-      orderBy: { issuedAt: 'desc' },
-    }),
-    db.plateRequirement.findMany({
-      where: { status: { in: ['pending', 'ctp_notified'] } },
-      take: 5,
-      orderBy: { createdAt: 'desc' },
-    }),
-    db.plateStore.findMany({
-      where: { status: 'partially_destroyed' },
-      take: 5,
-      orderBy: { updatedAt: 'desc' },
-    }),
-    db.plateStore.count({ where: { status: 'issued' } }),
-    db.dieIssueRecord.findMany({
-      where: { status: { in: ['issued', 'overdue'] } },
-      take: 5,
-      orderBy: { issuedAt: 'desc' },
-    }),
-    db.dieStore.findMany({
-      where: {
-        OR: [
-          { condition: 'Needs Sharpening' },
-          { impressionCount: { gt: 450000 } },
-        ],
-      },
-      take: 5,
-      orderBy: { updatedAt: 'desc' },
-    }),
-    db.dieStore.findMany({
-      where: {
-        OR: [
-          { impressionCount: { gt: 490000 } },
-          { status: 'scrapped' },
-        ],
-      },
-      take: 5,
-      orderBy: { updatedAt: 'desc' },
-    }),
-    db.dieVendorOrder.findMany({
-      where: { status: { not: 'received' }, expectedBy: { lt: new Date() } },
-      take: 5,
-      orderBy: { expectedBy: 'asc' },
-    }),
-    db.dieVendorOrder.findMany({
-      where: { status: 'received' },
-      take: 5,
-      orderBy: { receivedAt: 'desc' },
-    }),
-    db.embossIssueRecord.findMany({
-      where: { status: { in: ['issued', 'overdue'] } },
-      take: 5,
-      orderBy: { issuedAt: 'desc' },
-    }),
-    db.embossBlock.findMany({
-      where: {
-        OR: [
-          { condition: 'Needs Polish' },
-          { impressionCount: { gt: 85000 } },
-        ],
-      },
-      take: 5,
-      orderBy: { updatedAt: 'desc' },
-    }),
-    db.embossVendorOrder.findMany({
-      where: { status: { not: 'received' }, expectedBy: { lt: new Date() } },
-      take: 5,
-      orderBy: { expectedBy: 'asc' },
-    }),
-    db.embossVendorOrder.findMany({
-      where: { status: 'received' },
-      take: 5,
-      orderBy: { receivedAt: 'desc' },
-    }),
-  ])
+  const [excess, artworkPending, pendingCtp, partialDestroyed, issuedCount, polishEmboss] =
+    await Promise.all([
+      db.sheetIssue.findMany({
+        where: { isExcess: true, approvedAt: null, rejectedAt: null },
+        take: 5,
+        include: { job: { select: { jobNumber: true } } },
+      }),
+      db.artwork.findMany({
+        where: { status: { in: ['pending', 'partially_approved'] } },
+        take: 5,
+        include: { job: { select: { jobNumber: true, productName: true } } },
+      }),
+      db.plateRequirement.findMany({
+        where: { status: { in: ['pending', 'ctp_notified'] } },
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+      }),
+      db.plateStore.findMany({
+        where: { status: 'partially_destroyed' },
+        take: 5,
+        orderBy: { updatedAt: 'desc' },
+      }),
+      db.plateStore.count({ where: { status: 'issued' } }),
+      db.embossBlock.findMany({
+        where: {
+          OR: [{ condition: 'Needs Polish' }, { impressionCount: { gt: 85000 } }],
+        },
+        take: 5,
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ])
+
+  const overduePlates: {
+    jobCardNumber?: number | null
+    cartonName?: string | null
+    jobCardId?: string | null
+  }[] = []
+  const overdueDies: {
+    jobCardNumber?: number | null
+    dieNumber?: string | null
+    dieCode?: string | null
+    jobCardId?: string | null
+    id?: string
+    maxImpressions?: number
+    impressionCount?: number
+  }[] = []
+  const sharpenDies: (typeof overdueDies)[number][] = []
+  const endOfLifeDies: { dieCode?: string | null; id?: string }[] = []
+  const overdueOrders: {
+    expectedBy?: Date | null
+    orderCode?: string | null
+    jobCardId?: string | null
+  }[] = []
+  const receivedOrders: { orderCode?: string | null; jobCardId?: string | null }[] = []
+  const overdueEmboss: {
+    jobCardNumber?: number | null
+    blockCode?: string | null
+    jobCardId?: string | null
+  }[] = []
+  const overdueEmbossOrders: (typeof overdueOrders)[number][] = []
+  const receivedEmbossOrders: (typeof receivedOrders)[number][] = []
 
   const alerts: {
     type: string

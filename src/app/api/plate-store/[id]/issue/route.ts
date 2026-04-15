@@ -37,14 +37,8 @@ export async function POST(
     parsed.data.issuedTo,
     user!.id,
     parsed.data.coloursToIssue,
+    { purpose: parsed.data.purpose },
   )
-
-  if (parsed.data.purpose && parsed.data.purpose !== 'production') {
-    await db.plateIssueRecord.update({
-      where: { id: issueRecord.id },
-      data: { purpose: parsed.data.purpose },
-    })
-  }
 
   const plate = await db.plateStore.findUnique({ where: { id } })
   return NextResponse.json({ plate, issueRecord })

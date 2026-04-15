@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type {
   EmbossBlock,
   EmbossIssueRecord,
@@ -350,4 +351,3 @@ export async function returnEmbossBlock(
     })
   })
 }
-

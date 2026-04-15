@@ -1,5 +1,11 @@
-import type { PlateIssueRecord, Prisma } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
+import { randomUUID } from 'crypto'
 import { db } from '@/lib/db'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 /** DB or interactive transaction client (same delegates for our usage). */
 export type DbOrTx = typeof db | Prisma.TransactionClient
@@ -171,31 +177,46 @@ export async function onArtworkApproved(
     colourBreakdown.length ? colourBreakdown : [{ name: 'C' }, { name: 'M' }, { name: 'Y' }, { name: 'K' }],
   )
 
-  const requirementCode = await generateRequirementCode(db)
-  await db.plateRequirement.create({
-    data: {
-      requirementCode,
-      jobCardId,
-      cartonName: carton?.cartonName ?? artwork.filename,
-      artworkCode: artwork.filename,
-      artworkVersion: `R${artwork.versionNumber}`,
-      customerId: carton?.customerId ?? null,
-      numberOfColours: carton?.numberOfColours ?? 4,
-      coloursNeeded: buildColoursNeeded(
-        colourBreakdown.length ? colourBreakdown : [{ name: 'C' }, { name: 'M' }, { name: 'Y' }, { name: 'K' }],
-        availability.availableColours ?? [],
-      ),
-      newPlatesNeeded: availability.newNeeded,
-      oldPlatesAvailable: availability.oldAvailable,
-      status: availability.newNeeded > 0 ? 'ctp_notified' : 'plates_ready',
-      createdBy: userId,
-      ctpTriggeredAt: availability.newNeeded > 0 ? new Date() : null,
-      plateSize: carton?.plateSize ?? null,
-    },
+  const createdReq = await db.$transaction(async (tx) => {
+    const requirementCode = await generateRequirementCode(tx)
+    const row = await tx.plateRequirement.create({
+      data: {
+        requirementCode,
+        jobCardId,
+        cartonName: carton?.cartonName ?? artwork.filename,
+        artworkCode: artwork.filename,
+        artworkVersion: `R${artwork.versionNumber}`,
+        customerId: carton?.customerId ?? null,
+        numberOfColours: carton?.numberOfColours ?? 4,
+        coloursNeeded: buildColoursNeeded(
+          colourBreakdown.length ? colourBreakdown : [{ name: 'C' }, { name: 'M' }, { name: 'Y' }, { name: 'K' }],
+          availability.availableColours ?? [],
+        ),
+        newPlatesNeeded: availability.newNeeded,
+        oldPlatesAvailable: availability.oldAvailable,
+        status: availability.newNeeded > 0 ? 'ctp_notified' : 'plates_ready',
+        createdBy: userId,
+        ctpTriggeredAt: availability.newNeeded > 0 ? new Date() : null,
+        plateSize: carton?.plateSize ?? null,
+      },
+    })
+    await createPlateHubEvent(tx, {
+      plateRequirementId: row.id,
+      actionType: PLATE_HUB_ACTION.PREPRESS_FINALIZE,
+      fromZone: HUB_ZONE.OTHER,
+      toZone: HUB_ZONE.INCOMING_TRIAGE,
+      details: {
+        source: 'artwork_approved',
+        requirementCode: row.requirementCode,
+        jobCardId,
+        message: availability.message,
+      },
+    })
+    return row
   })
 
   if (availability.newNeeded > 0) {
-    await createCtpNotification(requirementCode, jobCardId, availability.message)
+    await createCtpNotification(createdReq.requirementCode, jobCardId, availability.message)
   }
 
   if (availability.plateSetCode) {
@@ -255,7 +276,7 @@ export async function createPlateRequirementFromPoLine(
   const requirementCode = await generateRequirementCode(client)
   const cartonLabel = `${line.cartonName} · ${line.po.poNumber} · PO line ${poLineId}`
 
-  await client.plateRequirement.create({
+  const created = await client.plateRequirement.create({
     data: {
       requirementCode,
       jobCardId: null,
@@ -278,6 +299,19 @@ export async function createPlateRequirementFromPoLine(
     },
   })
 
+  await createPlateHubEvent(client, {
+    plateRequirementId: created.id,
+    actionType: PLATE_HUB_ACTION.PREPRESS_FINALIZE,
+    fromZone: HUB_ZONE.OTHER,
+    toZone: HUB_ZONE.INCOMING_TRIAGE,
+    details: {
+      poLineId,
+      requirementCode: created.requirementCode,
+      message: availability.message,
+      source: 'pre_press_finalize',
+    },
+  })
+
   await client.auditLog.create({
     data: {
       userId,
@@ -295,6 +329,8 @@ export async function createPlateRequirementFromPoLine(
   return { requirementCode }
 }
 
+export type PlateIssueRef = { id: string }
+
 export async function issuePlates(
   plateStoreId: string,
   jobCardId: string,
@@ -302,7 +338,9 @@ export async function issuePlates(
   issuedTo: string,
   issuedBy: string,
   coloursToIssue: string[],
-): Promise<PlateIssueRecord> {
+  opts?: { purpose?: 'production' | 'reprint' | 'sample' | 'proof' },
+): Promise<PlateIssueRef> {
+  const issueId = randomUUID()
   return db.$transaction(async (tx) => {
     const plate = await tx.plateStore.findUnique({ where: { id: plateStoreId } })
     if (!plate) throw new Error('Plate set not found')
@@ -321,38 +359,50 @@ export async function issuePlates(
         jobCardId,
         issuedTo,
         issuedAt: new Date(),
-        totalJobsUsed: { increment: 1 },
-        lastUsedJobCard: jobCardId,
         lastUsedDate: new Date(),
       },
     })
 
-    const issueRecord = await tx.plateIssueRecord.create({
+    await tx.auditLog.create({
       data: {
-        plateStoreId,
-        plateSetCode: plate.plateSetCode,
-        jobCardId,
-        jobCardNumber,
-        cartonName: plate.cartonName,
-        artworkCode: plate.artworkCode,
-        issuedTo,
-        issuedBy,
-        coloursIssued: coloursToIssue,
-        status: 'issued',
+        userId: issuedBy,
+        action: 'INSERT',
+        tableName: 'plate_store_issue',
+        recordId: issueId,
+        newValue: {
+          plateStoreId,
+          plateSetCode: plate.plateSetCode,
+          jobCardId,
+          jobCardNumber,
+          cartonName: plate.cartonName,
+          artworkCode: plate.artworkCode,
+          issuedTo,
+          issuedBy,
+          coloursIssued: coloursToIssue,
+          status: 'issued',
+          purpose:
+            opts?.purpose && opts.purpose !== 'production' ? opts.purpose : undefined,
+        },
       },
     })
 
-    await tx.plateAuditLog.create({
+    await tx.auditLog.create({
       data: {
-        plateStoreId,
-        plateSetCode: plate.plateSetCode,
-        action: 'issued',
-        performedBy: issuedBy,
-        details: { jobCardId, jobCardNumber, coloursIssued: coloursToIssue },
+        userId: issuedBy,
+        action: 'UPDATE',
+        tableName: 'plate_store',
+        recordId: plateStoreId,
+        newValue: {
+          plateEvent: 'issued',
+          issueId,
+          jobCardId,
+          jobCardNumber,
+          coloursIssued: coloursToIssue,
+        },
       },
     })
 
-    return issueRecord
+    return { id: issueId }
   })
 }
 
@@ -364,13 +414,19 @@ export async function returnPlates(
   rackLocation: string,
 ): Promise<void> {
   await db.$transaction(async (tx) => {
-    const issueRecord = await tx.plateIssueRecord.findUnique({
-      where: { id: plateIssueRecordId },
-      include: { plateStore: true },
+    const issueLog = await tx.auditLog.findFirst({
+      where: { tableName: 'plate_store_issue', recordId: plateIssueRecordId },
     })
-    if (!issueRecord) throw new Error('Issue record not found')
+    if (!issueLog?.newValue || typeof issueLog.newValue !== 'object') {
+      throw new Error('Issue record not found')
+    }
+    const meta = issueLog.newValue as Record<string, unknown>
+    const plateStoreId = String(meta.plateStoreId ?? '')
+    if (!plateStoreId) throw new Error('Issue record not found')
 
-    const plate = issueRecord.plateStore
+    const plate = await tx.plateStore.findUnique({ where: { id: plateStoreId } })
+    if (!plate) throw new Error('Plate set not found')
+
     const colours = parseColours(plate.colours)
 
     const destroyedColours: string[] = []
@@ -397,34 +453,28 @@ export async function returnPlates(
         status: allDestroyed ? 'destroyed' : someDestroyed ? 'partially_destroyed' : 'returned',
         returnedBy,
         returnedAt: new Date(),
-        returnCondition: colourConditions[0]?.condition,
         rackLocation,
         jobCardId: null,
         issuedTo: null,
-        destroyedCount: { increment: destroyedColours.length },
+        issuedAt: null,
       },
     })
 
-    await tx.plateIssueRecord.update({
-      where: { id: plateIssueRecordId },
+    await tx.auditLog.create({
       data: {
-        returnedBy,
-        returnedAt: new Date(),
-        returnCondition: colourConditions[0]?.condition,
-        coloursReturned: storedColours,
-        coloursDestroyed: destroyedColours,
-        returnNotes,
-        status: 'returned',
-      },
-    })
-
-    await tx.plateAuditLog.create({
-      data: {
-        plateStoreId: plate.id,
-        plateSetCode: plate.plateSetCode,
-        action: 'returned',
-        performedBy: returnedBy,
-        details: { storedColours, destroyedColours, rackLocation, returnNotes, colourConditions },
+        userId: returnedBy,
+        action: 'UPDATE',
+        tableName: 'plate_store',
+        recordId: plate.id,
+        newValue: {
+          plateEvent: 'returned',
+          issueId: plateIssueRecordId,
+          storedColours,
+          destroyedColours,
+          rackLocation,
+          returnNotes,
+          colourConditions,
+        },
       },
     })
   })
@@ -448,26 +498,29 @@ export async function destroyColour(
 
   const allDestroyed = updatedColours.every((c) => c.status === 'destroyed')
 
-  await db.$transaction([
-    db.plateStore.update({
+  await db.$transaction(async (tx) => {
+    await tx.plateStore.update({
       where: { id: plateStoreId },
       data: {
         colours: updatedColours,
         status: allDestroyed ? 'destroyed' : 'partially_destroyed',
-        destroyedCount: { increment: 1 },
         destroyedReason: reason,
         destroyedBy,
         destroyedAt: new Date(),
       },
-    }),
-    db.plateAuditLog.create({
+    })
+    await tx.auditLog.create({
       data: {
-        plateStoreId,
-        plateSetCode: plate.plateSetCode,
-        action: 'colour_destroyed',
-        performedBy: destroyedBy,
-        details: { colourName, reason },
+        userId: destroyedBy,
+        action: 'UPDATE',
+        tableName: 'plate_store',
+        recordId: plateStoreId,
+        newValue: {
+          plateEvent: 'colour_destroyed',
+          colourName,
+          reason,
+        },
       },
-    }),
-  ])
+    })
+  })
 }

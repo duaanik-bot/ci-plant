@@ -8,11 +8,6 @@ export const dynamic = 'force-dynamic'
 
 const TOLERANCE_PCT = 3
 
-function calcSheetWeight(lengthMm: number, widthMm: number, gsm: number): number {
-  if (!lengthMm || !widthMm || !gsm) return 0
-  return (lengthMm * widthMm * gsm) / 1_000_000
-}
-
 function generateLotNumber(materialCode: string): string {
   const d = new Date()
   const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
@@ -63,10 +58,8 @@ export async function POST(req: NextRequest) {
   const inv = await db.inventory.findUnique({ where: { id: data.materialId } })
   if (!inv) return NextResponse.json({ error: 'Material not found' }, { status: 404 })
 
-  const isBoardType = !!(inv.boardType && inv.gsm && inv.sheetLength && inv.sheetWidth)
-  const sheetWeightG = isBoardType
-    ? calcSheetWeight(Number(inv.sheetLength), Number(inv.sheetWidth), inv.gsm!)
-    : 0
+  const isBoardType = false
+  const sheetWeightG = 0
 
   let totalSheets: number
   let totalWeightKg: number
@@ -144,14 +137,8 @@ export async function POST(req: NextRequest) {
         materialId: data.materialId,
         movementType: 'grn_quarantine',
         qty: quarantineQty,
-        qtyWeightKg: totalWeightKg > 0 ? totalWeightKg : null,
-        entryUnit: data.entryUnit,
-        lotNumber: lot,
-        millDate: data.millDate ? new Date(data.millDate) : null,
-        palletCount: data.palletCount ?? null,
-        pricePerKg: pricePerKg,
         refType: 'grn',
-        refId: data.poReference ?? null,
+        refId: data.poReference?.trim() || lot,
         userId: user!.id,
       },
     })

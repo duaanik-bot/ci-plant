@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
+import { createPlateHubEvent, PLATE_HUB_ACTION } from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +27,18 @@ export async function POST(req: NextRequest) {
     select: { id: true, plateSetCode: true, cartonName: true, status: true },
   })
   if (!plate) return NextResponse.json({ error: 'Plate set not found' }, { status: 404 })
+
+  await db.$transaction(async (tx) => {
+    await createPlateHubEvent(tx, {
+      plateStoreId: plate.id,
+      actionType: PLATE_HUB_ACTION.REISSUE_REQUEST,
+      details: {
+        plateSetCode: plate.plateSetCode,
+        cartonName: plate.cartonName,
+        note: parsed.data.note ?? null,
+      },
+    })
+  })
 
   await createAuditLog({
     userId: user!.id,

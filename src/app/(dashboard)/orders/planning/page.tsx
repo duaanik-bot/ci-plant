@@ -545,7 +545,11 @@ export default function PlanningPage() {
                     <select
                       value={embossStatus}
                       disabled={!embossRequired}
-                      onChange={(e) => updateSpec(r.id, { embossStatus: e.target.value })}
+                      onChange={(e) =>
+                        updateSpec(r.id, {
+                          embossStatus: e.target.value as PlanningSpec['embossStatus'],
+                        })
+                      }
                       className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs disabled:opacity-70"
                     >
                       <option value="na">⊘ N/A</option>

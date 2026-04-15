@@ -4,6 +4,11 @@ import { PlateSize } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { generateRequirementCode } from '@/lib/plate-engine'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,28 +77,38 @@ export async function POST(req: NextRequest) {
   })
   if (!carton) return NextResponse.json({ error: 'Carton not found' }, { status: 404 })
 
-  const requirementCode = await generateRequirementCode(db)
   const n = coloursNeeded.length
 
-  const created = await db.plateRequirement.create({
-    data: {
-      requirementCode,
-      jobCardId: null,
-      cartonName: carton.cartonName,
-      artworkCode: carton.artworkCode?.trim() || null,
-      artworkVersion: null,
-      customerId: carton.customerId,
-      numberOfColours: n,
-      coloursNeeded,
-      newPlatesNeeded: n,
-      oldPlatesAvailable: 0,
-      status: 'ctp_internal_queue',
-      triageChannel: 'inhouse_ctp',
-      poLineId: null,
-      partialRemake: false,
-      createdBy: user!.id,
-      plateSize,
-    },
+  const created = await db.$transaction(async (tx) => {
+    const requirementCode = await generateRequirementCode(tx)
+    const row = await tx.plateRequirement.create({
+      data: {
+        requirementCode,
+        jobCardId: null,
+        cartonName: carton.cartonName,
+        artworkCode: carton.artworkCode?.trim() || null,
+        artworkVersion: null,
+        customerId: carton.customerId,
+        numberOfColours: n,
+        coloursNeeded,
+        newPlatesNeeded: n,
+        oldPlatesAvailable: 0,
+        status: 'ctp_internal_queue',
+        triageChannel: 'inhouse_ctp',
+        poLineId: null,
+        partialRemake: false,
+        createdBy: user!.id,
+        plateSize,
+      },
+    })
+    await createPlateHubEvent(tx, {
+      plateRequirementId: row.id,
+      actionType: PLATE_HUB_ACTION.MANUAL_CTP_CREATED,
+      fromZone: HUB_ZONE.OTHER,
+      toZone: HUB_ZONE.CTP_QUEUE,
+      details: { requirementCode: row.requirementCode, cartonId, manualCtp: true },
+    })
+    return row
   })
 
   await createAuditLog({
@@ -101,7 +116,7 @@ export async function POST(req: NextRequest) {
     action: 'INSERT',
     tableName: 'plate_requirements',
     recordId: created.id,
-    newValue: { requirementCode, manualCtp: true },
+    newValue: { requirementCode: created.requirementCode, manualCtp: true },
   })
 
   return NextResponse.json({ ok: true, requirement: created })

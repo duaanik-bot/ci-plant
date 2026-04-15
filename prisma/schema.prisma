@@ -885,6 +885,7 @@ model PlateStore {
   customer          Customer?          @relation(fields: [customerId], references: [id])
   jobCardsUsingThis ProductionJobCard[] @relation("PlateSetUsedBy")
   scrapEvents     PlateStoreScrapEvent[]
+  hubEvents       PlateHubEvent[]
 
   @@map("plate_store")
 }
@@ -934,7 +935,29 @@ model PlateRequirement {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
+  hubEvents PlateHubEvent[]
+
   @@map("plate_requirements")
+}
+
+/// Append-only hub audit trail (dual-written with hub state changes).
+model PlateHubEvent {
+  id                 String   @id @default(uuid())
+  plateRequirementId String?  @map("plate_requirement_id")
+  plateStoreId       String?  @map("plate_store_id")
+  actionType         String   @map("action_type") @db.VarChar(64)
+  fromZone           String?  @map("from_zone") @db.VarChar(128)
+  toZone             String?  @map("to_zone") @db.VarChar(128)
+  details            Json?
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  plateRequirement PlateRequirement? @relation(fields: [plateRequirementId], references: [id], onDelete: SetNull)
+  plateStore       PlateStore?       @relation(fields: [plateStoreId], references: [id], onDelete: SetNull)
+
+  @@index([plateRequirementId])
+  @@index([plateStoreId])
+  @@index([createdAt(sort: Desc)])
+  @@map("plate_hub_events")
 }
 
 // ─────────────────────────────────────────

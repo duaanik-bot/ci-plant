@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
 
     const line = await db.poLineItem.findFirst({
       where: lineWhere,
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { createdAt: 'desc' },
       include: {
         po: { select: { customerId: true } },
       },
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
       line?.cartonId != null
         ? await db.carton.findUnique({
             where: { id: line.cartonId },
-            select: { id: true, name: true },
+            select: { id: true, cartonName: true },
           })
         : null
 
@@ -116,7 +116,7 @@ export async function GET(req: NextRequest) {
         : null
     const setNumber = line?.setNumber?.trim() || null
     const cartonName =
-      carton?.name ||
+      carton?.cartonName ||
       line?.cartonName ||
       (artwork
         ? (

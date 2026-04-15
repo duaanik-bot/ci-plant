@@ -9,7 +9,6 @@ const storeSchema = z.object({
   returnedBy: z.string().min(1),
   rackLocation: z.string().optional().nullable(),
   slotNumber: z.string().optional().nullable(),
-  returnCondition: z.string().optional().nullable(),
 })
 
 export async function POST(
@@ -43,21 +42,6 @@ export async function POST(
       returnedAt: now,
       rackLocation: parsed.data.rackLocation ?? existing.rackLocation,
       slotNumber: parsed.data.slotNumber ?? existing.slotNumber,
-      returnCondition: parsed.data.returnCondition ?? existing.returnCondition,
-    },
-  })
-
-  await db.plateAuditLog.create({
-    data: {
-      plateStoreId: id,
-      plateSetCode: updated.plateSetCode,
-      action: 'returned',
-      performedBy: user!.id,
-      details: {
-        returnedBy: parsed.data.returnedBy,
-        rackLocation: updated.rackLocation,
-        slotNumber: updated.slotNumber,
-      },
     },
   })
 

@@ -30,3 +30,13 @@ export function hubMarkedReadyLabel(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return '—'
   return formatDistanceToNow(d, { addSuffix: true })
 }
+
+/** Footer line on hub cards: absolute time + relative age. */
+export function hubLastActionLine(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const abs = format(d, 'MMM d, HH:mm')
+  const rel = formatDistanceToNow(d, { addSuffix: true })
+  return `Last action: ${abs} (${rel})`
+}

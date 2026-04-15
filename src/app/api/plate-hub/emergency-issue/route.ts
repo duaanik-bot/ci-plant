@@ -3,6 +3,11 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { safeJsonParse } from '@/lib/safe-json'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,6 +82,21 @@ export async function POST(req: NextRequest) {
           machineId,
           operatorUserId,
         } as object,
+      },
+    })
+    await createPlateHubEvent(tx, {
+      plateStoreId,
+      actionType: PLATE_HUB_ACTION.EMERGENCY_ISSUE,
+      fromZone: HUB_ZONE.CUSTODY_FLOOR,
+      toZone: HUB_ZONE.ISSUED_PRESS,
+      details: {
+        machineId,
+        machineCode: machine.machineCode,
+        operatorUserId,
+        operatorName: operator.name,
+        jobCardId,
+        artworkId,
+        setNumber,
       },
     })
     return u

@@ -3,6 +3,12 @@ import { z } from 'zod'
 import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
+import { plateColourCanonicalKey } from '@/lib/hub-plate-card-ui'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,13 +25,6 @@ type ColourRow = {
   rackLocation?: string | null
   slotNumber?: string | null
   condition?: string | null
-}
-
-function normColourKey(s: string): string {
-  return s
-    .replace(/\s*\((new|existing)\)\s*$/i, '')
-    .trim()
-    .toLowerCase()
 }
 
 function normHubKey(s: string | null | undefined): string {
@@ -99,7 +98,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { requirementId, plateStoreId, colourNames } = parsed.data
-  const wanted = new Set(colourNames.map((n) => normColourKey(n)).filter(Boolean))
+  const wantedCanon = new Set(colourNames.map((n) => plateColourCanonicalKey(n)).filter(Boolean))
 
   try {
     const result = await db.$transaction(async (tx) => {
@@ -138,11 +137,19 @@ export async function POST(req: NextRequest) {
       const needed = Array.isArray(reqRow.coloursNeeded)
         ? (reqRow.coloursNeeded as { name: string; isNew?: boolean }[])
         : []
-      const neededNorm = new Set(needed.map((x) => normColourKey(x.name)))
-      for (const w of Array.from(wanted)) {
-        if (!neededNorm.has(w)) {
+      const neededCanon = new Set(needed.map((x) => plateColourCanonicalKey(x.name)))
+      for (const wCanon of Array.from(wantedCanon)) {
+        if (!neededCanon.has(wCanon)) {
+          const display =
+            colourNames.find((n) => plateColourCanonicalKey(n) === wCanon) ?? wCanon
+          console.log('[plate-hub/take-from-stock] Colour not in job requirement', {
+            payloadColours: colourNames,
+            payloadCanonical: Array.from(wantedCanon),
+            jobColours: needed.map((x) => x.name),
+            jobCanonical: Array.from(neededCanon),
+          })
           throw new TakeStockHttpError(
-            `Colour is not part of this job’s requirement: ${colourNames.find((n) => normColourKey(n) === w) ?? w}`,
+            `Colour is not part of this job's requirement: ${display}`,
             400,
           )
         }
@@ -155,7 +162,7 @@ export async function POST(req: NextRequest) {
         const name = String(row?.name ?? '').trim()
         const st = String(row?.status ?? '').toLowerCase()
         if (!name || st === 'destroyed') continue
-        if (!wanted.has(normColourKey(name))) continue
+        if (!wantedCanon.has(plateColourCanonicalKey(name))) continue
         pulledForCustody.push({
           ...row,
           rackLocation: null,
@@ -163,9 +170,15 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      const pulledNorms = new Set(pulledForCustody.map((r) => normColourKey(String(r.name))))
-      for (const w of Array.from(wanted)) {
-        if (!pulledNorms.has(w)) {
+      const pulledCanon = new Set(pulledForCustody.map((r) => plateColourCanonicalKey(String(r.name))))
+      for (const wCanon of Array.from(wantedCanon)) {
+        if (!pulledCanon.has(wCanon)) {
+          console.log('[plate-hub/take-from-stock] Colour not on plate set', {
+            payloadColours: colourNames,
+            payloadCanonical: Array.from(wantedCanon),
+            plateChannelNames: sourceColours.map((r) => String(r?.name ?? '')),
+            plateCanonical: Array.from(pulledCanon),
+          })
           throw new TakeStockHttpError(
             'One or more colours are not available on this plate set (check rack / partial scrap).',
             400,
@@ -178,7 +191,7 @@ export async function POST(req: NextRequest) {
         const name = String(row?.name ?? '').trim()
         const st = String(row?.status ?? '').toLowerCase()
         if (!name || st === 'destroyed') return row
-        if (wanted.has(normColourKey(name))) {
+        if (wantedCanon.has(plateColourCanonicalKey(name))) {
           return {
             ...row,
             status: 'destroyed',
@@ -247,7 +260,7 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      const nextNeeded = needed.filter((item) => !wanted.has(normColourKey(item.name)))
+      const nextNeeded = needed.filter((item) => !wantedCanon.has(plateColourCanonicalKey(item.name)))
       const fullyFulfilled = nextNeeded.length === 0
 
       await tx.plateRequirement.update({
@@ -263,6 +276,45 @@ export async function POST(req: NextRequest) {
                 triageChannel: null,
               }
             : {}),
+        },
+      })
+
+      await createPlateHubEvent(tx, {
+        plateRequirementId: requirementId,
+        actionType: PLATE_HUB_ACTION.TAKE_FROM_STOCK,
+        fromZone: HUB_ZONE.INCOMING_TRIAGE,
+        toZone: fullyFulfilled ? HUB_ZONE.FULFILLED : HUB_ZONE.INCOMING_TRIAGE,
+        details: {
+          sourcePlateStoreId: plateStoreId,
+          colourNames,
+          custodyPlateId: custodyPlate.id,
+          fulfilled: fullyFulfilled,
+        },
+      })
+
+      await createPlateHubEvent(tx, {
+        plateStoreId: plateStoreId,
+        actionType: PLATE_HUB_ACTION.TAKE_FROM_STOCK,
+        fromZone: HUB_ZONE.LIVE_INVENTORY,
+        toZone: HUB_ZONE.LIVE_INVENTORY,
+        details: {
+          requirementId,
+          colourNames,
+          custodyPlateId: custodyPlate.id,
+          role: 'source_depleted_channels',
+        },
+      })
+
+      await createPlateHubEvent(tx, {
+        plateStoreId: custodyPlate.id,
+        actionType: PLATE_HUB_ACTION.TAKE_FROM_STOCK,
+        fromZone: HUB_ZONE.LIVE_INVENTORY,
+        toZone: HUB_ZONE.CUSTODY_FLOOR,
+        details: {
+          requirementId,
+          colourNames,
+          sourcePlateStoreId: plateStoreId,
+          role: 'custody_set',
         },
       })
 

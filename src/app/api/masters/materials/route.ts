@@ -203,15 +203,6 @@ export async function POST(req: NextRequest) {
       supplierId: data.supplierId || null,
       weightedAvgCost: data.weightedAvgCost,
       active: data.active,
-      boardType: data.boardType || null,
-      gsm: data.gsm ?? null,
-      sheetLength: data.sheetLength ?? null,
-      sheetWidth: data.sheetWidth ?? null,
-      grainDirection: data.grainDirection || null,
-      caliperMicrons: data.caliperMicrons ?? null,
-      brightnessPct: data.brightnessPct ?? null,
-      moisturePct: data.moisturePct ?? null,
-      hsnCode: data.hsnCode?.trim() || null,
     },
   })
 

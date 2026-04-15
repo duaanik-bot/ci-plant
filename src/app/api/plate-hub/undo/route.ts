@@ -3,6 +3,11 @@ import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
 import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,6 +59,14 @@ export async function POST(req: NextRequest) {
   // Build new spec without the finalized fields
   const { prePressSentToPlateHubAt: _removed, lastPlateRequirementCode: _rc, plateHubPayload: _ph, ...restSpec } = spec
 
+  const toCancelRows =
+    requirementCode ?
+      await db.plateRequirement.findMany({
+        where: { requirementCode, status: { not: 'cancelled' } },
+        select: { id: true },
+      })
+    : []
+
   await db.$transaction(async (tx) => {
     // Clear finalize stamp from specOverrides
     await tx.poLineItem.update({
@@ -70,6 +83,16 @@ export async function POST(req: NextRequest) {
       await tx.plateRequirement.updateMany({
         where: { requirementCode, status: { not: 'cancelled' } },
         data: { status: 'cancelled' },
+      })
+    }
+
+    for (const row of toCancelRows) {
+      await createPlateHubEvent(tx, {
+        plateRequirementId: row.id,
+        actionType: PLATE_HUB_ACTION.UNDO_FINALIZE,
+        fromZone: HUB_ZONE.OTHER,
+        toZone: HUB_ZONE.CANCELLED,
+        details: { poLineId, requirementCode: requirementCode ?? undefined },
       })
     }
 

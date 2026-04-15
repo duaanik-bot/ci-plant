@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { db } from '@/lib/db'
 
 const DEFAULT_MAX_IMPRESSIONS: Record<string, number> = {

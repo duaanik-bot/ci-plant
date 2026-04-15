@@ -9,7 +9,6 @@ const updateSchema = z.object({
   rackLocation: z.string().optional().nullable(),
   slotNumber: z.string().optional().nullable(),
   status: z.string().optional(),
-  expectedReturn: z.string().optional().nullable(),
 })
 
 export async function GET(
@@ -24,13 +23,28 @@ export async function GET(
     where: { id },
     include: {
       customer: { select: { id: true, name: true } },
-      issueRecords: { orderBy: { issuedAt: 'desc' } },
-      auditLog: { orderBy: { performedAt: 'desc' } },
     },
   })
   if (!plate) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  return NextResponse.json(plate)
+  const [issueLogCandidates, auditLog] = await Promise.all([
+    db.auditLog.findMany({
+      where: { tableName: 'plate_store_issue' },
+      orderBy: { timestamp: 'desc' },
+      take: 120,
+    }),
+    db.auditLog.findMany({
+      where: { tableName: 'plate_store', recordId: id },
+      orderBy: { timestamp: 'desc' },
+      take: 50,
+    }),
+  ])
+  const issueRecords = issueLogCandidates.filter((row) => {
+    const v = row.newValue as Record<string, unknown> | null | undefined
+    return v != null && String(v.plateStoreId ?? '') === id
+  })
+
+  return NextResponse.json({ ...plate, issueRecords, auditLog })
 }
 
 export async function PUT(
@@ -65,30 +79,6 @@ export async function PUT(
         ? { slotNumber: parsed.data.slotNumber }
         : {}),
       ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
-      ...(parsed.data.expectedReturn !== undefined
-        ? { expectedReturn: parsed.data.expectedReturn ? new Date(parsed.data.expectedReturn) : null }
-        : {}),
-    },
-  })
-
-  await db.plateAuditLog.create({
-    data: {
-      plateStoreId: id,
-      plateSetCode: updated.plateSetCode,
-      action: 'rack_updated',
-      performedBy: user!.id,
-      details: {
-        before: {
-          rackLocation: existing.rackLocation,
-          slotNumber: existing.slotNumber,
-          status: existing.status,
-        },
-        after: {
-          rackLocation: updated.rackLocation,
-          slotNumber: updated.slotNumber,
-          status: updated.status,
-        },
-      },
     },
   })
 

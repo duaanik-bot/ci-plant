@@ -3,6 +3,11 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { generateRequirementCode } from '@/lib/plate-engine'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,28 +53,46 @@ export async function POST(req: NextRequest) {
 
   const n = missingColourNames.length
   const coloursNeeded = missingColourNames.map((name) => ({ name: name.trim(), isNew: true }))
-  const requirementCode = await generateRequirementCode(db)
   const isVendor = lane === 'outside_vendor'
 
-  const created = await db.plateRequirement.create({
-    data: {
-      requirementCode,
-      jobCardId: plate.jobCardId,
-      cartonName: plate.cartonName,
-      artworkCode: plate.artworkCode,
-      artworkVersion: plate.artworkVersion,
-      customerId: plate.customerId,
-      numberOfColours: n,
-      coloursNeeded,
-      newPlatesNeeded: n,
-      oldPlatesAvailable: 0,
-      status: isVendor ? 'awaiting_vendor_delivery' : 'ctp_internal_queue',
-      triageChannel: lane,
-      poLineId: null,
-      partialRemake: true,
-      createdBy: user!.id,
-      plateSize: plate.plateSize,
-    },
+  const created = await db.$transaction(async (tx) => {
+    const requirementCode = await generateRequirementCode(tx)
+    const row = await tx.plateRequirement.create({
+      data: {
+        requirementCode,
+        jobCardId: plate.jobCardId,
+        cartonName: plate.cartonName,
+        artworkCode: plate.artworkCode,
+        artworkVersion: plate.artworkVersion,
+        customerId: plate.customerId,
+        numberOfColours: n,
+        coloursNeeded,
+        newPlatesNeeded: n,
+        oldPlatesAvailable: 0,
+        status: isVendor ? 'awaiting_vendor_delivery' : 'ctp_internal_queue',
+        triageChannel: lane,
+        poLineId: null,
+        partialRemake: true,
+        createdBy: user!.id,
+        plateSize: plate.plateSize,
+      },
+    })
+
+    await createPlateHubEvent(tx, {
+      plateRequirementId: row.id,
+      actionType: PLATE_HUB_ACTION.PARTIAL_REMAKE_CREATED,
+      fromZone: HUB_ZONE.LIVE_INVENTORY,
+      toZone: isVendor ? HUB_ZONE.OUTSIDE_VENDOR : HUB_ZONE.CTP_QUEUE,
+      details: {
+        sourcePlateStoreId: plateStoreId,
+        plateSetCode: plate.plateSetCode,
+        lane,
+        missingColourNames,
+        requirementCode: row.requirementCode,
+      },
+    })
+
+    return row
   })
 
   await createAuditLog({
@@ -77,7 +100,11 @@ export async function POST(req: NextRequest) {
     action: 'INSERT',
     tableName: 'plate_requirements',
     recordId: created.id,
-    newValue: { requirementCode, partialRemake: true, sourcePlateStoreId: plateStoreId },
+    newValue: {
+      requirementCode: created.requirementCode,
+      partialRemake: true,
+      sourcePlateStoreId: plateStoreId,
+    },
   })
 
   return NextResponse.json({ ok: true, requirement: created })

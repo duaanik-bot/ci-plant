@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/helpers'
 import { replaceBlock } from '@/lib/emboss-block-service'

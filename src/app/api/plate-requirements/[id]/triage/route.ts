@@ -4,6 +4,11 @@ import { PlateSize, Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { mergeOrchestrationIntoSpec, PLATE_FLOW } from '@/lib/orchestration-spec'
+import {
+  createPlateHubEvent,
+  HUB_ZONE,
+  PLATE_HUB_ACTION,
+} from '@/lib/plate-hub-events'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,6 +90,13 @@ export async function PATCH(
 
   let updated
   try {
+    const toZone =
+      channel === 'inhouse_ctp'
+        ? HUB_ZONE.CTP_QUEUE
+        : channel === 'outside_vendor'
+          ? HUB_ZONE.OUTSIDE_VENDOR
+          : HUB_ZONE.AWAITING_RACK
+
     updated = await db.$transaction(async (tx) => {
       const req = await tx.plateRequirement.update({
         where: { id },
@@ -117,6 +129,21 @@ export async function PATCH(
           })
         }
       }
+
+      await createPlateHubEvent(tx, {
+        plateRequirementId: id,
+        actionType: PLATE_HUB_ACTION.DISPATCHED,
+        fromZone: HUB_ZONE.INCOMING_TRIAGE,
+        toZone,
+        details: {
+          channel,
+          triageChannel: channel,
+          status: nextStatus,
+          plateFlowStatus,
+          plateSize: resolvedPlateSize ?? undefined,
+          rackSlot: parsed.data.rackSlot?.trim() || undefined,
+        },
+      })
 
       return req
     })

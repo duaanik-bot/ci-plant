@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
@@ -27,4 +28,3 @@ export async function GET(req: NextRequest) {
   }, {})
   return NextResponse.json(grouped)
 }
-

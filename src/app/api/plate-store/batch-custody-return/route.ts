@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
   if (!operator) return NextResponse.json({ error: 'Operator not found' }, { status: 404 })
 
   const rack = rackSlot.trim()
-  const ids = [...new Set(items.map((i) => i.plateStoreId))]
+  const ids = Array.from(new Set(items.map((i) => i.plateStoreId)))
   const found = await db.plateStore.findMany({
     where: { id: { in: ids } },
     select: { id: true },
