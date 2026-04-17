@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
@@ -18,6 +19,12 @@ function toNullableText(value: unknown): string | null | undefined {
   if (value === null) return null
   const trimmed = String(value).trim()
   return trimmed ? trimmed : null
+}
+
+function num(d: unknown): number | null {
+  if (d == null) return null
+  const n = Number(d)
+  return Number.isFinite(n) ? n : null
 }
 
 const updateSchema = cartonSchema.partial().extend({
@@ -53,309 +60,231 @@ const updateSchema = cartonSchema.partial().extend({
   specialInstructions: z.string().optional().nullable(),
 })
 
-export async function GET(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+const cartonInclude = {
+  customer: true,
+  dye: {
+    select: {
+      id: true,
+      dyeNumber: true,
+      sheetSize: true,
+      condition: true,
+      conditionRating: true,
+    },
+  },
+} as const
+
+function serializeCarton(
+  row: Prisma.CartonGetPayload<{ include: typeof cartonInclude }>,
 ) {
-  const { error } = await requireRole('operations_head', 'md')
-  if (error) return error
-
-  const { id } = await context.params
-  const rows = await db.$queryRawUnsafe<Array<{
-    id: string
-    cartonName: string
-    customerId: string
-    productType: string | null
-    category: string | null
-    rate: number | null
-    gstPct: number
-    active: boolean
-    remarks: string | null
-    cartonSize: string | null
-    printSize: string | null
-    dyeCondition: string | null
-    boardGrade: string | null
-    gsm: number | null
-    caliperMicrons: number | null
-    paperType: string | null
-    plyCount: number | null
-    finishedLength: number | null
-    finishedWidth: number | null
-    finishedHeight: number | null
-    blankLength: number | null
-    blankWidth: number | null
-    backPrint: string
-    printingType: string | null
-    artworkCode: string | null
-    coatingType: string | null
-    foilType: string | null
-    embossingLeafing: string | null
-    dyeId: string | null
-    cartonConstruct: string | null
-    pastingType: string | null
-    glueType: string | null
-    drugSchedule: string | null
-    regulatoryText: string | null
-    specialInstructions: string | null
-    customerName: string
-    dyeNumber: number | null
-    dyeSheetSize: string | null
-    dyeConditionRating: string | null
-    dyeConditionValue: string | null
-  }>>(`
-    select
-      c.id,
-      c.carton_name as "cartonName",
-      c.customer_id as "customerId",
-      c.product_type as "productType",
-      c.category,
-      c.rate::float8 as rate,
-      c.gst_pct as "gstPct",
-      c.active,
-      c.remarks,
-      c.carton_size as "cartonSize",
-      c.print_size as "printSize",
-      c.dye_condition as "dyeCondition",
-      c.board_grade as "boardGrade",
-      c.gsm,
-      c.caliper_microns as "caliperMicrons",
-      c.paper_type as "paperType",
-      c.ply_count as "plyCount",
-      c.finished_length::float8 as "finishedLength",
-      c.finished_width::float8 as "finishedWidth",
-      c.finished_height::float8 as "finishedHeight",
-      c.blank_length::float8 as "blankLength",
-      c.blank_width::float8 as "blankWidth",
-      c.back_print as "backPrint",
-      c.printing_type as "printingType",
-      c.artwork_code as "artworkCode",
-      c.coating_type as "coatingType",
-      c.foil_type as "foilType",
-      c.embossing_leafing as "embossingLeafing",
-      c.dye_id as "dyeId",
-      c.carton_construct as "cartonConstruct",
-      c.pasting_type as "pastingType",
-      c.glue_type as "glueType",
-      c.drug_schedule as "drugSchedule",
-      c.regulatory_text as "regulatoryText",
-      c.special_instructions as "specialInstructions",
-      cu.name as "customerName",
-      d.dye_number as "dyeNumber",
-      d.sheet_size as "dyeSheetSize",
-      d.condition_rating as "dyeConditionRating",
-      d.condition as "dyeConditionValue"
-    from cartons c
-    join customers cu on cu.id = c.customer_id
-    left join dyes d on d.id = c.dye_id
-    where c.id = $1
-    limit 1
-  `, id)
-  const carton = rows[0]
-  if (!carton) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-  return NextResponse.json({
-    ...carton,
-    customer: { id: carton.customerId, name: carton.customerName },
-    dye: carton.dyeId
+  const construct = row.cartonConstruct?.trim() || ''
+  return {
+    id: row.id,
+    cartonName: row.cartonName,
+    customerId: row.customerId,
+    productType: row.productType,
+    category: row.category,
+    rate: num(row.rate),
+    gstPct: row.gstPct,
+    active: row.active,
+    boardGrade: row.boardGrade,
+    gsm: row.gsm,
+    caliperMicrons: row.caliperMicrons,
+    paperType: row.paperType,
+    plyCount: row.plyCount,
+    finishedLength: num(row.finishedLength),
+    finishedWidth: num(row.finishedWidth),
+    finishedHeight: num(row.finishedHeight),
+    blankLength: num(row.blankLength),
+    blankWidth: num(row.blankWidth),
+    backPrint: row.backPrint,
+    artworkCode: row.artworkCode,
+    coatingType: row.coatingType,
+    foilType: row.foilType,
+    embossingLeafing: row.embossingLeafing,
+    dyeId: row.dyeId,
+    cartonConstruct: row.cartonConstruct,
+    glueType: row.glueType,
+    drugSchedule: row.drugSchedule,
+    regulatoryText: row.regulatoryText,
+    specialInstructions: row.specialInstructions,
+    plateSize: row.plateSize,
+    /** UI field — stored as `carton_construct` in DB. */
+    pastingType: construct,
+    /** No dedicated column; form value is not persisted until schema adds it. */
+    printingType: '',
+    /** No dedicated column; form value is not persisted until schema adds it. */
+    remarks: '',
+    customer: { id: row.customer.id, name: row.customer.name },
+    dye: row.dye
       ? {
-          id: carton.dyeId,
-          dyeNumber: carton.dyeNumber,
-          sheetSize: carton.dyeSheetSize,
-          condition: carton.dyeConditionValue,
-          conditionRating: carton.dyeConditionRating,
+          id: row.dye.id,
+          dyeNumber: row.dye.dyeNumber,
+          sheetSize: row.dye.sheetSize,
+          condition: row.dye.condition,
+          conditionRating: row.dye.conditionRating,
         }
       : null,
-  })
+  }
+}
+
+export async function GET(
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { error } = await requireRole('operations_head', 'md')
+    if (error) return error
+
+    const { id } = await context.params
+    const row = await db.carton.findUnique({
+      where: { id },
+      include: cartonInclude,
+    })
+    if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    return NextResponse.json(serializeCarton(row))
+  } catch (e) {
+    console.error('[cartons/[id] GET]', e)
+    return NextResponse.json({ error: 'Failed to load carton' }, { status: 500 })
+  }
 }
 
 export async function PUT(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> },
 ) {
-  const { error, user } = await requireRole('operations_head', 'md')
-  if (error) return error
+  try {
+    const { error, user } = await requireRole('operations_head', 'md')
+    if (error) return error
 
-  const { id } = await context.params
-  const body = await req.json().catch(() => ({}))
-  const parsed = updateSchema.safeParse({
-    ...body,
-    rate: toOptionalNumber(body.rate),
-    gstPct: toOptionalNumber(body.gstPct),
-    finishedLength: toOptionalNumber(body.finishedLength),
-    finishedWidth: toOptionalNumber(body.finishedWidth),
-    finishedHeight: toOptionalNumber(body.finishedHeight),
-    blankLength: toOptionalNumber(body.blankLength),
-    blankWidth: toOptionalNumber(body.blankWidth),
-  })
-  if (!parsed.success) {
-    const fields: Record<string, string> = {}
-    parsed.error.issues.forEach((i) => {
-      const path = i.path[0] as string
-      if (path) fields[path] = i.message
+    const { id } = await context.params
+    const body = await req.json().catch(() => ({}))
+    const parsed = updateSchema.safeParse({
+      ...body,
+      rate: toOptionalNumber(body.rate),
+      gstPct: toOptionalNumber(body.gstPct),
+      finishedLength: toOptionalNumber(body.finishedLength),
+      finishedWidth: toOptionalNumber(body.finishedWidth),
+      finishedHeight: toOptionalNumber(body.finishedHeight),
+      blankLength: toOptionalNumber(body.blankLength),
+      blankWidth: toOptionalNumber(body.blankWidth),
     })
-    return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+    if (!parsed.success) {
+      const fields: Record<string, string> = {}
+      parsed.error.issues.forEach((i) => {
+        const path = i.path[0] as string
+        if (path) fields[path] = i.message
+      })
+      return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+    }
+
+    const existing = await db.carton.findUnique({ where: { id } })
+    if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    const data = parsed.data
+    const u: Prisma.CartonUpdateInput = {}
+
+    if (data.cartonName !== undefined) u.cartonName = data.cartonName.trim()
+    if (data.customerId !== undefined) u.customer = { connect: { id: data.customerId } }
+    if (data.productType !== undefined) u.productType = toNullableText(data.productType) ?? null
+    if (data.category !== undefined) u.category = toNullableText(data.category) ?? null
+    if (data.rate !== undefined) u.rate = data.rate
+    if (data.gstPct !== undefined) u.gstPct = data.gstPct
+    if (data.active !== undefined) u.active = data.active
+    if (data.boardGrade !== undefined) u.boardGrade = toNullableText(data.boardGrade) ?? null
+    if (data.gsm !== undefined) u.gsm = data.gsm
+    if (data.caliperMicrons !== undefined) u.caliperMicrons = data.caliperMicrons
+    if (data.paperType !== undefined) u.paperType = toNullableText(data.paperType) ?? null
+    if (data.plyCount !== undefined) u.plyCount = data.plyCount
+    if (data.coatingType !== undefined) u.coatingType = toNullableText(data.coatingType) ?? null
+    if (data.embossingLeafing !== undefined) {
+      u.embossingLeafing = toNullableText(data.embossingLeafing) ?? null
+    }
+    if (data.artworkCode !== undefined) u.artworkCode = toNullableText(data.artworkCode) ?? null
+    if (data.glueType !== undefined) u.glueType = toNullableText(data.glueType) ?? null
+    if (data.cartonConstruct !== undefined) {
+      u.cartonConstruct = toNullableText(data.cartonConstruct) ?? null
+    }
+    /** Form field `pastingType` maps to `carton_construct`. */
+    if (data.pastingType !== undefined) {
+      u.cartonConstruct = toNullableText(data.pastingType) ?? null
+    }
+    if (data.dyeId !== undefined) {
+      u.dye = data.dyeId ? { connect: { id: data.dyeId } } : { disconnect: true }
+    }
+    if (data.finishedLength !== undefined) u.finishedLength = data.finishedLength
+    if (data.finishedWidth !== undefined) u.finishedWidth = data.finishedWidth
+    if (data.finishedHeight !== undefined) u.finishedHeight = data.finishedHeight
+    if (data.blankLength !== undefined) u.blankLength = data.blankLength
+    if (data.blankWidth !== undefined) u.blankWidth = data.blankWidth
+    if (data.drugSchedule !== undefined) u.drugSchedule = toNullableText(data.drugSchedule) ?? null
+    if (data.regulatoryText !== undefined) {
+      u.regulatoryText = toNullableText(data.regulatoryText) ?? null
+    }
+    if (data.specialInstructions !== undefined) {
+      u.specialInstructions = toNullableText(data.specialInstructions) ?? null
+    }
+
+    if (Object.keys(u).length === 0) {
+      return NextResponse.json({ error: 'No changes provided' }, { status: 400 })
+    }
+
+    await db.carton.update({
+      where: { id },
+      data: u,
+    })
+
+    const refreshed = await db.carton.findUnique({
+      where: { id },
+      include: cartonInclude,
+    })
+    if (!refreshed) {
+      return NextResponse.json({ error: 'Not found after update' }, { status: 404 })
+    }
+
+    await createAuditLog({
+      userId: user!.id,
+      action: 'UPDATE',
+      tableName: 'cartons',
+      recordId: id,
+      newValue: parsed.data as Record<string, unknown>,
+    })
+
+    return NextResponse.json(serializeCarton(refreshed))
+  } catch (e) {
+    console.error('[cartons/[id] PUT]', e)
+    return NextResponse.json({ error: 'Failed to update carton' }, { status: 500 })
   }
-
-  const existingRows = await db.$queryRawUnsafe<Array<{
-    id: string
-    cartonName: string
-    customerId: string
-  }>>(
-    `
-      select id, carton_name as "cartonName", customer_id as "customerId"
-      from cartons
-      where id = $1
-      limit 1
-    `,
-    id,
-  )
-  const existing = existingRows[0]
-  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-  const data = parsed.data
-  const assignments: string[] = []
-  const values: unknown[] = []
-  const set = (column: string, value: unknown) => {
-    values.push(value)
-    assignments.push(`${column} = $${values.length}`)
-  }
-
-  if (data.cartonName !== undefined) set('carton_name', data.cartonName)
-  if (data.customerId !== undefined) set('customer_id', data.customerId)
-  if (data.productType !== undefined) set('product_type', toNullableText(data.productType))
-  if (data.category !== undefined) set('category', toNullableText(data.category))
-  if (data.rate !== undefined) set('rate', data.rate)
-  if (data.gstPct !== undefined) set('gst_pct', data.gstPct)
-  if (data.active !== undefined) set('active', data.active)
-  if (data.remarks !== undefined) set('remarks', toNullableText(data.remarks))
-  if (data.cartonSize !== undefined) set('carton_size', toNullableText(data.cartonSize))
-  if (data.printSize !== undefined) set('print_size', toNullableText(data.printSize))
-  if (data.boardGrade !== undefined) set('board_grade', toNullableText(data.boardGrade))
-  if (data.gsm !== undefined) set('gsm', data.gsm)
-  if (data.caliperMicrons !== undefined) set('caliper_microns', data.caliperMicrons)
-  if (data.paperType !== undefined) set('paper_type', toNullableText(data.paperType))
-  if (data.plyCount !== undefined) set('ply_count', data.plyCount)
-  if (data.printingType !== undefined) set('printing_type', toNullableText(data.printingType))
-  if (data.coatingType !== undefined) set('coating_type', toNullableText(data.coatingType))
-  if (data.embossingLeafing !== undefined) set('embossing_leafing', toNullableText(data.embossingLeafing))
-  if (data.artworkCode !== undefined) set('artwork_code', toNullableText(data.artworkCode))
-  if (data.pastingType !== undefined) set('pasting_type', toNullableText(data.pastingType))
-  if (data.glueType !== undefined) set('glue_type', toNullableText(data.glueType))
-  if (data.cartonConstruct !== undefined) set('carton_construct', toNullableText(data.cartonConstruct))
-  if (data.dyeId !== undefined) set('dye_id', data.dyeId || null)
-  if (data.dyeCondition !== undefined) set('dye_condition', toNullableText(data.dyeCondition))
-  if (data.finishedLength !== undefined) set('finished_length', data.finishedLength)
-  if (data.finishedWidth !== undefined) set('finished_width', data.finishedWidth)
-  if (data.finishedHeight !== undefined) set('finished_height', data.finishedHeight)
-  if (data.blankLength !== undefined) set('blank_length', data.blankLength)
-  if (data.blankWidth !== undefined) set('blank_width', data.blankWidth)
-  if (data.drugSchedule !== undefined) set('drug_schedule', toNullableText(data.drugSchedule))
-  if (data.regulatoryText !== undefined) set('regulatory_text', toNullableText(data.regulatoryText))
-  if (data.specialInstructions !== undefined) set('special_instructions', toNullableText(data.specialInstructions))
-
-  if (assignments.length === 0) {
-    return NextResponse.json({ error: 'No changes provided' }, { status: 400 })
-  }
-
-  values.push(id)
-  await db.$executeRawUnsafe(
-    `
-      update cartons
-      set ${assignments.join(', ')}, updated_at = now()
-      where id = $${values.length}
-    `,
-    ...values,
-  )
-
-  const updatedRows = await db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-    `
-      select
-        id,
-        carton_name as "cartonName",
-        customer_id as "customerId",
-        product_type as "productType",
-        category,
-        rate::float8 as rate,
-        gst_pct as "gstPct",
-        active,
-        remarks,
-        carton_size as "cartonSize",
-        print_size as "printSize",
-        board_grade as "boardGrade",
-        gsm,
-        caliper_microns as "caliperMicrons",
-        paper_type as "paperType",
-        ply_count as "plyCount",
-        printing_type as "printingType",
-        coating_type as "coatingType",
-        embossing_leafing as "embossingLeafing",
-        artwork_code as "artworkCode",
-        foil_type as "foilType",
-        pasting_type as "pastingType",
-        glue_type as "glueType",
-        carton_construct as "cartonConstruct",
-        dye_id as "dyeId",
-        dye_condition as "dyeCondition",
-        finished_length::float8 as "finishedLength",
-        finished_width::float8 as "finishedWidth",
-        finished_height::float8 as "finishedHeight",
-        blank_length::float8 as "blankLength",
-        blank_width::float8 as "blankWidth",
-        drug_schedule as "drugSchedule",
-        regulatory_text as "regulatoryText",
-        special_instructions as "specialInstructions"
-      from cartons
-      where id = $1
-      limit 1
-    `,
-    id,
-  )
-  const updated = updatedRows[0]
-
-  await createAuditLog({
-    userId: user!.id,
-    action: 'UPDATE',
-    tableName: 'cartons',
-    recordId: id,
-    newValue: parsed.data,
-  })
-
-  return NextResponse.json(updated)
 }
 
 export async function DELETE(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> },
 ) {
-  const { error, user } = await requireRole('operations_head', 'md')
-  if (error) return error
+  try {
+    const { error, user } = await requireRole('operations_head', 'md')
+    if (error) return error
 
-  const { id } = await context.params
-  const existingRows = await db.$queryRawUnsafe<Array<{
-    id: string
-    cartonName: string
-    customerId: string
-  }>>(
-    `
-      select id, carton_name as "cartonName", customer_id as "customerId"
-      from cartons
-      where id = $1
-      limit 1
-    `,
-    id,
-  )
-  const existing = existingRows[0]
-  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const { id } = await context.params
+    const existing = await db.carton.findUnique({
+      where: { id },
+      select: { id: true, cartonName: true, customerId: true },
+    })
+    if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  await db.$executeRawUnsafe('delete from cartons where id = $1', id)
+    await db.carton.delete({ where: { id } })
 
-  await createAuditLog({
-    userId: user!.id,
-    action: 'DELETE',
-    tableName: 'cartons',
-    recordId: id,
-    oldValue: { cartonName: existing.cartonName, customerId: existing.customerId },
-  })
+    await createAuditLog({
+      userId: user!.id,
+      action: 'DELETE',
+      tableName: 'cartons',
+      recordId: id,
+      oldValue: { cartonName: existing.cartonName, customerId: existing.customerId },
+    })
 
-  return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true })
+  } catch (e) {
+    console.error('[cartons/[id] DELETE]', e)
+    return NextResponse.json({ error: 'Failed to delete carton' }, { status: 500 })
+  }
 }
