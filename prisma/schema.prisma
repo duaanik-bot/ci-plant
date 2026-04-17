@@ -719,7 +719,7 @@ model DieHubEvent {
   /// ISSUE | RETURN | UNDO | ZONE_MOVE | CONDITION_CHANGE | SCRAP
   auditActionType String?  @map("audit_action_type") @db.VarChar(32)
   metadata        Json?
-  supersededByUndoEventId String?   @map("superseded_by_undo_event_id") @db.Uuid
+  supersededByUndoEventId String?   @map("superseded_by_undo_event_id")
   /// Canonical action label for timelines (e.g. ISSUED_TO_MACHINE, RETURNED_TO_RACK).
   hubAction        String?  @map("hub_action") @db.VarChar(64)
   /// Good | Fair | Poor when applicable (returns); null otherwise.
