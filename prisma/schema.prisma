@@ -671,6 +671,14 @@ model Dye {
   dateOfManufacturing DateTime? @map("date_of_manufacturing")
   /// Die Hub custody staging: e.g. `rack` when pulled from live inventory (matches plate hub).
   hubCustodySource    String?   @map("hub_custody_source") @db.VarChar(32)
+  /// Die Hub triage: non-null = on hold (yellow highlight in UI).
+  hubTriageHoldReason String?   @map("hub_triage_hold_reason") @db.VarChar(500)
+  /// Last time Poor-condition maintenance was cleared in hub.
+  hubMaintenanceCompletedAt DateTime? @map("hub_maintenance_completed_at")
+  /// Die Hub only — e.g. POOR_CONDITION after a Poor return; not used by Plate/PO flows.
+  hubStatusFlag       String?   @map("hub_status_flag") @db.VarChar(32)
+  /// Operator name from Operator Master when Poor was reported (hub-only alert).
+  hubPoorReportedBy   String?   @map("hub_poor_reported_by") @db.VarChar(120)
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -686,6 +694,17 @@ model Dye {
   @@map("dyes")
 }
 
+/// Press / floor operators for Die Hub issuance & returns (searchable identity).
+model OperatorMaster {
+  id        String   @id @default(uuid())
+  name      String   @unique @db.VarChar(120)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("operator_master")
+}
+
 /// Append-only Die Hub audit trail (dual-written with hub state changes).
 model DieHubEvent {
   id         String   @id @default(uuid())
@@ -694,12 +713,26 @@ model DieHubEvent {
   fromZone   String?  @map("from_zone") @db.VarChar(128)
   toZone     String?  @map("to_zone") @db.VarChar(128)
   details    Json?
+  operatorName String? @map("operator_name") @db.VarChar(120)
+  /// Physical actor (Operator Master name) — canonical for timelines.
+  actorName       String?  @map("actor_name") @db.VarChar(120)
+  /// ISSUE | RETURN | UNDO | ZONE_MOVE | CONDITION_CHANGE | SCRAP
+  auditActionType String?  @map("audit_action_type") @db.VarChar(32)
+  metadata        Json?
+  supersededByUndoEventId String?   @map("superseded_by_undo_event_id") @db.Uuid
+  /// Canonical action label for timelines (e.g. ISSUED_TO_MACHINE, RETURNED_TO_RACK).
+  hubAction        String?  @map("hub_action") @db.VarChar(64)
+  /// Good | Fair | Poor when applicable (returns); null otherwise.
+  eventCondition   String?  @map("event_condition") @db.VarChar(16)
   createdAt  DateTime @default(now()) @map("created_at")
 
   dye Dye @relation(fields: [dyeId], references: [id], onDelete: Cascade)
+  supersedingUndo DieHubEvent?  @relation("DieHubEventUndoSupersede", fields: [supersededByUndoEventId], references: [id], onDelete: SetNull)
+  supersededByThis DieHubEvent[] @relation("DieHubEventUndoSupersede")
 
   @@index([dyeId])
   @@index([createdAt(sort: Desc)])
+  @@index([supersededByUndoEventId])
   @@map("die_hub_events")
 }
 

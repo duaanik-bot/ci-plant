@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { inventoryIssueBodySchema } from '@/lib/inventory-hub-schemas'
 import { issueToolToMachine } from '@/lib/inventory-hub-service'
 import { safeJsonParse, safeJsonStringify } from '@/lib/safe-json'
 import { buildIssueDedupeKey, isDuplicateIssue, recordIssueSuccess } from '@/lib/inventory-issue-idempotency'
+import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
+import { dieHubZoneLabelFromCustody, DIE_HUB_ZONE } from '@/lib/tooling-hub-zones'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,7 +41,21 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       return NextResponse.json({ ok: true, duplicate: true, message: 'Duplicate issue suppressed' })
     }
 
-    const result = await issueToolToMachine('die', toolId, parsed.data.machineId, parsed.data.operatorUserId)
+    const before = await db.dye.findUnique({
+      where: { id: toolId },
+      select: { custodyStatus: true, dyeNumber: true, active: true },
+    })
+    if (!before?.active) {
+      return NextResponse.json({ error: 'Die not found', code: 'NOT_FOUND' }, { status: 404 })
+    }
+
+    const result = await issueToolToMachine(
+      'die',
+      toolId,
+      parsed.data.machineId,
+      parsed.data.operatorUserId,
+      parsed.data.operatorName,
+    )
     if (result.ok === false) {
       const status =
         result.code === 'NOT_FOUND'
@@ -52,6 +69,42 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     }
 
     recordIssueSuccess(dedupeKey)
+
+    let opLabel = parsed.data.operatorName?.trim()
+    if (!opLabel && parsed.data.operatorUserId) {
+      opLabel =
+        (await db.user.findUnique({
+          where: { id: parsed.data.operatorUserId },
+          select: { name: true },
+        }))?.name ?? undefined
+    }
+
+    const machine = await db.machine.findUnique({
+      where: { id: parsed.data.machineId },
+      select: { machineCode: true, name: true },
+    })
+
+    await createDieHubEvent(db, {
+      dyeId: toolId,
+      actionType: DIE_HUB_ACTION.ISSUE_TO_MACHINE,
+      fromZone: dieHubZoneLabelFromCustody(before.custodyStatus),
+      toZone: DIE_HUB_ZONE.ON_MACHINE_FLOOR,
+      operatorName: opLabel ?? undefined,
+      actorName: opLabel ?? undefined,
+      metadata: {
+        condition: null,
+        remarks: null,
+      },
+      details: {
+        displayCode: `DYE-${before.dyeNumber}`,
+        machineId: parsed.data.machineId,
+        machineCode: machine?.machineCode,
+        machineName: machine?.name,
+        operatorUserId: parsed.data.operatorUserId,
+        operatorName: opLabel,
+      },
+    })
+
     return new NextResponse(safeJsonStringify({ ok: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

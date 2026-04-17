@@ -16,6 +16,7 @@ import {
 import { CUSTODY_HUB_TRIAGE } from '@/lib/inventory-hub-custody'
 import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
 import { createEmbossHubEvent, EMBOSS_HUB_ACTION } from '@/lib/emboss-hub-events'
+import { dieHubZoneLabelFromCustody, embossHubZoneLabelFromCustody } from '@/lib/tooling-hub-zones'
 import {
   formatDimsLwhFromDb,
   normalizeDieMake,
@@ -222,6 +223,16 @@ async function resolveDieTriageSpecs(
     }
   }
 
+  if (master) {
+    const pt = master.pastingType?.trim()
+    if (pt) pastingType = pt
+    triageDyeType = master.dyeType?.trim() || triageDyeType
+    sourceMasterTypeLabel = masterDieTypeLabel({
+      dyeType: master.dyeType,
+      pastingType: master.pastingType,
+    })
+  }
+
   return {
     sheetSize: sheet,
     ups: ups ?? 0,
@@ -392,6 +403,7 @@ export async function POST(req: NextRequest) {
 
   let createdDyeId: string | null = null
   let createdEmbossBlockId: string | null = null
+  const dispatchActor = user?.name?.trim() || 'Operator'
 
   await db.$transaction(async (tx) => {
     if (dieTriageSpec) {
@@ -419,7 +431,8 @@ export async function POST(req: NextRequest) {
         dyeId: dye.id,
         actionType: DIE_HUB_ACTION.PUSH_TO_TRIAGE,
         fromZone: null,
-        toZone: CUSTODY_HUB_TRIAGE,
+        toZone: dieHubZoneLabelFromCustody(CUSTODY_HUB_TRIAGE),
+        actorName: dispatchActor,
         details: {
           DieJobId: data.jobCardId,
           awReference: dieTriageSpec.awRef,
@@ -456,7 +469,7 @@ export async function POST(req: NextRequest) {
         blockId: block.id,
         actionType: EMBOSS_HUB_ACTION.PUSH_TO_TRIAGE,
         fromZone: null,
-        toZone: CUSTODY_HUB_TRIAGE,
+        toZone: embossHubZoneLabelFromCustody(CUSTODY_HUB_TRIAGE),
         details: {
           EmbossJobId: data.jobCardId,
           awReference: embossTriageSpec.awRef,

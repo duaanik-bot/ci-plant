@@ -9,11 +9,10 @@ import {
 } from '@/lib/inventory-hub-custody'
 import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
 import { dieHubZoneLabelFromCustody } from '@/lib/tooling-hub-zones'
-import { dimTriplesEqual, normalizeDieMake, tripleFromDyeRow } from '@/lib/die-hub-dimensions'
 
 export const dynamic = 'force-dynamic'
 
-const postSchema = z.object({
+const bodySchema = z.object({
   triageDyeId: z.string().uuid(),
   inventoryDyeId: z.string().uuid(),
   actorName: z.string().min(1).max(120).optional(),
@@ -34,92 +33,20 @@ function rackSlotLabel(location: string | null | undefined): string {
   return s && s.length > 0 ? s : '—'
 }
 
-/** GET — list live dies matching triage L×W×H. */
-export async function GET(req: NextRequest) {
-  try {
-    const { error } = await requireAuth()
-    if (error) return error
-
-    const triageDyeId = req.nextUrl.searchParams.get('triageDyeId')?.trim()
-    if (!triageDyeId) {
-      return NextResponse.json({ error: 'triageDyeId required' }, { status: 400 })
-    }
-
-    const triage = await db.dye.findFirst({
-      where: { id: triageDyeId, active: true, custodyStatus: CUSTODY_HUB_TRIAGE },
-    })
-    if (!triage) {
-      return NextResponse.json({ error: 'Triage die not found' }, { status: 404 })
-    }
-
-    const triageTriple = tripleFromDyeRow(triage)
-    if (!triageTriple) {
-      return NextResponse.json({
-        triageDisplayCode: `DYE-${triage.dyeNumber}`,
-        candidates: [] as unknown[],
-        hint: 'Add parsed dimensions (L×W×H) on the triage die to match rack inventory.',
-      })
-    }
-
-    const rack = await db.dye.findMany({
-      where: {
-        active: true,
-        custodyStatus: CUSTODY_IN_STOCK,
-        NOT: { id: triage.id },
-      },
-      orderBy: { dyeNumber: 'asc' },
-      select: {
-        id: true,
-        dyeNumber: true,
-        pastingType: true,
-        dieMake: true,
-        location: true,
-        reuseCount: true,
-        impressionCount: true,
-        dimLengthMm: true,
-        dimWidthMm: true,
-        dimHeightMm: true,
-        cartonSize: true,
-      },
-    })
-
-    const candidates = rack
-      .filter((row) => dimTriplesEqual(triageTriple, tripleFromDyeRow(row)))
-      .map((row) => ({
-        id: row.id,
-        serialLabel: `#DYE-${row.dyeNumber}`,
-        displayCode: `DYE-${row.dyeNumber}`,
-        pastingType: row.pastingType?.trim() || null,
-        dieMake: normalizeDieMake(row.dieMake),
-        location: row.location,
-        reuseCount: row.reuseCount,
-        impressionCount: row.impressionCount,
-      }))
-
-    return NextResponse.json({
-      triageDisplayCode: `DYE-${triage.dyeNumber}`,
-      candidates,
-    })
-  } catch (e) {
-    console.error('[tooling-hub/dies/take-from-stock GET]', e)
-    return NextResponse.json({ error: 'Failed to load candidates' }, { status: 500 })
-  }
-}
-
-/** POST — archive triage placeholder; move rack die to custody staging (Source: Rack). */
+/** Force-link triage job to any in-stock die (dimension check skipped). */
 export async function POST(req: NextRequest) {
   try {
     const { error, user } = await requireAuth()
     if (error) return error
 
-    const parsed = postSchema.safeParse(await req.json().catch(() => ({})))
+    const parsed = bodySchema.safeParse(await req.json().catch(() => ({})))
     if (!parsed.success) {
       return NextResponse.json({ error: 'triageDyeId and inventoryDyeId required' }, { status: 400 })
     }
 
     const { triageDyeId, inventoryDyeId, actorName: actorRaw } = parsed.data
     if (triageDyeId === inventoryDyeId) {
-      return NextResponse.json({ error: 'Cannot select the triage record as inventory' }, { status: 400 })
+      return NextResponse.json({ error: 'Cannot link triage record to itself' }, { status: 400 })
     }
 
     const actor = actorRaw?.trim() || user?.name?.trim() || 'Operator'
@@ -134,11 +61,8 @@ export async function POST(req: NextRequest) {
       })
       if (!triage) throw new HttpErr('Triage die not found or not in triage', 404)
       if (!inventory) throw new HttpErr('Inventory die not found or not in live inventory', 404)
-
-      const tTrip = tripleFromDyeRow(triage)
-      const iTrip = tripleFromDyeRow(inventory)
-      if (!tTrip || !iTrip || !dimTriplesEqual(tTrip, iTrip)) {
-        throw new HttpErr('Dimensions do not match exactly (L × W × H)', 409)
+      if (triage.hubTriageHoldReason?.trim()) {
+        throw new HttpErr('Release on-hold before linking', 409)
       }
 
       const triageSnap = triage.updatedAt
@@ -147,7 +71,7 @@ export async function POST(req: NextRequest) {
       const slot = rackSlotLabel(inventory.location)
       const triageCode = `DYE-${triage.dyeNumber}`
       const invCode = `DYE-${inventory.dyeNumber}`
-      const msg = `Die ${invCode} pulled from Slot [${slot}] to fulfill Job [${triageCode}]. Source: Rack.`
+      const msg = `Manual link: ${invCode} pulled from [${slot}] to fulfill ${triageCode} (dimensions not auto-matched).`
 
       const arch = await tx.dye.updateMany({
         where: {
@@ -158,7 +82,7 @@ export async function POST(req: NextRequest) {
         },
         data: {
           active: false,
-          scrapReason: 'Triage fulfilled — existing die pulled from rack stock',
+          scrapReason: 'Triage fulfilled — manual link to rack die',
           scrappedBy: user!.id,
           scrappedAt: now,
           updatedAt: now,
@@ -191,7 +115,7 @@ export async function POST(req: NextRequest) {
 
       await createDieHubEvent(tx, {
         dyeId: inventoryDyeId,
-        actionType: DIE_HUB_ACTION.TAKE_FROM_STOCK_TO_CUSTODY,
+        actionType: DIE_HUB_ACTION.MANUAL_LINK_STOCK_FULFILL,
         fromZone: dieHubZoneLabelFromCustody(CUSTODY_IN_STOCK),
         toZone: dieHubZoneLabelFromCustody(CUSTODY_HUB_CUSTODY_READY),
         actorName: actor,
@@ -201,7 +125,7 @@ export async function POST(req: NextRequest) {
           triageDisplayCode: triageCode,
           inventoryDisplayCode: invCode,
           slot,
-          source: 'rack',
+          manualLink: true,
         },
       })
 
@@ -212,9 +136,10 @@ export async function POST(req: NextRequest) {
         toZone: 'Archived',
         actorName: actor,
         details: {
-          message: `Triage ${triageCode} closed — fulfilled from rack die ${invCode} (${slot}).`,
+          message: `Triage ${triageCode} closed — manual link to ${invCode}.`,
           inventoryDyeId,
           inventoryDisplayCode: invCode,
+          manualLink: true,
         },
       })
     })
@@ -225,7 +150,7 @@ export async function POST(req: NextRequest) {
       tableName: 'dyes',
       recordId: inventoryDyeId,
       newValue: {
-        dieHubTakeFromStock: true,
+        dieHubManualLink: true,
         triageDyeId,
         inventoryDyeId,
       },
@@ -233,10 +158,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true })
   } catch (e) {
-    console.error('[tooling-hub/dies/take-from-stock POST]', e)
+    console.error('[tooling-hub/dies/manual-link]', e)
     if (e instanceof HttpErr) {
       return NextResponse.json({ error: e.message }, { status: e.status })
     }
-    return NextResponse.json({ error: 'Take from stock failed' }, { status: 500 })
+    return NextResponse.json({ error: 'Manual link failed' }, { status: 500 })
   }
 }

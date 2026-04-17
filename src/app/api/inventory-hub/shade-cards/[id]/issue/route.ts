@@ -38,7 +38,13 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       return NextResponse.json({ ok: true, duplicate: true, message: 'Duplicate issue suppressed' })
     }
 
-    const result = await issueToolToMachine('shade_card', toolId, parsed.data.machineId, parsed.data.operatorUserId)
+    const result = await issueToolToMachine(
+      'shade_card',
+      toolId,
+      parsed.data.machineId,
+      parsed.data.operatorUserId,
+      parsed.data.operatorName,
+    )
     if (result.ok === false) {
       const status =
         result.code === 'NOT_FOUND'

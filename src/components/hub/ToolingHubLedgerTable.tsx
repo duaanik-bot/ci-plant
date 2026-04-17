@@ -32,6 +32,7 @@ export type ToolingLedgerRow = {
   dateOfManufacturing?: string | null
   similarMatches?: ToolingSimilarMatch[]
   typeMismatchMatches?: ToolingSimilarMatch[]
+  hubConditionPoor?: boolean
 }
 
 function hubSearchMatch(q: string, parts: Array<string | null | undefined>): boolean {
@@ -47,7 +48,11 @@ export function getFilteredToolingLedgerRows(
 ): ToolingLedgerRow[] {
   const q = searchQuery.trim().toLowerCase()
   return rows.filter((r) => {
-    if (zoneFilter && r.zoneKey !== zoneFilter) return false
+    if (zoneFilter === 'maintenance_needed') {
+      if (r.kind !== 'die' || !r.hubConditionPoor) return false
+    } else if (zoneFilter && r.zoneKey !== zoneFilter) {
+      return false
+    }
     const dieParts =
       r.kind === 'die'
         ? [
@@ -74,6 +79,8 @@ export const TOOLING_LEDGER_ZONE_OPTIONS_DIES: { value: string; label: string }[
   { value: 'outside_vendor', label: 'Outside Vendor' },
   { value: 'live_inventory', label: 'Live Inventory' },
   { value: 'custody_floor', label: 'Custody Floor' },
+  { value: 'on_machine', label: 'On machine floor' },
+  { value: 'maintenance_needed', label: 'Maintenance needed' },
 ]
 
 export const TOOLING_LEDGER_ZONE_OPTIONS_BLOCKS: { value: string; label: string }[] = [
@@ -82,6 +89,7 @@ export const TOOLING_LEDGER_ZONE_OPTIONS_BLOCKS: { value: string; label: string 
   { value: 'engraving_queue', label: 'In-House Engraving' },
   { value: 'live_inventory', label: 'Live Inventory' },
   { value: 'custody_floor', label: 'Custody Floor' },
+  { value: 'on_machine', label: 'On machine floor' },
 ]
 
 function formatDom(iso: string | null | undefined): string {
@@ -232,6 +240,7 @@ export function ToolingHubLedgerTable({
               <th className="px-2 py-2 font-semibold whitespace-nowrap">Match</th>
               <th className="px-2 py-2 font-semibold whitespace-nowrap">DOM</th>
               <th className="px-2 py-2 font-semibold whitespace-nowrap">Zone</th>
+              <th className="px-2 py-2 font-semibold whitespace-nowrap w-[1%]">Flags</th>
               <th className="px-2 py-2 font-semibold whitespace-nowrap">Time in zone</th>
               <th className="px-2 py-2 font-semibold min-w-[140px]">Last action</th>
             </tr>
@@ -239,7 +248,7 @@ export function ToolingHubLedgerTable({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-3 py-8 text-center text-zinc-500 text-sm">
+                <td colSpan={11} className="px-3 py-8 text-center text-zinc-500 text-sm">
                   No rows match the current filters.
                 </td>
               </tr>
@@ -287,9 +296,7 @@ export function ToolingHubLedgerTable({
                       {r.kind === 'die' ? (r.ups ?? '—') : '—'}
                     </td>
                     <td className="px-2 py-1.5 text-[11px] text-zinc-300 max-w-[100px] truncate">
-                      {r.kind === 'die'
-                        ? (r.masterType ?? r.pastingType)?.trim() || '—'
-                        : '—'}
+                      {r.kind === 'die' ? r.masterType?.trim() || '—' : '—'}
                     </td>
                     <td className="px-2 py-1.5 whitespace-nowrap">
                       {r.kind === 'die' && r.dieMake ? (
@@ -346,6 +353,15 @@ export function ToolingHubLedgerTable({
                       >
                         {r.zoneLabel}
                       </span>
+                    </td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      {r.hubConditionPoor ? (
+                        <span className="inline-flex items-center rounded border border-red-600/70 bg-red-950/50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-red-300 whitespace-nowrap">
+                          Maintenance
+                        </span>
+                      ) : (
+                        <span className="text-zinc-600">—</span>
+                      )}
                     </td>
                     <td className="px-2 py-1.5 text-[11px] text-zinc-400 whitespace-nowrap tabular-nums">
                       {timeInZone}

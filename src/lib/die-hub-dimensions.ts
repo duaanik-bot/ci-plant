@@ -6,7 +6,7 @@ export type ParsedCartonDims = { l: number; w: number; h: number }
 /** Options shown on Die Hub add / triage forms. */
 export const DIE_HUB_PASTING_TYPES = [
   'Lock Bottom',
-  'RTF',
+  'Registered tuck flap',
   'Side Paste',
   'BSO',
   'Crash lock',

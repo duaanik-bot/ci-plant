@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
-import { CUSTODY_AT_VENDOR } from '@/lib/inventory-hub-custody'
+import { CUSTODY_AT_VENDOR, CUSTODY_IN_STOCK } from '@/lib/inventory-hub-custody'
 import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
 import { dieHubZoneLabelFromCustody } from '@/lib/tooling-hub-zones'
 import {
@@ -22,6 +22,8 @@ const bodySchema = z.object({
   dyeType: z.string().max(80).optional(),
   pastingType: z.string().max(64).optional().nullable(),
   dieMake: z.enum(['local', 'laser']).optional(),
+  /** `live_inventory` = + Add Die (rack). Default = Outside vendor lane. */
+  hubDestination: z.enum(['vendor', 'live_inventory']).optional().default('vendor'),
 })
 
 /** Create / upsert die row and place in Outside Vendor lane for Die Hub. */
@@ -35,8 +37,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
     }
 
-    const { dyeNumber, cartonSize, sheetSize, ups, dieMaterial, dyeType, pastingType, dieMake } =
-      parsed.data
+    const {
+      dyeNumber,
+      cartonSize,
+      sheetSize,
+      ups,
+      dieMaterial,
+      dyeType,
+      pastingType,
+      dieMake,
+      hubDestination,
+    } = parsed.data
     const existing = await db.dye.findUnique({ where: { dyeNumber } })
     if (existing) {
       return NextResponse.json(
@@ -46,6 +57,8 @@ export async function POST(req: NextRequest) {
     }
 
     const dims = prismaDimsFromParsed(parseCartonSizeToDims(cartonSize))
+    const custody =
+      hubDestination === 'live_inventory' ? CUSTODY_IN_STOCK : CUSTODY_AT_VENDOR
     const row = await db.$transaction(async (tx) => {
       const created = await tx.dye.create({
         data: {
@@ -55,7 +68,7 @@ export async function POST(req: NextRequest) {
           sheetSize: sheetSize?.trim() || 'Standard',
           cartonSize: cartonSize.trim(),
           dieMaterial: dieMaterial?.trim() || null,
-          custodyStatus: CUSTODY_AT_VENDOR,
+          custodyStatus: custody,
           pastingType: pastingType?.trim() || null,
           dieMake: normalizeDieMake(dieMake),
           ...(dims ?? {}),
@@ -63,9 +76,13 @@ export async function POST(req: NextRequest) {
       })
       await createDieHubEvent(tx, {
         dyeId: created.id,
-        actionType: DIE_HUB_ACTION.MANUAL_VENDOR_CREATE,
+        actionType:
+          hubDestination === 'live_inventory'
+            ? DIE_HUB_ACTION.MANUAL_LIVE_CREATE
+            : DIE_HUB_ACTION.MANUAL_VENDOR_CREATE,
         fromZone: 'Manual entry',
-        toZone: dieHubZoneLabelFromCustody(CUSTODY_AT_VENDOR),
+        toZone: dieHubZoneLabelFromCustody(custody),
+        actorName: user?.name?.trim() || 'Operator',
         details: {
           displayCode: `DYE-${created.dyeNumber}`,
           dyeNumber: created.dyeNumber,

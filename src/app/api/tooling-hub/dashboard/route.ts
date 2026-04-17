@@ -8,6 +8,7 @@ import {
   CUSTODY_HUB_ENGRAVING_QUEUE,
   CUSTODY_HUB_TRIAGE,
   CUSTODY_IN_STOCK,
+  CUSTODY_ON_FLOOR,
 } from '@/lib/inventory-hub-custody'
 import { hubJobCardHubStatus } from '@/lib/hub-job-card-status'
 import {
@@ -67,6 +68,7 @@ export type ToolingHubLedgerRowJson = {
   ups?: number
   pastingType?: string | null
   masterType?: string | null
+  hubConditionPoor?: boolean
   dieMake?: 'local' | 'laser'
   dateOfManufacturing?: string | null
   similarMatches?: DieSimilarMatchJson[]
@@ -98,8 +100,17 @@ function mapDie(d: {
   dieMake: string
   dateOfManufacturing: Date | null
   hubCustodySource: string | null
+  hubTriageHoldReason: string | null
+  issuedOperator: string | null
+  condition: string
+  conditionRating: string | null
+  hubStatusFlag: string | null
+  hubPoorReportedBy: string | null
   cartonsWork: { cartonName: string }[]
 }) {
+  const physicalPoor =
+    d.condition?.trim() === 'Poor' || (d.conditionRating?.trim() ?? '') === 'Poor'
+  const hubDieHubPoorFlag = d.hubStatusFlag?.trim() === 'POOR_CONDITION'
   const parsedDims = parseCartonSizeToDims(d.cartonSize)
   const dimensionsLwh =
     (formatDimsLwhFromDb({
@@ -138,6 +149,11 @@ function mapDie(d: {
     dieMake: normalizeDieMake(d.dieMake),
     dateOfManufacturing: d.dateOfManufacturing ? d.dateOfManufacturing.toISOString() : null,
     hubCustodySource: d.hubCustodySource?.trim() || null,
+    hubTriageHoldReason: d.hubTriageHoldReason?.trim() || null,
+    issuedOperator: d.issuedOperator?.trim() || null,
+    hubDieHubPoorFlag,
+    hubPoorReportedBy: d.hubPoorReportedBy?.trim() || null,
+    hubConditionPoor: physicalPoor || hubDieHubPoorFlag,
     jobCardHub: null as ReturnType<typeof hubJobCardHubStatus> | null,
   }
 }
@@ -155,8 +171,10 @@ function mapEmboss(
     reuseCount: number
     custodyStatus: string
     hubPreviousCustody: string | null
+    issuedOperator: string | null
     updatedAt: Date
     createdAt: Date
+    condition: string
   },
   jobCardHub: ReturnType<typeof hubJobCardHubStatus> | null,
   triageMeta?: EmbossTriageCardMeta | null,
@@ -180,6 +198,8 @@ function mapEmboss(
     triageManualEntry: triageMeta?.triageManualEntry ?? false,
     triageAwReference: triageMeta?.triageAwReference ?? null,
     triageBlockDimensions: triageMeta?.triageBlockDimensions ?? null,
+    hubConditionPoor: b.condition?.trim() === 'Poor',
+    issuedOperator: b.issuedOperator?.trim() || null,
   }
 }
 
@@ -249,7 +269,10 @@ export async function GET(req: NextRequest) {
       const triage = withSimilar.filter((r) => r.custodyStatus === CUSTODY_HUB_TRIAGE)
       const prep = withSimilar.filter((r) => r.custodyStatus === CUSTODY_AT_VENDOR)
       const inventory = withSimilar.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK)
-      const custody = withSimilar.filter((r) => r.custodyStatus === CUSTODY_HUB_CUSTODY_READY)
+      const custody = withSimilar.filter(
+        (r) =>
+          r.custodyStatus === CUSTODY_HUB_CUSTODY_READY || r.custodyStatus === CUSTODY_ON_FLOOR,
+      )
       const ledgerRows: ToolingHubLedgerRowJson[] = withSimilar.map((r) => {
         const zoneKey = dieLedgerZoneKeyFromCustody(r.custodyStatus)
         const units = Math.max(1, r.currentStock ?? 1)
@@ -274,6 +297,7 @@ export async function GET(req: NextRequest) {
           dateOfManufacturing: r.dateOfManufacturing,
           similarMatches: r.similarMatches,
           typeMismatchMatches: r.typeMismatchMatches,
+          hubConditionPoor: r.hubConditionPoor,
         }
       })
       return new NextResponse(
@@ -286,7 +310,10 @@ export async function GET(req: NextRequest) {
       where: { active: true },
       orderBy: { blockCode: 'asc' },
     })
-    const custodyRows = rows.filter((r) => r.custodyStatus === CUSTODY_HUB_CUSTODY_READY)
+    const custodyRows = rows.filter(
+      (r) =>
+        r.custodyStatus === CUSTODY_HUB_CUSTODY_READY || r.custodyStatus === CUSTODY_ON_FLOOR,
+    )
     const custodyIds = custodyRows.map((r) => r.id)
     const jcs =
       custodyIds.length > 0
@@ -336,14 +363,19 @@ export async function GET(req: NextRequest) {
     const mapped = rows.map((b) =>
       mapEmboss(
         b,
-        b.custodyStatus === CUSTODY_HUB_CUSTODY_READY ? jcHubByEmboss.get(b.id) ?? null : null,
+        b.custodyStatus === CUSTODY_HUB_CUSTODY_READY || b.custodyStatus === CUSTODY_ON_FLOOR
+          ? jcHubByEmboss.get(b.id) ?? null
+          : null,
         b.custodyStatus === CUSTODY_HUB_TRIAGE ? triageMetaByBlock.get(b.id) ?? null : null,
       ),
     )
     const triage = mapped.filter((r) => r.custodyStatus === CUSTODY_HUB_TRIAGE)
     const prep = mapped.filter((r) => r.custodyStatus === CUSTODY_HUB_ENGRAVING_QUEUE)
     const inventory = mapped.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK)
-    const custody = mapped.filter((r) => r.custodyStatus === CUSTODY_HUB_CUSTODY_READY)
+    const custody = mapped.filter(
+      (r) =>
+        r.custodyStatus === CUSTODY_HUB_CUSTODY_READY || r.custodyStatus === CUSTODY_ON_FLOOR,
+    )
 
     const embossRankById = new Map(
       [...mapped]
@@ -368,6 +400,7 @@ export async function GET(req: NextRequest) {
         lastStatusUpdatedAt: r.lastStatusUpdatedAt,
         ledgerEntryAt: r.createdAt,
         ledgerRank: embossRankById.get(r.id) ?? 0,
+        hubConditionPoor: r.kind === 'emboss' ? r.hubConditionPoor : undefined,
       }
     })
 

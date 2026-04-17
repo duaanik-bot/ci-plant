@@ -1,9 +1,15 @@
 import { z } from 'zod'
 
-export const inventoryIssueBodySchema = z.object({
-  machineId: z.string().min(1, 'machineId is required'),
-  operatorUserId: z.string().uuid('operatorUserId must be a valid UUID'),
-})
+export const inventoryIssueBodySchema = z
+  .object({
+    machineId: z.string().min(1, 'machineId is required'),
+    operatorUserId: z.string().uuid('operatorUserId must be a valid UUID').optional(),
+    /** Free-text operator when not picking a directory user (floor speed). */
+    operatorName: z.string().min(1).max(120).optional(),
+  })
+  .refine((d) => Boolean(d.operatorUserId?.trim()) || Boolean(d.operatorName?.trim()), {
+    message: 'Operator is required (pick a user or enter a name)',
+  })
 
 export const inventoryReceiveBodySchema = z.object({
   finalImpressions: z.number().int().min(0),

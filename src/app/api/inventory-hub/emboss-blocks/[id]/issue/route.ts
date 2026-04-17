@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { inventoryIssueBodySchema } from '@/lib/inventory-hub-schemas'
 import { issueToolToMachine } from '@/lib/inventory-hub-service'
 import { safeJsonParse, safeJsonStringify } from '@/lib/safe-json'
 import { buildIssueDedupeKey, isDuplicateIssue, recordIssueSuccess } from '@/lib/inventory-issue-idempotency'
+import { createEmbossHubEvent, EMBOSS_HUB_ACTION } from '@/lib/emboss-hub-events'
+import { embossHubZoneLabelFromCustody, DIE_HUB_ZONE } from '@/lib/tooling-hub-zones'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,7 +41,21 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       return NextResponse.json({ ok: true, duplicate: true, message: 'Duplicate issue suppressed' })
     }
 
-    const result = await issueToolToMachine('emboss_block', toolId, parsed.data.machineId, parsed.data.operatorUserId)
+    const before = await db.embossBlock.findUnique({
+      where: { id: toolId },
+      select: { custodyStatus: true, blockCode: true, active: true },
+    })
+    if (!before?.active) {
+      return NextResponse.json({ error: 'Block not found', code: 'NOT_FOUND' }, { status: 404 })
+    }
+
+    const result = await issueToolToMachine(
+      'emboss_block',
+      toolId,
+      parsed.data.machineId,
+      parsed.data.operatorUserId,
+      parsed.data.operatorName,
+    )
     if (result.ok === false) {
       const status =
         result.code === 'NOT_FOUND'
@@ -52,6 +69,29 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     }
 
     recordIssueSuccess(dedupeKey)
+
+    let opLabel = parsed.data.operatorName?.trim()
+    if (!opLabel && parsed.data.operatorUserId) {
+      opLabel =
+        (await db.user.findUnique({
+          where: { id: parsed.data.operatorUserId },
+          select: { name: true },
+        }))?.name ?? undefined
+    }
+
+    await createEmbossHubEvent(db, {
+      blockId: toolId,
+      actionType: EMBOSS_HUB_ACTION.ISSUE_TO_MACHINE,
+      fromZone: embossHubZoneLabelFromCustody(before.custodyStatus),
+      toZone: DIE_HUB_ZONE.ON_MACHINE_FLOOR,
+      details: {
+        displayCode: before.blockCode,
+        machineId: parsed.data.machineId,
+        operatorUserId: parsed.data.operatorUserId,
+        operatorName: opLabel,
+      },
+    })
+
     return new NextResponse(safeJsonStringify({ ok: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

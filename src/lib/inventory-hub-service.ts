@@ -30,19 +30,33 @@ export async function issueToolToMachine(
   kind: InventoryToolKind,
   toolId: string,
   machineId: string,
-  operatorUserId: string,
+  operatorUserId: string | undefined,
+  operatorNameText?: string | null,
 ): Promise<IssueResult> {
   if (!toolId?.trim() || !machineId?.trim()) {
     return { ok: false, code: 'INVALID_STATE', message: 'toolId and machineId are required' }
   }
 
-  const [machine, operator] = await Promise.all([
-    db.machine.findUnique({ where: { id: machineId } }),
-    db.user.findUnique({ where: { id: operatorUserId }, select: { id: true, name: true, active: true } }),
-  ])
-
+  const machine = await db.machine.findUnique({ where: { id: machineId } })
   if (!machine) return { ok: false, code: 'BAD_MACHINE', message: 'Machine not found' }
-  if (!operator || !operator.active) return { ok: false, code: 'BAD_OPERATOR', message: 'Operator not found' }
+
+  let operatorLabel: string
+  let maintenancePerformedBy: string
+  const trimmedName = operatorNameText?.trim()
+  if (trimmedName) {
+    operatorLabel = trimmedName
+    maintenancePerformedBy = trimmedName
+  } else if (operatorUserId?.trim()) {
+    const operator = await db.user.findUnique({
+      where: { id: operatorUserId },
+      select: { id: true, name: true, active: true },
+    })
+    if (!operator || !operator.active) return { ok: false, code: 'BAD_OPERATOR', message: 'Operator not found' }
+    operatorLabel = operator.name
+    maintenancePerformedBy = operator.name
+  } else {
+    return { ok: false, code: 'BAD_OPERATOR', message: 'Operator is required' }
+  }
 
   try {
     await db.$transaction(async (tx) => {
@@ -56,7 +70,7 @@ export async function issueToolToMachine(
           data: {
             custodyStatus: CUSTODY_ON_FLOOR,
             issuedMachineId: machineId,
-            issuedOperator: operator.name,
+            issuedOperator: operatorLabel,
             issuedAt: new Date(),
           },
         })
@@ -70,7 +84,7 @@ export async function issueToolToMachine(
           data: {
             dyeId: toolId,
             actionType: 'issue_to_machine',
-            performedBy: operator.name,
+            performedBy: maintenancePerformedBy,
             notes: `Issued to machine ${machine.machineCode} (${machine.name})`,
           },
         })
@@ -87,7 +101,7 @@ export async function issueToolToMachine(
           data: {
             custodyStatus: CUSTODY_ON_FLOOR,
             issuedMachineId: machineId,
-            issuedOperator: operator.name,
+            issuedOperator: operatorLabel,
             issuedAt: new Date(),
           },
         })
@@ -101,7 +115,7 @@ export async function issueToolToMachine(
           data: {
             blockId: toolId,
             actionType: 'issue_to_machine',
-            performedBy: operator.name,
+            performedBy: maintenancePerformedBy,
             notes: `Issued to machine ${machine.machineCode} (${machine.name})`,
           },
         })
@@ -113,9 +127,9 @@ export async function issueToolToMachine(
         data: {
           custodyStatus: CUSTODY_ON_FLOOR,
           issuedMachineId: machineId,
-          issuedOperator: operator.name,
+          issuedOperator: operatorLabel,
           issuedAt: new Date(),
-          currentHolder: `${machine.machineCode} · ${operator.name}`,
+          currentHolder: `${machine.machineCode} · ${operatorLabel}`,
         },
       })
       if (upd.count !== 1) {
@@ -131,7 +145,7 @@ export async function issueToolToMachine(
           machineId,
           machineCode: machine.machineCode,
           machineName: machine.name,
-          operatorName: operator.name,
+          operatorName: operatorLabel,
         },
       })
     })
@@ -294,6 +308,7 @@ export async function receiveToolFromVendor(
             actionType: DIE_HUB_ACTION.MANUFACTURED_AND_RECEIVED,
             fromZone: dieHubZoneLabelFromCustody(CUSTODY_AT_VENDOR),
             toZone: dieHubZoneLabelFromCustody(CUSTODY_IN_STOCK),
+            actorName: 'Vendor receive',
             details: {
               message: 'Die manufactured and received from vendor.',
               displayCode: `DYE-${row.dyeNumber}`,

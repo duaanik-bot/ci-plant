@@ -24,33 +24,61 @@ function httpError(status: number, message: string): Error & { status: number } 
   return e
 }
 
+const actorField = z.object({
+  actorName: z.string().min(1).max(120),
+})
+
 const bodySchema = z.discriminatedUnion('action', [
-  z.object({
-    action: z.literal('mark_ready'),
-    tool: z.enum(['die', 'emboss']),
-    id: z.string().uuid(),
-  }),
-  z.object({
-    action: z.literal('reverse_staging'),
-    tool: z.enum(['die', 'emboss']),
-    id: z.string().uuid(),
-  }),
-  z.object({
-    action: z.literal('scrap'),
-    tool: z.enum(['die', 'emboss']),
-    id: z.string().uuid(),
-    reason: z.string().min(3).max(500),
-  }),
-  z.object({
-    action: z.literal('push_to_triage'),
-    tool: z.enum(['die', 'emboss']),
-    id: z.string().uuid(),
-  }),
-  z.object({
-    action: z.literal('triage_to_prep'),
-    tool: z.enum(['die', 'emboss']),
-    id: z.string().uuid(),
-  }),
+  z
+    .object({
+      action: z.literal('mark_ready'),
+      tool: z.enum(['die', 'emboss']),
+      id: z.string().uuid(),
+    })
+    .merge(actorField),
+  z
+    .object({
+      action: z.literal('reverse_staging'),
+      tool: z.enum(['die', 'emboss']),
+      id: z.string().uuid(),
+    })
+    .merge(actorField),
+  z
+    .object({
+      action: z.literal('scrap'),
+      tool: z.enum(['die', 'emboss']),
+      id: z.string().uuid(),
+      reason: z.string().min(3).max(500),
+    })
+    .merge(actorField),
+  z
+    .object({
+      action: z.literal('push_to_triage'),
+      tool: z.enum(['die', 'emboss']),
+      id: z.string().uuid(),
+    })
+    .merge(actorField),
+  z
+    .object({
+      action: z.literal('triage_to_prep'),
+      tool: z.enum(['die', 'emboss']),
+      id: z.string().uuid(),
+    })
+    .merge(actorField),
+  z
+    .object({
+      action: z.literal('vendor_to_live_inventory'),
+      tool: z.literal('die'),
+      id: z.string().uuid(),
+    })
+    .merge(actorField),
+  z
+    .object({
+      action: z.literal('inventory_to_custody_floor'),
+      tool: z.enum(['die', 'emboss']),
+      id: z.string().uuid(),
+    })
+    .merge(actorField),
 ])
 
 /** POST /api/tooling-hub/transition — zone moves + scrap (use /return-to-rack for staging → rack). */
@@ -94,6 +122,7 @@ export async function POST(req: NextRequest) {
               actionType: DIE_HUB_ACTION.MANUFACTURED_AND_RECEIVED,
               fromZone,
               toZone,
+              actorName: body.actorName,
               details: {
                 message: 'Die manufactured and received from vendor.',
                 displayCode: `DYE-${row.dyeNumber}`,
@@ -105,6 +134,7 @@ export async function POST(req: NextRequest) {
             actionType: DIE_HUB_ACTION.MARKED_READY,
             fromZone,
             toZone,
+            actorName: body.actorName,
             details: { displayCode: `DYE-${row.dyeNumber}` },
           })
         })
@@ -159,6 +189,7 @@ export async function POST(req: NextRequest) {
             actionType: DIE_HUB_ACTION.REVERSE_STAGING,
             fromZone,
             toZone,
+            actorName: body.actorName,
             details: { displayCode: `DYE-${row.dyeNumber}`, restoredStatus: prev },
           })
         })
@@ -212,6 +243,8 @@ export async function POST(req: NextRequest) {
             actionType: DIE_HUB_ACTION.SCRAP,
             fromZone,
             toZone: 'Scrapped',
+            actorName: body.actorName,
+            metadata: { remarks: body.reason.trim() },
             details: { reason: body.reason.trim(), displayCode: `DYE-${row.dyeNumber}` },
           })
         })
@@ -260,6 +293,7 @@ export async function POST(req: NextRequest) {
             actionType: DIE_HUB_ACTION.PUSH_TO_TRIAGE,
             fromZone,
             toZone,
+            actorName: body.actorName,
             details: { displayCode: `DYE-${row.dyeNumber}` },
           })
         })
@@ -304,6 +338,7 @@ export async function POST(req: NextRequest) {
             actionType: DIE_HUB_ACTION.TRIAGE_TO_VENDOR,
             fromZone,
             toZone,
+            actorName: body.actorName,
             details: { displayCode: `DYE-${row.dyeNumber}` },
           })
         })
@@ -323,6 +358,81 @@ export async function POST(req: NextRequest) {
           await createEmbossHubEvent(tx, {
             blockId: body.id,
             actionType: EMBOSS_HUB_ACTION.TRIAGE_TO_ENGRAVING,
+            fromZone,
+            toZone,
+            details: { displayCode: row.blockCode },
+          })
+        })
+      }
+    } else if (body.action === 'vendor_to_live_inventory') {
+      await db.$transaction(async (tx) => {
+        const row = await tx.dye.findUnique({ where: { id: body.id } })
+        if (!row?.active) throw httpError(404, 'Die not found')
+        if (row.custodyStatus !== CUSTODY_AT_VENDOR) {
+          throw httpError(409, 'Die must be at vendor to receive into live inventory')
+        }
+        const fromZone = dieHubZoneLabelFromCustody(row.custodyStatus)
+        await tx.dye.update({
+          where: { id: body.id },
+          data: { custodyStatus: CUSTODY_IN_STOCK, updatedAt: now },
+        })
+        const toZone = dieHubZoneLabelFromCustody(CUSTODY_IN_STOCK)
+        await createDieHubEvent(tx, {
+          dyeId: body.id,
+          actionType: DIE_HUB_ACTION.VENDOR_TO_LIVE_INVENTORY,
+          fromZone,
+          toZone,
+          actorName: body.actorName,
+          details: { displayCode: `DYE-${row.dyeNumber}` },
+        })
+      })
+    } else if (body.action === 'inventory_to_custody_floor') {
+      if (body.tool === 'die') {
+        await db.$transaction(async (tx) => {
+          const row = await tx.dye.findUnique({ where: { id: body.id } })
+          if (!row?.active) throw httpError(404, 'Die not found')
+          if (row.custodyStatus !== CUSTODY_IN_STOCK) {
+            throw httpError(409, 'Die must be in live inventory')
+          }
+          const fromZone = dieHubZoneLabelFromCustody(row.custodyStatus)
+          await tx.dye.update({
+            where: { id: body.id },
+            data: {
+              custodyStatus: CUSTODY_HUB_CUSTODY_READY,
+              hubPreviousCustody: CUSTODY_IN_STOCK,
+              updatedAt: now,
+            },
+          })
+          const toZone = dieHubZoneLabelFromCustody(CUSTODY_HUB_CUSTODY_READY)
+          await createDieHubEvent(tx, {
+            dyeId: body.id,
+            actionType: DIE_HUB_ACTION.INVENTORY_TO_CUSTODY_FLOOR,
+            fromZone,
+            toZone,
+            actorName: body.actorName,
+            details: { displayCode: `DYE-${row.dyeNumber}` },
+          })
+        })
+      } else {
+        await db.$transaction(async (tx) => {
+          const row = await tx.embossBlock.findUnique({ where: { id: body.id } })
+          if (!row?.active) throw httpError(404, 'Block not found')
+          if (row.custodyStatus !== CUSTODY_IN_STOCK) {
+            throw httpError(409, 'Block must be in live inventory')
+          }
+          const fromZone = embossHubZoneLabelFromCustody(row.custodyStatus)
+          await tx.embossBlock.update({
+            where: { id: body.id },
+            data: {
+              custodyStatus: CUSTODY_HUB_CUSTODY_READY,
+              hubPreviousCustody: CUSTODY_IN_STOCK,
+              updatedAt: now,
+            },
+          })
+          const toZone = embossHubZoneLabelFromCustody(CUSTODY_HUB_CUSTODY_READY)
+          await createEmbossHubEvent(tx, {
+            blockId: body.id,
+            actionType: EMBOSS_HUB_ACTION.INVENTORY_TO_CUSTODY_FLOOR,
             fromZone,
             toZone,
             details: { displayCode: row.blockCode },

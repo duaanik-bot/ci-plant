@@ -61,7 +61,7 @@ export function toolingMasterLedgerExportColumns(): HubExportColumn<ToolingLedge
     { header: 'Title', getValue: (r) => r.title },
     { header: 'L×W×H', getValue: (r) => r.dimensionsLwh?.trim() || '—' },
     { header: 'UPS', getValue: (r) => (r.ups != null ? String(r.ups) : '—') },
-    { header: 'Master type', getValue: (r) => (r.masterType ?? r.pastingType)?.trim() || '—' },
+    { header: 'Master type', getValue: (r) => r.masterType?.trim() || '—' },
     { header: 'Make', getValue: (r) => (r.dieMake ? r.dieMake : '—') },
     {
       header: 'Similar die codes',

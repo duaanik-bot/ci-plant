@@ -61,3 +61,18 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+/* Die Hub — custody floor tool actively issued to press */
+@keyframes hub-tool-in-use-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 14px 3px rgba(59, 130, 246, 0.25);
+  }
+}
+
+.hub-tool-in-use-pulse {
+  animation: hub-tool-in-use-pulse 2.2s ease-in-out infinite;
+}

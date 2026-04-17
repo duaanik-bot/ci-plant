@@ -1,9 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
+import { OperatorMasterCombobox } from '@/components/hub/OperatorMasterCombobox'
 import { safeJsonParse, safeJsonStringify } from '@/lib/safe-json'
 import {
   hubAddedToRackLabel,
@@ -31,6 +34,13 @@ import {
   toolingMasterLedgerExportColumns,
   toolingMasterLedgerExcelExtraColumns,
 } from '@/lib/hub-ledger-export-columns'
+import { CUSTODY_ON_FLOOR } from '@/lib/inventory-hub-custody'
+
+function isDieHubSupervisorRole(role: string | undefined): boolean {
+  if (!role?.trim()) return false
+  const r = role.toLowerCase()
+  return r.includes('admin') || r.includes('manager') || r.includes('supervisor')
+}
 
 const TOOLING_RETURN_SIZE_REASONS: {
   value: 'alternate_machine' | 'edge_damage' | 'prepress_error'
@@ -57,6 +67,8 @@ function ZoneCapacitySubheader({
 
 type JobCardHub = { key: string; badgeLabel: string }
 
+type MasterOperator = { id: string; name: string }
+
 type DieRow = {
   id: string
   kind: 'die'
@@ -79,11 +91,17 @@ type DieRow = {
   ledgerRank: number
   pastingType: string | null
   masterType?: string | null
+  hubConditionPoor?: boolean
+  /** Die Hub maintenance flag after a Poor return (isolated from Plate/PO). */
+  hubDieHubPoorFlag?: boolean
+  hubPoorReportedBy?: string | null
   dieMake: 'local' | 'laser'
   dateOfManufacturing: string | null
   similarMatches: SimilarDieMatch[]
   typeMismatchMatches?: SimilarDieMatch[]
   hubCustodySource?: string | null
+  hubTriageHoldReason?: string | null
+  issuedOperator?: string | null
 }
 
 type EmbossRow = {
@@ -104,6 +122,8 @@ type EmbossRow = {
   triageManualEntry?: boolean
   triageAwReference?: string | null
   triageBlockDimensions?: string | null
+  hubConditionPoor?: boolean
+  issuedOperator?: string | null
 }
 
 type ToolRow = DieRow | EmbossRow
@@ -118,7 +138,6 @@ type DashboardPayload = {
 }
 
 type MachineOpt = { id: string; machineCode: string; name: string }
-type UserOpt = { id: string; name: string }
 
 function JobCardStatusBadge({ hub }: { hub: JobCardHub | null | undefined }) {
   if (!hub) return null
@@ -188,6 +207,7 @@ async function postTransition(body: Record<string, unknown>) {
 }
 
 export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'blocks' }) {
+  const { data: session } = useSession()
   const tool = mode === 'dies' ? 'dies' : 'blocks'
   const toolKind = mode === 'dies' ? 'die' : 'emboss'
 
@@ -216,14 +236,22 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     '' | 'alternate_machine' | 'edge_damage' | 'prepress_error'
   >('')
   const [returnSizeRemarks, setReturnSizeRemarks] = useState('')
+  const [returnOperatorMasterId, setReturnOperatorMasterId] = useState('')
+  const [returnCondition, setReturnCondition] = useState<'Good' | 'Fair' | 'Poor'>('Good')
 
-  const [emergencyId, setEmergencyId] = useState<string | null>(null)
+  const [masterOperators, setMasterOperators] = useState<MasterOperator[]>([])
+  const [floorOperatorId, setFloorOperatorId] = useState('')
+
+  const [issueDieId, setIssueDieId] = useState<string | null>(null)
   const [machines, setMachines] = useState<MachineOpt[]>([])
-  const [users, setUsers] = useState<UserOpt[]>([])
-  const [emergencyMachineId, setEmergencyMachineId] = useState('')
-  const [emergencyOperatorId, setEmergencyOperatorId] = useState('')
+  const [issueMachineId, setIssueMachineId] = useState('')
+  const [issueOperatorMasterId, setIssueOperatorMasterId] = useState('')
+
+  const [reverseRowId, setReverseRowId] = useState<string | null>(null)
+  const [reverseOperatorMasterId, setReverseOperatorMasterId] = useState('')
 
   const [manualDieOpen, setManualDieOpen] = useState(false)
+  const [manualDieTarget, setManualDieTarget] = useState<'vendor' | 'live_inventory'>('vendor')
   const [mdNumber, setMdNumber] = useState('')
   const [mdCartonSize, setMdCartonSize] = useState('')
   const [mdSheetSize, setMdSheetSize] = useState('')
@@ -277,20 +305,47 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   }, [load])
 
   useEffect(() => {
-    if (!emergencyId) return
     void (async () => {
       try {
-        const [mRes, uRes] = await Promise.all([fetch('/api/machines'), fetch('/api/users')])
+        const r = await fetch('/api/operator-master')
+        const t = await r.text()
+        const j = safeJsonParse<{ operators?: MasterOperator[] }>(t, {})
+        const list = Array.isArray(j.operators) ? j.operators : []
+        setMasterOperators(list)
+        const anik = list.find((o) => o.name === 'Anik Dua')
+        setFloorOperatorId((prev) => {
+          if (prev && list.some((o) => o.id === prev)) return prev
+          return anik?.id ?? list[0]?.id ?? ''
+        })
+      } catch {
+        setMasterOperators([])
+      }
+    })()
+  }, [])
+
+  const floorOperatorName = useMemo(() => {
+    const o = masterOperators.find((x) => x.id === floorOperatorId)
+    return o?.name ?? ''
+  }, [masterOperators, floorOperatorId])
+
+  useEffect(() => {
+    if (!issueDieId) return
+    void (async () => {
+      try {
+        const mRes = await fetch('/api/machines')
         setMachines(safeJsonParse<MachineOpt[]>(await mRes.text(), []))
-        setUsers(safeJsonParse<UserOpt[]>(await uRes.text(), []))
       } catch {
         setMachines([])
-        setUsers([])
       }
-      setEmergencyMachineId('')
-      setEmergencyOperatorId('')
+      setIssueMachineId('')
+      setIssueOperatorMasterId(floorOperatorId)
     })()
-  }, [emergencyId])
+  }, [issueDieId, floorOperatorId])
+
+  useEffect(() => {
+    if (!reverseRowId) return
+    setReverseOperatorMasterId(floorOperatorId)
+  }, [reverseRowId, floorOperatorId])
 
   const filterRows = (list: ToolRow[], q: string) => {
     const s = q.trim().toLowerCase()
@@ -346,6 +401,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     [custF],
   )
 
+  const custodyInUseCount = useMemo(
+    () => custF.filter((r) => r.custodyStatus === CUSTODY_ON_FLOOR).length,
+    [custF],
+  )
+
   const ledgerZoneOptions =
     mode === 'dies' ? TOOLING_LEDGER_ZONE_OPTIONS_DIES : TOOLING_LEDGER_ZONE_OPTIONS_BLOCKS
 
@@ -379,6 +439,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     }
     setReturnSizeReason('')
     setReturnSizeRemarks('')
+    setReturnOperatorMasterId(floorOperatorId)
+    setReturnCondition('Good')
   }
 
   async function submitReturnToRack() {
@@ -405,6 +467,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       toast.error('Select a reason when changing dimensions on return')
       return
     }
+    const returnOp = masterOperators.find((o) => o.id === returnOperatorMasterId)
+    if (!returnOp?.name.trim()) {
+      toast.error('Select the operator who performed the return')
+      return
+    }
 
     setSaving(true)
     try {
@@ -422,15 +489,31 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         body.sizeModificationReason = returnSizeReason
         if (returnSizeRemarks.trim()) body.sizeModificationRemarks = returnSizeRemarks.trim()
       }
+      body.returnOperatorName = returnOp.name.trim()
+      body.returnCondition = returnCondition
       const r = await fetch('/api/tooling-hub/return-to-rack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: safeJsonStringify(body),
       })
       const t = await r.text()
-      const j = safeJsonParse<{ error?: string }>(t, {})
+      const j = safeJsonParse<{
+        error?: string
+        poorConditionAlert?: boolean
+        poorConditionMeta?: { displayCode: string; operatorName: string }
+      }>(t, {})
       if (!r.ok) throw new Error(j.error ?? 'Return failed')
       toast.success('Returned to live inventory')
+      if (
+        j.poorConditionAlert &&
+        j.poorConditionMeta &&
+        isDieHubSupervisorRole(session?.user?.role)
+      ) {
+        toast.error(
+          `Tooling Alert: Die #${j.poorConditionMeta.displayCode} returned in Poor condition by ${j.poorConditionMeta.operatorName}.`,
+          { duration: 12_000 },
+        )
+      }
       setReturnModal(null)
       await load()
     } catch (e) {
@@ -441,9 +524,14 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   }
 
   async function runTransition(body: Record<string, unknown>, msg: string) {
+    const actorName = floorOperatorName.trim()
+    if (!actorName) {
+      toast.error('Select the floor operator (toolbar above)')
+      return
+    }
     setSaving(true)
     try {
-      await postTransition(body)
+      await postTransition({ ...body, actorName })
       toast.success(msg)
       await load()
     } catch (e) {
@@ -463,6 +551,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         body: safeJsonStringify({
           triageDyeId: dieStockModal.id,
           inventoryDyeId,
+          actorName: floorOperatorName.trim() || undefined,
         }),
       })
       const t = await r.text()
@@ -505,13 +594,19 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           dieMaterial: mdMaterial.trim() || undefined,
           pastingType: mdPastingType.trim() || undefined,
           dieMake: mdDieMake,
+          hubDestination: manualDieTarget,
         }),
       })
       const t = await r.text()
       const j = safeJsonParse<{ error?: string }>(t, {})
       if (!r.ok) throw new Error(j.error ?? 'Failed')
-      toast.success('Die added — Outside vendor')
+      toast.success(
+        manualDieTarget === 'live_inventory'
+          ? 'Die added — Live inventory'
+          : 'Die added — Outside vendor',
+      )
       setManualDieOpen(false)
+      setManualDieTarget('vendor')
       setMdNumber('')
       setMdCartonSize('')
       setMdSheetSize('')
@@ -561,31 +656,156 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     }
   }
 
-  async function submitEmergency() {
-    if (!emergencyId) return
-    if (!emergencyMachineId || !emergencyOperatorId) {
-      toast.error('Machine and operator required')
+  async function postReverseLast(rowId: string, actorName: string) {
+    const actor = actorName.trim()
+    if (!actor) {
+      toast.error('Select the operator performing the reverse')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/tooling-hub/reverse-last', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ tool: toolKind, id: rowId, actorName: actor }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string; returnedToTechnicalSpecs?: boolean }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Reverse failed')
+      if (j.returnedToTechnicalSpecs) {
+        toast.success('Job returned to Technical Specs.')
+      } else {
+        toast.success('Last hub action undone')
+      }
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Reverse failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function confirmReverseLast() {
+    if (!reverseRowId) return
+    const op = masterOperators.find((o) => o.id === reverseOperatorMasterId)
+    if (!op?.name.trim()) {
+      toast.error('Select the operator undoing this action')
+      return
+    }
+    await postReverseLast(reverseRowId, op.name.trim())
+    setReverseRowId(null)
+  }
+
+  async function submitTriageHold(dyeId: string, onHold: boolean, reason?: string) {
+    const actorName = floorOperatorName.trim()
+    if (!actorName) {
+      toast.error('Select the floor operator (toolbar above)')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/tooling-hub/dies/triage-hold', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          dyeId,
+          onHold,
+          reason: onHold ? reason : null,
+          actorName,
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Hold update failed')
+      toast.success(onHold ? 'Triage on-hold' : 'Hold released')
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Hold update failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitManualDieLink(triageDyeId: string, inventoryDyeId: string) {
+    const actorName = floorOperatorName.trim()
+    if (!actorName) {
+      toast.error('Select the floor operator (toolbar above)')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/tooling-hub/dies/manual-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ triageDyeId, inventoryDyeId, actorName }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Manual link failed')
+      toast.success('Manual link — rack die sent to custody')
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Manual link failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitMaintenanceComplete(dyeId: string) {
+    const actorName = floorOperatorName.trim()
+    if (!actorName) {
+      toast.error('Select the floor operator (toolbar above)')
+      return
+    }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/tooling-hub/dies/maintenance-complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ dyeId, actorName }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) throw new Error(j.error ?? 'Maintenance update failed')
+      toast.success('Maintenance complete — condition reset to Good')
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Maintenance update failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitIssueToMachine() {
+    if (!issueDieId) return
+    if (!issueMachineId) {
+      toast.error('Machine is required')
+      return
+    }
+    const op = masterOperators.find((o) => o.id === issueOperatorMasterId)
+    if (!op?.name.trim()) {
+      toast.error('Select the operator issuing the tool')
       return
     }
     setSaving(true)
     try {
       const path =
         mode === 'dies'
-          ? `/api/inventory-hub/dies/${emergencyId}/issue`
-          : `/api/inventory-hub/emboss-blocks/${emergencyId}/issue`
+          ? `/api/inventory-hub/dies/${issueDieId}/issue`
+          : `/api/inventory-hub/emboss-blocks/${issueDieId}/issue`
       const r = await fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: safeJsonStringify({
-          machineId: emergencyMachineId,
-          operatorUserId: emergencyOperatorId,
+          machineId: issueMachineId,
+          operatorName: op.name.trim(),
         }),
       })
       const t = await r.text()
       const j = safeJsonParse<{ error?: string }>(t, {})
       if (!r.ok) throw new Error(j.error ?? 'Issue failed')
-      toast.success('Issued (bypass)')
-      setEmergencyId(null)
+      toast.success('Issued to machine')
+      setIssueDieId(null)
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Issue failed')
@@ -626,25 +846,29 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   function renderSpecs(r: ToolRow, zone: 'triage' | 'prep' | 'inventory' | 'custody') {
     if (r.kind === 'die') {
       return (
-        <div className="mt-1 space-y-0.5 text-[11px] font-medium text-zinc-400 leading-tight">
-          <p>
-            UPS: <span className="text-zinc-300 tabular-nums">{r.ups}</span>
-            <span className="text-zinc-600 mx-1">·</span>
-            Master type:{' '}
-            <span className="text-zinc-300">
-              {(r.masterType ?? r.pastingType)?.trim() || '—'}
-            </span>
-          </p>
-          {r.sheetSize ? (
-            <p className="text-[10px] text-zinc-500">Sheet: {r.sheetSize}</p>
-          ) : null}
-          <p className="text-[10px] text-zinc-500">
-            Material: <span className="text-zinc-400">{r.materialLabel}</span>
-          </p>
-          {r.location ? (
-            <p className="text-[10px] text-zinc-500">Rack: {r.location}</p>
-          ) : null}
-        </div>
+        <>
+          <div className="mt-1 space-y-0.5 text-[11px] font-medium text-zinc-400 leading-tight">
+            <p>
+              Die type (master):{' '}
+              <span className="text-zinc-300">{r.masterType?.trim() || '—'}</span>
+            </p>
+            <p className="text-[10px] text-zinc-500">
+              Material: <span className="text-zinc-400">{r.materialLabel}</span>
+            </p>
+            {r.location ? (
+              <p className="text-[10px] text-zinc-500">Rack: {r.location}</p>
+            ) : null}
+          </div>
+          <details className="mt-1.5 rounded border border-zinc-800 bg-zinc-950/50 px-2 py-1">
+            <summary className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 cursor-pointer select-none">
+              Technical data
+            </summary>
+            <div className="mt-1 space-y-0.5 text-[10px] text-zinc-400">
+              <p>Sheet: {r.sheetSize?.trim() || '—'}</p>
+              <p className="tabular-nums">UPS: {r.ups}</p>
+            </div>
+          </details>
+        </>
       )
     }
     return (
@@ -681,10 +905,13 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     r: ToolRow,
     zone: 'triage' | 'prep' | 'inventory' | 'custody',
   ) {
+    const custodyInUse = zone === 'custody' && r.custodyStatus === CUSTODY_ON_FLOOR
     const liClass = `rounded-lg border bg-black p-2 overflow-visible ${
-      zone === 'custody' && r.jobCardHub?.key === 'printed'
-        ? 'border-emerald-600/70 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
-        : 'border-zinc-800'
+      custodyInUse
+        ? 'border-2 border-blue-500 hub-tool-in-use-pulse'
+        : zone === 'custody' && r.jobCardHub?.key === 'printed'
+          ? 'border-emerald-600/70 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
+          : 'border-zinc-800'
     }`
 
     if (r.kind === 'die') {
@@ -704,40 +931,56 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </span>
               <span className="font-mono text-[10px] text-amber-300/90 truncate">{r.displayCode}</span>
             </div>
-            {hasTypeMismatch ? (
+            <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
-                onClick={() =>
-                  setSimilarDieBoardModal({
-                    sourceLabel: r.displayCode,
-                    sourceDieType: r.masterType?.trim() || undefined,
-                    variant: 'type_mismatch',
-                    matches: mismatch,
-                  })
-                }
-                className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-600/60 rounded px-1.5 py-0.5 hover:bg-red-950/40"
+                disabled={saving}
+                title="Undo last hub action"
+                className="text-[10px] font-bold uppercase tracking-wide text-amber-200/90 border border-amber-700/60 rounded px-1.5 py-0.5 hover:bg-amber-950/50 disabled:opacity-50 whitespace-nowrap"
+                onClick={() => setReverseRowId(r.id)}
               >
-                Type mismatch
+                ↺ Reverse
               </button>
-            ) : hasSimilar ? (
-              <button
-                type="button"
-                onClick={() =>
-                  setSimilarDieBoardModal({
-                    sourceLabel: r.displayCode,
-                    variant: 'similar',
-                    matches: r.similarMatches,
-                  })
-                }
-                className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-amber-500 border border-amber-600/60 rounded px-1.5 py-0.5 hover:bg-amber-950/50"
-              >
-                Similar
-              </button>
-            ) : null}
+              {hasTypeMismatch ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSimilarDieBoardModal({
+                      sourceLabel: r.displayCode,
+                      sourceDieType: r.masterType?.trim() || undefined,
+                      variant: 'type_mismatch',
+                      matches: mismatch,
+                    })
+                  }
+                  className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-600/60 rounded px-1.5 py-0.5 hover:bg-red-950/40"
+                >
+                  Type mismatch
+                </button>
+              ) : hasSimilar ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSimilarDieBoardModal({
+                      sourceLabel: r.displayCode,
+                      variant: 'similar',
+                      matches: r.similarMatches,
+                    })
+                  }
+                  className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-amber-500 border border-amber-600/60 rounded px-1.5 py-0.5 hover:bg-amber-950/50"
+                >
+                  Similar
+                </button>
+              ) : null}
+            </div>
           </div>
           <p className="text-[11px] text-zinc-500 truncate mt-1" title={r.title}>
             {r.title}
           </p>
+          {r.hubConditionPoor ? (
+            <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-700/60 rounded px-1.5 py-0.5 w-fit">
+              Poor condition
+            </p>
+          ) : null}
           <button
             type="button"
             className="text-left w-full text-blue-400 hover:text-blue-300 hover:underline font-semibold text-sm mt-0.5 truncate"
@@ -764,6 +1007,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 </span>
               ) : null}
             </div>
+          ) : null}
+          {zone === 'custody' && r.custodyStatus === CUSTODY_ON_FLOOR && r.issuedOperator?.trim() ? (
+            <p className="mt-1 text-[11px] text-sky-300/95 font-medium">
+              👤 Issued to: {r.issuedOperator.trim()}
+            </p>
           ) : null}
           {renderSpecs(r, zone)}
           <div className="mt-1.5">
@@ -794,6 +1042,21 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               >
                 Mark ready
               </button>
+              {mode === 'dies' ? (
+                <button
+                  type="button"
+                  disabled={saving}
+                  className="mt-1.5 w-full py-1.5 rounded border border-emerald-600/80 bg-emerald-950/30 text-emerald-100 text-[11px] font-semibold hover:bg-emerald-950/50 disabled:opacity-50"
+                  onClick={() =>
+                    void runTransition(
+                      { action: 'vendor_to_live_inventory', tool: 'die', id: r.id },
+                      'Received into live inventory',
+                    )
+                  }
+                >
+                  Push to live inventory
+                </button>
+              ) : null}
               <HubStaleTime at={r.lastStatusUpdatedAt} />
             </>
           ) : null}
@@ -805,18 +1068,58 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <button
                 type="button"
                 disabled={saving}
-                className="mt-1.5 w-full py-1.5 rounded border border-zinc-600 bg-zinc-900 text-zinc-200 text-[11px] font-semibold hover:bg-zinc-800 disabled:opacity-50"
+                className="mt-1.5 w-full py-1.5 rounded border border-orange-600/80 bg-orange-950/40 text-orange-100 text-[11px] font-semibold hover:bg-orange-950/60 disabled:opacity-50"
                 onClick={() =>
-                  void runTransition({ action: 'push_to_triage', tool: toolKind, id: r.id }, 'Sent to triage')
+                  void runTransition(
+                    { action: 'inventory_to_custody_floor', tool: toolKind, id: r.id },
+                    'Sent to custody floor',
+                  )
                 }
               >
-                Push to incoming triage
+                Push to custody floor
               </button>
               <HubRackAdded createdAt={r.createdAt} />
             </>
           ) : null}
           {zone === 'custody' ? (
             <div className="mt-1.5 flex flex-col gap-2">
+              {custodyInUse ? (
+                <p className="text-[10px] font-bold uppercase tracking-wide text-blue-400">In use on press</p>
+              ) : null}
+              {r.custodyStatus !== 'on_floor' ? (
+                <>
+                  {r.hubConditionPoor ? (
+                    <p className="flex items-start gap-1.5 text-[10px] font-medium text-amber-300/95 leading-snug">
+                      <span className="shrink-0" aria-hidden>
+                        ⚠️
+                      </span>
+                      <span>
+                        {r.hubDieHubPoorFlag && r.hubPoorReportedBy?.trim()
+                          ? `Tool reported in Poor condition by ${r.hubPoorReportedBy.trim()}.`
+                          : 'This die is in Poor condition — maintenance recommended.'}
+                      </span>
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={saving}
+                    className="w-full py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-white text-[11px] font-bold shadow-sm disabled:opacity-50"
+                    onClick={() => setIssueDieId(r.id)}
+                  >
+                    Issue to machine
+                  </button>
+                </>
+              ) : null}
+              {r.hubConditionPoor ? (
+                <button
+                  type="button"
+                  disabled={saving}
+                  className="w-full py-1.5 rounded border border-amber-600/80 bg-amber-950/50 text-amber-100 text-[11px] font-semibold hover:bg-amber-950/70 disabled:opacity-50"
+                  onClick={() => void submitMaintenanceComplete(r.id)}
+                >
+                  Maintenance complete
+                </button>
+              ) : null}
               <button
                 type="button"
                 disabled={saving}
@@ -839,22 +1142,6 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               >
                 Scrap / Report Damage
               </button>
-              <button
-                type="button"
-                className="w-full py-1.5 rounded border-2 border-red-600/90 bg-gradient-to-b from-red-950/95 to-orange-950/90 text-orange-50 text-[11px] font-bold hover:from-red-900 hover:to-orange-900"
-                onClick={() => setEmergencyId(r.id)}
-              >
-                Emergency Issue (Bypass)
-              </button>
-              <button
-                type="button"
-                className="w-full py-1.5 rounded border border-amber-800/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
-                onClick={() =>
-                  void runTransition({ action: 'reverse_staging', tool: toolKind, id: r.id }, 'Reversed')
-                }
-              >
-                Reverse / Undo
-              </button>
               <HubCustodyReady at={r.lastStatusUpdatedAt} />
             </div>
           ) : null}
@@ -864,13 +1151,24 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
     return (
       <li key={`${r.kind}-${r.id}`} className={liClass}>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <p className="font-mono text-amber-300 text-xs">{r.displayCode}</p>
-          {zone === 'triage' && r.triageManualEntry ? (
-            <span className="inline-flex items-center rounded border border-amber-600/60 bg-amber-950/50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">
-              Manual Entry
-            </span>
-          ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+            <p className="font-mono text-amber-300 text-xs">{r.displayCode}</p>
+            {zone === 'triage' && r.triageManualEntry ? (
+              <span className="inline-flex items-center rounded border border-amber-600/60 bg-amber-950/50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">
+                Manual Entry
+              </span>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            disabled={saving}
+            title="Undo last hub action"
+            className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-amber-200/90 border border-amber-700/60 rounded px-1.5 py-0.5 hover:bg-amber-950/50 disabled:opacity-50 whitespace-nowrap"
+            onClick={() => setReverseRowId(r.id)}
+          >
+            ↺ Reverse
+          </button>
         </div>
         <button
           type="button"
@@ -889,10 +1187,20 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         >
           {r.title}
         </button>
+        {r.hubConditionPoor ? (
+          <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-700/60 rounded px-1.5 py-0.5 w-fit">
+            Poor condition
+          </p>
+        ) : null}
         {zone === 'custody' ? (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
             <JobCardStatusBadge hub={r.jobCardHub} />
           </div>
+        ) : null}
+        {zone === 'custody' && r.custodyStatus === CUSTODY_ON_FLOOR && r.issuedOperator?.trim() ? (
+          <p className="mt-1 text-[11px] text-sky-300/95 font-medium">
+            👤 Issued to: {r.issuedOperator.trim()}
+          </p>
         ) : null}
         {renderSpecs(r, zone)}
         {zone === 'triage' ? (
@@ -934,18 +1242,37 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <button
               type="button"
               disabled={saving}
-              className="mt-1.5 w-full py-1.5 rounded border border-zinc-600 bg-zinc-900 text-zinc-200 text-[11px] font-semibold hover:bg-zinc-800 disabled:opacity-50"
+              className="mt-1.5 w-full py-1.5 rounded border border-orange-600/80 bg-orange-950/40 text-orange-100 text-[11px] font-semibold hover:bg-orange-950/60 disabled:opacity-50"
               onClick={() =>
-                void runTransition({ action: 'push_to_triage', tool: toolKind, id: r.id }, 'Sent to triage')
+                void runTransition(
+                  { action: 'inventory_to_custody_floor', tool: toolKind, id: r.id },
+                  'Sent to custody floor',
+                )
               }
             >
-              Push to incoming triage
+              Push to custody floor
             </button>
             <HubRackAdded createdAt={r.createdAt} />
           </>
         ) : null}
         {zone === 'custody' ? (
           <div className="mt-1.5 flex flex-col gap-2">
+            {custodyInUse ? (
+              <p className="text-[10px] font-bold uppercase tracking-wide text-blue-400">In use on press</p>
+            ) : null}
+            {r.custodyStatus !== 'on_floor' ? (
+              <button
+                type="button"
+                disabled={saving || r.hubConditionPoor}
+                title={
+                  r.hubConditionPoor ? 'Poor condition — complete maintenance before issuing' : undefined
+                }
+                className="w-full py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-white text-[11px] font-bold shadow-sm disabled:opacity-50"
+                onClick={() => setIssueDieId(r.id)}
+              >
+                Issue to machine
+              </button>
+            ) : null}
             <button
               type="button"
               disabled={saving}
@@ -967,22 +1294,6 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               }}
             >
               Scrap / Report Damage
-            </button>
-            <button
-              type="button"
-              className="w-full py-1.5 rounded border-2 border-red-600/90 bg-gradient-to-b from-red-950/95 to-orange-950/90 text-orange-50 text-[11px] font-bold hover:from-red-900 hover:to-orange-900"
-              onClick={() => setEmergencyId(r.id)}
-            >
-              Emergency Issue (Bypass)
-            </button>
-            <button
-              type="button"
-              className="w-full py-1.5 rounded border border-amber-800/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
-              onClick={() =>
-                void runTransition({ action: 'reverse_staging', tool: toolKind, id: r.id }, 'Reversed')
-              }
-            >
-              Reverse / Undo
             </button>
             <HubCustodyReady at={r.lastStatusUpdatedAt} />
           </div>
@@ -1009,6 +1320,25 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <p className="text-sm text-zinc-400 mt-1">
                 Preparation lanes → custody staging. High-contrast layout for floor speed.
               </p>
+              <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 max-w-xl">
+                <div className="flex-1 min-w-[200px]">
+                  <OperatorMasterCombobox
+                    label="Floor operator (zone moves)"
+                    value={floorOperatorId}
+                    onChange={setFloorOperatorId}
+                    options={masterOperators}
+                    disabled={saving || masterOperators.length === 0}
+                  />
+                </div>
+                {mode === 'dies' ? (
+                  <Link
+                    href="/hub/dies/settings"
+                    className="text-xs font-bold uppercase tracking-wide text-amber-400 hover:text-amber-300 border border-amber-700/50 rounded-lg px-3 py-2 shrink-0"
+                  >
+                    Staff settings
+                  </Link>
+                ) : null}
+              </div>
             </div>
             <div
               className="flex rounded-lg border border-zinc-600 overflow-hidden p-0.5 bg-black/60 shrink-0"
@@ -1090,16 +1420,30 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   </select>
                 </label>
               </div>
-              <TableExportMenu
-                rows={filteredLedgerRows}
-                columns={toolingLedgerExportColumns}
-                excelOnlyColumns={toolingLedgerExcelExtraColumns}
-                fileBase={mode === 'dies' ? 'die-hub-master-ledger' : 'emboss-hub-master-ledger'}
-                reportTitle={mode === 'dies' ? 'Die Hub — Master ledger' : 'Emboss Hub — Master ledger'}
-                sheetName={mode === 'dies' ? 'Die Hub' : 'Emboss Hub'}
-                filterSummary={toolingLedgerExportFilterSummary}
-                className="shrink-0"
-              />
+              <div className="flex flex-wrap gap-2 items-center shrink-0">
+                {mode === 'dies' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualDieTarget('live_inventory')
+                      setManualDieOpen(true)
+                    }}
+                    className="px-3 py-2 rounded-md border border-emerald-600/80 bg-emerald-950/40 text-emerald-100 text-xs font-bold hover:bg-emerald-950/70 whitespace-nowrap"
+                  >
+                    + Add Die
+                  </button>
+                ) : null}
+                <TableExportMenu
+                  rows={filteredLedgerRows}
+                  columns={toolingLedgerExportColumns}
+                  excelOnlyColumns={toolingLedgerExcelExtraColumns}
+                  fileBase={mode === 'dies' ? 'die-hub-master-ledger' : 'emboss-hub-master-ledger'}
+                  reportTitle={mode === 'dies' ? 'Die Hub — Master ledger' : 'Emboss Hub — Master ledger'}
+                  sheetName={mode === 'dies' ? 'Die Hub' : 'Emboss Hub'}
+                  filterSummary={toolingLedgerExportFilterSummary}
+                  className="shrink-0"
+                />
+              </div>
             </div>
             <DieMasterLedger
               rows={data.ledgerRows}
@@ -1158,6 +1502,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                           )
                         }
                         onTakeFromStock={() => setDieStockModal(r)}
+                        onManualLink={(inventoryDyeId) => void submitManualDieLink(r.id, inventoryDyeId)}
+                        onTriageHold={(placeOnHold, reason) =>
+                          void submitTriageHold(r.id, placeOnHold, reason)
+                        }
+                        onReverse={() => setReverseRowId(r.id)}
                         onSimilarClick={() => {
                           const mm = r.typeMismatchMatches ?? []
                           if (mm.length) {
@@ -1200,7 +1549,10 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   {mode === 'dies' ? (
                     <button
                       type="button"
-                      onClick={() => setManualDieOpen(true)}
+                      onClick={() => {
+                        setManualDieTarget('vendor')
+                        setManualDieOpen(true)
+                      }}
                       className="w-full px-3 py-2 rounded-md border border-violet-500/80 bg-violet-950/40 text-violet-100 text-xs font-bold hover:bg-violet-950/70"
                     >
                       + Manual Vendor PO
@@ -1231,14 +1583,28 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </section>
 
               <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[260px] xl:min-h-0 xl:h-full">
-                <div className="flex flex-col gap-1 mb-2 min-w-0">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
-                    Live inventory
-                  </h2>
-                  <ZoneCapacitySubheader
-                    jobCount={invMetrics.jobCount}
-                    unitCount={invMetrics.unitCount}
-                  />
+                <div className="flex flex-col gap-2 mb-2 min-w-0">
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                      Live inventory
+                    </h2>
+                    <ZoneCapacitySubheader
+                      jobCount={invMetrics.jobCount}
+                      unitCount={invMetrics.unitCount}
+                    />
+                  </div>
+                  {mode === 'dies' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualDieTarget('live_inventory')
+                        setManualDieOpen(true)
+                      }}
+                      className="w-full px-3 py-2 rounded-md border border-emerald-600/80 bg-emerald-950/40 text-emerald-100 text-xs font-bold hover:bg-emerald-950/70"
+                    >
+                      + Add Die
+                    </button>
+                  ) : null}
                 </div>
                 <input
                   value={invSearch}
@@ -1264,6 +1630,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                     jobCount={custMetrics.jobCount}
                     unitCount={custMetrics.unitCount}
                   />
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-blue-400/90 tabular-nums">
+                    {custodyInUseCount} active on press
+                  </p>
                 </div>
                 <p className="text-[11px] text-zinc-500 mb-2">Staging · tools marked ready</p>
                 <input
@@ -1311,6 +1680,34 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               Confirm rack return. If you change dimensions vs. the master record, select a reason (same
               policy as Plate Hub).
             </p>
+            <OperatorMasterCombobox
+              label="Operator (who returned it)"
+              value={returnOperatorMasterId}
+              onChange={setReturnOperatorMasterId}
+              options={masterOperators}
+              disabled={saving || masterOperators.length === 0}
+            />
+            <div>
+              <span className="block text-sm text-zinc-300 mb-1">Condition</span>
+              <div className="flex rounded-lg border border-zinc-600 overflow-hidden p-0.5 bg-black/40">
+                {(['Good', 'Fair', 'Poor'] as const).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setReturnCondition(c)}
+                    className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                      returnCondition === c
+                        ? c === 'Poor'
+                          ? 'bg-red-900/80 text-red-100'
+                          : 'bg-amber-600 text-white'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
             {returnModal.kind === 'die' ? (
               <>
                 <label className="block text-sm text-zinc-300">
@@ -1399,7 +1796,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </button>
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || !returnOperatorMasterId}
                 className="px-3 py-2 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50"
                 onClick={() => void submitReturnToRack()}
               >
@@ -1413,7 +1810,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       {manualDieOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Manual vendor PO (die)</h3>
+            <h3 className="text-lg font-semibold text-white">
+              {manualDieTarget === 'live_inventory' ? 'Add die — Live inventory' : 'Manual vendor PO (die)'}
+            </h3>
             <label className="block text-sm text-zinc-300">
               Dye #
               <input
@@ -1486,7 +1885,10 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <button
                 type="button"
                 className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
-                onClick={() => setManualDieOpen(false)}
+                onClick={() => {
+                  setManualDieOpen(false)
+                  setManualDieTarget('vendor')
+                }}
               >
                 Cancel
               </button>
@@ -1496,7 +1898,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className="px-3 py-2 rounded bg-violet-600 text-white font-semibold disabled:opacity-50"
                 onClick={() => void submitManualDie()}
               >
-                Create
+                {manualDieTarget === 'live_inventory' ? 'Add to rack' : 'Create'}
               </button>
             </div>
           </div>
@@ -1596,15 +1998,53 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         </div>
       )}
 
-      {emergencyId && (
+      {reverseRowId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-red-700/50 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Emergency issue (bypass)</h3>
+          <div className="w-full max-w-md rounded-xl border border-amber-700/50 bg-zinc-950 p-4 space-y-3">
+            <h3 className="text-lg font-semibold text-white">Reverse last hub action</h3>
+            <p className="text-xs text-zinc-500">
+              Who is undoing this step? Pick a name from Operator Master — this is stored on the audit log.
+            </p>
+            <OperatorMasterCombobox
+              label="Operator"
+              value={reverseOperatorMasterId}
+              onChange={setReverseOperatorMasterId}
+              options={masterOperators}
+              disabled={saving || masterOperators.length === 0}
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                onClick={() => setReverseRowId(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={saving || !reverseOperatorMasterId}
+                className="px-3 py-2 rounded bg-amber-700 text-white font-semibold disabled:opacity-50"
+                onClick={() => void confirmReverseLast()}
+              >
+                Confirm reverse
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {issueDieId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md rounded-xl border border-sky-700/50 bg-zinc-950 p-4 space-y-3">
+            <h3 className="text-lg font-semibold text-white">Issue to machine</h3>
+            <p className="text-xs text-zinc-500">
+              Select press and operator. Names come from Operator Master (Die Hub staff settings).
+            </p>
             <label className="block text-sm text-zinc-300">
               Machine
               <select
-                value={emergencyMachineId}
-                onChange={(e) => setEmergencyMachineId(e.target.value)}
+                value={issueMachineId}
+                onChange={(e) => setIssueMachineId(e.target.value)}
                 className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
               >
                 <option value="">Select…</option>
@@ -1615,36 +2055,28 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 ))}
               </select>
             </label>
-            <label className="block text-sm text-zinc-300">
-              Operator
-              <select
-                value={emergencyOperatorId}
-                onChange={(e) => setEmergencyOperatorId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              >
-                <option value="">Select…</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <OperatorMasterCombobox
+              label="Operator"
+              value={issueOperatorMasterId}
+              onChange={setIssueOperatorMasterId}
+              options={masterOperators}
+              disabled={saving || masterOperators.length === 0}
+            />
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
-                onClick={() => setEmergencyId(null)}
+                onClick={() => setIssueDieId(null)}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={saving}
-                className="px-3 py-2 rounded bg-red-700 text-white font-semibold disabled:opacity-50"
-                onClick={() => void submitEmergency()}
+                disabled={saving || !issueMachineId || !issueOperatorMasterId}
+                className="px-3 py-2 rounded bg-sky-600 text-white font-semibold disabled:opacity-50"
+                onClick={() => void submitIssueToMachine()}
               >
-                Issue now
+                Issue to machine
               </button>
             </div>
           </div>
