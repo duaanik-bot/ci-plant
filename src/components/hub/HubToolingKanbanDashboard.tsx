@@ -54,6 +54,16 @@ const TOOLING_RETURN_SIZE_REASONS: {
   { value: 'prepress_error', label: 'Pre-press layout error / Manual correction' },
 ]
 
+const FALLBACK_HUB_OPERATOR_ID = '__hub_fallback_operator__'
+const FALLBACK_HUB_OPERATOR_NAME = 'Anik Dua'
+
+function resolveHubOperatorName(id: string, options: { id: string; name: string }[]): string {
+  const o = options.find((x) => x.id === id)
+  if (o?.name.trim()) return o.name.trim()
+  if (id === FALLBACK_HUB_OPERATOR_ID) return FALLBACK_HUB_OPERATOR_NAME
+  return ''
+}
+
 /** Board column title with filter-aware job count and physical units. */
 function BoardZoneTitle({
   name,
@@ -405,26 +415,38 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   useEffect(() => {
     void (async () => {
       try {
-        const r = await fetch('/api/operator-master')
+        const r = await fetch('/api/operator-master?activeOnly=1')
         const t = await r.text()
-        const j = safeJsonParse<{ operators?: MasterOperator[] }>(t, {})
-        const list = Array.isArray(j.operators) ? j.operators : []
+        const j = safeJsonParse<{ operators?: MasterOperator[] } | MasterOperator[]>(t, {})
+        const rawList = Array.isArray(j) ? j : j.operators
+        const list = Array.isArray(rawList) ? rawList : []
         setMasterOperators(list)
-        const anik = list.find((o) => o.name === 'Anik Dua')
+        const anik = list.find((o) => o.name.trim() === FALLBACK_HUB_OPERATOR_NAME)
         setFloorOperatorId((prev) => {
           if (prev && list.some((o) => o.id === prev)) return prev
-          return anik?.id ?? list[0]?.id ?? ''
+          if (anik) return anik.id
+          if (list[0]) return list[0].id
+          return FALLBACK_HUB_OPERATOR_ID
         })
       } catch {
         setMasterOperators([])
+        setFloorOperatorId(FALLBACK_HUB_OPERATOR_ID)
       }
     })()
   }, [])
 
-  const floorOperatorName = useMemo(() => {
-    const o = masterOperators.find((x) => x.id === floorOperatorId)
-    return o?.name ?? ''
-  }, [masterOperators, floorOperatorId])
+  const operatorOptionsForUi = useMemo(
+    () =>
+      masterOperators.length > 0
+        ? masterOperators
+        : [{ id: FALLBACK_HUB_OPERATOR_ID, name: FALLBACK_HUB_OPERATOR_NAME }],
+    [masterOperators],
+  )
+
+  const effectiveFloorOperatorName = useMemo(() => {
+    const n = resolveHubOperatorName(floorOperatorId, operatorOptionsForUi).trim()
+    return n || FALLBACK_HUB_OPERATOR_NAME
+  }, [floorOperatorId, operatorOptionsForUi])
 
   useEffect(() => {
     if (!issueDieId) return
@@ -616,8 +638,10 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       toast.error('Select a reason when changing dimensions on return')
       return
     }
-    const returnOp = masterOperators.find((o) => o.id === returnOperatorMasterId)
-    if (!returnOp?.name.trim()) {
+    const returnName =
+      resolveHubOperatorName(returnOperatorMasterId, operatorOptionsForUi).trim() ||
+      effectiveFloorOperatorName.trim()
+    if (!returnName) {
       toast.error('Select the operator who performed the return')
       return
     }
@@ -638,7 +662,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         body.sizeModificationReason = returnSizeReason
         if (returnSizeRemarks.trim()) body.sizeModificationRemarks = returnSizeRemarks.trim()
       }
-      body.returnOperatorName = returnOp.name.trim()
+      body.returnOperatorName = returnName
       body.returnCondition = returnCondition
       const r = await fetch('/api/tooling-hub/return-to-rack', {
         method: 'POST',
@@ -673,7 +697,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   }
 
   async function runTransition(body: Record<string, unknown>, msg: string) {
-    const actorName = floorOperatorName.trim()
+    const actorName = effectiveFloorOperatorName.trim()
     if (!actorName) {
       toast.error('Select the floor operator (toolbar above)')
       return
@@ -700,7 +724,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         body: safeJsonStringify({
           triageDyeId: dieStockModal.id,
           inventoryDyeId,
-          actorName: floorOperatorName.trim() || undefined,
+          actorName: effectiveFloorOperatorName.trim() || undefined,
         }),
       })
       const t = await r.text()
@@ -836,17 +860,19 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
   async function confirmReverseLast() {
     if (!reverseRowId) return
-    const op = masterOperators.find((o) => o.id === reverseOperatorMasterId)
-    if (!op?.name.trim()) {
+    const actor =
+      resolveHubOperatorName(reverseOperatorMasterId, operatorOptionsForUi).trim() ||
+      effectiveFloorOperatorName.trim()
+    if (!actor) {
       toast.error('Select the operator undoing this action')
       return
     }
-    await postReverseLast(reverseRowId, op.name.trim())
+    await postReverseLast(reverseRowId, actor)
     setReverseRowId(null)
   }
 
   async function submitTriageHold(dyeId: string, onHold: boolean, reason?: string) {
-    const actorName = floorOperatorName.trim()
+    const actorName = effectiveFloorOperatorName.trim()
     if (!actorName) {
       toast.error('Select the floor operator (toolbar above)')
       return
@@ -876,7 +902,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   }
 
   async function submitManualDieLink(triageDyeId: string, inventoryDyeId: string) {
-    const actorName = floorOperatorName.trim()
+    const actorName = effectiveFloorOperatorName.trim()
     if (!actorName) {
       toast.error('Select the floor operator (toolbar above)')
       return
@@ -901,7 +927,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   }
 
   async function submitMaintenanceComplete(dyeId: string) {
-    const actorName = floorOperatorName.trim()
+    const actorName = effectiveFloorOperatorName.trim()
     if (!actorName) {
       toast.error('Select the floor operator (toolbar above)')
       return
@@ -931,8 +957,10 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       toast.error('Machine is required')
       return
     }
-    const op = masterOperators.find((o) => o.id === issueOperatorMasterId)
-    if (!op?.name.trim()) {
+    const opName =
+      resolveHubOperatorName(issueOperatorMasterId, operatorOptionsForUi).trim() ||
+      effectiveFloorOperatorName.trim()
+    if (!opName) {
       toast.error('Select the operator issuing the tool')
       return
     }
@@ -947,7 +975,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         headers: { 'Content-Type': 'application/json' },
         body: safeJsonStringify({
           machineId: issueMachineId,
-          operatorName: op.name.trim(),
+          operatorName: opName,
         }),
       })
       const t = await r.text()
@@ -1425,9 +1453,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             {r.custodyStatus !== 'on_floor' ? (
               <button
                 type="button"
-                disabled={saving || r.hubConditionPoor}
+                disabled={saving}
                 title={
-                  r.hubConditionPoor ? 'Poor condition — complete maintenance before issuing' : undefined
+                  r.hubConditionPoor
+                    ? 'Poor condition — confirm operator when issuing; maintenance still recommended'
+                    : undefined
                 }
                 className="w-full py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-white text-[11px] font-bold shadow-sm disabled:opacity-50"
                 onClick={() => setIssueDieId(r.id)}
@@ -1488,8 +1518,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                     label="Floor operator (zone moves)"
                     value={floorOperatorId}
                     onChange={setFloorOperatorId}
-                    options={masterOperators}
-                    disabled={saving || masterOperators.length === 0}
+                    options={operatorOptionsForUi}
+                    disabled={saving}
                   />
                 </div>
                 {mode === 'dies' ? (
@@ -1884,9 +1914,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
       {returnModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-emerald-700/50 bg-zinc-950 p-4 space-y-3 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-white">Return to live inventory</h3>
-            <p className="text-xs text-zinc-500">
+          <div className="ci-hub-modal-panel max-w-md max-h-[90vh]">
+            <h3 className="ci-hub-modal-title">Return to live inventory</h3>
+            <p className="text-[11px] text-zinc-500 leading-snug">
               Confirm rack return. If you change dimensions vs. the master record, select a reason (same
               policy as Plate Hub).
             </p>
@@ -1894,8 +1924,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               label="Operator (who returned it)"
               value={returnOperatorMasterId}
               onChange={setReturnOperatorMasterId}
-              options={masterOperators}
-              disabled={saving || masterOperators.length === 0}
+              options={operatorOptionsForUi}
+              disabled={saving}
             />
             <div>
               <span className="block text-sm text-zinc-300 mb-1">Condition</span>
@@ -2006,8 +2036,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </button>
               <button
                 type="button"
-                disabled={saving || !returnOperatorMasterId}
-                className="px-3 py-2 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50"
+                disabled={saving}
+                className="ci-btn-save-industrial disabled:opacity-50"
                 onClick={() => void submitReturnToRack()}
               >
                 Confirm return
@@ -2019,8 +2049,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
       {manualDieOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">
+          <div className="ci-hub-modal-panel max-w-md">
+            <h3 className="ci-hub-modal-title">
               {manualDieTarget === 'live_inventory' ? 'Add die — Live inventory' : 'Manual vendor PO (die)'}
             </h3>
             <label className="block text-sm text-zinc-300">
@@ -2105,7 +2135,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <button
                 type="button"
                 disabled={saving}
-                className="px-3 py-2 rounded bg-violet-600 text-white font-semibold disabled:opacity-50"
+                className="ci-btn-save-industrial disabled:opacity-50"
                 onClick={() => void submitManualDie()}
               >
                 {manualDieTarget === 'live_inventory' ? 'Add to rack' : 'Create'}
@@ -2117,8 +2147,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
       {manualEmbossOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Manual in-house request</h3>
+          <div className="ci-hub-modal-panel max-w-md">
+            <h3 className="ci-hub-modal-title">Manual in-house request</h3>
             <label className="block text-sm text-zinc-300">
               Block code
               <input
@@ -2162,7 +2192,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <button
                 type="button"
                 disabled={saving}
-                className="px-3 py-2 rounded bg-amber-600 text-white font-semibold disabled:opacity-50"
+                className="ci-btn-save-industrial disabled:opacity-50"
                 onClick={() => void submitManualEmboss()}
               >
                 Create
@@ -2174,9 +2204,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
       {scrapId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-rose-800/50 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Scrap / damage</h3>
-            <p className="text-xs text-zinc-500">Record why this tool is removed from active inventory.</p>
+          <div className="ci-hub-modal-panel max-w-md border-rose-900/50">
+            <h3 className="ci-hub-modal-title text-rose-200/95 border-rose-900/40">Scrap / damage</h3>
+            <p className="text-[11px] text-zinc-500 leading-snug">Record why this tool is removed from active inventory.</p>
             <textarea
               value={scrapReason}
               onChange={(e) => setScrapReason(e.target.value)}
@@ -2210,17 +2240,17 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
       {reverseRowId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-amber-700/50 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Reverse last hub action</h3>
-            <p className="text-xs text-zinc-500">
+          <div className="ci-hub-modal-panel max-w-md border-amber-900/40">
+            <h3 className="ci-hub-modal-title">Reverse last hub action</h3>
+            <p className="text-[11px] text-zinc-500 leading-snug">
               Who is undoing this step? Pick a name from Operator Master — this is stored on the audit log.
             </p>
             <OperatorMasterCombobox
               label="Operator"
               value={reverseOperatorMasterId}
               onChange={setReverseOperatorMasterId}
-              options={masterOperators}
-              disabled={saving || masterOperators.length === 0}
+              options={operatorOptionsForUi}
+              disabled={saving}
             />
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -2232,8 +2262,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </button>
               <button
                 type="button"
-                disabled={saving || !reverseOperatorMasterId}
-                className="px-3 py-2 rounded bg-amber-700 text-white font-semibold disabled:opacity-50"
+                disabled={saving}
+                className="ci-btn-save-industrial disabled:opacity-50"
                 onClick={() => void confirmReverseLast()}
               >
                 Confirm reverse
@@ -2245,9 +2275,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
       {issueDieId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-sky-700/50 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Issue to machine</h3>
-            <p className="text-xs text-zinc-500">
+          <div className="ci-hub-modal-panel max-w-md border-sky-900/35">
+            <h3 className="ci-hub-modal-title">Issue to machine</h3>
+            <p className="text-[11px] text-zinc-500 leading-snug">
               Select press and operator. Names come from Operator Master (Die Hub staff settings).
             </p>
             <label className="block text-sm text-zinc-300">
@@ -2269,8 +2299,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               label="Operator"
               value={issueOperatorMasterId}
               onChange={setIssueOperatorMasterId}
-              options={masterOperators}
-              disabled={saving || masterOperators.length === 0}
+              options={operatorOptionsForUi}
+              disabled={saving}
             />
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -2282,8 +2312,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </button>
               <button
                 type="button"
-                disabled={saving || !issueMachineId || !issueOperatorMasterId}
-                className="px-3 py-2 rounded bg-sky-600 text-white font-semibold disabled:opacity-50"
+                disabled={saving || !issueMachineId}
+                className="ci-btn-save-industrial disabled:opacity-50"
                 onClick={() => void submitIssueToMachine()}
               >
                 Issue to machine

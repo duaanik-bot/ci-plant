@@ -5,6 +5,11 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { Menu, X } from 'lucide-react'
 import { useSession } from 'next-auth/react'
+import {
+  CommandPaletteProvider,
+  CommandPaletteTrigger,
+  CommandPaletteTriggerIcon,
+} from '@/components/command-palette/CommandPalette'
 import { SidebarNav } from './SidebarNav'
 
 export function DashboardShell({
@@ -19,6 +24,7 @@ export function DashboardShell({
   const userName = session?.user?.name ?? null
   const userRole = session?.user?.role as string | undefined
   const canSeeMasters = userRole === 'operations_head' || userRole === 'md'
+  const hideGlobalCommandBar = pathname === '/orders/purchase-orders'
 
   useEffect(() => {
     setMobileMenuOpen(false)
@@ -45,6 +51,7 @@ export function DashboardShell({
   }
 
   return (
+    <CommandPaletteProvider>
     <div className="min-h-screen bg-slate-900 text-white flex">
       {/* Backdrop when mobile menu open */}
       {mobileMenuOpen && (
@@ -90,14 +97,24 @@ export function DashboardShell({
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Desktop: global command bar */}
+        {!hideGlobalCommandBar ? (
+          <header className="relative hidden md:flex border-b border-slate-800/90 px-4 py-2.5 shrink-0 items-center justify-center gap-4 bg-slate-950/40 backdrop-blur-sm">
+            <CommandPaletteTrigger />
+            <span className="absolute right-4 text-xs text-slate-500 truncate max-w-[200px]">
+              {userName ? `${userName} · ${userRole ?? '—'}` : null}
+            </span>
+          </header>
+        ) : null}
         {/* Mobile header */}
-        <header className="md:hidden border-b border-slate-800 px-4 py-2 flex items-center justify-between shrink-0">
-          <Link href="/dashboard" className="font-semibold text-amber-400">
+        <header className="md:hidden border-b border-slate-800 px-2 py-2 flex items-center justify-between shrink-0 gap-1">
+          <Link href="/dashboard" className="font-semibold text-amber-400 text-sm pl-2">
             Colour Impressions
           </Link>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400 truncate max-w-[120px]">
-              {userName} · {userRole}
+          <div className="flex items-center gap-0.5">
+            {hideGlobalCommandBar ? null : <CommandPaletteTriggerIcon />}
+            <span className="text-[10px] text-slate-500 truncate max-w-[88px]">
+              {userName ?? ''}
             </span>
             <button
               type="button"
@@ -112,5 +129,6 @@ export function DashboardShell({
         <main className="min-h-screen bg-slate-900 flex-1">{children}</main>
       </div>
     </div>
+    </CommandPaletteProvider>
   )
 }

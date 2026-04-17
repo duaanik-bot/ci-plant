@@ -55,6 +55,8 @@ type Row = {
     planningForwarded?: boolean
     plateFlowStatus?: string | null
   }
+  directorPriority?: boolean
+  directorHold?: boolean
 }
 
 type Customer = { id: string; name: string }
@@ -271,8 +273,25 @@ export default function DesigningQueuePage() {
                 approvalsDone && !finalized && !!(r.setNumber || '').trim() && !!(r.artworkCode || '').trim()
               const canRecallPlanning = planningForwarded && !machineAllocated && !['in_production', 'closed'].includes(r.planningStatus)
               return (
-                <tr key={r.id} className="hover:bg-slate-800/60">
-                  <td className="px-3 py-3 align-top font-mono text-amber-300 break-all">{r.po.poNumber}</td>
+                <tr
+                  key={r.id}
+                  className={`hover:bg-slate-800/60 ${r.directorHold ? 'opacity-50 bg-slate-900/80' : ''}`}
+                >
+                  <td className="px-3 py-3 align-top font-mono text-amber-300 break-all">
+                    <div className="flex flex-col gap-1">
+                      <span>{r.po.poNumber}</span>
+                      {r.directorPriority ? (
+                        <span className="inline-flex w-fit rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-amber-500/25 text-amber-300 ring-1 ring-amber-500/40">
+                          Director priority
+                        </span>
+                      ) : null}
+                      {r.directorHold ? (
+                        <span className="inline-flex w-fit rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-slate-600/50 text-slate-300 ring-1 ring-slate-500/50">
+                          Hold
+                        </span>
+                      ) : null}
+                    </div>
+                  </td>
                   <td className="px-3 py-3 align-top text-slate-100">{r.po.customer.name}</td>
                   <td className="px-3 py-3 align-top text-slate-100 text-balance break-words">
                     {r.cartonName}

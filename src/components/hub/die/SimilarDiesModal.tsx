@@ -43,17 +43,17 @@ export function SimilarDiesModal({
       aria-labelledby="similar-dies-title"
     >
       <div
-        className="w-full max-w-lg rounded-xl border border-zinc-600 bg-zinc-950 shadow-xl max-h-[85vh] flex flex-col"
+        className="ci-hub-modal-panel max-w-lg max-h-[85vh] flex flex-col !p-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-4 py-3 border-b border-zinc-800 shrink-0">
+        <div className="px-3.5 py-3 border-b border-zinc-800 shrink-0">
           <h2
             id="similar-dies-title"
-            className={`text-sm font-bold ${isMismatch ? 'text-red-400' : 'text-white'}`}
+            className={`ci-hub-modal-title border-0 pb-0 ${isMismatch ? '!text-red-400' : ''}`}
           >
             {title}
           </h2>
-          <p className="text-[11px] text-zinc-500 mt-0.5">
+          <p className="text-[11px] text-zinc-500 mt-2 leading-snug">
             {isMismatch ? (
               <>
                 Same footprint as <span className="text-amber-300 font-mono">{sourceLabel}</span>

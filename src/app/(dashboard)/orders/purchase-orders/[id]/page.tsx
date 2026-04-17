@@ -18,6 +18,9 @@ import {
   usePoRecentCartons,
   type PoCartonCatalogItem,
 } from '@/lib/po-carton-autocomplete'
+import { Copy, FileText, Trash2 } from 'lucide-react'
+import { paperSupplyIconMeta } from '@/lib/po-paper-supply-ui'
+import { parseDeliveryYmdFromRemarks } from '@/lib/po-delivery-parse'
 
 type Customer = {
   id: string
@@ -33,6 +36,8 @@ type CartonOption = PoCartonCatalogItem
 
 type Line = {
   id?: string
+  dieMasterId?: string
+  materialProcurementStatus?: string
   cartonId: string
   cartonName: string
   cartonSize: string
@@ -63,6 +68,8 @@ type CartonLookupFieldProps = {
 }
 
 const defaultLine = (): Line => ({
+  dieMasterId: '',
+  materialProcurementStatus: 'not_calculated',
   cartonId: '',
   cartonName: '',
   cartonSize: '',
@@ -85,6 +92,8 @@ function resetAutofillFields(line: Line, cartonName: string): Line {
   if (!line.cartonId) return { ...line, cartonName }
   return {
     ...line,
+    dieMasterId: '',
+    materialProcurementStatus: 'not_calculated',
     cartonId: '',
     cartonName,
     cartonSize: '',
@@ -318,11 +327,18 @@ export default function EditPurchaseOrderPage() {
         setPoDate(data.poDate ? data.poDate.slice(0, 10) : '')
         setStatus(data.status || 'draft')
         setRemarks(data.remarks || '')
+        const drb =
+          data.deliveryRequiredBy != null
+            ? String(data.deliveryRequiredBy).slice(0, 10)
+            : parseDeliveryYmdFromRemarks(data.remarks) || ''
+        setDeliveryRequiredBy(drb)
         // Map lineItems from API to Line type
         const mapped: Line[] = (data.lineItems || []).map((li: any) => {
           const specOverrides = li.specOverrides && typeof li.specOverrides === 'object' ? li.specOverrides : {}
           return {
             id: li.id,
+            dieMasterId: li.dieMasterId || '',
+            materialProcurementStatus: li.materialProcurementStatus || 'not_calculated',
             cartonId: li.cartonId || '',
             cartonName: li.cartonName || '',
             cartonSize: li.cartonSize || '',
@@ -388,6 +404,14 @@ export default function EditPurchaseOrderPage() {
 
   const addLine = () => setLines((prev) => [...prev, defaultLine()])
   const removeLine = (idx: number) => setLines((prev) => prev.filter((_, i) => i !== idx))
+  const duplicateLine = (idx: number) => {
+    setLines((prev) => {
+      const ln = prev[idx]
+      if (!ln) return prev
+      const copy: Line = { ...ln, id: undefined }
+      return [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)]
+    })
+  }
 
   const validLines = lines.filter((l) => l.cartonName.trim() && l.quantity.trim() && Number(l.quantity) > 0)
   const subtotal = validLines.reduce((sum, l) => {
@@ -400,6 +424,20 @@ export default function EditPurchaseOrderPage() {
   }, 0)
   const grandTotal = subtotal + totalGst
   const totalQty = validLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
+
+  const supplyMaterialCounts = useMemo(() => {
+    const total = lines.length
+    let grey = 0
+    let blue = 0
+    let green = 0
+    for (const l of lines) {
+      const s = (l.materialProcurementStatus || 'not_calculated').toLowerCase()
+      if (s === 'received') green += 1
+      else if (s === 'on_order' || s === 'dispatched' || s === 'paper_ordered') blue += 1
+      else grey += 1
+    }
+    return { total, grey, blue, green }
+  }, [lines])
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -422,7 +460,11 @@ export default function EditPurchaseOrderPage() {
           poDate,
           status,
           remarks: remarks || undefined,
+          deliveryRequiredBy: deliveryRequiredBy.trim() || null,
           lineItems: validLines.map((l) => ({
+            id: l.id,
+            dieMasterId: l.dieMasterId?.trim() || null,
+            materialProcurementStatus: l.materialProcurementStatus || 'not_calculated',
             cartonId: l.cartonId || undefined,
             cartonName: l.cartonName.trim(),
             cartonSize: l.cartonSize.trim() || undefined,
@@ -535,12 +577,16 @@ export default function EditPurchaseOrderPage() {
     }
   }
 
-  const inputCls = 'w-full px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-xs'
+  const inputBase =
+    'w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 text-xs placeholder:text-slate-500'
+  const inputCls = `${inputBase} text-white`
+  const lineCellPad = 'px-[0.35rem] py-[2px]'
+  const poMono = 'po-mono-metric'
 
   if (loading) return <div className="p-4 text-slate-400">Loading…</div>
 
   return (
-    <form onSubmit={handleSave} className="p-4 max-w-[1600px] mx-auto space-y-4">
+    <form onSubmit={handleSave} className="p-4 max-w-[1600px] mx-auto space-y-4 pb-32">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <span className="text-slate-400 text-sm font-medium whitespace-nowrap">PO #</span>
@@ -642,8 +688,8 @@ export default function EditPurchaseOrderPage() {
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
             />
           </div>
-          <div className="text-slate-400 text-sm pb-2">
-            PO value: <span className="text-white font-medium">₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          <div className="text-slate-500 text-xs pb-2 leading-snug">
+            Subtotal, GST, and grand total update live in the summary dock at the bottom of the screen.
           </div>
         </div>
       </div>
@@ -657,35 +703,44 @@ export default function EditPurchaseOrderPage() {
           </button>
         </div>
         {fieldErrors.lines && <p className="text-red-400 text-xs">{fieldErrors.lines}</p>}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left min-w-[1720px]">
-            <thead className="bg-slate-800 text-slate-300">
+        <div className="overflow-x-auto overflow-y-auto min-h-[320px] max-h-[min(calc(100vh-15rem),720px)] rounded-md border border-slate-800/90">
+          <table className="w-full text-left min-w-[1720px] border-collapse">
+            <thead className="sticky top-0 z-30 backdrop-blur-md bg-slate-800/90 text-slate-300 shadow-[inset_0_-1px_0_0_rgb(51_65_85)] supports-[backdrop-filter]:bg-slate-800/75">
               <tr>
-                <th className="px-2 py-1">Carton name</th>
-                <th className="px-2 py-1">Size</th>
-                <th className="px-2 py-1">Qty*</th>
-                <th className="px-2 py-1">Artwork</th>
-                <th className="px-2 py-1">Back</th>
-                <th className="px-2 py-1">Wastage%</th>
-                <th className="px-2 py-1">Rate</th>
-                <th className="px-2 py-1">GST%</th>
-                <th className="px-2 py-1">Amount</th>
-                <th className="px-2 py-1">Board</th>
-                <th className="px-2 py-1">GSM</th>
-                <th className="px-2 py-1">Paper</th>
-                <th className="px-2 py-1">Coating</th>
-                <th className="px-2 py-1">Emboss</th>
-                <th className="px-2 py-1">Foil</th>
-                <th className="px-2 py-1">Remarks</th>
-                <th className="px-2 py-1" />
+                <th className={`${lineCellPad} w-[35%] min-w-[14rem]`}>Carton name</th>
+                <th className={`${lineCellPad} ${poMono} w-[9%]`}>Size</th>
+                <th className={`${lineCellPad} ${poMono}`}>Qty*</th>
+                <th className={`${lineCellPad}`}>Artwork</th>
+                <th className={`${lineCellPad}`}>Back</th>
+                <th className={`${lineCellPad}`}>Wastage%</th>
+                <th className={`${lineCellPad} w-[12%]`}>Rate</th>
+                <th className={lineCellPad}>GST%</th>
+                <th className={`${lineCellPad} ${poMono} w-[11%]`}>Amount</th>
+                <th className={lineCellPad}>Board</th>
+                <th className={lineCellPad}>GSM</th>
+                <th className={lineCellPad}>Paper</th>
+                <th className={lineCellPad}>Coating</th>
+                <th className={lineCellPad}>Emboss</th>
+                <th className={lineCellPad}>Foil</th>
+                <th className={lineCellPad}>Remarks</th>
+                <th className={`${lineCellPad} w-8 text-center`} title="Board / paper supply vs vendor">
+                  Paper
+                </th>
+                <th className={lineCellPad} aria-label="Row actions" />
               </tr>
             </thead>
             <tbody>
               {lines.map((ln, idx) => {
                 const { beforeGst } = lineAmount(Number(ln.rate) || 0, Number(ln.quantity) || 0, Number(ln.gstPct) || 0)
+                const paperMeta = paperSupplyIconMeta(ln.materialProcurementStatus)
                 return (
-                  <tr key={ln.id ?? idx} className="border-t border-slate-800">
-                    <td className="px-2 py-1 align-top">
+                  <tr
+                    key={ln.id ?? idx}
+                    className={`group border-b border-slate-800/80 ${
+                      idx % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/40'
+                    } ${ln.cartonId ? 'border-l-2 border-l-emerald-500' : 'border-l-2 border-l-transparent'}`}
+                  >
+                    <td className={`${lineCellPad} align-top`}>
                       <CartonLookupField
                         line={ln}
                         customerId={customerId}
@@ -701,99 +756,178 @@ export default function EditPurchaseOrderPage() {
                         }}
                       />
                     </td>
-                    <td className="px-2 py-1">
+                    <td className={lineCellPad}>
                       <input
                         type="text"
                         value={ln.cartonSize}
                         onChange={(e) => updateLine(idx, { cartonSize: e.target.value })}
-                        className={inputCls}
-                        style={{ minWidth: '6rem', width: `${Math.max(6, (ln.cartonSize || '').length + 3) * 0.6}rem` }}
+                        className={`${inputCls} ${poMono}`}
+                        style={{ minWidth: '5rem', width: `${Math.max(5, (ln.cartonSize || '').length + 2) * 0.55}rem` }}
                         placeholder="L×W×H"
                       />
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="number" min={1} value={ln.quantity} onChange={(e) => updateLine(idx, { quantity: e.target.value })} className={`w-20 ${inputCls}`} />
+                    <td className={lineCellPad}>
+                      <input type="number" min={1} value={ln.quantity} onChange={(e) => updateLine(idx, { quantity: e.target.value })} className={`w-[4.25rem] ${inputCls} ${poMono}`} />
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="text" value={ln.artworkCode} onChange={(e) => updateLine(idx, { artworkCode: e.target.value })} className={`w-28 ${inputCls}`} />
+                    <td className={lineCellPad}>
+                      <input type="text" value={ln.artworkCode} onChange={(e) => updateLine(idx, { artworkCode: e.target.value })} className={`w-full min-w-0 max-w-[6.5rem] ${inputCls}`} />
                     </td>
-                    <td className="px-2 py-1">
-                      <select value={ln.backPrint} onChange={(e) => updateLine(idx, { backPrint: e.target.value })} className={inputCls}>
+                    <td className={lineCellPad}>
+                      <select value={ln.backPrint} onChange={(e) => updateLine(idx, { backPrint: e.target.value })} className={`${inputCls} min-w-0`}>
                         <option value="No">No</option>
                         <option value="Yes">Yes</option>
                       </select>
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="number" min={0} step={0.5} value={ln.wastagePct} onChange={(e) => updateLine(idx, { wastagePct: e.target.value })} className={`w-20 ${inputCls}`} />
+                    <td className={lineCellPad}>
+                      <input type="number" min={0} step={0.5} value={ln.wastagePct} onChange={(e) => updateLine(idx, { wastagePct: e.target.value })} className={`w-[4.25rem] ${inputCls}`} />
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="number" min={0} step={0.01} value={ln.rate} onChange={(e) => updateLine(idx, { rate: e.target.value })} className={`w-20 ${inputCls}`} />
+                    <td className={lineCellPad}>
+                      <input type="number" min={0} step={0.01} value={ln.rate} onChange={(e) => updateLine(idx, { rate: e.target.value })} className={`w-full min-w-0 ${inputCls}`} />
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="number" min={0} max={28} value={ln.gstPct} onChange={(e) => updateLine(idx, { gstPct: e.target.value })} className={`w-16 ${inputCls}`} />
+                    <td className={lineCellPad}>
+                      <input type="number" min={0} max={28} value={ln.gstPct} onChange={(e) => updateLine(idx, { gstPct: e.target.value })} className={`w-full min-w-0 ${inputCls}`} />
                     </td>
-                    <td className="px-2 py-1 text-slate-300 tabular-nums">{beforeGst.toFixed(2)}</td>
-                    <td className="px-2 py-1">
-                      <select value={ln.boardGrade} onChange={(e) => updateLine(idx, { boardGrade: e.target.value })} className={inputCls}>
+                    <td className={`${lineCellPad} text-white ${poMono}`}>{beforeGst.toFixed(2)}</td>
+                    <td className={lineCellPad}>
+                      <select value={ln.boardGrade} onChange={(e) => updateLine(idx, { boardGrade: e.target.value })} className={`${inputCls} min-w-0`}>
                         <option value="">—</option>
                         {BOARD_GRADES.map((b) => <option key={b} value={b}>{b}</option>)}
                       </select>
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="number" value={ln.gsm} onChange={(e) => updateLine(idx, { gsm: e.target.value })} className={`w-16 ${inputCls}`} />
+                    <td className={lineCellPad}>
+                      <input type="number" value={ln.gsm} onChange={(e) => updateLine(idx, { gsm: e.target.value })} className={`w-full min-w-0 ${inputCls} ${poMono}`} />
                     </td>
-                    <td className="px-2 py-1">
-                      <select value={ln.paperType} onChange={(e) => updateLine(idx, { paperType: e.target.value })} className={inputCls}>
+                    <td className={lineCellPad}>
+                      <select value={ln.paperType} onChange={(e) => updateLine(idx, { paperType: e.target.value })} className={`${inputCls} min-w-0`}>
                         <option value="">—</option>
                         {PAPER_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="text" value={ln.coatingType} readOnly className={`w-32 ${inputCls} text-slate-300`} placeholder="—" />
+                    <td className={lineCellPad}>
+                      <input type="text" value={ln.coatingType} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="text" value={ln.embossingLeafing} readOnly className={`w-32 ${inputCls} text-slate-300`} placeholder="—" />
+                    <td className={lineCellPad}>
+                      <input type="text" value={ln.embossingLeafing} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="text" value={ln.foilType} readOnly className={`w-32 ${inputCls} text-slate-300`} placeholder="—" />
+                    <td className={lineCellPad}>
+                      <input type="text" value={ln.foilType} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
                     </td>
-                    <td className="px-2 py-1">
-                      <input type="text" value={ln.remarks} onChange={(e) => updateLine(idx, { remarks: e.target.value })} className={`w-40 ${inputCls}`} />
+                    <td className={lineCellPad}>
+                      <input type="text" value={ln.remarks} onChange={(e) => updateLine(idx, { remarks: e.target.value })} className={`w-full min-w-0 max-w-[7rem] ${inputCls}`} />
                     </td>
-                    <td className="px-2 py-1">
-                      {lines.length > 1 && (
-                        <button type="button" onClick={() => removeLine(idx)} className="text-red-400 hover:text-red-300">
-                          ×
+                    <td className={`${lineCellPad} align-middle text-center`}>
+                      <span title={paperMeta.title} className="inline-flex justify-center">
+                        <FileText className={`h-3.5 w-3.5 ${paperMeta.iconClassName}`} strokeWidth={2} aria-hidden />
+                      </span>
+                    </td>
+                    <td className={`${lineCellPad} align-middle`}>
+                      <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                        <button
+                          type="button"
+                          title="Duplicate line"
+                          onClick={() => duplicateLine(idx)}
+                          className="rounded p-1 text-slate-400 hover:bg-slate-700/80 hover:text-amber-300"
+                        >
+                          <Copy className="h-3.5 w-3.5" strokeWidth={2} />
                         </button>
-                      )}
+                        {lines.length > 1 ? (
+                          <button
+                            type="button"
+                            title="Remove line"
+                            onClick={() => removeLine(idx)}
+                            className="rounded p-1 text-red-400/80 hover:bg-red-950/50 hover:text-red-300"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 )
               })}
             </tbody>
-            <tfoot className="bg-slate-800 text-slate-200 font-medium">
-              <tr>
-                <td colSpan={2} className="px-2 py-2">Total</td>
-                <td className="px-2 py-2 tabular-nums">{totalQty}</td>
-                <td colSpan={5} />
-                <td className="px-2 py-2 tabular-nums">Subtotal ₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                <td colSpan={4} />
-                <td className="px-2 py-2 tabular-nums">GST ₹ {totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                <td className="px-2 py-2 tabular-nums">Grand total ₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                <td colSpan={2} />
-              </tr>
-            </tfoot>
           </table>
         </div>
       </div>
 
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={() => router.push('/orders/purchase-orders')} className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm">
           Cancel
         </button>
-        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium">
+        <button type="submit" disabled={saving} className="ci-btn-save-industrial px-5 py-2 text-sm">
           {saving ? 'Saving…' : 'Save changes'}
         </button>
+      </div>
+
+      <div
+        className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700/50 bg-slate-950/82 backdrop-blur-md supports-[backdrop-filter]:bg-slate-950/68 shadow-[0_-6px_28px_rgba(0,0,0,0.45)]"
+        aria-live="polite"
+        aria-label="Purchase order financial summary"
+      >
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-[11px] sm:text-xs">
+          <span className="font-semibold uppercase tracking-wider text-slate-500">Live summary</span>
+          <div className="flex min-w-[12rem] max-w-md flex-1 flex-col gap-1.5 px-2">
+            <div className="text-[9px] font-semibold uppercase tracking-wider text-slate-600">
+              Supply progress — Material
+            </div>
+            <div className="flex h-1.5 w-full flex-row overflow-hidden rounded-full bg-slate-800/95 ring-1 ring-slate-700/80">
+              {supplyMaterialCounts.total > 0 ? (
+                <>
+                  <div
+                    className="h-full flex-none bg-slate-600 transition-[width] duration-300 ease-out"
+                    style={{
+                      width: `${(supplyMaterialCounts.grey / supplyMaterialCounts.total) * 100}%`,
+                    }}
+                    title={`Not calculated / pre-dispatch: ${supplyMaterialCounts.grey} / ${supplyMaterialCounts.total}`}
+                  />
+                  <div
+                    className="h-full flex-none bg-sky-500 transition-[width] duration-300 ease-out"
+                    style={{
+                      width: `${(supplyMaterialCounts.blue / supplyMaterialCounts.total) * 100}%`,
+                    }}
+                    title={`On order (vendor PO sent): ${supplyMaterialCounts.blue} / ${supplyMaterialCounts.total}`}
+                  />
+                  <div
+                    className="h-full flex-none bg-emerald-500 transition-[width] duration-300 ease-out"
+                    style={{
+                      width: `${(supplyMaterialCounts.green / supplyMaterialCounts.total) * 100}%`,
+                    }}
+                    title={`Received at factory: ${supplyMaterialCounts.green} / ${supplyMaterialCounts.total}`}
+                  />
+                </>
+              ) : null}
+            </div>
+            <div className="text-[10px] text-slate-500 text-right tabular-nums">
+              <span className="text-slate-500">{supplyMaterialCounts.grey}</span> grey ·{' '}
+              <span className="text-sky-400">{supplyMaterialCounts.blue}</span> blue ·{' '}
+              <span className="text-emerald-400">{supplyMaterialCounts.green}</span> green
+              <span className="text-slate-600"> / {supplyMaterialCounts.total} lines</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1 text-slate-400">
+            <span>
+              Total qty <span className={`${poMono} text-white`}>{totalQty}</span>
+            </span>
+            <span>
+              Subtotal{' '}
+              <span className={`${poMono} text-white`}>
+                ₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+            </span>
+            <span>
+              GST{' '}
+              <span className={`${poMono} text-white`}>
+                ₹ {totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+            </span>
+            <span className="text-slate-300">
+              Grand total{' '}
+              <span className={`${poMono} text-base font-semibold text-amber-200`}>
+                ₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Quick Create Carton panel */}

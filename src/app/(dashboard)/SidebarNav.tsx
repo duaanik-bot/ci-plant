@@ -27,6 +27,7 @@ import {
   Cpu,
   UserCog,
   BarChart3,
+  Crosshair,
   Flame,
   FileSpreadsheet,
   PackageCheck,
@@ -159,7 +160,10 @@ export function SidebarNav({
       key: 'dashboard',
       title: '📊 DASHBOARD',
       borderColor: 'border-l-blue-500',
-      links: [{ href: '/', label: 'Dashboard', icon: LayoutDashboard }],
+      links: [
+        { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/director/command-center', label: 'Director Command Center', icon: Crosshair },
+      ],
     },
     {
       key: 'orders',
@@ -168,6 +172,7 @@ export function SidebarNav({
       links: [
         { href: '/rfq', label: 'RFQ Pipeline', icon: FileText },
         { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart },
+        { href: '/orders/procurement', label: 'Procurement Workbench', icon: PackageCheck },
       ],
     },
     {

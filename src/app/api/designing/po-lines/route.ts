@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
       ...(customerId ? { po: { customerId } } : {}),
       planningStatus: { in: ['planned', 'design_ready', 'job_card_created'] },
     },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ directorPriority: 'desc' }, { directorHold: 'asc' }, { createdAt: 'desc' }],
     include: {
       po: {
         select: {

@@ -9,10 +9,23 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        'po-dashboard': ['var(--font-po-predictive)', 'ui-monospace', 'monospace'],
+        'director-cc': ['var(--font-director-cc)', 'ui-monospace', 'monospace'],
+      },
       borderRadius: {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
+      },
+      keyframes: {
+        'po-age-alert': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.65' },
+        },
+      },
+      animation: {
+        'po-age-alert': 'po-age-alert 2.2s ease-in-out infinite',
       },
       colors: {
         border: 'hsl(var(--border))',

@@ -170,10 +170,15 @@ function resolveEventCondition(args: LogDieHubEventArgs): string | null {
   return null
 }
 
+const DEFAULT_DIE_HUB_EVENT_ACTOR = 'Anik Dua'
+
 export async function createDieHubEvent(tx: DieHubDb, args: LogDieHubEventArgs): Promise<void> {
   const id = args.dyeId.trim()
   if (!id) return
-  const actor = args.actorName?.trim() || args.operatorName?.trim() || null
+  const actor =
+    args.actorName?.trim() ||
+    args.operatorName?.trim() ||
+    DEFAULT_DIE_HUB_EVENT_ACTOR
   const audit =
     args.auditActionType?.trim() || auditCategoryForGranularAction(args.actionType)
   const meta =
@@ -189,8 +194,8 @@ export async function createDieHubEvent(tx: DieHubDb, args: LogDieHubEventArgs):
       fromZone: args.fromZone?.trim() || undefined,
       toZone: args.toZone?.trim() || undefined,
       details: args.details === undefined || args.details === null ? undefined : args.details,
-      operatorName: actor || undefined,
-      actorName: actor || undefined,
+      operatorName: actor,
+      actorName: actor,
       auditActionType: audit,
       metadata: meta === undefined ? undefined : meta,
       hubAction,

@@ -15,6 +15,10 @@ import {
   initialCycleDataForChannelNames,
   mergeEffectiveCycleData,
 } from '@/lib/plate-cycle-ledger'
+import {
+  SIZE_MODIFICATION_REASON_LABELS,
+  sizeModificationReasonSchema,
+} from '@/lib/plate-return-size-modification'
 export const dynamic = 'force-dynamic'
 
 async function nextPlateSetCode(tx: Prisma.TransactionClient): Promise<string> {
@@ -42,21 +46,6 @@ async function nextPlateSerial(tx: Prisma.TransactionClient): Promise<string> {
 }
 
 const firstOriginSchema = z.enum(['inhouse_ctp', 'outside_vendor', 'legacy_unknown'])
-
-const sizeModificationReasonSchema = z.enum([
-  'alternate_machine',
-  'edge_damage',
-  'prepress_error',
-])
-
-export const SIZE_MODIFICATION_REASON_LABELS: Record<
-  z.infer<typeof sizeModificationReasonSchema>,
-  string
-> = {
-  alternate_machine: 'Resized for alternate machine assignment',
-  edge_damage: 'Trimmed due to edge damage / wear',
-  prepress_error: 'Pre-press layout error / Manual correction',
-}
 
 const bodySchema = z
   .object({

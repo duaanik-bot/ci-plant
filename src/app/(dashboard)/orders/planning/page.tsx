@@ -52,6 +52,8 @@ type Line = {
     dieStatus: string
     machineAllocated: boolean
   }
+  directorPriority?: boolean
+  directorHold?: boolean
 }
 
 type Customer = { id: string; name: string; contactName?: string | null }
@@ -375,9 +377,12 @@ export default function PlanningPage() {
                 ? machines.find((m) => m.id === spec.machineId)
                 : null
               return (
-                <tr key={r.id} className="hover:bg-slate-800/60">
+                <tr
+                  key={r.id}
+                  className={`hover:bg-slate-800/60 ${r.directorHold ? 'opacity-50 bg-slate-900/80' : ''}`}
+                >
                   <td className="px-3 py-2 align-top">
-                    <div className="flex flex-col">
+                    <div className="flex flex-col gap-1">
                       <Link
                         href={`/orders/purchase-orders/${r.po.id}`}
                         className="font-mono text-amber-300 hover:underline text-xs"
@@ -387,6 +392,16 @@ export default function PlanningPage() {
                       <span className="text-[11px] text-slate-500">
                         {new Date(r.po.poDate).toLocaleDateString('en-IN')}
                       </span>
+                      {r.directorPriority ? (
+                        <span className="inline-flex w-fit rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-amber-500/25 text-amber-300 ring-1 ring-amber-500/40">
+                          Director priority
+                        </span>
+                      ) : null}
+                      {r.directorHold ? (
+                        <span className="inline-flex w-fit rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-slate-600/50 text-slate-300 ring-1 ring-slate-500/50">
+                          Hold
+                        </span>
+                      ) : null}
                     </div>
                   </td>
                   <td className="px-3 py-2 align-top text-slate-200">

@@ -3,14 +3,16 @@
  * Block the request if artwork, job card, or set # is missing.
  */
 
+import { parseCartonSizeToDims } from '@/lib/die-hub-dimensions'
+
 export const HUB_TECHNICAL_DATA_MISSING_TOAST =
   'Technical Data Missing: Please re-select Artwork Code.'
 
 export const HUB_DIE_PUSH_SPECS_MISSING_TOAST =
-  'Enter set #, job card, AW code, actual sheet size, and number of UPS (or link artwork with those specs saved).'
+  'Enter actual sheet size, number of UPS, and three dimensions (L × W × H, e.g. 100×50×30).'
 
 export const HUB_EMBOSS_PUSH_SPECS_MISSING_TOAST =
-  'Enter set #, job card, AW code, and actual sheet size (or link artwork) before pushing to Embossing Hub.'
+  'Enter actual sheet size and three dimensions (L × W × H) before pushing to Embossing Hub.'
 
 export type HubPayloadInput = {
   artworkId?: string | null
@@ -74,6 +76,46 @@ export function validateDieHubPushPayload(
     if (!manualOk) missing.push('ups')
   }
 
+  if (missing.length > 0) return { ok: false, missing }
+  return { ok: true }
+}
+
+/** Die hub push from Technical Spec: sheet + UPS + carton dimensions only (manual job OK). */
+export type DieHubMinimalPushInput = {
+  actualSheetSize?: string | null
+  ups?: string | number | null
+  cartonSize?: string | null
+}
+
+export function validateDieHubMinimalPushPayload(
+  payload: DieHubMinimalPushInput,
+): HubPayloadResult {
+  const sheet = String(payload.actualSheetSize ?? '').trim()
+  const upsRaw = String(payload.ups ?? '').trim()
+  const upsNum = upsRaw ? Number(upsRaw) : NaN
+  const upsOk = Number.isFinite(upsNum) && upsNum >= 1 && Math.floor(upsNum) === upsNum
+  const dims = String(payload.cartonSize ?? '').trim()
+  const missing: string[] = []
+  if (!sheet) missing.push('actualSheetSize')
+  if (!upsOk) missing.push('ups')
+  if (!dims || !parseCartonSizeToDims(dims)) missing.push('cartonSize')
+  if (missing.length > 0) return { ok: false, missing }
+  return { ok: true }
+}
+
+export type EmbossHubMinimalPushInput = {
+  actualSheetSize?: string | null
+  cartonSize?: string | null
+}
+
+export function validateEmbossHubMinimalPushPayload(
+  payload: EmbossHubMinimalPushInput,
+): HubPayloadResult {
+  const sheet = String(payload.actualSheetSize ?? '').trim()
+  const dims = String(payload.cartonSize ?? '').trim()
+  const missing: string[] = []
+  if (!sheet) missing.push('actualSheetSize')
+  if (!dims || !parseCartonSizeToDims(dims)) missing.push('cartonSize')
   if (missing.length > 0) return { ok: false, missing }
   return { ok: true }
 }

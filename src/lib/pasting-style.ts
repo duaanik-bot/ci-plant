@@ -15,6 +15,9 @@ export const PO_MANUAL_PASTING_VALUES: readonly PastingStyle[] = [
   PastingStyle.BSO,
 ] as const
 
+/** Lock Bottom / BSO only — PO one-click master sync and manual cells. */
+export type PoManualPastingStyle = (typeof PO_MANUAL_PASTING_VALUES)[number]
+
 /** Die Hub “add die” manual vendor form — same as PO manual. */
 export const DIE_HUB_PASTING_TYPES = PO_MANUAL_PASTING_VALUES
 
@@ -74,4 +77,24 @@ export function coercePastingStyleInput(raw: unknown): PastingStyle | null {
 
 export function pastingNeedsMasterReview(s: PastingStyle | null | undefined): boolean {
   return s == null || s === PastingStyle.SPECIAL
+}
+
+/** PO + Die Hub triage: hub cards only use Lock Bottom or BSO. */
+export function normalizePoTriagePastingStyle(s: PastingStyle | null | undefined): PastingStyle {
+  if (s === PastingStyle.BSO) return PastingStyle.BSO
+  return PastingStyle.LOCK_BOTTOM
+}
+
+/** Command palette + compact search rows — matches PO Lock Bottom (indigo) / BSO (violet) badges. */
+export function pastingStyleSearchBadgeClass(s: PastingStyle | null | undefined): string {
+  if (s === PastingStyle.BSO) {
+    return 'rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-violet-600/80 text-white ring-1 ring-violet-300/35'
+  }
+  if (s === PastingStyle.LOCK_BOTTOM) {
+    return 'rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-indigo-600/80 text-white ring-1 ring-indigo-300/35'
+  }
+  if (s === PastingStyle.SPECIAL) {
+    return 'rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-slate-600/80 text-slate-200 ring-1 ring-slate-400/30'
+  }
+  return 'rounded px-1.5 py-0.5 text-[9px] font-semibold text-slate-500 ring-1 ring-slate-600/60'
 }

@@ -4,36 +4,47 @@ import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
 import { purchaseOrderSchema } from '@/lib/validations'
+import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
 
 export const dynamic = 'force-dynamic'
 
-const lineItemUpdateSchema = purchaseOrderSchema.shape.lineItems.element.extend({
-  id: z.string().uuid().optional(),
-  cartonId: z.string().uuid().optional().nullable(),
-  cartonSize: z.string().optional(),
-  artworkCode: z.string().optional().nullable(),
-  backPrint: z.string().optional(),
-  gstPct: z.number().int().min(0).max(28).default(5),
-  coatingType: z.string().optional(),
-  otherCoating: z.string().optional(),
-  embossingLeafing: z.string().optional(),
-  paperType: z.string().optional(),
-  dyeId: z.string().optional().nullable(),
-  remarks: z.string().optional(),
-  setNumber: z.string().optional(),
-  planningStatus: z.string().optional(),
-  specOverrides: z
-    .object({
-      wastagePct: z.number().optional(),
-      boardGrade: z.string().optional(),
-      foilType: z.string().optional(),
-      pastingStyle: z.nativeEnum(PastingStyle).optional(),
-      pastingType: z.string().optional(),
-    })
-    .passthrough()
-    .optional()
-    .nullable(),
-})
+const lineItemUpdateSchema = purchaseOrderSchema.shape.lineItems.element
+  .omit({ rate: true })
+  .extend({
+    id: z.string().uuid().optional(),
+    rate: z.number().nonnegative().optional().nullable(),
+    cartonId: z.string().uuid().optional().nullable(),
+    cartonSize: z.string().optional(),
+    artworkCode: z.string().optional().nullable(),
+    backPrint: z.string().optional(),
+    gstPct: z.number().int().min(0).max(28).default(5),
+    coatingType: z.string().optional(),
+    otherCoating: z.string().optional(),
+    embossingLeafing: z.string().optional(),
+    paperType: z.string().optional(),
+    dyeId: z.string().optional().nullable(),
+    dieMasterId: z.string().optional().nullable(),
+    remarks: z.string().optional(),
+    setNumber: z.string().optional(),
+    planningStatus: z.string().optional(),
+    toolingLocked: z.boolean().optional(),
+    lineDieType: z.string().optional().nullable(),
+    dimLengthMm: z.coerce.number().optional().nullable(),
+    dimWidthMm: z.coerce.number().optional().nullable(),
+    dimHeightMm: z.coerce.number().optional().nullable(),
+    materialProcurementStatus: z.string().optional(),
+    specOverrides: z
+      .object({
+        wastagePct: z.number().optional(),
+        boardGrade: z.string().optional(),
+        foilType: z.string().optional(),
+        pastingStyle: z.nativeEnum(PastingStyle).optional(),
+        pastingType: z.string().optional(),
+      })
+      .passthrough()
+      .optional()
+      .nullable(),
+  })
 
 const updateSchema = purchaseOrderSchema.partial().omit({
   deliveryRequiredBy: true,
@@ -46,6 +57,8 @@ const updateSchema = purchaseOrderSchema.partial().omit({
   poDate: z.string().optional(),
   remarks: z.string().optional(),
   status: z.string().optional(),
+  isPriority: z.boolean().optional(),
+  deliveryRequiredBy: z.string().optional().nullable(),
   lineItems: z.array(lineItemUpdateSchema).optional(),
 })
 
@@ -62,7 +75,7 @@ export async function GET(
     where: { id },
     include: {
       customer: { select: { id: true, name: true } },
-      lineItems: true,
+      lineItems: { include: { materialQueue: true } },
     },
   })
 
@@ -134,6 +147,14 @@ export async function PUT(
         ...(data.poDate ? { poDate: new Date(data.poDate) } : {}),
         ...(data.remarks !== undefined ? { remarks: data.remarks || null } : {}),
         ...(data.status ? { status: data.status } : {}),
+        ...(data.isPriority !== undefined ? { isPriority: data.isPriority } : {}),
+        ...(data.deliveryRequiredBy !== undefined
+          ? {
+              deliveryRequiredBy: data.deliveryRequiredBy?.trim()
+                ? new Date(data.deliveryRequiredBy.trim())
+                : null,
+            }
+          : {}),
       },
     })
 
@@ -146,37 +167,71 @@ export async function PUT(
     }
 
     if (data.lineItems) {
-      // Simple approach: delete existing and recreate from payload
-      await tx.poLineItem.deleteMany({ where: { poId: id } })
-      await Promise.all(
-        data.lineItems.map((li) =>
-          tx.poLineItem.create({
-            data: {
-              poId: id,
-              cartonId: li.cartonId || null,
-              cartonName: li.cartonName,
-              cartonSize: li.cartonSize || null,
-              quantity: li.quantity,
-              artworkCode: li.artworkCode || null,
-              backPrint: li.backPrint || 'No',
-              rate: li.rate != null ? li.rate : null,
-              gsm: li.gsm ?? null,
-              gstPct: li.gstPct,
-              coatingType: li.coatingType || null,
-              otherCoating: li.otherCoating || null,
-              embossingLeafing: li.embossingLeafing || null,
-              paperType: li.paperType || null,
-              dyeId: li.dyeId || null,
-              remarks: li.remarks || null,
-              setNumber: li.setNumber || null,
-              planningStatus: li.planningStatus || 'pending',
-              specOverrides: li.specOverrides && Object.keys(li.specOverrides).length > 0
-                ? (li.specOverrides as object)
-                : null,
-            },
-          })
-        )
+      const existingLines = existing.lineItems
+      const existingById = new Map(existingLines.map((x) => [x.id, x]))
+      const incomingIdSet = new Set(
+        data.lineItems
+          .map((li) => li.id)
+          .filter((x): x is string => typeof x === 'string' && x.length > 0),
       )
+      const toRemove = existingLines.filter((e) => !incomingIdSet.has(e.id)).map((e) => e.id)
+      if (toRemove.length > 0) {
+        await tx.poLineItem.deleteMany({
+          where: { poId: id, id: { in: toRemove } },
+        })
+      }
+
+      for (const li of data.lineItems) {
+        const prev = li.id ? existingById.get(li.id) : undefined
+        const specOverrides =
+          li.specOverrides && Object.keys(li.specOverrides).length > 0
+            ? (li.specOverrides as object)
+            : null
+
+        const row = {
+          poId: id,
+          cartonId: li.cartonId || null,
+          cartonName: li.cartonName,
+          cartonSize: li.cartonSize || null,
+          quantity: li.quantity,
+          artworkCode: li.artworkCode || null,
+          backPrint: li.backPrint || 'No',
+          rate: li.rate != null ? li.rate : null,
+          gsm: li.gsm ?? null,
+          gstPct: li.gstPct,
+          coatingType: li.coatingType || null,
+          otherCoating: li.otherCoating || null,
+          embossingLeafing: li.embossingLeafing || null,
+          paperType: li.paperType || null,
+          dyeId: li.dyeId !== undefined ? li.dyeId : prev?.dyeId ?? null,
+          remarks: li.remarks || null,
+          setNumber: li.setNumber || null,
+          planningStatus: li.planningStatus ?? prev?.planningStatus ?? 'pending',
+          specOverrides,
+          dieMasterId:
+            li.dieMasterId !== undefined ? li.dieMasterId : prev?.dieMasterId ?? null,
+          toolingLocked: li.toolingLocked ?? prev?.toolingLocked ?? true,
+          lineDieType: li.lineDieType !== undefined ? li.lineDieType : prev?.lineDieType ?? null,
+          dimLengthMm: li.dimLengthMm !== undefined ? li.dimLengthMm : prev?.dimLengthMm ?? null,
+          dimWidthMm: li.dimWidthMm !== undefined ? li.dimWidthMm : prev?.dimWidthMm ?? null,
+          dimHeightMm: li.dimHeightMm !== undefined ? li.dimHeightMm : prev?.dimHeightMm ?? null,
+          materialProcurementStatus:
+            li.materialProcurementStatus ??
+            prev?.materialProcurementStatus ??
+            'pending',
+        }
+
+        if (li.id && existingById.has(li.id)) {
+          await tx.poLineItem.update({
+            where: { id: li.id },
+            data: row,
+          })
+        } else {
+          await tx.poLineItem.create({
+            data: row,
+          })
+        }
+      }
     }
 
     return header
@@ -187,7 +242,7 @@ export async function PUT(
     action: 'UPDATE',
     tableName: 'purchase_orders',
     recordId: id,
-    newValue: data,
+    newValue: { ...data, actorLabel: 'Anik Dua' },
   })
 
   return NextResponse.json(updated)

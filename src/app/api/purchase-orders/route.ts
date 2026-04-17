@@ -4,6 +4,9 @@ import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
 import { purchaseOrderSchema } from '@/lib/validations'
+import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
+import { dyeMapFromRows, poHasCriticalTooling } from '@/lib/po-tooling-critical'
+import { computePoReadiness } from '@/lib/po-readiness'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,6 +62,8 @@ const createSchema = purchaseOrderSchema.omit({
   poNumber: z.string().min(1).max(100).optional(),
   remarks: z.string().optional(),
   status: z.string().optional(),
+  /** ISO date YYYY-MM-DD — stored on header for MRP / vendor scheduling */
+  deliveryRequiredBy: z.string().optional().nullable(),
   lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
 })
 
@@ -105,7 +110,36 @@ export async function GET(req: NextRequest) {
     }
   })
 
-  return NextResponse.json(mapped)
+  const allDieIds = Array.from(
+    new Set(
+      mapped.flatMap((po) =>
+        po.lineItems.map((li) => li.dieMasterId).filter((id): id is string => Boolean(id)),
+      ),
+    ),
+  )
+  const dyes =
+    allDieIds.length > 0
+      ? await db.dye.findMany({
+          where: { id: { in: allDieIds } },
+          select: {
+            id: true,
+            custodyStatus: true,
+            condition: true,
+            dyeNumber: true,
+            location: true,
+            hubStatusFlag: true,
+          },
+        })
+      : []
+  const dyeById = dyeMapFromRows(dyes)
+
+  const withTooling = mapped.map((po) => ({
+    ...po,
+    toolingCritical: poHasCriticalTooling(po.lineItems, dyeById),
+    readiness: computePoReadiness(po.lineItems, dyeById),
+  }))
+
+  return NextResponse.json(withTooling)
 }
 
 export async function POST(req: NextRequest) {
@@ -178,6 +212,9 @@ export async function POST(req: NextRequest) {
           poNumber,
           customerId: data.customerId,
           poDate: new Date(data.poDate),
+          deliveryRequiredBy: data.deliveryRequiredBy?.trim()
+            ? new Date(data.deliveryRequiredBy.trim())
+            : null,
           remarks: data.remarks || null,
           status: data.status || 'draft',
           createdBy: user!.id,
@@ -220,6 +257,8 @@ export async function POST(req: NextRequest) {
         )
       )
 
+      await syncMaterialRequirementsForPurchaseOrder(po.id, tx)
+
       return po
     })
   } catch (err) {
@@ -233,7 +272,7 @@ export async function POST(req: NextRequest) {
     action: 'INSERT',
     tableName: 'purchase_orders',
     recordId: created.id,
-    newValue: { poNumber, customerId: created.customerId },
+    newValue: { poNumber, customerId: created.customerId, actorLabel: 'Anik Dua' },
   })
 
   return NextResponse.json(created, { status: 201 })

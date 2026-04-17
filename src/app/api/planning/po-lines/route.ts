@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   const list = await db.poLineItem.findMany({
     where,
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ directorPriority: 'desc' }, { directorHold: 'asc' }, { createdAt: 'desc' }],
     include: {
       po: {
         select: {

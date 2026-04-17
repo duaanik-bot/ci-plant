@@ -8,6 +8,10 @@ type SlideOverPanelProps = {
   onClose: () => void
   children: ReactNode
   widthClass?: string
+  /** Backdrop (full-screen button) classes */
+  backdropClassName?: string
+  /** Panel container classes (glass, border, etc.) */
+  panelClassName?: string
 }
 
 export function SlideOverPanel({
@@ -16,6 +20,8 @@ export function SlideOverPanel({
   onClose,
   children,
   widthClass = 'max-w-xl',
+  backdropClassName = 'bg-black/50',
+  panelClassName = 'border-l border-slate-800 bg-slate-900 shadow-xl',
 }: SlideOverPanelProps) {
   useEffect(() => {
     if (!isOpen) return
@@ -29,17 +35,17 @@ export function SlideOverPanel({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-0 z-[60] flex justify-end">
       <button
         type="button"
         aria-label="Close"
-        className="absolute inset-0 bg-black/50"
+        className={`absolute inset-0 ${backdropClassName} backdrop-blur-[2px]`}
         onClick={onClose}
       />
       <div
-        className={`relative h-full w-full ${widthClass} border-l border-slate-800 bg-slate-900 shadow-xl flex flex-col`}
+        className={`relative h-full w-full ${widthClass} flex flex-col ${panelClassName}`}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/80 shrink-0">
           <h2 className="text-sm font-semibold text-slate-100">{title}</h2>
           <button
             type="button"

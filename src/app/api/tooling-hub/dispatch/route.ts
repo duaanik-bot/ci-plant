@@ -25,7 +25,11 @@ import {
   prismaDimsFromParsed,
 } from '@/lib/die-hub-dimensions'
 import { masterDieTypeLabel } from '@/lib/master-die-type'
-import { coercePastingStyleInput, mapLegacyPastingToEnum } from '@/lib/pasting-style'
+import {
+  coercePastingStyleInput,
+  mapLegacyPastingToEnum,
+  normalizePoTriagePastingStyle,
+} from '@/lib/pasting-style'
 
 export const dynamic = 'force-dynamic'
 
@@ -90,12 +94,12 @@ async function resolveDieTriageSpecs(
   ups: number
   awRef: string
   cartonSize: string
-  pastingStyle: PastingStyle | null
   dieMake: 'local' | 'laser'
   triageDyeType: string
   sourceDieMasterId: string | null
   sourceMasterDyeNumber: number | null
   sourceMasterTypeLabel: string | null
+  pastingStyle: PastingStyle
 }> {
   let sheet = data.actualSheetSize.trim()
   let ups = data.ups
@@ -117,7 +121,9 @@ async function resolveDieTriageSpecs(
       dyeType: master.dyeType,
       pastingStyle: master.pastingStyle,
     })
-    if (master.pastingStyle != null) pastingStyle = master.pastingStyle
+    if (master.pastingStyle === PastingStyle.LOCK_BOTTOM || master.pastingStyle === PastingStyle.BSO) {
+      pastingStyle = master.pastingStyle
+    }
     if (
       master.dimLengthMm != null &&
       master.dimWidthMm != null &&
@@ -233,7 +239,9 @@ async function resolveDieTriageSpecs(
   }
 
   if (master) {
-    if (master.pastingStyle != null) pastingStyle = master.pastingStyle
+    if (master.pastingStyle === PastingStyle.LOCK_BOTTOM || master.pastingStyle === PastingStyle.BSO) {
+      pastingStyle = master.pastingStyle
+    }
     triageDyeType = master.dyeType?.trim() || triageDyeType
     sourceMasterTypeLabel = masterDieTypeLabel({
       dyeType: master.dyeType,
@@ -246,7 +254,7 @@ async function resolveDieTriageSpecs(
     ups: ups ?? 0,
     awRef: awRef || '—',
     cartonSize: cartonSize.trim() || '—',
-    pastingStyle,
+    pastingStyle: normalizePoTriagePastingStyle(pastingStyle),
     dieMake,
     triageDyeType,
     sourceDieMasterId,
@@ -388,6 +396,15 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       )
     }
+    if (!parseCartonSizeToDims(dieTriageSpec.cartonSize)) {
+      return NextResponse.json(
+        {
+          error:
+            'Die triage requires three carton dimensions (L×W×H mm), e.g. 100×50×30.',
+        },
+        { status: 400 },
+      )
+    }
   }
 
   let embossTriageSpec: Awaited<ReturnType<typeof resolveEmbossTriageSpecs>> | null = null
@@ -402,11 +419,29 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       )
     }
+    if (!parseCartonSizeToDims(data.cartonSize)) {
+      return NextResponse.json(
+        {
+          error:
+            'Emboss triage requires three carton dimensions (L×W×H mm) on the job line.',
+        },
+        { status: 400 },
+      )
+    }
   }
+
+  const authorityAudit = data.authorityPush
+    ? {
+        directorAuthority: data.authorityPush.directorLabel,
+        specialRemarks: data.authorityPush.specialRemarks ?? null,
+        linkedDieMaster: data.authorityPush.linkedDieMaster ?? null,
+      }
+    : null
 
   const auditPayload = {
     ...data,
     reference,
+    authorityPush: data.authorityPush,
   }
 
   let createdDyeId: string | null = null
@@ -454,6 +489,7 @@ export async function POST(req: NextRequest) {
           masterDyeNumber: dieTriageSpec.sourceMasterDyeNumber,
           masterDieType: dieTriageSpec.sourceMasterTypeLabel,
           cartonLwh: dieTriageSpec.cartonSize,
+          ...(authorityAudit ?? {}),
         },
       })
     }
@@ -488,6 +524,7 @@ export async function POST(req: NextRequest) {
           poLineId: data.poLineId || null,
           artworkId: data.artworkId || null,
           setNumber: data.setNumber,
+          ...(authorityAudit ?? {}),
         },
       })
     }

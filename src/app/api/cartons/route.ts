@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const customerId = searchParams.get('customerId')
-  const q = (searchParams.get('q') ?? '').trim().toLowerCase()
+  const qNorm = (searchParams.get('q') ?? '').trim()
   const limitRaw = parseInt(searchParams.get('limit') ?? '4000', 10)
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 8000) : 4000
 
@@ -57,6 +57,14 @@ export async function GET(req: NextRequest) {
     where: {
       active: true,
       ...(customerId ? { customerId } : {}),
+      ...(qNorm
+        ? {
+            OR: [
+              { cartonName: { contains: qNorm, mode: 'insensitive' } },
+              { artworkCode: { contains: qNorm, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
     },
     orderBy: { cartonName: 'asc' },
     take: limit,
@@ -89,7 +97,7 @@ export async function GET(req: NextRequest) {
     },
   })
 
-  let mapped = list.map((c) => {
+  const mapped = list.map((c) => {
     const sizeText = cartonSizeFromFinished(c)
     const dm = c.dieMaster
     const legacyDye = c.dye
@@ -131,14 +139,6 @@ export async function GET(req: NextRequest) {
       toolingUnlinked: !c.dieMasterId,
     }
   })
-
-  if (q) {
-    mapped = mapped.filter(
-      (c) =>
-        c.cartonName.toLowerCase().includes(q) ||
-        (c.artworkCode ?? '').toLowerCase().includes(q),
-    )
-  }
 
   return NextResponse.json(mapped)
 }

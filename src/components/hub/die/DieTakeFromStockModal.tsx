@@ -82,12 +82,12 @@ export function DieTakeFromStockModal({
       aria-modal="true"
     >
       <div
-        className="w-full max-w-3xl rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3 max-h-[90vh] flex flex-col"
+        className="ci-hub-modal-panel max-w-3xl flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="shrink-0">
-          <h3 className="text-lg font-semibold text-white">Take from stock</h3>
-          <p className="text-slate-400 text-sm mt-1">
+          <h3 className="ci-hub-modal-title">Take from stock</h3>
+          <p className="text-slate-400 text-[11px] leading-snug mt-2">
             Matching dies share the same L×W×H as triage job{' '}
             <span className="text-amber-200/90 font-mono">{triageCode || '…'}</span>. Pull one into
             custody floor (<span className="text-amber-200/90">Source: Rack</span>). The triage
@@ -162,7 +162,7 @@ export function DieTakeFromStockModal({
           <button
             type="button"
             disabled={saving || !selectedId || candidates.length === 0}
-            className="px-3 py-2 rounded bg-amber-600 text-white font-medium disabled:opacity-50"
+            className="ci-btn-save-industrial disabled:opacity-50"
             onClick={() => selectedId && void onConfirm(selectedId)}
           >
             Confirm

@@ -116,13 +116,16 @@ model Supplier {
   email         String?  @db.VarChar(200)
   address       String?
   materialTypes String[] @map("material_types") // board | ink | foil | consumables etc
+  /// Board grades this supplier is the default mill for (e.g. FBB, SBS) — procurement auto-map
+  defaultForBoardGrades String[] @default([]) @map("default_for_board_grades")
   leadTimeDays  Int      @default(7) @map("lead_time_days")
   paymentTerms  String?  @map("payment_terms") @db.VarChar(60)
   active        Boolean  @default(true)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  inventories Inventory[]
+  inventories       Inventory[]
+  vendorMaterialPos VendorMaterialPurchaseOrder[]
 
   @@map("suppliers")
 }
@@ -778,18 +781,23 @@ model DyeMaintenanceLog {
 // ─────────────────────────────────────────
 
 model PurchaseOrder {
-  id          String       @id @default(uuid())
-  poNumber    String       @unique @map("po_number")
-  customerId  String       @map("customer_id")
-  poDate      DateTime     @map("po_date") @db.Date
-  remarks     String?
-  status      String       @default("draft")
-  createdBy   String       @map("created_by")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  id                 String    @id @default(uuid())
+  poNumber           String    @unique @map("po_number")
+  customerId         String    @map("customer_id")
+  poDate             DateTime  @map("po_date") @db.Date
+  /// Target customer delivery (MRP / vendor schedule). Also duplicated in remarks for legacy rows.
+  deliveryRequiredBy DateTime? @map("delivery_required_by") @db.Date
+  remarks            String?
+  status             String    @default("draft")
+  /// Pin to top of command-center list (executive priority).
+  isPriority         Boolean   @default(false) @map("is_priority")
+  createdBy          String    @map("created_by")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  customer  Customer   @relation(fields: [customerId], references: [id])
-  lineItems PoLineItem[]
+  customer             Customer               @relation(fields: [customerId], references: [id])
+  lineItems       PoLineItem[]
+  materialQueues  MaterialQueue[]
 
   @@map("purchase_orders")
 }
@@ -822,14 +830,120 @@ model PoLineItem {
   setNumber        String?       @map("set_number")
   jobCardNumber    Int?          @map("job_card_number")
   planningStatus   String        @default("pending") @map("planning_status")
+  /// not_calculated | pending | on_order | dispatched (legacy) | paper_ordered (legacy) | received
+  materialProcurementStatus String @default("not_calculated") @map("material_procurement_status") @db.VarChar(32)
   specOverrides    Json?         @map("spec_overrides")
+  /// Director Command Center — floor broadcast & WIP clocks (synced across modules).
+  directorPriority              Boolean   @default(false) @map("director_priority")
+  directorHold                  Boolean   @default(false) @map("director_hold")
+  directorBroadcastNote         String?   @map("director_broadcast_note") @db.Text
+  /// Primary lifecycle stage for bottleneck detection (artwork|tooling|material|production|logistics|complete).
+  directorCurrentStageKey       String?   @map("director_current_stage_key") @db.VarChar(32)
+  directorCurrentStageEnteredAt DateTime? @map("director_current_stage_entered_at")
+  artworkStageEnteredAt         DateTime? @map("artwork_stage_entered_at")
+  toolingStageEnteredAt         DateTime? @map("tooling_stage_entered_at")
+  materialStageEnteredAt        DateTime? @map("material_stage_entered_at")
+  productionStageEnteredAt      DateTime? @map("production_stage_entered_at")
+  logisticsStageEnteredAt       DateTime? @map("logistics_stage_entered_at")
   createdAt        DateTime      @default(now()) @map("created_at")
 
-  po         PurchaseOrder @relation(fields: [poId], references: [id])
-  carton     Carton?       @relation(fields: [cartonId], references: [id])
-  dieMaster  Dye?          @relation("PoLineDieMaster", fields: [dieMasterId], references: [id])
+  po                  PurchaseOrder        @relation(fields: [poId], references: [id])
+  carton              Carton?              @relation(fields: [cartonId], references: [id])
+  dieMaster           Dye?                 @relation("PoLineDieMaster", fields: [dieMasterId], references: [id])
+  materialQueue MaterialQueue?
 
   @@map("po_line_items")
+}
+
+// ─────────────────────────────────────────
+// MATERIAL QUEUE (board MRP per customer PO line — tonnage & sheets for procurement)
+// ─────────────────────────────────────────
+
+model MaterialQueue {
+  id              String   @id @default(uuid())
+  purchaseOrderId String   @map("purchase_order_id")
+  poLineItemId    String   @unique @map("po_line_item_id")
+  boardType       String   @map("board_type")
+  gsm             Int
+  grainDirection  String   @map("grain_direction") @db.VarChar(64)
+  sheetLengthMm   Decimal  @map("sheet_length_mm") @db.Decimal(12, 4)
+  sheetWidthMm    Decimal  @map("sheet_width_mm") @db.Decimal(12, 4)
+  ups             Int
+  wastagePct      Decimal  @map("wastage_pct") @db.Decimal(8, 4)
+  orderQty        Int      @map("order_qty")
+  totalSheets     Int      @map("total_sheets")
+  totalWeightKg   Decimal  @map("total_weight_kg") @db.Decimal(16, 6)
+  /// Metric tons required (total_weight_kg / 1000); stored for audit / reporting.
+  totalMetricTons Decimal? @map("total_metric_tons") @db.Decimal(18, 8)
+  formulaVersion  String   @default("erp_board_v1") @map("formula_version") @db.VarChar(32)
+  calculatedAt    DateTime @default(now()) @map("calculated_at")
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  lineItem      PoLineItem    @relation(fields: [poLineItemId], references: [id], onDelete: Cascade)
+
+  @@map("material_queue")
+}
+
+model CommunicationLog {
+  id           String   @id @default(uuid())
+  channel      String   @db.VarChar(24)
+  direction    String   @default("outbound") @map("direction") @db.VarChar(16)
+  subject      String?  @db.VarChar(500)
+  bodyPreview  String?  @map("body_preview") @db.VarChar(2000)
+  toAddress    String?  @map("to_address") @db.VarChar(320)
+  status       String   @default("sent") @db.VarChar(24)
+  errorMessage String?  @map("error_message") @db.Text
+  metadata     Json?
+  relatedTable String?  @map("related_table") @db.VarChar(80)
+  relatedId    String?  @map("related_id") @db.VarChar(36)
+  actorLabel   String   @default("Anik Dua") @map("actor_label") @db.VarChar(120)
+  userId       String?  @map("user_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([relatedTable, relatedId])
+  @@map("communication_logs")
+}
+
+// ─────────────────────────────────────────
+// VENDOR MATERIAL PURCHASE ORDERS (board/paper)
+// ─────────────────────────────────────────
+
+model VendorMaterialPurchaseOrder {
+  id                   String    @id @default(uuid())
+  poNumber             String    @unique @map("po_number")
+  supplierId           String    @map("supplier_id")
+  status               String    @default("draft") @map("status") @db.VarChar(24)
+  orderDate            DateTime  @default(now()) @map("order_date") @db.Date
+  requiredDeliveryDate DateTime? @map("required_delivery_date") @db.Date
+  signatoryName        String    @default("Anik Dua") @map("signatory_name") @db.VarChar(120)
+  remarks              String?
+  dispatchedAt         DateTime? @map("dispatched_at")
+  dispatchActor        String?   @map("dispatch_actor") @db.VarChar(120)
+  createdBy            String    @map("created_by")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  supplier Supplier                        @relation(fields: [supplierId], references: [id])
+  lines    VendorMaterialPurchaseOrderLine[]
+
+  @@map("vendor_material_purchase_orders")
+}
+
+model VendorMaterialPurchaseOrderLine {
+  id              String  @id @default(uuid())
+  vendorPoId      String  @map("vendor_po_id")
+  boardGrade      String  @map("board_grade")
+  gsm             Int
+  grainDirection  String  @default("Long grain") @map("grain_direction") @db.VarChar(64)
+  totalSheets     Int     @map("total_sheets")
+  totalWeightKg   Decimal @map("total_weight_kg") @db.Decimal(16, 6)
+  ratePerKg       Decimal? @map("rate_per_kg") @db.Decimal(14, 4)
+  /// UUIDs of customer PoLineItem rows covered by this vendor line
+  linkedPoLineIds Json    @map("linked_po_line_ids")
+
+  vendorPo VendorMaterialPurchaseOrder @relation(fields: [vendorPoId], references: [id], onDelete: Cascade)
+
+  @@map("vendor_material_po_lines")
 }
 
 // ─────────────────────────────────────────

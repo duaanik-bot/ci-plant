@@ -17,6 +17,19 @@ export async function GET(
     where: { id },
     include: {
       po: { include: { customer: true } },
+      dieMaster: {
+        select: {
+          id: true,
+          dyeNumber: true,
+          dyeType: true,
+          condition: true,
+          location: true,
+          cartonSize: true,
+          dimLengthMm: true,
+          dimWidthMm: true,
+          dimHeightMm: true,
+        },
+      },
     },
   })
   if (!li) return NextResponse.json({ error: 'PO line not found' }, { status: 404 })

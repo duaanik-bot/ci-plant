@@ -1,5 +1,26 @@
 import { z } from 'zod'
 
+const linkedDieMasterSchema = z
+  .object({
+    id: z.string(),
+    dyeNumber: z.number(),
+    dyeType: z.string(),
+    condition: z.string().optional(),
+    location: z.string().nullable().optional(),
+    cartonSize: z.string().nullable().optional(),
+    dimsMm: z.string().optional(),
+  })
+  .optional()
+
+/** Pre-press “authority push” bundle (director + remarks + linked die snapshot). */
+export const authorityPushSchema = z
+  .object({
+    directorLabel: z.string().min(1),
+    specialRemarks: z.string().optional(),
+    linkedDieMaster: linkedDieMasterSchema,
+  })
+  .optional()
+
 /** POST /api/tooling-hub/dispatch — use jobCardId or legacy jobId (PO line id). */
 export const toolingHubDispatchBodySchema = z
   .object({
@@ -15,8 +36,13 @@ export const toolingHubDispatchBodySchema = z
     jobCardId: z.string().optional(),
     /** PO line id (designing page sends this as `jobId`) */
     jobId: z.string().optional(),
-    setNumber: z.string().min(1, 'setNumber is required'),
+    setNumber: z.preprocess((v) => {
+      if (v == null || v === '') return 'MANUAL'
+      const s = String(v).trim()
+      return s || 'MANUAL'
+    }, z.string().min(1)),
     source: z.enum(['NEW', 'OLD']),
+    authorityPush: authorityPushSchema,
   })
   .refine((d) => !!(String(d.jobCardId || '').trim() || String(d.jobId || '').trim()), {
     message: 'jobCardId is required',
@@ -47,6 +73,8 @@ export const toolingHubDispatchBodySchema = z
 
 export type ToolingHubDispatchInput = z.infer<typeof toolingHubDispatchBodySchema>
 
+export type AuthorityPushPayload = NonNullable<z.infer<typeof authorityPushSchema>>
+
 export type NormalizedToolingHubDispatch = {
   toolType: 'DIE' | 'BLOCK'
   artworkId: string
@@ -60,6 +88,7 @@ export type NormalizedToolingHubDispatch = {
   poLineId: string
   setNumber: string
   source: 'NEW' | 'OLD'
+  authorityPush: AuthorityPushPayload | null
 }
 
 export function normalizeDispatchBody(d: ToolingHubDispatchInput): NormalizedToolingHubDispatch {
@@ -78,5 +107,6 @@ export function normalizeDispatchBody(d: ToolingHubDispatchInput): NormalizedToo
     poLineId,
     setNumber: d.setNumber.trim(),
     source: d.source,
+    authorityPush: d.authorityPush ?? null,
   }
 }

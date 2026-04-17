@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { AlertTriangle, Check, Search } from 'lucide-react'
 import {
   computeTotalPlates,
   defaultDesignerCommand,
@@ -16,14 +17,20 @@ import {
   HUB_DIE_PUSH_SPECS_MISSING_TOAST,
   HUB_EMBOSS_PUSH_SPECS_MISSING_TOAST,
   HUB_TECHNICAL_DATA_MISSING_TOAST,
-  validateDieHubPushPayload,
-  validateEmbossHubPushPayload,
+  validateDieHubMinimalPushPayload,
+  validateEmbossHubMinimalPushPayload,
   validatePayload,
 } from '@/lib/validate-hub-payload'
 import { safeJsonStringify } from '@/lib/safe-json'
 import { PastingStyle } from '@prisma/client'
 import { masterDieTypeLabel } from '@/lib/master-die-type'
-import { coercePastingStyleInput, pastingStyleLabel } from '@/lib/pasting-style'
+import { parseCartonSizeToDims } from '@/lib/die-hub-dimensions'
+import type { AuthorityPushPayload } from '@/lib/tooling-hub-dispatch-schema'
+import { pantoneContrastFg, pantoneHexApprox } from '@/lib/pantone-hex-approx'
+import {
+  SmartMatchDieModal,
+  type SmartMatchDieRow,
+} from '@/components/designing/SmartMatchDieModal'
 
 type SpecOverrides = {
   assignedDesignerId?: string
@@ -62,6 +69,18 @@ type CartonMasterDims = {
   } | null
 } | null
 
+type LineDieMaster = {
+  id: string
+  dyeNumber: number
+  dyeType: string
+  condition: string
+  location: string | null
+  cartonSize: string | null
+  dimLengthMm: unknown
+  dimWidthMm: unknown
+  dimHeightMm: unknown
+} | null
+
 type DesigningDetail = {
   line: {
     id: string
@@ -76,6 +95,7 @@ type DesigningDetail = {
     artworkCode?: string | null
     dyeId?: string | null
     dieMasterId?: string | null
+    dieMaster?: LineDieMaster
     toolingLocked?: boolean
     lineDieType?: string | null
     setNumber: string | null
@@ -123,9 +143,37 @@ function formatPreprintedBatchSpace(line: DesigningDetail['line']): string {
 type User = { id: string; name: string }
 
 const manualInputClass =
-  'mt-1 w-full px-2 py-1.5 rounded bg-slate-900 text-white text-sm border-2 border-slate-400/85 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-500/35 placeholder:text-slate-500'
+  'mt-1 w-full px-2 py-1.5 rounded bg-black text-white text-sm border border-white/20 focus:border-amber-500/80 focus:outline-none focus:ring-1 focus:ring-amber-500/40 placeholder:text-slate-600'
 
-function CartonDimensionsRow({ carton }: { carton: CartonMasterDims | null | undefined }) {
+const monoInputClass = `${manualInputClass} font-mono tabular-nums tracking-tight`
+
+/** L×W×H for hub push validation (PO line + carton master). */
+function fmtLineCartonSizeLwh(line: {
+  cartonSize?: string | null
+  carton?: CartonMasterDims | null
+}): string {
+  if (line.cartonSize?.trim()) return line.cartonSize.trim()
+  const c = line.carton
+  if (!c) return ''
+  const fmt = (v: unknown) => {
+    if (v == null || v === '') return ''
+    const n = Number(v)
+    return Number.isFinite(n) ? String(n) : String(v)
+  }
+  const L = fmt(c.finishedLength)
+  const W = fmt(c.finishedWidth)
+  const H = fmt(c.finishedHeight)
+  if (L && W && H) return `${L}×${W}×${H}`
+  return ''
+}
+
+function CartonDimensionsRow({
+  carton,
+  right,
+}: {
+  carton: CartonMasterDims | null | undefined
+  right?: ReactNode
+}) {
   const fmt = (v: unknown) => {
     if (v == null || v === '') return null
     const n = Number(v)
@@ -135,17 +183,82 @@ function CartonDimensionsRow({ carton }: { carton: CartonMasterDims | null | und
   const W = fmt(carton?.finishedWidth)
   const H = fmt(carton?.finishedHeight)
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:col-span-3 border-b border-slate-800/80 sm:border-0 pb-2 sm:pb-0">
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:col-span-3 border-b border-white/10 sm:border-0 pb-2 sm:pb-0">
       <span className="text-slate-500 shrink-0 text-xs">Carton dimensions (L × W × H)</span>
-      <span className="flex flex-wrap items-center gap-x-2 text-slate-100 text-sm font-mono tabular-nums min-w-0">
-        <span>{L ?? '—'}</span>
-        <span className="text-slate-500">×</span>
-        <span>{W ?? '—'}</span>
-        <span className="text-slate-500">×</span>
-        <span>{H ?? '—'}</span>
-      </span>
+      <div className="flex flex-wrap items-center gap-2 min-w-0">
+        <span className="flex flex-wrap items-center gap-x-2 text-slate-100 text-sm font-mono tabular-nums tracking-tight min-w-0">
+          <span>{L ?? '—'}</span>
+          <span className="text-slate-500">×</span>
+          <span>{W ?? '—'}</span>
+          <span className="text-slate-500">×</span>
+          <span>{H ?? '—'}</span>
+        </span>
+        {right}
+      </div>
     </div>
   )
+}
+
+function fmtDieDimsMm(dm: NonNullable<LineDieMaster>): string {
+  if (dm.dimLengthMm != null && dm.dimWidthMm != null && dm.dimHeightMm != null) {
+    return `${dm.dimLengthMm}×${dm.dimWidthMm}×${dm.dimHeightMm}`
+  }
+  return (dm.cartonSize || '').trim() || '—'
+}
+
+function buildAuthorityPush(
+  line: DesigningDetail['line'],
+  remarksTrim: string,
+): {
+  directorLabel: string
+  specialRemarks?: string
+  linkedDieMaster?: {
+    id: string
+    dyeNumber: number
+    dyeType: string
+    condition?: string
+    location?: string | null
+    cartonSize?: string | null
+    dimsMm?: string
+  }
+} {
+  const dm = line.dieMaster
+  const cm = line.carton?.dieMaster
+  const linked = dm
+    ? {
+        id: dm.id,
+        dyeNumber: dm.dyeNumber,
+        dyeType: dm.dyeType,
+        condition: dm.condition,
+        location: dm.location,
+        cartonSize: dm.cartonSize,
+        dimsMm: fmtDieDimsMm(dm),
+      }
+    : cm
+      ? {
+          id: cm.id,
+          dyeNumber: cm.dyeNumber,
+          dyeType: cm.dyeType,
+          dimsMm: '—',
+        }
+      : undefined
+  return {
+    directorLabel: 'Anik Dua',
+    specialRemarks: remarksTrim || undefined,
+    linkedDieMaster: linked,
+  }
+}
+
+function formatHubSentAt(iso?: string): string {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleString('en-IN', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    })
+  } catch {
+    return iso
+  }
 }
 
 export default function DesigningDetailPage() {
@@ -351,6 +464,86 @@ export default function DesigningDetailPage() {
     [data, poLineId],
   )
 
+  const reloadLine = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/designing/po-lines/${poLineId}`)
+      const json = (await r.json()) as DesigningDetail | { error?: string }
+      if ('error' in json && json.error) throw new Error(json.error)
+      setData(json as DesigningDetail)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to refresh')
+    }
+  }, [poLineId])
+
+  const [smartMatchOpen, setSmartMatchOpen] = useState(false)
+  const [smartMatchRows, setSmartMatchRows] = useState<SmartMatchDieRow[]>([])
+  const [smartMatchTarget, setSmartMatchTarget] = useState('')
+  const [smartMatchTol, setSmartMatchTol] = useState(1)
+  const [smartMatchBusyId, setSmartMatchBusyId] = useState<string | null>(null)
+
+  const openSmartMatch = async () => {
+    try {
+      const r = await fetch(`/api/designing/po-lines/${poLineId}/smart-match-dies`)
+      const j = (await r.json()) as {
+        matches?: SmartMatchDieRow[]
+        targetDims?: string
+        toleranceMm?: number
+        message?: string
+        error?: string
+      }
+      if (!r.ok) throw new Error(j.message || j.error || 'Smart match failed')
+      setSmartMatchRows(j.matches ?? [])
+      setSmartMatchTarget(j.targetDims ?? '')
+      setSmartMatchTol(j.toleranceMm ?? 1)
+      setSmartMatchOpen(true)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Smart match failed')
+    }
+  }
+
+  const linkDieFromSmartMatch = async (row: SmartMatchDieRow) => {
+    setSmartMatchBusyId(row.id)
+    try {
+      const res = await fetch(`/api/planning/po-lines/${poLineId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dieMasterId: row.id }),
+      })
+      const json = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(json.error || 'Link failed')
+      await reloadLine()
+      setSmartMatchOpen(false)
+      toast.success(`Linked die master #${row.serialNumber}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Link failed')
+    } finally {
+      setSmartMatchBusyId(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!data?.line) return
+    if (data.line.setNumber?.trim()) return
+    const aw = (data.line.artworkCode || '').trim()
+    const cid = data.line.po.customer.id
+    if (!aw || !cid) return
+    let cancelled = false
+    void (async () => {
+      const r = await fetch(
+        `/api/designing/customer-aw-set-history?customerId=${encodeURIComponent(cid)}&awCode=${encodeURIComponent(aw)}&excludeLineId=${encodeURIComponent(poLineId)}`,
+      )
+      const j = (await r.json()) as { setNumber?: string | null }
+      if (cancelled || !j.setNumber?.trim()) return
+      setSetNumberInput((prev) => (prev.trim() ? prev : j.setNumber!.trim()))
+      toast.message(
+        `Set # from latest ${data.line.po.customer.name} + AW (${aw}): ${j.setNumber}`,
+      )
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [data?.line?.id, data?.line?.artworkCode, data?.line?.setNumber, data?.line?.po.customer.id, poLineId])
+
   type ToolingApiBody = {
     toolType: 'DIE' | 'BLOCK'
     jobId: string
@@ -364,6 +557,7 @@ export default function DesigningDetailPage() {
     setNumber: string
     source: 'NEW' | 'OLD'
     blockType?: string
+    authorityPush: AuthorityPushPayload
   }
 
   const buildToolingBody = (tool: 'die' | 'emboss', forHub = false): ToolingApiBody | null => {
@@ -371,11 +565,17 @@ export default function DesigningDetailPage() {
     const artworkIdRaw =
       String(data.line.specOverrides?.artworkId ?? '').trim() || resolvedArtworkId?.trim() || ''
     const artworkId = artworkIdRaw || undefined
-    const setNumber = setNumberInput.trim()
-    const jobCardId = data.jobCard?.id?.trim() || ''
+    const setTrim = setNumberInput.trim()
+    const jobCardIdStrict = data.jobCard?.id?.trim() || ''
+    const hubJobCardId = jobCardIdStrict || data.line.id
+    const setNumber = forHub ? setTrim || 'MANUAL' : setTrim
     const src = tool === 'die' ? designerCommand.dieSource : designerCommand.embossSource
     if (!src) return null
-    if (!setNumber || !/^\d+$/.test(setNumber) || !jobCardId) return null
+    if (!forHub) {
+      if (!setTrim || !/^\d+$/.test(setTrim) || !jobCardIdStrict) return null
+    }
+
+    const authorityPush = buildAuthorityPush(data.line, prePressRemarksInput.trim())
 
     if (tool === 'emboss') {
       if (!forHub) {
@@ -383,28 +583,34 @@ export default function DesigningDetailPage() {
         return {
           toolType: 'BLOCK',
           jobId: data.line.id,
-          jobCardId,
+          jobCardId: jobCardIdStrict,
           artworkId,
           setNumber,
           source: src === 'new' ? 'NEW' : 'OLD',
+          authorityPush,
         }
       }
-      const aw = artworkCodeInput.trim()
+      const aw =
+        artworkCodeInput.trim() ||
+        (data.line.artworkCode || '').trim() ||
+        'MANUAL'
       const sheet = actualSheetSizeInput.trim()
-      if (!aw || !sheet) return null
+      const cartonSize = fmtLineCartonSizeLwh(data.line)
+      if (!sheet || !cartonSize || !parseCartonSizeToDims(cartonSize)) return null
       const blockType = (data.line.embossingLeafing || 'Embossing').trim()
       return {
         toolType: 'BLOCK',
         jobId: data.line.id,
-        jobCardId,
+        jobCardId: hubJobCardId,
         setNumber,
         source: src === 'new' ? 'NEW' : 'OLD',
         ...(artworkId ? { artworkId } : {}),
         awCode: aw,
         actualSheetSize: sheet,
         blockType,
-        cartonSize: data.line.cartonSize?.trim() || '',
+        cartonSize,
         ...(data.line.cartonId?.trim() ? { cartonId: data.line.cartonId.trim() } : {}),
+        authorityPush,
       }
     }
 
@@ -413,48 +619,38 @@ export default function DesigningDetailPage() {
       return {
         toolType: 'DIE',
         jobId: data.line.id,
-        jobCardId,
+        jobCardId: jobCardIdStrict,
         artworkId,
         setNumber,
         source: src === 'new' ? 'NEW' : 'OLD',
+        authorityPush,
       }
     }
 
-    const aw = artworkCodeInput.trim()
+    const aw =
+      artworkCodeInput.trim() ||
+      (data.line.artworkCode || '').trim() ||
+      'MANUAL'
     const sheet = actualSheetSizeInput.trim()
     const upsRaw = numberOfUpsInput.trim()
     const upsNum = upsRaw ? Number(upsRaw) : NaN
     const upsOk = Number.isFinite(upsNum) && upsNum >= 1 && Math.floor(upsNum) === upsNum
-    if (!aw || !sheet || !upsOk) return null
-
-    const fmtCartonSize = (): string => {
-      if (data.line.cartonSize?.trim()) return data.line.cartonSize.trim()
-      const c = data.line.carton
-      if (!c) return ''
-      const fmt = (v: unknown) => {
-        if (v == null || v === '') return ''
-        const n = Number(v)
-        return Number.isFinite(n) ? String(n) : String(v)
-      }
-      const L = fmt(c.finishedLength)
-      const W = fmt(c.finishedWidth)
-      const H = fmt(c.finishedHeight)
-      if (L && W && H) return `${L}×${W}×${H}`
-      return ''
-    }
+    const cartonSize = fmtLineCartonSizeLwh(data.line)
+    if (!sheet || !upsOk || !cartonSize || !parseCartonSizeToDims(cartonSize)) return null
 
     return {
       toolType: 'DIE',
       jobId: data.line.id,
-      jobCardId,
+      jobCardId: hubJobCardId,
       setNumber,
       source: src === 'new' ? 'NEW' : 'OLD',
       ...(artworkId ? { artworkId } : {}),
       awCode: aw,
       actualSheetSize: sheet,
       ups: Math.floor(upsNum),
-      cartonSize: fmtCartonSize(),
+      cartonSize,
       ...(data.line.cartonId?.trim() ? { cartonId: data.line.cartonId.trim() } : {}),
+      authorityPush,
     }
   }
 
@@ -463,13 +659,10 @@ export default function DesigningDetailPage() {
       toast.error(HUB_DIE_PUSH_SPECS_MISSING_TOAST)
       return false
     }
-    const v = validateDieHubPushPayload({
-      artworkId: body.artworkId,
-      jobCardId: body.jobCardId,
-      setNumber: body.setNumber,
-      awCode: body.awCode,
+    const v = validateDieHubMinimalPushPayload({
       actualSheetSize: body.actualSheetSize,
       ups: body.ups ?? numberOfUpsInput,
+      cartonSize: body.cartonSize,
     })
     if (!v.ok) {
       toast.error(HUB_DIE_PUSH_SPECS_MISSING_TOAST)
@@ -483,12 +676,9 @@ export default function DesigningDetailPage() {
       toast.error(HUB_EMBOSS_PUSH_SPECS_MISSING_TOAST)
       return false
     }
-    const v = validateEmbossHubPushPayload({
-      artworkId: body.artworkId,
-      jobCardId: body.jobCardId,
-      setNumber: body.setNumber,
-      awCode: body.awCode,
+    const v = validateEmbossHubMinimalPushPayload({
       actualSheetSize: body.actualSheetSize,
+      cartonSize: body.cartonSize,
     })
     if (!v.ok) {
       toast.error(HUB_EMBOSS_PUSH_SPECS_MISSING_TOAST)
@@ -557,22 +747,6 @@ export default function DesigningDetailPage() {
     if (!data || !designerCommand.dieSource) return
     const body = buildToolingBody('die', true)
     if (!assertDieHubPayload(body)) return
-    const dm = data.line.carton?.dieMaster
-    const userPaste =
-      coercePastingStyleInput(data.line.specOverrides?.pastingStyle) ??
-      coercePastingStyleInput(data.line.specOverrides?.pastingType)
-    if (
-      dm &&
-      userPaste &&
-      dm.pastingStyle != null &&
-      dm.pastingStyle !== PastingStyle.SPECIAL &&
-      userPaste !== dm.pastingStyle
-    ) {
-      toast.error(
-        `Conflict: Master Die #${dm.dyeNumber} is listed as [${pastingStyleLabel(dm.pastingStyle)}]. You are entering [${pastingStyleLabel(userPaste)}].`,
-      )
-      return
-    }
     setSavingDesignerCommand(true)
     try {
       const res = await fetch('/api/tooling-hub/dispatch', {
@@ -967,6 +1141,24 @@ export default function DesigningDetailPage() {
     } catch {
       setArtworkRepeatJob(false)
     }
+    if (data?.line && !setNumberInput.trim()) {
+      const cid = data.line.po.customer.id
+      if (cid) {
+        try {
+          const r2 = await fetch(
+            `/api/designing/customer-aw-set-history?customerId=${encodeURIComponent(cid)}&awCode=${encodeURIComponent(code)}&excludeLineId=${encodeURIComponent(poLineId)}`,
+          )
+          const j2 = (await r2.json()) as { setNumber?: string | null }
+          const sn = j2.setNumber?.trim()
+          if (sn) {
+            setSetNumberInput(sn)
+            toast.message(`Set # ${sn} from ${data.line.po.customer.name} + AW history`)
+          }
+        } catch {
+          /* non-fatal */
+        }
+      }
+    }
   }
 
   const line = data?.line ?? null
@@ -1097,7 +1289,11 @@ export default function DesigningDetailPage() {
 
   const totalPlatesLive = useMemo(
     () => computeTotalPlates(designerCommand.plateRequirement),
-    [designerCommand.plateRequirement],
+    [
+      designerCommand.plateRequirement,
+      actualSheetSizeInput,
+      numberOfUpsInput,
+    ],
   )
 
   const effectiveArtworkId = useMemo(
@@ -1106,43 +1302,47 @@ export default function DesigningDetailPage() {
     [data?.line?.specOverrides, resolvedArtworkId],
   )
 
+  const hubCartonSizeLabel = useMemo(
+    () => (data?.line ? fmtLineCartonSizeLwh(data.line) : ''),
+    [data?.line],
+  )
+
+  const hubCartonDimsParsable = useMemo(
+    () => !!hubCartonSizeLabel && parseCartonSizeToDims(hubCartonSizeLabel) != null,
+    [hubCartonSizeLabel],
+  )
+
   const dieManualSpecsComplete = useMemo(() => {
-    const aw = artworkCodeInput.trim()
     const sheet = actualSheetSizeInput.trim()
     const upsRaw = numberOfUpsInput.trim()
     const upsNum = upsRaw ? Number(upsRaw) : NaN
     const upsOk = Number.isFinite(upsNum) && upsNum >= 1 && Math.floor(upsNum) === upsNum
-    return !!aw && !!sheet && upsOk
-  }, [artworkCodeInput, actualSheetSizeInput, numberOfUpsInput])
+    return !!sheet && upsOk && hubCartonDimsParsable
+  }, [actualSheetSizeInput, numberOfUpsInput, hubCartonDimsParsable])
 
   const embossManualSpecsComplete = useMemo(() => {
-    const aw = artworkCodeInput.trim()
     const sheet = actualSheetSizeInput.trim()
-    return !!aw && !!sheet
-  }, [artworkCodeInput, actualSheetSizeInput])
+    return !!sheet && hubCartonDimsParsable
+  }, [actualSheetSizeInput, hubCartonDimsParsable])
 
   const section1ManualHubOk = useMemo(
     () => dieManualSpecsComplete || (embossRequired && embossManualSpecsComplete),
     [dieManualSpecsComplete, embossRequired, embossManualSpecsComplete],
   )
 
-  const diePushGateReady = useMemo(() => {
-    if (!data?.jobCard?.id) return false
-    const setTrim = setNumberInput.trim()
-    if (!setTrim || !/^\d+$/.test(setTrim)) return false
-    return dieManualSpecsComplete
-  }, [data?.jobCard?.id, setNumberInput, dieManualSpecsComplete])
+  const diePushGateReady = useMemo(
+    () => !!designerCommand.dieSource && dieManualSpecsComplete,
+    [designerCommand.dieSource, dieManualSpecsComplete],
+  )
 
   const dieDispatchedToHub =
     designerCommand.dieLastIntent === 'die_hub' ||
     designerCommand.dieLastIntent === 'store_retrieval'
 
-  const embossPushGateReady = useMemo(() => {
-    if (!data?.jobCard?.id) return false
-    const setTrim = setNumberInput.trim()
-    if (!setTrim || !/^\d+$/.test(setTrim)) return false
-    return embossManualSpecsComplete
-  }, [data?.jobCard?.id, setNumberInput, embossManualSpecsComplete])
+  const embossPushGateReady = useMemo(
+    () => !!designerCommand.embossSource && embossManualSpecsComplete,
+    [designerCommand.embossSource, embossManualSpecsComplete],
+  )
 
   const embossDispatchedToHub =
     designerCommand.embossLastIntent === 'emboss_hub' ||
@@ -1155,8 +1355,8 @@ export default function DesigningDetailPage() {
   const showRepeatJobBadge = setLookupState === 'matched' || artworkRepeatJob
 
   return (
-    <div className="flex flex-col min-h-[calc(100dvh-0px)]">
-      <header className="sticky top-0 z-30 border-b border-slate-700 bg-slate-950/95 backdrop-blur-sm px-3 py-2">
+    <div className="flex flex-col min-h-[calc(100dvh-0px)] bg-black text-slate-200">
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-black backdrop-blur-sm px-3 py-2">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-4 max-w-7xl mx-auto w-full">
           <div className="min-w-0 flex-1">
             <h1 className="text-lg sm:text-xl font-bold text-amber-400 break-words leading-tight">{line.cartonName}</h1>
@@ -1164,10 +1364,10 @@ export default function DesigningDetailPage() {
               {line.po.customer.name} | PO {line.po.poNumber} | Qty {line.quantity}
             </p>
             <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] items-center">
-              <span className="px-1.5 py-0.5 rounded border border-slate-700 bg-slate-900 text-slate-200">
+              <span className="px-1.5 py-0.5 rounded border border-white/15 bg-black font-mono tabular-nums text-slate-200">
                 AW: {artworkCodeInput.trim() || '—'}
               </span>
-              <span className="px-1.5 py-0.5 rounded border border-slate-700 bg-slate-900 text-slate-200">
+              <span className="px-1.5 py-0.5 rounded border border-white/15 bg-black text-slate-200">
                 Status: {line.planningStatus}
               </span>
               {showRepeatJobBadge ? (
@@ -1186,7 +1386,7 @@ export default function DesigningDetailPage() {
                 Back
               </Link>
               <div
-                className="inline-flex flex-wrap items-center gap-2 sm:gap-3 rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1.5"
+                className="inline-flex flex-wrap items-center gap-2 sm:gap-3 rounded-lg border border-white/15 bg-black px-2 py-1.5"
                 role="group"
                 aria-label="Designer and approvals"
               >
@@ -1194,7 +1394,7 @@ export default function DesigningDetailPage() {
                   value={designerId}
                   onChange={(e) => saveDesigner(e.target.value || undefined)}
                   disabled={savingDesigner}
-                  className="px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-xs min-w-[140px] max-w-[200px]"
+                  className="px-2 py-1 rounded bg-black border border-white/20 text-white text-xs min-w-[140px] max-w-[200px]"
                   title="Assigned designer"
                 >
                   <option value="">Designer…</option>
@@ -1296,46 +1496,46 @@ export default function DesigningDetailPage() {
       </header>
 
       <div className="flex-1 p-3 max-w-7xl mx-auto w-full space-y-2 pb-6">
-          <section className="rounded-xl bg-slate-900 border border-slate-700 p-3">
+          <section className="rounded-xl bg-black border border-white/10 p-3">
             <h2 className="text-sm font-semibold text-slate-200 mb-2">Section 1 — Identification &amp; spec</h2>
             {!effectiveArtworkId && artworkCodeInput.trim() ? (
               <div
-                className={`mb-3 rounded-lg border px-3 py-2 text-[11px] leading-snug ${
+                className={`mb-3 flex items-start gap-2 border-l-2 pl-2 py-0.5 text-[11px] leading-snug ${
                   section1ManualHubOk
-                    ? 'border-amber-500/45 bg-amber-950/20 text-amber-100/95'
-                    : 'border-rose-500/40 bg-rose-950/25 text-rose-100/90'
+                    ? 'border-amber-500/80 text-slate-400'
+                    : 'border-rose-500/80 text-slate-400'
                 }`}
                 role="status"
               >
-                {section1ManualHubOk ? (
-                  <>
-                    <span className="font-semibold text-amber-200/95">Warning — </span>
-                    Proceeding with manual specs (Artwork file missing). Die Hub needs sheet size and UPS.
-                    {embossRequired
-                      ? ' Embossing Hub needs sheet size; block type comes from Emboss / leaf on this job.'
-                      : ''}
-                  </>
-                ) : (
-                  <>
-                    <span className="font-semibold text-rose-200/95">Technical data gap — </span>
-                    Link an artwork record or enter actual sheet size
-                    {embossRequired
-                      ? ', number of UPS for Die Hub, and sheet size for Emboss Hub.'
-                      : ' and number of UPS for Die Hub.'}
-                  </>
-                )}
+                <AlertTriangle
+                  className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${section1ManualHubOk ? 'text-amber-500' : 'text-rose-400'}`}
+                  aria-hidden
+                />
+                <span>
+                  {section1ManualHubOk ? (
+                    <>
+                      Manual triage: artwork row missing — Die Hub needs sheet + UPS
+                      {embossRequired ? '; Emboss Hub needs sheet.' : '.'}
+                    </>
+                  ) : (
+                    <>
+                      Link artwork or complete sheet
+                      {embossRequired ? ', UPS, and emboss sheet' : ' + UPS'} for hub push.
+                    </>
+                  )}
+                </span>
               </div>
             ) : null}
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <span className="text-[11px] text-slate-500 shrink-0">Job type</span>
-              <div className="inline-flex rounded-lg border border-slate-600 overflow-hidden">
+              <div className="inline-flex rounded-lg border border-white/15 overflow-hidden">
                 <button
                   type="button"
                   onClick={() => void persistJobType('new')}
                   className={`px-3 py-1.5 text-xs font-medium ${
                     jobType === 'new'
                       ? 'bg-amber-600 text-white'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
                   }`}
                 >
                   New product
@@ -1343,10 +1543,10 @@ export default function DesigningDetailPage() {
                 <button
                   type="button"
                   onClick={() => void persistJobType('repeat')}
-                  className={`px-3 py-1.5 text-xs font-medium border-l border-slate-600 ${
+                  className={`px-3 py-1.5 text-xs font-medium border-l border-white/15 ${
                     jobType === 'repeat'
                       ? 'bg-amber-600 text-white'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
                   }`}
                 >
                   Repeat product
@@ -1371,10 +1571,10 @@ export default function DesigningDetailPage() {
                   required
                   value={setNumberInput}
                   onChange={(e) => setSetNumberInput(e.target.value.replace(/\D/g, ''))}
-                  className={`mt-1 w-full px-2 py-1.5 rounded bg-slate-800 text-white text-sm border ${
+                  className={`${monoInputClass} ${
                     showNewProductSetHint
                       ? 'border-amber-500/90 ring-1 ring-amber-600/35'
-                      : 'border-slate-600'
+                      : ''
                   }`}
                   placeholder="e.g. 1"
                   aria-invalid={showNewProductSetHint}
@@ -1392,7 +1592,7 @@ export default function DesigningDetailPage() {
                   value={artworkCodeInput}
                   onChange={(e) => setArtworkCodeInput(e.target.value)}
                   onBlur={() => void onArtworkCodeBlur()}
-                  className="mt-1 w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white text-sm"
+                  className={manualInputClass}
                   placeholder="Manual artwork / revision code"
                 />
                 {artworkCodeInput.trim() ? (
@@ -1413,7 +1613,7 @@ export default function DesigningDetailPage() {
                   type="text"
                   value={actualSheetSizeInput}
                   onChange={(e) => setActualSheetSizeInput(e.target.value)}
-                  className={manualInputClass}
+                  className={monoInputClass}
                   placeholder="e.g. 25 x 36"
                   autoComplete="off"
                 />
@@ -1425,7 +1625,7 @@ export default function DesigningDetailPage() {
                   inputMode="numeric"
                   value={numberOfUpsInput}
                   onChange={(e) => setNumberOfUpsInput(e.target.value.replace(/\D/g, ''))}
-                  className={manualInputClass}
+                  className={monoInputClass}
                   placeholder="e.g. 4"
                   autoComplete="off"
                 />
@@ -1441,17 +1641,39 @@ export default function DesigningDetailPage() {
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm border-t border-slate-700 pt-3">
-              <CartonDimensionsRow carton={line.carton} />
-              {line.cartonId && !line.carton?.dieMasterId ? (
-                <div className="sm:col-span-3 rounded border border-amber-700/50 bg-amber-950/40 px-2 py-1.5 text-[11px] text-amber-200">
-                  Unlinked tooling — this product has no Die Master in Product Master. Enter die specs manually
-                  and link a master when available.
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm border-t border-white/10 pt-3">
+              <CartonDimensionsRow
+                carton={line.carton}
+                right={
+                  <button
+                    type="button"
+                    onClick={() => void openSmartMatch()}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-sky-500/55 bg-sky-950/35 text-sky-100 text-[10px] font-semibold hover:bg-sky-950/60 shrink-0"
+                    title="Match dies within ±1 mm on L×W×H"
+                  >
+                    <Search className="h-3 w-3 shrink-0" aria-hidden />
+                    Smart Match
+                  </button>
+                }
+              />
+              {line.cartonId && !line.dieMasterId && !line.carton?.dieMasterId ? (
+                <div className="sm:col-span-3 flex items-start gap-2 border-l-2 border-amber-600/60 pl-2 py-0.5 text-[11px] text-amber-200/95">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500 mt-0.5" aria-hidden />
+                  <span>
+                    Unlinked tooling — no die master on this line or product master. Use Smart Match or link from
+                    masters.
+                  </span>
                 </div>
+              ) : null}
+              {line.dieMaster ? (
+                <KV
+                  label="Line die master"
+                  value={`#${line.dieMaster.dyeNumber} · ${masterDieTypeLabel(line.dieMaster)}`}
+                />
               ) : null}
               {line.carton?.dieMaster ? (
                 <KV
-                  label="Die master"
+                  label="Product die master"
                   value={`#${line.carton.dieMaster.dyeNumber} · ${masterDieTypeLabel(line.carton.dieMaster)}`}
                 />
               ) : null}
@@ -1466,7 +1688,7 @@ export default function DesigningDetailPage() {
                 title="Reserved area for batch / coding print (typically L × W in mm from carton master or PO spec)."
               />
             </div>
-            <label className="block text-xs text-slate-400 mt-3 pt-3 border-t border-slate-700">
+            <label className="block text-xs text-slate-400 mt-3 pt-3 border-t border-white/10">
               Pre-press remarks
               <textarea
                 value={prePressRemarksInput}
@@ -1478,13 +1700,13 @@ export default function DesigningDetailPage() {
             </label>
           </section>
 
-        <section className="rounded-xl bg-slate-900 border border-slate-700 p-3 space-y-3">
-          <h2 className="text-sm font-semibold text-slate-200 border-b border-slate-800 pb-2">
+        <section className="rounded-xl bg-black border border-white/10 p-3 space-y-3">
+          <h2 className="text-sm font-semibold text-slate-200 border-b border-white/10 pb-2">
             Section 2 — Tooling (die · emboss · plate requirement)
           </h2>
 
           <div className="grid md:grid-cols-2 gap-3">
-            <div className="space-y-3 rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
+            <div className="space-y-3 rounded-lg border border-white/10 bg-black p-3">
               <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
                 Die inventory
               </h3>
@@ -1495,7 +1717,7 @@ export default function DesigningDetailPage() {
                 onChange={(v) => setDesignerCommand((p) => ({ ...p, dieSource: v }))}
               />
               {designerCommand.dieSource ? (
-                <div className="flex flex-wrap gap-2 justify-start">
+                <div className="flex flex-wrap gap-2 justify-start items-center">
                   <button
                     type="button"
                     disabled={savingDesignerCommand || designerCommand.dieSource === 'old'}
@@ -1504,29 +1726,31 @@ export default function DesigningDetailPage() {
                   >
                     Send to Vendor
                   </button>
-                  <button
-                    type="button"
-                    disabled={
-                      savingDesignerCommand ||
-                      dieDispatchedToHub ||
-                      !diePushGateReady
-                    }
-                    title={
-                      dieDispatchedToHub
-                        ? 'Already sent to Die Hub'
-                        : !diePushGateReady
-                          ? 'Enter numeric set #, AW code, actual sheet size, and number of UPS'
-                          : 'POST /api/tooling-hub/dispatch (does not route to Plate Hub)'
-                    }
-                    onClick={() => void diePushToHub()}
-                    className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
-                  >
-                    {designerCommand.dieLastIntent === 'die_hub'
-                      ? 'Sent to Die Hub ✅'
-                      : designerCommand.dieLastIntent === 'store_retrieval'
-                        ? 'Retrieval sent ✅'
-                        : 'Push to Die Hub'}
-                  </button>
+                  {dieDispatchedToHub ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-emerald-500/45 bg-emerald-950/40 text-emerald-100 text-xs font-medium">
+                      <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      <span>
+                        Die Hub sent ·{' '}
+                        <span className="font-mono tabular-nums text-[10px] text-emerald-200/90">
+                          {formatHubSentAt(designerCommand.dieLastIntentAt)}
+                        </span>
+                      </span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={savingDesignerCommand}
+                      title={
+                        !diePushGateReady
+                          ? 'Requires actual sheet size, integer UPS ≥ 1, and L×W×H dimensions (e.g. 100×50×30). Click to validate.'
+                          : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
+                      }
+                      onClick={() => void diePushToHub()}
+                      className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                    >
+                      Push to Die Hub
+                    </button>
+                  )}
                 </div>
               ) : (
                 <span className="text-[11px] text-slate-500">Select New or Old to show actions.</span>
@@ -1534,7 +1758,7 @@ export default function DesigningDetailPage() {
             </div>
 
             {embossRequired ? (
-              <div className="space-y-3 rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
+              <div className="space-y-3 rounded-lg border border-white/10 bg-black p-3">
                 <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
                   Emboss blocks
                 </h3>
@@ -1545,13 +1769,13 @@ export default function DesigningDetailPage() {
                   onChange={(v) => setDesignerCommand((p) => ({ ...p, embossSource: v }))}
                 />
                 {designerCommand.embossSource && !effectiveArtworkId && embossManualSpecsComplete ? (
-                  <p className="text-[11px] text-amber-400/95 leading-snug" role="status">
-                    Proceeding with manual specs (Artwork file missing). Push uses set #, AW code, and sheet
-                    size; block type comes from Emboss / leaf on this job.
+                  <p className="flex items-start gap-1.5 text-[11px] text-slate-500 leading-snug" role="status">
+                    <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500/90 mt-0.5" aria-hidden />
+                    Manual emboss: artwork optional; push uses sheet + dimensions + block type from spec.
                   </p>
                 ) : null}
                 {designerCommand.embossSource ? (
-                  <div className="flex flex-wrap gap-2 justify-start">
+                  <div className="flex flex-wrap gap-2 justify-start items-center">
                     <button
                       type="button"
                       disabled={savingDesignerCommand || designerCommand.embossSource === 'old'}
@@ -1560,49 +1784,58 @@ export default function DesigningDetailPage() {
                     >
                       Send to Vendor
                     </button>
-                    <button
-                      type="button"
-                      disabled={
-                        savingDesignerCommand ||
-                        embossDispatchedToHub ||
-                        !embossPushGateReady
-                      }
-                      title={
-                        embossDispatchedToHub
-                          ? 'Already sent to Embossing Hub'
-                          : !embossPushGateReady
-                            ? 'Enter numeric set #, AW code, and actual sheet size'
-                            : 'POST /api/tooling-hub/dispatch (independent of Die / Plate Hub)'
-                      }
-                      onClick={() => void embossPushToHub()}
-                      className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
-                    >
-                      {designerCommand.embossLastIntent === 'emboss_hub'
-                        ? 'Sent to Embossing Hub ✅'
-                        : designerCommand.embossLastIntent === 'store_retrieval'
-                          ? 'Retrieval sent ✅'
-                          : 'Push to Embossing Hub'}
-                    </button>
+                    {embossDispatchedToHub ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-emerald-500/45 bg-emerald-950/40 text-emerald-100 text-xs font-medium">
+                        <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        <span>
+                          Emboss Hub sent ·{' '}
+                          <span className="font-mono tabular-nums text-[10px] text-emerald-200/90">
+                            {formatHubSentAt(designerCommand.embossLastIntentAt)}
+                          </span>
+                        </span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={savingDesignerCommand}
+                        title={
+                          !embossPushGateReady
+                            ? 'Requires actual sheet size and L×W×H dimensions on the line. Click to validate.'
+                            : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
+                        }
+                        onClick={() => void embossPushToHub()}
+                        className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                      >
+                        Push to Embossing Hub
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <span className="text-[11px] text-slate-500">Select New or Old to show actions.</span>
                 )}
               </div>
             ) : (
-              <div className="rounded-lg border border-slate-800 bg-slate-950/20 p-3 text-[11px] text-slate-500">
+              <div className="rounded-lg border border-white/10 bg-black p-3 text-[11px] text-slate-500">
                 Emboss tooling not required for this carton (no embossing on spec).
               </div>
             )}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
+          <div className="space-y-3 rounded-lg border border-white/10 bg-black p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2 mb-2">
               <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
                 Plate hub — requirement
               </h3>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center rounded-md border border-cyan-600/60 bg-cyan-950/50 px-2 py-0.5 text-[11px] font-semibold text-cyan-100">
-                  Total plates: {totalPlatesLive}
+                <span className="inline-flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 rounded-md border border-cyan-600/55 bg-cyan-950/35 px-2 py-0.5 text-[11px] font-semibold text-cyan-100">
+                  <span>
+                    Total plates:{' '}
+                    <span className="font-mono tabular-nums text-cyan-50">{totalPlatesLive}</span>
+                  </span>
+                  <span className="hidden sm:inline text-cyan-600/80">·</span>
+                  <span className="font-mono tabular-nums text-[10px] font-normal text-cyan-200/80">
+                    Sheet {actualSheetSizeInput.trim() || '—'} · UPS {numberOfUpsInput.trim() || '—'}
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -1662,20 +1895,23 @@ export default function DesigningDetailPage() {
                 </label>
               ) : null}
             </div>
-            <div className="flex flex-wrap gap-3 items-center">
+            <div className="flex flex-wrap gap-2 items-center">
               <span className="text-[11px] text-slate-400 shrink-0">Standard</span>
               {(
                 [
-                  ['standardC', 'C'],
-                  ['standardM', 'M'],
-                  ['standardY', 'Y'],
-                  ['standardK', 'K'],
+                  ['standardC', 'C', 'border-cyan-500/70 bg-cyan-950/40 text-cyan-50'],
+                  ['standardM', 'M', 'border-fuchsia-500/70 bg-fuchsia-950/40 text-fuchsia-50'],
+                  ['standardY', 'Y', 'border-yellow-500/75 bg-yellow-950/35 text-yellow-50'],
+                  ['standardK', 'K', 'border-zinc-500/80 bg-zinc-950/80 text-zinc-100'],
                 ] as const
-              ).map(([key, lab]) => (
-                <label key={key} className="flex items-center gap-1.5 text-xs text-slate-200 cursor-pointer">
+              ).map(([key, lab, box]) => (
+                <label
+                  key={key}
+                  className={`flex items-center gap-1.5 text-xs cursor-pointer rounded-md border px-2 py-1 ${box}`}
+                >
                   <input
                     type="checkbox"
-                    className="rounded border-slate-600"
+                    className="rounded border-white/30 bg-black/40"
                     checked={designerCommand.plateRequirement[key]}
                     onChange={(e) =>
                       setDesignerCommand((p) => ({
@@ -1686,7 +1922,7 @@ export default function DesigningDetailPage() {
                   />
                   {lab}
                   {historyDesignerCommand?.plateRequirement[key] ? (
-                    <span className="text-[10px] text-emerald-400/90">Previously used</span>
+                    <span className="text-[10px] text-emerald-300/90">Prev</span>
                   ) : null}
                 </label>
               ))}
@@ -1698,7 +1934,9 @@ export default function DesigningDetailPage() {
                   ['pantone2', 'P2'],
                   ['pantone3', 'P3'],
                 ] as const
-              ).map(([key, lab]) => (
+              ).map(([key, lab]) => {
+                const pHex = pantoneHexApprox(designerCommand.plateRequirement[key])
+                return (
                 <label key={key} className="block text-[11px] text-slate-400">
                   {lab} (Pantone code)
                   <input
@@ -1712,12 +1950,22 @@ export default function DesigningDetailPage() {
                     }
                     className={manualInputClass}
                     placeholder="e.g. 185 C"
+                    style={
+                      pHex
+                        ? {
+                            backgroundColor: pHex,
+                            color: pantoneContrastFg(pHex),
+                            borderColor: 'rgba(255,255,255,0.35)',
+                          }
+                        : undefined
+                    }
                   />
                   {historyDesignerCommand?.plateRequirement[key] ? (
                     <span className="text-[10px] text-emerald-400/90">Previously used</span>
                   ) : null}
                 </label>
-              ))}
+                )
+              })}
             </div>
             <label className="block text-[11px] text-slate-400">
               Special colour / effect note
@@ -1800,7 +2048,7 @@ export default function DesigningDetailPage() {
           </div>
         </section>
 
-        <section className="rounded-xl bg-slate-900 border border-slate-700 px-3 py-2">
+        <section className="rounded-xl bg-black border border-white/10 px-3 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-[11px] font-semibold text-slate-200 shrink-0">Post-press routing</span>
             <div className="flex flex-wrap gap-1.5 text-xs">
@@ -1812,6 +2060,16 @@ export default function DesigningDetailPage() {
             </div>
           </div>
         </section>
+
+        <SmartMatchDieModal
+          open={smartMatchOpen}
+          onClose={() => setSmartMatchOpen(false)}
+          targetDims={smartMatchTarget}
+          toleranceMm={smartMatchTol}
+          rows={smartMatchRows}
+          busyId={smartMatchBusyId}
+          onSelect={(row) => void linkDieFromSmartMatch(row)}
+        />
       </div>
     </div>
   )
