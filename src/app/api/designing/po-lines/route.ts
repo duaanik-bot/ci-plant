@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
           poNumber: true,
           status: true,
           poDate: true,
-          customer: { select: { id: true, name: true } },
+          customer: { select: { id: true, name: true, logoUrl: true } },
         },
       },
     },
@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
               finalQcPass: true,
               qaReleased: true,
               status: true,
+              fileUrl: true,
             },
           })
         : null
@@ -68,9 +69,43 @@ export async function GET(req: NextRequest) {
         orch.planningFlowStatus === 'forwarded' ||
         orch.planningFlowStatus === 'in_progress'
 
+      const awCode = li.artworkCode?.trim()
+      let artworkPreviewUrl: string | null = null
+      let artworkStatus: string | null = null
+      if (awCode) {
+        const art = await db.artwork.findFirst({
+          where: {
+            filename: { equals: awCode, mode: 'insensitive' },
+            job: { customerId: li.po.customer.id },
+          },
+          orderBy: [{ versionNumber: 'desc' }, { createdAt: 'desc' }],
+          select: { fileUrl: true, status: true },
+        })
+        if (art?.fileUrl) {
+          artworkPreviewUrl = art.fileUrl
+          artworkStatus = art.status
+        }
+      }
+      if (!artworkPreviewUrl && jc?.fileUrl) {
+        artworkPreviewUrl = jc.fileUrl
+      }
+
+      const jcStatus = (jc?.status ?? '').toLowerCase()
+      const revisionRequired =
+        !!spec.revisionRequired ||
+        artworkStatus === 'partially_approved' ||
+        jcStatus === 'revision' ||
+        jcStatus === 'rework'
+
+      let pipelinePhase: 'finalized' | 'revision' | 'awaiting_client' | 'drafting' = 'drafting'
+      if (prePressFinalized) pipelinePhase = 'finalized'
+      else if (revisionRequired) pipelinePhase = 'revision'
+      else if (!approvalsComplete) pipelinePhase = 'awaiting_client'
+
       return {
         ...li,
         jobCard: jc,
+        artworkPreviewUrl,
         readiness: {
           hasSet,
           hasJobCard,
@@ -84,6 +119,8 @@ export async function GET(req: NextRequest) {
           readyForProduction,
           planningForwarded,
           plateFlowStatus: orch.plateFlowStatus ?? null,
+          pipelinePhase,
+          revisionRequired,
         },
       }
     })

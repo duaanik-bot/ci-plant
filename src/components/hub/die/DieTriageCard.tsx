@@ -88,6 +88,7 @@ export function DieTriageCard({
 
   return (
     <li
+      data-hub-die-id={r.id}
       className={`rounded-lg border bg-black p-2 overflow-visible ${
         onHold
           ? 'border-yellow-500/70 shadow-[0_0_16px_rgba(234,179,8,0.22)] ring-2 ring-yellow-400/35'

@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
@@ -314,6 +315,8 @@ async function postTransition(body: Record<string, unknown>) {
 
 export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'blocks' }) {
   const { data: session } = useSession()
+  const searchParams = useSearchParams()
+  const focusDieId = searchParams.get('focusDie')?.trim() || null
   const tool = mode === 'dies' ? 'dies' : 'blocks'
   const toolKind = mode === 'dies' ? 'die' : 'emboss'
 
@@ -330,6 +333,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const [scrapReason, setScrapReason] = useState('')
 
   const [hubView, setHubView] = useState<'board' | 'table'>('board')
+  const focusDieFlippedToTable = useRef(false)
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerZoneFilter, setLedgerZoneFilter] = useState('')
   /** Die Hub only — Lock Bottom / BSO narrows board, table, and zone summary. */
@@ -411,6 +415,30 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    focusDieFlippedToTable.current = false
+  }, [focusDieId])
+
+  useEffect(() => {
+    if (mode !== 'dies' || !focusDieId || loading) return
+    const t = window.setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-hub-die-id="${focusDieId}"]`)
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        el.classList.add('ring-2', 'ring-amber-500/60', 'ring-offset-2', 'ring-offset-black')
+        window.setTimeout(() => {
+          el.classList.remove('ring-2', 'ring-amber-500/60', 'ring-offset-2', 'ring-offset-black')
+        }, 2400)
+        return
+      }
+      if (hubView === 'board' && !focusDieFlippedToTable.current) {
+        focusDieFlippedToTable.current = true
+        setHubView('table')
+      }
+    }, 400)
+    return () => window.clearTimeout(t)
+  }, [mode, focusDieId, loading, data, hubView])
 
   useEffect(() => {
     void (async () => {
@@ -1110,7 +1138,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       const hasSimilar = !hasTypeMismatch && r.similarMatches.length > 0
       const dimTitle = r.dimensionsLwh || r.dimensionsLabel
       return (
-        <li key={`${r.kind}-${r.id}`} className={liClass}>
+        <li key={`${r.kind}-${r.id}`} data-hub-die-id={r.id} className={liClass}>
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <span

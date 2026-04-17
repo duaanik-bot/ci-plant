@@ -48,6 +48,7 @@ export async function PUT(
     where: { id },
     data: {
       ...(data.name != null && { name: data.name }),
+      ...(data.logoUrl !== undefined && { logoUrl: data.logoUrl?.trim() ? data.logoUrl.trim() : null }),
       ...(data.gstNumber !== undefined && { gstNumber: data.gstNumber || null }),
       ...(data.contactName !== undefined && { contactName: data.contactName || null }),
       ...(data.contactPhone !== undefined && { contactPhone: data.contactPhone || null }),
@@ -71,6 +72,7 @@ export async function PUT(
   return NextResponse.json({
     id: customer.id,
     name: customer.name,
+    logoUrl: customer.logoUrl,
     gstNumber: customer.gstNumber,
     contactName: customer.contactName,
     contactPhone: customer.contactPhone,

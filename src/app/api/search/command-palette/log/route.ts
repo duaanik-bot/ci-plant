@@ -28,10 +28,11 @@ export async function POST(req: NextRequest) {
     recordId: undefined,
     newValue: {
       actorLabel: COMMAND_PALETTE_ACTOR,
+      navigatorAudit: `Navigator: ${COMMAND_PALETTE_ACTOR} · audits navigation`,
       href: parsed.data.href,
       title: parsed.data.title,
       category: parsed.data.category ?? null,
-      source: 'global_search',
+      source: 'universal_command_palette',
     },
   })
 

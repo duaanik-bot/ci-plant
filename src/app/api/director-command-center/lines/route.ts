@@ -76,6 +76,8 @@ export async function GET() {
 
     return {
       id: li.id,
+      cartonId: li.cartonId,
+      dieMasterId: li.dieMasterId,
       cartonName: li.cartonName,
       quantity: li.quantity,
       rate: li.rate != null ? Number(li.rate) : null,

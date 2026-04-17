@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { z } from 'zod'
+import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
 
 export const dynamic = 'force-dynamic'
 
@@ -123,7 +124,9 @@ export async function POST(
         remarks: `Auto from ${rfq.rfqNumber}`,
         setNumber: null,
         planningStatus: 'pending',
-        specOverrides: rfq.feasibilityData ?? undefined,
+        specOverrides: withDefaultPrePressAuditLead(
+          (rfq.feasibilityData as Record<string, unknown> | null) ?? null,
+        ) as object,
       },
     })
 

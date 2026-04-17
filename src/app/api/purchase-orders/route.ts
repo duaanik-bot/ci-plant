@@ -7,6 +7,7 @@ import { purchaseOrderSchema } from '@/lib/validations'
 import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
 import { dyeMapFromRows, poHasCriticalTooling } from '@/lib/po-tooling-critical'
 import { computePoReadiness } from '@/lib/po-readiness'
+import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
 
 export const dynamic = 'force-dynamic'
 
@@ -248,10 +249,11 @@ export async function POST(req: NextRequest) {
               dimLengthMm: li.dimLengthMm ?? null,
               dimWidthMm: li.dimWidthMm ?? null,
               dimHeightMm: li.dimHeightMm ?? null,
-              specOverrides:
+              specOverrides: withDefaultPrePressAuditLead(
                 li.specOverrides && Object.keys(li.specOverrides).length > 0
-                  ? (li.specOverrides as object)
+                  ? (li.specOverrides as Record<string, unknown>)
                   : null,
+              ) as object,
             },
           })
         )

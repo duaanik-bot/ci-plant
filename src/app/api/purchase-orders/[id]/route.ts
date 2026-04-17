@@ -5,6 +5,7 @@ import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
 import { purchaseOrderSchema } from '@/lib/validations'
 import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
+import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,6 +34,7 @@ const lineItemUpdateSchema = purchaseOrderSchema.shape.lineItems.element
     dimWidthMm: z.coerce.number().optional().nullable(),
     dimHeightMm: z.coerce.number().optional().nullable(),
     materialProcurementStatus: z.string().optional(),
+    directorPriority: z.boolean().optional(),
     specOverrides: z
       .object({
         wastagePct: z.number().optional(),
@@ -183,10 +185,13 @@ export async function PUT(
 
       for (const li of data.lineItems) {
         const prev = li.id ? existingById.get(li.id) : undefined
-        const specOverrides =
+        const rawSpec =
           li.specOverrides && Object.keys(li.specOverrides).length > 0
-            ? (li.specOverrides as object)
-            : null
+            ? (li.specOverrides as Record<string, unknown>)
+            : prev
+              ? (prev.specOverrides as Record<string, unknown> | null)
+              : null
+        const specOverrides = withDefaultPrePressAuditLead(rawSpec ?? undefined) as object
 
         const row = {
           poId: id,
@@ -219,6 +224,10 @@ export async function PUT(
             li.materialProcurementStatus ??
             prev?.materialProcurementStatus ??
             'pending',
+          directorPriority:
+            li.directorPriority !== undefined
+              ? li.directorPriority
+              : (prev?.directorPriority ?? false),
         }
 
         if (li.id && existingById.has(li.id)) {

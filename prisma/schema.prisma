@@ -144,6 +144,8 @@ model Customer {
   address                 String?
   creditLimit             Decimal  @default(0) @map("credit_limit") @db.Decimal(12, 2)
   requiresArtworkApproval Boolean  @default(true) @map("requires_artwork_approval")
+  /// Customer logo URL for CRM / queue avatars (optional).
+  logoUrl                 String?  @map("logo_url") @db.VarChar(500)
   active                  Boolean  @default(true)
   createdAt               DateTime @default(now()) @map("created_at")
   updatedAt               DateTime @updatedAt @map("updated_at")

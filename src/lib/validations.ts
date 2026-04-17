@@ -139,6 +139,7 @@ export const customerSchema = z.object({
   contactName: optionalString,
   contactPhone: phoneValidator,
   email: emailValidator,
+  logoUrl: z.string().trim().max(500).optional().or(z.literal('')),
 })
 
 // PLATE STORE SCHEMA

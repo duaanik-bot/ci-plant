@@ -11,11 +11,21 @@ import {
 } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
-import { CornerDownLeft, Search } from 'lucide-react'
-import type { CommandPaletteGroup, CommandPaletteResult } from '@/lib/command-palette-types'
+import { CornerDownLeft, History, Package, Search } from 'lucide-react'
+import type {
+  CommandPaletteGroup,
+  CommandPaletteResult,
+  PaletteRecentStored,
+} from '@/lib/command-palette-types'
+import {
+  loadPaletteRecent,
+  paletteCategoryToRecentGroupId,
+  rememberPaletteNavigation,
+  storedToCommandResult,
+} from '@/lib/command-palette-recent'
 import { pastingStyleSearchBadgeClass, pastingStyleShortLabel } from '@/lib/pasting-style'
 
-const DEBOUNCE_MS = 300
+const DEBOUNCE_MS = 200
 
 type FlatRow = {
   group: CommandPaletteGroup
@@ -56,6 +66,7 @@ function CommandPaletteModal({
   const [debounced, setDebounced] = useState('')
   const [loading, setLoading] = useState(false)
   const [groups, setGroups] = useState<CommandPaletteGroup[]>([])
+  const [recentItems, setRecentItems] = useState<PaletteRecentStored[]>([])
   const [selectedFlat, setSelectedFlat] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -63,9 +74,10 @@ function CommandPaletteModal({
 
   useEffect(() => {
     if (!open) {
-      setDebounced('')
       setGroups([])
       setSelectedFlat(0)
+    } else {
+      setRecentItems(loadPaletteRecent())
     }
   }, [open])
 
@@ -108,16 +120,33 @@ function CommandPaletteModal({
     return () => abortRef.current?.abort()
   }, [debounced, open])
 
+  const debouncePending = query.trim().length >= 2 && debounced !== query.trim()
+
+  const displayGroups = useMemo((): CommandPaletteGroup[] => {
+    if (query.trim().length === 0) {
+      const results = recentItems.map(storedToCommandResult)
+      if (results.length === 0) return []
+      return [{ id: 'recent', label: 'RECENT ACTIVITY', results }]
+    }
+    if (debounced.length < 2) return []
+    return groups
+  }, [query, debounced, recentItems, groups])
+
   const flatRows = useMemo(() => {
     const rows: FlatRow[] = []
     let flatIndex = 0
-    for (const group of groups) {
+    for (const group of displayGroups) {
       for (const result of group.results) {
         rows.push({ group, result, flatIndex: flatIndex++ })
       }
     }
     return rows
-  }, [groups])
+  }, [displayGroups])
+
+  useEffect(() => {
+    if (!open) return
+    setSelectedFlat(0)
+  }, [open, query, debounced])
 
   useEffect(() => {
     if (!open) return
@@ -131,8 +160,29 @@ function CommandPaletteModal({
     }
   }, [flatRows.length, selectedFlat])
 
+  const persistRecentForResult = useCallback((r: CommandPaletteResult, category: string) => {
+    if (r.recentSource) {
+      rememberPaletteNavigation(r.recentSource)
+      return
+    }
+    const gid = paletteCategoryToRecentGroupId(category)
+    if (!gid) return
+    rememberPaletteNavigation({
+      href: r.href,
+      title: r.title,
+      subtitle: r.subtitle,
+      resultId: r.id,
+      groupId: gid,
+      titleMono: r.titleMono,
+      subtitleMono: r.subtitleMono,
+      showMasterIcon: r.showMasterIcon,
+      statusBadge: r.statusBadge,
+    })
+  }, [])
+
   const navigateTo = useCallback(
     async (r: CommandPaletteResult, category: string) => {
+      persistRecentForResult(r, category)
       onOpenChange(false)
       try {
         void fetch('/api/search/command-palette/log', {
@@ -147,7 +197,7 @@ function CommandPaletteModal({
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       router.push(r.href)
     },
-    [onOpenChange, queryClient, router],
+    [onOpenChange, persistRecentForResult, queryClient, router],
   )
 
   useEffect(() => {
@@ -193,7 +243,7 @@ function CommandPaletteModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex justify-center bg-slate-950/70 px-3 pt-[10vh] backdrop-blur-md sm:pt-[12vh]"
+      className="fixed inset-0 z-[100] flex justify-center bg-black/75 px-3 pt-[10vh] backdrop-blur-md sm:pt-[12vh]"
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onOpenChange(false)
@@ -201,23 +251,23 @@ function CommandPaletteModal({
     >
       <div
         ref={panelRef}
-        className="flex h-[min(70vh,520px)] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-slate-600/40 bg-slate-950/85 shadow-2xl shadow-black/50 ring-1 ring-amber-500/10 backdrop-blur-xl"
+        className="flex h-[min(70vh,560px)] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-slate-800/80 bg-[#000000] shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur-xl"
         onKeyDown={onPaletteKeyDown}
       >
-        <div className="flex items-center gap-2 border-b border-slate-700/80 px-3 py-2">
+        <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
           <Search className="h-4 w-4 shrink-0 text-amber-400/90" aria-hidden />
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Type PO #, customer, die, carton, job code…"
-            className="min-w-0 flex-1 bg-transparent py-1 text-sm text-white placeholder:text-slate-500 focus:outline-none"
+            placeholder="PO #, customer, carton, die, artwork code…"
+            className="min-w-0 flex-1 bg-transparent py-1 text-sm text-white placeholder:text-slate-600 focus:outline-none"
             autoComplete="off"
             spellCheck={false}
             aria-autocomplete="list"
             aria-controls="command-palette-results"
           />
-          {loading ? (
+          {loading || debouncePending ? (
             <span className="text-[10px] text-slate-500 tabular-nums">Searching…</span>
           ) : (
             <span className="flex items-center gap-0.5 text-[10px] text-slate-500">
@@ -232,16 +282,22 @@ function CommandPaletteModal({
           role="listbox"
           aria-label="Search results"
         >
-          {debounced.length > 0 && debounced.length < 2 ? (
+          {query.trim().length > 0 && debounced.length < 2 && !debouncePending ? (
             <p className="px-3 py-6 text-center text-xs text-slate-500">Type at least 2 characters.</p>
           ) : null}
-          {debounced.length >= 2 && !loading && flatRows.length === 0 ? (
-            <p className="px-3 py-6 text-center text-xs text-slate-500">No matches.</p>
+          {debounced.length >= 2 &&
+          !loading &&
+          !debouncePending &&
+          flatRows.length === 0 &&
+          query.trim().length > 0 ? (
+            <p className="px-3 py-8 text-center text-xs leading-relaxed text-slate-500">
+              No records found. Searching for a PO, Die ID, or Product Name?
+            </p>
           ) : null}
-          {groups.map((g) => (
+          {displayGroups.map((g) => (
             <div key={g.id} className="mb-3">
-              <div className="sticky top-0 z-10 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-amber-400/90">
-                {g.label}
+              <div className="sticky top-0 z-10 bg-[#000000] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                [ {g.label} ]
               </div>
               <ul className="space-y-0.5">
                 {g.results.map((r) => {
@@ -257,13 +313,28 @@ function CommandPaletteModal({
                         onMouseEnter={() => setSelectedFlat(flatIndex)}
                         className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left transition ${
                           active
-                            ? 'border-l-2 border-amber-400 bg-amber-500/15 text-amber-50 ring-1 ring-amber-500/20'
-                            : 'border-l-2 border-transparent text-slate-200 hover:bg-slate-800/50'
+                            ? 'border-l-2 border-l-[#f97316] bg-[#f97316]/[0.07] text-slate-50 shadow-[inset_0_0_24px_rgba(249,115,22,0.06)]'
+                            : 'border-l-2 border-l-transparent text-slate-200 hover:bg-slate-800/40'
                         }`}
                       >
+                        {r.isRecent ? (
+                          <History
+                            className="mt-0.5 h-4 w-4 shrink-0 text-amber-500/80"
+                            aria-hidden
+                          />
+                        ) : r.showMasterIcon ? (
+                          <Package
+                            className="mt-0.5 h-4 w-4 shrink-0 text-slate-500 opacity-80"
+                            aria-hidden
+                          />
+                        ) : null}
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="truncate font-medium">{r.title}</span>
+                            <span
+                              className={`truncate font-medium ${r.titleMono ? 'font-designing-queue text-[13px] tabular-nums tracking-tight' : ''}`}
+                            >
+                              {r.title}
+                            </span>
                             {r.statusBadge ? (
                               <span
                                 className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${r.statusBadge.className}`}
@@ -278,7 +349,11 @@ function CommandPaletteModal({
                             ) : null}
                           </div>
                           {r.subtitle ? (
-                            <div className="truncate text-[11px] text-slate-500">{r.subtitle}</div>
+                            <div
+                              className={`truncate text-[11px] text-slate-500 ${r.subtitleMono ? 'font-designing-queue tabular-nums tracking-tight' : ''}`}
+                            >
+                              {r.subtitle}
+                            </div>
                           ) : null}
                         </div>
                       </button>
@@ -289,9 +364,9 @@ function CommandPaletteModal({
             </div>
           ))}
         </div>
-        <div className="border-t border-slate-800/90 px-3 py-1.5 text-[10px] text-slate-500">
-          <span className="text-slate-600">Navigator · </span>
-          <span className="text-amber-500/80">Anik Dua</span>
+        <div className="border-t border-slate-800 px-3 py-1.5 text-[10px] text-slate-500">
+          <span className="text-slate-600">Navigator: </span>
+          <span className="text-[#f97316]/90">Anik Dua</span>
           <span className="text-slate-600"> · audits navigation</span>
         </div>
       </div>

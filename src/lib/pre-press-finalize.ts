@@ -7,6 +7,7 @@ import {
 } from '@/lib/designer-command'
 import { isEmbossingRequired } from '@/lib/emboss-conditions'
 import { z } from 'zod'
+import { DEFAULT_PREPRESS_AUDIT_LEAD } from '@/lib/pre-press-defaults'
 
 /** Flat payload for Plate Hub / audit (JSON-serializable primitives only). */
 export type PlateHubUpsertPayload = {
@@ -16,6 +17,8 @@ export type PlateHubUpsertPayload = {
   pharmaApproved: boolean
   status: 'PUSH_TO_PRODUCTION_QUEUE'
   designerCommand: DesignerCommand
+  /** Canonical pre-press audit owner for compliance trail */
+  prePressAuditLead: string
 }
 
 /** Request body: flat object — no nested spec blobs — to avoid JSON parse issues on the client. */
@@ -122,6 +125,10 @@ export async function executePrePressFinalize(
       pharmaApproved: !!(customerApproval && qaTextCheckApproval),
       status: 'PUSH_TO_PRODUCTION_QUEUE',
       designerCommand,
+      prePressAuditLead:
+        typeof spec.prePressAuditLead === 'string' && spec.prePressAuditLead.trim()
+          ? spec.prePressAuditLead.trim()
+          : DEFAULT_PREPRESS_AUDIT_LEAD,
     }
 
     const finalSpec = {

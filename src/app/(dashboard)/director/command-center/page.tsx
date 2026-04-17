@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { Star, PauseCircle, PlayCircle } from 'lucide-react'
 import type { BarPart, DirectorLifeBars } from '@/lib/director-command-center-lifecycle'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
+import { DirectorWorkspaceSidebar } from '@/components/director/DirectorWorkspaceSidebar'
 
 const mono = 'font-director-cc tabular-nums tracking-tight'
 
@@ -50,6 +51,8 @@ type Metrics = {
 
 type GridRow = {
   id: string
+  cartonId: string | null
+  dieMasterId: string | null
   cartonName: string
   quantity: number
   rate: number | null
@@ -220,6 +223,7 @@ export default function DirectorCommandCenterPage() {
   const [drawerLoading, setDrawerLoading] = useState(false)
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [focusedLineId, setFocusedLineId] = useState<string | null>(null)
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -306,8 +310,14 @@ export default function DirectorCommandCenterPage() {
   const alerts = vitals?.alerts ?? []
 
   return (
-    <div className="min-h-screen bg-black text-slate-200">
-      <div className="p-3 md:p-4 max-w-[1800px] mx-auto space-y-3 pb-24">
+    <div className="min-h-screen bg-black text-slate-200 flex">
+      <DirectorWorkspaceSidebar
+        rows={rows}
+        focusedLineId={focusedLineId}
+        onFocusLine={setFocusedLineId}
+        monoClass={mono}
+      />
+      <div className="min-w-0 flex-1 p-3 md:p-4 max-w-[1800px] mx-auto space-y-3 pb-24">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-lg md:text-xl font-bold text-amber-400 tracking-tight">
@@ -552,17 +562,26 @@ export default function DirectorCommandCenterPage() {
               return (
                 <tr
                   key={r.id}
+                  data-director-line={r.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => setDrawerId(r.id)}
+                  onClick={() => {
+                    setFocusedLineId(r.id)
+                    setDrawerId(r.id)
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
+                      setFocusedLineId(r.id)
                       setDrawerId(r.id)
                     }
                   }}
-                  className={`border-b border-slate-900 hover:bg-slate-950/80 cursor-pointer ${
+                  className={`border-b border-slate-900 hover:bg-slate-950/80 cursor-pointer transition-[box-shadow] duration-200 ease-in-out ${
                     r.directorHold ? 'opacity-45' : ''
+                  } ${
+                    focusedLineId === r.id
+                      ? 'bg-[#f97316]/[0.06] shadow-[inset_3px_0_0_0_#f97316]'
+                      : ''
                   }`}
                 >
                   <td className="px-1 py-0.5 align-middle" onClick={(e) => e.stopPropagation()}>

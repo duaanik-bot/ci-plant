@@ -18,7 +18,17 @@ import {
   usePoRecentCartons,
   type PoCartonCatalogItem,
 } from '@/lib/po-carton-autocomplete'
-import { Copy, FileText, Trash2 } from 'lucide-react'
+import {
+  Copy,
+  FileText,
+  FlipHorizontal2,
+  Layers,
+  Sparkles,
+  Star,
+  Sun,
+  Trash2,
+  type LucideIcon,
+} from 'lucide-react'
 import { paperSupplyIconMeta } from '@/lib/po-paper-supply-ui'
 import { parseDeliveryYmdFromRemarks } from '@/lib/po-delivery-parse'
 
@@ -38,6 +48,7 @@ type Line = {
   id?: string
   dieMasterId?: string
   materialProcurementStatus?: string
+  directorPriority?: boolean
   cartonId: string
   cartonName: string
   cartonSize: string
@@ -70,6 +81,7 @@ type CartonLookupFieldProps = {
 const defaultLine = (): Line => ({
   dieMasterId: '',
   materialProcurementStatus: 'not_calculated',
+  directorPriority: false,
   cartonId: '',
   cartonName: '',
   cartonSize: '',
@@ -142,6 +154,48 @@ function deriveCartonDecorations(carton: CartonOption): Pick<Line, 'coatingType'
   return { coatingType, embossingLeafing, foilType }
 }
 
+function IconSpecSelect({
+  icon: Icon,
+  label,
+  value,
+  options,
+  onChange,
+  mono,
+}: {
+  icon: LucideIcon
+  label: string
+  value: string
+  options: readonly string[]
+  onChange: (v: string) => void
+  mono?: boolean
+}) {
+  return (
+    <div className="relative flex flex-col items-center gap-0.5" title={label}>
+      <Icon
+        className="h-3 w-3 shrink-0 text-slate-500 opacity-70 transition-colors group-hover:text-[#f97316]"
+        strokeWidth={2}
+        aria-hidden
+      />
+      <select
+        aria-label={label}
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        className={`w-full max-w-[4.5rem] cursor-pointer truncate rounded-md border border-slate-800 bg-white/[0.06] py-0.5 pl-0.5 pr-0 text-[9px] leading-tight text-slate-200 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 ${mono ? 'po-mono-metric' : ''}`}
+      >
+        <option value="">—</option>
+        {value && !options.includes(value) ? (
+          <option value={value}>{value}</option>
+        ) : null}
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 function CartonLookupField({
   line,
   customerId,
@@ -180,7 +234,7 @@ function CartonLookupField({
   }, [line.cartonId, line.cartonName, customerCatalog, catalogLoading, onSelect, pushRecent])
 
   return (
-    <div className="min-w-[180px]">
+    <div className="min-w-[200px] w-full max-w-full">
       <MasterSearchSelect
         label="Carton name"
         hideLabel
@@ -224,8 +278,8 @@ function CartonLookupField({
           const suggestedName = cartonQuery.trim()
           if (suggestedName) onCreate(suggestedName)
         }}
-        inputClassName="min-w-[260px] px-2 py-1 text-xs"
-        dropdownClassName="min-w-[320px]"
+        inputClassName="min-w-0 w-full max-w-full px-1.5 py-0.5 text-[11px]"
+        dropdownClassName="min-w-[280px]"
       />
       {!line.cartonId && line.cartonName.trim() ? (
         <span className="mt-1 inline-block text-[10px] text-amber-400">Unsaved carton name</span>
@@ -252,6 +306,7 @@ export default function EditPurchaseOrderPage() {
   const [saving, setSaving] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [activeCartonLineIndex, setActiveCartonLineIndex] = useState<number | null>(null)
+  const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null)
 
   const [qcCartonOpen, setQcCartonOpen] = useState(false)
   const [qcCarton, setQcCarton] = useState({
@@ -339,6 +394,7 @@ export default function EditPurchaseOrderPage() {
             id: li.id,
             dieMasterId: li.dieMasterId || '',
             materialProcurementStatus: li.materialProcurementStatus || 'not_calculated',
+            directorPriority: li.directorPriority === true,
             cartonId: li.cartonId || '',
             cartonName: li.cartonName || '',
             cartonSize: li.cartonSize || '',
@@ -408,7 +464,8 @@ export default function EditPurchaseOrderPage() {
     setLines((prev) => {
       const ln = prev[idx]
       if (!ln) return prev
-      const copy: Line = { ...ln, id: undefined }
+      const copy = structuredClone(ln) as Line
+      copy.id = undefined
       return [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)]
     })
   }
@@ -465,6 +522,7 @@ export default function EditPurchaseOrderPage() {
             id: l.id,
             dieMasterId: l.dieMasterId?.trim() || null,
             materialProcurementStatus: l.materialProcurementStatus || 'not_calculated',
+            directorPriority: l.directorPriority === true,
             cartonId: l.cartonId || undefined,
             cartonName: l.cartonName.trim(),
             cartonSize: l.cartonSize.trim() || undefined,
@@ -578,169 +636,237 @@ export default function EditPurchaseOrderPage() {
   }
 
   const inputBase =
-    'w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 text-xs placeholder:text-slate-500'
-  const inputCls = `${inputBase} text-white`
-  const lineCellPad = 'px-[0.35rem] py-[2px]'
+    'w-full px-1.5 py-0.5 rounded-md bg-[#111827]/90 border border-slate-800 text-[11px] text-slate-100 placeholder:text-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/45'
+  const inputCls = inputBase
+  const lineCellPad = 'px-1 py-0.5'
   const poMono = 'po-mono-metric'
+  const rowStripe = (i: number) => (i % 2 === 0 ? 'bg-[#161B26]' : 'bg-[#111827]')
 
-  if (loading) return <div className="p-4 text-slate-400">Loading…</div>
+  if (loading) {
+    return (
+      <div className="min-h-[40vh] bg-[#0B0F1A] p-4 text-slate-400">Loading…</div>
+    )
+  }
 
   return (
-    <form onSubmit={handleSave} className="p-4 max-w-[1600px] mx-auto space-y-4 pb-32">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <span className="text-slate-400 text-sm font-medium whitespace-nowrap">PO #</span>
-          <input
-            type="text"
-            value={poNumber}
-            onChange={(e) => {
-              setPoNumber(e.target.value)
-              setFieldErrors((prev) => { const next = { ...prev }; delete next.poNumber; return next })
-            }}
-            className={`px-3 py-1.5 rounded-lg bg-slate-900 border text-amber-400 font-bold text-lg font-mono ${fieldErrors.poNumber ? 'border-red-500' : 'border-slate-600'}`}
-            style={{ minWidth: '14rem' }}
-          />
-          {fieldErrors.poNumber && <span className="text-xs text-red-400">{fieldErrors.poNumber}</span>}
-        </div>
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-xs text-white"
-        >
-          <option value="draft">Draft</option>
-          <option value="confirmed">Confirmed</option>
-          <option value="closed">Closed</option>
-        </select>
-      </div>
-
-      {/* Header fields */}
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm space-y-3">
-        {/* Row 1: Customer + PO date + Delivery by */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-1">
-            <MasterSearchSelect
-              label="Customer"
-              required
-              query={customerSearch.query}
-              onQueryChange={(value) => {
-                customerSearch.setQuery(value)
-                setCustomerId('')
-                setSelectedCustomer(null)
+    <form
+      onSubmit={handleSave}
+      className="min-h-screen bg-[#0B0F1A] px-3 py-3 sm:px-4 space-y-3 pb-36 max-w-[1920px] mx-auto w-full"
+    >
+      {/* Director's glass — metadata */}
+      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 backdrop-blur-md sm:px-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-3">
+          <div className="min-w-0">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">PO #</div>
+            <input
+              type="text"
+              value={poNumber}
+              onChange={(e) => {
+                setPoNumber(e.target.value)
+                setFieldErrors((prev) => {
+                  const next = { ...prev }
+                  delete next.poNumber
+                  return next
+                })
               }}
-              loading={customerSearch.loading}
-              options={customerSearch.options}
-              lastUsed={customerSearch.lastUsed}
-              onSelect={applyCustomer}
-              getOptionLabel={(c) => c.name}
-              getOptionMeta={(c) => [c.contactName, c.contactPhone].filter(Boolean).join(' · ')}
-              error={fieldErrors.customerId}
-              placeholder="Type to search customers..."
-              emptyMessage="No customer found."
-              recentLabel="Recent customers"
-              loadingMessage="Searching customers..."
+              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-amber-400 focus:border-blue-500 focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-red-500/60' : ''}`}
             />
+            {fieldErrors.poNumber ? (
+              <span className="mt-0.5 block text-xs text-red-400">{fieldErrors.poNumber}</span>
+            ) : null}
+          </div>
+          <div className="shrink-0">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</div>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="mt-1 rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+            >
+              <option value="draft">Draft</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="closed">Closed</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="min-w-0">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Customer</div>
+            <div className="mt-1">
+              <MasterSearchSelect
+                label="Customer"
+                required
+                hideLabel
+                query={customerSearch.query}
+                onQueryChange={(value) => {
+                  customerSearch.setQuery(value)
+                  setCustomerId('')
+                  setSelectedCustomer(null)
+                }}
+                loading={customerSearch.loading}
+                options={customerSearch.options}
+                lastUsed={customerSearch.lastUsed}
+                onSelect={applyCustomer}
+                getOptionLabel={(c) => c.name}
+                getOptionMeta={(c) => [c.contactName, c.contactPhone].filter(Boolean).join(' · ')}
+                error={fieldErrors.customerId}
+                placeholder="Search customer…"
+                emptyMessage="No customer found."
+                recentLabel="Recent customers"
+                loadingMessage="Searching customers..."
+                inputClassName="min-w-0 w-full border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
+              />
+            </div>
             {selectedCustomer ? (
-              <p className="mt-1 text-[11px] text-slate-500">
+              <p className="mt-1 text-[10px] text-slate-500">
                 {[selectedCustomer.contactName, selectedCustomer.contactPhone].filter(Boolean).join(' · ')}
               </p>
             ) : null}
           </div>
           <div>
-            <label className="block text-slate-400 mb-1">PO date*</label>
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">PO date</div>
             <input
               type="date"
               value={poDate}
               onChange={(e) => setPoDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="mt-1 w-full rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
             />
           </div>
           <div>
-            <label className="block text-slate-400 mb-1">Delivery required by</label>
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Delivery</div>
             <input
               type="date"
               value={deliveryRequiredBy}
               onChange={(e) => setDeliveryRequiredBy(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="mt-1 w-full rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
             />
           </div>
         </div>
-        {/* Row 2: Payment terms */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           <div>
-            <label className="block text-slate-400 mb-1">Payment terms</label>
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Payment terms</div>
             <input
               type="text"
               value={paymentTerms}
               onChange={(e) => setPaymentTerms(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="mt-1 w-full rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
               placeholder="e.g. 30 days"
             />
           </div>
-        </div>
-        {/* Row 3: Remarks + PO value */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-          <div className="md:col-span-2">
-            <label className="block text-slate-400 mb-1">Remarks</label>
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Remarks</div>
             <input
               type="text"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="mt-1 w-full rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
             />
-          </div>
-          <div className="text-slate-500 text-xs pb-2 leading-snug">
-            Subtotal, GST, and grand total update live in the summary dock at the bottom of the screen.
           </div>
         </div>
       </div>
 
-      {/* Line items */}
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs space-y-3">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-slate-200 font-semibold text-sm">Line items</h2>
-          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs">
+      {/* Zero-scroll line grid */}
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-2 text-[11px] backdrop-blur-sm sm:p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Line items</h2>
+          <button
+            type="button"
+            onClick={addLine}
+            className="rounded-lg border border-slate-800 bg-[#111827] px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:border-blue-500/40 hover:text-white"
+          >
             + Add line
           </button>
         </div>
-        {fieldErrors.lines && <p className="text-red-400 text-xs">{fieldErrors.lines}</p>}
-        <div className="overflow-x-auto overflow-y-auto min-h-[320px] max-h-[min(calc(100vh-15rem),720px)] rounded-md border border-slate-800/90">
-          <table className="w-full text-left min-w-[1720px] border-collapse">
-            <thead className="sticky top-0 z-30 backdrop-blur-md bg-slate-800/90 text-slate-300 shadow-[inset_0_-1px_0_0_rgb(51_65_85)] supports-[backdrop-filter]:bg-slate-800/75">
+        {fieldErrors.lines ? <p className="mb-2 text-xs text-red-400">{fieldErrors.lines}</p> : null}
+        <div className="max-h-[min(calc(100vh-14rem),760px)] overflow-x-hidden overflow-y-auto rounded-lg border border-slate-800/80">
+          <table className="w-full table-fixed border-collapse text-left">
+            <thead className="sticky top-0 z-20 border-b border-slate-800 bg-[#111827]/95 text-[10px] font-semibold uppercase tracking-wide text-slate-500 backdrop-blur-md">
               <tr>
-                <th className={`${lineCellPad} w-[35%] min-w-[14rem]`}>Carton name</th>
-                <th className={`${lineCellPad} ${poMono} w-[9%]`}>Size</th>
-                <th className={`${lineCellPad} ${poMono}`}>Qty*</th>
-                <th className={`${lineCellPad}`}>Artwork</th>
-                <th className={`${lineCellPad}`}>Back</th>
-                <th className={`${lineCellPad}`}>Wastage%</th>
-                <th className={`${lineCellPad} w-[12%]`}>Rate</th>
-                <th className={lineCellPad}>GST%</th>
-                <th className={`${lineCellPad} ${poMono} w-[11%]`}>Amount</th>
-                <th className={lineCellPad}>Board</th>
-                <th className={lineCellPad}>GSM</th>
-                <th className={lineCellPad}>Paper</th>
-                <th className={lineCellPad}>Coating</th>
-                <th className={lineCellPad}>Emboss</th>
-                <th className={lineCellPad}>Foil</th>
-                <th className={lineCellPad}>Remarks</th>
-                <th className={`${lineCellPad} w-8 text-center`} title="Board / paper supply vs vendor">
-                  Paper
+                <th className={`${lineCellPad} w-10 text-center`} title="Priority & row tools" aria-label="Row tools">
+                  {/* 40px tool column */}
                 </th>
-                <th className={lineCellPad} aria-label="Row actions" />
+                <th className={`${lineCellPad} min-w-[200px] w-[22%]`}>Carton</th>
+                <th className={`${lineCellPad} w-[100px] ${poMono}`}>Size</th>
+                <th className={`${lineCellPad} w-20 ${poMono}`}>Qty</th>
+                <th className={lineCellPad}>AW</th>
+                <th className={`${lineCellPad} w-11`}>W%</th>
+                <th className={lineCellPad}>Brd</th>
+                <th className={`${lineCellPad} w-12`}>GSM</th>
+                <th className={`${lineCellPad} w-[4.5rem]`}>Paper</th>
+                <th className={`${lineCellPad} w-[168px]`}>₹ Fin</th>
+                <th className={`${lineCellPad} w-12 text-center`} title="Back print">
+                  <FlipHorizontal2 className="mx-auto h-3 w-3 opacity-60" aria-hidden />
+                </th>
+                <th className={`${lineCellPad} w-12 text-center`} title="Coating">
+                  <Layers className="mx-auto h-3 w-3 opacity-60" aria-hidden />
+                </th>
+                <th className={`${lineCellPad} w-12 text-center`} title="Emboss / leaf">
+                  <Sparkles className="mx-auto h-3 w-3 opacity-60" aria-hidden />
+                </th>
+                <th className={`${lineCellPad} w-12 text-center`} title="Foil">
+                  <Sun className="mx-auto h-3 w-3 opacity-60" aria-hidden />
+                </th>
+                <th className={`${lineCellPad} min-w-0`}>Rm</th>
+                <th className={`${lineCellPad} w-7 text-center`} title="Material supply">
+                  M
+                </th>
               </tr>
             </thead>
             <tbody>
               {lines.map((ln, idx) => {
-                const { beforeGst } = lineAmount(Number(ln.rate) || 0, Number(ln.quantity) || 0, Number(ln.gstPct) || 0)
+                const { beforeGst } = lineAmount(
+                  Number(ln.rate) || 0,
+                  Number(ln.quantity) || 0,
+                  Number(ln.gstPct) || 0,
+                )
                 const paperMeta = paperSupplyIconMeta(ln.materialProcurementStatus)
+                const focused = focusedRowIndex === idx
                 return (
                   <tr
                     key={ln.id ?? idx}
-                    className={`group border-b border-slate-800/80 ${
-                      idx % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/40'
-                    } ${ln.cartonId ? 'border-l-2 border-l-emerald-500' : 'border-l-2 border-l-transparent'}`}
+                    onFocusCapture={() => setFocusedRowIndex(idx)}
+                    className={`group border-b border-slate-800/90 ${rowStripe(idx)} ${
+                      focused ? 'border-l-2 border-l-[#f59e0b]' : 'border-l-2 border-l-transparent'
+                    }`}
                   >
-                    <td className={`${lineCellPad} align-top`}>
+                    <td className={`${lineCellPad} w-10 align-middle`}>
+                      <div className="flex w-10 flex-col items-center gap-0.5 opacity-20 transition-[opacity,color] duration-150 group-hover:opacity-100 group-hover:text-[#f97316]">
+                        <button
+                          type="button"
+                          title={ln.directorPriority ? 'Clear director priority' : 'Director priority'}
+                          onClick={() => updateLine(idx, { directorPriority: !ln.directorPriority })}
+                          className={`rounded p-0.5 transition-colors ${
+                            ln.directorPriority
+                              ? 'text-[#f59e0b] group-hover:text-[#f97316]'
+                              : 'text-slate-500 group-hover:text-[#f97316]'
+                          }`}
+                        >
+                          <Star
+                            className={`h-3.5 w-3.5 ${ln.directorPriority ? 'fill-[#f59e0b]' : ''}`}
+                            strokeWidth={2}
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          title="Duplicate line"
+                          onClick={() => duplicateLine(idx)}
+                          className="rounded p-0.5 text-slate-500 transition-colors group-hover:text-[#f97316]"
+                        >
+                          <Copy className="h-3.5 w-3.5" strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          title={lines.length > 1 ? 'Remove line' : 'At least one line required'}
+                          disabled={lines.length <= 1}
+                          onClick={() => lines.length > 1 && removeLine(idx)}
+                          className="rounded p-0.5 text-slate-500 transition-colors group-hover:text-[#f97316] disabled:cursor-not-allowed disabled:opacity-25 disabled:group-hover:text-slate-500"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                        </button>
+                      </div>
+                    </td>
+                    <td className={`${lineCellPad} min-w-[200px] align-top`}>
                       <CartonLookupField
                         line={ln}
                         customerId={customerId}
@@ -761,86 +887,156 @@ export default function EditPurchaseOrderPage() {
                         type="text"
                         value={ln.cartonSize}
                         onChange={(e) => updateLine(idx, { cartonSize: e.target.value })}
-                        className={`${inputCls} ${poMono}`}
-                        style={{ minWidth: '5rem', width: `${Math.max(5, (ln.cartonSize || '').length + 2) * 0.55}rem` }}
+                        className={`${inputCls} ${poMono} w-full max-w-[100px]`}
                         placeholder="L×W×H"
                       />
                     </td>
                     <td className={lineCellPad}>
-                      <input type="number" min={1} value={ln.quantity} onChange={(e) => updateLine(idx, { quantity: e.target.value })} className={`w-[4.25rem] ${inputCls} ${poMono}`} />
+                      <input
+                        type="number"
+                        min={1}
+                        value={ln.quantity}
+                        onChange={(e) => updateLine(idx, { quantity: e.target.value })}
+                        className={`w-full max-w-[80px] ${inputCls} ${poMono}`}
+                      />
                     </td>
                     <td className={lineCellPad}>
-                      <input type="text" value={ln.artworkCode} onChange={(e) => updateLine(idx, { artworkCode: e.target.value })} className={`w-full min-w-0 max-w-[6.5rem] ${inputCls}`} />
+                      <input
+                        type="text"
+                        value={ln.artworkCode}
+                        onChange={(e) => updateLine(idx, { artworkCode: e.target.value })}
+                        className={`w-full min-w-0 ${inputCls} font-mono text-[10px]`}
+                      />
                     </td>
                     <td className={lineCellPad}>
-                      <select value={ln.backPrint} onChange={(e) => updateLine(idx, { backPrint: e.target.value })} className={`${inputCls} min-w-0`}>
-                        <option value="No">No</option>
-                        <option value="Yes">Yes</option>
-                      </select>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        value={ln.wastagePct}
+                        onChange={(e) => updateLine(idx, { wastagePct: e.target.value })}
+                        className={`w-full max-w-[2.75rem] ${inputCls} ${poMono}`}
+                      />
                     </td>
                     <td className={lineCellPad}>
-                      <input type="number" min={0} step={0.5} value={ln.wastagePct} onChange={(e) => updateLine(idx, { wastagePct: e.target.value })} className={`w-[4.25rem] ${inputCls}`} />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input type="number" min={0} step={0.01} value={ln.rate} onChange={(e) => updateLine(idx, { rate: e.target.value })} className={`w-full min-w-0 ${inputCls}`} />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input type="number" min={0} max={28} value={ln.gstPct} onChange={(e) => updateLine(idx, { gstPct: e.target.value })} className={`w-full min-w-0 ${inputCls}`} />
-                    </td>
-                    <td className={`${lineCellPad} text-white ${poMono}`}>{beforeGst.toFixed(2)}</td>
-                    <td className={lineCellPad}>
-                      <select value={ln.boardGrade} onChange={(e) => updateLine(idx, { boardGrade: e.target.value })} className={`${inputCls} min-w-0`}>
+                      <select
+                        value={ln.boardGrade}
+                        onChange={(e) => updateLine(idx, { boardGrade: e.target.value })}
+                        className={`${inputCls} min-w-0 max-w-full truncate text-[10px]`}
+                      >
                         <option value="">—</option>
-                        {BOARD_GRADES.map((b) => <option key={b} value={b}>{b}</option>)}
+                        {BOARD_GRADES.map((b) => (
+                          <option key={b} value={b}>
+                            {b}
+                          </option>
+                        ))}
                       </select>
                     </td>
                     <td className={lineCellPad}>
-                      <input type="number" value={ln.gsm} onChange={(e) => updateLine(idx, { gsm: e.target.value })} className={`w-full min-w-0 ${inputCls} ${poMono}`} />
+                      <input
+                        type="number"
+                        value={ln.gsm}
+                        onChange={(e) => updateLine(idx, { gsm: e.target.value })}
+                        className={`w-full min-w-0 ${inputCls} ${poMono} text-[10px]`}
+                      />
                     </td>
                     <td className={lineCellPad}>
-                      <select value={ln.paperType} onChange={(e) => updateLine(idx, { paperType: e.target.value })} className={`${inputCls} min-w-0`}>
+                      <select
+                        value={ln.paperType}
+                        onChange={(e) => updateLine(idx, { paperType: e.target.value })}
+                        className={`${inputCls} min-w-0 max-w-full truncate text-[9px]`}
+                      >
                         <option value="">—</option>
-                        {PAPER_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
+                        {PAPER_TYPES.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
                       </select>
                     </td>
                     <td className={lineCellPad}>
-                      <input type="text" value={ln.coatingType} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
+                      <div className="rounded-md bg-slate-800/95 px-1.5 py-1 ring-1 ring-slate-700/90">
+                        <div className="flex items-center justify-between gap-1 text-[9px] text-slate-500">
+                          <span>Rate</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={ln.rate}
+                            onChange={(e) => updateLine(idx, { rate: e.target.value })}
+                            className={`w-16 border-0 bg-transparent p-0 text-right ${poMono} text-[10px] font-semibold text-slate-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/60`}
+                          />
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-between gap-1 text-[9px] text-slate-500">
+                          <span>GST%</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={28}
+                            value={ln.gstPct}
+                            onChange={(e) => updateLine(idx, { gstPct: e.target.value })}
+                            className={`w-10 border-0 bg-transparent p-0 text-right ${poMono} text-[10px] text-slate-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/60`}
+                          />
+                        </div>
+                        <div
+                          className={`mt-0.5 border-t border-slate-700/80 pt-0.5 text-right text-[10px] font-semibold text-white ${poMono}`}
+                        >
+                          {beforeGst.toFixed(2)}
+                        </div>
+                      </div>
+                    </td>
+                    <td className={`${lineCellPad} align-middle`}>
+                      <IconSpecSelect
+                        icon={FlipHorizontal2}
+                        label="Back print"
+                        value={ln.backPrint}
+                        options={['No', 'Yes']}
+                        onChange={(v) => updateLine(idx, { backPrint: v })}
+                      />
+                    </td>
+                    <td className={`${lineCellPad} align-middle`}>
+                      <IconSpecSelect
+                        icon={Layers}
+                        label="Coating"
+                        value={ln.coatingType}
+                        options={COATING_TYPES}
+                        onChange={(v) => updateLine(idx, { coatingType: v })}
+                      />
+                    </td>
+                    <td className={`${lineCellPad} align-middle`}>
+                      <IconSpecSelect
+                        icon={Sparkles}
+                        label="Emboss / leaf"
+                        value={ln.embossingLeafing}
+                        options={EMBOSSING_TYPES}
+                        onChange={(v) => updateLine(idx, { embossingLeafing: v })}
+                      />
+                    </td>
+                    <td className={`${lineCellPad} align-middle`}>
+                      <IconSpecSelect
+                        icon={Sun}
+                        label="Foil"
+                        value={ln.foilType}
+                        options={FOIL_TYPES}
+                        onChange={(v) => updateLine(idx, { foilType: v })}
+                      />
                     </td>
                     <td className={lineCellPad}>
-                      <input type="text" value={ln.embossingLeafing} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input type="text" value={ln.foilType} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input type="text" value={ln.remarks} onChange={(e) => updateLine(idx, { remarks: e.target.value })} className={`w-full min-w-0 max-w-[7rem] ${inputCls}`} />
+                      <input
+                        type="text"
+                        value={ln.remarks}
+                        onChange={(e) => updateLine(idx, { remarks: e.target.value })}
+                        className={`w-full min-w-0 ${inputCls}`}
+                      />
                     </td>
                     <td className={`${lineCellPad} align-middle text-center`}>
                       <span title={paperMeta.title} className="inline-flex justify-center">
-                        <FileText className={`h-3.5 w-3.5 ${paperMeta.iconClassName}`} strokeWidth={2} aria-hidden />
+                        <FileText
+                          className={`h-3.5 w-3.5 ${paperMeta.iconClassName}`}
+                          strokeWidth={2}
+                          aria-hidden
+                        />
                       </span>
-                    </td>
-                    <td className={`${lineCellPad} align-middle`}>
-                      <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                        <button
-                          type="button"
-                          title="Duplicate line"
-                          onClick={() => duplicateLine(idx)}
-                          className="rounded p-1 text-slate-400 hover:bg-slate-700/80 hover:text-amber-300"
-                        >
-                          <Copy className="h-3.5 w-3.5" strokeWidth={2} />
-                        </button>
-                        {lines.length > 1 ? (
-                          <button
-                            type="button"
-                            title="Remove line"
-                            onClick={() => removeLine(idx)}
-                            className="rounded p-1 text-red-400/80 hover:bg-red-950/50 hover:text-red-300"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-                          </button>
-                        ) : null}
-                      </div>
                     </td>
                   </tr>
                 )
@@ -850,82 +1046,87 @@ export default function EditPurchaseOrderPage() {
         </div>
       </div>
 
-      <div className="flex justify-end gap-2 pt-2">
-        <button type="button" onClick={() => router.push('/orders/purchase-orders')} className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm">
-          Cancel
-        </button>
-        <button type="submit" disabled={saving} className="ci-btn-save-industrial px-5 py-2 text-sm">
-          {saving ? 'Saving…' : 'Save changes'}
-        </button>
-      </div>
-
       <div
-        className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700/50 bg-slate-950/82 backdrop-blur-md supports-[backdrop-filter]:bg-slate-950/68 shadow-[0_-6px_28px_rgba(0,0,0,0.45)]"
+        className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-black/85 shadow-[0_-8px_32px_rgba(0,0,0,0.55)] backdrop-blur-md"
         aria-live="polite"
         aria-label="Purchase order financial summary"
       >
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-[11px] sm:text-xs">
-          <span className="font-semibold uppercase tracking-wider text-slate-500">Live summary</span>
-          <div className="flex min-w-[12rem] max-w-md flex-1 flex-col gap-1.5 px-2">
-            <div className="text-[9px] font-semibold uppercase tracking-wider text-slate-600">
-              Supply progress — Material
-            </div>
-            <div className="flex h-1.5 w-full flex-row overflow-hidden rounded-full bg-slate-800/95 ring-1 ring-slate-700/80">
+        <div className="mx-auto flex max-w-[1920px] flex-col gap-2 px-3 py-2.5 sm:px-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+              Supply
+            </span>
+            <div className="flex h-1.5 min-w-[120px] flex-1 max-w-md flex-row overflow-hidden rounded-full bg-slate-800 ring-1 ring-slate-700/80">
               {supplyMaterialCounts.total > 0 ? (
                 <>
                   <div
-                    className="h-full flex-none bg-slate-600 transition-[width] duration-300 ease-out"
+                    className="h-full flex-none bg-slate-600 transition-[width] duration-300"
                     style={{
                       width: `${(supplyMaterialCounts.grey / supplyMaterialCounts.total) * 100}%`,
                     }}
-                    title={`Not calculated / pre-dispatch: ${supplyMaterialCounts.grey} / ${supplyMaterialCounts.total}`}
                   />
                   <div
-                    className="h-full flex-none bg-sky-500 transition-[width] duration-300 ease-out"
+                    className="h-full flex-none bg-sky-500 transition-[width] duration-300"
                     style={{
                       width: `${(supplyMaterialCounts.blue / supplyMaterialCounts.total) * 100}%`,
                     }}
-                    title={`On order (vendor PO sent): ${supplyMaterialCounts.blue} / ${supplyMaterialCounts.total}`}
                   />
                   <div
-                    className="h-full flex-none bg-emerald-500 transition-[width] duration-300 ease-out"
+                    className="h-full flex-none bg-emerald-500 transition-[width] duration-300"
                     style={{
                       width: `${(supplyMaterialCounts.green / supplyMaterialCounts.total) * 100}%`,
                     }}
-                    title={`Received at factory: ${supplyMaterialCounts.green} / ${supplyMaterialCounts.total}`}
                   />
                 </>
               ) : null}
             </div>
-            <div className="text-[10px] text-slate-500 text-right tabular-nums">
-              <span className="text-slate-500">{supplyMaterialCounts.grey}</span> grey ·{' '}
-              <span className="text-sky-400">{supplyMaterialCounts.blue}</span> blue ·{' '}
-              <span className="text-emerald-400">{supplyMaterialCounts.green}</span> green
-              <span className="text-slate-600"> / {supplyMaterialCounts.total} lines</span>
-            </div>
+            <span className="text-[10px] tabular-nums text-slate-500">
+              {supplyMaterialCounts.grey}/{supplyMaterialCounts.blue}/{supplyMaterialCounts.green}
+            </span>
           </div>
-          <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1 text-slate-400">
-            <span>
-              Total qty <span className={`${poMono} text-white`}>{totalQty}</span>
-            </span>
-            <span>
-              Subtotal{' '}
-              <span className={`${poMono} text-white`}>
-                ₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-1 text-[11px] text-slate-400">
+              <span>
+                Qty <span className={`${poMono} font-semibold text-slate-200`}>{totalQty}</span>
               </span>
-            </span>
-            <span>
-              GST{' '}
-              <span className={`${poMono} text-white`}>
-                ₹ {totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              <span>
+                Subtotal{' '}
+                <span className={`${poMono} font-semibold text-slate-100`}>
+                  ₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
               </span>
-            </span>
-            <span className="text-slate-300">
-              Grand total{' '}
-              <span className={`${poMono} text-base font-semibold text-amber-200`}>
-                ₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              <span title="Sum of GST from each line (line rate × qty × GST %).">
+                <span className="uppercase tracking-wide">GST (18%)</span>{' '}
+                <span className={`${poMono} font-semibold text-slate-100`}>
+                  ₹{totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
               </span>
-            </span>
+              <span className="flex items-baseline gap-1.5 text-slate-300">
+                <span className="text-[11px] font-medium uppercase tracking-wide">Grand total</span>
+                <span
+                  className={`${poMono} text-[1.2rem] font-bold leading-none text-[#f97316] sm:text-[1.35rem]`}
+                >
+                  ₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => router.push('/orders/purchase-orders')}
+                className="rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-200 hover:border-slate-500"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="ci-btn-save-industrial rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

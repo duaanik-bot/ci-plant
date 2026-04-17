@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
     list.map((c) => ({
       id: c.id,
       name: c.name,
+      logoUrl: c.logoUrl,
       city: cityFromAddress(c.address),
       gstNumber: c.gstNumber,
       contactName: c.contactName,
@@ -81,6 +82,7 @@ export async function POST(req: NextRequest) {
     const customer = await db.customer.create({
       data: {
         name: data.name,
+        logoUrl: data.logoUrl?.trim() ? data.logoUrl.trim() : null,
         gstNumber: data.gstNumber?.trim() ? data.gstNumber.trim() : null,
         contactName: data.contactName || null,
         contactPhone: data.contactPhone || null,
@@ -104,6 +106,7 @@ export async function POST(req: NextRequest) {
       {
         id: customer.id,
         name: customer.name,
+        logoUrl: customer.logoUrl,
         gstNumber: customer.gstNumber,
         contactName: customer.contactName,
         contactPhone: customer.contactPhone,

@@ -294,6 +294,7 @@ export function ToolingHubLedgerTable({
                 return (
                   <tr
                     key={`${r.kind}-${r.id}`}
+                    data-hub-die-id={r.kind === 'die' ? r.id : undefined}
                     className="border-b border-zinc-800/80 hover:bg-zinc-900/50"
                   >
                     <td className="px-2 py-1.5 text-zinc-500 tabular-nums font-mono text-[11px]">
