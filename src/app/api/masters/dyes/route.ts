@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { PastingStyle } from '@prisma/client'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 import { dyeSchema } from '@/lib/validations'
 import { normalizeDieMake, prismaDimsFromParsed } from '@/lib/die-hub-dimensions'
+import { coercePastingStyleInput, mapLegacyPastingToEnum } from '@/lib/pasting-style'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +28,7 @@ const createSchema = z.object({
   cartonH: z.number().positive('Carton H must be positive'),
   location: z.string().optional(),
   conditionRating: z.string().optional(),
+  pastingStyle: z.nativeEnum(PastingStyle).optional().nullable(),
   pastingType: z.string().max(64).optional().nullable(),
   dieMake: z.enum(['local', 'laser']).optional(),
 })
@@ -116,6 +119,15 @@ export async function POST(req: NextRequest) {
   }
 
   const dims = prismaDimsFromParsed({ l: data.cartonL, w: data.cartonW, h: data.cartonH })
+  let resolvedPasting: PastingStyle | null = null
+  if (data.pastingStyle !== undefined) {
+    resolvedPasting = data.pastingStyle
+  } else {
+    resolvedPasting =
+      coercePastingStyleInput(data.pastingType) ??
+      mapLegacyPastingToEnum(data.pastingType) ??
+      null
+  }
   const dye = await db.dye.create({
     data: {
       dyeNumber,
@@ -125,7 +137,7 @@ export async function POST(req: NextRequest) {
       cartonSize,
       location: data.location || null,
       conditionRating: data.conditionRating || 'Good',
-      pastingType: data.pastingType?.trim() || null,
+      pastingStyle: resolvedPasting,
       dieMake: normalizeDieMake(data.dieMake),
       ...(dims ?? {}),
     },

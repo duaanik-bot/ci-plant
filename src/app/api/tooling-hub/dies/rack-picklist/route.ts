@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { PastingStyle } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { CUSTODY_IN_STOCK } from '@/lib/inventory-hub-custody'
@@ -14,6 +15,12 @@ export async function GET(req: NextRequest) {
   const take = Math.min(80, Math.max(5, parseInt(req.nextUrl.searchParams.get('limit') ?? '40', 10) || 40))
 
   const nExact = q && /^\d+$/.test(q) ? parseInt(q, 10) : NaN
+  const pastingOr: Array<{ pastingStyle: PastingStyle }> = []
+  if (q.includes('bso')) pastingOr.push({ pastingStyle: PastingStyle.BSO })
+  if (q.includes('lock') && q.includes('bottom')) pastingOr.push({ pastingStyle: PastingStyle.LOCK_BOTTOM })
+  if (q.includes('special') || q.includes('non-standard')) {
+    pastingOr.push({ pastingStyle: PastingStyle.SPECIAL })
+  }
   const rows = await db.dye.findMany({
     where: {
       active: true,
@@ -23,7 +30,7 @@ export async function GET(req: NextRequest) {
             OR: [
               { cartonSize: { contains: q, mode: 'insensitive' as const } },
               { dyeType: { contains: q, mode: 'insensitive' as const } },
-              { pastingType: { contains: q, mode: 'insensitive' as const } },
+              ...pastingOr,
               ...(Number.isFinite(nExact) ? [{ dyeNumber: nExact }] : []),
             ],
           }
@@ -38,7 +45,7 @@ export async function GET(req: NextRequest) {
       sheetSize: true,
       ups: true,
       location: true,
-      pastingType: true,
+      pastingStyle: true,
     },
   })
 

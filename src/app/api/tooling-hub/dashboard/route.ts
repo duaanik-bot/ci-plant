@@ -30,6 +30,8 @@ import {
   typeMismatchDiesForRow,
 } from '@/lib/die-hub-dimensions'
 import { masterDieTypeLabel } from '@/lib/master-die-type'
+import type { PastingStyle } from '@prisma/client'
+import { pastingNeedsMasterReview, pastingStyleLabel } from '@/lib/pasting-style'
 
 type EmbossTriageCardMeta = {
   triageManualEntry: boolean
@@ -66,7 +68,8 @@ export type ToolingHubLedgerRowJson = {
   ledgerRank?: number
   dimensionsLwh?: string
   ups?: number
-  pastingType?: string | null
+  pastingStyle?: PastingStyle | null
+  hubPastingNeedsMasterUpdate?: boolean
   masterType?: string | null
   hubConditionPoor?: boolean
   dieMake?: 'local' | 'laser'
@@ -96,7 +99,7 @@ function mapDie(d: {
   dimLengthMm: unknown
   dimWidthMm: unknown
   dimHeightMm: unknown
-  pastingType: string | null
+  pastingStyle: PastingStyle | null
   dieMake: string
   dateOfManufacturing: Date | null
   hubCustodySource: string | null
@@ -141,10 +144,10 @@ function mapDie(d: {
     hubPreviousCustody: d.hubPreviousCustody,
     lastStatusUpdatedAt: d.updatedAt.toISOString(),
     createdAt: d.createdAt.toISOString(),
-    pastingType: d.pastingType?.trim() || null,
+    pastingStyle: d.pastingStyle ?? null,
     masterType: masterDieTypeLabel({
       dyeType: d.dyeType,
-      pastingType: d.pastingType,
+      pastingStyle: d.pastingStyle,
     }),
     dieMake: normalizeDieMake(d.dieMake),
     dateOfManufacturing: d.dateOfManufacturing ? d.dateOfManufacturing.toISOString() : null,
@@ -154,6 +157,8 @@ function mapDie(d: {
     hubDieHubPoorFlag,
     hubPoorReportedBy: d.hubPoorReportedBy?.trim() || null,
     hubConditionPoor: physicalPoor || hubDieHubPoorFlag,
+    hubPastingNeedsMasterUpdate:
+      d.custodyStatus === CUSTODY_HUB_TRIAGE && pastingNeedsMasterReview(d.pastingStyle),
     jobCardHub: null as ReturnType<typeof hubJobCardHubStatus> | null,
   }
 }
@@ -234,7 +239,7 @@ export async function GET(req: NextRequest) {
           raw.dimWidthMm,
           raw.dimHeightMm,
           raw.dyeType,
-          raw.pastingType,
+          raw.pastingStyle,
           similarBuckets,
         )
         const mismatch = typeMismatchDiesForRow(
@@ -243,7 +248,7 @@ export async function GET(req: NextRequest) {
           raw.dimWidthMm,
           raw.dimHeightMm,
           raw.dyeType,
-          raw.pastingType,
+          raw.pastingStyle,
           dimOnlyBuckets,
         )
         return {
@@ -284,14 +289,20 @@ export async function GET(req: NextRequest) {
           zoneKey,
           zoneLabel: toolingLedgerZoneLabel('dies', zoneKey),
           zoneBadgeClass: toolingLedgerZoneBadge(zoneKey),
-          specSummary: `UPS ${r.ups} · ${r.dimensionsLwh} · ${r.materialLabel}`,
+          specSummary: `${(() => {
+            const ps = r.pastingStyle
+            const typeLead =
+              ps != null ? `Type: ${pastingStyleLabel(ps)} · ` : ''
+            return `${typeLead}UPS ${r.ups} · ${r.dimensionsLwh} · ${r.materialLabel}`
+          })()}`,
           units,
           lastStatusUpdatedAt: r.lastStatusUpdatedAt,
           ledgerEntryAt: r.createdAt,
           ledgerRank: r.ledgerRank,
           dimensionsLwh: r.dimensionsLwh,
           ups: r.ups,
-          pastingType: r.pastingType,
+          pastingStyle: r.pastingStyle,
+          hubPastingNeedsMasterUpdate: r.hubPastingNeedsMasterUpdate,
           masterType: r.masterType,
           dieMake: r.dieMake,
           dateOfManufacturing: r.dateOfManufacturing,

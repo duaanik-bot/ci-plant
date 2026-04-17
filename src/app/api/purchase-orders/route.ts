@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { PastingStyle } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
@@ -20,7 +21,10 @@ const specOverridesSchema = z
     totalSheets: z.number().int().min(0).optional(),
     boardGrade: z.string().optional(),
     foilType: z.string().optional(),
+    pastingStyle: z.nativeEnum(PastingStyle).optional(),
+    pastingType: z.string().optional(),
   })
+  .passthrough()
   .optional()
 
 const lineItemSchema = purchaseOrderSchema.shape.lineItems.element.extend({

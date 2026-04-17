@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
       select: {
         id: true,
         dyeNumber: true,
-        pastingType: true,
+        pastingStyle: true,
         dieMake: true,
         location: true,
         reuseCount: true,
@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
         id: row.id,
         serialLabel: `#DYE-${row.dyeNumber}`,
         displayCode: `DYE-${row.dyeNumber}`,
-        pastingType: row.pastingType?.trim() || null,
+        pastingStyle: row.pastingStyle ?? null,
         dieMake: normalizeDieMake(row.dieMake),
         location: row.location,
         reuseCount: row.reuseCount,

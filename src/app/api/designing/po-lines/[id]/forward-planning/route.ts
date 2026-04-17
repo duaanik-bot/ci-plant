@@ -24,7 +24,7 @@ export async function POST(
           id: true,
           dyeNumber: true,
           dyeType: true,
-          pastingType: true,
+          pastingStyle: true,
           dimLengthMm: true,
           dimWidthMm: true,
           dimHeightMm: true,
@@ -58,7 +58,7 @@ export async function POST(
       ? {
           dieMasterId: line.dieMasterId,
           masterDyeNumber: dm.dyeNumber,
-          masterDieType: masterDieTypeLabel({ dyeType: dm.dyeType, pastingType: dm.pastingType }),
+          masterDieType: masterDieTypeLabel({ dyeType: dm.dyeType, pastingStyle: dm.pastingStyle }),
           dimensionsLwh: dimsLwh,
         }
       : line.dieMasterId

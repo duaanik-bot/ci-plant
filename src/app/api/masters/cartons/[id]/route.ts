@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
+import { PastingStyle } from '@prisma/client'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 import { cartonSchema } from '@/lib/validations'
 import { serializeCarton } from '@/lib/carton-serialize'
+import { coercePastingStyleInput, mapLegacyPastingToEnum } from '@/lib/pasting-style'
+import { syncTriageDiesPastingForCarton } from '@/lib/sync-carton-triage-pasting'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,6 +43,7 @@ const updateSchema = cartonSchema.partial().extend({
   coatingType: z.string().optional().nullable(),
   embossingLeafing: z.string().optional().nullable(),
   artworkCode: z.string().optional().nullable(),
+  pastingStyle: z.nativeEnum(PastingStyle).optional().nullable(),
   pastingType: z.string().optional().nullable(),
   glueType: z.string().optional().nullable(),
   cartonConstruct: z.string().optional().nullable(),
@@ -125,10 +129,24 @@ export async function PUT(
   if (data.embossingLeafing !== undefined) update.embossingLeafing = toNullableText(data.embossingLeafing)
   if (data.artworkCode !== undefined) update.artworkCode = toNullableText(data.artworkCode)
   if (data.glueType !== undefined) update.glueType = toNullableText(data.glueType)
-  if (data.pastingType !== undefined || data.cartonConstruct !== undefined) {
-    const v =
-      data.cartonConstruct !== undefined ? data.cartonConstruct : data.pastingType
-    update.cartonConstruct = toNullableText(v) ?? null
+  if (
+    data.pastingStyle !== undefined ||
+    data.pastingType !== undefined ||
+    data.cartonConstruct !== undefined
+  ) {
+    const next: PastingStyle | null =
+      data.pastingStyle !== undefined
+        ? data.pastingStyle
+        : (() => {
+            const raw =
+              data.cartonConstruct !== undefined ? data.cartonConstruct : data.pastingType
+            return (
+              coercePastingStyleInput(raw) ??
+              mapLegacyPastingToEnum(raw) ??
+              null
+            )
+          })()
+    update.pastingStyle = next
   }
   if (data.dyeId !== undefined) {
     if (data.dyeId) update.dye = { connect: { id: data.dyeId } }
@@ -158,6 +176,10 @@ export async function PUT(
     data: update,
     include: { customer: true, dye: true, dieMaster: true },
   })
+
+  if (update.pastingStyle !== undefined) {
+    await syncTriageDiesPastingForCarton(id, row.pastingStyle)
+  }
 
   await createAuditLog({
     userId: user!.id,

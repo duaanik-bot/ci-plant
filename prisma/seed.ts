@@ -2,7 +2,7 @@
 // Run with: npx prisma db seed
 // Seeds: 8 roles, 12 machines, 13 QC instruments, admin user
 
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, PastingStyle } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
@@ -618,7 +618,7 @@ async function main() {
           deltaEMax: 3.0,
           registrationTol: 0.1,
           aqlLevel: '1.0',
-          cartonConstruct: 'Straight Tuck End',
+          pastingStyle: PastingStyle.SPECIAL,
           glueType: 'Hot Melt',
           glueBondMinN: 2.0,
           coatingType: 'Aqueous Varnish',
@@ -643,7 +643,7 @@ async function main() {
           numberOfColours: 4,
           deltaEMax: 3.0,
           aqlLevel: '1.0',
-          cartonConstruct: 'Lock Bottom',
+          pastingStyle: PastingStyle.LOCK_BOTTOM,
           glueType: 'Hot Melt',
           coatingType: 'Drip off + UV',
           drugSchedule: 'Schedule H',
@@ -664,7 +664,7 @@ async function main() {
           numberOfColours: 4,
           deltaEMax: 3.0,
           aqlLevel: '1.0',
-          cartonConstruct: 'Lock Bottom',
+          pastingStyle: PastingStyle.LOCK_BOTTOM,
           glueType: 'Hot Melt',
           coatingType: 'Aqueous Varnish',
           drugSchedule: 'Schedule H',

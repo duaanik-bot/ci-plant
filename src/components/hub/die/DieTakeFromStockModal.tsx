@@ -1,13 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import type { PastingStyle } from '@prisma/client'
 import { safeJsonParse } from '@/lib/safe-json'
+import { pastingStyleLabel } from '@/lib/pasting-style'
 
 export type DieStockCandidate = {
   id: string
   serialLabel: string
   displayCode: string
-  pastingType: string | null
+  pastingStyle: PastingStyle | null
   dieMake: 'local' | 'laser'
   location: string | null
   reuseCount: number
@@ -133,7 +135,7 @@ export function DieTakeFromStockModal({
                     <td className="py-1.5 px-2 text-amber-200/90 font-mono font-semibold whitespace-nowrap">
                       {c.serialLabel}
                     </td>
-                    <td className="py-1.5 px-2 text-zinc-300">{c.pastingType?.trim() || '—'}</td>
+                    <td className="py-1.5 px-2 text-zinc-300">{pastingStyleLabel(c.pastingStyle)}</td>
                     <td className="py-1.5 px-2 text-zinc-300 capitalize">{c.dieMake}</td>
                     <td className="py-1.5 px-2 text-zinc-300 whitespace-nowrap">
                       {c.location?.trim() || '—'}

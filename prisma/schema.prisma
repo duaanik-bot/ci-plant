@@ -19,6 +19,13 @@ enum PlateSize {
   SIZE_630_700
 }
 
+/// Facility-standard pasting (Product Master + Die Master + Die Hub).
+enum PastingStyle {
+  LOCK_BOTTOM
+  BSO
+  SPECIAL
+}
+
 // ─────────────────────────────────────────
 // ROLES & USERS
 // ─────────────────────────────────────────
@@ -582,7 +589,7 @@ model Carton {
   dyeId            String?  @map("dye_id")
   /// Canonical Die Master (tooling type + dimensions source) for this product.
   dieMasterId      String?  @map("die_master_id")
-  cartonConstruct  String?  @map("carton_construct")
+  pastingStyle     PastingStyle? @map("pasting_style")
   creaseDepthMm    Decimal? @map("crease_depth_mm") @db.Decimal(4, 2)
   nickCount        Int?     @map("nick_count")
   strippingType    String?  @default("Auto") @map("stripping_type")
@@ -664,7 +671,7 @@ model Dye {
   dimLengthMm         Decimal?  @map("dim_length_mm") @db.Decimal(12, 4)
   dimWidthMm          Decimal?  @map("dim_width_mm") @db.Decimal(12, 4)
   dimHeightMm         Decimal?  @map("dim_height_mm") @db.Decimal(12, 4)
-  pastingType         String?   @map("pasting_type") @db.VarChar(64)
+  pastingStyle        PastingStyle? @map("pasting_style")
   /// Hub make lane: local vs laser (table/board switcher).
   dieMake             String    @default("local") @map("die_make") @db.VarChar(16)
   /// First receipt into hub stock or custody from vendor (DOM).

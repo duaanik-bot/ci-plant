@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { PastingStyle } from '@prisma/client'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 import { cartonSchema } from '@/lib/validations'
+import { coercePastingStyleInput, mapLegacyPastingToEnum } from '@/lib/pasting-style'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +40,7 @@ const createSchema = cartonSchema.extend({
   foilType: z.string().optional(),
   artworkCode: z.string().optional(),
   backPrint: z.string().optional(),
+  pastingStyle: z.nativeEnum(PastingStyle).optional().nullable(),
   pastingType: z.string().optional(),
   glueType: z.string().optional(),
   cartonConstruct: z.string().optional(),
@@ -131,6 +134,17 @@ export async function POST(req: NextRequest) {
 
   const data = parsed.data
 
+  let resolvedPasting: PastingStyle | null = null
+  if (data.pastingStyle !== undefined) {
+    resolvedPasting = data.pastingStyle
+  } else {
+    resolvedPasting =
+      coercePastingStyleInput(data.pastingType) ??
+      coercePastingStyleInput(data.cartonConstruct) ??
+      mapLegacyPastingToEnum(data.pastingType ?? data.cartonConstruct) ??
+      null
+  }
+
   const carton = await db.carton.create({
     data: {
       cartonName: data.cartonName.trim(),
@@ -156,8 +170,7 @@ export async function POST(req: NextRequest) {
       artworkCode: data.artworkCode || null,
       backPrint: data.backPrint || 'No',
       glueType: data.glueType || null,
-      cartonConstruct:
-        data.pastingType?.trim() || data.cartonConstruct?.trim() || null,
+      pastingStyle: resolvedPasting,
       dyeId: data.dyeId || null,
       dieMasterId: data.dieMasterId || null,
       drugSchedule: data.drugSchedule || null,

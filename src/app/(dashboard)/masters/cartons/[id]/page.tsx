@@ -43,7 +43,7 @@ export default function CartonEditPage() {
         remarks: data.remarks ?? '',
         printingType: data.printingType ?? '',
         coatingType: data.coatingType ?? '',
-        pastingType: data.pastingType ?? '',
+        pastingStyle: data.pastingStyle ?? '',
         finishedLength: data.finishedLength != null ? String(data.finishedLength) : '',
         finishedWidth: data.finishedWidth != null ? String(data.finishedWidth) : '',
         finishedHeight: data.finishedHeight != null ? String(data.finishedHeight) : '',

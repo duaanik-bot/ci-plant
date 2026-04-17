@@ -1,10 +1,15 @@
-/** Human-facing die / pasting label from Die Master (prefers detailed `pastingType` when set). */
+import type { PastingStyle } from '@prisma/client'
+import { pastingStyleLabel } from '@/lib/pasting-style'
+
+/** Human-facing die / pasting label from Die Master (prefers canonical `pastingStyle` when set). */
 export function masterDieTypeLabel(d: {
   dyeType: string
-  pastingType?: string | null
+  pastingStyle?: PastingStyle | null
 }): string {
-  const p = d.pastingType?.trim()
-  if (p) return p
+  if (d.pastingStyle != null) {
+    const pl = pastingStyleLabel(d.pastingStyle)
+    if (pl !== '—') return pl
+  }
   return d.dyeType?.trim() || '—'
 }
 

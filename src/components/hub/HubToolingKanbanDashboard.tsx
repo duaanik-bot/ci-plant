@@ -20,6 +20,9 @@ import { DieTakeFromStockModal } from '@/components/hub/die/DieTakeFromStockModa
 import { DieTriageCard } from '@/components/hub/die/DieTriageCard'
 import { SimilarDiesModal, type SimilarDieMatch } from '@/components/hub/die/SimilarDiesModal'
 import { DIE_HUB_PASTING_TYPES } from '@/lib/die-hub-dimensions'
+import type { PastingStyle } from '@prisma/client'
+import { PO_MANUAL_PASTING_VALUES, pastingStyleLabel } from '@/lib/pasting-style'
+import { PastingStyleBadge } from '@/components/hub/PastingStyleBadge'
 import { calculateToolingZoneMetrics, toolingCardUnits } from '@/lib/tooling-hub-metrics'
 import {
   DieMasterLedger,
@@ -51,17 +54,108 @@ const TOOLING_RETURN_SIZE_REASONS: {
   { value: 'prepress_error', label: 'Pre-press layout error / Manual correction' },
 ]
 
-function ZoneCapacitySubheader({
-  jobCount,
+/** Board column title with filter-aware job count and physical units. */
+function BoardZoneTitle({
+  name,
+  count,
   unitCount,
 }: {
-  jobCount: number
+  name: string
+  count: number
   unitCount: number
 }) {
   return (
-    <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold tabular-nums leading-tight shrink-0">
-      {jobCount} jobs · {unitCount} units
-    </p>
+    <div className="flex flex-col gap-1 min-w-0">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400 flex flex-wrap items-baseline gap-x-1.5">
+        <span>{name}</span>
+        <span
+          className={`tabular-nums font-bold ${
+            count === 0 ? 'text-zinc-500' : 'text-amber-200/95'
+          }`}
+        >
+          ({count})
+        </span>
+      </h2>
+      <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold tabular-nums leading-tight shrink-0">
+        {unitCount} units
+      </p>
+    </div>
+  )
+}
+
+/** Table view — per-zone die counts (search + pasting only; not zone dropdown). */
+function DieHubZoneSummaryBar({
+  triage,
+  outsideVendor,
+  liveInventory,
+  custodyInUse,
+}: {
+  triage: number
+  outsideVendor: number
+  liveInventory: number
+  custodyInUse: number
+}) {
+  const Card = ({
+    label,
+    count,
+    dotClass,
+    borderClass,
+  }: {
+    label: string
+    count: number
+    dotClass: string
+    borderClass: string
+  }) => (
+    <div
+      className={`flex-1 min-w-[132px] rounded-lg border ${borderClass} bg-zinc-950/95 px-3 py-2.5 flex items-center gap-2.5`}
+    >
+      <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${dotClass}`} aria-hidden />
+      <div className="min-w-0">
+        <p className="text-[10px] uppercase tracking-wide text-zinc-400 font-semibold leading-tight">
+          {label}
+        </p>
+        <p
+          className={`text-lg font-bold tabular-nums leading-tight ${
+            count === 0 ? 'text-zinc-500' : 'text-white'
+          }`}
+        >
+          ({count})
+        </p>
+      </div>
+    </div>
+  )
+
+  return (
+    <div
+      className="relative z-10 mb-1 flex flex-wrap gap-2 rounded-xl border border-zinc-700 bg-zinc-950/95 backdrop-blur-sm px-3 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.35)]"
+      role="region"
+      aria-label="Zone summary"
+    >
+      <Card
+        label="Triage"
+        count={triage}
+        dotClass="bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.55)]"
+        borderClass="border-amber-600/55"
+      />
+      <Card
+        label="Outside vendor"
+        count={outsideVendor}
+        dotClass="bg-violet-500 shadow-[0_0_10px_rgba(167,139,250,0.5)]"
+        borderClass="border-violet-500/55"
+      />
+      <Card
+        label="Live inventory"
+        count={liveInventory}
+        dotClass="bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.45)]"
+        borderClass="border-emerald-600/55"
+      />
+      <Card
+        label="Custody floor (in-use)"
+        count={custodyInUse}
+        dotClass="bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.5)]"
+        borderClass="border-sky-600/55"
+      />
+    </div>
   )
 }
 
@@ -89,7 +183,9 @@ type DieRow = {
   createdAt: string
   jobCardHub: JobCardHub | null
   ledgerRank: number
-  pastingType: string | null
+  pastingStyle: PastingStyle | null
+  /** Triage-only hint from API — legacy / SPECIAL / unset pasting. */
+  hubPastingNeedsMasterUpdate?: boolean
   masterType?: string | null
   hubConditionPoor?: boolean
   /** Die Hub maintenance flag after a Poor return (isolated from Plate/PO). */
@@ -226,6 +322,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const [hubView, setHubView] = useState<'board' | 'table'>('board')
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerZoneFilter, setLedgerZoneFilter] = useState('')
+  /** Die Hub only — Lock Bottom / BSO narrows board, table, and zone summary. */
+  const [dieHubPastingFilter, setDieHubPastingFilter] = useState<'' | 'LOCK_BOTTOM' | 'BSO'>('')
   const [toolingAudit, setToolingAudit] = useState<ToolingHubAuditContext | null>(null)
 
   const [returnModal, setReturnModal] = useState<ToolRow | null>(null)
@@ -257,7 +355,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const [mdSheetSize, setMdSheetSize] = useState('')
   const [mdUps, setMdUps] = useState('1')
   const [mdMaterial, setMdMaterial] = useState('Laser')
-  const [mdPastingType, setMdPastingType] = useState<string>(DIE_HUB_PASTING_TYPES[0])
+  const [mdPastingType, setMdPastingType] = useState<PastingStyle>(DIE_HUB_PASTING_TYPES[0])
   const [mdDieMake, setMdDieMake] = useState<'local' | 'laser'>('local')
   const [similarDieBoardModal, setSimilarDieBoardModal] = useState<{
     sourceLabel: string
@@ -359,7 +457,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               r.materialLabel,
               r.dimensionsLwh,
               r.dimensionsLabel,
-              r.pastingType,
+              pastingStyleLabel(r.pastingStyle),
               r.masterType,
               r.dieMake,
             ]
@@ -370,18 +468,30 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     })
   }
 
-  const triageF = useMemo(
-    () => filterRows(data?.triage ?? [], triageSearch),
-    [data?.triage, triageSearch],
+  const applyDieHubPastingBoard = useCallback(
+    (rows: ToolRow[]) => {
+      if (mode !== 'dies' || !dieHubPastingFilter) return rows
+      const f = dieHubPastingFilter as PastingStyle
+      return rows.filter((r) => r.kind === 'die' && r.pastingStyle === f)
+    },
+    [mode, dieHubPastingFilter],
   )
-  const prepF = useMemo(() => filterRows(data?.prep ?? [], prepSearch), [data?.prep, prepSearch])
+
+  const triageF = useMemo(
+    () => applyDieHubPastingBoard(filterRows(data?.triage ?? [], triageSearch)),
+    [data?.triage, triageSearch, applyDieHubPastingBoard],
+  )
+  const prepF = useMemo(
+    () => applyDieHubPastingBoard(filterRows(data?.prep ?? [], prepSearch)),
+    [data?.prep, prepSearch, applyDieHubPastingBoard],
+  )
   const invF = useMemo(
-    () => filterRows(data?.inventory ?? [], invSearch),
-    [data?.inventory, invSearch],
+    () => applyDieHubPastingBoard(filterRows(data?.inventory ?? [], invSearch)),
+    [data?.inventory, invSearch, applyDieHubPastingBoard],
   )
   const custF = useMemo(
-    () => filterRows(data?.custody ?? [], custSearch),
-    [data?.custody, custSearch],
+    () => applyDieHubPastingBoard(filterRows(data?.custody ?? [], custSearch)),
+    [data?.custody, custSearch, applyDieHubPastingBoard],
   )
 
   const triageMetrics = useMemo(
@@ -409,10 +519,46 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const ledgerZoneOptions =
     mode === 'dies' ? TOOLING_LEDGER_ZONE_OPTIONS_DIES : TOOLING_LEDGER_ZONE_OPTIONS_BLOCKS
 
+  const ledgerPastingArg =
+    mode === 'dies' && dieHubPastingFilter
+      ? (dieHubPastingFilter as PastingStyle)
+      : undefined
+
   const filteredLedgerRows = useMemo(
-    () => getFilteredDieMasterLedgerRows(data?.ledgerRows ?? [], ledgerSearch, ledgerZoneFilter),
-    [data?.ledgerRows, ledgerSearch, ledgerZoneFilter],
+    () =>
+      getFilteredDieMasterLedgerRows(
+        data?.ledgerRows ?? [],
+        ledgerSearch,
+        ledgerZoneFilter,
+        ledgerPastingArg,
+      ),
+    [data?.ledgerRows, ledgerSearch, ledgerZoneFilter, ledgerPastingArg],
   )
+
+  /** Search + pasting only — used for zone summary bar (not zone dropdown). */
+  const ledgerRowsForZoneSummary = useMemo(
+    () =>
+      getFilteredDieMasterLedgerRows(
+        data?.ledgerRows ?? [],
+        ledgerSearch,
+        '',
+        ledgerPastingArg,
+      ),
+    [data?.ledgerRows, ledgerSearch, ledgerPastingArg],
+  )
+
+  const dieHubZoneSummary = useMemo(() => {
+    if (mode !== 'dies') return null
+    const rows = ledgerRowsForZoneSummary.filter((r) => r.kind === 'die')
+    const count = (keys: string[]) =>
+      rows.filter((r) => keys.includes(r.zoneKey)).length
+    return {
+      triage: count(['incoming_triage']),
+      outsideVendor: count(['outside_vendor']),
+      liveInventory: count(['live_inventory']),
+      custodyInUse: count(['on_machine']),
+    }
+  }, [ledgerRowsForZoneSummary, mode])
   const toolingLedgerExportColumns = useMemo(() => toolingMasterLedgerExportColumns(), [])
   const toolingLedgerExcelExtraColumns = useMemo(() => toolingMasterLedgerExcelExtraColumns(), [])
   const toolingLedgerExportFilterSummary = useMemo(() => {
@@ -422,8 +568,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       parts.push(o ? `Zone: ${o.label}` : `Zone: ${ledgerZoneFilter}`)
     }
     if (ledgerSearch.trim()) parts.push(`Search: "${ledgerSearch.trim()}"`)
+    if (mode === 'dies' && dieHubPastingFilter) {
+      parts.push(`Pasting: ${pastingStyleLabel(dieHubPastingFilter as PastingStyle)}`)
+    }
     return parts
-  }, [ledgerZoneFilter, ledgerSearch, ledgerZoneOptions])
+  }, [ledgerZoneFilter, ledgerSearch, ledgerZoneOptions, mode, dieHubPastingFilter])
   const filteredLedgerSummary = useMemo(() => {
     const units = filteredLedgerRows.reduce((s, r) => s + (r.units ?? 1), 0)
     return { jobs: filteredLedgerRows.length, units }
@@ -592,7 +741,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           sheetSize: mdSheetSize.trim() || undefined,
           ups: mdUps.trim() ? parseInt(mdUps, 10) : undefined,
           dieMaterial: mdMaterial.trim() || undefined,
-          pastingType: mdPastingType.trim() || undefined,
+          pastingStyle: mdPastingType,
           dieMake: mdDieMake,
           hubDestination: manualDieTarget,
         }),
@@ -829,7 +978,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
   function toolingSpecSummaryLine(r: ToolRow): string {
     if (r.kind === 'die') {
-      return `UPS ${r.ups} · ${r.dimensionsLwh} · ${r.materialLabel}`
+      const head =
+        r.pastingStyle != null
+          ? `Type: ${pastingStyleLabel(r.pastingStyle)} · `
+          : ''
+      return `${head}UPS ${r.ups} · ${r.dimensionsLwh} · ${r.materialLabel}`
     }
     return `${r.typeLabel} · ${r.materialLabel}${r.blockSize ? ` · ${r.blockSize}` : ''}${
       r.triageAwReference ? ` · AW ${r.triageAwReference}` : ''
@@ -848,6 +1001,15 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       return (
         <>
           <div className="mt-1 space-y-0.5 text-[11px] font-medium text-zinc-400 leading-tight">
+            <p className="flex flex-wrap items-center gap-1.5">
+              <span>Type:</span>
+              <PastingStyleBadge value={r.pastingStyle} />
+              {zone === 'triage' && r.hubPastingNeedsMasterUpdate ? (
+                <span className="inline-flex items-center rounded border border-amber-500/80 bg-amber-950/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">
+                  Master update
+                </span>
+              ) : null}
+            </p>
             <p>
               Die type (master):{' '}
               <span className="text-zinc-300">{r.masterType?.trim() || '—'}</span>
@@ -1379,6 +1541,14 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           <p className="text-zinc-500">Loading…</p>
         ) : hubView === 'table' ? (
           <div className="space-y-4">
+            {mode === 'dies' && dieHubZoneSummary ? (
+              <DieHubZoneSummaryBar
+                triage={dieHubZoneSummary.triage}
+                outsideVendor={dieHubZoneSummary.outsideVendor}
+                liveInventory={dieHubZoneSummary.liveInventory}
+                custodyInUse={dieHubZoneSummary.custodyInUse}
+              />
+            ) : null}
             <div
               className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold tabular-nums"
               role="status"
@@ -1403,6 +1573,27 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                     className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                   />
                 </label>
+                {mode === 'dies' ? (
+                  <label className="block min-w-[160px]">
+                    <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                      Pasting style
+                    </span>
+                    <select
+                      value={dieHubPastingFilter}
+                      onChange={(e) =>
+                        setDieHubPastingFilter(e.target.value as '' | 'LOCK_BOTTOM' | 'BSO')
+                      }
+                      className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+                    >
+                      <option value="">All</option>
+                      {PO_MANUAL_PASTING_VALUES.map((p) => (
+                        <option key={p} value={p}>
+                          {pastingStyleLabel(p)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label className="block min-w-[180px]">
                   <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
                     Zone
@@ -1449,6 +1640,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               rows={data.ledgerRows}
               searchQuery={ledgerSearch}
               zoneFilter={ledgerZoneFilter}
+              pastingStyleFilter={ledgerPastingArg}
               onOpenAudit={setToolingAudit}
               hubMode={mode}
               onDieDataChanged={() => void load()}
@@ -1457,13 +1649,37 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           </div>
         ) : (
           <>
+            {mode === 'dies' ? (
+              <div className="rounded-lg border border-zinc-700 bg-zinc-950/90 px-3 py-2.5 mb-4 flex flex-col sm:flex-row sm:items-end gap-3 sm:justify-between">
+                <label className="block min-w-[200px] max-w-md flex-1">
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                    Pasting style filter
+                  </span>
+                  <select
+                    value={dieHubPastingFilter}
+                    onChange={(e) =>
+                      setDieHubPastingFilter(e.target.value as '' | 'LOCK_BOTTOM' | 'BSO')
+                    }
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm"
+                  >
+                    <option value="">All</option>
+                    {PO_MANUAL_PASTING_VALUES.map((p) => (
+                      <option key={p} value={p}>
+                        {pastingStyleLabel(p)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="text-[11px] text-zinc-500 sm:pb-2">
+                  Column counts and table zone summary use this filter with each zone&apos;s search.
+                </p>
+              </div>
+            ) : null}
             <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3">
-              <div className="flex flex-col gap-1 mb-2 min-w-0">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
-                  Incoming triage
-                </h2>
-                <ZoneCapacitySubheader
-                  jobCount={triageMetrics.jobCount}
+              <div className="mb-2 min-w-0">
+                <BoardZoneTitle
+                  name="Incoming triage"
+                  count={triageF.length}
                   unitCount={triageMetrics.unitCount}
                 />
               </div>
@@ -1536,12 +1752,10 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6 xl:min-h-[min(70vh,calc(100vh-14rem))] xl:items-stretch">
               <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[260px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-2 mb-2 min-w-0">
-                  <div className="flex flex-col gap-1 min-w-0">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
-                      {prepHeading}
-                    </h2>
-                    <ZoneCapacitySubheader
-                      jobCount={prepMetrics.jobCount}
+                  <div className="min-w-0">
+                    <BoardZoneTitle
+                      name={prepHeading}
+                      count={prepF.length}
                       unitCount={prepMetrics.unitCount}
                     />
                   </div>
@@ -1584,12 +1798,10 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
               <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[260px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-2 mb-2 min-w-0">
-                  <div className="flex flex-col gap-1 min-w-0">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
-                      Live inventory
-                    </h2>
-                    <ZoneCapacitySubheader
-                      jobCount={invMetrics.jobCount}
+                  <div className="min-w-0">
+                    <BoardZoneTitle
+                      name="Live inventory"
+                      count={invF.length}
                       unitCount={invMetrics.unitCount}
                     />
                   </div>
@@ -1623,11 +1835,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
               <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[260px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-1 mb-0.5 min-w-0">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
-                    Custody floor
-                  </h2>
-                  <ZoneCapacitySubheader
-                    jobCount={custMetrics.jobCount}
+                  <BoardZoneTitle
+                    name="Custody floor"
+                    count={custF.length}
                     unitCount={custMetrics.unitCount}
                   />
                   <p className="text-[10px] font-bold uppercase tracking-wider text-blue-400/90 tabular-nums">
@@ -1860,12 +2070,12 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               Pasting type
               <select
                 value={mdPastingType}
-                onChange={(e) => setMdPastingType(e.target.value)}
+                onChange={(e) => setMdPastingType(e.target.value as PastingStyle)}
                 className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
               >
                 {DIE_HUB_PASTING_TYPES.map((t) => (
                   <option key={t} value={t}>
-                    {t}
+                    {pastingStyleLabel(t)}
                   </option>
                 ))}
               </select>

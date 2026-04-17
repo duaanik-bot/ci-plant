@@ -19,6 +19,8 @@ import {
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { parseCartonSizeToDims } from '@/lib/die-hub-dimensions'
+import type { PastingStyle } from '@prisma/client'
+import { PO_MANUAL_PASTING_VALUES, pastingStyleLabel } from '@/lib/pasting-style'
 
 type Customer = {
   id: string
@@ -53,6 +55,8 @@ type Line = {
   toolingDieType: string
   toolingDims: string
   toolingUnlinked: boolean
+  /** LOCK_BOTTOM | BSO — required on every line; prefilled from Product Master when linked. */
+  pastingStyle: string
 }
 
 type CartonLookupFieldProps = {
@@ -87,6 +91,7 @@ const defaultLine = (): Line => ({
   toolingDieType: '',
   toolingDims: '',
   toolingUnlinked: false,
+  pastingStyle: '',
 })
 
 function hasLineInput(line: Line): boolean {
@@ -120,6 +125,7 @@ function resetAutofillFields(line: Line, cartonName: string): Line {
     toolingDieType: '',
     toolingDims: '',
     toolingUnlinked: false,
+    pastingStyle: '',
   }
 }
 
@@ -371,6 +377,8 @@ export default function NewPurchaseOrderPage() {
     const decorations = deriveCartonDecorations(c)
     const raw = (c.toolingDimsLabel || c.cartonSize || '').trim()
     const sizeForLine = raw.replace(/x/gi, '×')
+    const autoPaste =
+      c.pastingStyle === 'LOCK_BOTTOM' || c.pastingStyle === 'BSO' ? c.pastingStyle : ''
     updateLine(idx, {
       cartonId: c.id,
       cartonName: c.cartonName,
@@ -389,6 +397,7 @@ export default function NewPurchaseOrderPage() {
       toolingDieType: c.masterDieType || '',
       toolingDims: sizeForLine,
       toolingUnlinked: !!c.toolingUnlinked,
+      pastingStyle: autoPaste,
     })
     setFieldErrors((prev) => {
       const next = { ...prev }
@@ -436,6 +445,9 @@ export default function NewPurchaseOrderPage() {
     if (validLines.length === 0) err.lines = 'Add at least one line with carton name and quantity'
     validLines.forEach((l, i) => {
       if (l.rate === '' || (Number(l.rate) < 0)) err[`line${i}_rate`] = 'Rate required'
+      if (l.pastingStyle !== 'LOCK_BOTTOM' && l.pastingStyle !== 'BSO') {
+        err[`line${i}_pasting`] = 'Select Lock Bottom or BSO'
+      }
     })
     setFieldErrors(err)
     if (Object.keys(err).length > 0) {
@@ -486,6 +498,7 @@ export default function NewPurchaseOrderPage() {
                 foilType: l.foilType.trim() || undefined,
                 masterDieType: l.toolingDieType.trim() || undefined,
                 dieMasterId: l.dieMasterId.trim() || undefined,
+                pastingStyle: l.pastingStyle as PastingStyle,
               },
             }
           }),
@@ -585,7 +598,12 @@ export default function NewPurchaseOrderPage() {
         toast.error(data?.error ?? 'Failed to create carton')
         return
       }
-      const created = data as CartonOption & { finishedLength?: number; finishedWidth?: number; finishedHeight?: number }
+      const created = data as CartonOption & {
+        finishedLength?: number
+        finishedWidth?: number
+        finishedHeight?: number
+        pastingStyle?: PastingStyle | null
+      }
       const cartonSizeStr =
         created.finishedLength != null && created.finishedWidth != null && created.finishedHeight != null
           ? `${created.finishedLength}×${created.finishedWidth}×${created.finishedHeight}`
@@ -607,6 +625,7 @@ export default function NewPurchaseOrderPage() {
         backPrint: created.backPrint ?? 'No',
         dyeId: created.dyeId ?? null,
         dieMasterId: (created as { dieMasterId?: string | null }).dieMasterId ?? null,
+        pastingStyle: created.pastingStyle ?? null,
         masterDieType: null,
         toolingDimsLabel: cartonSizeStr || null,
         toolingUnlinked: !(created as { dieMasterId?: string | null }).dieMasterId,
@@ -770,6 +789,7 @@ export default function NewPurchaseOrderPage() {
                 <th className="px-2 py-1">Carton name</th>
                 <th className="px-2 py-1">Size</th>
                 <th className="px-2 py-1">Die Type</th>
+                <th className="px-2 py-1">Pasting</th>
                 <th className="px-2 py-1">Qty*</th>
                 <th className="px-2 py-1">Artwork</th>
                 <th className="px-2 py-1">Back</th>
@@ -795,6 +815,7 @@ export default function NewPurchaseOrderPage() {
                 const { beforeGst } = lineAmount(rate, qty, gstPct)
                 const amount = beforeGst
                 const dieTypeMissing = !!ln.cartonId && !ln.toolingDieType.trim()
+                const pasteErr = fieldErrors[`line${idx}_pasting`]
                 return (
                   <tr key={idx} className="border-t border-slate-800">
                     <td className="px-2 py-1 align-top">
@@ -847,6 +868,25 @@ export default function NewPurchaseOrderPage() {
                       </div>
                       {dieTypeMissing ? (
                         <p className="text-[10px] text-red-400 mt-0.5 leading-tight">Define Die Type in Master.</p>
+                      ) : null}
+                    </td>
+                    <td className="px-2 py-1 align-top min-w-[7rem]">
+                      <select
+                        value={ln.pastingStyle}
+                        onChange={(e) =>
+                          updateLine(idx, { pastingStyle: e.target.value })
+                        }
+                        className={`${inputCls} ${pasteErr ? inputErr : ''}`}
+                      >
+                        <option value="">Select…</option>
+                        {PO_MANUAL_PASTING_VALUES.map((p) => (
+                          <option key={p} value={p}>
+                            {pastingStyleLabel(p)}
+                          </option>
+                        ))}
+                      </select>
+                      {pasteErr ? (
+                        <p className="text-[10px] text-red-400 mt-0.5">{pasteErr}</p>
                       ) : null}
                     </td>
                     <td className="px-2 py-1">

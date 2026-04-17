@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
+import { PastingStyle } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { safeJsonParse } from '@/lib/safe-json'
@@ -24,6 +25,7 @@ import {
   prismaDimsFromParsed,
 } from '@/lib/die-hub-dimensions'
 import { masterDieTypeLabel } from '@/lib/master-die-type'
+import { coercePastingStyleInput, mapLegacyPastingToEnum } from '@/lib/pasting-style'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +38,7 @@ async function loadDieMasterForLine(
   id: string
   dyeNumber: number
   dyeType: string
-  pastingType: string | null
+  pastingStyle: PastingStyle | null
   dimLengthMm: unknown
   dimWidthMm: unknown
   dimHeightMm: unknown
@@ -64,7 +66,7 @@ async function loadDieMasterForLine(
       id: true,
       dyeNumber: true,
       dyeType: true,
-      pastingType: true,
+      pastingStyle: true,
       dimLengthMm: true,
       dimWidthMm: true,
       dimHeightMm: true,
@@ -88,7 +90,7 @@ async function resolveDieTriageSpecs(
   ups: number
   awRef: string
   cartonSize: string
-  pastingType: string | null
+  pastingStyle: PastingStyle | null
   dieMake: 'local' | 'laser'
   triageDyeType: string
   sourceDieMasterId: string | null
@@ -99,7 +101,7 @@ async function resolveDieTriageSpecs(
   let ups = data.ups
   let awRef = (data.awCode.trim() || data.artworkId.trim()).trim()
   let cartonSize = data.cartonSize.trim()
-  let pastingType: string | null = null
+  let pastingStyle: PastingStyle | null = null
   let dieMake: 'local' | 'laser' = 'local'
   let triageDyeType = 'Die Hub Triage'
   let sourceDieMasterId: string | null = null
@@ -113,9 +115,9 @@ async function resolveDieTriageSpecs(
     triageDyeType = master.dyeType?.trim() || triageDyeType
     sourceMasterTypeLabel = masterDieTypeLabel({
       dyeType: master.dyeType,
-      pastingType: master.pastingType,
+      pastingStyle: master.pastingStyle,
     })
-    if (master.pastingType?.trim()) pastingType = master.pastingType.trim()
+    if (master.pastingStyle != null) pastingStyle = master.pastingStyle
     if (
       master.dimLengthMm != null &&
       master.dimWidthMm != null &&
@@ -157,9 +159,13 @@ async function resolveDieTriageSpecs(
       }
       if (!awRef && line.artworkCode?.trim()) awRef = line.artworkCode.trim()
       if (!cartonSize && line.cartonSize?.trim()) cartonSize = line.cartonSize.trim()
-      if (typeof spec.pastingType === 'string' && spec.pastingType.trim()) {
-        pastingType = spec.pastingType.trim()
-      }
+      const specPaste =
+        coercePastingStyleInput(spec.pastingType) ??
+        coercePastingStyleInput(spec.pastingStyle) ??
+        mapLegacyPastingToEnum(
+          typeof spec.pastingType === 'string' ? spec.pastingType : undefined,
+        )
+      if (specPaste) pastingStyle = specPaste
       if (typeof spec.dieMake === 'string' && spec.dieMake.trim()) {
         dieMake = normalizeDieMake(spec.dieMake)
       }
@@ -178,7 +184,10 @@ async function resolveDieTriageSpecs(
           }) ?? ''
         if (lwh.trim()) cartonSize = lwh.trim()
       }
-      if (!pastingType && line.lineDieType?.trim()) pastingType = line.lineDieType.trim()
+      const linePaste =
+        coercePastingStyleInput(line.lineDieType) ??
+        mapLegacyPastingToEnum(line.lineDieType)
+      if (!pastingStyle && linePaste) pastingStyle = linePaste
 
       const cid = (data.cartonId || line.cartonId || '').trim()
       if (cid) {
@@ -188,7 +197,7 @@ async function resolveDieTriageSpecs(
             finishedLength: true,
             finishedWidth: true,
             finishedHeight: true,
-            cartonConstruct: true,
+            pastingStyle: true,
           },
         })
         if (c) {
@@ -198,7 +207,7 @@ async function resolveDieTriageSpecs(
             const H = c.finishedHeight != null ? String(c.finishedHeight) : ''
             if (L && W && H) cartonSize = `${L}×${W}×${H}`
           }
-          if (!pastingType && c.cartonConstruct?.trim()) pastingType = c.cartonConstruct.trim()
+          if (!pastingStyle && c.pastingStyle != null) pastingStyle = c.pastingStyle
         }
       }
     }
@@ -209,7 +218,7 @@ async function resolveDieTriageSpecs(
         finishedLength: true,
         finishedWidth: true,
         finishedHeight: true,
-        cartonConstruct: true,
+        pastingStyle: true,
       },
     })
     if (c) {
@@ -219,17 +228,16 @@ async function resolveDieTriageSpecs(
         const H = c.finishedHeight != null ? String(c.finishedHeight) : ''
         if (L && W && H) cartonSize = `${L}×${W}×${H}`
       }
-      if (!pastingType && c.cartonConstruct?.trim()) pastingType = c.cartonConstruct.trim()
+      if (!pastingStyle && c.pastingStyle != null) pastingStyle = c.pastingStyle
     }
   }
 
   if (master) {
-    const pt = master.pastingType?.trim()
-    if (pt) pastingType = pt
+    if (master.pastingStyle != null) pastingStyle = master.pastingStyle
     triageDyeType = master.dyeType?.trim() || triageDyeType
     sourceMasterTypeLabel = masterDieTypeLabel({
       dyeType: master.dyeType,
-      pastingType: master.pastingType,
+      pastingStyle: master.pastingStyle,
     })
   }
 
@@ -238,7 +246,7 @@ async function resolveDieTriageSpecs(
     ups: ups ?? 0,
     awRef: awRef || '—',
     cartonSize: cartonSize.trim() || '—',
-    pastingType,
+    pastingStyle,
     dieMake,
     triageDyeType,
     sourceDieMasterId,
@@ -421,7 +429,7 @@ export async function POST(req: NextRequest) {
           sheetSize: dieTriageSpec.sheetSize,
           cartonSize: dieTriageSpec.cartonSize,
           custodyStatus: CUSTODY_HUB_TRIAGE,
-          pastingType: dieTriageSpec.pastingType,
+          pastingStyle: dieTriageSpec.pastingStyle,
           dieMake: dieTriageSpec.dieMake,
           ...(dims ?? {}),
         },

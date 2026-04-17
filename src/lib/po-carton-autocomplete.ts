@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import type { PastingStyle } from '@prisma/client'
 
 /** Shape returned from `GET /api/cartons` and used by PO line-item autocomplete. */
 export type PoCartonCatalogItem = {
@@ -20,7 +21,9 @@ export type PoCartonCatalogItem = {
   backPrint?: string | null
   dyeId?: string | null
   dieMasterId?: string | null
-  /** Label from Die Master (`pastingType` or `dyeType`). */
+  /** Product master pasting (canonical). */
+  pastingStyle?: PastingStyle | null
+  /** Label from Die Master (`pastingStyle` or `dyeType`). */
   masterDieType?: string | null
   toolingDimsLabel?: string | null
   toolingUnlinked?: boolean
@@ -47,6 +50,7 @@ export function mapApiRowToPoCarton(raw: Record<string, unknown>): PoCartonCatal
     backPrint: (raw.backPrint as string | null | undefined) ?? null,
     dyeId: (raw.dyeId as string | null | undefined) ?? null,
     dieMasterId: (raw.dieMasterId as string | null | undefined) ?? null,
+    pastingStyle: (raw.pastingStyle as PastingStyle | null | undefined) ?? null,
     masterDieType: (raw.masterDieType as string | null | undefined) ?? null,
     toolingDimsLabel: (raw.toolingDimsLabel as string | null | undefined) ?? null,
     toolingUnlinked: raw.toolingUnlinked === true,

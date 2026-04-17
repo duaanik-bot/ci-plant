@@ -57,29 +57,15 @@ export const PRINTING_TYPES = [
   'Gravure',
 ]
 
-export const PASTING_TYPES = [
-  'Single wall',
-  'Double wall',
-  'Straight line',
-  'Crash lock',
-  'Lock bottom',
-  'Window pasting',
-  'None',
-]
+/** @deprecated Prefer Product Master `pastingStyle` (Lock Bottom, BSO, Special). */
+export const PASTING_TYPES = ['Lock Bottom', 'BSO', 'Special']
 
 export const DYE_CONDITIONS = ['Old', 'New']
 
 export const BOARD_GRADES = ['SBS', 'FBB', 'Duplex', 'Art Card', 'Kraft', 'Metpet', 'Cup Stock']
 
-export const CARTON_CONSTRUCTIONS = [
-  'Straight Tuck End',
-  'Reverse Tuck End',
-  'Lock Bottom',
-  'Crash Lock',
-  'Seal End',
-  'Tuck Top Snap Lock',
-  'Auto Bottom',
-]
+/** @deprecated Align with `PastingStyle` on Product Master. */
+export const CARTON_CONSTRUCTIONS = ['Lock Bottom', 'BSO', 'Special']
 
 export const GLUE_TYPES = ['Hot Melt', 'Cold Glue', 'PVA', 'EVA', 'None']
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { PastingStyle } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
@@ -21,11 +22,17 @@ const lineItemUpdateSchema = purchaseOrderSchema.shape.lineItems.element.extend(
   remarks: z.string().optional(),
   setNumber: z.string().optional(),
   planningStatus: z.string().optional(),
-  specOverrides: z.object({
-    wastagePct: z.number().optional(),
-    boardGrade: z.string().optional(),
-    foilType: z.string().optional(),
-  }).optional().nullable(),
+  specOverrides: z
+    .object({
+      wastagePct: z.number().optional(),
+      boardGrade: z.string().optional(),
+      foilType: z.string().optional(),
+      pastingStyle: z.nativeEnum(PastingStyle).optional(),
+      pastingType: z.string().optional(),
+    })
+    .passthrough()
+    .optional()
+    .nullable(),
 })
 
 const updateSchema = purchaseOrderSchema.partial().omit({

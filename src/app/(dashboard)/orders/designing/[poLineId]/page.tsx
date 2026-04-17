@@ -21,7 +21,9 @@ import {
   validatePayload,
 } from '@/lib/validate-hub-payload'
 import { safeJsonStringify } from '@/lib/safe-json'
-import { masterDieTypeLabel, normalizeDieTypeKey } from '@/lib/master-die-type'
+import { PastingStyle } from '@prisma/client'
+import { masterDieTypeLabel } from '@/lib/master-die-type'
+import { coercePastingStyleInput, pastingStyleLabel } from '@/lib/pasting-style'
 
 type SpecOverrides = {
   assignedDesignerId?: string
@@ -56,7 +58,7 @@ type CartonMasterDims = {
     id: string
     dyeNumber: number
     dyeType: string
-    pastingType: string | null
+    pastingStyle: PastingStyle | null
   } | null
 } | null
 
@@ -556,16 +558,20 @@ export default function DesigningDetailPage() {
     const body = buildToolingBody('die', true)
     if (!assertDieHubPayload(body)) return
     const dm = data.line.carton?.dieMaster
-    const userPaste = String(data.line.specOverrides?.pastingType ?? '').trim()
-    if (dm && userPaste) {
-      const ma = normalizeDieTypeKey(masterDieTypeLabel(dm))
-      const ub = normalizeDieTypeKey(userPaste)
-      if (ma && ub && ma !== ub) {
-        toast.error(
-          `Conflict: Master Die #${dm.dyeNumber} is listed as [${masterDieTypeLabel(dm)}]. You are entering [${userPaste}].`,
-        )
-        return
-      }
+    const userPaste =
+      coercePastingStyleInput(data.line.specOverrides?.pastingStyle) ??
+      coercePastingStyleInput(data.line.specOverrides?.pastingType)
+    if (
+      dm &&
+      userPaste &&
+      dm.pastingStyle != null &&
+      dm.pastingStyle !== PastingStyle.SPECIAL &&
+      userPaste !== dm.pastingStyle
+    ) {
+      toast.error(
+        `Conflict: Master Die #${dm.dyeNumber} is listed as [${pastingStyleLabel(dm.pastingStyle)}]. You are entering [${pastingStyleLabel(userPaste)}].`,
+      )
+      return
     }
     setSavingDesignerCommand(true)
     try {

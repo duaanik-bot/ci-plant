@@ -10,6 +10,8 @@ import {
   parseCartonSizeToDims,
   prismaDimsFromParsed,
 } from '@/lib/die-hub-dimensions'
+import { PastingStyle } from '@prisma/client'
+import { PO_MANUAL_PASTING_VALUES } from '@/lib/pasting-style'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +22,7 @@ const bodySchema = z.object({
   ups: z.coerce.number().int().min(1).max(64).optional(),
   dieMaterial: z.string().max(80).optional(),
   dyeType: z.string().max(80).optional(),
-  pastingType: z.string().max(64).optional().nullable(),
+  pastingStyle: z.nativeEnum(PastingStyle).optional(),
   dieMake: z.enum(['local', 'laser']).optional(),
   /** `live_inventory` = + Add Die (rack). Default = Outside vendor lane. */
   hubDestination: z.enum(['vendor', 'live_inventory']).optional().default('vendor'),
@@ -44,10 +46,12 @@ export async function POST(req: NextRequest) {
       ups,
       dieMaterial,
       dyeType,
-      pastingType,
+      pastingStyle: pastingStyleIn,
       dieMake,
       hubDestination,
     } = parsed.data
+    const pastingStyle =
+      pastingStyleIn && PO_MANUAL_PASTING_VALUES.includes(pastingStyleIn) ? pastingStyleIn : null
     const existing = await db.dye.findUnique({ where: { dyeNumber } })
     if (existing) {
       return NextResponse.json(
@@ -69,7 +73,7 @@ export async function POST(req: NextRequest) {
           cartonSize: cartonSize.trim(),
           dieMaterial: dieMaterial?.trim() || null,
           custodyStatus: custody,
-          pastingType: pastingType?.trim() || null,
+          pastingStyle,
           dieMake: normalizeDieMake(dieMake),
           ...(dims ?? {}),
         },

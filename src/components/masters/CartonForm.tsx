@@ -5,10 +5,11 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { cityFromAddress } from '@/lib/customer-address'
+import type { PastingStyle } from '@prisma/client'
+import { PASTING_STYLE_ORDER, pastingStyleLabel } from '@/lib/pasting-style'
 
 const PRINTING_TYPES = ['Offset', 'Metallic']
 const BOARD_GRADES = ['FBB', 'SAFFIRE', 'WB DUplex', 'GB Duples', 'CFBB', 'Artcard', 'Maplitho']
-const PASTING_TYPES = ['BSO', 'Lock Bottom']
 const COATING_SPECS = ['Aq. Varnish (Window)', 'Dripp Off (Window)', 'UV (Window)']
 
 type Customer = { id: string; name: string; address?: string | null; city?: string | null }
@@ -67,7 +68,8 @@ export type CartonFormData = {
   finishedLength: string
   finishedWidth: string
   finishedHeight: string
-  pastingType: string
+  /** `PastingStyle` enum value or empty when unset. */
+  pastingStyle: string
   boardGrade: string
   gsm: string
   printingType: string
@@ -93,7 +95,7 @@ const EMPTY: CartonFormData = {
   finishedLength: '',
   finishedWidth: '',
   finishedHeight: '',
-  pastingType: '',
+  pastingStyle: '',
   boardGrade: '',
   gsm: '',
   printingType: '',
@@ -370,7 +372,9 @@ export default function CartonForm({ mode, initialData }: Props) {
       finishedLength: f.finishedLength ? Number(f.finishedLength) : undefined,
       finishedWidth: f.finishedWidth ? Number(f.finishedWidth) : undefined,
       finishedHeight: f.finishedHeight ? Number(f.finishedHeight) : undefined,
-      pastingType: f.pastingType || undefined,
+      pastingStyle: f.pastingStyle
+        ? (f.pastingStyle as PastingStyle)
+        : null,
       boardGrade: f.boardGrade || undefined,
       gsm: toOptionalInt(f.gsm),
       printingType: f.printingType || undefined,
@@ -579,10 +583,12 @@ export default function CartonForm({ mode, initialData }: Props) {
                 </div>
               </div>
               <div>
-                <label className='block text-slate-400 mb-1'>Pasting Type</label>
-                <select className={cls} value={f.pastingType} onChange={(e) => patch('pastingType', e.target.value)}>
+                <label className='block text-slate-400 mb-1'>Pasting style</label>
+                <select className={cls} value={f.pastingStyle} onChange={(e) => patch('pastingStyle', e.target.value)}>
                   <option value=''>Select...</option>
-                  {PASTING_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
+                  {PASTING_STYLE_ORDER.map((p) => (
+                    <option key={p} value={p}>{pastingStyleLabel(p)}</option>
+                  ))}
                 </select>
               </div>
               <div className='md:col-span-1'>

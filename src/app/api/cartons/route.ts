@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
           id: true,
           dyeNumber: true,
           dyeType: true,
-          pastingType: true,
+          pastingStyle: true,
           dimLengthMm: true,
           dimWidthMm: true,
           dimHeightMm: true,
@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
           id: true,
           dyeNumber: true,
           dyeType: true,
-          pastingType: true,
+          pastingStyle: true,
           dimLengthMm: true,
           dimWidthMm: true,
           dimHeightMm: true,
@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
     const masterDieType = effectiveMaster
       ? masterDieTypeLabel({
           dyeType: effectiveMaster.dyeType,
-          pastingType: effectiveMaster.pastingType,
+          pastingStyle: effectiveMaster.pastingStyle,
         })
       : ''
     return {
@@ -120,7 +120,7 @@ export async function GET(req: NextRequest) {
       finishedLength: c.finishedLength != null ? Number(c.finishedLength) : null,
       finishedWidth: c.finishedWidth != null ? Number(c.finishedWidth) : null,
       finishedHeight: c.finishedHeight != null ? Number(c.finishedHeight) : null,
-      cartonConstruct: c.cartonConstruct,
+      pastingStyle: c.pastingStyle,
       drugSchedule: c.drugSchedule,
       regulatoryText: c.regulatoryText,
       specialInstructions: c.specialInstructions,

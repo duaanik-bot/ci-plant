@@ -1,21 +1,12 @@
+import type { PastingStyle } from '@prisma/client'
 import { Prisma } from '@prisma/client'
 import { masterDieTypeLabel, normalizeDieTypeKey } from '@/lib/master-die-type'
+import { DIE_HUB_PASTING_TYPES as _DIE_HUB_PASTING_TYPES_EXPORT } from '@/lib/pasting-style'
 
 export type ParsedCartonDims = { l: number; w: number; h: number }
 
-/** Options shown on Die Hub add / triage forms. */
-export const DIE_HUB_PASTING_TYPES = [
-  'Lock Bottom',
-  'Registered tuck flap',
-  'Side Paste',
-  'BSO',
-  'Crash lock',
-  'Straight line',
-  'Window pasting',
-  'Single wall',
-  'Double wall',
-  'None',
-] as const
+/** Re-export: Die Hub manual vendor — LOCK_BOTTOM | BSO only. */
+export const DIE_HUB_PASTING_TYPES = _DIE_HUB_PASTING_TYPES_EXPORT
 
 export function normalizeDieMake(v: string | null | undefined): 'local' | 'laser' {
   const s = (v ?? '').trim().toLowerCase()
@@ -89,7 +80,7 @@ export function buildDieSimilarityBuckets(
     dimLengthMm: unknown
     dimWidthMm: unknown
     dimHeightMm: unknown
-    pastingType: string | null
+    pastingStyle: PastingStyle | null
     location: string | null
     impressionCount: number
     reuseCount: number
@@ -99,7 +90,7 @@ export function buildDieSimilarityBuckets(
   for (const r of rows) {
     if (r.dimLengthMm == null || r.dimWidthMm == null || r.dimHeightMm == null) continue
     const typeKey = normalizeDieTypeKey(
-      masterDieTypeLabel({ dyeType: r.dyeType, pastingType: r.pastingType }),
+      masterDieTypeLabel({ dyeType: r.dyeType, pastingStyle: r.pastingStyle }),
     )
     const k = `${String(r.dimLengthMm)}|${String(r.dimWidthMm)}|${String(r.dimHeightMm)}|${typeKey}`
     const ent: DieSimilarIndexEntry = {
@@ -122,12 +113,12 @@ export function similarDiesForRow(
   dimWidthMm: unknown,
   dimHeightMm: unknown,
   dyeType: string,
-  pastingType: string | null | undefined,
+  pastingStyle: PastingStyle | null | undefined,
   buckets: Map<string, DieSimilarIndexEntry[]>,
 ): DieSimilarIndexEntry[] {
   if (dimLengthMm == null || dimWidthMm == null || dimHeightMm == null) return []
   const typeKey = normalizeDieTypeKey(
-    masterDieTypeLabel({ dyeType, pastingType: pastingType ?? null }),
+    masterDieTypeLabel({ dyeType, pastingStyle: pastingStyle ?? null }),
   )
   const k = `${String(dimLengthMm)}|${String(dimWidthMm)}|${String(dimHeightMm)}|${typeKey}`
   return (buckets.get(k) ?? []).filter((e) => e.id !== id)
@@ -144,7 +135,7 @@ export function buildDieDimensionOnlyBuckets(
     dimLengthMm: unknown
     dimWidthMm: unknown
     dimHeightMm: unknown
-    pastingType: string | null
+    pastingStyle: PastingStyle | null
     location: string | null
     impressionCount: number
     reuseCount: number
@@ -153,7 +144,7 @@ export function buildDieDimensionOnlyBuckets(
   const buckets = new Map<string, DieDimBucketEntry[]>()
   for (const r of rows) {
     if (r.dimLengthMm == null || r.dimWidthMm == null || r.dimHeightMm == null) continue
-    const typeLabel = masterDieTypeLabel({ dyeType: r.dyeType, pastingType: r.pastingType })
+    const typeLabel = masterDieTypeLabel({ dyeType: r.dyeType, pastingStyle: r.pastingStyle })
     const typeKey = normalizeDieTypeKey(typeLabel)
     const k = `${String(r.dimLengthMm)}|${String(r.dimWidthMm)}|${String(r.dimHeightMm)}`
     const ent: DieDimBucketEntry = {
@@ -179,12 +170,12 @@ export function typeMismatchDiesForRow(
   dimWidthMm: unknown,
   dimHeightMm: unknown,
   dyeType: string,
-  pastingType: string | null | undefined,
+  pastingStyle: PastingStyle | null | undefined,
   dimBuckets: Map<string, DieDimBucketEntry[]>,
 ): DieDimBucketEntry[] {
   if (dimLengthMm == null || dimWidthMm == null || dimHeightMm == null) return []
   const myKey = normalizeDieTypeKey(
-    masterDieTypeLabel({ dyeType, pastingType: pastingType ?? null }),
+    masterDieTypeLabel({ dyeType, pastingStyle: pastingStyle ?? null }),
   )
   const k = `${String(dimLengthMm)}|${String(dimWidthMm)}|${String(dimHeightMm)}`
   const list = dimBuckets.get(k) ?? []

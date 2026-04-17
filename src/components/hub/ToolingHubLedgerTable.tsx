@@ -2,11 +2,14 @@
 
 import { useState } from 'react'
 import { format, formatDistanceToNow } from 'date-fns'
-import { hubLastActionLine } from '@/lib/hub-card-time'
+import type { PastingStyle } from '@prisma/client'
 import type { ToolingLedgerZoneKey } from '@/lib/tooling-hub-zones'
+import { pastingStyleLabel } from '@/lib/pasting-style'
+import { hubLastActionLine } from '@/lib/hub-card-time'
 import type { ToolingHubAuditContext } from '@/components/hub/ToolingJobAuditModal'
 import { DieMakeSwitcher } from '@/components/hub/die/DieMakeSwitcher'
 import { SimilarDiesModal, type SimilarDieMatch } from '@/components/hub/die/SimilarDiesModal'
+import { PastingStyleBadge } from '@/components/hub/PastingStyleBadge'
 
 export type ToolingSimilarMatch = SimilarDieMatch
 
@@ -25,8 +28,9 @@ export type ToolingLedgerRow = {
   ledgerRank?: number
   dimensionsLwh?: string
   ups?: number
-  pastingType?: string | null
-  /** Die Master display label (pastingType + dyeType); preferred over `pastingType` in ledger. */
+  pastingStyle?: PastingStyle | null
+  hubPastingNeedsMasterUpdate?: boolean
+  /** Die Master display label (pasting emphasis). */
   masterType?: string | null
   dieMake?: 'local' | 'laser'
   dateOfManufacturing?: string | null
@@ -45,9 +49,18 @@ export function getFilteredToolingLedgerRows(
   rows: ToolingLedgerRow[],
   searchQuery: string,
   zoneFilter: string,
+  /** Die Hub: restrict to Lock Bottom or BSO when set. */
+  pastingStyleFilter?: PastingStyle | null,
 ): ToolingLedgerRow[] {
   const q = searchQuery.trim().toLowerCase()
   return rows.filter((r) => {
+    if (
+      pastingStyleFilter &&
+      r.kind === 'die' &&
+      r.pastingStyle !== pastingStyleFilter
+    ) {
+      return false
+    }
     if (zoneFilter === 'maintenance_needed') {
       if (r.kind !== 'die' || !r.hubConditionPoor) return false
     } else if (zoneFilter && r.zoneKey !== zoneFilter) {
@@ -61,7 +74,7 @@ export function getFilteredToolingLedgerRows(
             r.specSummary,
             r.zoneLabel,
             r.dimensionsLwh,
-            r.pastingType,
+            pastingStyleLabel(r.pastingStyle),
             r.masterType,
             r.dieMake,
           ]
@@ -103,6 +116,7 @@ export function ToolingHubLedgerTable({
   rows,
   searchQuery,
   zoneFilter,
+  pastingStyleFilter,
   onOpenAudit,
   hubMode,
   onDieDataChanged,
@@ -111,12 +125,18 @@ export function ToolingHubLedgerTable({
   rows: ToolingLedgerRow[]
   searchQuery: string
   zoneFilter: string
+  pastingStyleFilter?: PastingStyle | null
   onOpenAudit: (ctx: ToolingHubAuditContext) => void
   hubMode: 'dies' | 'blocks'
   onDieDataChanged?: () => void
   dieMakeDisabled?: boolean
 }) {
-  const filtered = getFilteredToolingLedgerRows(rows, searchQuery, zoneFilter)
+  const filtered = getFilteredToolingLedgerRows(
+    rows,
+    searchQuery,
+    zoneFilter,
+    hubMode === 'dies' ? pastingStyleFilter : null,
+  )
   const [similarModal, setSimilarModal] = useState<{
     sourceLabel: string
     sourceDieType?: string
@@ -295,8 +315,24 @@ export function ToolingHubLedgerTable({
                     <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums font-semibold whitespace-nowrap">
                       {r.kind === 'die' ? (r.ups ?? '—') : '—'}
                     </td>
-                    <td className="px-2 py-1.5 text-[11px] text-zinc-300 max-w-[100px] truncate">
-                      {r.kind === 'die' ? r.masterType?.trim() || '—' : '—'}
+                    <td className="px-2 py-1.5 text-[11px] text-zinc-300 max-w-[140px] min-w-0">
+                      {r.kind === 'die' ? (
+                        <div className="flex flex-col gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <PastingStyleBadge value={r.pastingStyle} />
+                            {r.hubPastingNeedsMasterUpdate ? (
+                              <span className="inline-flex items-center rounded border border-amber-500/70 bg-amber-950/50 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-amber-200 whitespace-nowrap">
+                                Master update
+                              </span>
+                            ) : null}
+                          </div>
+                          <span className="truncate text-zinc-400">
+                            {r.masterType?.trim() || '—'}
+                          </span>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="px-2 py-1.5 whitespace-nowrap">
                       {r.kind === 'die' && r.dieMake ? (

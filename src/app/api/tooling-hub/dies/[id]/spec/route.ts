@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { PastingStyle } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { normalizeDieMake } from '@/lib/die-hub-dimensions'
@@ -9,9 +10,9 @@ export const dynamic = 'force-dynamic'
 const patchSchema = z
   .object({
     dieMake: z.enum(['local', 'laser']).optional(),
-    pastingType: z.string().min(1).max(64).optional().nullable(),
+    pastingStyle: z.nativeEnum(PastingStyle).optional().nullable(),
   })
-  .refine((b) => b.dieMake !== undefined || b.pastingType !== undefined, {
+  .refine((b) => b.dieMake !== undefined || b.pastingStyle !== undefined, {
     message: 'No changes',
   })
 
@@ -39,19 +40,18 @@ export async function PATCH(
       return NextResponse.json({ error: 'Die not found' }, { status: 404 })
     }
 
-    const data: { dieMake?: string; pastingType?: string | null } = {}
+    const data: { dieMake?: string; pastingStyle?: PastingStyle | null } = {}
     if (parsed.data.dieMake !== undefined) {
       data.dieMake = normalizeDieMake(parsed.data.dieMake)
     }
-    if (parsed.data.pastingType !== undefined) {
-      const t = parsed.data.pastingType?.trim()
-      data.pastingType = t && t.length > 0 ? t : null
+    if (parsed.data.pastingStyle !== undefined) {
+      data.pastingStyle = parsed.data.pastingStyle
     }
 
     const updated = await db.dye.update({
       where: { id: row.id },
       data,
-      select: { id: true, dieMake: true, pastingType: true },
+      select: { id: true, dieMake: true, pastingStyle: true },
     })
 
     await createAuditLog({
@@ -66,7 +66,7 @@ export async function PATCH(
       ok: true,
       id: updated.id,
       dieMake: normalizeDieMake(updated.dieMake),
-      pastingType: updated.pastingType,
+      pastingStyle: updated.pastingStyle,
     })
   } catch (e) {
     console.error('[tooling-hub/dies/spec]', e)

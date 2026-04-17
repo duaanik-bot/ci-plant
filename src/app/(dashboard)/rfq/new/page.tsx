@@ -6,6 +6,8 @@ import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { DRUG_SCHEDULES, COATING_TYPES, LAMINATE_TYPES, FOIL_TYPES, EMBOSSING_TYPES, CARTON_CONSTRUCTIONS, BARCODE_TYPES } from '@/lib/constants'
+import type { PastingStyle } from '@prisma/client'
+import { pastingStyleLabel } from '@/lib/pasting-style'
 
 type Customer = {
   id: string
@@ -30,7 +32,7 @@ type CartonTemplate = {
   foilType?: string | null
   laminateType?: string | null
   embossingLeafing?: string | null
-  cartonConstruct?: string | null
+  pastingStyle?: PastingStyle | null
   barcodeType?: string | null
   artworkCode?: string | null
   finishedLength?: number | null
@@ -272,7 +274,10 @@ export default function NewRfqPage() {
       lamination: carton.laminateType ?? prev.lamination,
       foil: carton.foilType ?? prev.foil,
       embossing: carton.embossingLeafing ?? prev.embossing,
-      construction: carton.cartonConstruct ?? prev.construction,
+      construction:
+        carton.pastingStyle != null
+          ? pastingStyleLabel(carton.pastingStyle)
+          : prev.construction,
       barcodeType: carton.barcodeType ?? prev.barcodeType,
       sizeL: carton.finishedLength != null ? String(carton.finishedLength) : prev.sizeL,
       sizeW: carton.finishedWidth != null ? String(carton.finishedWidth) : prev.sizeW,

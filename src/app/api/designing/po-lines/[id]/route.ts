@@ -38,7 +38,7 @@ export async function GET(
               id: true,
               dyeNumber: true,
               dyeType: true,
-              pastingType: true,
+              pastingStyle: true,
               dimLengthMm: true,
               dimWidthMm: true,
               dimHeightMm: true,

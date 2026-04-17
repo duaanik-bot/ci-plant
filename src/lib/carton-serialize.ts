@@ -1,6 +1,7 @@
 import type { Carton, Customer, Dye } from '@prisma/client'
 import { masterDieTypeLabel } from '@/lib/master-die-type'
 import { formatDimsLwhFromDb, parseCartonSizeToDims, formatDimsLwhFromParsed } from '@/lib/die-hub-dimensions'
+import { pastingStyleLabel } from '@/lib/pasting-style'
 
 export type CartonWithCustomerDye = Carton & {
   customer: Customer
@@ -32,8 +33,9 @@ function toolingDimsLabel(die: Dye | null): string {
 export function serializeCarton(row: CartonWithCustomerDye) {
   const dm = row.dieMaster
   const masterLabel = dm
-    ? masterDieTypeLabel({ dyeType: dm.dyeType, pastingType: dm.pastingType })
+    ? masterDieTypeLabel({ dyeType: dm.dyeType, pastingStyle: dm.pastingStyle })
     : ''
+  const pasteLabel = row.pastingStyle != null ? pastingStyleLabel(row.pastingStyle) : ''
   return {
     id: row.id,
     cartonName: row.cartonName,
@@ -46,7 +48,9 @@ export function serializeCarton(row: CartonWithCustomerDye) {
     active: row.active,
     remarks: row.remarks ?? '',
     printingType: row.printingType ?? '',
-    pastingType: row.cartonConstruct ?? '',
+    /** Form field `pastingType` — human label for backward-compatible UIs. */
+    pastingType: pasteLabel,
+    pastingStyle: row.pastingStyle,
     boardGrade: row.boardGrade,
     gsm: row.gsm,
     caliperMicrons: row.caliperMicrons,
@@ -62,7 +66,6 @@ export function serializeCarton(row: CartonWithCustomerDye) {
     coatingType: row.coatingType,
     foilType: row.foilType,
     embossingLeafing: row.embossingLeafing,
-    cartonConstruct: row.cartonConstruct,
     glueType: row.glueType,
     dyeId: row.dyeId,
     dieMasterId: row.dieMasterId,
@@ -77,10 +80,10 @@ export function serializeCarton(row: CartonWithCustomerDye) {
             id: dm.id,
             dyeNumber: dm.dyeNumber,
             dyeType: dm.dyeType,
-            pastingType: dm.pastingType,
+            pastingStyle: dm.pastingStyle,
             masterTypeLabel: masterDieTypeLabel({
               dyeType: dm.dyeType,
-              pastingType: dm.pastingType,
+              pastingStyle: dm.pastingStyle,
             }),
             dimensionsLwh: toolingDimsLabel(dm) || null,
           }
