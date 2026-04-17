@@ -35,6 +35,12 @@ const lineItemSchema = purchaseOrderSchema.shape.lineItems.element.extend({
   remarks: z.string().optional(),
   setNumber: z.string().optional(),
   specOverrides: specOverridesSchema,
+  dieMasterId: z.string().uuid().optional().nullable(),
+  toolingLocked: z.boolean().optional(),
+  lineDieType: z.string().optional().nullable(),
+  dimLengthMm: z.coerce.number().optional().nullable(),
+  dimWidthMm: z.coerce.number().optional().nullable(),
+  dimHeightMm: z.coerce.number().optional().nullable(),
 })
 
 const createSchema = purchaseOrderSchema.omit({
@@ -195,6 +201,12 @@ export async function POST(req: NextRequest) {
               dyeId: li.dyeId || null,
               remarks: li.remarks || null,
               setNumber: li.setNumber || null,
+              dieMasterId: li.dieMasterId || null,
+              toolingLocked: li.toolingLocked ?? true,
+              lineDieType: li.lineDieType || null,
+              dimLengthMm: li.dimLengthMm ?? null,
+              dimWidthMm: li.dimWidthMm ?? null,
+              dimHeightMm: li.dimHeightMm ?? null,
               specOverrides:
                 li.specOverrides && Object.keys(li.specOverrides).length > 0
                   ? (li.specOverrides as object)

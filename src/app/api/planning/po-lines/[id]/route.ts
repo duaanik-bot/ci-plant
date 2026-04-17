@@ -10,6 +10,12 @@ const updateSchema = z.object({
   artworkCode: z.string().optional().nullable(),
   planningStatus: z.string().optional(),
   specOverrides: z.any().optional(),
+  dieMasterId: z.string().uuid().optional().nullable(),
+  toolingLocked: z.boolean().optional(),
+  lineDieType: z.string().optional().nullable(),
+  dimLengthMm: z.coerce.number().optional().nullable(),
+  dimWidthMm: z.coerce.number().optional().nullable(),
+  dimHeightMm: z.coerce.number().optional().nullable(),
 })
 
 export async function GET(
@@ -61,6 +67,14 @@ export async function PATCH(
       ...(data.artworkCode !== undefined ? { artworkCode: data.artworkCode || null } : {}),
       ...(data.planningStatus !== undefined ? { planningStatus: data.planningStatus } : {}),
       ...(data.specOverrides !== undefined ? { specOverrides: data.specOverrides as any } : {}),
+      ...(data.dieMasterId !== undefined
+        ? { dieMasterId: data.dieMasterId || null }
+        : {}),
+      ...(data.toolingLocked !== undefined ? { toolingLocked: data.toolingLocked } : {}),
+      ...(data.lineDieType !== undefined ? { lineDieType: data.lineDieType || null } : {}),
+      ...(data.dimLengthMm !== undefined ? { dimLengthMm: data.dimLengthMm } : {}),
+      ...(data.dimWidthMm !== undefined ? { dimWidthMm: data.dimWidthMm } : {}),
+      ...(data.dimHeightMm !== undefined ? { dimHeightMm: data.dimHeightMm } : {}),
     },
   })
 

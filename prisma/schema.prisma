@@ -197,6 +197,8 @@ model Job {
   id                 String    @id @default(uuid())
   jobNumber          String    @unique @map("job_number") @db.VarChar(30) // CI-JOB-YYYY-NNNN
   customerId         String    @map("customer_id")
+  /// Canonical die master for this job (from PO / product master).
+  dieMasterId        String?   @map("die_master_id")
   productName        String    @map("product_name") @db.VarChar(200)
   qtyOrdered         Int       @map("qty_ordered")
   qtyProducedGood    Int       @default(0) @map("qty_produced_good")
@@ -216,6 +218,7 @@ model Job {
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
   customer   Customer  @relation(fields: [customerId], references: [id])
+  dieMaster  Dye?      @relation("JobDieMaster", fields: [dieMasterId], references: [id])
   creator    User      @relation("JobCreator", fields: [createdBy], references: [id])
   closer     User?     @relation("JobCloser", fields: [closedBy], references: [id])
   artwork    Artwork?  @relation(fields: [artworkId], references: [id])
@@ -562,6 +565,7 @@ model Carton {
   barcodeType      String?  @map("barcode_type")
   barcodePosition  String?  @map("barcode_position")
   artworkCode      String?  @map("artwork_code")
+  printingType     String?  @map("printing_type")
   /// Default plate sheet size for new plate requirements (optional).
   plateSize        PlateSize? @map("plate_size")
   // FINISHING
@@ -576,6 +580,8 @@ model Carton {
   embossDepth      Decimal? @map("emboss_depth") @db.Decimal(4, 2)
   // CUTTING
   dyeId            String?  @map("dye_id")
+  /// Canonical Die Master (tooling type + dimensions source) for this product.
+  dieMasterId      String?  @map("die_master_id")
   cartonConstruct  String?  @map("carton_construct")
   creaseDepthMm    Decimal? @map("crease_depth_mm") @db.Decimal(4, 2)
   nickCount        Int?     @map("nick_count")
@@ -587,6 +593,7 @@ model Carton {
   // PHARMA COMPLIANCE
   drugSchedule     String?  @map("drug_schedule")
   regulatoryText   String?  @map("regulatory_text")
+  remarks          String?  @map("remarks")
   specialInstructions String? @map("special_instructions")
   iso9001Required  Boolean  @default(true)  @map("iso_9001_required")
   whoGmpRequired   Boolean  @default(false) @map("who_gmp_required")
@@ -604,9 +611,11 @@ model Carton {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   customer   Customer    @relation(fields: [customerId], references: [id])
-  dye        Dye?        @relation(fields: [dyeId], references: [id])
+  dye        Dye?        @relation("CartonWorkDye", fields: [dyeId], references: [id])
+  dieMaster  Dye?        @relation("CartonDieMaster", fields: [dieMasterId], references: [id])
   embossBlock EmbossBlock? @relation(fields: [embossBlockId], references: [id])
   plateStores PlateStore[]
+  poLineItems PoLineItem[]
 
   @@map("cartons")
 }
@@ -665,7 +674,11 @@ model Dye {
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  cartons          Carton[]
+  cartonsWork             Carton[]          @relation("CartonWorkDye")
+  cartonsAsDieMaster      Carton[]          @relation("CartonDieMaster")
+  poLinesAsDieMaster      PoLineItem[]      @relation("PoLineDieMaster")
+  jobsAsDieMaster         Job[]             @relation("JobDieMaster")
+  plateRequirementsMaster PlateRequirement[] @relation("PlateReqDieMaster")
   usageLogs        DyeUsageLog[]
   maintenanceLogs  DyeMaintenanceLog[]
   hubEvents        DieHubEvent[]
@@ -758,6 +771,13 @@ model PoLineItem {
   embossingLeafing String?       @map("embossing_leafing")
   paperType        String?       @map("paper_type")
   dyeId            String?       @map("dye_id")
+  /// Snapshot link to Die Master at PO entry (may match carton.dieMasterId).
+  dieMasterId      String?       @map("die_master_id")
+  toolingLocked    Boolean       @default(true) @map("tooling_locked")
+  lineDieType      String?       @map("line_die_type")
+  dimLengthMm      Decimal?      @map("dim_length_mm") @db.Decimal(12, 4)
+  dimWidthMm       Decimal?      @map("dim_width_mm") @db.Decimal(12, 4)
+  dimHeightMm      Decimal?      @map("dim_height_mm") @db.Decimal(12, 4)
   remarks          String?
   setNumber        String?       @map("set_number")
   jobCardNumber    Int?          @map("job_card_number")
@@ -765,7 +785,9 @@ model PoLineItem {
   specOverrides    Json?         @map("spec_overrides")
   createdAt        DateTime      @default(now()) @map("created_at")
 
-  po PurchaseOrder @relation(fields: [poId], references: [id])
+  po         PurchaseOrder @relation(fields: [poId], references: [id])
+  carton     Carton?       @relation(fields: [cartonId], references: [id])
+  dieMaster  Dye?          @relation("PoLineDieMaster", fields: [dieMasterId], references: [id])
 
   @@map("po_line_items")
 }
@@ -941,6 +963,7 @@ model PlateRequirement {
   id                 String    @id @default(uuid())
   requirementCode    String    @unique @map("requirement_code")
   jobCardId          String?   @map("job_card_id")
+  dieMasterId        String?   @map("die_master_id")
   cartonName         String    @map("carton_name")
   artworkCode        String?   @map("artwork_code")
   artworkVersion     String?   @map("artwork_version")
@@ -966,7 +989,8 @@ model PlateRequirement {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  hubEvents PlateHubEvent[]
+  hubEvents   PlateHubEvent[]
+  dieMaster   Dye?            @relation("PlateReqDieMaster", fields: [dieMasterId], references: [id])
 
   @@map("plate_requirements")
 }

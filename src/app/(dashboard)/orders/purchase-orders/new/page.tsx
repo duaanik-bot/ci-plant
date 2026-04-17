@@ -18,6 +18,7 @@ import {
 } from '@/lib/po-carton-autocomplete'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
+import { parseCartonSizeToDims } from '@/lib/die-hub-dimensions'
 
 type Customer = {
   id: string
@@ -48,6 +49,10 @@ type Line = {
   boardGrade: string
   foilType: string
   remarks: string
+  dieMasterId: string
+  toolingDieType: string
+  toolingDims: string
+  toolingUnlinked: boolean
 }
 
 type CartonLookupFieldProps = {
@@ -78,6 +83,10 @@ const defaultLine = (): Line => ({
   boardGrade: '',
   foilType: '',
   remarks: '',
+  dieMasterId: '',
+  toolingDieType: '',
+  toolingDims: '',
+  toolingUnlinked: false,
 })
 
 function hasLineInput(line: Line): boolean {
@@ -107,6 +116,10 @@ function resetAutofillFields(line: Line, cartonName: string): Line {
     paperType: '',
     boardGrade: '',
     foilType: '',
+    dieMasterId: '',
+    toolingDieType: '',
+    toolingDims: '',
+    toolingUnlinked: false,
   }
 }
 
@@ -356,10 +369,12 @@ export default function NewPurchaseOrderPage() {
 
   const applyCartonToLine = (idx: number, c: CartonOption) => {
     const decorations = deriveCartonDecorations(c)
+    const raw = (c.toolingDimsLabel || c.cartonSize || '').trim()
+    const sizeForLine = raw.replace(/x/gi, '×')
     updateLine(idx, {
       cartonId: c.id,
       cartonName: c.cartonName,
-      cartonSize: c.cartonSize || '',
+      cartonSize: sizeForLine,
       artworkCode: c.artworkCode || '',
       backPrint: c.backPrint || 'No',
       rate: c.rate != null ? String(c.rate) : '',
@@ -370,6 +385,10 @@ export default function NewPurchaseOrderPage() {
       paperType: c.paperType || '',
       boardGrade: c.boardGrade || '',
       foilType: decorations.foilType,
+      dieMasterId: c.dieMasterId || c.dyeId || '',
+      toolingDieType: c.masterDieType || '',
+      toolingDims: sizeForLine,
+      toolingUnlinked: !!c.toolingUnlinked,
     })
     setFieldErrors((prev) => {
       const next = { ...prev }
@@ -439,6 +458,8 @@ export default function NewPurchaseOrderPage() {
           lineItems: validLines.map((l) => {
             const qty = Number(l.quantity)
             const wastage = Number(l.wastagePct) || 0
+            const dimSrc = l.toolingDims.trim() || l.cartonSize.trim()
+            const td = parseCartonSizeToDims(dimSrc)
             return {
               cartonId: l.cartonId || undefined,
               cartonName: l.cartonName.trim(),
@@ -453,10 +474,18 @@ export default function NewPurchaseOrderPage() {
               embossingLeafing: l.embossingLeafing || undefined,
               paperType: l.paperType || undefined,
               remarks: l.remarks.trim() || undefined,
+              dieMasterId: l.dieMasterId.trim() || undefined,
+              toolingLocked: true,
+              lineDieType: l.toolingDieType.trim() || undefined,
+              dimLengthMm: td?.l,
+              dimWidthMm: td?.w,
+              dimHeightMm: td?.h,
               specOverrides: {
                 wastagePct: wastage,
                 boardGrade: l.boardGrade.trim() || undefined,
                 foilType: l.foilType.trim() || undefined,
+                masterDieType: l.toolingDieType.trim() || undefined,
+                dieMasterId: l.dieMasterId.trim() || undefined,
               },
             }
           }),
@@ -577,6 +606,10 @@ export default function NewPurchaseOrderPage() {
         artworkCode: created.artworkCode ?? null,
         backPrint: created.backPrint ?? 'No',
         dyeId: created.dyeId ?? null,
+        dieMasterId: (created as { dieMasterId?: string | null }).dieMasterId ?? null,
+        masterDieType: null,
+        toolingDimsLabel: cartonSizeStr || null,
+        toolingUnlinked: !(created as { dieMasterId?: string | null }).dieMasterId,
         specialInstructions: created.specialInstructions ?? null,
       }
       if (activeCartonLineIndex != null) {
@@ -731,11 +764,12 @@ export default function NewPurchaseOrderPage() {
         </div>
         {fieldErrors.lines && <p className="text-red-400 text-xs">{fieldErrors.lines}</p>}
         <div className="overflow-x-auto">
-          <table className="w-full text-left min-w-[1720px]">
+          <table className="w-full text-left min-w-[1900px]">
             <thead className="bg-slate-800 text-slate-300">
               <tr>
                 <th className="px-2 py-1">Carton name</th>
                 <th className="px-2 py-1">Size</th>
+                <th className="px-2 py-1">Die Type</th>
                 <th className="px-2 py-1">Qty*</th>
                 <th className="px-2 py-1">Artwork</th>
                 <th className="px-2 py-1">Back</th>
@@ -760,6 +794,7 @@ export default function NewPurchaseOrderPage() {
                 const gstPct = Number(ln.gstPct) || 0
                 const { beforeGst } = lineAmount(rate, qty, gstPct)
                 const amount = beforeGst
+                const dieTypeMissing = !!ln.cartonId && !ln.toolingDieType.trim()
                 return (
                   <tr key={idx} className="border-t border-slate-800">
                     <td className="px-2 py-1 align-top">
@@ -777,16 +812,42 @@ export default function NewPurchaseOrderPage() {
                           setQcCartonOpen(true)
                         }}
                       />
+                      {ln.cartonId && ln.toolingUnlinked ? (
+                        <p className="text-[10px] text-amber-400 font-semibold mt-1">Unlinked tooling</p>
+                      ) : null}
                     </td>
                     <td className="px-2 py-1">
                       <input
                         type="text"
                         value={ln.cartonSize}
-                        onChange={(e) => updateLine(idx, { cartonSize: e.target.value })}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          updateLine(idx, { cartonSize: v, toolingDims: v })
+                        }}
                         className={inputCls}
                         style={{ minWidth: '6rem', width: `${Math.max(6, (ln.cartonSize || '').length + 3) * 0.6}rem` }}
                         placeholder="L×W×H"
                       />
+                    </td>
+                    <td className="px-2 py-1 align-top min-w-[7rem] max-w-[11rem]">
+                      <div
+                        className={`rounded px-2 py-1 text-xs min-h-[1.75rem] flex flex-col justify-center ${
+                          dieTypeMissing
+                            ? 'bg-red-950/50 border border-red-600/70 text-red-100'
+                            : 'bg-slate-900/90 border border-slate-600/80 text-slate-200'
+                        }`}
+                      >
+                        {ln.toolingDieType.trim() ? (
+                          <span className="font-medium leading-snug">{ln.toolingDieType.trim()}</span>
+                        ) : ln.cartonId ? (
+                          <span className="text-slate-500">—</span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
+                      </div>
+                      {dieTypeMissing ? (
+                        <p className="text-[10px] text-red-400 mt-0.5 leading-tight">Define Die Type in Master.</p>
+                      ) : null}
                     </td>
                     <td className="px-2 py-1">
                       <input
@@ -867,7 +928,7 @@ export default function NewPurchaseOrderPage() {
             </tbody>
             <tfoot className="bg-slate-800 text-slate-200 font-medium">
               <tr>
-                <td colSpan={2} className="px-2 py-2">Total</td>
+                <td colSpan={3} className="px-2 py-2">Total</td>
                 <td className="px-2 py-2 tabular-nums">{totalQty}</td>
                 <td colSpan={5} />
                 <td className="px-2 py-2 tabular-nums">Subtotal ₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>

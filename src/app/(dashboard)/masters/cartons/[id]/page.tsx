@@ -48,6 +48,7 @@ export default function CartonEditPage() {
         finishedWidth: data.finishedWidth != null ? String(data.finishedWidth) : '',
         finishedHeight: data.finishedHeight != null ? String(data.finishedHeight) : '',
         specialInstructions: (data as any).specialInstructions ?? '',
+        dieMasterId: (data as { dieMasterId?: string }).dieMasterId ?? '',
         active: data.active,
       }}
     />

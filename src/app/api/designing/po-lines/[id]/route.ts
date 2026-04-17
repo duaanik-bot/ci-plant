@@ -26,11 +26,24 @@ export async function GET(
         where: { id: li.cartonId },
         select: {
           id: true,
+          dieMasterId: true,
+          dyeId: true,
           finishedLength: true,
           finishedWidth: true,
           finishedHeight: true,
           batchSpaceL: true,
           batchSpaceW: true,
+          dieMaster: {
+            select: {
+              id: true,
+              dyeNumber: true,
+              dyeType: true,
+              pastingType: true,
+              dimLengthMm: true,
+              dimWidthMm: true,
+              dimHeightMm: true,
+            },
+          },
         },
       })
     : null

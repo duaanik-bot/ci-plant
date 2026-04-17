@@ -19,6 +19,11 @@ export type PoCartonCatalogItem = {
   artworkCode?: string | null
   backPrint?: string | null
   dyeId?: string | null
+  dieMasterId?: string | null
+  /** Label from Die Master (`pastingType` or `dyeType`). */
+  masterDieType?: string | null
+  toolingDimsLabel?: string | null
+  toolingUnlinked?: boolean
   specialInstructions?: string | null
 }
 
@@ -41,6 +46,10 @@ export function mapApiRowToPoCarton(raw: Record<string, unknown>): PoCartonCatal
     artworkCode: (raw.artworkCode as string | null | undefined) ?? null,
     backPrint: (raw.backPrint as string | null | undefined) ?? null,
     dyeId: (raw.dyeId as string | null | undefined) ?? null,
+    dieMasterId: (raw.dieMasterId as string | null | undefined) ?? null,
+    masterDieType: (raw.masterDieType as string | null | undefined) ?? null,
+    toolingDimsLabel: (raw.toolingDimsLabel as string | null | undefined) ?? null,
+    toolingUnlinked: raw.toolingUnlinked === true,
     specialInstructions: (raw.specialInstructions as string | null | undefined) ?? null,
   }
 }

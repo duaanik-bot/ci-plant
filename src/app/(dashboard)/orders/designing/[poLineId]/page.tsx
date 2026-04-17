@@ -21,6 +21,7 @@ import {
   validatePayload,
 } from '@/lib/validate-hub-payload'
 import { safeJsonStringify } from '@/lib/safe-json'
+import { masterDieTypeLabel, normalizeDieTypeKey } from '@/lib/master-die-type'
 
 type SpecOverrides = {
   assignedDesignerId?: string
@@ -43,12 +44,20 @@ type SpecOverrides = {
 
 type CartonMasterDims = {
   id: string
+  dieMasterId?: string | null
+  dyeId?: string | null
   finishedLength: unknown
   finishedWidth: unknown
   finishedHeight: unknown
   /** Preprinted batch / pharma coding area (mm) from carton master */
   batchSpaceL?: unknown
   batchSpaceW?: unknown
+  dieMaster?: {
+    id: string
+    dyeNumber: number
+    dyeType: string
+    pastingType: string | null
+  } | null
 } | null
 
 type DesigningDetail = {
@@ -64,6 +73,9 @@ type DesigningDetail = {
     embossingLeafing: string | null
     artworkCode?: string | null
     dyeId?: string | null
+    dieMasterId?: string | null
+    toolingLocked?: boolean
+    lineDieType?: string | null
     setNumber: string | null
     planningStatus: string
     specOverrides: SpecOverrides
@@ -543,6 +555,18 @@ export default function DesigningDetailPage() {
     if (!data || !designerCommand.dieSource) return
     const body = buildToolingBody('die', true)
     if (!assertDieHubPayload(body)) return
+    const dm = data.line.carton?.dieMaster
+    const userPaste = String(data.line.specOverrides?.pastingType ?? '').trim()
+    if (dm && userPaste) {
+      const ma = normalizeDieTypeKey(masterDieTypeLabel(dm))
+      const ub = normalizeDieTypeKey(userPaste)
+      if (ma && ub && ma !== ub) {
+        toast.error(
+          `Conflict: Master Die #${dm.dyeNumber} is listed as [${masterDieTypeLabel(dm)}]. You are entering [${userPaste}].`,
+        )
+        return
+      }
+    }
     setSavingDesignerCommand(true)
     try {
       const res = await fetch('/api/tooling-hub/dispatch', {
@@ -1413,6 +1437,18 @@ export default function DesigningDetailPage() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm border-t border-slate-700 pt-3">
               <CartonDimensionsRow carton={line.carton} />
+              {line.cartonId && !line.carton?.dieMasterId ? (
+                <div className="sm:col-span-3 rounded border border-amber-700/50 bg-amber-950/40 px-2 py-1.5 text-[11px] text-amber-200">
+                  Unlinked tooling — this product has no Die Master in Product Master. Enter die specs manually
+                  and link a master when available.
+                </div>
+              ) : null}
+              {line.carton?.dieMaster ? (
+                <KV
+                  label="Die master"
+                  value={`#${line.carton.dieMaster.dyeNumber} · ${masterDieTypeLabel(line.carton.dieMaster)}`}
+                />
+              ) : null}
               <KV label="Paper" value={line.paperType || '-'} />
               <KV label="GSM" value={line.gsm ? String(line.gsm) : '-'} />
               <KV label="Coating" value={line.coatingType || '-'} />

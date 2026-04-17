@@ -19,13 +19,16 @@ import {
 } from '@/lib/tooling-hub-zones'
 import { EMBOSS_HUB_ACTION } from '@/lib/emboss-hub-events'
 import {
+  buildDieDimensionOnlyBuckets,
   buildDieSimilarityBuckets,
   formatDimsLwhFromDb,
   formatDimsLwhFromParsed,
   normalizeDieMake,
   parseCartonSizeToDims,
   similarDiesForRow,
+  typeMismatchDiesForRow,
 } from '@/lib/die-hub-dimensions'
+import { masterDieTypeLabel } from '@/lib/master-die-type'
 
 type EmbossTriageCardMeta = {
   triageManualEntry: boolean
@@ -41,6 +44,8 @@ export type DieSimilarMatchJson = {
   location: string | null
   impressionCount: number
   reuseCount: number
+  /** Present for type-mismatch rows: the other die’s master type label. */
+  dieTypeLabel?: string
 }
 
 export type ToolingHubLedgerRowJson = {
@@ -61,9 +66,12 @@ export type ToolingHubLedgerRowJson = {
   dimensionsLwh?: string
   ups?: number
   pastingType?: string | null
+  masterType?: string | null
   dieMake?: 'local' | 'laser'
   dateOfManufacturing?: string | null
   similarMatches?: DieSimilarMatchJson[]
+  /** Same L×W×H as this die, but a different master die type — not interchangeable. */
+  typeMismatchMatches?: DieSimilarMatchJson[]
 }
 
 function mapDie(d: {
@@ -90,7 +98,7 @@ function mapDie(d: {
   dieMake: string
   dateOfManufacturing: Date | null
   hubCustodySource: string | null
-  cartons: { cartonName: string }[]
+  cartonsWork: { cartonName: string }[]
 }) {
   const parsedDims = parseCartonSizeToDims(d.cartonSize)
   const dimensionsLwh =
@@ -107,7 +115,7 @@ function mapDie(d: {
     kind: 'die' as const,
     displayCode: `DYE-${d.dyeNumber}`,
     dyeNumber: d.dyeNumber,
-    title: d.cartons[0]?.cartonName ?? `Die #${d.dyeNumber}`,
+    title: d.cartonsWork[0]?.cartonName ?? `Die #${d.dyeNumber}`,
     ups: d.ups,
     dimensionsLabel: dimensionsLwh,
     dimensionsLwh,
@@ -123,6 +131,10 @@ function mapDie(d: {
     lastStatusUpdatedAt: d.updatedAt.toISOString(),
     createdAt: d.createdAt.toISOString(),
     pastingType: d.pastingType?.trim() || null,
+    masterType: masterDieTypeLabel({
+      dyeType: d.dyeType,
+      pastingType: d.pastingType,
+    }),
     dieMake: normalizeDieMake(d.dieMake),
     dateOfManufacturing: d.dateOfManufacturing ? d.dateOfManufacturing.toISOString() : null,
     hubCustodySource: d.hubCustodySource?.trim() || null,
@@ -186,10 +198,11 @@ export async function GET(req: NextRequest) {
       const rows = await db.dye.findMany({
         where: { active: true },
         orderBy: { dyeNumber: 'asc' },
-        include: { cartons: { take: 1, select: { cartonName: true } } },
+        include: { cartonsWork: { take: 1, select: { cartonName: true } } },
       })
       const mapped = rows.map(mapDie)
       const similarBuckets = buildDieSimilarityBuckets(rows)
+      const dimOnlyBuckets = buildDieDimensionOnlyBuckets(rows)
       const rankById = new Map(
         [...mapped].sort((a, b) => a.dyeNumber - b.dyeNumber).map((r, idx) => [r.id, idx + 1]),
       )
@@ -200,7 +213,18 @@ export async function GET(req: NextRequest) {
           raw.dimLengthMm,
           raw.dimWidthMm,
           raw.dimHeightMm,
+          raw.dyeType,
+          raw.pastingType,
           similarBuckets,
+        )
+        const mismatch = typeMismatchDiesForRow(
+          raw.id,
+          raw.dimLengthMm,
+          raw.dimWidthMm,
+          raw.dimHeightMm,
+          raw.dyeType,
+          raw.pastingType,
+          dimOnlyBuckets,
         )
         return {
           ...r,
@@ -211,6 +235,14 @@ export async function GET(req: NextRequest) {
             location: e.location,
             impressionCount: e.impressionCount,
             reuseCount: e.reuseCount,
+          })),
+          typeMismatchMatches: mismatch.map((e) => ({
+            id: e.id,
+            displayCode: `DYE-${e.dyeNumber}`,
+            location: e.location,
+            impressionCount: e.impressionCount,
+            reuseCount: e.reuseCount,
+            dieTypeLabel: e.typeLabel,
           })),
         }
       })
@@ -237,9 +269,11 @@ export async function GET(req: NextRequest) {
           dimensionsLwh: r.dimensionsLwh,
           ups: r.ups,
           pastingType: r.pastingType,
+          masterType: r.masterType,
           dieMake: r.dieMake,
           dateOfManufacturing: r.dateOfManufacturing,
           similarMatches: r.similarMatches,
+          typeMismatchMatches: r.typeMismatchMatches,
         }
       })
       return new NextResponse(

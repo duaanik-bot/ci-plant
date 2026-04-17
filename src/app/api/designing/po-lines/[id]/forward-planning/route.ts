@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { mergeOrchestrationIntoSpec, PLANNING_FLOW } from '@/lib/orchestration-spec'
+import { formatDimsLwhFromDb } from '@/lib/die-hub-dimensions'
+import { masterDieTypeLabel } from '@/lib/master-die-type'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +16,22 @@ export async function POST(
   if (error) return error
 
   const { id } = await context.params
-  const line = await db.poLineItem.findUnique({ where: { id } })
+  const line = await db.poLineItem.findUnique({
+    where: { id },
+    include: {
+      dieMaster: {
+        select: {
+          id: true,
+          dyeNumber: true,
+          dyeType: true,
+          pastingType: true,
+          dimLengthMm: true,
+          dimWidthMm: true,
+          dimHeightMm: true,
+        },
+      },
+    },
+  })
   if (!line) return NextResponse.json({ error: 'PO line not found' }, { status: 404 })
 
   const spec = (line.specOverrides as Record<string, unknown> | null) || {}
@@ -27,9 +44,30 @@ export async function POST(
   }
 
   const now = new Date().toISOString()
+  const dm = line.dieMaster
+  const dimsLwh =
+    dm != null
+      ? formatDimsLwhFromDb({
+          dimLengthMm: dm.dimLengthMm as { toString(): string } | null,
+          dimWidthMm: dm.dimWidthMm as { toString(): string } | null,
+          dimHeightMm: dm.dimHeightMm as { toString(): string } | null,
+        })
+      : null
+  const toolingBridge =
+    line.dieMasterId && dm
+      ? {
+          dieMasterId: line.dieMasterId,
+          masterDyeNumber: dm.dyeNumber,
+          masterDieType: masterDieTypeLabel({ dyeType: dm.dyeType, pastingType: dm.pastingType }),
+          dimensionsLwh: dimsLwh,
+        }
+      : line.dieMasterId
+        ? { dieMasterId: line.dieMasterId }
+        : null
   const nextSpec = mergeOrchestrationIntoSpec(spec, {
     planningFlowStatus: PLANNING_FLOW.forwarded,
     planningForwardedAt: now,
+    ...(toolingBridge ? { toolingFromMaster: toolingBridge } : {}),
   })
 
   const updated = await db.poLineItem.update({

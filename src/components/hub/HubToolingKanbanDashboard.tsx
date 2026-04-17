@@ -19,12 +19,12 @@ import { SimilarDiesModal, type SimilarDieMatch } from '@/components/hub/die/Sim
 import { DIE_HUB_PASTING_TYPES } from '@/lib/die-hub-dimensions'
 import { calculateToolingZoneMetrics, toolingCardUnits } from '@/lib/tooling-hub-metrics'
 import {
-  ToolingHubLedgerTable,
+  DieMasterLedger,
   TOOLING_LEDGER_ZONE_OPTIONS_BLOCKS,
   TOOLING_LEDGER_ZONE_OPTIONS_DIES,
-  getFilteredToolingLedgerRows,
-  type ToolingLedgerRow,
-} from '@/components/hub/ToolingHubLedgerTable'
+  getFilteredDieMasterLedgerRows,
+  type DieMasterLedgerRow,
+} from '@/components/hub/die/DieMasterLedger'
 import { ToolingJobAuditModal, type ToolingHubAuditContext } from '@/components/hub/ToolingJobAuditModal'
 import { TableExportMenu } from '@/components/hub/TableExportMenu'
 import {
@@ -78,9 +78,11 @@ type DieRow = {
   jobCardHub: JobCardHub | null
   ledgerRank: number
   pastingType: string | null
+  masterType?: string | null
   dieMake: 'local' | 'laser'
   dateOfManufacturing: string | null
   similarMatches: SimilarDieMatch[]
+  typeMismatchMatches?: SimilarDieMatch[]
   hubCustodySource?: string | null
 }
 
@@ -112,7 +114,7 @@ type DashboardPayload = {
   prep: ToolRow[]
   inventory: ToolRow[]
   custody: ToolRow[]
-  ledgerRows: ToolingLedgerRow[]
+  ledgerRows: DieMasterLedgerRow[]
 }
 
 type MachineOpt = { id: string; machineCode: string; name: string }
@@ -227,10 +229,12 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const [mdSheetSize, setMdSheetSize] = useState('')
   const [mdUps, setMdUps] = useState('1')
   const [mdMaterial, setMdMaterial] = useState('Laser')
-  const [mdPastingType, setMdPastingType] = useState('Lock Bottom')
+  const [mdPastingType, setMdPastingType] = useState<string>(DIE_HUB_PASTING_TYPES[0])
   const [mdDieMake, setMdDieMake] = useState<'local' | 'laser'>('local')
   const [similarDieBoardModal, setSimilarDieBoardModal] = useState<{
     sourceLabel: string
+    sourceDieType?: string
+    variant: 'similar' | 'type_mismatch'
     matches: SimilarDieMatch[]
   } | null>(null)
   const [dieStockModal, setDieStockModal] = useState<DieRow | null>(null)
@@ -301,6 +305,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               r.dimensionsLwh,
               r.dimensionsLabel,
               r.pastingType,
+              r.masterType,
               r.dieMake,
             ]
               .join(' ')
@@ -345,7 +350,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     mode === 'dies' ? TOOLING_LEDGER_ZONE_OPTIONS_DIES : TOOLING_LEDGER_ZONE_OPTIONS_BLOCKS
 
   const filteredLedgerRows = useMemo(
-    () => getFilteredToolingLedgerRows(data?.ledgerRows ?? [], ledgerSearch, ledgerZoneFilter),
+    () => getFilteredDieMasterLedgerRows(data?.ledgerRows ?? [], ledgerSearch, ledgerZoneFilter),
     [data?.ledgerRows, ledgerSearch, ledgerZoneFilter],
   )
   const toolingLedgerExportColumns = useMemo(() => toolingMasterLedgerExportColumns(), [])
@@ -512,7 +517,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       setMdSheetSize('')
       setMdUps('1')
       setMdMaterial('Laser')
-      setMdPastingType('Lock Bottom')
+      setMdPastingType(DIE_HUB_PASTING_TYPES[0])
       setMdDieMake('local')
       await load()
     } catch (e) {
@@ -625,8 +630,10 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           <p>
             UPS: <span className="text-zinc-300 tabular-nums">{r.ups}</span>
             <span className="text-zinc-600 mx-1">·</span>
-            Type:{' '}
-            <span className="text-zinc-300">{r.pastingType?.trim() || '—'}</span>
+            Master type:{' '}
+            <span className="text-zinc-300">
+              {(r.masterType ?? r.pastingType)?.trim() || '—'}
+            </span>
           </p>
           {r.sheetSize ? (
             <p className="text-[10px] text-zinc-500">Sheet: {r.sheetSize}</p>
@@ -681,7 +688,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     }`
 
     if (r.kind === 'die') {
-      const hasSimilar = r.similarMatches.length > 0
+      const mismatch = r.typeMismatchMatches ?? []
+      const hasTypeMismatch = mismatch.length > 0
+      const hasSimilar = !hasTypeMismatch && r.similarMatches.length > 0
       const dimTitle = r.dimensionsLwh || r.dimensionsLabel
       return (
         <li key={`${r.kind}-${r.id}`} className={liClass}>
@@ -695,12 +704,28 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </span>
               <span className="font-mono text-[10px] text-amber-300/90 truncate">{r.displayCode}</span>
             </div>
-            {hasSimilar ? (
+            {hasTypeMismatch ? (
               <button
                 type="button"
                 onClick={() =>
                   setSimilarDieBoardModal({
                     sourceLabel: r.displayCode,
+                    sourceDieType: r.masterType?.trim() || undefined,
+                    variant: 'type_mismatch',
+                    matches: mismatch,
+                  })
+                }
+                className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-600/60 rounded px-1.5 py-0.5 hover:bg-red-950/40"
+              >
+                Type mismatch
+              </button>
+            ) : hasSimilar ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setSimilarDieBoardModal({
+                    sourceLabel: r.displayCode,
+                    variant: 'similar',
                     matches: r.similarMatches,
                   })
                 }
@@ -1076,7 +1101,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className="shrink-0"
               />
             </div>
-            <ToolingHubLedgerTable
+            <DieMasterLedger
               rows={data.ledgerRows}
               searchQuery={ledgerSearch}
               zoneFilter={ledgerZoneFilter}
@@ -1133,12 +1158,23 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                           )
                         }
                         onTakeFromStock={() => setDieStockModal(r)}
-                        onSimilarClick={() =>
-                          setSimilarDieBoardModal({
-                            sourceLabel: r.displayCode,
-                            matches: r.similarMatches,
-                          })
-                        }
+                        onSimilarClick={() => {
+                          const mm = r.typeMismatchMatches ?? []
+                          if (mm.length) {
+                            setSimilarDieBoardModal({
+                              sourceLabel: r.displayCode,
+                              sourceDieType: r.masterType?.trim() || undefined,
+                              variant: 'type_mismatch',
+                              matches: mm,
+                            })
+                          } else {
+                            setSimilarDieBoardModal({
+                              sourceLabel: r.displayCode,
+                              variant: 'similar',
+                              matches: r.similarMatches,
+                            })
+                          }
+                        }}
                       />
                     ) : (
                       renderCard(r, 'triage')
@@ -1255,6 +1291,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         open={!!similarDieBoardModal}
         onClose={() => setSimilarDieBoardModal(null)}
         sourceLabel={similarDieBoardModal?.sourceLabel ?? ''}
+        sourceDieType={similarDieBoardModal?.sourceDieType}
+        variant={similarDieBoardModal?.variant ?? 'similar'}
         matches={similarDieBoardModal?.matches ?? []}
       />
 

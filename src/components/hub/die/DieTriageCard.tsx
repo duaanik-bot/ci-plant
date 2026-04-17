@@ -13,6 +13,8 @@ export type DieTriageCardRow = {
   dimensionsLabel: string
   lastStatusUpdatedAt: string
   similarMatches: SimilarDieMatch[]
+  typeMismatchMatches?: SimilarDieMatch[]
+  masterType?: string | null
 }
 
 export function DieTriageCard({
@@ -32,7 +34,9 @@ export function DieTriageCard({
   onSimilarClick: () => void
   specs: React.ReactNode
 }) {
-  const hasSimilar = r.similarMatches.length > 0
+  const mismatch = r.typeMismatchMatches ?? []
+  const hasTypeMismatch = mismatch.length > 0
+  const hasSimilar = !hasTypeMismatch && r.similarMatches.length > 0
   const dimTitle = r.dimensionsLwh || r.dimensionsLabel
 
   return (
@@ -47,7 +51,15 @@ export function DieTriageCard({
           </span>
           <span className="font-mono text-[10px] text-amber-300/90 truncate">{r.displayCode}</span>
         </div>
-        {hasSimilar ? (
+        {hasTypeMismatch ? (
+          <button
+            type="button"
+            onClick={onSimilarClick}
+            className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-600/60 rounded px-1.5 py-0.5 hover:bg-red-950/40"
+          >
+            Type mismatch
+          </button>
+        ) : hasSimilar ? (
           <button
             type="button"
             onClick={onSimilarClick}

@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { masterDieTypeLabel, normalizeDieTypeKey } from '@/lib/master-die-type'
 
 export type ParsedCartonDims = { l: number; w: number; h: number }
 
@@ -84,9 +85,11 @@ export function buildDieSimilarityBuckets(
   rows: Array<{
     id: string
     dyeNumber: number
+    dyeType: string
     dimLengthMm: unknown
     dimWidthMm: unknown
     dimHeightMm: unknown
+    pastingType: string | null
     location: string | null
     impressionCount: number
     reuseCount: number
@@ -95,7 +98,10 @@ export function buildDieSimilarityBuckets(
   const buckets = new Map<string, DieSimilarIndexEntry[]>()
   for (const r of rows) {
     if (r.dimLengthMm == null || r.dimWidthMm == null || r.dimHeightMm == null) continue
-    const k = `${String(r.dimLengthMm)}|${String(r.dimWidthMm)}|${String(r.dimHeightMm)}`
+    const typeKey = normalizeDieTypeKey(
+      masterDieTypeLabel({ dyeType: r.dyeType, pastingType: r.pastingType }),
+    )
+    const k = `${String(r.dimLengthMm)}|${String(r.dimWidthMm)}|${String(r.dimHeightMm)}|${typeKey}`
     const ent: DieSimilarIndexEntry = {
       id: r.id,
       dyeNumber: r.dyeNumber,
@@ -115,11 +121,74 @@ export function similarDiesForRow(
   dimLengthMm: unknown,
   dimWidthMm: unknown,
   dimHeightMm: unknown,
+  dyeType: string,
+  pastingType: string | null | undefined,
   buckets: Map<string, DieSimilarIndexEntry[]>,
 ): DieSimilarIndexEntry[] {
   if (dimLengthMm == null || dimWidthMm == null || dimHeightMm == null) return []
-  const k = `${String(dimLengthMm)}|${String(dimWidthMm)}|${String(dimHeightMm)}`
+  const typeKey = normalizeDieTypeKey(
+    masterDieTypeLabel({ dyeType, pastingType: pastingType ?? null }),
+  )
+  const k = `${String(dimLengthMm)}|${String(dimWidthMm)}|${String(dimHeightMm)}|${typeKey}`
   return (buckets.get(k) ?? []).filter((e) => e.id !== id)
+}
+
+/** Bucket by L×W×H only — used to detect same-size dies with different master types. */
+export type DieDimBucketEntry = DieSimilarIndexEntry & { typeKey: string; typeLabel: string }
+
+export function buildDieDimensionOnlyBuckets(
+  rows: Array<{
+    id: string
+    dyeNumber: number
+    dyeType: string
+    dimLengthMm: unknown
+    dimWidthMm: unknown
+    dimHeightMm: unknown
+    pastingType: string | null
+    location: string | null
+    impressionCount: number
+    reuseCount: number
+  }>,
+): Map<string, DieDimBucketEntry[]> {
+  const buckets = new Map<string, DieDimBucketEntry[]>()
+  for (const r of rows) {
+    if (r.dimLengthMm == null || r.dimWidthMm == null || r.dimHeightMm == null) continue
+    const typeLabel = masterDieTypeLabel({ dyeType: r.dyeType, pastingType: r.pastingType })
+    const typeKey = normalizeDieTypeKey(typeLabel)
+    const k = `${String(r.dimLengthMm)}|${String(r.dimWidthMm)}|${String(r.dimHeightMm)}`
+    const ent: DieDimBucketEntry = {
+      id: r.id,
+      dyeNumber: r.dyeNumber,
+      location: r.location,
+      impressionCount: r.impressionCount,
+      reuseCount: r.reuseCount,
+      typeKey,
+      typeLabel,
+    }
+    const arr = buckets.get(k) ?? []
+    arr.push(ent)
+    buckets.set(k, arr)
+  }
+  return buckets
+}
+
+/** Same L×W×H as this row, but different die type — wrong tool if treated as “similar”. */
+export function typeMismatchDiesForRow(
+  id: string,
+  dimLengthMm: unknown,
+  dimWidthMm: unknown,
+  dimHeightMm: unknown,
+  dyeType: string,
+  pastingType: string | null | undefined,
+  dimBuckets: Map<string, DieDimBucketEntry[]>,
+): DieDimBucketEntry[] {
+  if (dimLengthMm == null || dimWidthMm == null || dimHeightMm == null) return []
+  const myKey = normalizeDieTypeKey(
+    masterDieTypeLabel({ dyeType, pastingType: pastingType ?? null }),
+  )
+  const k = `${String(dimLengthMm)}|${String(dimWidthMm)}|${String(dimHeightMm)}`
+  const list = dimBuckets.get(k) ?? []
+  return list.filter((e) => e.id !== id && e.typeKey !== myKey)
 }
 
 /** L×W×H for matching triage ↔ rack (DB mm or parsed carton text). */

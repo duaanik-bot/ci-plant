@@ -78,6 +78,8 @@ export type CartonFormData = {
   spotUvEnabled: boolean
   specialInstructions: string
   remarks: string
+  /** Linked Die Master (tooling) — UUID or empty */
+  dieMasterId: string
   active: boolean
 }
 
@@ -102,6 +104,7 @@ const EMPTY: CartonFormData = {
   spotUvEnabled: false,
   specialInstructions: '',
   remarks: '',
+  dieMasterId: '',
   active: true,
 }
 
@@ -110,8 +113,11 @@ type Props = {
   initialData?: Partial<CartonFormData> & { id?: string }
 }
 
+type DieMasterOption = { id: string; dyeNumber: number; dyeType: string }
+
 export default function CartonForm({ mode, initialData }: Props) {
   const router = useRouter()
+  const [dieMasters, setDieMasters] = useState<DieMasterOption[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [customerResults, setCustomerResults] = useState<Customer[]>([])
   const [customerState, setCustomerState] = useState<CustomerSearchState>({
@@ -180,6 +186,32 @@ export default function CartonForm({ mode, initialData }: Props) {
     const onUpdated = () => refreshCustomerList()
     window.addEventListener('ci-customers-updated', onUpdated)
     return () => window.removeEventListener('ci-customers-updated', onUpdated)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/masters/dyes')
+        const data = await res.json()
+        if (cancelled || !res.ok || !Array.isArray(data)) {
+          if (!cancelled && !res.ok) setDieMasters([])
+          return
+        }
+        setDieMasters(
+          data.map((d: { id: string; dyeNumber: number; dyeType: string }) => ({
+            id: d.id,
+            dyeNumber: d.dyeNumber,
+            dyeType: d.dyeType,
+          })),
+        )
+      } catch {
+        if (!cancelled) setDieMasters([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -358,6 +390,7 @@ export default function CartonForm({ mode, initialData }: Props) {
         spotUvEnabled: f.spotUvEnabled,
       }),
       remarks: toCaps(f.remarks || '') || undefined,
+      dieMasterId: f.dieMasterId.trim() || undefined,
       active: f.active,
     }
 
@@ -551,6 +584,24 @@ export default function CartonForm({ mode, initialData }: Props) {
                   <option value=''>Select...</option>
                   {PASTING_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
+              </div>
+              <div className='md:col-span-1'>
+                <label className='block text-slate-400 mb-1'>Die Master (tooling)</label>
+                <select
+                  className={cls}
+                  value={f.dieMasterId}
+                  onChange={(e) => patch('dieMasterId', e.target.value)}
+                >
+                  <option value=''>None — unlinked tooling</option>
+                  {dieMasters.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      DYE-{d.dyeNumber} · {d.dyeType}
+                    </option>
+                  ))}
+                </select>
+                <p className='mt-1 text-[10px] text-slate-500'>
+                  PO and Die Hub use this record for type and L×W×H.
+                </p>
               </div>
               {/* Open Size removed as requested */}
             </div>

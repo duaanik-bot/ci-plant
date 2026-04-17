@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { formatDimsLwhFromDb, parseCartonSizeToDims, formatDimsLwhFromParsed } from '@/lib/die-hub-dimensions'
+import { masterDieTypeLabel } from '@/lib/master-die-type'
 
 export const dynamic = 'force-dynamic'
 
-function cartonSize(c: {
-  finishedLength?: unknown
-  finishedWidth?: unknown
-  finishedHeight?: unknown
+function cartonSizeFromFinished(c: {
+  finishedLength: unknown
+  finishedWidth: unknown
+  finishedHeight: unknown
 }): string {
   const l = c.finishedLength != null ? Number(c.finishedLength) : null
   const w = c.finishedWidth != null ? Number(c.finishedWidth) : null
@@ -15,6 +17,30 @@ function cartonSize(c: {
   if (l != null && w != null && h != null) return `${l}×${w}×${h}`
   if (l != null && w != null) return `${l}×${w}`
   return ''
+}
+
+function toolingDimsLabel(
+  die:
+    | {
+        dimLengthMm: unknown
+        dimWidthMm: unknown
+        dimHeightMm: unknown
+        cartonSize: string
+      }
+    | null
+    | undefined,
+): string {
+  if (!die) return ''
+  const formatted =
+    formatDimsLwhFromDb({
+      dimLengthMm: die.dimLengthMm as { toString(): string } | null,
+      dimWidthMm: die.dimWidthMm as { toString(): string } | null,
+      dimHeightMm: die.dimHeightMm as { toString(): string } | null,
+    }) ??
+    (parseCartonSizeToDims(die.cartonSize)
+      ? formatDimsLwhFromParsed(parseCartonSizeToDims(die.cartonSize)!)
+      : null)
+  return formatted?.trim() || ''
 }
 
 export async function GET(req: NextRequest) {
@@ -27,94 +53,84 @@ export async function GET(req: NextRequest) {
   const limitRaw = parseInt(searchParams.get('limit') ?? '4000', 10)
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 8000) : 4000
 
-  const list = await db.$queryRawUnsafe<Array<{
-    id: string
-    cartonName: string
-    customerId: string
-    customerName: string
-    productType: string | null
-    cartonSizeText: string | null
-    boardGrade: string | null
-    gsm: number | null
-    paperType: string | null
-    rate: number | null
-    gstPct: number | null
-    coatingType: string | null
-    embossingLeafing: string | null
-    foilType: string | null
-    artworkCode: string | null
-    backPrint: string | null
-    finishedLength: number | null
-    finishedWidth: number | null
-    finishedHeight: number | null
-    cartonConstruct: string | null
-    drugSchedule: string | null
-    regulatoryText: string | null
-    specialInstructions: string | null
-    dyeId: string | null
-  }>>(
-    `
-      select
-        c.id,
-        c.carton_name as "cartonName",
-        c.customer_id as "customerId",
-        cu.name as "customerName",
-        c.product_type as "productType",
-        c.carton_size as "cartonSizeText",
-        c.board_grade as "boardGrade",
-        c.gsm,
-        c.paper_type as "paperType",
-        c.rate::float8 as rate,
-        c.gst_pct as "gstPct",
-        c.coating_type as "coatingType",
-        c.embossing_leafing as "embossingLeafing",
-        c.foil_type as "foilType",
-        c.artwork_code as "artworkCode",
-        c.back_print as "backPrint",
-        c.finished_length::float8 as "finishedLength",
-        c.finished_width::float8 as "finishedWidth",
-        c.finished_height::float8 as "finishedHeight",
-        c.carton_construct as "cartonConstruct",
-        c.drug_schedule as "drugSchedule",
-        c.regulatory_text as "regulatoryText",
-        c.special_instructions as "specialInstructions",
-        c.dye_id as "dyeId"
-      from cartons c
-      join customers cu on cu.id = c.customer_id
-      where c.active = true
-        ${customerId ? 'and c.customer_id = $1' : ''}
-      order by c.carton_name asc
-      limit ${customerId ? '$2' : '$1'}
-    `,
-    ...(customerId ? [customerId, limit] : [limit]),
-  )
+  const list = await db.carton.findMany({
+    where: {
+      active: true,
+      ...(customerId ? { customerId } : {}),
+    },
+    orderBy: { cartonName: 'asc' },
+    take: limit,
+    include: {
+      customer: { select: { id: true, name: true } },
+      dieMaster: {
+        select: {
+          id: true,
+          dyeNumber: true,
+          dyeType: true,
+          pastingType: true,
+          dimLengthMm: true,
+          dimWidthMm: true,
+          dimHeightMm: true,
+          cartonSize: true,
+        },
+      },
+      dye: {
+        select: {
+          id: true,
+          dyeNumber: true,
+          dyeType: true,
+          pastingType: true,
+          dimLengthMm: true,
+          dimWidthMm: true,
+          dimHeightMm: true,
+          cartonSize: true,
+        },
+      },
+    },
+  })
 
-  let mapped = list.map((c) => ({
-    id: c.id,
-    cartonName: c.cartonName,
-    customerId: c.customerId,
-    customer: { id: c.customerId, name: c.customerName },
-    productType: c.productType,
-    cartonSize: c.cartonSizeText || cartonSize(c),
-    boardGrade: c.boardGrade,
-    gsm: c.gsm,
-    paperType: c.paperType,
-    rate: c.rate != null ? Number(c.rate) : null,
-    gstPct: c.gstPct ?? 5,
-    coatingType: c.coatingType,
-    embossingLeafing: c.embossingLeafing,
-    foilType: c.foilType,
-    artworkCode: c.artworkCode,
-    backPrint: c.backPrint,
-    finishedLength: c.finishedLength != null ? Number(c.finishedLength) : null,
-    finishedWidth: c.finishedWidth != null ? Number(c.finishedWidth) : null,
-    finishedHeight: c.finishedHeight != null ? Number(c.finishedHeight) : null,
-    cartonConstruct: c.cartonConstruct,
-    drugSchedule: c.drugSchedule,
-    regulatoryText: c.regulatoryText,
-    specialInstructions: c.specialInstructions,
-    dyeId: c.dyeId,
-  }))
+  let mapped = list.map((c) => {
+    const sizeText = cartonSizeFromFinished(c)
+    const dm = c.dieMaster
+    const legacyDye = c.dye
+    const effectiveMaster = dm ?? legacyDye
+    const masterDieType = effectiveMaster
+      ? masterDieTypeLabel({
+          dyeType: effectiveMaster.dyeType,
+          pastingType: effectiveMaster.pastingType,
+        })
+      : ''
+    return {
+      id: c.id,
+      cartonName: c.cartonName,
+      customerId: c.customerId,
+      customer: { id: c.customer.id, name: c.customer.name },
+      productType: c.productType,
+      cartonSize: sizeText,
+      boardGrade: c.boardGrade,
+      gsm: c.gsm,
+      paperType: c.paperType,
+      rate: c.rate != null ? Number(c.rate) : null,
+      gstPct: c.gstPct ?? 5,
+      coatingType: c.coatingType,
+      embossingLeafing: c.embossingLeafing,
+      foilType: c.foilType,
+      artworkCode: c.artworkCode,
+      backPrint: c.backPrint,
+      finishedLength: c.finishedLength != null ? Number(c.finishedLength) : null,
+      finishedWidth: c.finishedWidth != null ? Number(c.finishedWidth) : null,
+      finishedHeight: c.finishedHeight != null ? Number(c.finishedHeight) : null,
+      cartonConstruct: c.cartonConstruct,
+      drugSchedule: c.drugSchedule,
+      regulatoryText: c.regulatoryText,
+      specialInstructions: c.specialInstructions,
+      dyeId: c.dyeId,
+      dieMasterId: c.dieMasterId,
+      masterDieType,
+      toolingDimsLabel: toolingDimsLabel(effectiveMaster),
+      toolingUnlinked: !c.dieMasterId,
+    }
+  })
 
   if (q) {
     mapped = mapped.filter(

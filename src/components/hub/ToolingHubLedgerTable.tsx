@@ -26,9 +26,12 @@ export type ToolingLedgerRow = {
   dimensionsLwh?: string
   ups?: number
   pastingType?: string | null
+  /** Die Master display label (pastingType + dyeType); preferred over `pastingType` in ledger. */
+  masterType?: string | null
   dieMake?: 'local' | 'laser'
   dateOfManufacturing?: string | null
   similarMatches?: ToolingSimilarMatch[]
+  typeMismatchMatches?: ToolingSimilarMatch[]
 }
 
 function hubSearchMatch(q: string, parts: Array<string | null | undefined>): boolean {
@@ -54,6 +57,7 @@ export function getFilteredToolingLedgerRows(
             r.zoneLabel,
             r.dimensionsLwh,
             r.pastingType,
+            r.masterType,
             r.dieMake,
           ]
         : [r.displayCode, r.title, r.specSummary, r.zoneLabel]
@@ -107,6 +111,8 @@ export function ToolingHubLedgerTable({
   const filtered = getFilteredToolingLedgerRows(rows, searchQuery, zoneFilter)
   const [similarModal, setSimilarModal] = useState<{
     sourceLabel: string
+    sourceDieType?: string
+    variant: 'similar' | 'type_mismatch'
     matches: SimilarDieMatch[]
   } | null>(null)
 
@@ -221,9 +227,9 @@ export function ToolingHubLedgerTable({
               <th className="px-2 py-2 font-semibold whitespace-nowrap w-[1%]">#</th>
               <th className="px-2 py-2 font-semibold min-w-[100px]">L×W×H</th>
               <th className="px-2 py-2 font-semibold text-right tabular-nums w-[1%]">UPS</th>
-              <th className="px-2 py-2 font-semibold min-w-[88px]">Pasting</th>
+              <th className="px-2 py-2 font-semibold min-w-[88px]">Master type</th>
               <th className="px-2 py-2 font-semibold whitespace-nowrap">Make</th>
-              <th className="px-2 py-2 font-semibold whitespace-nowrap">Similar</th>
+              <th className="px-2 py-2 font-semibold whitespace-nowrap">Match</th>
               <th className="px-2 py-2 font-semibold whitespace-nowrap">DOM</th>
               <th className="px-2 py-2 font-semibold whitespace-nowrap">Zone</th>
               <th className="px-2 py-2 font-semibold whitespace-nowrap">Time in zone</th>
@@ -247,8 +253,13 @@ export function ToolingHubLedgerTable({
                     : '—'
                 const lastLine = hubLastActionLine(at) ?? '—'
                 const dimTitle = r.dimensionsLwh?.trim() || '—'
+                const mismatchCount = r.kind === 'die' ? (r.typeMismatchMatches?.length ?? 0) : 0
+                const hasTypeMismatch = r.kind === 'die' && mismatchCount > 0
                 const hasSimilar =
-                  r.kind === 'die' && Array.isArray(r.similarMatches) && r.similarMatches.length > 0
+                  r.kind === 'die' &&
+                  !hasTypeMismatch &&
+                  Array.isArray(r.similarMatches) &&
+                  r.similarMatches.length > 0
                 const rank = idx + 1
 
                 return (
@@ -276,7 +287,9 @@ export function ToolingHubLedgerTable({
                       {r.kind === 'die' ? (r.ups ?? '—') : '—'}
                     </td>
                     <td className="px-2 py-1.5 text-[11px] text-zinc-300 max-w-[100px] truncate">
-                      {r.kind === 'die' ? r.pastingType?.trim() || '—' : '—'}
+                      {r.kind === 'die'
+                        ? (r.masterType ?? r.pastingType)?.trim() || '—'
+                        : '—'}
                     </td>
                     <td className="px-2 py-1.5 whitespace-nowrap">
                       {r.kind === 'die' && r.dieMake ? (
@@ -291,18 +304,34 @@ export function ToolingHubLedgerTable({
                       )}
                     </td>
                     <td className="px-2 py-1.5 whitespace-nowrap">
-                      {r.kind === 'die' && hasSimilar ? (
+                      {r.kind === 'die' && hasTypeMismatch ? (
                         <button
                           type="button"
                           onClick={() =>
                             setSimilarModal({
                               sourceLabel: r.displayCode,
+                              sourceDieType: r.masterType?.trim() || undefined,
+                              variant: 'type_mismatch',
+                              matches: r.typeMismatchMatches ?? [],
+                            })
+                          }
+                          className="text-red-400 hover:text-red-300 font-bold text-[11px] uppercase tracking-wide"
+                        >
+                          Type mismatch
+                        </button>
+                      ) : r.kind === 'die' && hasSimilar ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSimilarModal({
+                              sourceLabel: r.displayCode,
+                              variant: 'similar',
                               matches: r.similarMatches ?? [],
                             })
                           }
                           className="text-amber-500 hover:text-amber-400 font-bold text-[11px] uppercase tracking-wide"
                         >
-                          Yes
+                          Similar
                         </button>
                       ) : (
                         <span className="text-zinc-600">—</span>
@@ -335,6 +364,8 @@ export function ToolingHubLedgerTable({
         open={!!similarModal}
         onClose={() => setSimilarModal(null)}
         sourceLabel={similarModal?.sourceLabel ?? ''}
+        sourceDieType={similarModal?.sourceDieType}
+        variant={similarModal?.variant ?? 'similar'}
         matches={similarModal?.matches ?? []}
       />
     </>

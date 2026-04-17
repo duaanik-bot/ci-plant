@@ -281,6 +281,7 @@ export async function createPlateRequirementFromPoLine(
       requirementCode,
       jobCardId: null,
       poLineId,
+      dieMasterId: line.dieMasterId ?? carton?.dieMasterId ?? null,
       cartonName: cartonLabel,
       artworkCode,
       artworkVersion: normaliseArtworkVersion(artworkVersionRaw),

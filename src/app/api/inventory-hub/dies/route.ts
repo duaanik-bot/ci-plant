@@ -13,13 +13,17 @@ export async function GET() {
     const rows = await db.dye.findMany({
       where: { active: true },
       orderBy: { dyeNumber: 'asc' },
-      include: { cartons: { take: 1, select: { cartonName: true } } },
+      include: {
+        cartonsWork: { take: 1, select: { cartonName: true } },
+        cartonsAsDieMaster: { take: 1, select: { cartonName: true } },
+      },
     })
 
     const payload = rows.map((d) => ({
       id: d.id,
       dyeNumber: d.dyeNumber,
-      cartonName: d.cartons[0]?.cartonName ?? null,
+      cartonName:
+        d.cartonsWork[0]?.cartonName ?? d.cartonsAsDieMaster[0]?.cartonName ?? null,
       cartonSize: d.cartonSize,
       sheetSize: d.sheetSize,
       dieMaterial: d.dieMaterial,

@@ -17,14 +17,60 @@ import { CUSTODY_HUB_TRIAGE } from '@/lib/inventory-hub-custody'
 import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
 import { createEmbossHubEvent, EMBOSS_HUB_ACTION } from '@/lib/emboss-hub-events'
 import {
+  formatDimsLwhFromDb,
   normalizeDieMake,
   parseCartonSizeToDims,
   prismaDimsFromParsed,
 } from '@/lib/die-hub-dimensions'
+import { masterDieTypeLabel } from '@/lib/master-die-type'
 
 export const dynamic = 'force-dynamic'
 
 type DbClient = typeof db | Prisma.TransactionClient
+
+async function loadDieMasterForLine(
+  tx: DbClient,
+  poLineId: string | undefined,
+): Promise<{
+  id: string
+  dyeNumber: number
+  dyeType: string
+  pastingType: string | null
+  dimLengthMm: unknown
+  dimWidthMm: unknown
+  dimHeightMm: unknown
+} | null> {
+  const pid = String(poLineId ?? '').trim()
+  if (!pid) return null
+  const line = await tx.poLineItem.findUnique({
+    where: { id: pid },
+    select: { dieMasterId: true, cartonId: true, dyeId: true },
+  })
+  if (!line) return null
+  let masterId =
+    line.dieMasterId?.trim() || line.dyeId?.trim() || null
+  if (!masterId && line.cartonId) {
+    const c = await tx.carton.findUnique({
+      where: { id: line.cartonId },
+      select: { dieMasterId: true, dyeId: true },
+    })
+    masterId = c?.dieMasterId?.trim() || c?.dyeId?.trim() || null
+  }
+  if (!masterId) return null
+  const master = await tx.dye.findUnique({
+    where: { id: masterId },
+    select: {
+      id: true,
+      dyeNumber: true,
+      dyeType: true,
+      pastingType: true,
+      dimLengthMm: true,
+      dimWidthMm: true,
+      dimHeightMm: true,
+    },
+  })
+  return master
+}
 
 function buildDieNumber(existingMax: number | null): number {
   const year = new Date().getFullYear()
@@ -43,6 +89,10 @@ async function resolveDieTriageSpecs(
   cartonSize: string
   pastingType: string | null
   dieMake: 'local' | 'laser'
+  triageDyeType: string
+  sourceDieMasterId: string | null
+  sourceMasterDyeNumber: number | null
+  sourceMasterTypeLabel: string | null
 }> {
   let sheet = data.actualSheetSize.trim()
   let ups = data.ups
@@ -50,6 +100,36 @@ async function resolveDieTriageSpecs(
   let cartonSize = data.cartonSize.trim()
   let pastingType: string | null = null
   let dieMake: 'local' | 'laser' = 'local'
+  let triageDyeType = 'Die Hub Triage'
+  let sourceDieMasterId: string | null = null
+  let sourceMasterDyeNumber: number | null = null
+  let sourceMasterTypeLabel: string | null = null
+
+  const master = await loadDieMasterForLine(tx, data.poLineId)
+  if (master) {
+    sourceDieMasterId = master.id
+    sourceMasterDyeNumber = master.dyeNumber
+    triageDyeType = master.dyeType?.trim() || triageDyeType
+    sourceMasterTypeLabel = masterDieTypeLabel({
+      dyeType: master.dyeType,
+      pastingType: master.pastingType,
+    })
+    if (master.pastingType?.trim()) pastingType = master.pastingType.trim()
+    if (
+      master.dimLengthMm != null &&
+      master.dimWidthMm != null &&
+      master.dimHeightMm != null &&
+      !cartonSize
+    ) {
+      const lwh =
+        formatDimsLwhFromDb({
+          dimLengthMm: master.dimLengthMm as { toString(): string },
+          dimWidthMm: master.dimWidthMm as { toString(): string },
+          dimHeightMm: master.dimHeightMm as { toString(): string },
+        }) ?? ''
+      if (lwh.trim()) cartonSize = lwh.trim()
+    }
+  }
 
   if (data.poLineId) {
     const line = await tx.poLineItem.findUnique({
@@ -59,6 +139,10 @@ async function resolveDieTriageSpecs(
         artworkCode: true,
         cartonSize: true,
         cartonId: true,
+        lineDieType: true,
+        dimLengthMm: true,
+        dimWidthMm: true,
+        dimHeightMm: true,
       },
     })
     if (line) {
@@ -78,6 +162,22 @@ async function resolveDieTriageSpecs(
       if (typeof spec.dieMake === 'string' && spec.dieMake.trim()) {
         dieMake = normalizeDieMake(spec.dieMake)
       }
+
+      if (
+        !cartonSize &&
+        line.dimLengthMm != null &&
+        line.dimWidthMm != null &&
+        line.dimHeightMm != null
+      ) {
+        const lwh =
+          formatDimsLwhFromDb({
+            dimLengthMm: line.dimLengthMm as { toString(): string },
+            dimWidthMm: line.dimWidthMm as { toString(): string },
+            dimHeightMm: line.dimHeightMm as { toString(): string },
+          }) ?? ''
+        if (lwh.trim()) cartonSize = lwh.trim()
+      }
+      if (!pastingType && line.lineDieType?.trim()) pastingType = line.lineDieType.trim()
 
       const cid = (data.cartonId || line.cartonId || '').trim()
       if (cid) {
@@ -129,6 +229,10 @@ async function resolveDieTriageSpecs(
     cartonSize: cartonSize.trim() || '—',
     pastingType,
     dieMake,
+    triageDyeType,
+    sourceDieMasterId,
+    sourceMasterDyeNumber,
+    sourceMasterTypeLabel,
   }
 }
 
@@ -300,7 +404,7 @@ export async function POST(req: NextRequest) {
       const dye = await tx.dye.create({
         data: {
           dyeNumber,
-          dyeType: 'Die Hub Triage',
+          dyeType: dieTriageSpec.triageDyeType,
           ups: dieTriageSpec.ups,
           sheetSize: dieTriageSpec.sheetSize,
           cartonSize: dieTriageSpec.cartonSize,
@@ -325,6 +429,10 @@ export async function POST(req: NextRequest) {
           poLineId: data.poLineId || null,
           artworkId: data.artworkId || null,
           setNumber: data.setNumber,
+          dieMasterId: dieTriageSpec.sourceDieMasterId,
+          masterDyeNumber: dieTriageSpec.sourceMasterDyeNumber,
+          masterDieType: dieTriageSpec.sourceMasterTypeLabel,
+          cartonLwh: dieTriageSpec.cartonSize,
         },
       })
     }

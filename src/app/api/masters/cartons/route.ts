@@ -42,6 +42,7 @@ const createSchema = cartonSchema.extend({
   glueType: z.string().optional(),
   cartonConstruct: z.string().optional(),
   dyeId: z.string().uuid().optional().nullable(),
+  dieMasterId: z.string().uuid().optional().nullable(),
   dyeCondition: z.string().optional(),
   drugSchedule: z.string().optional(),
   regulatoryText: z.string().optional(),
@@ -155,10 +156,14 @@ export async function POST(req: NextRequest) {
       artworkCode: data.artworkCode || null,
       backPrint: data.backPrint || 'No',
       glueType: data.glueType || null,
-      cartonConstruct: data.cartonConstruct || null,
+      cartonConstruct:
+        data.pastingType?.trim() || data.cartonConstruct?.trim() || null,
       dyeId: data.dyeId || null,
+      dieMasterId: data.dieMasterId || null,
       drugSchedule: data.drugSchedule || null,
       regulatoryText: data.regulatoryText || null,
+      remarks: data.remarks?.trim() ? data.remarks.trim() : null,
+      printingType: data.printingType?.trim() ? data.printingType.trim() : null,
       specialInstructions: data.specialInstructions || null,
     },
   })

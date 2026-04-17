@@ -6,20 +6,33 @@ export type SimilarDieMatch = {
   location: string | null
   impressionCount: number
   reuseCount: number
+  /** Other die’s master type — required context for type-mismatch alerts. */
+  dieTypeLabel?: string
 }
 
 export function SimilarDiesModal({
   open,
   onClose,
   sourceLabel,
+  sourceDieType,
+  variant = 'similar',
   matches,
 }: {
   open: boolean
   onClose: () => void
   sourceLabel: string
+  /** This die’s master type (shown when `variant` is type_mismatch). */
+  sourceDieType?: string
+  variant?: 'similar' | 'type_mismatch'
   matches: SimilarDieMatch[]
 }) {
   if (!open) return null
+
+  const isMismatch = variant === 'type_mismatch'
+  const title = isMismatch ? 'Type mismatch (same L×W×H)' : 'Similar dies (same L×W×H + master type)'
+  const emptyCopy = isMismatch
+    ? 'No other dies with the same dimensions but a different master type.'
+    : 'No other dies with identical dimensions and die type.'
 
   return (
     <div
@@ -34,22 +47,42 @@ export function SimilarDiesModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-4 py-3 border-b border-zinc-800 shrink-0">
-          <h2 id="similar-dies-title" className="text-sm font-bold text-white">
-            Similar dies (same L×W×H)
+          <h2
+            id="similar-dies-title"
+            className={`text-sm font-bold ${isMismatch ? 'text-red-400' : 'text-white'}`}
+          >
+            {title}
           </h2>
           <p className="text-[11px] text-zinc-500 mt-0.5">
-            Matches for <span className="text-amber-300 font-mono">{sourceLabel}</span> — rack / star
-            ledger usage
+            {isMismatch ? (
+              <>
+                Same footprint as <span className="text-amber-300 font-mono">{sourceLabel}</span>
+                {sourceDieType ? (
+                  <>
+                    {' '}
+                    (<span className="text-zinc-300">{sourceDieType}</span>)
+                  </>
+                ) : null}
+                — verify master type before taking from rack.
+              </>
+            ) : (
+              <>
+                Matches for <span className="text-amber-300 font-mono">{sourceLabel}</span> — rack / star
+                ledger usage
+              </>
+            )}
           </p>
         </div>
         <div className="overflow-y-auto p-3 space-y-2">
           {matches.length === 0 ? (
-            <p className="text-sm text-zinc-500">No other dies with identical dimensions.</p>
+            <p className="text-sm text-zinc-500">{emptyCopy}</p>
           ) : (
             matches.map((m) => (
               <div
                 key={m.id}
-                className="rounded-lg border border-zinc-800 bg-black px-3 py-2 text-xs"
+                className={`rounded-lg border px-3 py-2 text-xs ${
+                  isMismatch ? 'border-red-900/80 bg-red-950/20' : 'border-zinc-800 bg-black'
+                }`}
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="font-mono text-amber-200/90 font-semibold">{m.displayCode}</span>
@@ -59,6 +92,11 @@ export function SimilarDiesModal({
                     Cycles: <span className="text-zinc-300 tabular-nums">{m.reuseCount}</span>
                   </span>
                 </div>
+                {isMismatch && m.dieTypeLabel ? (
+                  <p className="text-[11px] text-red-300/90 mt-1 font-medium">
+                    Master type: <span className="text-red-200">{m.dieTypeLabel}</span>
+                  </p>
+                ) : null}
                 <p className="text-[11px] text-zinc-400 mt-1">
                   Rack / slot:{' '}
                   <span className="text-zinc-200">{m.location?.trim() || '—'}</span>
