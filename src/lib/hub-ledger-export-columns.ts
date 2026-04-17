@@ -15,6 +15,13 @@ function formatExportTimestamp(iso: string | null | undefined): string {
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+function formatExportDateOnly(iso: string | null | undefined): string {
+  if (!iso?.trim()) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return String(iso)
+  return d.toLocaleDateString(undefined, { dateStyle: 'medium' })
+}
+
 function timeInZoneLine(iso: string | null | undefined): string {
   if (!iso?.trim()) return '—'
   const d = new Date(iso)
@@ -49,8 +56,21 @@ export function plateMasterLedgerExportColumns(): HubExportColumn<MasterLedgerRo
 
 export function toolingMasterLedgerExportColumns(): HubExportColumn<ToolingLedgerRow>[] {
   return [
+    { header: 'Stable row #', getValue: (r) => (r.ledgerRank != null ? String(r.ledgerRank) : '—') },
     { header: 'Tool / job code', getValue: (r) => r.displayCode },
     { header: 'Title', getValue: (r) => r.title },
+    { header: 'L×W×H', getValue: (r) => r.dimensionsLwh?.trim() || '—' },
+    { header: 'UPS', getValue: (r) => (r.ups != null ? String(r.ups) : '—') },
+    { header: 'Pasting type', getValue: (r) => r.pastingType?.trim() || '—' },
+    { header: 'Make', getValue: (r) => (r.dieMake ? r.dieMake : '—') },
+    {
+      header: 'Similar die codes',
+      getValue: (r) =>
+        r.similarMatches && r.similarMatches.length > 0
+          ? r.similarMatches.map((m) => m.displayCode).join('; ')
+          : '—',
+    },
+    { header: 'DOM (mfg date)', getValue: (r) => formatExportDateOnly(r.dateOfManufacturing) },
     { header: 'Zone', getValue: (r) => r.zoneLabel },
     { header: 'Units', getValue: (r) => String(r.units ?? 0) },
     { header: 'Specifications', getValue: (r) => r.specSummary || '—' },

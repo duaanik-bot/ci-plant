@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 import { dyeSchema } from '@/lib/validations'
+import { normalizeDieMake, prismaDimsFromParsed } from '@/lib/die-hub-dimensions'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +26,8 @@ const createSchema = z.object({
   cartonH: z.number().positive('Carton H must be positive'),
   location: z.string().optional(),
   conditionRating: z.string().optional(),
+  pastingType: z.string().max(64).optional().nullable(),
+  dieMake: z.enum(['local', 'laser']).optional(),
 })
 
 function buildDieNumber(existingMax: number | null): number {
@@ -112,6 +115,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
   }
 
+  const dims = prismaDimsFromParsed({ l: data.cartonL, w: data.cartonW, h: data.cartonH })
   const dye = await db.dye.create({
     data: {
       dyeNumber,
@@ -121,6 +125,9 @@ export async function POST(req: NextRequest) {
       cartonSize,
       location: data.location || null,
       conditionRating: data.conditionRating || 'Good',
+      pastingType: data.pastingType?.trim() || null,
+      dieMake: normalizeDieMake(data.dieMake),
+      ...(dims ?? {}),
     },
   })
 

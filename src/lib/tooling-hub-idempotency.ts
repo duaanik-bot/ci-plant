@@ -11,6 +11,7 @@ export function buildDispatchDedupeKey(
   parts: {
     toolType: string
     jobCardId: string
+    /** Artwork id or a stable manual-spec fingerprint for die triage without artwork */
     artworkId: string
     setNumber: string
     source: string

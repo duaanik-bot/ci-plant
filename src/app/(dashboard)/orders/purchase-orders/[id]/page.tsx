@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -13,6 +13,11 @@ import {
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
+import {
+  mapApiRowToPoCarton,
+  usePoRecentCartons,
+  type PoCartonCatalogItem,
+} from '@/lib/po-carton-autocomplete'
 
 type Customer = {
   id: string
@@ -24,24 +29,7 @@ type Customer = {
   address?: string | null
 }
 
-type CartonOption = {
-  id: string
-  cartonName: string
-  customerId: string
-  cartonSize: string
-  boardGrade?: string | null
-  gsm?: number | null
-  paperType?: string | null
-  rate?: number | null
-  gstPct: number
-  coatingType?: string | null
-  embossingLeafing?: string | null
-  foilType?: string | null
-  artworkCode?: string | null
-  backPrint?: string | null
-  dyeId?: string | null
-  specialInstructions?: string | null
-}
+type CartonOption = PoCartonCatalogItem
 
 type Line = {
   id?: string
@@ -66,6 +54,8 @@ type Line = {
 type CartonLookupFieldProps = {
   line: Line
   customerId: string
+  customerCatalog: CartonOption[]
+  catalogLoading: boolean
   error?: string
   onLineChange: (patch: Partial<Line>) => void
   onSelect: (carton: CartonOption) => void
@@ -143,30 +133,42 @@ function deriveCartonDecorations(carton: CartonOption): Pick<Line, 'coatingType'
   return { coatingType, embossingLeafing, foilType }
 }
 
-function CartonLookupField({ line, customerId, error, onLineChange, onSelect, onCreate }: CartonLookupFieldProps) {
-  const cartonSearch = useAutoPopulate<CartonOption>({
-    storageKey: `po-carton-${customerId || 'all'}`,
-    search: async (query: string) => {
-      if (!customerId) return []
-      const res = await fetch(`/api/cartons?customerId=${encodeURIComponent(customerId)}&q=${encodeURIComponent(query)}`)
-      return (await res.json()) as CartonOption[]
-    },
-    getId: (c) => c.id,
-    getLabel: (c) => c.cartonName,
-  })
+function CartonLookupField({
+  line,
+  customerId,
+  customerCatalog,
+  catalogLoading,
+  error,
+  onLineChange,
+  onSelect,
+  onCreate,
+}: CartonLookupFieldProps) {
+  const { lastUsed, pushRecent } = usePoRecentCartons(customerId || undefined)
+  const cartonQuery = line.cartonName
 
-  const recentCartons = cartonSearch.lastUsed.filter((c) => !customerId || c.customerId === customerId)
-  const cartonQuery = cartonSearch.query || line.cartonName
+  const filteredOptions = useMemo(() => {
+    const q = cartonQuery.trim().toLowerCase()
+    if (!q) return []
+    return customerCatalog
+      .filter(
+        (c) =>
+          c.cartonName.toLowerCase().includes(q) ||
+          (c.artworkCode ?? '').toLowerCase().includes(q),
+      )
+      .slice(0, 200)
+  }, [customerCatalog, cartonQuery])
 
   useEffect(() => {
-    if (line.cartonId || !line.cartonName.trim() || cartonSearch.loading) return
+    if (line.cartonId || !line.cartonName.trim() || catalogLoading) return
     const normalizedName = line.cartonName.trim().toLowerCase()
-    const exactMatches = cartonSearch.options.filter((c) => c.cartonName.trim().toLowerCase() === normalizedName)
+    const exactMatches = customerCatalog.filter(
+      (c) => c.cartonName.trim().toLowerCase() === normalizedName,
+    )
     if (exactMatches.length !== 1) return
     const [match] = exactMatches
-    cartonSearch.select(match)
+    pushRecent(match)
     onSelect(match)
-  }, [cartonSearch, line.cartonId, line.cartonName, onSelect])
+  }, [line.cartonId, line.cartonName, customerCatalog, catalogLoading, onSelect, pushRecent])
 
   return (
     <div className="min-w-[180px]">
@@ -174,15 +176,20 @@ function CartonLookupField({ line, customerId, error, onLineChange, onSelect, on
         label="Carton name"
         hideLabel
         query={cartonQuery}
-        onQueryChange={(value) => {
-          cartonSearch.setQuery(value)
-          onLineChange(resetAutofillFields(line, value))
-        }}
-        loading={cartonSearch.loading}
-        options={cartonSearch.options}
-        lastUsed={recentCartons}
+        onQueryChange={(value) => onLineChange(resetAutofillFields(line, value))}
+        loading={false}
+        options={filteredOptions}
+        lastUsed={lastUsed}
+        browseOptions={customerCatalog}
+        browseOptionsLabel="Products for this customer"
+        browseLoading={catalogLoading}
+        browseEmptyMessage={
+          customerId && !catalogLoading && customerCatalog.length === 0
+            ? 'No carton found for this customer.'
+            : null
+        }
         onSelect={(carton) => {
-          cartonSearch.select(carton)
+          pushRecent(carton)
           onSelect(carton)
         }}
         getOptionLabel={(carton) => carton.cartonName}
@@ -200,7 +207,7 @@ function CartonLookupField({ line, customerId, error, onLineChange, onSelect, on
         error={error}
         disabled={!customerId}
         placeholder={customerId ? 'Search or type carton...' : 'Select customer first'}
-        emptyMessage={customerId ? 'No carton found for this customer.' : 'Select customer first.'}
+        emptyMessage={customerId ? 'No matching carton in master for this customer.' : 'Select customer first.'}
         recentLabel="Recent cartons"
         loadingMessage="Searching cartons..."
         emptyActionLabel={customerId && cartonQuery.trim() ? `Create "${cartonQuery.trim()}" as new carton` : undefined}
@@ -255,6 +262,37 @@ export default function EditPurchaseOrderPage() {
   })
   const [qcCartonErrors, setQcCartonErrors] = useState<Record<string, string>>({})
   const [qcCartonSaving, setQcCartonSaving] = useState(false)
+  const [customerCartons, setCustomerCartons] = useState<CartonOption[]>([])
+  const [customerCartonsLoading, setCustomerCartonsLoading] = useState(false)
+
+  useEffect(() => {
+    if (!customerId) {
+      setCustomerCartons([])
+      setCustomerCartonsLoading(false)
+      return
+    }
+    let cancelled = false
+    setCustomerCartonsLoading(true)
+    void (async () => {
+      try {
+        const res = await fetch(`/api/cartons?customerId=${encodeURIComponent(customerId)}&limit=4000`)
+        const data = (await res.json()) as Record<string, unknown>[]
+        if (cancelled) return
+        if (!Array.isArray(data)) {
+          setCustomerCartons([])
+          return
+        }
+        setCustomerCartons(data.map(mapApiRowToPoCarton))
+      } catch {
+        if (!cancelled) setCustomerCartons([])
+      } finally {
+        if (!cancelled) setCustomerCartonsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [customerId])
 
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'po-customer',
@@ -485,6 +523,10 @@ export default function EditPurchaseOrderPage() {
       setQcCartonOpen(false)
       setActiveCartonLineIndex(null)
       setQcCarton({ cartonName: '', artworkCode: '', sizeL: '', sizeW: '', sizeH: '', rate: '', gstPct: '5', boardGrade: '', gsm: '', paperType: '', coatingType: '', embossingLeafing: '', foilType: '' })
+      setCustomerCartons((prev) => {
+        if (prev.some((p) => p.id === formatted.id)) return prev
+        return [...prev, formatted].sort((a, b) => a.cartonName.localeCompare(b.cartonName))
+      })
       toast.success('Carton created')
     } catch {
       toast.error('Failed to create carton')
@@ -647,6 +689,8 @@ export default function EditPurchaseOrderPage() {
                       <CartonLookupField
                         line={ln}
                         customerId={customerId}
+                        customerCatalog={customerCartons}
+                        catalogLoading={customerCartonsLoading}
                         error={!ln.cartonName && fieldErrors.lines ? 'Carton name is required' : undefined}
                         onLineChange={(patch) => updateLine(idx, patch)}
                         onSelect={(carton) => applyCartonToLine(idx, carton)}

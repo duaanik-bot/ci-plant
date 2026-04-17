@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
           data: {
             custodyStatus: CUSTODY_IN_STOCK,
             hubPreviousCustody: null,
+            hubCustodySource: null,
             cartonSize: nextCarton,
             sheetSize: nextSheet,
             reuseCount: { increment: 1 },

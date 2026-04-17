@@ -651,6 +651,17 @@ model Dye {
   issuedMachineId     String?   @map("issued_machine_id")
   issuedOperator      String?   @map("issued_operator")
   issuedAt            DateTime? @map("issued_at")
+  /// Parsed L×W×H (mm) for Die Hub matching & ledger; optional when only legacy `cartonSize` text exists.
+  dimLengthMm         Decimal?  @map("dim_length_mm") @db.Decimal(12, 4)
+  dimWidthMm          Decimal?  @map("dim_width_mm") @db.Decimal(12, 4)
+  dimHeightMm         Decimal?  @map("dim_height_mm") @db.Decimal(12, 4)
+  pastingType         String?   @map("pasting_type") @db.VarChar(64)
+  /// Hub make lane: local vs laser (table/board switcher).
+  dieMake             String    @default("local") @map("die_make") @db.VarChar(16)
+  /// First receipt into hub stock or custody from vendor (DOM).
+  dateOfManufacturing DateTime? @map("date_of_manufacturing")
+  /// Die Hub custody staging: e.g. `rack` when pulled from live inventory (matches plate hub).
+  hubCustodySource    String?   @map("hub_custody_source") @db.VarChar(32)
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
 

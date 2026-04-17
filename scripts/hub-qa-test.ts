@@ -48,15 +48,63 @@ ok(
   validatePayload({ artworkId: 'a', jobCardId: 'b', setNumber: '1' }).ok === true,
 )
 
-console.log('\n[Hub QA] Zod dispatch guard (empty artwork)')
+console.log('\n[Hub QA] Zod dispatch guard (die: artwork or manual)')
 const badDispatch = toolingHubDispatchBodySchema.safeParse({
   toolType: 'DIE',
-  artworkId: '',
   jobCardId: '00000000-0000-4000-8000-000000000099',
+  jobId: '00000000-0000-4000-8000-000000000088',
   setNumber: '1',
   source: 'NEW',
 })
-ok('empty artworkId rejected by Zod', badDispatch.success === false, badDispatch.success ? 'unexpected success' : undefined)
+ok(
+  'die dispatch without artwork or manual rejected',
+  badDispatch.success === false,
+  badDispatch.success ? 'unexpected success' : undefined,
+)
+const goodManual = toolingHubDispatchBodySchema.safeParse({
+  toolType: 'DIE',
+  jobCardId: '00000000-0000-4000-8000-000000000099',
+  jobId: '00000000-0000-4000-8000-000000000088',
+  awCode: 'R234',
+  actualSheetSize: '25×36',
+  ups: 4,
+  setNumber: '1',
+  source: 'NEW',
+})
+ok(
+  'die dispatch with manual specs accepted',
+  goodManual.success === true,
+  goodManual.success ? undefined : String(goodManual.error),
+)
+
+console.log('\n[Hub QA] Zod dispatch guard (emboss: artwork or manual)')
+const badEmboss = toolingHubDispatchBodySchema.safeParse({
+  toolType: 'BLOCK',
+  jobCardId: '00000000-0000-4000-8000-000000000099',
+  jobId: '00000000-0000-4000-8000-000000000088',
+  setNumber: '1',
+  source: 'NEW',
+})
+ok(
+  'emboss dispatch without artwork or manual rejected',
+  badEmboss.success === false,
+  badEmboss.success ? 'unexpected success' : undefined,
+)
+const goodEmbossManual = toolingHubDispatchBodySchema.safeParse({
+  toolType: 'BLOCK',
+  jobCardId: '00000000-0000-4000-8000-000000000099',
+  jobId: '00000000-0000-4000-8000-000000000088',
+  awCode: 'R234',
+  actualSheetSize: '19x20',
+  blockType: 'Embossing',
+  setNumber: '1',
+  source: 'NEW',
+})
+ok(
+  'emboss dispatch with manual specs accepted',
+  goodEmbossManual.success === true,
+  goodEmbossManual.success ? undefined : String(goodEmbossManual.error),
+)
 
 console.log('\n[Hub QA] Idempotency (5s window)')
 __resetDispatchIdempotencyForTests()

@@ -5,6 +5,11 @@ import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { CUSTODY_AT_VENDOR } from '@/lib/inventory-hub-custody'
 import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
 import { dieHubZoneLabelFromCustody } from '@/lib/tooling-hub-zones'
+import {
+  normalizeDieMake,
+  parseCartonSizeToDims,
+  prismaDimsFromParsed,
+} from '@/lib/die-hub-dimensions'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +20,8 @@ const bodySchema = z.object({
   ups: z.coerce.number().int().min(1).max(64).optional(),
   dieMaterial: z.string().max(80).optional(),
   dyeType: z.string().max(80).optional(),
+  pastingType: z.string().max(64).optional().nullable(),
+  dieMake: z.enum(['local', 'laser']).optional(),
 })
 
 /** Create / upsert die row and place in Outside Vendor lane for Die Hub. */
@@ -28,7 +35,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
     }
 
-    const { dyeNumber, cartonSize, sheetSize, ups, dieMaterial, dyeType } = parsed.data
+    const { dyeNumber, cartonSize, sheetSize, ups, dieMaterial, dyeType, pastingType, dieMake } =
+      parsed.data
     const existing = await db.dye.findUnique({ where: { dyeNumber } })
     if (existing) {
       return NextResponse.json(
@@ -37,6 +45,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const dims = prismaDimsFromParsed(parseCartonSizeToDims(cartonSize))
     const row = await db.$transaction(async (tx) => {
       const created = await tx.dye.create({
         data: {
@@ -47,6 +56,9 @@ export async function POST(req: NextRequest) {
           cartonSize: cartonSize.trim(),
           dieMaterial: dieMaterial?.trim() || null,
           custodyStatus: CUSTODY_AT_VENDOR,
+          pastingType: pastingType?.trim() || null,
+          dieMake: normalizeDieMake(dieMake),
+          ...(dims ?? {}),
         },
       })
       await createDieHubEvent(tx, {

@@ -12,6 +12,8 @@ export const HUB_ZONE = {
   CUSTODY_FLOOR: 'Custody Floor',
   FULFILLED: 'Fulfilled',
   CANCELLED: 'Cancelled',
+  /** Designer recall — requirement closed without press fulfillment */
+  RECALLED: 'Recalled',
   ISSUED_PRESS: 'Issued to Press',
   OTHER: 'Other',
 } as const

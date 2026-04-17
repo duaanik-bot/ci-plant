@@ -24,6 +24,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const customerId = searchParams.get('customerId')
   const q = (searchParams.get('q') ?? '').trim().toLowerCase()
+  const limitRaw = parseInt(searchParams.get('limit') ?? '4000', 10)
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 8000) : 4000
 
   const list = await db.$queryRawUnsafe<Array<{
     id: string
@@ -82,8 +84,9 @@ export async function GET(req: NextRequest) {
       where c.active = true
         ${customerId ? 'and c.customer_id = $1' : ''}
       order by c.carton_name asc
+      limit ${customerId ? '$2' : '$1'}
     `,
-    ...(customerId ? [customerId] : []),
+    ...(customerId ? [customerId, limit] : [limit]),
   )
 
   let mapped = list.map((c) => ({

@@ -27,6 +27,18 @@ export function humanizeToolingHubEventDetail(actionType: string, details: unkno
   }
 
   switch (actionType) {
+    case 'MANUFACTURED_AND_RECEIVED': {
+      const msg = str(d.message)
+      return msg || 'Die manufactured and received from vendor.'
+    }
+    case 'TAKE_FROM_STOCK_TO_CUSTODY': {
+      const msg = str(d.message)
+      return msg || 'Pulled from rack to custody floor.'
+    }
+    case 'TRIAGE_ARCHIVED_STOCK_FULFILL': {
+      const msg = str(d.message)
+      return msg || 'Triage requirement fulfilled from rack stock.'
+    }
     case 'SCRAP': {
       const reason = str(d.reason ?? d.scrapReason)
       return reason ? `Scrapped — ${reason}` : 'Scrapped'

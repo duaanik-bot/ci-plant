@@ -1,15 +1,22 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { format } from 'date-fns'
 import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { safeJsonParse, safeJsonStringify } from '@/lib/safe-json'
 import {
   hubAddedToRackLabel,
+  hubLastActionLine,
   hubMarkedReadyLabel,
   hubQueueAgeLabel,
   hubQueueStale,
 } from '@/lib/hub-card-time'
+import { DieMakeSwitcher } from '@/components/hub/die/DieMakeSwitcher'
+import { DieTakeFromStockModal } from '@/components/hub/die/DieTakeFromStockModal'
+import { DieTriageCard } from '@/components/hub/die/DieTriageCard'
+import { SimilarDiesModal, type SimilarDieMatch } from '@/components/hub/die/SimilarDiesModal'
+import { DIE_HUB_PASTING_TYPES } from '@/lib/die-hub-dimensions'
 import { calculateToolingZoneMetrics, toolingCardUnits } from '@/lib/tooling-hub-metrics'
 import {
   ToolingHubLedgerTable,
@@ -57,6 +64,7 @@ type DieRow = {
   title: string
   ups: number
   dimensionsLabel: string
+  dimensionsLwh: string
   sheetSize: string | null
   materialLabel: string
   location: string | null
@@ -68,6 +76,12 @@ type DieRow = {
   lastStatusUpdatedAt: string
   createdAt: string
   jobCardHub: JobCardHub | null
+  ledgerRank: number
+  pastingType: string | null
+  dieMake: 'local' | 'laser'
+  dateOfManufacturing: string | null
+  similarMatches: SimilarDieMatch[]
+  hubCustodySource?: string | null
 }
 
 type EmbossRow = {
@@ -85,6 +99,9 @@ type EmbossRow = {
   lastStatusUpdatedAt: string
   createdAt: string
   jobCardHub: JobCardHub | null
+  triageManualEntry?: boolean
+  triageAwReference?: string | null
+  triageBlockDimensions?: string | null
 }
 
 type ToolRow = DieRow | EmbossRow
@@ -210,6 +227,13 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const [mdSheetSize, setMdSheetSize] = useState('')
   const [mdUps, setMdUps] = useState('1')
   const [mdMaterial, setMdMaterial] = useState('Laser')
+  const [mdPastingType, setMdPastingType] = useState('Lock Bottom')
+  const [mdDieMake, setMdDieMake] = useState<'local' | 'laser'>('local')
+  const [similarDieBoardModal, setSimilarDieBoardModal] = useState<{
+    sourceLabel: string
+    matches: SimilarDieMatch[]
+  } | null>(null)
+  const [dieStockModal, setDieStockModal] = useState<DieRow | null>(null)
 
   const [manualEmbossOpen, setManualEmbossOpen] = useState(false)
   const [meCode, setMeCode] = useState('')
@@ -268,9 +292,20 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     const s = q.trim().toLowerCase()
     if (!s) return list
     return list.filter((r) => {
-      const hay = [r.displayCode, r.title, r.kind === 'die' ? r.materialLabel : r.typeLabel]
-        .join(' ')
-        .toLowerCase()
+      const hay =
+        r.kind === 'die'
+          ? [
+              r.displayCode,
+              r.title,
+              r.materialLabel,
+              r.dimensionsLwh,
+              r.dimensionsLabel,
+              r.pastingType,
+              r.dieMake,
+            ]
+              .join(' ')
+              .toLowerCase()
+          : [r.displayCode, r.title, r.typeLabel].join(' ').toLowerCase()
       return hay.includes(s)
     })
   }
@@ -413,6 +448,35 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     }
   }
 
+  async function submitDieTakeFromStock(inventoryDyeId: string) {
+    if (!dieStockModal) return
+    setSaving(true)
+    try {
+      const r = await fetch('/api/tooling-hub/dies/take-from-stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({
+          triageDyeId: dieStockModal.id,
+          inventoryDyeId,
+        }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Take from stock failed')
+        return
+      }
+      toast.success('Custody floor — die pulled from rack; triage archived')
+      setDieStockModal(null)
+      await load()
+    } catch (e) {
+      console.error(e)
+      toast.error('Take from stock failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function submitManualDie() {
     const n = parseInt(mdNumber, 10)
     if (!Number.isFinite(n) || n < 1) {
@@ -434,6 +498,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           sheetSize: mdSheetSize.trim() || undefined,
           ups: mdUps.trim() ? parseInt(mdUps, 10) : undefined,
           dieMaterial: mdMaterial.trim() || undefined,
+          pastingType: mdPastingType.trim() || undefined,
+          dieMake: mdDieMake,
         }),
       })
       const t = await r.text()
@@ -446,6 +512,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       setMdSheetSize('')
       setMdUps('1')
       setMdMaterial('Laser')
+      setMdPastingType('Lock Bottom')
+      setMdDieMake('local')
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed')
@@ -536,9 +604,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
   function toolingSpecSummaryLine(r: ToolRow): string {
     if (r.kind === 'die') {
-      return `UPS ${r.ups} · ${r.dimensionsLabel} · ${r.materialLabel}`
+      return `UPS ${r.ups} · ${r.dimensionsLwh} · ${r.materialLabel}`
     }
-    return `${r.typeLabel} · ${r.materialLabel}${r.blockSize ? ` · ${r.blockSize}` : ''}`
+    return `${r.typeLabel} · ${r.materialLabel}${r.blockSize ? ` · ${r.blockSize}` : ''}${
+      r.triageAwReference ? ` · AW ${r.triageAwReference}` : ''
+    }`
   }
 
   function zoneLabelForBoard(z: 'triage' | 'prep' | 'inventory' | 'custody'): string {
@@ -548,21 +618,21 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     return mode === 'dies' ? 'Outside vendor' : 'In-house engraving'
   }
 
-  function renderSpecs(r: ToolRow) {
+  function renderSpecs(r: ToolRow, zone: 'triage' | 'prep' | 'inventory' | 'custody') {
     if (r.kind === 'die') {
       return (
-        <div className="mt-1 space-y-0.5 text-xs font-medium text-zinc-400">
+        <div className="mt-1 space-y-0.5 text-[11px] font-medium text-zinc-400 leading-tight">
           <p>
-            Ups: <span className="text-zinc-300">{r.ups}</span>
+            UPS: <span className="text-zinc-300 tabular-nums">{r.ups}</span>
+            <span className="text-zinc-600 mx-1">·</span>
+            Type:{' '}
+            <span className="text-zinc-300">{r.pastingType?.trim() || '—'}</span>
           </p>
-          <p>
-            Dimensions: <span className="text-zinc-300">{r.dimensionsLabel}</span>
-            {r.sheetSize ? (
-              <span className="text-zinc-500"> · Sheet {r.sheetSize}</span>
-            ) : null}
-          </p>
-          <p>
-            Material: <span className="text-zinc-300">{r.materialLabel}</span>
+          {r.sheetSize ? (
+            <p className="text-[10px] text-zinc-500">Sheet: {r.sheetSize}</p>
+          ) : null}
+          <p className="text-[10px] text-zinc-500">
+            Material: <span className="text-zinc-400">{r.materialLabel}</span>
           </p>
           {r.location ? (
             <p className="text-[10px] text-zinc-500">Rack: {r.location}</p>
@@ -572,6 +642,16 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     }
     return (
       <div className="mt-1 space-y-0.5 text-xs font-medium text-zinc-400">
+        {zone === 'triage' && r.triageAwReference ? (
+          <p>
+            AW: <span className="text-zinc-200">{r.triageAwReference}</span>
+          </p>
+        ) : null}
+        {zone === 'triage' && r.triageBlockDimensions ? (
+          <p>
+            Block / sheet: <span className="text-zinc-200">{r.triageBlockDimensions}</span>
+          </p>
+        ) : null}
         <p>
           Type: <span className="text-zinc-300">{r.typeLabel}</span>
         </p>
@@ -594,22 +674,185 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     r: ToolRow,
     zone: 'triage' | 'prep' | 'inventory' | 'custody',
   ) {
+    const liClass = `rounded-lg border bg-black p-2 overflow-visible ${
+      zone === 'custody' && r.jobCardHub?.key === 'printed'
+        ? 'border-emerald-600/70 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
+        : 'border-zinc-800'
+    }`
+
+    if (r.kind === 'die') {
+      const hasSimilar = r.similarMatches.length > 0
+      const dimTitle = r.dimensionsLwh || r.dimensionsLabel
+      return (
+        <li key={`${r.kind}-${r.id}`} className={liClass}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-[10px] font-mono font-bold text-zinc-500"
+                title="Row #"
+              >
+                #{r.ledgerRank}
+              </span>
+              <span className="font-mono text-[10px] text-amber-300/90 truncate">{r.displayCode}</span>
+            </div>
+            {hasSimilar ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setSimilarDieBoardModal({
+                    sourceLabel: r.displayCode,
+                    matches: r.similarMatches,
+                  })
+                }
+                className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-amber-500 border border-amber-600/60 rounded px-1.5 py-0.5 hover:bg-amber-950/50"
+              >
+                Similar
+              </button>
+            ) : null}
+          </div>
+          <p className="text-[11px] text-zinc-500 truncate mt-1" title={r.title}>
+            {r.title}
+          </p>
+          <button
+            type="button"
+            className="text-left w-full text-blue-400 hover:text-blue-300 hover:underline font-semibold text-sm mt-0.5 truncate"
+            onClick={() =>
+              setToolingAudit({
+                tool: 'die',
+                id: r.id,
+                zoneLabel: zoneLabelForBoard(zone),
+                displayCode: r.displayCode,
+                title: dimTitle,
+                specSummary: toolingSpecSummaryLine(r),
+                units: toolingCardUnits(r),
+              })
+            }
+          >
+            {dimTitle}
+          </button>
+          {zone === 'custody' ? (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+              <JobCardStatusBadge hub={r.jobCardHub} />
+              {r.hubCustodySource === 'rack' ? (
+                <span className="inline-flex items-center rounded border border-zinc-500 bg-zinc-900 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-300">
+                  Source: Rack
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          {renderSpecs(r, zone)}
+          <div className="mt-1.5">
+            <DieMakeSwitcher
+              dyeId={r.id}
+              value={r.dieMake}
+              disabled={saving}
+              onPersisted={() => void load()}
+            />
+          </div>
+          {r.dateOfManufacturing ? (
+            <p className="text-[9px] text-zinc-500 mt-1 tabular-nums">
+              Mfg: {format(new Date(r.dateOfManufacturing), 'MMM d, yyyy')}
+            </p>
+          ) : null}
+          <p className="text-[10px] text-zinc-600 mt-1 leading-tight">
+            {hubLastActionLine(r.lastStatusUpdatedAt) ?? '—'}
+          </p>
+          {zone === 'prep' ? (
+            <>
+              <button
+                type="button"
+                disabled={saving}
+                className="mt-1.5 w-full py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50"
+                onClick={() =>
+                  void runTransition({ action: 'mark_ready', tool: toolKind, id: r.id }, 'Marked ready')
+                }
+              >
+                Mark ready
+              </button>
+              <HubStaleTime at={r.lastStatusUpdatedAt} />
+            </>
+          ) : null}
+          {zone === 'inventory' ? (
+            <>
+              <p className="text-[10px] font-medium text-zinc-400 mt-1 tabular-nums">
+                Reuse cycles: {r.reuseCount ?? 0}
+              </p>
+              <button
+                type="button"
+                disabled={saving}
+                className="mt-1.5 w-full py-1.5 rounded border border-zinc-600 bg-zinc-900 text-zinc-200 text-[11px] font-semibold hover:bg-zinc-800 disabled:opacity-50"
+                onClick={() =>
+                  void runTransition({ action: 'push_to_triage', tool: toolKind, id: r.id }, 'Sent to triage')
+                }
+              >
+                Push to incoming triage
+              </button>
+              <HubRackAdded createdAt={r.createdAt} />
+            </>
+          ) : null}
+          {zone === 'custody' ? (
+            <div className="mt-1.5 flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={saving}
+                className={`w-full py-1.5 rounded text-white text-[11px] font-bold shadow-sm ${
+                  r.jobCardHub?.key === 'printed'
+                    ? 'bg-emerald-500 hover:bg-emerald-400 ring-2 ring-emerald-300/40'
+                    : 'bg-emerald-700 hover:bg-emerald-600'
+                }`}
+                onClick={() => openReturnModal(r)}
+              >
+                Return to rack
+              </button>
+              <button
+                type="button"
+                className="w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-[11px] font-semibold hover:bg-rose-950/70"
+                onClick={() => {
+                  setScrapId(r.id)
+                  setScrapReason('')
+                }}
+              >
+                Scrap / Report Damage
+              </button>
+              <button
+                type="button"
+                className="w-full py-1.5 rounded border-2 border-red-600/90 bg-gradient-to-b from-red-950/95 to-orange-950/90 text-orange-50 text-[11px] font-bold hover:from-red-900 hover:to-orange-900"
+                onClick={() => setEmergencyId(r.id)}
+              >
+                Emergency Issue (Bypass)
+              </button>
+              <button
+                type="button"
+                className="w-full py-1.5 rounded border border-amber-800/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                onClick={() =>
+                  void runTransition({ action: 'reverse_staging', tool: toolKind, id: r.id }, 'Reversed')
+                }
+              >
+                Reverse / Undo
+              </button>
+              <HubCustodyReady at={r.lastStatusUpdatedAt} />
+            </div>
+          ) : null}
+        </li>
+      )
+    }
+
     return (
-      <li
-        key={`${r.kind}-${r.id}`}
-        className={`rounded-lg border bg-black p-2 ${
-          zone === 'custody' && r.jobCardHub?.key === 'printed'
-            ? 'border-emerald-600/70 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
-            : 'border-zinc-800'
-        }`}
-      >
-        <p className="font-mono text-amber-300 text-xs">{r.displayCode}</p>
+      <li key={`${r.kind}-${r.id}`} className={liClass}>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p className="font-mono text-amber-300 text-xs">{r.displayCode}</p>
+          {zone === 'triage' && r.triageManualEntry ? (
+            <span className="inline-flex items-center rounded border border-amber-600/60 bg-amber-950/50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">
+              Manual Entry
+            </span>
+          ) : null}
+        </div>
         <button
           type="button"
           className="text-left w-full text-white font-semibold text-sm truncate mt-0.5 pr-1 hover:text-blue-300 hover:underline"
           onClick={() =>
             setToolingAudit({
-              tool: r.kind === 'die' ? 'die' : 'emboss',
+              tool: 'emboss',
               id: r.id,
               zoneLabel: zoneLabelForBoard(zone),
               displayCode: r.displayCode,
@@ -626,7 +869,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <JobCardStatusBadge hub={r.jobCardHub} />
           </div>
         ) : null}
-        {renderSpecs(r)}
+        {renderSpecs(r, zone)}
         {zone === 'triage' ? (
           <>
             <button
@@ -838,6 +1081,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               searchQuery={ledgerSearch}
               zoneFilter={ledgerZoneFilter}
               onOpenAudit={setToolingAudit}
+              hubMode={mode}
+              onDieDataChanged={() => void load()}
+              dieMakeDisabled={saving}
             />
           </div>
         ) : (
@@ -862,7 +1108,42 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 {triageF.length === 0 ? (
                   <li className="text-zinc-500 text-sm">No jobs awaiting triage.</li>
                 ) : (
-                  triageF.map((r) => renderCard(r, 'triage'))
+                  triageF.map((r) =>
+                    mode === 'dies' && r.kind === 'die' ? (
+                      <DieTriageCard
+                        key={`${r.kind}-${r.id}`}
+                        r={r}
+                        saving={saving}
+                        specs={renderSpecs(r, 'triage')}
+                        onOpenAudit={() =>
+                          setToolingAudit({
+                            tool: 'die',
+                            id: r.id,
+                            zoneLabel: zoneLabelForBoard('triage'),
+                            displayCode: r.displayCode,
+                            title: r.dimensionsLwh || r.dimensionsLabel,
+                            specSummary: toolingSpecSummaryLine(r),
+                            units: toolingCardUnits(r),
+                          })
+                        }
+                        onRouteToVendor={() =>
+                          void runTransition(
+                            { action: 'triage_to_prep', tool: toolKind, id: r.id },
+                            'Sent to vendor lane',
+                          )
+                        }
+                        onTakeFromStock={() => setDieStockModal(r)}
+                        onSimilarClick={() =>
+                          setSimilarDieBoardModal({
+                            sourceLabel: r.displayCode,
+                            matches: r.similarMatches,
+                          })
+                        }
+                      />
+                    ) : (
+                      renderCard(r, 'triage')
+                    ),
+                  )
                 )}
               </ul>
             </section>
@@ -969,6 +1250,20 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       </div>
 
       <ToolingJobAuditModal context={toolingAudit} onClose={() => setToolingAudit(null)} />
+
+      <SimilarDiesModal
+        open={!!similarDieBoardModal}
+        onClose={() => setSimilarDieBoardModal(null)}
+        sourceLabel={similarDieBoardModal?.sourceLabel ?? ''}
+        matches={similarDieBoardModal?.matches ?? []}
+      />
+
+      <DieTakeFromStockModal
+        triageDyeId={dieStockModal?.id ?? null}
+        saving={saving}
+        onClose={() => setDieStockModal(null)}
+        onConfirm={(inventoryDyeId) => submitDieTakeFromStock(inventoryDyeId)}
+      />
 
       {returnModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
@@ -1123,6 +1418,31 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
                 placeholder="Laser, Wood, Steel Rule…"
               />
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Pasting type
+              <select
+                value={mdPastingType}
+                onChange={(e) => setMdPastingType(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+              >
+                {DIE_HUB_PASTING_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm text-zinc-300">
+              Initial make
+              <select
+                value={mdDieMake}
+                onChange={(e) => setMdDieMake(e.target.value as 'local' | 'laser')}
+                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+              >
+                <option value="local">Local</option>
+                <option value="laser">Laser</option>
+              </select>
             </label>
             <div className="flex justify-end gap-2 pt-2">
               <button

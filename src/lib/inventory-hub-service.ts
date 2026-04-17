@@ -5,7 +5,9 @@ import {
   CUSTODY_IN_STOCK,
   CUSTODY_ON_FLOOR,
 } from '@/lib/inventory-hub-custody'
+import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
 import { createShadeCardEvent, SHADE_CARD_ACTION } from '@/lib/shade-card-events'
+import { dieHubZoneLabelFromCustody } from '@/lib/tooling-hub-zones'
 
 export type InventoryToolKind = 'die' | 'emboss_block' | 'shade_card'
 
@@ -266,20 +268,37 @@ export async function receiveToolFromVendor(
   try {
     await db.$transaction(async (tx) => {
       if (kind === 'die') {
-        const upd = await tx.dye.updateMany({
+        const row = await tx.dye.findFirst({
           where: { id: toolId, custodyStatus: CUSTODY_AT_VENDOR, active: true },
+        })
+        if (!row) {
+          const any = await tx.dye.findUnique({ where: { id: toolId } })
+          if (!any) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
+          throw Object.assign(new Error('NOT_AT_VENDOR'), { code: 'NOT_AT_VENDOR' })
+        }
+        const setDom = !row.dateOfManufacturing
+        await tx.dye.update({
+          where: { id: toolId },
           data: {
             custodyStatus: CUSTODY_IN_STOCK,
             issuedMachineId: null,
             issuedOperator: null,
             issuedAt: null,
+            ...(setDom ? { dateOfManufacturing: new Date() } : {}),
             ...(options?.condition ? { condition: options.condition } : {}),
           },
         })
-        if (upd.count !== 1) {
-          const row = await tx.dye.findUnique({ where: { id: toolId } })
-          if (!row) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
-          throw Object.assign(new Error('NOT_AT_VENDOR'), { code: 'NOT_AT_VENDOR' })
+        if (setDom) {
+          await createDieHubEvent(tx, {
+            dyeId: toolId,
+            actionType: DIE_HUB_ACTION.MANUFACTURED_AND_RECEIVED,
+            fromZone: dieHubZoneLabelFromCustody(CUSTODY_AT_VENDOR),
+            toZone: dieHubZoneLabelFromCustody(CUSTODY_IN_STOCK),
+            details: {
+              message: 'Die manufactured and received from vendor.',
+              displayCode: `DYE-${row.dyeNumber}`,
+            },
+          })
         }
         await tx.dyeMaintenanceLog.create({
           data: {

@@ -17,6 +17,7 @@ import {
   countActiveShopfloorColours,
   shopfloorInactiveCanonicalKeysFromJson,
 } from '@/lib/plate-shopfloor-spec'
+import { extractPoLineIdFromCartonLabel } from '@/lib/plate-requirement-po-link'
 
 export const dynamic = 'force-dynamic'
 
@@ -245,20 +246,39 @@ export async function GET() {
       jobCardsForCustody.map((j) => [j.id, hubJobCardHubStatus(j)] as const),
     )
 
-    const triagePoLineIds = Array.from(
+    const triageEffectivePoLineIds = Array.from(
       new Set(
-        triageRows
-          .map((r) => r.poLineId)
-          .filter((id): id is string => Boolean(id && String(id).trim())),
+        triageRows.flatMap((r) => {
+          const col = r.poLineId?.trim()
+          const parsed = extractPoLineIdFromCartonLabel(r.cartonName)
+          const out: string[] = []
+          if (col) out.push(col)
+          if (parsed) out.push(parsed)
+          return out
+        }),
       ),
     )
     const triageLinesForMaster =
-      triagePoLineIds.length > 0
+      triageEffectivePoLineIds.length > 0
         ? await db.poLineItem.findMany({
-            where: { id: { in: triagePoLineIds } },
-            select: { id: true, cartonId: true },
+            where: { id: { in: triageEffectivePoLineIds } },
+            select: {
+              id: true,
+              cartonId: true,
+              po: { select: { id: true, poNumber: true } },
+            },
           })
         : []
+    const triagePoMetaByLineId = new Map<
+      string,
+      { purchaseOrderId: string; poNumber: string }
+    >()
+    for (const line of triageLinesForMaster) {
+      triagePoMetaByLineId.set(line.id, {
+        purchaseOrderId: line.po.id,
+        poNumber: line.po.poNumber,
+      })
+    }
     const triageCartonIds = Array.from(
       new Set(
         triageLinesForMaster
@@ -291,9 +311,21 @@ export async function GET() {
     const triage = triageRows.map((r) => {
       const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
       const poKey = r.poLineId?.trim()
+      const extractedLineId = extractPoLineIdFromCartonLabel(r.cartonName)
+      const effectivePoLineId = poKey || extractedLineId || null
+      const poMeta = effectivePoLineId ? triagePoMetaByLineId.get(effectivePoLineId) : undefined
+      const poLinkHint: 'linked' | 'missing_row' | 'manual' = poMeta
+        ? 'linked'
+        : effectivePoLineId
+          ? 'missing_row'
+          : 'manual'
       return {
         id: r.id,
         poLineId: r.poLineId,
+        effectivePoLineId,
+        poNumber: poMeta?.poNumber ?? null,
+        purchaseOrderId: poMeta?.purchaseOrderId ?? null,
+        poLinkHint,
         requirementCode: r.requirementCode,
         cartonName: r.cartonName,
         artworkCode: r.artworkCode,
@@ -304,7 +336,9 @@ export async function GET() {
         lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
         ledgerEntryAt: r.createdAt.toISOString(),
         plateSize: r.plateSize,
-        cartonMasterPlateSize: poKey ? cartonMasterPlateByPoLineId.get(poKey) ?? null : null,
+        cartonMasterPlateSize: effectivePoLineId
+          ? cartonMasterPlateByPoLineId.get(effectivePoLineId) ?? null
+          : null,
       }
     })
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import Link from 'next/link'
 import { Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
@@ -78,6 +79,10 @@ const RETURN_SIZE_MOD_REASONS: {
 type TriageRow = {
   id: string
   poLineId?: string | null
+  effectivePoLineId?: string | null
+  poNumber?: string | null
+  purchaseOrderId?: string | null
+  poLinkHint?: 'linked' | 'missing_row' | 'manual'
   requirementCode: string
   cartonName: string
   artworkCode: string | null
@@ -791,9 +796,6 @@ function plateColourNamesForScrap(p: {
   return (p.plateColours ?? []).map((x) => stripPlateColourDisplaySuffix(x)).filter(Boolean)
 }
 
-type MachineOpt = { id: string; machineCode: string; name: string }
-type UserOpt = { id: string; name: string }
-
 function safeReadDashboard(text: string): DashboardPayload | null {
   try {
     const v = JSON.parse(text) as unknown
@@ -952,15 +954,6 @@ export default function HubPlateDashboard() {
   const [remakeLane, setRemakeLane] = useState<'inhouse_ctp' | 'outside_vendor'>('inhouse_ctp')
   const [remakePick, setRemakePick] = useState<Record<string, boolean>>({})
 
-  const [emergencyTarget, setEmergencyTarget] = useState<CustodyCard | null>(null)
-  const [machines, setMachines] = useState<MachineOpt[]>([])
-  const [users, setUsers] = useState<UserOpt[]>([])
-  const [emergencyMachineId, setEmergencyMachineId] = useState('')
-  const [emergencyOperatorId, setEmergencyOperatorId] = useState('')
-  const [emergencyArtworkId, setEmergencyArtworkId] = useState('')
-  const [emergencyJobCardId, setEmergencyJobCardId] = useState('')
-  const [emergencySetNum, setEmergencySetNum] = useState('')
-
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true)
     try {
@@ -1116,25 +1109,6 @@ export default function HubPlateDashboard() {
     setRemakePick(next)
   }, [remakePlate])
 
-  useEffect(() => {
-    if (!emergencyTarget || emergencyTarget.kind !== 'plate') return
-    void (async () => {
-      try {
-        const [mRes, uRes] = await Promise.all([fetch('/api/machines'), fetch('/api/users')])
-        setMachines(safeJsonParseArray<MachineOpt>(await mRes.text(), []))
-        setUsers(safeJsonParseArray<UserOpt>(await uRes.text(), []))
-      } catch {
-        setMachines([])
-        setUsers([])
-      }
-      setEmergencyMachineId('')
-      setEmergencyOperatorId('')
-      setEmergencyArtworkId(String(emergencyTarget.artworkId ?? '').trim())
-      setEmergencyJobCardId(String(emergencyTarget.jobCardId ?? '').trim())
-      setEmergencySetNum(String(emergencyTarget.slotNumber ?? '').trim() || '01')
-    })()
-  }, [emergencyTarget])
-
   const addStockTotalPlates = useMemo(() => {
     let n = 0
     if (stdC) n += 1
@@ -1183,12 +1157,16 @@ export default function HubPlateDashboard() {
         method: 'POST',
       })
       const t = await r.text()
-      const j = safeJsonParse<{ error?: string }>(t, {})
+      const j = safeJsonParse<{ error?: string; warning?: string }>(t, {})
       if (!r.ok) {
         toast.error(j.error ?? 'Recall failed')
         return
       }
-      toast.success('Recalled to pre-press')
+      if (j.warning) {
+        toast.warning(j.warning, { duration: 6500 })
+      } else {
+        toast.success('Recalled to pre-press')
+      }
       await load()
     } finally {
       setSaving(false)
@@ -1826,44 +1804,6 @@ export default function HubPlateDashboard() {
     }
   }
 
-  async function submitEmergencyIssue() {
-    if (!emergencyTarget || emergencyTarget.kind !== 'plate') return
-    if (!emergencyMachineId.trim() || !emergencyOperatorId.trim()) {
-      toast.error('Machine and operator are required')
-      return
-    }
-    if (!emergencyArtworkId.trim() || !emergencyJobCardId.trim()) {
-      toast.error('Artwork ID and job card ID are required for issue')
-      return
-    }
-    setSaving(true)
-    try {
-      const r = await fetch('/api/plate-hub/emergency-issue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeJsonStringify({
-          plateStoreId: emergencyTarget.id,
-          machineId: emergencyMachineId,
-          operatorUserId: emergencyOperatorId,
-          artworkId: emergencyArtworkId.trim(),
-          jobCardId: emergencyJobCardId.trim(),
-          setNumber: emergencySetNum.trim() || '01',
-        }),
-      })
-      const t = await r.text()
-      const j = safeJsonParse<{ error?: string }>(t, {})
-      if (!r.ok) throw new Error(j.error ?? 'Emergency issue failed')
-      toast.success('Plate issued (bypass)')
-      setEmergencyTarget(null)
-      await load({ silent: true })
-    } catch (e) {
-      console.error(e)
-      toast.error(e instanceof Error ? e.message : 'Emergency issue failed')
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const filteredInventory = useMemo(() => {
     const q = invSearch.trim().toLowerCase()
     const list = data.inventory
@@ -2370,9 +2310,37 @@ export default function HubPlateDashboard() {
                             {row.newPlatesNeeded}
                           </span>
                           {' · '}AW: {row.artworkCode?.trim() || '—'}
-                          {row.poLineId ? (
+                          {row.purchaseOrderId && row.poNumber ? (
                             <>
-                              {' · '}PO line: {row.poLineId}
+                              {' · '}
+                              <Link
+                                href={`/orders/purchase-orders/${row.purchaseOrderId}`}
+                                className="text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline font-medium"
+                              >
+                                PO {row.poNumber}
+                              </Link>
+                            </>
+                          ) : row.poLinkHint === 'missing_row' ? (
+                            <>
+                              {' · '}
+                              <span
+                                className="inline-flex items-center text-amber-400/90 cursor-help select-none"
+                                title="Linked PO line not found — may be deleted or archived"
+                                aria-label="PO link broken"
+                              >
+                                ⚠️
+                              </span>
+                            </>
+                          ) : row.poLinkHint === 'manual' ? (
+                            <>
+                              {' · '}
+                              <span
+                                className="inline-flex items-center text-zinc-500 cursor-help select-none"
+                                title="No PO link - Manual Job"
+                                aria-label="No PO link"
+                              >
+                                ⚠️
+                              </span>
                             </>
                           ) : null}
                         </HubJobCardMetaLine>
@@ -3026,21 +2994,6 @@ export default function HubPlateDashboard() {
                             }}
                           >
                             Scrap / Report Damage
-                          </button>
-                          <button
-                            type="button"
-                            className="w-full py-1.5 rounded border-2 border-red-600/90 bg-gradient-to-b from-red-950/95 to-orange-950/90 text-orange-50 text-[11px] font-bold hover:from-red-900 hover:to-orange-900 shadow-[0_0_12px_rgba(220,38,38,0.25)]"
-                            onClick={() => {
-                              if (c.kind !== 'plate') {
-                                toast.error(
-                                  'Emergency issue applies to rack plate sets. This row is a CTP/vendor requirement — use Reverse / Undo or finish burning plates first.',
-                                )
-                                return
-                              }
-                              setEmergencyTarget(c)
-                            }}
-                          >
-                            Emergency Issue (Bypass)
                           </button>
                           <button
                             type="button"
@@ -4205,92 +4158,6 @@ export default function HubPlateDashboard() {
                 onClick={() => void submitPartialRemake()}
               >
                 Create partial request
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Emergency issue (bypass planning) */}
-      {emergencyTarget && emergencyTarget.kind === 'plate' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-orange-700/50 bg-zinc-950 p-4 space-y-3">
-            <h3 className="text-lg font-semibold text-white">Emergency issue (bypass)</h3>
-            <p className="text-zinc-500 text-xs">
-              Issue this staged plate directly to the machine. Use for on-the-fly remakes or floor
-              urgency.
-            </p>
-            <p className="text-sm font-mono text-amber-300">{emergencyTarget.displayCode}</p>
-            <label className="block text-sm text-zinc-300">
-              Machine
-              <select
-                value={emergencyMachineId}
-                onChange={(e) => setEmergencyMachineId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              >
-                <option value="">Select…</option>
-                {machines.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.machineCode} — {m.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm text-zinc-300">
-              Operator
-              <select
-                value={emergencyOperatorId}
-                onChange={(e) => setEmergencyOperatorId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              >
-                <option value="">Select…</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm text-zinc-300">
-              Artwork ID
-              <input
-                value={emergencyArtworkId}
-                onChange={(e) => setEmergencyArtworkId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white font-mono text-sm"
-              />
-            </label>
-            <label className="block text-sm text-zinc-300">
-              Job card ID
-              <input
-                value={emergencyJobCardId}
-                onChange={(e) => setEmergencyJobCardId(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white font-mono text-sm"
-              />
-            </label>
-            <label className="block text-sm text-zinc-300">
-              Set #
-              <input
-                value={emergencySetNum}
-                onChange={(e) => setEmergencySetNum(e.target.value)}
-                placeholder="01"
-                className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
-              />
-            </label>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
-                onClick={() => setEmergencyTarget(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                className="px-3 py-2 rounded bg-gradient-to-b from-red-800 to-orange-800 text-white font-semibold disabled:opacity-50"
-                onClick={() => void submitEmergencyIssue()}
-              >
-                Issue now
               </button>
             </div>
           </div>

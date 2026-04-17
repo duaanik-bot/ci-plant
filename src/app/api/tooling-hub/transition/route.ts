@@ -77,15 +77,29 @@ export async function POST(req: NextRequest) {
             throw httpError(409, 'Die must be at vendor to mark ready')
           }
           const fromZone = dieHubZoneLabelFromCustody(row.custodyStatus)
+          const setDom = !row.dateOfManufacturing
           await tx.dye.update({
             where: { id: body.id },
             data: {
               custodyStatus: CUSTODY_HUB_CUSTODY_READY,
               hubPreviousCustody: row.custodyStatus,
               updatedAt: now,
+              ...(setDom ? { dateOfManufacturing: now } : {}),
             },
           })
           const toZone = dieHubZoneLabelFromCustody(CUSTODY_HUB_CUSTODY_READY)
+          if (setDom) {
+            await createDieHubEvent(tx, {
+              dyeId: body.id,
+              actionType: DIE_HUB_ACTION.MANUFACTURED_AND_RECEIVED,
+              fromZone,
+              toZone,
+              details: {
+                message: 'Die manufactured and received from vendor.',
+                displayCode: `DYE-${row.dyeNumber}`,
+              },
+            })
+          }
           await createDieHubEvent(tx, {
             dyeId: body.id,
             actionType: DIE_HUB_ACTION.MARKED_READY,
@@ -135,6 +149,7 @@ export async function POST(req: NextRequest) {
             data: {
               custodyStatus: prev,
               hubPreviousCustody: null,
+              hubCustodySource: null,
               updatedAt: now,
             },
           })

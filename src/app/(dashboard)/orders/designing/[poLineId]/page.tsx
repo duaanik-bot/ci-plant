@@ -13,7 +13,11 @@ import {
 } from '@/lib/designer-command'
 import { getPostPressRouting, isEmbossingRequired } from '@/lib/emboss-conditions'
 import {
+  HUB_DIE_PUSH_SPECS_MISSING_TOAST,
+  HUB_EMBOSS_PUSH_SPECS_MISSING_TOAST,
   HUB_TECHNICAL_DATA_MISSING_TOAST,
+  validateDieHubPushPayload,
+  validateEmbossHubPushPayload,
   validatePayload,
 } from '@/lib/validate-hub-payload'
 import { safeJsonStringify } from '@/lib/safe-json'
@@ -337,32 +341,154 @@ export default function DesigningDetailPage() {
     toolType: 'DIE' | 'BLOCK'
     jobId: string
     jobCardId: string
-    artworkId: string
+    artworkId?: string
+    awCode?: string
+    actualSheetSize?: string
+    ups?: number
+    cartonSize?: string
+    cartonId?: string
     setNumber: string
     source: 'NEW' | 'OLD'
+    blockType?: string
   }
 
-  const buildToolingBody = (tool: 'die' | 'emboss'): ToolingApiBody | null => {
+  const buildToolingBody = (tool: 'die' | 'emboss', forHub = false): ToolingApiBody | null => {
     if (!data?.line) return null
-    const artworkId =
+    const artworkIdRaw =
       String(data.line.specOverrides?.artworkId ?? '').trim() || resolvedArtworkId?.trim() || ''
+    const artworkId = artworkIdRaw || undefined
     const setNumber = setNumberInput.trim()
     const jobCardId = data.jobCard?.id?.trim() || ''
-    if (!artworkId || !setNumber || !jobCardId) return null
     const src = tool === 'die' ? designerCommand.dieSource : designerCommand.embossSource
     if (!src) return null
+    if (!setNumber || !/^\d+$/.test(setNumber) || !jobCardId) return null
+
+    if (tool === 'emboss') {
+      if (!forHub) {
+        if (!artworkId) return null
+        return {
+          toolType: 'BLOCK',
+          jobId: data.line.id,
+          jobCardId,
+          artworkId,
+          setNumber,
+          source: src === 'new' ? 'NEW' : 'OLD',
+        }
+      }
+      const aw = artworkCodeInput.trim()
+      const sheet = actualSheetSizeInput.trim()
+      if (!aw || !sheet) return null
+      const blockType = (data.line.embossingLeafing || 'Embossing').trim()
+      return {
+        toolType: 'BLOCK',
+        jobId: data.line.id,
+        jobCardId,
+        setNumber,
+        source: src === 'new' ? 'NEW' : 'OLD',
+        ...(artworkId ? { artworkId } : {}),
+        awCode: aw,
+        actualSheetSize: sheet,
+        blockType,
+        cartonSize: data.line.cartonSize?.trim() || '',
+        ...(data.line.cartonId?.trim() ? { cartonId: data.line.cartonId.trim() } : {}),
+      }
+    }
+
+    if (!forHub) {
+      if (!artworkId) return null
+      return {
+        toolType: 'DIE',
+        jobId: data.line.id,
+        jobCardId,
+        artworkId,
+        setNumber,
+        source: src === 'new' ? 'NEW' : 'OLD',
+      }
+    }
+
+    const aw = artworkCodeInput.trim()
+    const sheet = actualSheetSizeInput.trim()
+    const upsRaw = numberOfUpsInput.trim()
+    const upsNum = upsRaw ? Number(upsRaw) : NaN
+    const upsOk = Number.isFinite(upsNum) && upsNum >= 1 && Math.floor(upsNum) === upsNum
+    if (!aw || !sheet || !upsOk) return null
+
+    const fmtCartonSize = (): string => {
+      if (data.line.cartonSize?.trim()) return data.line.cartonSize.trim()
+      const c = data.line.carton
+      if (!c) return ''
+      const fmt = (v: unknown) => {
+        if (v == null || v === '') return ''
+        const n = Number(v)
+        return Number.isFinite(n) ? String(n) : String(v)
+      }
+      const L = fmt(c.finishedLength)
+      const W = fmt(c.finishedWidth)
+      const H = fmt(c.finishedHeight)
+      if (L && W && H) return `${L}×${W}×${H}`
+      return ''
+    }
+
     return {
-      toolType: tool === 'die' ? 'DIE' : 'BLOCK',
+      toolType: 'DIE',
       jobId: data.line.id,
       jobCardId,
-      artworkId,
       setNumber,
       source: src === 'new' ? 'NEW' : 'OLD',
+      ...(artworkId ? { artworkId } : {}),
+      awCode: aw,
+      actualSheetSize: sheet,
+      ups: Math.floor(upsNum),
+      cartonSize: fmtCartonSize(),
+      ...(data.line.cartonId?.trim() ? { cartonId: data.line.cartonId.trim() } : {}),
     }
+  }
+
+  const assertDieHubPayload = (body: ToolingApiBody | null): body is ToolingApiBody => {
+    if (!body || body.toolType !== 'DIE') {
+      toast.error(HUB_DIE_PUSH_SPECS_MISSING_TOAST)
+      return false
+    }
+    const v = validateDieHubPushPayload({
+      artworkId: body.artworkId,
+      jobCardId: body.jobCardId,
+      setNumber: body.setNumber,
+      awCode: body.awCode,
+      actualSheetSize: body.actualSheetSize,
+      ups: body.ups ?? numberOfUpsInput,
+    })
+    if (!v.ok) {
+      toast.error(HUB_DIE_PUSH_SPECS_MISSING_TOAST)
+      return false
+    }
+    return true
+  }
+
+  const assertEmbossHubPayload = (body: ToolingApiBody | null): body is ToolingApiBody => {
+    if (!body || body.toolType !== 'BLOCK') {
+      toast.error(HUB_EMBOSS_PUSH_SPECS_MISSING_TOAST)
+      return false
+    }
+    const v = validateEmbossHubPushPayload({
+      artworkId: body.artworkId,
+      jobCardId: body.jobCardId,
+      setNumber: body.setNumber,
+      awCode: body.awCode,
+      actualSheetSize: body.actualSheetSize,
+    })
+    if (!v.ok) {
+      toast.error(HUB_EMBOSS_PUSH_SPECS_MISSING_TOAST)
+      return false
+    }
+    return true
   }
 
   const assertToolingPayload = (body: ToolingApiBody | null): body is ToolingApiBody => {
     if (!body) {
+      toast.error(HUB_TECHNICAL_DATA_MISSING_TOAST)
+      return false
+    }
+    if (!body.artworkId?.trim()) {
       toast.error(HUB_TECHNICAL_DATA_MISSING_TOAST)
       return false
     }
@@ -415,8 +541,8 @@ export default function DesigningDetailPage() {
 
   const diePushToHub = async () => {
     if (!data || !designerCommand.dieSource) return
-    const body = buildToolingBody('die')
-    if (!assertToolingPayload(body)) return
+    const body = buildToolingBody('die', true)
+    if (!assertDieHubPayload(body)) return
     setSavingDesignerCommand(true)
     try {
       const res = await fetch('/api/tooling-hub/dispatch', {
@@ -483,8 +609,8 @@ export default function DesigningDetailPage() {
 
   const embossPushToHub = async () => {
     if (!data || !designerCommand.embossSource) return
-    const body = buildToolingBody('emboss')
-    if (!assertToolingPayload(body)) return
+    const body = buildToolingBody('emboss', true)
+    if (!assertEmbossHubPayload(body)) return
     setSavingDesignerCommand(true)
     try {
       const res = await fetch('/api/tooling-hub/dispatch', {
@@ -950,6 +1076,48 @@ export default function DesigningDetailPage() {
     [data?.line?.specOverrides, resolvedArtworkId],
   )
 
+  const dieManualSpecsComplete = useMemo(() => {
+    const aw = artworkCodeInput.trim()
+    const sheet = actualSheetSizeInput.trim()
+    const upsRaw = numberOfUpsInput.trim()
+    const upsNum = upsRaw ? Number(upsRaw) : NaN
+    const upsOk = Number.isFinite(upsNum) && upsNum >= 1 && Math.floor(upsNum) === upsNum
+    return !!aw && !!sheet && upsOk
+  }, [artworkCodeInput, actualSheetSizeInput, numberOfUpsInput])
+
+  const embossManualSpecsComplete = useMemo(() => {
+    const aw = artworkCodeInput.trim()
+    const sheet = actualSheetSizeInput.trim()
+    return !!aw && !!sheet
+  }, [artworkCodeInput, actualSheetSizeInput])
+
+  const section1ManualHubOk = useMemo(
+    () => dieManualSpecsComplete || (embossRequired && embossManualSpecsComplete),
+    [dieManualSpecsComplete, embossRequired, embossManualSpecsComplete],
+  )
+
+  const diePushGateReady = useMemo(() => {
+    if (!data?.jobCard?.id) return false
+    const setTrim = setNumberInput.trim()
+    if (!setTrim || !/^\d+$/.test(setTrim)) return false
+    return dieManualSpecsComplete
+  }, [data?.jobCard?.id, setNumberInput, dieManualSpecsComplete])
+
+  const dieDispatchedToHub =
+    designerCommand.dieLastIntent === 'die_hub' ||
+    designerCommand.dieLastIntent === 'store_retrieval'
+
+  const embossPushGateReady = useMemo(() => {
+    if (!data?.jobCard?.id) return false
+    const setTrim = setNumberInput.trim()
+    if (!setTrim || !/^\d+$/.test(setTrim)) return false
+    return embossManualSpecsComplete
+  }, [data?.jobCard?.id, setNumberInput, embossManualSpecsComplete])
+
+  const embossDispatchedToHub =
+    designerCommand.embossLastIntent === 'emboss_hub' ||
+    designerCommand.embossLastIntent === 'store_retrieval'
+
   if (!data || !line) return <div className="p-4 text-slate-400">Loading...</div>
 
   const showNewProductSetHint =
@@ -1100,6 +1268,34 @@ export default function DesigningDetailPage() {
       <div className="flex-1 p-3 max-w-7xl mx-auto w-full space-y-2 pb-6">
           <section className="rounded-xl bg-slate-900 border border-slate-700 p-3">
             <h2 className="text-sm font-semibold text-slate-200 mb-2">Section 1 — Identification &amp; spec</h2>
+            {!effectiveArtworkId && artworkCodeInput.trim() ? (
+              <div
+                className={`mb-3 rounded-lg border px-3 py-2 text-[11px] leading-snug ${
+                  section1ManualHubOk
+                    ? 'border-amber-500/45 bg-amber-950/20 text-amber-100/95'
+                    : 'border-rose-500/40 bg-rose-950/25 text-rose-100/90'
+                }`}
+                role="status"
+              >
+                {section1ManualHubOk ? (
+                  <>
+                    <span className="font-semibold text-amber-200/95">Warning — </span>
+                    Proceeding with manual specs (Artwork file missing). Die Hub needs sheet size and UPS.
+                    {embossRequired
+                      ? ' Embossing Hub needs sheet size; block type comes from Emboss / leaf on this job.'
+                      : ''}
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold text-rose-200/95">Technical data gap — </span>
+                    Link an artwork record or enter actual sheet size
+                    {embossRequired
+                      ? ', number of UPS for Die Hub, and sheet size for Emboss Hub.'
+                      : ' and number of UPS for Die Hub.'}
+                  </>
+                )}
+              </div>
+            ) : null}
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <span className="text-[11px] text-slate-500 shrink-0">Job type</span>
               <div className="inline-flex rounded-lg border border-slate-600 overflow-hidden">
@@ -1171,11 +1367,13 @@ export default function DesigningDetailPage() {
                 />
                 {artworkCodeInput.trim() ? (
                   <p
-                    className={`mt-1 text-[10px] ${effectiveArtworkId ? 'text-emerald-500/80' : 'text-amber-500/85'}`}
+                    className={`mt-1 text-[10px] ${effectiveArtworkId ? 'text-emerald-500/80' : section1ManualHubOk ? 'text-amber-500/85' : 'text-rose-400/85'}`}
                   >
                     {effectiveArtworkId
                       ? 'Artwork linked for die / emboss / send-all dispatch.'
-                      : 'No artwork record for this AW + customer (match filename in job artworks).'}
+                      : section1ManualHubOk
+                        ? 'No artwork row — manual specs can be used for Die / Emboss Hub triage.'
+                        : 'No artwork record for this AW + customer (match filename in job artworks).'}
                   </p>
                 ) : null}
               </label>
@@ -1266,11 +1464,26 @@ export default function DesigningDetailPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={savingDesignerCommand}
+                    disabled={
+                      savingDesignerCommand ||
+                      dieDispatchedToHub ||
+                      !diePushGateReady
+                    }
+                    title={
+                      dieDispatchedToHub
+                        ? 'Already sent to Die Hub'
+                        : !diePushGateReady
+                          ? 'Enter numeric set #, AW code, actual sheet size, and number of UPS'
+                          : 'POST /api/tooling-hub/dispatch (does not route to Plate Hub)'
+                    }
                     onClick={() => void diePushToHub()}
-                    className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                    className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                   >
-                    Push to Die Hub
+                    {designerCommand.dieLastIntent === 'die_hub'
+                      ? 'Sent to Die Hub ✅'
+                      : designerCommand.dieLastIntent === 'store_retrieval'
+                        ? 'Retrieval sent ✅'
+                        : 'Push to Die Hub'}
                   </button>
                 </div>
               ) : (
@@ -1289,6 +1502,12 @@ export default function DesigningDetailPage() {
                   historyValue={historyDesignerCommand?.embossSource ?? null}
                   onChange={(v) => setDesignerCommand((p) => ({ ...p, embossSource: v }))}
                 />
+                {designerCommand.embossSource && !effectiveArtworkId && embossManualSpecsComplete ? (
+                  <p className="text-[11px] text-amber-400/95 leading-snug" role="status">
+                    Proceeding with manual specs (Artwork file missing). Push uses set #, AW code, and sheet
+                    size; block type comes from Emboss / leaf on this job.
+                  </p>
+                ) : null}
                 {designerCommand.embossSource ? (
                   <div className="flex flex-wrap gap-2 justify-start">
                     <button
@@ -1301,11 +1520,26 @@ export default function DesigningDetailPage() {
                     </button>
                     <button
                       type="button"
-                      disabled={savingDesignerCommand}
+                      disabled={
+                        savingDesignerCommand ||
+                        embossDispatchedToHub ||
+                        !embossPushGateReady
+                      }
+                      title={
+                        embossDispatchedToHub
+                          ? 'Already sent to Embossing Hub'
+                          : !embossPushGateReady
+                            ? 'Enter numeric set #, AW code, and actual sheet size'
+                            : 'POST /api/tooling-hub/dispatch (independent of Die / Plate Hub)'
+                      }
                       onClick={() => void embossPushToHub()}
-                      className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                      className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
-                      Push to Embossing Hub
+                      {designerCommand.embossLastIntent === 'emboss_hub'
+                        ? 'Sent to Embossing Hub ✅'
+                        : designerCommand.embossLastIntent === 'store_retrieval'
+                          ? 'Retrieval sent ✅'
+                          : 'Push to Embossing Hub'}
                     </button>
                   </div>
                 ) : (
