@@ -118,6 +118,23 @@
   letter-spacing: -0.02em;
 }
 
+@layer utilities {
+  @keyframes yield-wastage-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      filter: drop-shadow(0 0 4px rgba(244, 63, 94, 0.4));
+    }
+    50% {
+      opacity: 0.88;
+      filter: drop-shadow(0 0 12px rgba(244, 63, 94, 0.75));
+    }
+  }
+  .animate-yield-wastage-pulse {
+    animation: yield-wastage-pulse 2s ease-in-out infinite;
+  }
+}
+
 @layer components {
   .ci-hub-modal-panel {
     @apply w-full max-w-md rounded-lg border border-zinc-700/90 bg-zinc-950/95 p-3.5 space-y-2.5 shadow-2xl backdrop-blur-md max-h-[90vh] overflow-y-auto;

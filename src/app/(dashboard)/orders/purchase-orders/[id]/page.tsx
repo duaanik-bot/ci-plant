@@ -32,6 +32,8 @@ import {
 import { paperSupplyIconMeta } from '@/lib/po-paper-supply-ui'
 import { parseDeliveryYmdFromRemarks } from '@/lib/po-delivery-parse'
 import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
+import { ProductionReadinessBar } from '@/components/orders/ProductionReadinessBar'
+import type { ProductionKitForLine } from '@/lib/production-kit-status'
 
 type Customer = {
   id: string
@@ -329,6 +331,12 @@ export default function EditPurchaseOrderPage() {
   const [qcCartonSaving, setQcCartonSaving] = useState(false)
   const [customerCartons, setCustomerCartons] = useState<CartonOption[]>([])
   const [customerCartonsLoading, setCustomerCartonsLoading] = useState(false)
+  const [productionKit, setProductionKit] = useState<{
+    lines: ProductionKitForLine[]
+    allOk: boolean
+    anyRose: boolean
+  } | null>(null)
+  const [productionKitLoading, setProductionKitLoading] = useState(true)
 
   useEffect(() => {
     if (!customerId) {
@@ -419,6 +427,35 @@ export default function EditPurchaseOrderPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    let cancelled = false
+    setProductionKitLoading(true)
+    void (async () => {
+      try {
+        const res = await fetch(`/api/purchase-orders/${id}/production-kit`)
+        const j = await res.json()
+        if (cancelled) return
+        if (!res.ok || !j || typeof j !== 'object') {
+          setProductionKit(null)
+          return
+        }
+        setProductionKit({
+          lines: Array.isArray(j.lines) ? j.lines : [],
+          allOk: j.allOk === true,
+          anyRose: j.anyRose === true,
+        })
+      } catch {
+        if (!cancelled) setProductionKit(null)
+      } finally {
+        if (!cancelled) setProductionKitLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [id])
 
   const applyCustomer = (c: Customer) => {
@@ -770,6 +807,13 @@ export default function EditPurchaseOrderPage() {
           </div>
         </div>
       </div>
+
+      <ProductionReadinessBar
+        lines={productionKit?.lines ?? []}
+        allOk={productionKit?.allOk ?? false}
+        anyRose={productionKit?.anyRose ?? false}
+        loading={productionKitLoading}
+      />
 
       {/* Zero-scroll line grid */}
       <div className="rounded-xl border border-white/10 bg-white/[0.02] p-2 text-[11px] backdrop-blur-sm sm:p-3">

@@ -18,6 +18,7 @@ export async function GET() {
       materialTypes: true,
       defaultForBoardGrades: true,
       leadTimeDays: true,
+      paymentTermsDays: true,
       email: true,
       contactPhone: true,
     },

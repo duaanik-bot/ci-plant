@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { jobFifoSpecFromPoLine } from '@/lib/inventory-aging-fifo'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,11 +33,11 @@ export async function GET(
   const sheetsIssued = jc.sheetsIssued
   const remaining = Math.max(0, totalSheets - sheetsIssued)
 
-  const productName =
-    (await db.poLineItem.findFirst({
-      where: { jobCardNumber: jc.jobCardNumber },
-      select: { cartonName: true },
-    }))?.cartonName ?? `Job Card #${jc.jobCardNumber}`
+  const poLine = await db.poLineItem.findFirst({
+    where: { jobCardNumber: jc.jobCardNumber },
+  })
+  const productName = poLine?.cartonName ?? `Job Card #${jc.jobCardNumber}`
+  const fifoSpecDto = poLine ? jobFifoSpecFromPoLine(poLine) : null
 
   return NextResponse.json({
     type: 'job_card',
@@ -44,6 +45,14 @@ export async function GET(
     jobNumber: `JC#${jc.jobCardNumber}`,
     productName,
     customerName: jc.customer.name,
+    fifoSpec: fifoSpecDto
+      ? {
+          gsm: fifoSpecDto.gsm,
+          boardNorm: fifoSpecDto.boardNorm,
+          paperTypeNorm: fifoSpecDto.paperTypeNorm,
+          sheetSizeNorm: fifoSpecDto.sheetSizeNorm,
+        }
+      : null,
     bomLines: [
       {
         id: jc.id,

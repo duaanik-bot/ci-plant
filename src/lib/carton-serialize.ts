@@ -1,4 +1,4 @@
-import type { Carton, Customer, Dye } from '@prisma/client'
+import type { Carton, Customer, Dye, ShadeCard } from '@prisma/client'
 import { masterDieTypeLabel } from '@/lib/master-die-type'
 import { formatDimsLwhFromDb, parseCartonSizeToDims, formatDimsLwhFromParsed } from '@/lib/die-hub-dimensions'
 import { pastingStyleLabel } from '@/lib/pasting-style'
@@ -7,6 +7,7 @@ export type CartonWithCustomerDye = Carton & {
   customer: Customer
   dye: Dye | null
   dieMaster: Dye | null
+  shadeCard?: Pick<ShadeCard, 'id' | 'shadeCode'> | null
 }
 
 function dec(value: { toString(): string } | null | undefined): number | null {
@@ -69,6 +70,7 @@ export function serializeCarton(row: CartonWithCustomerDye) {
     glueType: row.glueType,
     dyeId: row.dyeId,
     dieMasterId: row.dieMasterId,
+    shadeCardId: row.shadeCardId,
     masterDieType: masterLabel,
     toolingDimsLabel: toolingDimsLabel(dm),
     drugSchedule: row.drugSchedule,
@@ -97,5 +99,9 @@ export function serializeCarton(row: CartonWithCustomerDye) {
           conditionRating: row.dye.conditionRating,
         }
       : null,
+    shadeCard:
+      row.shadeCardId && row.shadeCard
+        ? { id: row.shadeCard.id, shadeCode: row.shadeCard.shadeCode }
+        : null,
   }
 }

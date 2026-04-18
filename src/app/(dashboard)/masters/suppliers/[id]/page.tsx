@@ -16,6 +16,7 @@ type Supplier = {
   materialTypes: string[]
   leadTimeDays: number
   paymentTerms: string | null
+  paymentTermsDays: number
   active: boolean
 }
 
@@ -34,6 +35,7 @@ export default function EditSupplierPage() {
   const [address, setAddress] = useState('')
   const [materialTypes, setMaterialTypes] = useState<string[]>([])
   const [leadTimeDays, setLeadTimeDays] = useState('7')
+  const [paymentTermsDays, setPaymentTermsDays] = useState('30')
   const [paymentTerms, setPaymentTerms] = useState('')
   const [active, setActive] = useState(true)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -61,6 +63,7 @@ export default function EditSupplierPage() {
           setAddress(s.address ?? '')
           setMaterialTypes(s.materialTypes ?? [])
           setLeadTimeDays(String(s.leadTimeDays))
+          setPaymentTermsDays(String(s.paymentTermsDays ?? 30))
           setPaymentTerms(s.paymentTerms ?? '')
           setActive(s.active)
         }
@@ -86,6 +89,10 @@ export default function EditSupplierPage() {
           address: address.trim() || null,
           materialTypes,
           leadTimeDays: Number(leadTimeDays) || 7,
+          paymentTermsDays: (() => {
+            const n = Number(paymentTermsDays)
+            return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 30
+          })(),
           paymentTerms: paymentTerms.trim() || null,
           active,
         }),
@@ -194,7 +201,21 @@ export default function EditSupplierPage() {
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Payment terms</label>
+          <label className="block text-sm text-slate-400 mb-1">Payment terms (days credit)</label>
+          <input
+            type="number"
+            min={0}
+            value={paymentTermsDays}
+            onChange={(e) => setPaymentTermsDays(e.target.value)}
+            placeholder="0 = advance, 30 = Net 30"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white font-mono tabular-nums"
+          />
+          <p className="mt-1 text-[11px] text-slate-500">
+            Drives projected payment date from GRN receipt (calendar days).
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm text-slate-400 mb-1">Payment terms (notes)</label>
           <input
             value={paymentTerms}
             onChange={(e) => setPaymentTerms(e.target.value)}

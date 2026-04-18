@@ -60,6 +60,7 @@ type JobCard = {
   totalSheets: number
   sheetsIssued: number
   assignedOperator: string | null
+  shiftOperator?: { id: string; name: string } | null
   batchNumber: string | null
   status: string
   artworkApproved: boolean
@@ -112,6 +113,7 @@ export default function JobCardDetailPage() {
   const id = params.id as string
 
   const [jc, setJc] = useState<JobCard | null>(null)
+  const [shiftOperators, setShiftOperators] = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving] = useState(false)
   const [artworkVersion, setArtworkVersion] = useState('R0')
   const [plateCheck, setPlateCheck] = useState<{
@@ -155,6 +157,13 @@ export default function JobCardDetailPage() {
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to load'))
   }, [id])
+
+  useEffect(() => {
+    fetch('/api/users')
+      .then((r) => r.json())
+      .then((list) => setShiftOperators(Array.isArray(list) ? list : []))
+      .catch(() => setShiftOperators([]))
+  }, [])
 
   const cartonId = jc?.poLine?.cartonId ?? jc?.poLine?.carton?.id ?? null
   const embossBlockId = jc?.embossBlockId ?? jc?.poLine?.carton?.embossBlockId ?? null
@@ -350,6 +359,30 @@ export default function JobCardDetailPage() {
           </div>
         </div>
       )}
+
+      <div className="rounded-xl bg-black border border-zinc-800 p-4">
+        <h2 className="text-sm font-semibold text-orange-400 mb-2">Shift operator (attribution)</h2>
+        <p className="text-xs text-zinc-500 mb-2">
+          Links this job to a user for OEE / yield leaderboard and incentive eligibility on close.
+        </p>
+        <select
+          className="w-full max-w-md px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-slate-200 text-sm font-designing-queue"
+          value={jc.shiftOperator?.id ?? ''}
+          disabled={saving}
+          onChange={(e) =>
+            saveChanges({
+              shiftOperatorUserId: e.target.value ? e.target.value : null,
+            })
+          }
+        >
+          <option value="">— Unassigned —</option>
+          {shiftOperators.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* Availability: Plate, Dye, Emboss */}
       <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">

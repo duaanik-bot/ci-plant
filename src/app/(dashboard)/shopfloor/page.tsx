@@ -2,8 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
 import { PRODUCTION_STAGES } from '@/lib/constants'
+import {
+  PRODUCTION_DOWNTIME_CATEGORIES,
+  PRODUCTION_DOWNTIME_LOCK_SECONDS,
+} from '@/lib/production-oee-constants'
 
 type Stage = {
   id: string
@@ -14,6 +19,8 @@ type Stage = {
   sheetSize: string | null
   excessSheets: number | null
   completedAt: string | null
+  lastProductionTickAt?: string | null
+  inProgressSince?: string | null
 }
 
 type JobCard = {
@@ -26,7 +33,15 @@ type JobCard = {
   totalSheets: number
   sheetsIssued: number
   status: string
+  createdAt: string
+  machineId?: string | null
   stages: Stage[]
+}
+
+function idleSecondsInProgress(stage: Stage, jobCreatedAt: string): number {
+  if (stage.status !== 'in_progress') return 0
+  const ref = stage.lastProductionTickAt ?? stage.inProgressSince ?? jobCreatedAt
+  return Math.max(0, Math.floor((Date.now() - new Date(ref).getTime()) / 1000))
 }
 
 type StageQueueItem = {
@@ -48,6 +63,7 @@ const TABS = [
 ] as const
 
 export default function ShopfloorPage() {
+  const { data: session } = useSession()
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('jobs')
   const [jobCards, setJobCards] = useState<JobCard[]>([])
   const [loading, setLoading] = useState(true)
@@ -57,6 +73,15 @@ export default function ShopfloorPage() {
   const [saving, setSaving] = useState(false)
   const [counterVal, setCounterVal] = useState<Record<string, string>>({})
   const [excessSheetsVal, setExcessSheetsVal] = useState<Record<string, string>>({})
+  const [downtimeOpen, setDowntimeOpen] = useState<{
+    jobCardId: string
+    stageId: string
+    machineId: string | null
+    gapStartedAt: string
+  } | null>(null)
+  const [downtimeCategory, setDowntimeCategory] = useState('WAITING_MATERIAL')
+  const [downtimeNotes, setDowntimeNotes] = useState('')
+  const [downtimeSubmitting, setDowntimeSubmitting] = useState(false)
 
   const fetchJobCards = useCallback(() => {
     fetch('/api/shopfloor/job-cards')
@@ -70,6 +95,31 @@ export default function ShopfloorPage() {
     setLoading(true)
     fetchJobCards()
   }, [fetchJobCards])
+
+  useEffect(() => {
+    const t = setInterval(() => void fetchJobCards(), 20_000)
+    return () => clearInterval(t)
+  }, [fetchJobCards])
+
+  useEffect(() => {
+    if (!jobCards.length || downtimeOpen) return
+    for (const jc of jobCards) {
+      for (const s of jc.stages) {
+        if (s.status !== 'in_progress') continue
+        const idle = idleSecondsInProgress(s, jc.createdAt)
+        if (idle > PRODUCTION_DOWNTIME_LOCK_SECONDS) {
+          const ref = s.lastProductionTickAt ?? s.inProgressSince ?? jc.createdAt
+          setDowntimeOpen({
+            jobCardId: jc.id,
+            stageId: s.id,
+            machineId: jc.machineId ?? null,
+            gapStartedAt: new Date(ref).toISOString(),
+          })
+          return
+        }
+      }
+    }
+  }, [jobCards, downtimeOpen])
 
   const fetchStageQueue = useCallback((key: string) => {
     fetch(`/api/production/stages/${key}`)
@@ -109,7 +159,13 @@ export default function ShopfloorPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed')
-      toast.success(patch.status === 'completed' ? 'Stage completed — moved to next queue' : 'Stage started')
+      toast.success(
+        patch.status === 'completed'
+          ? 'Stage completed — moved to next queue'
+          : patch.counter != null
+            ? 'Production pulse logged'
+            : 'Stage started',
+      )
       setCounterVal((prev) => ({ ...prev, [stageId]: '' }))
       setExcessSheetsVal((prev) => ({ ...prev, [stageId]: '' }))
       fetchJobCards()
@@ -123,10 +179,42 @@ export default function ShopfloorPage() {
 
   const currentStage = (jc: JobCard) => jc.stages.find((s) => s.status === 'in_progress') || jc.stages.find((s) => s.status === 'ready')
 
+  async function submitDowntimeReason() {
+    if (!downtimeOpen || !session?.user) {
+      toast.error('Sign in required to log downtime')
+      return
+    }
+    setDowntimeSubmitting(true)
+    try {
+      const res = await fetch('/api/production/downtime', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productionJobCardId: downtimeOpen.jobCardId,
+          productionStageRecordId: downtimeOpen.stageId,
+          machineId: downtimeOpen.machineId,
+          reasonCategory: downtimeCategory,
+          gapStartedAt: downtimeOpen.gapStartedAt,
+          notes: downtimeNotes.trim() || null,
+        }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((j as { error?: string }).error || 'Log failed')
+      toast.success('Downtime logged — timestamped to your operator ID')
+      setDowntimeOpen(null)
+      setDowntimeNotes('')
+      fetchJobCards()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setDowntimeSubmitting(false)
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-slate-900 text-white flex flex-col pb-20">
-      <header className="p-4 border-b border-slate-700 sticky top-0 bg-slate-900 z-10">
-        <h1 className="text-xl font-bold text-amber-400">Shopfloor</h1>
+    <div className="min-h-screen bg-black text-white flex flex-col pb-20">
+      <header className="p-4 border-b border-zinc-800 sticky top-0 bg-black z-10">
+        <h1 className="text-xl font-bold text-orange-400">Shopfloor</h1>
         <p className="text-xs text-slate-500 mt-0.5">Production job cards</p>
       </header>
 
@@ -142,7 +230,7 @@ export default function ShopfloorPage() {
                 return (
                   <div
                     key={jc.id}
-                    className="rounded-xl border border-slate-700 bg-slate-800/80 overflow-hidden"
+                    className="rounded-xl border border-zinc-800 bg-zinc-950/80 overflow-hidden"
                   >
                     <button
                       type="button"
@@ -174,11 +262,14 @@ export default function ShopfloorPage() {
                       </div>
                     </button>
                     {isExpanded && (
-                      <div className="border-t border-slate-700 p-4 space-y-3 bg-slate-900/50">
-                        {jc.stages.map((s) => (
+                      <div className="border-t border-zinc-800 p-4 space-y-3 bg-black/40">
+                        {jc.stages.map((s) => {
+                          const idleSec = idleSecondsInProgress(s, jc.createdAt)
+                          const lock = s.status === 'in_progress' && idleSec > PRODUCTION_DOWNTIME_LOCK_SECONDS
+                          return (
                           <div
                             key={s.id}
-                            className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 p-3"
+                            className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 p-3"
                           >
                             <span className="font-medium text-slate-200 w-32">{s.stageName}</span>
                             <span
@@ -200,7 +291,11 @@ export default function ShopfloorPage() {
                                   placeholder="Counter"
                                   value={counterVal[s.id] ?? ''}
                                   onChange={(e) => setCounterVal((prev) => ({ ...prev, [s.id]: e.target.value }))}
-                                  className="w-24 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-sm"
+                                  className={`w-24 px-2 py-1 rounded bg-zinc-900 border text-white text-sm font-designing-queue ${
+                                    lock
+                                      ? 'border-rose-500 ring-2 ring-rose-500/70 animate-pulse'
+                                      : 'border-zinc-600'
+                                  }`}
                                 />
                                 <input
                                   type="number"
@@ -210,8 +305,20 @@ export default function ShopfloorPage() {
                                   onChange={(e) =>
                                     setExcessSheetsVal((prev) => ({ ...prev, [s.id]: e.target.value }))
                                   }
-                                  className="w-28 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-sm"
+                                  className="w-28 px-2 py-1 rounded bg-zinc-900 border border-zinc-600 text-white text-sm"
                                 />
+                                <button
+                                  type="button"
+                                  disabled={saving || counterVal[s.id] === '' || counterVal[s.id] == null}
+                                  onClick={() =>
+                                    updateStage(jc.id, s.id, {
+                                      counter: parseInt(counterVal[s.id], 10),
+                                    })
+                                  }
+                                  className="px-2 py-1.5 rounded-lg bg-orange-600/90 hover:bg-orange-500 disabled:opacity-40 text-white text-xs font-medium"
+                                >
+                                  Log pulse
+                                </button>
                                 <button
                                   type="button"
                                   disabled={saving}
@@ -240,7 +347,8 @@ export default function ShopfloorPage() {
                               </button>
                             )}
                           </div>
-                        ))}
+                          )
+                        })}
                         <Link
                           href={`/production/job-cards/${jc.id}`}
                           className="inline-block text-sm text-amber-400 hover:underline"
@@ -340,7 +448,56 @@ export default function ShopfloorPage() {
         )}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 border-t border-slate-700 bg-slate-900 flex justify-around py-2 safe-area-pb">
+      {downtimeOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/95 p-4">
+          <div
+            className="w-full max-w-md rounded-2xl border border-orange-500/40 bg-black p-5 shadow-[0_0_40px_rgba(251,146,60,0.15)] space-y-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="downtime-title"
+          >
+            <h2 id="downtime-title" className="text-lg font-semibold text-orange-400">
+              Reason required — downtime lock
+            </h2>
+            <p className="text-xs text-zinc-500">
+              No production logged for {Math.floor(PRODUCTION_DOWNTIME_LOCK_SECONDS / 60)}+ minutes. Select a
+              category; log is timestamped and tied to your operator ID.
+            </p>
+            <label className="block text-xs text-zinc-400 uppercase tracking-wider">Category</label>
+            <select
+              value={downtimeCategory}
+              onChange={(e) => setDowntimeCategory(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white text-sm"
+            >
+              {PRODUCTION_DOWNTIME_CATEGORIES.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+            <label className="block text-xs text-zinc-400 uppercase tracking-wider">Notes (optional)</label>
+            <textarea
+              value={downtimeNotes}
+              onChange={(e) => setDowntimeNotes(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white text-sm"
+            />
+            <button
+              type="button"
+              disabled={downtimeSubmitting || !session?.user}
+              onClick={() => void submitDowntimeReason()}
+              className="w-full py-3 rounded-xl bg-gradient-to-b from-amber-500 to-orange-600 text-white font-semibold disabled:opacity-50"
+            >
+              {downtimeSubmitting ? 'Saving…' : 'Submit downtime log'}
+            </button>
+            {!session?.user ? (
+              <p className="text-rose-400 text-xs text-center">You must be signed in to submit.</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <nav className="fixed bottom-0 left-0 right-0 border-t border-zinc-800 bg-black flex justify-around py-2 safe-area-pb">
         {TABS.map((t) => (
           <button
             key={t.id}

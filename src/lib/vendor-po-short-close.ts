@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client'
+import { isVendorPoPostDispatchReceiving } from '@/lib/vendor-po-post-dispatch'
 
 /**
  * Manual short-close authority: button enables when received/ordered ≥ this % (0–100 scale).
@@ -11,6 +12,8 @@ export const SHORT_CLOSE_REASONS = [
   'Vendor Stock End',
   'Quality Rejection',
   'Director Override',
+  /** GRN rejection — user closed balance from shortage modal (status closed; display as short-received). */
+  'Rejection shortage — short-close',
 ] as const
 
 export type ShortCloseReason = (typeof SHORT_CLOSE_REASONS)[number]
@@ -55,25 +58,30 @@ export function computeShortCloseSnapshot(
   vpo: {
     status: string
     isShortClosed: boolean
+    totalReceivedKg?: unknown
+    totalUsableReceivedKg?: unknown
     lines: { id: string; totalWeightKg: unknown }[]
   },
   receivedByLineId: Map<string, number>,
 ): VendorPoShortCloseSnapshot {
   let orderedKg = 0
-  let receivedKg = 0
+  let reconKg = 0
   for (const li of vpo.lines) {
     orderedKg += Number(li.totalWeightKg)
-    receivedKg += receivedByLineId.get(li.id) ?? 0
+    reconKg += receivedByLineId.get(li.id) ?? 0
   }
   orderedKg = round2(orderedKg)
-  receivedKg = round2(receivedKg)
+  const grossKg = round2(Number(vpo.totalReceivedKg ?? 0))
+  const usableKg = round2(Number(vpo.totalUsableReceivedKg ?? 0))
+  /** GRNs exist → completion uses QC-passed usable kg only; else legacy reconciliation. */
+  const receivedKg = grossKg > 0 ? usableKg : round2(reconKg)
   const completionPct = orderedKg > 0 ? round2((receivedKg / orderedKg) * 100) : 0
 
   if (vpo.status === 'closed' && vpo.isShortClosed) {
     return { orderedKg, receivedKg, completionPct, eligible: false }
   }
 
-  if (vpo.status !== 'dispatched' || vpo.isShortClosed) {
+  if (!isVendorPoPostDispatchReceiving(vpo.status) || vpo.isShortClosed) {
     return { orderedKg, receivedKg, completionPct, eligible: false }
   }
 
@@ -93,6 +101,8 @@ export async function shortCloseSnapshotsForVendorPos<
     id: string
     status: string
     isShortClosed: boolean
+    totalReceivedKg?: unknown
+    totalUsableReceivedKg?: unknown
     lines: { id: string; totalWeightKg: unknown }[]
   },
 >(db: PrismaClient, vendorPos: T[]): Promise<Map<string, VendorPoShortCloseSnapshot>> {

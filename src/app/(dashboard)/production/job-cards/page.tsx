@@ -2,7 +2,19 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { Star } from 'lucide-react'
 import { toast } from 'sonner'
+
+const mono = 'font-designing-queue tabular-nums tracking-tight'
+
+type YieldMetrics = {
+  yieldPercent: number | null
+  plannedWastePercent: number
+  unexplainedWastePercent: number
+  wastageVariancePercent: number | null
+  finishedGoodsCount: number
+  totalSheetsIssuedFloor: number
+}
 
 type JobCardRow = {
   id: string
@@ -21,6 +33,7 @@ type JobCardRow = {
   batchNumber: string | null
   jobDate: string
   poLine: { id: string; cartonName: string; cartonSize: string | null; quantity: number } | null
+  yield?: YieldMetrics
 }
 
 type Customer = { id: string; name: string }
@@ -38,6 +51,7 @@ export default function JobCardsPage() {
         const params = new URLSearchParams()
         if (status) params.set('status', status)
         if (customerId) params.set('customerId', customerId)
+        params.set('yieldMetrics', '1')
         const [jcRes, custRes] = await Promise.all([
           fetch(`/api/job-cards?${params}`),
           fetch('/api/masters/customers'),
@@ -130,6 +144,7 @@ export default function JobCardsPage() {
               <th className="px-4 py-2">Set</th>
               <th className="px-4 py-2">Sheets</th>
               <th className="px-4 py-2">Compliance</th>
+              <th className="px-4 py-2">Yield</th>
               <th className="px-4 py-2">Status</th>
               <th className="px-4 py-2">Actions</th>
             </tr>
@@ -163,6 +178,25 @@ export default function JobCardsPage() {
                   <span className={jc.firstArticlePass ? 'text-green-400' : 'text-slate-500'}>FA</span>
                   <span className={jc.finalQcPass ? 'text-green-400' : 'text-slate-500'}>Final</span>
                   <span className={jc.qaReleased ? 'text-green-400' : 'text-slate-500'}>QA</span>
+                </td>
+                <td className="px-4 py-2">
+                  {jc.yield?.yieldPercent != null ? (
+                    <div
+                      className={`flex items-center gap-1.5 ${mono} text-sm ${
+                        jc.yield.yieldPercent < 92
+                          ? 'text-rose-400 animate-yield-wastage-pulse'
+                          : 'text-orange-300'
+                      }`}
+                      title={`Planned waste: ${jc.yield.plannedWastePercent}% | Unexplained waste: ${jc.yield.unexplainedWastePercent}% · FG count: ${jc.yield.finishedGoodsCount} · Floor sheets issued: ${jc.yield.totalSheetsIssuedFloor}`}
+                    >
+                      {jc.yield.yieldPercent >= 92 ? (
+                        <Star className="h-3.5 w-3.5 shrink-0 text-orange-400 fill-orange-400 drop-shadow-[0_0_6px_rgba(251,146,60,0.85)]" />
+                      ) : null}
+                      <span>{jc.yield.yieldPercent}%</span>
+                    </div>
+                  ) : (
+                    <span className="text-slate-600 text-xs">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-2">
                   <span className="px-2 py-0.5 rounded text-xs border bg-slate-900 text-slate-200 border-slate-600">

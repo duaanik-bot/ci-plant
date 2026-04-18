@@ -1,4 +1,6 @@
 import type { PrismaClient } from '@prisma/client'
+import { computePendingPayables30dInr } from '@/lib/procurement-payment-terms'
+import { computeProcurementLeakageMtdInr } from '@/lib/procurement-price-benchmark'
 import { monthlyWeightLossValueInr } from '@/lib/weight-reconciliation'
 
 const MS_DAY = 86_400_000
@@ -16,6 +18,14 @@ export type MaterialReadinessVitals = {
   priceVariancePct: number | null
   /** Sum of short-weight ₹ impact (variance × rate) MTD from gate reconciliations. */
   monthlyWeightLossInr: number
+  /** GRN rows on active mill POs awaiting QC (qc_status null). */
+  qcPendingTrucksCount: number
+  /** Sum of quality debit note amounts created this calendar month (₹). */
+  qualityRecoveriesMonthInr: number
+  /** Estimated extra spend vs 30d benchmark on ordered vendor lines MTD (₹). */
+  procurementLeakageMtdInr: number
+  /** Accrued payables on received mill POs with due date in the next 30 calendar days (₹). */
+  pendingPayables30dInr: number
 }
 
 function startOfMonth(d: Date): Date {
@@ -47,7 +57,17 @@ export async function computeMaterialReadinessVitals(db: PrismaClient): Promise<
   const monthStart = startOfMonth(now)
   const prevMonthStart = addMonths(now, -1)
 
-  const [vendorPosOpen, pendingMaterialLines, stockRows, vendorLinesPrice, weightReconsMtd] = await Promise.all([
+  const [
+    vendorPosOpen,
+    pendingMaterialLines,
+    stockRows,
+    vendorLinesPrice,
+    weightReconsMtd,
+    qcPendingTrucksCount,
+    qualityDebitMonthAgg,
+    procurementLeakageMtdInr,
+    pendingPayables30dInr,
+  ] = await Promise.all([
     db.vendorMaterialPurchaseOrder.findMany({
       where: { status: { in: ['draft', 'confirmed'] }, isShortClosed: false },
       include: { lines: true },
@@ -86,6 +106,33 @@ export async function computeMaterialReadinessVitals(db: PrismaClient): Promise<
       where: { createdAt: { gte: monthStart } },
       select: { varianceKg: true, ratePerKgInr: true },
     }),
+    db.vendorMaterialReceipt.count({
+      where: {
+        vendorPo: {
+          isShortClosed: false,
+          status: { in: ['dispatched', 'partially_received', 'fully_received'] },
+        },
+        NOT: {
+          OR: [
+            {
+              AND: [
+                { qcPerformedAt: { not: null } },
+                { qtyAcceptedStandard: { not: null } },
+                { qtyAcceptedPenalty: { not: null } },
+                { qtyRejected: { not: null } },
+              ],
+            },
+            { qcStatus: { in: ['PASSED', 'FAILED', 'PASSED_WITH_PENALTY'] } },
+          ],
+        },
+      },
+    }),
+    db.vendorQualityDebitNote.aggregate({
+      where: { createdAt: { gte: monthStart } },
+      _sum: { amountInr: true },
+    }),
+    computeProcurementLeakageMtdInr(db),
+    computePendingPayables30dInr(db),
   ])
 
   let openMaterialSpendInr = 0
@@ -154,5 +201,9 @@ export async function computeMaterialReadinessVitals(db: PrismaClient): Promise<
     criticalShortagePoCount: criticalPoIds.size,
     priceVariancePct,
     monthlyWeightLossInr,
+    qcPendingTrucksCount,
+    qualityRecoveriesMonthInr: Number(qualityDebitMonthAgg._sum.amountInr ?? 0),
+    procurementLeakageMtdInr,
+    pendingPayables30dInr,
   }
 }

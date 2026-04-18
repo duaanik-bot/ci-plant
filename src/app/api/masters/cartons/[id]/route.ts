@@ -49,6 +49,7 @@ const updateSchema = cartonSchema.partial().extend({
   cartonConstruct: z.string().optional().nullable(),
   dyeId: z.string().uuid().optional().nullable(),
   dieMasterId: z.string().uuid().optional().nullable(),
+  shadeCardId: z.string().uuid().optional().nullable(),
   dyeCondition: z.string().optional().nullable(),
   finishedLength: z.number().positive().optional().nullable(),
   finishedWidth: z.number().positive().optional().nullable(),
@@ -70,7 +71,7 @@ export async function GET(
   const { id } = await context.params
   const row = await db.carton.findUnique({
     where: { id },
-    include: { customer: true, dye: true, dieMaster: true },
+    include: { customer: true, dye: true, dieMaster: true, shadeCard: true },
   })
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -174,7 +175,7 @@ export async function PUT(
   const row = await db.carton.update({
     where: { id },
     data: update,
-    include: { customer: true, dye: true, dieMaster: true },
+    include: { customer: true, dye: true, dieMaster: true, shadeCard: true },
   })
 
   if (update.pastingStyle !== undefined) {

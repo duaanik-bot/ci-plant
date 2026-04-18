@@ -41,6 +41,10 @@ export type ToolingLedgerRow = {
   industrialPriority?: boolean
   /** Die Hub — customers linked via carton work (deep search). */
   linkedCustomerNames?: string[]
+  /** Emboss Hub — primary carton / product id for search (matches Die copy & masters). */
+  linkedProductId?: string | null
+  /** Emboss Hub — revision / asset version display. */
+  versionDisplay?: string | null
 }
 
 function hubSearchMatch(q: string, parts: Array<string | null | undefined>): boolean {
@@ -83,7 +87,15 @@ export function getFilteredToolingLedgerRows(
             r.dieMake,
             ...(r.linkedCustomerNames ?? []),
           ]
-        : [r.displayCode, r.title, r.specSummary, r.zoneLabel]
+        : [
+            r.displayCode,
+            r.title,
+            r.linkedProductId,
+            r.versionDisplay,
+            r.specSummary,
+            r.zoneLabel,
+            ...(r.linkedCustomerNames ?? []),
+          ]
     if (!hubSearchMatch(q, dieParts)) {
       return false
     }
@@ -316,6 +328,7 @@ export function ToolingHubLedgerTable({
                   <tr
                     key={`${r.kind}-${r.id}`}
                     data-hub-die-id={r.kind === 'die' ? r.id : undefined}
+                    data-hub-emboss-id={r.kind === 'emboss' ? r.id : undefined}
                     className={`border-b border-zinc-800/80 hover:bg-zinc-900/50 ${priorityRowDie}`}
                   >
                     <td className="px-2 py-1.5 text-zinc-500 tabular-nums font-mono text-[11px]">

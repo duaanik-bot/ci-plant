@@ -71,8 +71,12 @@ model User {
   ncrsAssigned        Ncr[]              @relation("NcrAssignee")
   ncrsClosed          Ncr[]              @relation("NcrCloser")
   auditLogs           AuditLog[]
+  preventiveMaintenanceSignoffs PreventiveMaintenanceLog[]
   wasteRecords        WasteRecord[]
   rfqsCreated         Rfq[]              @relation("RfqCreator")
+  productionDowntimeLogs ProductionDowntimeLog[]
+  shiftOperatorProductionJobCards ProductionJobCard[] @relation("ShiftOperatorJobCard")
+  attributedProductionOeeLedgers ProductionOeeLedger[] @relation("LedgerAttributedOperator")
 
   @@map("users")
 }
@@ -92,6 +96,10 @@ model Machine {
   status          String    @default("active") @db.VarChar(20) // active | under_maintenance | retired
   lastPmDate      DateTime? @map("last_pm_date") @db.Date
   nextPmDue       DateTime? @map("next_pm_due") @db.Date
+  /// Cumulative press run hours since last verified PM (reset on sign-off).
+  usageRunHoursSincePm     Decimal @default(0) @map("usage_run_hours_since_pm") @db.Decimal(14, 4)
+  /// Cumulative impressions (ledger total pieces) since last verified PM.
+  usageImpressionsSincePm  BigInt  @default(0) @map("usage_impressions_since_pm")
   notes           String?
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
@@ -99,8 +107,63 @@ model Machine {
   bomLines      BomLine[]
   jobStages     JobStage[]
   wasteRecords  WasteRecord[]
+  productionJobCards     ProductionJobCard[]
+  productionDowntimeLogs ProductionDowntimeLog[]
+  productionOeeLedgers   ProductionOeeLedger[]
+  pmSchedule             MachinePmSchedule?
+  pmLogs                 PreventiveMaintenanceLog[]
+  pmPlannedSlots         PmPlannedDowntime[]
+  embossBlocksIssued     EmbossBlock[] @relation("EmbossBlockIssuedMachine")
 
   @@map("machines")
+}
+
+/// Per-machine PM interval configuration (hours OR impressions — health uses the worst axis).
+model MachinePmSchedule {
+  id                   String   @id @default(uuid())
+  machineId            String   @unique @map("machine_id")
+  intervalRunHours     Decimal  @map("interval_run_hours") @db.Decimal(12, 4)
+  intervalImpressions  BigInt   @map("interval_impressions")
+  taskChecklistJson    Json?    @map("task_checklist_json")
+  sparePartsPlaceholder String? @map("spare_parts_placeholder") @db.Text
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@map("machine_pm_schedules")
+}
+
+model PreventiveMaintenanceLog {
+  id                     String   @id @default(uuid())
+  machineId              String   @map("machine_id")
+  verifiedAt             DateTime @map("verified_at")
+  verifiedByUserId       String?  @map("verified_by_user_id")
+  signedOffNote          String   @map("signed_off_note") @db.VarChar(220)
+  runHoursBeforeReset    Decimal  @map("run_hours_before_reset") @db.Decimal(14, 4)
+  impressionsBeforeReset BigInt   @map("impressions_before_reset")
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  machine    Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  verifiedBy User?   @relation(fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([machineId])
+  @@index([verifiedAt])
+  @@map("preventive_maintenance_logs")
+}
+
+model PmPlannedDowntime {
+  id           String   @id @default(uuid())
+  machineId    String   @map("machine_id")
+  plannedStart DateTime @map("planned_start")
+  plannedEnd   DateTime @map("planned_end")
+  note         String?  @db.VarChar(200)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([plannedStart, plannedEnd])
+  @@map("pm_planned_downtime")
 }
 
 // ─────────────────────────────────────────
@@ -120,12 +183,15 @@ model Supplier {
   defaultForBoardGrades String[] @default([]) @map("default_for_board_grades")
   leadTimeDays  Int      @default(7) @map("lead_time_days")
   paymentTerms  String?  @map("payment_terms") @db.VarChar(60)
+  /// Calendar days from GRN receipt to due date (0 = advance; 30 = Net 30).
+  paymentTermsDays Int   @default(30) @map("payment_terms_days")
   active        Boolean  @default(true)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   inventories       Inventory[]
   vendorMaterialPos VendorMaterialPurchaseOrder[]
+  qualityDebitNotes VendorQualityDebitNote[]
 
   @@map("suppliers")
 }
@@ -158,6 +224,7 @@ model Customer {
   productionJobCards ProductionJobCard[]
   bills             Bill[]
   plateStores       PlateStore[]
+  shadeCards        ShadeCard[]
 
   @@map("customers")
 }
@@ -619,6 +686,7 @@ model Carton {
   aqlLevel         String?  @default("1.0") @map("aql_level")
   postPressRouting Json?    @map("post_press_routing")
   embossBlockId    String?  @map("emboss_block_id")
+  shadeCardId      String?  @map("shade_card_id")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -626,9 +694,13 @@ model Carton {
   dye        Dye?        @relation("CartonWorkDye", fields: [dyeId], references: [id])
   dieMaster  Dye?        @relation("CartonDieMaster", fields: [dieMasterId], references: [id])
   embossBlock EmbossBlock? @relation(fields: [embossBlockId], references: [id])
+  shadeCard  ShadeCard?   @relation(fields: [shadeCardId], references: [id], onDelete: SetNull)
+  /// Shade cards that reference this carton as linked Product Master (inventory).
+  shadeCardsProductMaster ShadeCard[] @relation("ShadeCardProductMaster")
   plateStores PlateStore[]
   poLineItems PoLineItem[]
 
+  @@index([shadeCardId])
   @@map("cartons")
 }
 
@@ -697,6 +769,7 @@ model Dye {
   cartonsWork             Carton[]          @relation("CartonWorkDye")
   cartonsAsDieMaster      Carton[]          @relation("CartonDieMaster")
   poLinesAsDieMaster      PoLineItem[]      @relation("PoLineDieMaster")
+  embossBlocksLinked      EmbossBlock[]     @relation("EmbossBlockLinkedDie")
   jobsAsDieMaster         Job[]             @relation("JobDieMaster")
   plateRequirementsMaster PlateRequirement[] @relation("PlateReqDieMaster")
   usageLogs        DyeUsageLog[]
@@ -847,14 +920,17 @@ model PoLineItem {
   materialStageEnteredAt        DateTime? @map("material_stage_entered_at")
   productionStageEnteredAt      DateTime? @map("production_stage_entered_at")
   logisticsStageEnteredAt       DateTime? @map("logistics_stage_entered_at")
+  shadeCardId      String?       @map("shade_card_id")
   createdAt        DateTime      @default(now()) @map("created_at")
 
   po                  PurchaseOrder        @relation(fields: [poId], references: [id])
   carton              Carton?              @relation(fields: [cartonId], references: [id])
   dieMaster           Dye?                 @relation("PoLineDieMaster", fields: [dieMasterId], references: [id])
+  shadeCard           ShadeCard?           @relation(fields: [shadeCardId], references: [id], onDelete: SetNull)
   materialQueue MaterialQueue?
   weightReconciliation MaterialWeightReconciliation?
 
+  @@index([shadeCardId])
   @@map("po_line_items")
 }
 
@@ -965,14 +1041,92 @@ model VendorMaterialPurchaseOrder {
   shortClosedByUserId  String?   @map("short_closed_by_user_id")
   shortClosedByName    String?   @map("short_closed_by_name") @db.VarChar(120)
   shortCloseCompletionPct Decimal? @map("short_close_completion_pct") @db.Decimal(6, 2)
+  /// Cumulative kg from all GRN ledger rows (gate scale).
+  totalReceivedKg      Decimal   @default(0) @map("total_received_kg") @db.Decimal(16, 6)
+  /// QC-passed kg only — counts toward production / partial-full status & short-close %.
+  totalUsableReceivedKg Decimal  @default(0) @map("total_usable_received_kg") @db.Decimal(16, 6)
+  /// Sum of receipt-level accrued payable (standard + penalty adjusted rate) after QC.
+  accruedReceiptPayableInr Decimal @default(0) @map("accrued_receipt_payable_inr") @db.Decimal(16, 2)
+  /// Set after GRN rejection when user chooses replacement (e.g. Awaiting_Replacement).
+  procurementShortageFlag   String?   @map("procurement_shortage_flag") @db.VarChar(48)
+  /// Committed replacement arrival — drives lead-buffer when flag is Awaiting_Replacement.
+  replacementEtaAt          DateTime? @map("replacement_eta_at")
   createdBy            String    @map("created_by")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
 
   supplier Supplier                        @relation(fields: [supplierId], references: [id])
   lines    VendorMaterialPurchaseOrderLine[]
+  receipts VendorMaterialReceipt[]
+  qualityDebitNotes VendorQualityDebitNote[]
 
   @@map("vendor_material_purchase_orders")
+}
+
+/// Quality / GSM technical debit — queued for accounts (Saachi finalization).
+model VendorQualityDebitNote {
+  id                   String   @id @default(uuid())
+  receiptId            String   @unique @map("receipt_id")
+  vendorPoId           String   @map("vendor_po_id")
+  supplierId           String   @map("supplier_id")
+  orderedGsm           Decimal  @map("ordered_gsm") @db.Decimal(8, 2)
+  actualGsm            Decimal  @map("actual_gsm") @db.Decimal(8, 2)
+  technicalShortfallPct Decimal @map("technical_shortfall_pct") @db.Decimal(10, 4)
+  invoiceRatePerKg     Decimal  @map("invoice_rate_per_kg") @db.Decimal(14, 4)
+  receivedQtyKg        Decimal  @map("received_qty_kg") @db.Decimal(16, 6)
+  amountInr            Decimal  @map("amount_inr") @db.Decimal(16, 2)
+  status               String   @default("draft_pending_finance") @map("status") @db.VarChar(32)
+  formulaProof         String?  @map("formula_proof") @db.Text
+  authorizedByUserId   String?  @map("authorized_by_user_id")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  receipt  VendorMaterialReceipt         @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  vendorPo VendorMaterialPurchaseOrder @relation(fields: [vendorPoId], references: [id], onDelete: Cascade)
+  supplier Supplier                     @relation(fields: [supplierId], references: [id])
+
+  @@index([vendorPoId])
+  @@index([supplierId])
+  @@map("vendor_quality_debit_notes")
+}
+
+/// Partial GRN ledger — multiple gate receipts per vendor material PO.
+model VendorMaterialReceipt {
+  id               String   @id @default(uuid())
+  vendorPoId       String   @map("vendor_po_id")
+  receiptDate      DateTime @map("receipt_date")
+  receivedQty      Decimal  @map("received_qty") @db.Decimal(16, 6)
+  vehicleNumber    String   @map("vehicle_number") @db.VarChar(64)
+  scaleSlipId      String   @map("scale_slip_id") @db.VarChar(120)
+  receivedByUserId String?  @map("received_by_user_id")
+  receivedByName   String   @default("Anik Dua") @map("received_by_name") @db.VarChar(120)
+  /// Split QC (must sum to received_qty); null until new QC submitted.
+  qtyAcceptedStandard   Decimal?  @map("qty_accepted_standard") @db.Decimal(16, 6)
+  qtyAcceptedPenalty    Decimal?  @map("qty_accepted_penalty") @db.Decimal(16, 6)
+  qtyRejected           Decimal?  @map("qty_rejected") @db.Decimal(16, 6)
+  rejectionReason       String?   @map("rejection_reason") @db.VarChar(120)
+  rejectionRemarks      String?   @map("rejection_remarks") @db.Text
+  returnGatePassGeneratedAt DateTime? @map("return_gate_pass_generated_at")
+  /// null = QC pending; legacy: PASSED | PASSED_WITH_PENALTY | FAILED; new splits: QC_SPLIT | FAILED
+  qcStatus                 String?   @map("qc_status") @db.VarChar(32)
+  qcActualGsm              Decimal?  @map("qc_actual_gsm") @db.Decimal(8, 2)
+  qcShadeMatch             Boolean?  @map("qc_shade_match")
+  qcSurfaceCleanliness     Boolean?  @map("qc_surface_cleanliness")
+  qcRemarks                String?   @map("qc_remarks") @db.Text
+  qcPerformedByUserId      String?   @map("qc_performed_by_user_id")
+  qcPerformedAt            DateTime? @map("qc_performed_at")
+  /// Debit note recommended amount — GSM shortfall on penalty tranche only (₹).
+  qcPenaltyRecommendedInr  Decimal?  @map("qc_penalty_recommended_inr") @db.Decimal(16, 2)
+  qcInvoiceRatePerKg       Decimal?  @map("qc_invoice_rate_per_kg") @db.Decimal(14, 4)
+  qcTechnicalShortfallPct  Decimal?  @map("qc_technical_shortfall_pct") @db.Decimal(10, 4)
+  /// Payable accrual for this line after QC: (std×rate)+(penalty×adjusted rate).
+  qcAccruedPayableInr      Decimal?  @map("qc_accrued_payable_inr") @db.Decimal(16, 2)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  vendorPo           VendorMaterialPurchaseOrder @relation(fields: [vendorPoId], references: [id], onDelete: Cascade)
+  qualityDebitNote   VendorQualityDebitNote?
+
+  @@index([vendorPoId])
+  @@map("vendor_material_receipts")
 }
 
 model VendorMaterialPurchaseOrderLine {
@@ -984,6 +1138,12 @@ model VendorMaterialPurchaseOrderLine {
   totalSheets     Int     @map("total_sheets")
   totalWeightKg   Decimal @map("total_weight_kg") @db.Decimal(16, 6)
   ratePerKg       Decimal? @map("rate_per_kg") @db.Decimal(14, 4)
+  /// Total freight (₹) allocated to this line for landed cost.
+  freightTotalInr       Decimal @default(0) @map("freight_total_inr") @db.Decimal(16, 2)
+  unloadingChargesInr   Decimal @default(0) @map("unloading_charges_inr") @db.Decimal(16, 2)
+  insuranceMiscInr      Decimal @default(0) @map("insurance_misc_inr") @db.Decimal(16, 2)
+  /// Cached: basic_rate + (freight+unloading+insurance)/total_weight_kg — for margin / production.
+  landedRatePerKg       Decimal? @map("landed_rate_per_kg") @db.Decimal(14, 4)
   /// UUIDs of customer PoLineItem rows covered by this vendor line
   linkedPoLineIds Json    @map("linked_po_line_ids")
 
@@ -1001,6 +1161,8 @@ model ProductionJobCard {
   jobCardNumber      Int       @unique @default(autoincrement()) @map("job_card_number")
   setNumber          String?   @map("set_number")
   customerId         String    @map("customer_id")
+  /// Default / primary press for OEE & speed (optional).
+  machineId          String?   @map("machine_id")
   assignedOperator   String?   @map("assigned_operator")
   requiredSheets     Int       @map("required_sheets")
   wastageSheets      Int       @default(0) @map("wastage_sheets")
@@ -1021,15 +1183,22 @@ model ProductionJobCard {
   oldPlatesUsed      Int?      @map("old_plates_used")
   plateNotes         String?   @map("plate_notes")
   embossBlockId      String?   @map("emboss_block_id")
+  /// Shift-attributed operator (HR / incentive attribution).
+  shiftOperatorUserId String?   @map("shift_operator_user_id")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
   customer    Customer               @relation(fields: [customerId], references: [id])
+  shiftOperator User?                @relation("ShiftOperatorJobCard", fields: [shiftOperatorUserId], references: [id], onDelete: SetNull)
+  machine     Machine?             @relation(fields: [machineId], references: [id], onDelete: SetNull)
   plateSet    PlateStore?            @relation("PlateSetUsedBy", fields: [plateSetId], references: [id])
   embossBlock EmbossBlock?           @relation(fields: [embossBlockId], references: [id])
   stages      ProductionStageRecord[]
   issues      SheetIssueRecord[]
+  paperFloorIssues PaperIssueToFloor[]
   plateStoresCreatedForThis PlateStore[] @relation("PlateSetCreatedFor")
+  downtimeLogs ProductionDowntimeLog[]
+  oeeLedgerEntry ProductionOeeLedger?
 
   @@map("production_job_cards")
 }
@@ -1050,11 +1219,72 @@ model ProductionStageRecord {
   status         String    @default("pending")
   completedAt    DateTime? @map("completed_at")
   stageData      Json?     @map("stage_data")
+  /// Last time the operator logged production (counter / pulse).
+  lastProductionTickAt DateTime? @map("last_production_tick_at")
+  /// When this stage entered `in_progress` (for run-time & idle detection).
+  inProgressSince      DateTime? @map("in_progress_since")
   createdAt      DateTime  @default(now()) @map("created_at")
 
   jobCard ProductionJobCard @relation(fields: [jobCardId], references: [id])
+  downtimeLogs ProductionDowntimeLog[]
 
   @@map("production_stage_records")
+}
+
+/// Operator-attributed downtime (IoT / ERP handshake). Timestamped with operatorUserId.
+model ProductionDowntimeLog {
+  id                      String    @id @default(uuid())
+  productionJobCardId     String    @map("production_job_card_id")
+  productionStageRecordId String?   @map("production_stage_record_id")
+  machineId               String?   @map("machine_id")
+  operatorUserId          String    @map("operator_user_id")
+  reasonCategory          String    @map("reason_category") @db.VarChar(48)
+  startedAt               DateTime  @map("started_at")
+  endedAt                 DateTime? @map("ended_at")
+  durationSeconds         Int?      @map("duration_seconds")
+  notes                   String?   @db.Text
+  createdAt               DateTime  @default(now()) @map("created_at")
+
+  jobCard  ProductionJobCard      @relation(fields: [productionJobCardId], references: [id], onDelete: Cascade)
+  stage    ProductionStageRecord? @relation(fields: [productionStageRecordId], references: [id], onDelete: SetNull)
+  machine  Machine?               @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  operator User                   @relation(fields: [operatorUserId], references: [id], onDelete: Cascade)
+
+  @@index([productionJobCardId])
+  @@index([startedAt])
+  @@index([reasonCategory])
+  @@map("production_downtime_logs")
+}
+
+/// Final OEE snapshot when a production job card is closed (production ledger).
+model ProductionOeeLedger {
+  id                  String    @id @default(uuid())
+  productionJobCardId String    @unique @map("production_job_card_id")
+  machineId           String?   @map("machine_id")
+  availabilityPct     Decimal   @map("availability_pct") @db.Decimal(6, 2)
+  performancePct      Decimal   @map("performance_pct") @db.Decimal(6, 2)
+  qualityPct          Decimal   @map("quality_pct") @db.Decimal(6, 2)
+  oeePct              Decimal   @map("oee_pct") @db.Decimal(6, 2)
+  shiftMinutes        Int       @map("shift_minutes")
+  runMinutes          Int       @map("run_minutes")
+  ratedSpeedPph       Decimal?  @map("rated_speed_pph") @db.Decimal(12, 4)
+  actualAvgSpeedPph   Decimal?  @map("actual_avg_speed_pph") @db.Decimal(12, 4)
+  goodPieces          Int       @map("good_pieces")
+  totalPieces         Int       @map("total_pieces")
+  /// Yield % at close (theoretical vs issued); mirrors Yield Guardian.
+  yieldPercent        Decimal?  @map("yield_percent") @db.Decimal(6, 2)
+  /// Starred job, yield above 96%, OEE above 85%.
+  incentiveEligible   Boolean   @default(false) @map("incentive_eligible")
+  incentiveVerifiedAt DateTime? @map("incentive_verified_at")
+  /// Denormalized from job shift operator at ledger creation.
+  attributedOperatorUserId String? @map("attributed_operator_user_id")
+  computedAt          DateTime  @default(now()) @map("computed_at")
+
+  jobCard ProductionJobCard @relation(fields: [productionJobCardId], references: [id], onDelete: Cascade)
+  machine Machine?          @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  attributedOperator User?  @relation("LedgerAttributedOperator", fields: [attributedOperatorUserId], references: [id], onDelete: SetNull)
+
+  @@map("production_oee_ledgers")
 }
 
 model SheetIssueRecord {
@@ -1072,6 +1302,8 @@ model SheetIssueRecord {
   issuedBy        String    @map("issued_by")
   issuedAt        DateTime  @default(now()) @map("issued_at")
   lotNumber       String?   @map("lot_number")
+  /// Free-text when issuing a newer lot while older FIFO stock exists for the same spec.
+  fifoOverrideReason String? @map("fifo_override_reason") @db.Text
 
   jobCard ProductionJobCard @relation(fields: [jobCardId], references: [id])
 
@@ -1227,10 +1459,22 @@ model EmbossBlock {
   customerId       String?   @map("customer_id")
   blockType        String    @map("block_type")
   blockMaterial    String    @default("Magnesium") @map("block_material")
+  /// Hub: Brass | Magnesium | Copper (optional; falls back to blockMaterial).
+  materialType     String?   @map("material_type") @db.VarChar(32)
   blockSize        String?   @map("block_size")
   embossDepth      Decimal?  @map("emboss_depth") @db.Decimal(4, 2)
+  /// Relief depth (mm); optional duplicate of embossDepth for tooling spec clarity.
+  reliefDepthMm    Decimal?  @map("relief_depth_mm") @db.Decimal(4, 2)
   storageLocation  String?   @map("storage_location")
+  /// Linked die master for production kit traceability.
+  linkedDieId      String?   @map("linked_die_id")
+  /// Approved artwork PDF URL.
+  artworkRefLink   String?   @map("artwork_ref_link") @db.VarChar(600)
+  /// Optional revision label for hub identity (e.g. REV-A); falls back to short id in UI.
+  assetVersionId   String?   @map("asset_version_id") @db.VarChar(40)
   impressionCount  Int       @default(0) @map("impression_count")
+  /// Cumulative production strikes (job-close increments); kept aligned with usage for tooling life.
+  cumulativeStrikes Int      @default(0) @map("cumulative_strikes")
   maxImpressions   Int       @default(100000) @map("max_impressions")
   condition        String    @default("Good") @map("condition") @db.VarChar(40)
   lastPolishedDate DateTime? @map("last_polished_date") @db.Date
@@ -1248,12 +1492,15 @@ model EmbossBlock {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
+  issuedMachine    Machine?  @relation("EmbossBlockIssuedMachine", fields: [issuedMachineId], references: [id], onDelete: SetNull)
+  linkedDie        Dye?      @relation("EmbossBlockLinkedDie", fields: [linkedDieId], references: [id], onDelete: SetNull)
   cartons          Carton[]
   usageLogs        EmbossBlockUsageLog[]
   maintenanceLogs  EmbossBlockMaintenanceLog[]
   jobCards         ProductionJobCard[]
   hubEvents        EmbossHubEvent[]
 
+  @@index([linkedDieId])
   @@map("emboss_blocks")
 }
 
@@ -1284,6 +1531,23 @@ model ShadeCard {
   productMaster     String?   @map("product_master")
   masterArtworkRef  String?   @map("master_artwork_ref")
   approvalDate      DateTime? @map("approval_date") @db.Date
+  /// Last lab verification vs master (fade alert if &gt; 180 days).
+  lastVerifiedAt    DateTime? @map("last_verified_at") @db.Date
+  /// Color variance ΔE (standard &lt; 2.0).
+  deltaEReading     Decimal?  @map("delta_e_reading") @db.Decimal(5, 2)
+  /// Customer-signed approval PDF / image.
+  approvalAttachmentUrl String? @map("approval_attachment_url") @db.VarChar(600)
+  /// Ink Kitchen PMS / lab recipe link.
+  inkRecipeLink         String? @map("ink_recipe_link") @db.VarChar(600)
+  /// Signed physical scan (customer approval).
+  customerApprovalDoc   String? @map("customer_approval_doc") @db.VarChar(600)
+  /// Precomputed: last verification + 180 days (fade / re-verify gate).
+  validUntil            DateTime? @map("valid_until") @db.Date
+  /// Short spectro summary for spotlight drawer.
+  spectroReportSummary  String? @map("spectro_report_summary") @db.Text
+  /// Hex swatch for UI preview e.g. #C41E3A
+  colorSwatchHex    String?   @map("color_swatch_hex") @db.VarChar(7)
+  customerId        String?   @map("customer_id")
   inkComponent      String?   @map("ink_component")
   remarks           String?
   currentHolder     String?   @map("current_holder")
@@ -1292,11 +1556,33 @@ model ShadeCard {
   issuedMachineId   String?   @map("issued_machine_id")
   issuedOperator    String?   @map("issued_operator")
   issuedAt          DateTime? @map("issued_at")
+  /// Physical card manufacture date — drives 9 / 12 month colour policy.
+  mfgDate           DateTime? @map("mfg_date") @db.Date
+  /// Soft-hide retired cards without deleting ledger history.
+  isActive          Boolean   @default(true) @map("is_active")
+  /// Linked Product Master (carton) for identity & deep links.
+  productId         String?   @map("product_id")
+  /// Board substrate for color matching (FBB, SBS, GREY_BACK, KRAFT).
+  substrateType     String?   @map("substrate_type") @db.VarChar(32)
+  /// CIE L*a*b* reference (Color DNA).
+  labL              Decimal?  @map("lab_l") @db.Decimal(10, 4)
+  labA              Decimal?  @map("lab_a") @db.Decimal(10, 4)
+  labB              Decimal?  @map("lab_b") @db.Decimal(10, 4)
+  /// PMS / lab mix notes (spotlight + audit).
+  inkRecipeNotes    String?   @map("ink_recipe_notes") @db.Text
+  /// Append-only spectro verification timestamps [{ scannedAt, deltaE?, note? }].
+  spectroScanLog    Json?     @map("spectro_scan_log")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  events ShadeCardEvent[]
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  product  Carton?   @relation("ShadeCardProductMaster", fields: [productId], references: [id], onDelete: SetNull)
+  events   ShadeCardEvent[]
+  cartons  Carton[]
+  poLines  PoLineItem[]
 
+  @@index([customerId])
+  @@index([productId])
   @@map("shade_cards")
 }
 
@@ -1361,6 +1647,8 @@ model PaperWarehouse {
   coaReference      String?   @map("coa_reference")
   receiptDate       DateTime  @default(now()) @map("receipt_date") @db.Date
   location          String?
+  /// When this row was split off the main batch for floor stock, points to the source warehouse row.
+  originatedFromId  String?   @map("originated_from_id")
   supplierGsm       Int?      @map("supplier_gsm")
   measuredGsm       Int?      @map("measured_gsm")
   measuredCaliper   Int?      @map("measured_caliper")
@@ -1373,7 +1661,45 @@ model PaperWarehouse {
   status            String    @default("quarantine")
   createdAt         DateTime  @default(now()) @map("created_at")
 
+  originatedFrom PaperWarehouse?  @relation("PaperWhFloorSplit", fields: [originatedFromId], references: [id], onDelete: SetNull)
+  floorSplits    PaperWarehouse[]   @relation("PaperWhFloorSplit")
+  issuesSourced  PaperIssueToFloor[] @relation("PaperIssueSourceWh")
+  issuesAsDest   PaperIssueToFloor[] @relation("PaperIssueDestWh")
+
   @@map("paper_warehouse")
+}
+
+/// Digital requisition: move sheets from main warehouse to floor stock, optionally linked to a production job card.
+model PaperIssueToFloor {
+  id                       String    @id @default(uuid())
+  sourcePaperWarehouseId   String    @map("source_paper_warehouse_id")
+  destinationWarehouseId   String?   @map("destination_warehouse_id")
+  productionJobCardId      String?   @map("production_job_card_id")
+  qtySheets                Int       @map("qty_sheets")
+  operatorUserId           String    @map("operator_user_id")
+  operatorName             String    @map("operator_name")
+  /// When true, audit trail uses the director high-priority issuance wording.
+  highPriorityAuthorized   Boolean   @default(false) @map("high_priority_authorized")
+  createdAt                DateTime  @default(now()) @map("created_at")
+
+  source      PaperWarehouse     @relation("PaperIssueSourceWh", fields: [sourcePaperWarehouseId], references: [id], onDelete: Cascade)
+  destination PaperWarehouse?    @relation("PaperIssueDestWh", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
+  jobCard     ProductionJobCard? @relation(fields: [productionJobCardId], references: [id], onDelete: SetNull)
+
+  @@index([sourcePaperWarehouseId])
+  @@map("paper_issue_to_floor")
+}
+
+/// Safety stock / max buffer per MRP radar key (`boardType|gsm|grainDirection`).
+model PaperSpecReorderPolicy {
+  id               String   @id @default(uuid())
+  radarKey         String   @unique @map("radar_key") @db.VarChar(256)
+  minimumThreshold Int      @default(0) @map("minimum_threshold")
+  maximumBuffer    Int      @default(0) @map("maximum_buffer")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("paper_spec_reorder_policies")
 }
 
 // ─────────────────────────────────────────

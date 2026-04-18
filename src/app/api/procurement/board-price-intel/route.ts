@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
+import {
+  boardGradesMatch,
+  computeMarketBenchmark30d,
+  computePriceTrend6m,
+  normalizeBoardKey,
+  priceVariancePct,
+} from '@/lib/procurement-price-benchmark'
 
 export const dynamic = 'force-dynamic'
 
-/** Last purchase rates for a board grade + GSM (dispatched / historical vendor lines). */
+/** Last purchase rates + 30d global benchmark + 6m trend for board grade + GSM. */
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
   if (error) return error
@@ -16,7 +23,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'boardGrade and gsm required' }, { status: 400 })
   }
 
-  const norm = boardGrade.trim().toLowerCase()
+  const currentRateRaw = req.nextUrl.searchParams.get('currentRatePerKg')
+  const currentRate =
+    currentRateRaw != null && currentRateRaw !== '' ? Number(currentRateRaw) : null
+
+  const norm = normalizeBoardKey(boardGrade)
   const lines = await db.vendorMaterialPurchaseOrderLine.findMany({
     where: {
       gsm,
@@ -40,10 +51,7 @@ export async function GET(req: NextRequest) {
     },
   })
 
-  const matched = lines.filter((ln) => {
-    const g = ln.boardGrade.trim().toLowerCase()
-    return g === norm || g.includes(norm) || norm.includes(g)
-  })
+  const matched = lines.filter((ln) => boardGradesMatch(ln.boardGrade, norm))
   const history = matched.slice(0, 3).map((ln) => ({
     ratePerKg: ln.ratePerKg != null ? Number(ln.ratePerKg) : null,
     poNumber: ln.vendorPo.poNumber,
@@ -54,5 +62,31 @@ export async function GET(req: NextRequest) {
 
   const lastRate = history.find((h) => h.ratePerKg != null && h.ratePerKg > 0)?.ratePerKg ?? null
 
-  return NextResponse.json({ history, lastPurchaseRate: lastRate })
+  const [benchmark30d, trend] = await Promise.all([
+    computeMarketBenchmark30d(db, boardGrade, gsm),
+    computePriceTrend6m(db, boardGrade, gsm),
+  ])
+
+  let variancePct: number | null = null
+  if (
+    benchmark30d != null &&
+    currentRate != null &&
+    Number.isFinite(currentRate) &&
+    currentRate > 0
+  ) {
+    variancePct = Math.round(priceVariancePct(currentRate, benchmark30d.ratePerKg) * 100) / 100
+  }
+
+  return NextResponse.json({
+    history,
+    lastPurchaseRate: lastRate,
+    benchmark30d,
+    trend6m: trend.months,
+    trendTooltip: {
+      high: trend.seriesHigh > 0 ? trend.seriesHigh : null,
+      low: trend.seriesLow > 0 ? trend.seriesLow : null,
+      lastPaid: trend.lastPaid,
+    },
+    variancePct,
+  })
 }

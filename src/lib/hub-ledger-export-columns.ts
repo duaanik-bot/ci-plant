@@ -150,10 +150,20 @@ export type InventoryShadeExportRow = {
   locationLabel?: string
   entryDate?: string
   createdAt?: string
+  mfgDate?: string | null
+  currentAgeMonths?: number | null
 }
 
 export function inventoryShadeExportColumns(): HubExportColumn<InventoryShadeExportRow>[] {
   return [
+    {
+      header: 'MFG date',
+      getValue: (r) => r.mfgDate?.trim() || '—',
+    },
+    {
+      header: 'Card age (months)',
+      getValue: (r) => (r.currentAgeMonths != null ? String(r.currentAgeMonths) : '—'),
+    },
     {
       header: 'Entry date',
       getValue: (r) => r.entryDate ?? (r.createdAt ? r.createdAt.slice(0, 10) : '—'),

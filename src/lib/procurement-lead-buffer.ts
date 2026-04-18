@@ -1,6 +1,7 @@
 import type { PrismaClient, PurchaseOrder } from '@prisma/client'
 import { addCalendarDaysYmd, parseDeliveryYmdFromRemarks } from '@/lib/po-delivery-parse'
 import { effectiveLogisticsLane } from '@/lib/procurement-logistics-hud'
+import { PROCUREMENT_SHORTAGE_AWAITING_REPLACEMENT } from '@/lib/vendor-po-shortage'
 
 /** Factory / vendor schedule reference — all buffer math uses IST calendar boundaries. */
 export const FACTORY_TIMEZONE = 'Asia/Kolkata' as const
@@ -20,6 +21,8 @@ export type LeadBufferSnapshot = {
   productionTargetYmd: string
   primaryCustomerName: string
   supplierId: string
+  /** Buffer used replacement ETA (shortage path) instead of logistics / required delivery. */
+  drivenByReplacementEta?: boolean
 }
 
 /** Format a Date in IST as YYYY-MM-DD (for comparison with planning dates). */
@@ -89,6 +92,8 @@ export type VendorPoForLeadBuffer = {
   lrNumber: string | null
   vehicleNumber: string | null
   estimatedArrivalAt: Date | null
+  procurementShortageFlag: string | null
+  replacementEtaAt: Date | null
   supplier: { id: string; name: string }
   lines: { linkedPoLineIds: unknown }[]
 }
@@ -168,8 +173,16 @@ export async function computeVendorPoLeadBuffers(
     const lane = effectiveLogisticsLane(vpo)
     let bufferHours: number
     let vendorEtaYmd: string
+    let drivenByReplacementEta = false
 
     if (
+      vpo.procurementShortageFlag === PROCUREMENT_SHORTAGE_AWAITING_REPLACEMENT &&
+      vpo.replacementEtaAt
+    ) {
+      vendorEtaYmd = ymdInFactoryTZ(vpo.replacementEtaAt)
+      bufferHours = bufferHoursIst(vendorEtaYmd, productionTargetYmd)
+      drivenByReplacementEta = true
+    } else if (
       (lane === 'in_transit' || lane === 'at_gate') &&
       vpo.estimatedArrivalAt
     ) {
@@ -206,6 +219,7 @@ export async function computeVendorPoLeadBuffers(
       productionTargetYmd,
       primaryCustomerName,
       supplierId: vpo.supplier.id,
+      ...(drivenByReplacementEta ? { drivenByReplacementEta: true } : {}),
     }
     byVendorPoId.set(vpo.id, snap)
     if (bufferHours < 48) atRiskVendorPoCount += 1

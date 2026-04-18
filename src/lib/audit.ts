@@ -2,7 +2,7 @@ import { db } from './db'
 
 export async function createAuditLog(params: {
   userId?: string
-  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'LOGIN' | 'LOGOUT'
+  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'LOGIN' | 'LOGOUT' | 'VIEW'
   tableName: string
   recordId?: string
   oldValue?: Record<string, unknown>

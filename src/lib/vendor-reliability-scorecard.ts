@@ -52,10 +52,10 @@ function compositeGrade(score: number): ReliabilityGrade {
 export async function computeVendorReliabilityScores(db: PrismaClient): Promise<Map<string, VendorReliabilitySnapshot>> {
   const since = new Date(Date.now() - 540 * MS_DAY)
 
-  const [dispatchedPos, recons, suppliers] = await Promise.all([
+  const [dispatchedPos, recons, suppliers, qualityPenaltyReceipts] = await Promise.all([
     db.vendorMaterialPurchaseOrder.findMany({
       where: {
-        status: { in: ['dispatched', 'closed'] },
+        status: { in: ['dispatched', 'partially_received', 'fully_received', 'closed'] },
         dispatchedAt: { not: null, gte: since },
       },
       select: {
@@ -81,7 +81,20 @@ export async function computeVendorReliabilityScores(db: PrismaClient): Promise<
       where: { active: true },
       select: { id: true, name: true },
     }),
+    db.vendorMaterialReceipt.findMany({
+      where: {
+        qcPerformedAt: { gte: since },
+        OR: [{ qcStatus: 'PASSED_WITH_PENALTY' }, { qtyAcceptedPenalty: { gt: 0 } }],
+      },
+      select: { vendorPo: { select: { supplierId: true } } },
+    }),
   ])
+
+  const qualityPenaltyCountBySupplier = new Map<string, number>()
+  for (const row of qualityPenaltyReceipts) {
+    const sid = row.vendorPo.supplierId
+    qualityPenaltyCountBySupplier.set(sid, (qualityPenaltyCountBySupplier.get(sid) ?? 0) + 1)
+  }
 
   const lineIds = Array.from(
     new Set(
@@ -154,6 +167,10 @@ export async function computeVendorReliabilityScores(db: PrismaClient): Promise<
 
     let composite = 0.6 * deliveryScore + 0.4 * weightScore
     if (d && d.total === 0 && avgAbs == null) composite = 75
+    const qPen = qualityPenaltyCountBySupplier.get(sid) ?? 0
+    if (qPen > 0) {
+      composite -= Math.min(25, qPen * 7)
+    }
     composite = clamp(composite, 0, 100)
 
     const name = nameById.get(sid) ?? d?.name ?? 'Supplier'
@@ -224,7 +241,7 @@ export async function getSupplierScorecardDetail(
   const dispatchedWindow = await db.vendorMaterialPurchaseOrder.findMany({
     where: {
       supplierId,
-      status: { in: ['dispatched', 'closed'] },
+      status: { in: ['dispatched', 'partially_received', 'fully_received', 'closed'] },
       dispatchedAt: { gte: windowStart },
     },
     select: { requiredDeliveryDate: true, dispatchedAt: true },

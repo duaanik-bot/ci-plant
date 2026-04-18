@@ -53,7 +53,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
             ? 400
             : result.code === 'ALREADY_ISSUED'
               ? 409
-              : 400
+              : result.code === 'SHADE_EXPIRED'
+                ? 403
+                : 400
       return NextResponse.json({ error: result.message, code: result.code }, { status })
     }
 

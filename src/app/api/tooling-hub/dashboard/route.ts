@@ -32,6 +32,15 @@ import {
 import { masterDieTypeLabel } from '@/lib/master-die-type'
 import type { PastingStyle } from '@prisma/client'
 import { pastingNeedsMasterReview, pastingStyleLabel } from '@/lib/pasting-style'
+import {
+  effectiveStrikeLimit,
+  strikeCountExceedsLimit,
+} from '@/lib/emboss-block-material'
+import {
+  loadPriorityPoLineContext,
+  poLineMatchesEmbossBlock,
+} from '@/lib/hub-po-tooling-priority'
+import { embossOperationalStatus } from '@/lib/emboss-hub-operational-status'
 
 type EmbossTriageCardMeta = {
   triageManualEntry: boolean
@@ -79,6 +88,9 @@ export type ToolingHubLedgerRowJson = {
   typeMismatchMatches?: DieSimilarMatchJson[]
   industrialPriority?: boolean
   linkedCustomerNames?: string[]
+  /** Emboss — carton master id (primary filter key). */
+  linkedProductId?: string | null
+  versionDisplay?: string | null
 }
 
 function mapDie(d: {
@@ -177,33 +189,109 @@ function mapEmboss(
   b: {
     id: string
     blockCode: string
+    cartonId: string | null
+    assetVersionId: string | null
     blockType: string
     blockMaterial: string
+    materialType: string | null
     blockSize: string | null
     cartonName: string | null
+    customerId: string | null
     storageLocation: string | null
+    artworkRefLink: string | null
+    linkedDieId: string | null
+    linkedDie: { id: string; dyeNumber: number } | null
     impressionCount: number
+    cumulativeStrikes: number
+    maxImpressions: number
+    embossDepth: { toString(): string } | null
+    reliefDepthMm: { toString(): string } | null
     reuseCount: number
     custodyStatus: string
     hubPreviousCustody: string | null
     issuedOperator: string | null
+    issuedMachineId: string | null
+    issuedMachine: { machineCode: string; name: string } | null
     updatedAt: Date
     createdAt: Date
     condition: string
+    active: boolean
+    scrappedAt: Date | null
+    cartons: { id: string; cartonName: string; customer: { name: string } | null }[]
   },
   jobCardHub: ReturnType<typeof hubJobCardHubStatus> | null,
-  triageMeta?: EmbossTriageCardMeta | null,
+  triageMeta: EmbossTriageCardMeta | null | undefined,
+  industrialPriority: boolean,
 ) {
+  const strikes = Math.max(b.cumulativeStrikes ?? 0, b.impressionCount ?? 0)
+  const reliefFromCol =
+    b.reliefDepthMm != null ? Number(b.reliefDepthMm) : b.embossDepth != null ? Number(b.embossDepth) : null
+  const strikeLimit = effectiveStrikeLimit({
+    maxImpressions: b.maxImpressions,
+    blockMaterial: b.materialType?.trim() || b.blockMaterial,
+  })
+  const strikeOverLimit = strikeCountExceedsLimit({
+    impressionCount: strikes,
+    maxImpressions: b.maxImpressions,
+    blockMaterial: b.materialType?.trim() || b.blockMaterial,
+  })
+  const linkedCustomerNames = Array.from(
+    new Set(
+      b.cartons
+        .map((c) => c.customer?.name?.trim())
+        .filter((n): n is string => Boolean(n)),
+    ),
+  )
+  const issuedMachineLabel = b.issuedMachine
+    ? `${b.issuedMachine.machineCode} · ${b.issuedMachine.name}`
+    : null
+  const linkedProductId = b.cartonId ?? b.cartons[0]?.id ?? null
+  const fromCarton = linkedProductId
+    ? b.cartons.find((c) => c.id === linkedProductId)
+    : undefined
+  const productName =
+    fromCarton?.cartonName?.trim() ||
+    b.cartons[0]?.cartonName?.trim() ||
+    b.cartonName?.trim() ||
+    b.blockCode
+  const versionDisplay =
+    b.assetVersionId?.trim() ||
+    b.id
+      .replace(/-/g, '')
+      .slice(0, 8)
+      .toUpperCase()
+  const materialLabel = (b.materialType?.trim() || b.blockMaterial?.trim() || '—') as string
+  const operationalStatus = embossOperationalStatus({
+    active: b.active,
+    scrappedAt: b.scrappedAt,
+    condition: b.condition,
+    custodyStatus: b.custodyStatus,
+    issuedMachineId: b.issuedMachineId,
+  })
+
   return {
     id: b.id,
     kind: 'emboss' as const,
     displayCode: b.blockCode,
-    title: b.cartonName?.trim() || b.blockCode,
+    /** Product / carton master name — primary hub label. */
+    title: productName,
+    productName,
+    linkedProductId,
+    versionDisplay,
     typeLabel: b.blockType?.trim() || '—',
-    materialLabel: b.blockMaterial?.trim() || '—',
+    materialLabel,
     blockSize: b.blockSize?.trim() || null,
     storageLocation: b.storageLocation,
+    artworkRefLink: b.artworkRefLink?.trim() || null,
+    linkedDieId: b.linkedDieId,
+    linkedDieCode: b.linkedDie ? `DYE-${b.linkedDie.dyeNumber}` : null,
     impressionCount: b.impressionCount,
+    cumulativeStrikes: strikes,
+    operationalStatus,
+    strikeLimit,
+    strikeOverLimit,
+    reliefDepthMm: reliefFromCol,
+    maxImpressions: b.maxImpressions,
     reuseCount: b.reuseCount,
     custodyStatus: b.custodyStatus,
     hubPreviousCustody: b.hubPreviousCustody,
@@ -215,6 +303,11 @@ function mapEmboss(
     triageBlockDimensions: triageMeta?.triageBlockDimensions ?? null,
     hubConditionPoor: b.condition?.trim() === 'Poor',
     issuedOperator: b.issuedOperator?.trim() || null,
+    issuedMachineId: b.issuedMachineId,
+    issuedMachineLabel,
+    linkedCustomerNames,
+    industrialPriority,
+    ledgerRank: 0,
   }
 }
 
@@ -351,9 +444,19 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    const priorityLines = await loadPriorityPoLineContext(db)
+
     const rows = await db.embossBlock.findMany({
       where: { active: true },
       orderBy: { blockCode: 'asc' },
+      include: {
+        cartons: {
+          take: 24,
+          select: { id: true, cartonName: true, customer: { select: { name: true } } },
+        },
+        issuedMachine: { select: { machineCode: true, name: true } },
+        linkedDie: { select: { id: true, dyeNumber: true } },
+      },
     })
     const custodyRows = rows.filter(
       (r) =>
@@ -405,30 +508,49 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    const mapped = rows.map((b) =>
-      mapEmboss(
+    const mapped = rows.map((b) => {
+      const industrialPriority = poLineMatchesEmbossBlock(priorityLines, {
+        id: b.id,
+        customerId: b.customerId,
+        cartonName: b.cartonName,
+        cartonIds: b.cartons.map((c) => c.id),
+        cartonNames: b.cartons.map((c) => c.cartonName),
+      })
+      return mapEmboss(
         b,
         b.custodyStatus === CUSTODY_HUB_CUSTODY_READY || b.custodyStatus === CUSTODY_ON_FLOOR
           ? jcHubByEmboss.get(b.id) ?? null
           : null,
         b.custodyStatus === CUSTODY_HUB_TRIAGE ? triageMetaByBlock.get(b.id) ?? null : null,
-      ),
+        industrialPriority,
+      )
+    })
+    const embossRankById = new Map(
+      [...mapped]
+        .sort((a, b) => {
+          const na = (a.productName ?? a.title ?? '').localeCompare(b.productName ?? b.title ?? '', undefined, {
+            sensitivity: 'base',
+          })
+          if (na !== 0) return na
+          return a.displayCode.localeCompare(b.displayCode)
+        })
+        .map((r, idx) => [r.id, idx + 1]),
     )
-    const triage = mapped.filter((r) => r.custodyStatus === CUSTODY_HUB_TRIAGE)
-    const prep = mapped.filter((r) => r.custodyStatus === CUSTODY_HUB_ENGRAVING_QUEUE)
-    const inventory = mapped.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK)
-    const custody = mapped.filter(
+
+    const ranked = mapped.map((r) => ({
+      ...r,
+      ledgerRank: embossRankById.get(r.id) ?? 0,
+    }))
+
+    const triage = ranked.filter((r) => r.custodyStatus === CUSTODY_HUB_TRIAGE)
+    const prep = ranked.filter((r) => r.custodyStatus === CUSTODY_HUB_ENGRAVING_QUEUE)
+    const inventory = ranked.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK)
+    const custody = ranked.filter(
       (r) =>
         r.custodyStatus === CUSTODY_HUB_CUSTODY_READY || r.custodyStatus === CUSTODY_ON_FLOOR,
     )
 
-    const embossRankById = new Map(
-      [...mapped]
-        .sort((a, b) => a.displayCode.localeCompare(b.displayCode))
-        .map((r, idx) => [r.id, idx + 1]),
-    )
-
-    const ledgerRows: ToolingHubLedgerRowJson[] = mapped.map((r) => {
+    const ledgerRows: ToolingHubLedgerRowJson[] = ranked.map((r) => {
       const zoneKey = embossLedgerZoneKeyFromCustody(r.custodyStatus)
       return {
         kind: 'emboss',
@@ -446,6 +568,10 @@ export async function GET(req: NextRequest) {
         ledgerEntryAt: r.createdAt,
         ledgerRank: embossRankById.get(r.id) ?? 0,
         hubConditionPoor: r.kind === 'emboss' ? r.hubConditionPoor : undefined,
+        industrialPriority: r.kind === 'emboss' ? r.industrialPriority : undefined,
+        linkedCustomerNames: r.kind === 'emboss' ? r.linkedCustomerNames : undefined,
+        linkedProductId: r.kind === 'emboss' ? r.linkedProductId : undefined,
+        versionDisplay: r.kind === 'emboss' ? r.versionDisplay : undefined,
       }
     })
 

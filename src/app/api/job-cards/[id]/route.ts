@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
+import {
+  computeJobYieldMetricsForCard,
+  shortCloseFloorStockForJob,
+  YIELD_FINAL_AUDIT_MESSAGE,
+} from '@/lib/production-yield'
+import { persistProductionOeeLedger } from '@/lib/production-oee'
+import { incrementEmbossStrikesOnJobClose } from '@/lib/production-emboss-strikes'
 import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
@@ -24,6 +31,7 @@ const postPressRoutingSchema = z.object({
 
 const updateSchema = z.object({
   assignedOperator: z.string().optional().nullable(),
+  shiftOperatorUserId: z.string().uuid().optional().nullable(),
   batchNumber: z.string().optional().nullable(),
   requiredSheets: z.number().int().positive().optional(),
   wastageSheets: z.number().int().min(0).optional(),
@@ -49,6 +57,7 @@ export async function GET(
     where: { id },
     include: {
       customer: { select: { id: true, name: true } },
+      shiftOperator: { select: { id: true, name: true } },
       stages: { orderBy: { createdAt: 'asc' } },
     },
   })
@@ -122,6 +131,7 @@ export async function PUT(
   const requiredSheets = data.requiredSheets ?? existing.requiredSheets
   const wastageSheets = data.wastageSheets ?? existing.wastageSheets
   const totalSheets = requiredSheets + wastageSheets
+  const isClosing = data.status === 'closed' && existing.status !== 'closed'
 
   const updated = await db.$transaction(async (tx) => {
     const header = await tx.productionJobCard.update({
@@ -129,6 +139,9 @@ export async function PUT(
       data: {
         ...(data.assignedOperator !== undefined
           ? { assignedOperator: data.assignedOperator }
+          : {}),
+        ...(data.shiftOperatorUserId !== undefined
+          ? { shiftOperatorUserId: data.shiftOperatorUserId }
           : {}),
         ...(data.batchNumber !== undefined ? { batchNumber: data.batchNumber } : {}),
         ...(data.requiredSheets !== undefined ? { requiredSheets: data.requiredSheets } : {}),
@@ -165,8 +178,20 @@ export async function PUT(
         data.stages.filter((s) => s.status === 'completed').map((s) => s.id),
       )
       await Promise.all(
-        data.stages.map((s) =>
-          tx.productionStageRecord.update({
+        data.stages.map((s) => {
+          const prev = existing.stages.find((r) => r.id === s.id)
+          const counterTicked =
+            prev &&
+            s.counter !== undefined &&
+            s.counter !== prev.counter
+          const becameInProgress =
+            s.status === 'in_progress' && prev && prev.status !== 'in_progress'
+          const leftInProgress =
+            s.status != null &&
+            s.status !== 'in_progress' &&
+            prev?.status === 'in_progress'
+
+          return tx.productionStageRecord.update({
             where: { id: s.id },
             data: {
               ...(s.status !== undefined ? { status: s.status } : {}),
@@ -175,9 +200,12 @@ export async function PUT(
               ...(s.sheetSize !== undefined ? { sheetSize: s.sheetSize } : {}),
               ...(s.excessSheets !== undefined ? { excessSheets: s.excessSheets } : {}),
               ...(s.status === 'completed' ? { completedAt: new Date() } : {}),
+              ...(counterTicked ? { lastProductionTickAt: new Date() } : {}),
+              ...(becameInProgress ? { inProgressSince: new Date() } : {}),
+              ...(leftInProgress ? { inProgressSince: null } : {}),
             },
           })
-        )
+        }),
       )
 
       if (completedStageIds.size > 0) {
@@ -201,15 +229,59 @@ export async function PUT(
       }
     }
 
+    if (isClosing) {
+      await shortCloseFloorStockForJob(tx, id)
+    }
+
     return header
   })
+
+  let yieldAudit: Record<string, unknown> = {}
+  if (isClosing) {
+    await persistProductionOeeLedger(db, id)
+    await incrementEmbossStrikesOnJobClose(db, id, user?.name ?? null)
+  }
+
+  if (isClosing) {
+    const jc = await db.productionJobCard.findUnique({
+      where: { id },
+      include: { stages: true },
+    })
+    const poLine =
+      jc?.jobCardNumber != null
+        ? await db.poLineItem.findFirst({
+            where: { jobCardNumber: jc.jobCardNumber },
+            select: {
+              gsm: true,
+              dimLengthMm: true,
+              dimWidthMm: true,
+              carton: {
+                select: {
+                  finishedLength: true,
+                  finishedWidth: true,
+                  blankLength: true,
+                  blankWidth: true,
+                  gsm: true,
+                },
+              },
+            },
+          })
+        : null
+    if (jc) {
+      const yieldMetrics = await computeJobYieldMetricsForCard(db, jc, poLine)
+      yieldAudit = {
+        yieldFinalAudit: YIELD_FINAL_AUDIT_MESSAGE,
+        yieldMetrics,
+      }
+    }
+  }
 
   await createAuditLog({
     userId: user!.id,
     action: 'UPDATE',
     tableName: 'production_job_cards',
     recordId: id,
-    newValue: data,
+    newValue: isClosing ? { ...data, ...yieldAudit } : data,
   })
 
   return NextResponse.json(updated)

@@ -36,6 +36,7 @@ const lineItemUpdateSchema = purchaseOrderSchema.shape.lineItems.element
     dimHeightMm: z.coerce.number().optional().nullable(),
     materialProcurementStatus: z.string().optional(),
     directorPriority: z.boolean().optional(),
+    shadeCardId: z.string().uuid().optional().nullable(),
     specOverrides: z
       .object({
         wastagePct: z.number().optional(),
@@ -231,6 +232,8 @@ export async function PUT(
             li.directorPriority !== undefined
               ? li.directorPriority
               : (prev?.directorPriority ?? false),
+          shadeCardId:
+            li.shadeCardId !== undefined ? li.shadeCardId : prev?.shadeCardId ?? null,
         }
 
         if (li.id && existingById.has(li.id)) {

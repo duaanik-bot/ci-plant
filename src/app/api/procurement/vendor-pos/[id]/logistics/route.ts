@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { logIndustrialStatusChange } from '@/lib/industrial-audit'
 import { PROCUREMENT_LOGISTICS_AUDIT_ACTOR } from '@/lib/procurement-logistics-hud'
+import { isVendorPoPostDispatchReceiving } from '@/lib/vendor-po-post-dispatch'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,9 +39,9 @@ export async function PATCH(
 
   const existing = await db.vendorMaterialPurchaseOrder.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (existing.status !== 'dispatched' || existing.isShortClosed) {
+  if (!isVendorPoPostDispatchReceiving(existing.status) || existing.isShortClosed) {
     return NextResponse.json(
-      { error: 'Logistics can only be edited on active dispatched POs' },
+      { error: 'Logistics can only be edited on active mill-dispatched / GRN-in-progress POs' },
       { status: 400 },
     )
   }

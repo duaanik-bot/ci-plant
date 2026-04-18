@@ -2,6 +2,12 @@
 
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { MachineHealthMeter } from '@/components/industrial/MachineHealthMeter'
+import { PmSpotlightDrawer } from '@/components/industrial/PmSpotlightDrawer'
+
+const mono = 'font-designing-queue tabular-nums tracking-tight'
 
 type MachineFlowItem = {
   id: string
@@ -13,6 +19,13 @@ type MachineFlowItem = {
   oee: number | null
   sheetsToday: number | null
   firstArticle: string | null
+  pmHealth: {
+    healthPct: number
+    hasSchedule: boolean
+    overdue: boolean
+    usageRunHours: number
+    usageImpressions: string
+  }
 }
 
 const PREPRESS = ['Board Store', 'CI-10', 'CI-12', 'Plate QC & Store']
@@ -21,14 +34,51 @@ const POSTPRESS = ['CI-04', 'CI-05']
 const FINISHING = ['CI-06', 'CI-07', 'CI-08', 'CI-09']
 const QC_DISPATCH = ['Final QC Bench', 'Auto Counter', 'Packing Line', 'FG Warehouse', 'Dispatch Bay']
 
-function MachineCard({ m }: { m: MachineFlowItem }) {
+function MachineCard({
+  m,
+  onPmClick,
+  highlight,
+}: {
+  m: MachineFlowItem
+  onPmClick: (id: string) => void
+  /** Deep-link from tooling hub — scroll + transient ring */
+  highlight?: boolean
+}) {
+  const cardRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!highlight || !cardRef.current) return
+    const el = cardRef.current
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el.classList.add('ring-2', 'ring-emerald-400/85', 'ring-offset-2', 'ring-offset-black')
+    const t = window.setTimeout(() => {
+      el.classList.remove('ring-2', 'ring-emerald-400/85', 'ring-offset-2', 'ring-offset-black')
+    }, 2600)
+    return () => window.clearTimeout(t)
+  }, [highlight])
+
   const isPress = PRESS.includes(m.machineCode)
   const statusCls = m.status === 'active' ? 'text-green-400' : m.status === 'under_maintenance' ? 'text-red-400' : 'text-slate-400'
   return (
-    <div className="rounded-lg border border-slate-600 bg-slate-800/50 p-3 min-w-[140px]">
+    <div
+      ref={cardRef}
+      data-machine-flow-id={m.id}
+      className="rounded-lg border border-slate-600 bg-slate-800/50 p-3 min-w-[140px]"
+    >
       <p className="font-mono text-amber-400 text-sm">{m.machineCode}</p>
       <p className="text-slate-300 text-xs truncate">{m.name}</p>
       <p className="text-sm mt-1">{m.currentJob ? m.currentJob.jobNumber : 'Idle'}</p>
+      {m.pmHealth.hasSchedule ? (
+        <div className={`flex items-center gap-2 mt-2 ${mono} text-[10px] text-zinc-400`}>
+          <MachineHealthMeter
+            healthPct={m.pmHealth.healthPct}
+            hasSchedule
+            onClick={() => onPmClick(m.id)}
+          />
+          <span>
+            {m.pmHealth.usageRunHours}h · {m.pmHealth.usageImpressions} imp.
+          </span>
+        </div>
+      ) : null}
       {isPress && m.oee != null && (
         <div className="flex items-center gap-1 mt-1">
           <div className="w-8 h-8 rounded-full border-2 border-slate-500 flex items-center justify-center text-xs">
@@ -48,6 +98,9 @@ function MachineCard({ m }: { m: MachineFlowItem }) {
 }
 
 export default function MachineFlowPage() {
+  const searchParams = useSearchParams()
+  const highlightMachineId = searchParams.get('highlightMachineId')?.trim() || null
+  const [pmMachineId, setPmMachineId] = useState<string | null>(null)
   const { data: machines = [], isLoading } = useQuery<MachineFlowItem[]>({
     queryKey: ['production-machine-flow'],
     queryFn: () => fetch('/api/production/machine-flow').then((r) => r.json()),
@@ -86,7 +139,12 @@ export default function MachineFlowPage() {
               <p className="text-slate-400 text-xs">Board Store</p>
             </div>
             {prepressItems.map((m) => (
-              <MachineCard key={m.id} m={m} />
+              <MachineCard
+                key={m.id}
+                m={m}
+                onPmClick={setPmMachineId}
+                highlight={highlightMachineId === m.id}
+              />
             ))}
             <div className="rounded-lg border border-slate-600 bg-slate-800/30 p-3 min-w-[100px] text-center">
               <p className="text-slate-400 text-xs">Plate QC & Store</p>
@@ -98,7 +156,12 @@ export default function MachineFlowPage() {
           <h2 className="text-sm font-semibold text-slate-400 mb-2">Press</h2>
           <div className="flex flex-wrap gap-2">
             {pressItems.map((m) => (
-              <MachineCard key={m.id} m={m} />
+              <MachineCard
+                key={m.id}
+                m={m}
+                onPmClick={setPmMachineId}
+                highlight={highlightMachineId === m.id}
+              />
             ))}
           </div>
         </section>
@@ -107,7 +170,12 @@ export default function MachineFlowPage() {
           <h2 className="text-sm font-semibold text-slate-400 mb-2">Post-press</h2>
           <div className="flex flex-wrap gap-2">
             {postpressItems.map((m) => (
-              <MachineCard key={m.id} m={m} />
+              <MachineCard
+                key={m.id}
+                m={m}
+                onPmClick={setPmMachineId}
+                highlight={highlightMachineId === m.id}
+              />
             ))}
           </div>
         </section>
@@ -116,7 +184,12 @@ export default function MachineFlowPage() {
           <h2 className="text-sm font-semibold text-slate-400 mb-2">Finishing</h2>
           <div className="flex flex-wrap gap-2">
             {finishingItems.map((m) => (
-              <MachineCard key={m.id} m={m} />
+              <MachineCard
+                key={m.id}
+                m={m}
+                onPmClick={setPmMachineId}
+                highlight={highlightMachineId === m.id}
+              />
             ))}
           </div>
         </section>
@@ -133,21 +206,42 @@ export default function MachineFlowPage() {
         </section>
       </div>
 
-      <div className="mt-8 overflow-x-auto">
-        <h2 className="text-sm font-semibold text-slate-400 mb-2">Changeover timer</h2>
-        <table className="w-full text-sm">
-          <thead className="bg-slate-800 text-left">
+      <div className="mt-8 overflow-x-auto rounded-xl border border-zinc-800 bg-black ring-1 ring-white/5">
+        <h2 className="text-sm font-semibold text-slate-400 mb-2 px-4 pt-4">Machine ledger — changeover & PM health</h2>
+        <table className={`w-full text-sm ${mono}`}>
+          <thead className="bg-zinc-950 text-left text-zinc-500 text-[10px] uppercase tracking-wider">
             <tr>
               <th className="px-4 py-2">Machine</th>
+              <th className="px-4 py-2">Health</th>
+              <th className="px-4 py-2">Usage</th>
               <th className="px-4 py-2">Std Changeover</th>
               <th className="px-4 py-2">Current Status</th>
               <th className="px-4 py-2">Last Changeover</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700">
+          <tbody className="divide-y divide-zinc-900 text-zinc-300">
             {pressItems.concat(postpressItems).concat(finishingItems).map((m) => (
-              <tr key={m.id}>
-                <td className="px-4 py-2 font-mono">{m.machineCode}</td>
+              <tr
+                key={m.id}
+                className={m.pmHealth.overdue ? 'bg-rose-950/20 border-l-4 border-rose-600' : ''}
+              >
+                <td className="px-4 py-2 font-mono text-amber-300">{m.machineCode}</td>
+                <td className="px-4 py-2">
+                  {m.pmHealth.hasSchedule ? (
+                    <MachineHealthMeter
+                      healthPct={m.pmHealth.healthPct}
+                      hasSchedule
+                      onClick={() => setPmMachineId(m.id)}
+                    />
+                  ) : (
+                    <MachineHealthMeter healthPct={0} hasSchedule={false} />
+                  )}
+                </td>
+                <td className="px-4 py-2 text-xs text-zinc-400">
+                  {m.pmHealth.hasSchedule
+                    ? `${m.pmHealth.usageRunHours}h · ${m.pmHealth.usageImpressions} imp.`
+                    : '—'}
+                </td>
                 <td className="px-4 py-2 text-slate-400">45–90 min</td>
                 <td className="px-4 py-2">—</td>
                 <td className="px-4 py-2 text-slate-500">—</td>
@@ -156,6 +250,7 @@ export default function MachineFlowPage() {
           </tbody>
         </table>
       </div>
+      <PmSpotlightDrawer machineId={pmMachineId} onClose={() => setPmMachineId(null)} />
     </div>
   )
 }

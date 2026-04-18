@@ -17,6 +17,7 @@ export default function NewSupplierPage() {
   const [address, setAddress] = useState('')
   const [materialTypes, setMaterialTypes] = useState<string[]>([])
   const [leadTimeDays, setLeadTimeDays] = useState('7')
+  const [paymentTermsDays, setPaymentTermsDays] = useState('30')
   const [paymentTerms, setPaymentTerms] = useState('')
   const [active, setActive] = useState(true)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -45,6 +46,10 @@ export default function NewSupplierPage() {
           address: address.trim() || undefined,
           materialTypes,
           leadTimeDays: Number(leadTimeDays) || 7,
+          paymentTermsDays: (() => {
+            const n = Number(paymentTermsDays)
+            return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 30
+          })(),
           paymentTerms: paymentTerms.trim() || undefined,
           active,
         }),
@@ -150,7 +155,17 @@ export default function NewSupplierPage() {
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Payment terms</label>
+          <label className="block text-sm text-slate-400 mb-1">Payment terms (days credit)</label>
+          <input
+            type="number"
+            min={0}
+            value={paymentTermsDays}
+            onChange={(e) => setPaymentTermsDays(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white font-mono tabular-nums"
+          />
+        </div>
+        <div>
+          <label className="block text-sm text-slate-400 mb-1">Payment terms (notes)</label>
           <input
             value={paymentTerms}
             onChange={(e) => setPaymentTerms(e.target.value)}

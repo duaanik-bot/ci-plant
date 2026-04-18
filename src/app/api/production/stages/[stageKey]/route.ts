@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { PRODUCTION_STAGES } from '@/lib/constants'
+import { computeJobYieldMetricsForCard } from '@/lib/production-yield'
+import { computeLiveOeeForJobCard } from '@/lib/production-oee'
+import { loadMachinePmHealthMap } from '@/lib/machine-pm-health'
 
 export const dynamic = 'force-dynamic'
 
@@ -50,6 +53,8 @@ export async function GET(
       jobCard: {
         include: {
           customer: { select: { id: true, name: true } },
+          shiftOperator: { select: { id: true, name: true } },
+          machine: { select: { id: true, machineCode: true, name: true, capacityPerShift: true } },
         },
       },
     },
@@ -82,6 +87,124 @@ export async function GET(
     }
   })
 
+  const jcIds = Array.from(new Set(records.map((r) => r.jobCardId)))
+  const machineIds = Array.from(
+    new Set(
+      records
+        .map((r) => r.jobCard?.machineId)
+        .filter((id): id is string => id != null && id.length > 0),
+    ),
+  )
+  const pmHealthByMachineId = await loadMachinePmHealthMap(db, machineIds)
+  const jobsForYield =
+    jcIds.length > 0
+      ? await db.productionJobCard.findMany({
+          where: { id: { in: jcIds } },
+          include: { stages: true },
+        })
+      : []
+  type PoLineYield = NonNullable<Parameters<typeof computeJobYieldMetricsForCard>[2]>
+  const yieldLineByJcNum = new Map<number, PoLineYield>()
+  const jcNumsForYield = jobsForYield.map((j) => j.jobCardNumber)
+  if (jcNumsForYield.length > 0) {
+    const yLines = await db.poLineItem.findMany({
+      where: { jobCardNumber: { in: jcNumsForYield } },
+      select: {
+        jobCardNumber: true,
+        gsm: true,
+        dimLengthMm: true,
+        dimWidthMm: true,
+        carton: {
+          select: {
+            finishedLength: true,
+            finishedWidth: true,
+            blankLength: true,
+            blankWidth: true,
+            gsm: true,
+          },
+        },
+      },
+    })
+    for (const ln of yLines) {
+      if (ln.jobCardNumber == null) continue
+      yieldLineByJcNum.set(ln.jobCardNumber, {
+        gsm: ln.gsm,
+        dimLengthMm: ln.dimLengthMm,
+        dimWidthMm: ln.dimWidthMm,
+        carton: ln.carton,
+      })
+    }
+  }
+  const yieldByJobId = new Map<string, Awaited<ReturnType<typeof computeJobYieldMetricsForCard>>>()
+  for (const j of jobsForYield) {
+    const line = yieldLineByJcNum.get(j.jobCardNumber) ?? null
+    yieldByJobId.set(j.id, await computeJobYieldMetricsForCard(db, j, line))
+  }
+
+  const ledgerRows =
+    jcIds.length > 0
+      ? await db.productionOeeLedger.findMany({
+          where: { productionJobCardId: { in: jcIds } },
+        })
+      : []
+  const ledgerByJcId = new Map(ledgerRows.map((l) => [l.productionJobCardId, l]))
+
+  type OeePayload = {
+    oee: number
+    availability: number
+    performance: number
+    quality: number
+    currentSpeedPph: number
+    ratedSpeedPph: number
+    secondsSinceLastTick: number | null
+    downtimeLock: boolean
+    source: 'live' | 'ledger'
+  }
+  const oeeByStageId = new Map<string, OeePayload>()
+  for (const r of records) {
+    const jc = r.jobCard
+    if (!jc) continue
+    const led = ledgerByJcId.get(jc.id)
+    if (led) {
+      oeeByStageId.set(r.id, {
+        oee: Number(led.oeePct),
+        availability: Number(led.availabilityPct),
+        performance: Number(led.performancePct),
+        quality: Number(led.qualityPct),
+        currentSpeedPph: 0,
+        ratedSpeedPph: led.ratedSpeedPph != null ? Number(led.ratedSpeedPph) : 0,
+        secondsSinceLastTick: null,
+        downtimeLock: false,
+        source: 'ledger',
+      })
+      continue
+    }
+    if (r.status === 'in_progress') {
+      const live = await computeLiveOeeForJobCard(
+        db,
+        {
+          id: jc.id,
+          createdAt: jc.createdAt,
+          totalSheets: jc.totalSheets,
+          wastageSheets: jc.wastageSheets,
+          status: jc.status,
+          machineId: jc.machineId,
+          machine: jc.machine,
+        },
+        {
+          status: r.status,
+          counter: r.counter,
+          lastProductionTickAt: r.lastProductionTickAt,
+          inProgressSince: r.inProgressSince,
+          createdAt: r.createdAt,
+        },
+      )
+      if (live) {
+        oeeByStageId.set(r.id, { ...live, source: 'live' })
+      }
+    }
+  }
+
   function idleHoursForStage(
     status: string,
     stageCreatedAt: Date,
@@ -111,6 +234,8 @@ export async function GET(
         sheetSize: r.sheetSize,
         completedAt: r.completedAt?.toISOString() ?? null,
         createdAt: r.createdAt.toISOString(),
+        lastProductionTickAt: r.lastProductionTickAt?.toISOString() ?? null,
+        inProgressSince: r.inProgressSince?.toISOString() ?? null,
       },
       idleHours,
       jobCard: jc
@@ -124,10 +249,26 @@ export async function GET(
             status: jc.status,
             customer: jc.customer,
             updatedAt: jc.updatedAt.toISOString(),
+            machineId: jc.machineId,
+            machine: jc.machine,
             industrialPriority:
               jc.jobCardNumber != null && priorityByJc.get(jc.jobCardNumber) === true,
             productName:
               jc.jobCardNumber != null ? productNameByJc.get(jc.jobCardNumber) ?? null : null,
+            yield: yieldByJobId.get(jc.id) ?? null,
+            oee: oeeByStageId.get(r.id) ?? null,
+            shiftOperator: jc.shiftOperator ?? null,
+            incentiveLedger: (() => {
+              const led = ledgerByJcId.get(jc.id)
+              if (!led) return null
+              return {
+                incentiveEligible: led.incentiveEligible,
+                yieldPercent: led.yieldPercent != null ? Number(led.yieldPercent) : null,
+                oeePct: Number(led.oeePct),
+                incentiveVerifiedAt: led.incentiveVerifiedAt?.toISOString() ?? null,
+              }
+            })(),
+            machinePm: jc.machineId ? pmHealthByMachineId.get(jc.machineId) ?? null : null,
           }
         : null,
     }

@@ -12,9 +12,13 @@ export type VendorPoLogisticsFields = {
   estimatedArrivalAt: Date | null
 }
 
-/** Effective lane for UI + staleness (mill → gate). Null when vendor PO is not dispatched. */
+/** Effective lane for UI + staleness (mill → gate). Null when vendor PO is not post-dispatch. */
 export function effectiveLogisticsLane(vpo: VendorPoLogisticsFields): LogisticsLane | null {
-  if (vpo.status !== 'dispatched' || !vpo.dispatchedAt) return null
+  const post =
+    vpo.status === 'dispatched' ||
+    vpo.status === 'partially_received' ||
+    vpo.status === 'fully_received'
+  if (!post || !vpo.dispatchedAt) return null
   const lr = vpo.lrNumber?.trim()
   const vh = vpo.vehicleNumber?.trim()
   const explicit = vpo.logisticsStatus?.trim().toLowerCase()

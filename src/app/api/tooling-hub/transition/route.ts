@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { requireAuth } from '@/lib/helpers'
+import { requireAuth, createAuditLog } from '@/lib/helpers'
+import { EMBOSS_BLOCK_RETIREMENT_AUDIT } from '@/lib/emboss-hub-audit'
 import { logIndustrialStatusChange } from '@/lib/industrial-audit'
 import {
   CUSTODY_AT_VENDOR,
@@ -250,9 +251,11 @@ export async function POST(req: NextRequest) {
           })
         })
       } else {
+        let retiredCode = ''
         await db.$transaction(async (tx) => {
           const row = await tx.embossBlock.findUnique({ where: { id: body.id } })
           if (!row) throw httpError(404, 'Block not found')
+          retiredCode = row.blockCode
           const fromZone = embossHubZoneLabelFromCustody(row.custodyStatus)
           await tx.embossBlock.update({
             where: { id: body.id },
@@ -273,6 +276,17 @@ export async function POST(req: NextRequest) {
             toZone: 'Scrapped',
             details: { reason: body.reason.trim(), displayCode: row.blockCode },
           })
+        })
+        await createAuditLog({
+          userId: user?.id,
+          action: 'UPDATE',
+          tableName: 'emboss_blocks',
+          recordId: body.id,
+          newValue: {
+            blockRetirement: EMBOSS_BLOCK_RETIREMENT_AUDIT,
+            displayCode: retiredCode,
+            reason: body.reason.trim(),
+          },
         })
       }
     } else if (body.action === 'push_to_triage') {

@@ -14,9 +14,13 @@ const updateSchema = z.object({
   customerId: z.string().uuid().optional().nullable(),
   blockType: z.string().optional(),
   blockMaterial: z.string().optional(),
+  materialType: z.string().max(32).optional().nullable(),
   blockSize: z.string().optional().nullable(),
   embossDepth: z.number().optional().nullable(),
+  reliefDepthMm: z.number().optional().nullable(),
   storageLocation: z.string().optional().nullable(),
+  linkedDieId: z.string().uuid().optional().nullable(),
+  artworkRefLink: z.string().max(600).optional().nullable(),
   maxImpressions: z.number().int().min(1).optional(),
   condition: z.string().optional(),
   active: z.boolean().optional(),
@@ -99,6 +103,7 @@ export async function PUT(
   const parsed = updateSchema.safeParse({
     ...body,
     embossDepth: body.embossDepth != null ? Number(body.embossDepth) : undefined,
+    reliefDepthMm: body.reliefDepthMm != null ? Number(body.reliefDepthMm) : undefined,
     maxImpressions: body.maxImpressions != null ? Number(body.maxImpressions) : undefined,
   })
   if (!parsed.success) {
@@ -122,6 +127,11 @@ export async function PUT(
     )
   }
 
+  const relief =
+    data.reliefDepthMm !== undefined || data.embossDepth !== undefined
+      ? (data.reliefDepthMm ?? data.embossDepth ?? null)
+      : undefined
+
   const updated = await db.embossBlock.update({
     where: { id },
     data: {
@@ -130,9 +140,14 @@ export async function PUT(
       ...(data.customerId !== undefined ? { customerId: data.customerId } : {}),
       ...(data.blockType !== undefined ? { blockType: data.blockType } : {}),
       ...(data.blockMaterial !== undefined ? { blockMaterial: data.blockMaterial } : {}),
+      ...(data.materialType !== undefined ? { materialType: data.materialType?.trim() || null } : {}),
       ...(data.blockSize !== undefined ? { blockSize: data.blockSize?.trim() ?? null } : {}),
-      ...(data.embossDepth !== undefined ? { embossDepth: data.embossDepth } : {}),
+      ...(relief !== undefined ? { embossDepth: relief, reliefDepthMm: relief } : {}),
       ...(data.storageLocation !== undefined ? { storageLocation: data.storageLocation?.trim() ?? null } : {}),
+      ...(data.linkedDieId !== undefined ? { linkedDieId: data.linkedDieId } : {}),
+      ...(data.artworkRefLink !== undefined
+        ? { artworkRefLink: data.artworkRefLink?.trim() || null }
+        : {}),
       ...(data.maxImpressions !== undefined ? { maxImpressions: data.maxImpressions } : {}),
       ...(data.condition !== undefined ? { condition: data.condition } : {}),
       ...(data.active !== undefined ? { active: data.active } : {}),

@@ -7,6 +7,7 @@ import {
 } from '@/lib/inventory-hub-custody'
 import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
 import { createShadeCardEvent, SHADE_CARD_ACTION } from '@/lib/shade-card-events'
+import { shadeCardIsExpired } from '@/lib/shade-card-age'
 import { dieHubZoneLabelFromCustody } from '@/lib/tooling-hub-zones'
 
 export type InventoryToolKind = 'die' | 'emboss_block' | 'shade_card'
@@ -122,6 +123,17 @@ export async function issueToolToMachine(
         return
       }
 
+      const row = await tx.shadeCard.findUnique({ where: { id: toolId } })
+      if (!row) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
+      if (shadeCardIsExpired(row.mfgDate)) {
+        throw Object.assign(new Error('SHADE_EXPIRED'), { code: 'SHADE_EXPIRED' })
+      }
+      if (row.custodyStatus !== CUSTODY_IN_STOCK) {
+        if (row.custodyStatus === CUSTODY_ON_FLOOR) {
+          throw Object.assign(new Error('ALREADY_ISSUED'), { code: 'ALREADY_ISSUED' })
+        }
+        throw Object.assign(new Error('INVALID_STATE'), { code: 'INVALID_STATE' })
+      }
       const upd = await tx.shadeCard.updateMany({
         where: { id: toolId, custodyStatus: CUSTODY_IN_STOCK },
         data: {
@@ -133,9 +145,6 @@ export async function issueToolToMachine(
         },
       })
       if (upd.count !== 1) {
-        const row = await tx.shadeCard.findUnique({ where: { id: toolId } })
-        if (!row) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
-        if (row.custodyStatus === CUSTODY_ON_FLOOR) throw Object.assign(new Error('ALREADY_ISSUED'), { code: 'ALREADY_ISSUED' })
         throw Object.assign(new Error('INVALID_STATE'), { code: 'INVALID_STATE' })
       }
       await createShadeCardEvent(tx, {
@@ -158,6 +167,13 @@ export async function issueToolToMachine(
     }
     if (code === 'INVALID_STATE') {
       return { ok: false, code: 'INVALID_STATE', message: 'Tool cannot be issued in its current state' }
+    }
+    if (code === 'SHADE_EXPIRED') {
+      return {
+        ok: false,
+        code: 'SHADE_EXPIRED',
+        message: 'Shade card is EXPIRED (>12 months on 30.44-day basis). Replace before issuing to floor.',
+      }
     }
     throw e
   }

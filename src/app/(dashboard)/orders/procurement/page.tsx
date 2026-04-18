@@ -1,8 +1,16 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 import { toast } from 'sonner'
-import { ListChecks, Star, Truck, X } from 'lucide-react'
+import { ClipboardList, IndianRupee, ListChecks, Star, Truck, X } from 'lucide-react'
 import { PROCUREMENT_DEFAULT_SIGNATORY } from '@/lib/procurement-mrp-service'
 import type { MaterialReadinessRollup } from '@/lib/procurement-mrp-service'
 import { IndustrialModuleShell, industrialTableClassName } from '@/components/industrial/IndustrialModuleShell'
@@ -21,10 +29,19 @@ import {
 } from '@/lib/vendor-reliability-scorecard'
 import { SHORT_CLOSE_REASONS, type ShortCloseReason } from '@/lib/vendor-po-short-close'
 import { PROCUREMENT_LOGISTICS_AUDIT_ACTOR } from '@/lib/procurement-logistics-hud'
+import { GRN_REJECTION_REASONS } from '@/lib/grn-rejection-reasons'
+import { priceVariancePct as computePriceVariancePct } from '@/lib/procurement-price-benchmark'
+import {
+  computeLandedRatePerKg,
+  freightPctOfBasicRate,
+  isHighLogisticsCostVsBasic,
+} from '@/lib/total-landed-cost'
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -37,6 +54,10 @@ type MaterialVitals = {
   criticalShortagePoCount: number
   priceVariancePct: number | null
   monthlyWeightLossInr: number
+  qcPendingTrucksCount: number
+  qualityRecoveriesMonthInr: number
+  procurementLeakageMtdInr: number
+  pendingPayables30dInr: number
 }
 
 type LeadBuffer = {
@@ -49,6 +70,7 @@ type LeadBuffer = {
   productionTargetYmd: string
   primaryCustomerName: string
   supplierId: string
+  drivenByReplacementEta?: boolean
 }
 
 type WeightVarianceAgg = {
@@ -112,6 +134,44 @@ type ProcurementHud = {
     closedByName?: string | null
     closedReason?: string | null
   } | null
+  shortageAwaitingReplacement: boolean
+}
+
+type CashFlowTerms = {
+  paymentTermsDays: number
+  termsBand: 'advance' | 'near_cash' | 'credit'
+  badgeLabel: string
+  latestReceiptYmd: string | null
+  projectedPaymentYmd: string | null
+  accruedPayableInr: number | null
+  primarySupplierName: string | null
+  isProvisional: boolean
+  alternativeBetterTerms: { supplierName: string; extraDays: number } | null
+}
+
+type LandedCostSnapshot = {
+  vendorMaterialLineId: string | null
+  vendorPoId: string | null
+  basicRatePerKg: number | null
+  landedRatePerKg: number | null
+  totalWeightKg: number
+  freightTotalInr: number
+  unloadingChargesInr: number
+  insuranceMiscInr: number
+  freightPctOfBasic: number | null
+}
+
+type ReorderRadar = {
+  boardGsmKey: string
+  physicalSheets: number
+  allocatedSheets: number
+  netAvailable: number
+  minimumThreshold: number
+  maximumBuffer: number
+  stockStatus: 'OK' | 'Low_Stock_Alert'
+  safetyStatus: 'healthy' | 'low' | 'stockout'
+  recommendedReorderSheets: number
+  isProcurementRisk: boolean
 }
 
 type Requirement = {
@@ -130,6 +190,7 @@ type Requirement = {
   leadBuffer: LeadBuffer | null
   weightVariance: WeightVarianceAgg | null
   supplierReliability: SupplierReliability | null
+  reorderRadar: ReorderRadar
   contributions: {
     poLineItemId: string
     poId: string
@@ -146,6 +207,33 @@ type Requirement = {
   }[]
   suggestedSupplierId: string | null
   suggestedSupplierName: string | null
+  cashFlowTerms: CashFlowTerms
+  landedCost: LandedCostSnapshot
+}
+
+function SafetyStatusCell({ radar }: { radar: ReorderRadar }) {
+  if (radar.safetyStatus === 'stockout') {
+    return (
+      <span className="inline-flex items-center gap-1.5 font-mono text-[9px] tabular-nums text-rose-300">
+        <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse shrink-0" title="Stock out" />
+        OUT
+      </span>
+    )
+  }
+  if (radar.safetyStatus === 'low') {
+    return (
+      <span className="inline-flex items-center gap-1.5 font-mono text-[9px] tabular-nums text-amber-200">
+        <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse shrink-0" title="Below safety band" />
+        LOW
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 font-mono text-[9px] tabular-nums text-emerald-300/95">
+      <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" title="Healthy buffer" />
+      OK
+    </span>
+  )
 }
 
 type SupplierOpt = {
@@ -184,6 +272,90 @@ type PriceIntelRow = {
   kg: number
 }
 
+type Benchmark30dDto = {
+  ratePerKg: number
+  supplierName: string
+  vendorPoNumber: string
+}
+
+type TrendMonthDto = {
+  monthKey: string
+  avgRate: number
+  high: number
+  low: number
+  lastPaid: number
+}
+
+type PriceIntelBundle = {
+  history: PriceIntelRow[]
+  lastPurchaseRate: number | null
+  benchmark30d: Benchmark30dDto | null
+  trend6m: TrendMonthDto[]
+  trendTooltip: { high: number | null; low: number | null; lastPaid: number | null }
+}
+
+function emptyPriceIntelBundle(): PriceIntelBundle {
+  return {
+    history: [],
+    lastPurchaseRate: null,
+    benchmark30d: null,
+    trend6m: [],
+    trendTooltip: { high: null, low: null, lastPaid: null },
+  }
+}
+
+const PRICE_BENCHMARK_WARN_THRESHOLD_PCT = 2.0
+
+function PriceTrendSparkline({
+  data,
+  tooltip,
+}: {
+  data: TrendMonthDto[]
+  tooltip: PriceIntelBundle['trendTooltip']
+}) {
+  if (!data.length) {
+    return <span className="text-[9px] text-zinc-600 tabular-nums">No 6m trend</span>
+  }
+  const chartData = data.map((d) => ({ ...d, shortMonth: d.monthKey.slice(5) }))
+  return (
+    <div className="w-[128px] h-10 shrink-0">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={chartData} margin={{ top: 2, right: 2, left: 0, bottom: 0 }}>
+          <Tooltip
+            cursor={{ stroke: '#f59e0b', strokeOpacity: 0.35 }}
+            content={() => (
+              <div className="rounded border border-zinc-700 bg-black px-2 py-1.5 text-[9px] text-slate-200 shadow-xl space-y-0.5">
+                <div className="font-mono tabular-nums">
+                  High:{' '}
+                  {tooltip.high != null ? `₹${tooltip.high.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                </div>
+                <div className="font-mono tabular-nums">
+                  Low:{' '}
+                  {tooltip.low != null ? `₹${tooltip.low.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                </div>
+                <div className="font-mono tabular-nums">
+                  Last paid:{' '}
+                  {tooltip.lastPaid != null
+                    ? `₹${tooltip.lastPaid.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : '—'}
+                </div>
+              </div>
+            )}
+          />
+          <Line
+            type="monotone"
+            dataKey="avgRate"
+            stroke="#f59e0b"
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 function formatRupee(n: number): string {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -193,6 +365,103 @@ function formatRupee(n: number): string {
 }
 
 const industrialMono = 'font-[family-name:var(--font-designing-queue),ui-monospace]'
+/** JetBrains Mono (dashboard variable) — GRN ledger qty / balance. */
+const ledgerMono = 'font-designing-queue tabular-nums tracking-tight'
+
+type GrnReceiptRow = {
+  id: string
+  receiptDate: string
+  receivedQty: number
+  vehicleNumber: string
+  scaleSlipId: string
+  receivedByName: string
+  createdAt: string
+  qcStatus: string | null
+  qcComplete: boolean
+  qtyAcceptedStandard: number | null
+  qtyAcceptedPenalty: number | null
+  qtyRejected: number | null
+  rejectionReason: string | null
+  rejectionRemarks: string | null
+  returnGatePassGeneratedAt: string | null
+  qcAccruedPayableInr: number | null
+  qcDetails: {
+    actualGsm: number | null
+    shadeMatch: boolean | null
+    surfaceCleanliness: boolean | null
+    qcRemarks: string | null
+    qcPerformedByUserId: string | null
+    qcPerformedAt: string
+  } | null
+  penaltyRecommendedInr?: number | null
+  penaltyShortfallPct?: number | null
+  penaltyInvoiceRatePerKg?: number | null
+  penaltyProofLines?: string[] | null
+  qualityDebitNote?: { id: string; status: string } | null
+}
+
+type GrnLedger = {
+  vendorPoId: string
+  poNumber: string
+  status: string
+  orderedKg: number
+  orderedGsm: number | null
+  invoiceRatePerKg: number | null
+  totalReceivedKg: number
+  totalUsableReceivedKg: number
+  outstandingKg: number
+  accruedReceiptPayableInr: number
+  receiptBreakdownStockKg: number
+  receiptBreakdownPenaltyKg: number
+  receiptBreakdownReturnKg: number
+  receipts: GrnReceiptRow[]
+}
+
+type PenaltyFlowState = {
+  receiptId: string
+  orderedGsm: number
+  actualGsm: number
+  shortfallPct: number
+  recommendedInr: number
+  rate: number
+  penaltyQtyKg: number
+  proofLines: string[]
+}
+
+type ShortageActionModalState = {
+  vendorPoId: string
+  rejectKg: number
+  deferredPenalty: PenaltyFlowState | null
+}
+
+function coalesceGrnLedger(j: GrnLedger): GrnLedger {
+  return {
+    ...j,
+    accruedReceiptPayableInr: j.accruedReceiptPayableInr ?? 0,
+    receiptBreakdownStockKg: j.receiptBreakdownStockKg ?? 0,
+    receiptBreakdownPenaltyKg: j.receiptBreakdownPenaltyKg ?? 0,
+    receiptBreakdownReturnKg: j.receiptBreakdownReturnKg ?? 0,
+    receipts: j.receipts.map((r) => ({
+      ...r,
+      qcComplete:
+        r.qcComplete ??
+        Boolean(r.qcStatus && ['PASSED', 'FAILED', 'PASSED_WITH_PENALTY'].includes(r.qcStatus)),
+      qtyAcceptedStandard: r.qtyAcceptedStandard ?? null,
+      qtyAcceptedPenalty: r.qtyAcceptedPenalty ?? null,
+      qtyRejected: r.qtyRejected ?? null,
+      rejectionReason: r.rejectionReason ?? null,
+      rejectionRemarks: r.rejectionRemarks ?? null,
+      returnGatePassGeneratedAt: r.returnGatePassGeneratedAt ?? null,
+      qcAccruedPayableInr: r.qcAccruedPayableInr ?? null,
+    })),
+  }
+}
+
+function cashTermsBadgeClass(band: CashFlowTerms['termsBand']): string {
+  if (band === 'credit') return 'border-emerald-500/55 text-emerald-200 bg-emerald-500/12'
+  if (band === 'near_cash') return 'border-amber-500/55 text-amber-100 bg-amber-500/15'
+  return 'border-rose-500/65 text-rose-100 bg-rose-950/50 animate-pulse'
+}
 
 function procurementHudBadgeClass(variant: ProcurementHud['variant']): string {
   switch (variant) {
@@ -274,6 +543,9 @@ function leadBufferRowGlow(lb: LeadBuffer | null): string {
     return 'shadow-[0_0_26px_rgba(244,63,94,0.42)] ring-1 ring-rose-500/55 animate-pulse'
   }
   if (lb.level === 'at_risk') {
+    if (lb.drivenByReplacementEta) {
+      return 'shadow-[0_0_22px_rgba(245,158,11,0.38)] ring-1 ring-amber-500/55 animate-pulse'
+    }
     return 'shadow-[0_0_20px_rgba(245,158,11,0.28)] ring-1 ring-amber-500/40'
   }
   return ''
@@ -285,8 +557,255 @@ function daysSinceRequest(iso: string): number {
   return (Date.now() - t) / 86_400_000
 }
 
+function ProcurementLandedCostPanel({
+  landedCost,
+  primaryVendorPoNumber,
+  requirementKey,
+  debouncedQ,
+  riskFilterHigh,
+  vendorRiskFilterHigh,
+  stockOutRiskFilterHigh,
+  loadRequirements,
+  setSpotlightRow,
+}: {
+  landedCost: LandedCostSnapshot
+  primaryVendorPoNumber: string | null
+  requirementKey: string
+  debouncedQ: string
+  riskFilterHigh: boolean
+  vendorRiskFilterHigh: boolean
+  stockOutRiskFilterHigh: boolean
+  loadRequirements: (
+    q: string,
+    riskHighOnly: boolean,
+    vendorRiskHighOnly: boolean,
+    stockOutRiskOnly: boolean,
+  ) => Promise<Requirement[] | null>
+  setSpotlightRow: Dispatch<SetStateAction<Requirement | null>>
+}) {
+  const lineId = landedCost.vendorMaterialLineId
+  const basic = landedCost.basicRatePerKg
+  const w = landedCost.totalWeightKg
+
+  const [freightStr, setFreightStr] = useState(() => String(landedCost.freightTotalInr ?? 0))
+  const [unloadStr, setUnloadStr] = useState(() => String(landedCost.unloadingChargesInr ?? 0))
+  const [insStr, setInsStr] = useState(() => String(landedCost.insuranceMiscInr ?? 0))
+
+  const savedSigRef = useRef(
+    `${landedCost.freightTotalInr ?? 0}|${landedCost.unloadingChargesInr ?? 0}|${landedCost.insuranceMiscInr ?? 0}`,
+  )
+
+  const preview = useMemo(() => {
+    if (basic == null || !Number.isFinite(basic) || w <= 0 || !lineId) {
+      return {
+        liveLanded: null as number | null,
+        liveFreightPct: null as number | null,
+        highLogistics: false,
+      }
+    }
+    const f = Math.max(0, parseFloat(freightStr) || 0)
+    const u = Math.max(0, parseFloat(unloadStr) || 0)
+    const ins = Math.max(0, parseFloat(insStr) || 0)
+    const liveLanded = computeLandedRatePerKg({
+      basicRatePerKg: basic,
+      totalWeightKg: w,
+      freightTotalInr: f,
+      unloadingChargesInr: u,
+      insuranceMiscInr: ins,
+    })
+    const liveFreightPct = freightPctOfBasicRate(basic, w, f)
+    const highLogistics = isHighLogisticsCostVsBasic(basic, liveLanded, 10)
+    return { liveLanded, liveFreightPct, highLogistics }
+  }, [basic, w, lineId, freightStr, unloadStr, insStr])
+
+  useEffect(() => {
+    if (!lineId || basic == null) return
+    const f = Math.max(0, parseFloat(freightStr) || 0)
+    const u = Math.max(0, parseFloat(unloadStr) || 0)
+    const ins = Math.max(0, parseFloat(insStr) || 0)
+    const sig = `${f}|${u}|${ins}`
+    if (sig === savedSigRef.current) return
+
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/procurement/vendor-material-lines/${lineId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              freightTotalInr: f,
+              unloadingChargesInr: u,
+              insuranceMiscInr: ins,
+            }),
+          })
+          if (!res.ok) return
+          const json = (await res.json()) as {
+            freightTotalInr: unknown
+            unloadingChargesInr: unknown
+            insuranceMiscInr: unknown
+            landedRatePerKg: unknown
+            totalWeightKg: unknown
+          }
+          savedSigRef.current = sig
+          const lr = json.landedRatePerKg != null ? Number(json.landedRatePerKg) : 0
+          await fetch('/api/procurement/landed-cost-audit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              vendorMaterialLineId: lineId,
+              landedRatePerKg: lr,
+              vendorPoNumber: primaryVendorPoNumber ?? undefined,
+            }),
+          })
+          void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+          setSpotlightRow((prev) => {
+            if (!prev || prev.key !== requirementKey) return prev
+            const b = prev.landedCost.basicRatePerKg
+            const tw = Number(json.totalWeightKg)
+            const fr = Number(json.freightTotalInr)
+            return {
+              ...prev,
+              landedCost: {
+                ...prev.landedCost,
+                freightTotalInr: fr,
+                unloadingChargesInr: Number(json.unloadingChargesInr),
+                insuranceMiscInr: Number(json.insuranceMiscInr),
+                landedRatePerKg: lr,
+                freightPctOfBasic:
+                  b != null && b > 0
+                    ? freightPctOfBasicRate(b, tw, fr)
+                    : prev.landedCost.freightPctOfBasic,
+              },
+            }
+          })
+        } catch {
+          /* noop */
+        }
+      })()
+    }, 750)
+    return () => window.clearTimeout(t)
+  }, [
+    freightStr,
+    unloadStr,
+    insStr,
+    lineId,
+    basic,
+    requirementKey,
+    primaryVendorPoNumber,
+    debouncedQ,
+    riskFilterHigh,
+    vendorRiskFilterHigh,
+    stockOutRiskFilterHigh,
+    loadRequirements,
+    setSpotlightRow,
+  ])
+
+  if (!lineId || basic == null) {
+    return (
+      <div className="rounded-lg border border-zinc-800 bg-black px-3 py-2 text-[11px] text-zinc-500">
+        Landed cost needs a linked mill PO line with a basic ₹/kg rate.
+      </div>
+    )
+  }
+
+  const { liveLanded, liveFreightPct, highLogistics } = preview
+
+  return (
+    <div
+      className="rounded-lg border border-zinc-800 bg-black p-3 space-y-2"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      role="presentation"
+    >
+      <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">
+        Landed cost calculator
+      </p>
+      {highLogistics ? (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-200 leading-snug">
+          High logistics cost: total uplift vs basic rate exceeds 10%. Review freight, unloading, and
+          insurance allocations.
+        </div>
+      ) : null}
+      <div className={`space-y-2 text-[11px] ${ledgerMono}`}>
+        <div className="flex justify-between gap-2 text-slate-400">
+          <span>Basic rate (PO)</span>
+          <span className="text-slate-200">
+            ₹{basic.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg
+          </span>
+        </div>
+        <p className="text-[9px] text-zinc-600">
+          PO weight basis:{' '}
+          {w.toLocaleString('en-IN', { maximumFractionDigits: 3 })} kg (mill line)
+        </p>
+        <label className="block text-slate-500">
+          Freight total (₹)
+          <input
+            type="number"
+            min={0}
+            step={0.01}
+            value={freightStr}
+            onChange={(e) => setFreightStr(e.target.value)}
+            className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-slate-100"
+          />
+        </label>
+        <label className="block text-slate-500">
+          Unloading charges (₹)
+          <input
+            type="number"
+            min={0}
+            step={0.01}
+            value={unloadStr}
+            onChange={(e) => setUnloadStr(e.target.value)}
+            className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-slate-100"
+          />
+        </label>
+        <label className="block text-slate-500">
+          Insurance & misc (₹)
+          <input
+            type="number"
+            min={0}
+            step={0.01}
+            value={insStr}
+            onChange={(e) => setInsStr(e.target.value)}
+            className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-slate-100"
+          />
+        </label>
+        <div className="border-t border-zinc-800 pt-2 mt-1 space-y-1">
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-500">Landed rate</span>
+            <span className={`font-semibold ${STRATEGIC_SOURCING_GOLD}`}>
+              {liveLanded != null
+                ? `₹${liveLanded.toLocaleString('en-IN', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 4,
+                  })}/kg`
+                : '—'}
+            </span>
+          </div>
+          <p className="text-[9px] text-zinc-500">
+            Freight vs basic:{' '}
+            {liveFreightPct != null ? `${liveFreightPct.toFixed(1)}%` : '—'} · Auto-saves after edit
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ProcurementWorkbenchPage() {
   const [requirements, setRequirements] = useState<Requirement[]>([])
+  const [sortByPaymentDate, setSortByPaymentDate] = useState(false)
+  const displayRequirements = useMemo(() => {
+    if (!sortByPaymentDate) return requirements
+    return [...requirements].sort((a, b) => {
+      const pa = a.cashFlowTerms.projectedPaymentYmd
+      const pb = b.cashFlowTerms.projectedPaymentYmd
+      if (pa == null && pb == null) return 0
+      if (pa == null) return 1
+      if (pb == null) return -1
+      return pa.localeCompare(pb)
+    })
+  }, [requirements, sortByPaymentDate])
   const [vitals, setVitals] = useState<MaterialVitals | null>(null)
   const [suggestedSupplier, setSuggestedSupplier] = useState<{ id: string; name: string } | null>(null)
   const [suppliers, setSuppliers] = useState<SupplierOpt[]>([])
@@ -302,13 +821,20 @@ export default function ProcurementWorkbenchPage() {
   const [searchQ, setSearchQ] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
   const [spotlightRow, setSpotlightRow] = useState<Requirement | null>(null)
-  const [priceIntel, setPriceIntel] = useState<{ history: PriceIntelRow[]; lastPurchaseRate: number | null } | null>(
-    null,
-  )
+  const [priceIntel, setPriceIntel] = useState<PriceIntelBundle | null>(null)
+  const [benchByLineKey, setBenchByLineKey] = useState<Record<string, PriceIntelBundle>>({})
+  const priceBenchmarkAuditLoggedRef = useRef<Set<string>>(new Set())
+  const cashFlowAuditLoggedRef = useRef<Set<string>>(new Set())
   const [priceIntelLoading, setPriceIntelLoading] = useState(false)
   const [supplierPerf, setSupplierPerf] = useState<{ avgDaysLate: number | null; sampleSize: number } | null>(null)
   const [atRiskVendorPoCount, setAtRiskVendorPoCount] = useState(0)
   const [vendorRiskIndexCount, setVendorRiskIndexCount] = useState(0)
+  const [stockOutRisksCount, setStockOutRisksCount] = useState(0)
+  const [stockOutRiskFilterHigh, setStockOutRiskFilterHigh] = useState(false)
+  const [policyMinInput, setPolicyMinInput] = useState('')
+  const [policyMaxInput, setPolicyMaxInput] = useState('')
+  const [policySaving, setPolicySaving] = useState(false)
+  const [draftReorderSubmitting, setDraftReorderSubmitting] = useState(false)
   const [canAuthorizeShortClose, setCanAuthorizeShortClose] = useState(false)
   const [riskFilterHigh, setRiskFilterHigh] = useState(false)
   const [vendorRiskFilterHigh, setVendorRiskFilterHigh] = useState(false)
@@ -335,15 +861,44 @@ export default function ProcurementWorkbenchPage() {
   )
   const [shortCloseRemarks, setShortCloseRemarks] = useState('')
   const [shortCloseSubmitting, setShortCloseSubmitting] = useState(false)
+  const [grnLedger, setGrnLedger] = useState<GrnLedger | null>(null)
+  const [grnLoading, setGrnLoading] = useState(false)
+  const [grnExpanded, setGrnExpanded] = useState(false)
+  const [grnReceiptDate, setGrnReceiptDate] = useState('')
+  const [grnReceivedQty, setGrnReceivedQty] = useState('')
+  const [grnVehicle, setGrnVehicle] = useState('')
+  const [grnScaleSlip, setGrnScaleSlip] = useState('')
+  const [grnSaving, setGrnSaving] = useState(false)
+  const [grnQcReceiptId, setGrnQcReceiptId] = useState<string | null>(null)
+  const [grnQcActualGsm, setGrnQcActualGsm] = useState('')
+  const [grnQcShadeMatch, setGrnQcShadeMatch] = useState(true)
+  const [grnQcSurfaceClean, setGrnQcSurfaceClean] = useState(true)
+  const [grnQcRemarks, setGrnQcRemarks] = useState('')
+  const [grnQcQtyStandard, setGrnQcQtyStandard] = useState('')
+  const [grnQcQtyPenalty, setGrnQcQtyPenalty] = useState('')
+  const [grnQcQtyRejected, setGrnQcQtyRejected] = useState('')
+  const [grnQcRejectionReason, setGrnQcRejectionReason] = useState('')
+  const [grnQcRejectionRemarks, setGrnQcRejectionRemarks] = useState('')
+  const [grnQcSaving, setGrnQcSaving] = useState(false)
+  const [penaltyFlow, setPenaltyFlow] = useState<PenaltyFlowState | null>(null)
+  const [returnPassWorkingId, setReturnPassWorkingId] = useState<string | null>(null)
+  const [debitDraftSubmitting, setDebitDraftSubmitting] = useState(false)
+  const [shortageActionModal, setShortageActionModal] = useState<ShortageActionModalState | null>(null)
+  const [shortageReplacementEta, setShortageReplacementEta] = useState('')
+  const [shortageShortCloseRemarks, setShortageShortCloseRemarks] = useState('')
+  const [shortageActionSubmitting, setShortageActionSubmitting] = useState<'replacement' | 'short_close' | null>(
+    null,
+  )
 
   const loadRequirements = useCallback(
-    async (qArg: string, riskHighOnly: boolean, vendorRiskHighOnly: boolean) => {
+    async (qArg: string, riskHighOnly: boolean, vendorRiskHighOnly: boolean, stockOutRiskOnly: boolean) => {
       setLoading(true)
       try {
         const params = new URLSearchParams()
         if (qArg.trim()) params.set('q', qArg.trim())
         if (riskHighOnly) params.set('risk', 'high')
         if (vendorRiskHighOnly) params.set('vendorRisk', 'high')
+        if (stockOutRiskOnly) params.set('stockOutRisk', 'high')
         const qs = params.toString() ? `?${params.toString()}` : ''
         const res = await fetch(`/api/procurement/material-requirements${qs}`)
         const json = (await res.json()) as {
@@ -353,17 +908,25 @@ export default function ProcurementWorkbenchPage() {
           vitals?: MaterialVitals
           atRiskVendorPoCount?: number
           vendorRiskIndexCount?: number
+          stockOutRisksCount?: number
           canAuthorizeShortClose?: boolean
           factoryTimeZone?: string
           error?: string
         }
         if (!res.ok) throw new Error(json.error || 'Failed to load requirements')
-        const list = json.requirements ?? []
+        const list = (json.requirements ?? []).map((r) => ({
+          ...r,
+          procurementHud: {
+            ...r.procurementHud,
+            shortageAwaitingReplacement: r.procurementHud.shortageAwaitingReplacement ?? false,
+          },
+        }))
         setRequirements(list)
         setLineReconciliations(json.lineReconciliations ?? {})
         setVitals(json.vitals ?? null)
         setAtRiskVendorPoCount(json.atRiskVendorPoCount ?? 0)
         setVendorRiskIndexCount(json.vendorRiskIndexCount ?? 0)
+        setStockOutRisksCount(json.stockOutRisksCount ?? 0)
         setCanAuthorizeShortClose(Boolean(json.canAuthorizeShortClose))
         setSuggestedSupplier(json.suggestedSupplier ?? null)
         if (json.suggestedSupplier?.id) {
@@ -385,6 +948,16 @@ export default function ProcurementWorkbenchPage() {
   }, [spotlightRow])
 
   useEffect(() => {
+    if (!spotlightRow) {
+      setPolicyMinInput('')
+      setPolicyMaxInput('')
+      return
+    }
+    setPolicyMinInput(String(spotlightRow.reorderRadar.minimumThreshold))
+    setPolicyMaxInput(String(spotlightRow.reorderRadar.maximumBuffer))
+  }, [spotlightRow?.key])
+
+  useEffect(() => {
     if (shortCloseModalOpen) {
       setShortCloseRemarks('')
       setShortCloseReasonPick(SHORT_CLOSE_REASONS[0])
@@ -397,16 +970,24 @@ export default function ProcurementWorkbenchPage() {
   }, [searchQ])
 
   useEffect(() => {
-    void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)
-  }, [debouncedQ, riskFilterHigh, vendorRiskFilterHigh, loadRequirements])
+    void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+  }, [debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh, loadRequirements])
 
   useEffect(() => {
     const onPri = () => {
-      void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)
+      void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
     }
     window.addEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
     return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
-  }, [debouncedQ, riskFilterHigh, vendorRiskFilterHigh, loadRequirements])
+  }, [debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh, loadRequirements])
+
+  useEffect(() => {
+    const onPaper = () => {
+      void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+    }
+    window.addEventListener('ci-paper-consumed', onPaper)
+    return () => window.removeEventListener('ci-paper-consumed', onPaper)
+  }, [debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh, loadRequirements])
 
   useEffect(() => {
     void (async () => {
@@ -420,6 +1001,62 @@ export default function ProcurementWorkbenchPage() {
       }
     })()
   }, [])
+
+  useEffect(() => {
+    if (!spotlightRow) {
+      setGrnLedger(null)
+      setGrnExpanded(false)
+      setGrnReceiptDate('')
+      setGrnReceivedQty('')
+      setGrnVehicle('')
+      setGrnScaleSlip('')
+      setGrnQcReceiptId(null)
+      setGrnQcActualGsm('')
+      setGrnQcRemarks('')
+      setGrnQcQtyStandard('')
+      setGrnQcQtyPenalty('')
+      setGrnQcQtyRejected('')
+      setGrnQcRejectionReason('')
+      setGrnQcRejectionRemarks('')
+      setPenaltyFlow(null)
+      setShortageActionModal(null)
+    }
+  }, [spotlightRow])
+
+  useEffect(() => {
+    if (shortageActionModal) {
+      setShortageReplacementEta('')
+      setShortageShortCloseRemarks('')
+    }
+  }, [shortageActionModal])
+
+  useEffect(() => {
+    const poId = spotlightRow?.procurementHud.primaryVendorPoId
+    if (!poId) {
+      setGrnLedger(null)
+      return
+    }
+    let cancelled = false
+    setGrnLoading(true)
+    void (async () => {
+      try {
+        const res = await fetch(`/api/procurement/vendor-pos/${encodeURIComponent(poId)}/receipts`)
+        const json = (await res.json()) as GrnLedger & { error?: string }
+        if (!res.ok || cancelled) {
+          if (!cancelled) setGrnLedger(null)
+          return
+        }
+        if (!cancelled) setGrnLedger(coalesceGrnLedger(json as GrnLedger))
+      } catch {
+        if (!cancelled) setGrnLedger(null)
+      } finally {
+        if (!cancelled) setGrnLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [spotlightRow?.procurementHud.primaryVendorPoId])
 
   useEffect(() => {
     if (!spotlightRow) {
@@ -441,15 +1078,14 @@ export default function ProcurementWorkbenchPage() {
             ? fetch(`/api/procurement/supplier-performance?supplierId=${encodeURIComponent(suggestedSupplierId)}`)
             : Promise.resolve(null as Response | null),
         ])
-        const piJson = (await piRes.json()) as {
-          history?: PriceIntelRow[]
-          lastPurchaseRate?: number | null
-          error?: string
-        }
+        const piJson = (await piRes.json()) as Partial<PriceIntelBundle> & { error?: string }
         if (piRes.ok) {
           setPriceIntel({
             history: piJson.history ?? [],
             lastPurchaseRate: piJson.lastPurchaseRate ?? null,
+            benchmark30d: piJson.benchmark30d ?? null,
+            trend6m: piJson.trend6m ?? [],
+            trendTooltip: piJson.trendTooltip ?? { high: null, low: null, lastPaid: null },
           })
         }
         if (perfRes && perfRes.ok) {
@@ -457,9 +1093,32 @@ export default function ProcurementWorkbenchPage() {
           setSupplierPerf(p)
         }
       } catch {
-        setPriceIntel({ history: [], lastPurchaseRate: null })
+        setPriceIntel(emptyPriceIntelBundle())
       } finally {
         setPriceIntelLoading(false)
+      }
+    })()
+  }, [spotlightRow])
+
+  useEffect(() => {
+    if (!spotlightRow?.cashFlowTerms.projectedPaymentYmd) return
+    const key = spotlightRow.key
+    if (cashFlowAuditLoggedRef.current.has(key)) return
+    cashFlowAuditLoggedRef.current.add(key)
+    void (async () => {
+      try {
+        const res = await fetch('/api/procurement/cash-flow-audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requirementKey: key,
+            projectedPaymentYmd: spotlightRow.cashFlowTerms.projectedPaymentYmd,
+            vendorPoNumber: spotlightRow.procurementHud.primaryVendorPoNumber ?? undefined,
+          }),
+        })
+        if (!res.ok) cashFlowAuditLoggedRef.current.delete(key)
+      } catch {
+        cashFlowAuditLoggedRef.current.delete(key)
       }
     })()
   }, [spotlightRow])
@@ -597,6 +1256,8 @@ export default function ProcurementWorkbenchPage() {
   async function openDraft(id: string) {
     setDraftLoading(true)
     setLastPurchaseBenchmark(null)
+    setBenchByLineKey({})
+    priceBenchmarkAuditLoggedRef.current = new Set()
     try {
       const res = await fetch(`/api/procurement/vendor-pos/${id}`)
       const json = (await res.json()) as VendorPoDetail & { error?: string }
@@ -607,22 +1268,103 @@ export default function ProcurementWorkbenchPage() {
         rates[ln.id] = ln.ratePerKg != null ? String(ln.ratePerKg) : ''
       }
       setLineRates(rates)
-      const first = json.lines[0]
-      if (first) {
-        const intel = await fetch(
-          `/api/procurement/board-price-intel?boardGrade=${encodeURIComponent(first.boardGrade)}&gsm=${encodeURIComponent(String(first.gsm))}`,
-        )
-        const ij = (await intel.json()) as { lastPurchaseRate?: number | null }
-        if (intel.ok && ij.lastPurchaseRate != null && ij.lastPurchaseRate > 0) {
-          setLastPurchaseBenchmark(ij.lastPurchaseRate)
-        }
-      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Load failed')
     } finally {
       setDraftLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!draft?.lines?.length) {
+      setBenchByLineKey({})
+      return
+    }
+    const uniq = new Map<string, { bg: string; gsm: number }>()
+    for (const ln of draft.lines) {
+      uniq.set(`${ln.boardGrade}|${ln.gsm}`, { bg: ln.boardGrade, gsm: ln.gsm })
+    }
+    let cancelled = false
+    void (async () => {
+      const out: Record<string, PriceIntelBundle> = {}
+      await Promise.all(
+        Array.from(uniq.values()).map(async ({ bg, gsm }) => {
+          const key = `${bg}|${gsm}`
+          try {
+            const res = await fetch(
+              `/api/procurement/board-price-intel?boardGrade=${encodeURIComponent(bg)}&gsm=${encodeURIComponent(String(gsm))}`,
+            )
+            const j = (await res.json()) as Partial<PriceIntelBundle>
+            if (res.ok) {
+              out[key] = {
+                history: j.history ?? [],
+                lastPurchaseRate: j.lastPurchaseRate ?? null,
+                benchmark30d: j.benchmark30d ?? null,
+                trend6m: j.trend6m ?? [],
+                trendTooltip: j.trendTooltip ?? { high: null, low: null, lastPaid: null },
+              }
+            }
+          } catch {
+            /* noop */
+          }
+        }),
+      )
+      if (!cancelled) {
+        setBenchByLineKey(out)
+        const first = draft.lines[0]
+        if (first) {
+          const b = out[`${first.boardGrade}|${first.gsm}`]
+          const benchR = b?.benchmark30d?.ratePerKg
+          if (benchR != null && benchR > 0) setLastPurchaseBenchmark(benchR)
+          else if (b?.lastPurchaseRate != null && b.lastPurchaseRate > 0)
+            setLastPurchaseBenchmark(b.lastPurchaseRate)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [draft?.id])
+
+  useEffect(() => {
+    if (!draft?.id || !draft.lines.length) return
+    const t = window.setTimeout(() => {
+      void (async () => {
+        for (const ln of draft.lines) {
+          const key = `${ln.boardGrade}|${ln.gsm}`
+          const bundle = benchByLineKey[key]
+          const b = bundle?.benchmark30d
+          const raw = lineRates[ln.id] ?? ''
+          const num = raw === '' ? NaN : Number(raw)
+          if (!b || !Number.isFinite(num) || num <= 0) continue
+          const v = computePriceVariancePct(num, b.ratePerKg)
+          if (v > PRICE_BENCHMARK_WARN_THRESHOLD_PCT) {
+            const auditKey = `${draft.id}-${ln.id}`
+            if (priceBenchmarkAuditLoggedRef.current.has(auditKey)) continue
+            priceBenchmarkAuditLoggedRef.current.add(auditKey)
+            try {
+              const res = await fetch('/api/procurement/price-benchmark-audit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  boardGrade: ln.boardGrade,
+                  gsm: ln.gsm,
+                  variancePct: v,
+                  currentRatePerKg: num,
+                  benchmarkRatePerKg: b.ratePerKg,
+                  benchmarkSupplierName: b.supplierName,
+                }),
+              })
+              if (!res.ok) priceBenchmarkAuditLoggedRef.current.delete(auditKey)
+            } catch {
+              priceBenchmarkAuditLoggedRef.current.delete(auditKey)
+            }
+          }
+        }
+      })()
+    }, 700)
+    return () => window.clearTimeout(t)
+  }, [draft?.id, lineRates, benchByLineKey])
 
   async function generateVendorPo() {
     if (selected.size === 0) {
@@ -647,12 +1389,61 @@ export default function ProcurementWorkbenchPage() {
       if (!res.ok) throw new Error(json.error || 'Could not create draft')
       toast.success('Draft vendor PO created')
       setSelected(new Set())
-      await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)
+      await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
       if (json.id) await openDraft(json.id)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed')
     } finally {
       setGenerating(false)
+    }
+  }
+
+  async function saveReorderPolicyFromSpotlight() {
+    if (!spotlightRow) return
+    setPolicySaving(true)
+    try {
+      const res = await fetch('/api/procurement/reorder-radar/policy', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          radarKey: spotlightRow.key,
+          minimumThreshold: Math.max(0, parseInt(policyMinInput, 10) || 0),
+          maximumBuffer: Math.max(0, parseInt(policyMaxInput, 10) || 0),
+        }),
+      })
+      const j = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(j.error || 'Save failed')
+      toast.success('Safety buffer saved')
+      const list = await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+      if (list) {
+        const u = list.find((x) => x.key === spotlightRow.key)
+        if (u) setSpotlightRow(u)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setPolicySaving(false)
+    }
+  }
+
+  async function draftReorderPoFromSpotlight() {
+    if (!spotlightRow) return
+    setDraftReorderSubmitting(true)
+    try {
+      const res = await fetch('/api/procurement/reorder-radar/draft-vendor-po', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requirementKey: spotlightRow.key }),
+      })
+      const j = (await res.json()) as { id?: string; poNumber?: string; error?: string }
+      if (!res.ok) throw new Error(j.error || 'Draft failed')
+      toast.success(j.poNumber ? `Draft mill PO ${j.poNumber}` : 'Draft mill PO created')
+      await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+      if (j.id) await openDraft(j.id)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setDraftReorderSubmitting(false)
     }
   }
 
@@ -679,7 +1470,7 @@ export default function ProcurementWorkbenchPage() {
       )
       setDraft(null)
       setLastPurchaseBenchmark(null)
-      await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)
+      await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed')
     } finally {
@@ -704,7 +1495,7 @@ export default function ProcurementWorkbenchPage() {
       const json = (await res.json()) as { error?: string; email?: string; whatsapp?: string }
       if (!res.ok) throw new Error(json.error || 'Failed to send warning')
       toast.success(`Delay warning sent (email: ${json.email ?? '—'}, WhatsApp: ${json.whatsapp ?? '—'})`)
-      void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)
+      void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Send failed')
     } finally {
@@ -733,7 +1524,7 @@ export default function ProcurementWorkbenchPage() {
       const json = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(json.error || 'Save failed')
       toast.success('Weights saved — variance recalculated')
-      await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)
+      await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Save failed')
     } finally {
@@ -752,7 +1543,7 @@ export default function ProcurementWorkbenchPage() {
       const json = (await res.json()) as { error?: string; debitNoteDraftText?: string }
       if (!res.ok) throw new Error(json.error || 'Draft failed')
       toast.success('Debit note drafted — reconciliation pending')
-      await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)
+      await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Draft failed')
     } finally {
@@ -786,7 +1577,7 @@ export default function ProcurementWorkbenchPage() {
       const json = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(json.error || 'Save failed')
       toast.success(`Logistics committed — timestamped (${PROCUREMENT_LOGISTICS_AUDIT_ACTOR})`)
-      const list = await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)
+      const list = await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
       if (list && spotlightRow) {
         const u = list.find((x) => x.key === spotlightRow.key)
         if (u) setSpotlightRow(u)
@@ -831,6 +1622,332 @@ export default function ProcurementWorkbenchPage() {
     }
   }
 
+  async function submitGrnQcSplit() {
+    const poId = spotlightRow?.procurementHud.primaryVendorPoId
+    const receiptId = grnQcReceiptId
+    if (!poId || !receiptId || !grnLedger) return
+    const rec = grnLedger.receipts.find((r) => r.id === receiptId)
+    if (!rec) return
+    const actual = Number(grnQcActualGsm)
+    if (!Number.isFinite(actual) || actual <= 0) {
+      toast.error('Enter actual GSM (positive number)')
+      return
+    }
+    const std = Number(grnQcQtyStandard)
+    const pen = Number(grnQcQtyPenalty)
+    const rej = Number(grnQcQtyRejected)
+    if (![std, pen, rej].every((n) => Number.isFinite(n) && n >= 0)) {
+      toast.error('Enter non-negative quantities for standard, penalty, and rejected tranches')
+      return
+    }
+    const sum = std + pen + rej
+    if (Math.abs(sum - rec.receivedQty) > 1e-4) {
+      toast.error(
+        `Split must equal gate weight: ${rec.receivedQty.toLocaleString('en-IN', { maximumFractionDigits: 3 })} kg (currently ${sum.toLocaleString('en-IN', { maximumFractionDigits: 3 })})`,
+      )
+      return
+    }
+    if (rej > 0) {
+      if (!grnQcRejectionReason || !(GRN_REJECTION_REASONS as readonly string[]).includes(grnQcRejectionReason)) {
+        toast.error('Choose a rejection reason when return qty > 0')
+        return
+      }
+      if (grnQcRejectionRemarks.trim().length < 3) {
+        toast.error('Rejection remarks required (min 3 characters)')
+        return
+      }
+    }
+    setGrnQcSaving(true)
+    try {
+      const res = await fetch(
+        `/api/procurement/vendor-pos/${encodeURIComponent(poId)}/receipts/${encodeURIComponent(receiptId)}/qc`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            qcDetails: {
+              qtyAcceptedStandard: std,
+              qtyAcceptedPenalty: pen,
+              qtyRejected: rej,
+              actualGsm: actual,
+              shadeMatch: grnQcShadeMatch,
+              surfaceCleanliness: grnQcSurfaceClean,
+              qcRemarks: grnQcRemarks.trim() || null,
+              rejectionReason: rej > 0 ? grnQcRejectionReason : null,
+              rejectionRemarks: rej > 0 ? grnQcRejectionRemarks.trim() : null,
+            },
+          }),
+        },
+      )
+      const json = (await res.json()) as {
+        error?: string
+        message?: string
+        criticalGsmVariance?: boolean
+        orderedGsm?: number | null
+        penaltyRecommendedInr?: number | null
+        technicalShortfallPct?: number | null
+        invoiceRatePerKg?: number | null
+        penaltyProofLines?: string[] | null
+        qcStatus?: string
+        qtyAcceptedPenalty?: number
+        qtyRejected?: number
+      }
+      if (!res.ok) throw new Error(json.error || 'QC save failed')
+      toast.success(json.message ?? 'QC recorded')
+      if (json.criticalGsmVariance) {
+        toast.warning(
+          `Critical GSM variance — notify ${PROCUREMENT_LOGISTICS_AUDIT_ACTOR}: actual ${actual} vs ordered ${json.orderedGsm ?? '—'} (>5% deviation).`,
+          { duration: 12_000 },
+        )
+      }
+      const doneId = receiptId
+      const qtyRejectedAfter = json.qtyRejected ?? rej
+      let deferredPenalty: PenaltyFlowState | null = null
+      if (
+        json.qcStatus === 'PASSED_WITH_PENALTY' &&
+        json.penaltyRecommendedInr != null &&
+        json.penaltyRecommendedInr > 0 &&
+        json.penaltyProofLines &&
+        json.penaltyProofLines.length > 0
+      ) {
+        deferredPenalty = {
+          receiptId: doneId,
+          orderedGsm: json.orderedGsm ?? grnLedger.orderedGsm ?? spotlightRow?.gsm ?? 0,
+          actualGsm: actual,
+          shortfallPct: json.technicalShortfallPct ?? 0,
+          recommendedInr: json.penaltyRecommendedInr,
+          rate: json.invoiceRatePerKg ?? grnLedger.invoiceRatePerKg ?? 0,
+          penaltyQtyKg: json.qtyAcceptedPenalty ?? pen,
+          proofLines: json.penaltyProofLines,
+        }
+      }
+      if (qtyRejectedAfter > 0) {
+        setPenaltyFlow(null)
+        setShortageActionModal({
+          vendorPoId: poId,
+          rejectKg: qtyRejectedAfter,
+          deferredPenalty,
+        })
+      } else {
+        setShortageActionModal(null)
+        setPenaltyFlow(deferredPenalty)
+      }
+      setGrnQcReceiptId(null)
+      setGrnQcRemarks('')
+      setGrnQcQtyStandard('')
+      setGrnQcQtyPenalty('')
+      setGrnQcQtyRejected('')
+      setGrnQcRejectionReason('')
+      setGrnQcRejectionRemarks('')
+      const r2 = await fetch(`/api/procurement/vendor-pos/${encodeURIComponent(poId)}/receipts`)
+      if (r2.ok) setGrnLedger(coalesceGrnLedger((await r2.json()) as GrnLedger))
+      const list = await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+      if (list && spotlightRow) {
+        const u = list.find((x) => x.key === spotlightRow.key)
+        if (u) setSpotlightRow(u)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'QC failed')
+    } finally {
+      setGrnQcSaving(false)
+    }
+  }
+
+  async function generateReturnGatePass(receiptId: string) {
+    const poId = spotlightRow?.procurementHud.primaryVendorPoId
+    if (!poId) return
+    setReturnPassWorkingId(receiptId)
+    try {
+      const res = await fetch(
+        `/api/procurement/vendor-pos/${encodeURIComponent(poId)}/receipts/${encodeURIComponent(receiptId)}/return-gate-pass`,
+        { method: 'POST' },
+      )
+      const json = (await res.json()) as { error?: string; html?: string; auditMessage?: string }
+      if (!res.ok) throw new Error(json.error || 'Could not generate return pass')
+      const html = json.html ?? ''
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const w = window.open(url, '_blank', 'noopener,noreferrer')
+      if (w) {
+        w.addEventListener('load', () => {
+          window.setTimeout(() => {
+            try {
+              w.print()
+            } catch {
+              /* noop */
+            }
+          }, 200)
+        })
+      }
+      toast.success(json.auditMessage ?? 'Return gate pass opened for print')
+      const r2 = await fetch(`/api/procurement/vendor-pos/${encodeURIComponent(poId)}/receipts`)
+      if (r2.ok) setGrnLedger(coalesceGrnLedger((await r2.json()) as GrnLedger))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Return pass failed')
+    } finally {
+      setReturnPassWorkingId(null)
+    }
+  }
+
+  async function submitDebitDraft(receiptId: string) {
+    const poId = spotlightRow?.procurementHud.primaryVendorPoId
+    if (!poId) return
+    setDebitDraftSubmitting(true)
+    try {
+      const res = await fetch(
+        `/api/procurement/vendor-pos/${encodeURIComponent(poId)}/receipts/${encodeURIComponent(receiptId)}/debit-draft`,
+        { method: 'POST' },
+      )
+      const json = (await res.json()) as { error?: string; message?: string }
+      if (!res.ok) throw new Error(json.error || 'Draft failed')
+      toast.success(json.message ?? 'Debit draft queued for finance')
+      setPenaltyFlow(null)
+      const r2 = await fetch(`/api/procurement/vendor-pos/${encodeURIComponent(poId)}/receipts`)
+      if (r2.ok) setGrnLedger(coalesceGrnLedger((await r2.json()) as GrnLedger))
+      void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Draft failed')
+    } finally {
+      setDebitDraftSubmitting(false)
+    }
+  }
+
+  async function submitShortageReplacement() {
+    const m = shortageActionModal
+    if (!m || !shortageReplacementEta.trim()) {
+      toast.error('Enter replacement ETA (date & time)')
+      return
+    }
+    const etaMs = new Date(shortageReplacementEta).getTime()
+    if (!Number.isFinite(etaMs)) {
+      toast.error('Invalid replacement ETA')
+      return
+    }
+    setShortageActionSubmitting('replacement')
+    try {
+      const res = await fetch(
+        `/api/procurement/vendor-pos/${encodeURIComponent(m.vendorPoId)}/shortage-replacement`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rejectKg: m.rejectKg,
+            replacementEtaAt: new Date(shortageReplacementEta).toISOString(),
+          }),
+        },
+      )
+      const json = (await res.json()) as { error?: string; message?: string }
+      if (!res.ok) throw new Error(json.error || 'Could not record replacement')
+      toast.success(json.message ?? 'Replacement ETA committed')
+      const def = m.deferredPenalty
+      setShortageActionModal(null)
+      if (def) setPenaltyFlow(def)
+      const list = await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+      if (list && spotlightRow) {
+        const u = list.find((x) => x.key === spotlightRow.key)
+        if (u) setSpotlightRow(u)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Replacement save failed')
+    } finally {
+      setShortageActionSubmitting(null)
+    }
+  }
+
+  async function submitShortageShortClose() {
+    const m = shortageActionModal
+    if (!m) return
+    if (!canAuthorizeShortClose) {
+      toast.error('Short-close requires md, director, or procurement_manager role')
+      return
+    }
+    const remarks = shortageShortCloseRemarks.trim()
+    if (remarks.length < 10) {
+      toast.error('Remarks required (min 10 characters) for short-close')
+      return
+    }
+    setShortageActionSubmitting('short_close')
+    try {
+      const res = await fetch(`/api/procurement/vendor-pos/${encodeURIComponent(m.vendorPoId)}/short-close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: 'Rejection shortage — short-close',
+          remarks,
+          rejectionShortClose: true,
+          rejectKg: m.rejectKg,
+        }),
+      })
+      const json = (await res.json()) as { error?: string; message?: string }
+      if (!res.ok) throw new Error(json.error || 'Short-close failed')
+      toast.success(json.message ?? 'PO closed — short received')
+      const def = m.deferredPenalty
+      setShortageActionModal(null)
+      if (def) setPenaltyFlow(def)
+      const list = await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+      if (list && spotlightRow) {
+        const u = list.find((x) => x.key === spotlightRow.key)
+        if (u) setSpotlightRow(u)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Short-close failed')
+    } finally {
+      setShortageActionSubmitting(null)
+    }
+  }
+
+  async function submitGrnReceipt() {
+    const poId = spotlightRow?.procurementHud.primaryVendorPoId
+    if (!poId || !grnLedger) return
+    const qty = Number(grnReceivedQty)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error('Enter a positive received quantity (kg)')
+      return
+    }
+    if (!grnReceiptDate.trim()) {
+      toast.error('Receipt date is required')
+      return
+    }
+    if (!grnVehicle.trim() || !grnScaleSlip.trim()) {
+      toast.error('Vehicle and scale slip ID are required')
+      return
+    }
+    setGrnSaving(true)
+    try {
+      const res = await fetch(`/api/procurement/vendor-pos/${encodeURIComponent(poId)}/receipts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiptDate: new Date(grnReceiptDate).toISOString(),
+          receivedQty: qty,
+          vehicleNumber: grnVehicle,
+          scaleSlipId: grnScaleSlip,
+        }),
+      })
+      const json = (await res.json()) as { error?: string; message?: string }
+      if (!res.ok) throw new Error(json.error || 'Failed to log receipt')
+      toast.success(json.message ?? 'Receipt logged')
+      setGrnReceivedQty('')
+      setGrnVehicle('')
+      setGrnScaleSlip('')
+      setGrnExpanded(false)
+      const r2 = await fetch(`/api/procurement/vendor-pos/${encodeURIComponent(poId)}/receipts`)
+      if (r2.ok) {
+        const ledger = coalesceGrnLedger((await r2.json()) as GrnLedger)
+        setGrnLedger(ledger)
+      }
+      const list = await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
+      if (list && spotlightRow) {
+        const u = list.find((x) => x.key === spotlightRow.key)
+        if (u) setSpotlightRow(u)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Receipt failed')
+    } finally {
+      setGrnSaving(false)
+    }
+  }
+
   async function confirmShortClosePo() {
     const id = spotlightRow?.procurementHud.primaryVendorPoId
     const sc = spotlightRow?.procurementHud.shortClose
@@ -852,7 +1969,7 @@ export default function ProcurementWorkbenchPage() {
       toast.success(json.message ?? 'Vendor PO short-closed')
       setShortCloseModalOpen(false)
       const key = spotlightRow.key
-      const list = await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)
+      const list = await loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)
       if (list) {
         const u = list.find((x) => x.key === key)
         if (u) setSpotlightRow(u)
@@ -920,6 +2037,28 @@ export default function ProcurementWorkbenchPage() {
             shellClassName={glassKpi}
           />
           <IndustrialKpiTile
+            label="Procurement leakage"
+            value={vitals ? formatRupee(vitals.procurementLeakageMtdInr ?? 0) : '—'}
+            hint="Extra vs 30d benchmark · ordered vendor lines MTD (₹)"
+            valueClassName={
+              vitals && (vitals.procurementLeakageMtdInr ?? 0) > 0
+                ? 'text-rose-200/95 font-mono tabular-nums'
+                : 'text-slate-100 font-mono tabular-nums'
+            }
+            shellClassName={glassKpi}
+          />
+          <IndustrialKpiTile
+            label="Pending payables (30D)"
+            value={vitals ? formatRupee(vitals.pendingPayables30dInr ?? 0) : '—'}
+            hint="Received mill POs · accrued due within 30 calendar days (₹)"
+            valueClassName={
+              vitals && (vitals.pendingPayables30dInr ?? 0) > 0
+                ? 'text-sky-200/95 font-mono tabular-nums'
+                : 'text-slate-100 font-mono tabular-nums'
+            }
+            shellClassName={glassKpi}
+          />
+          <IndustrialKpiTile
             label="Monthly weight loss"
             value={vitals ? formatRupee(vitals.monthlyWeightLossInr ?? 0) : '—'}
             hint="Short-weight ₹ value MTD (gate vs invoice)"
@@ -927,6 +2066,26 @@ export default function ProcurementWorkbenchPage() {
               vitals && (vitals.monthlyWeightLossInr ?? 0) > 0 ? 'text-rose-200/95 font-mono' : 'text-slate-100 font-mono'
             }
             shellClassName={glassKpi}
+          />
+          <IndustrialKpiTile
+            label="QC pending trucks"
+            value={vitals ? vitals.qcPendingTrucksCount ?? 0 : '—'}
+            hint="GRN lines on active mill POs · QC not yet performed"
+            valueClassName={
+              vitals && (vitals.qcPendingTrucksCount ?? 0) > 0 ? 'text-amber-200/95 font-mono' : 'text-slate-100 font-mono'
+            }
+            shellClassName={`${glassKpi} ${STRATEGIC_SOURCING_GOLD_BORDER} ${STRATEGIC_SOURCING_GOLD_SOFT}`}
+          />
+          <IndustrialKpiTile
+            label="Total quality recoveries"
+            value={vitals ? formatRupee(vitals.qualityRecoveriesMonthInr ?? 0) : '—'}
+            hint="Quality debit notes queued this month (₹)"
+            valueClassName={
+              vitals && (vitals.qualityRecoveriesMonthInr ?? 0) > 0
+                ? 'text-amber-200/95 font-mono'
+                : 'text-slate-100 font-mono'
+            }
+            shellClassName={`${glassKpi} ${STRATEGIC_SOURCING_GOLD_BORDER}`}
           />
           <IndustrialKpiTile
             label="At-risk orders"
@@ -947,6 +2106,15 @@ export default function ProcurementWorkbenchPage() {
             }`}
             onClick={() => setVendorRiskFilterHigh((v) => !v)}
             isActive={vendorRiskFilterHigh}
+          />
+          <IndustrialKpiTile
+            label="Stock-out risks"
+            value={stockOutRisksCount}
+            hint="Unique board+GSM buckets · net ≤ min or ≤ 0 sheets"
+            valueClassName={stockOutRisksCount > 0 ? 'text-rose-300/95 font-mono tabular-nums' : 'text-slate-100 font-mono tabular-nums'}
+            shellClassName={glassKpi}
+            onClick={() => setStockOutRiskFilterHigh((v) => !v)}
+            isActive={stockOutRiskFilterHigh}
           />
         </>
       }
@@ -993,7 +2161,18 @@ export default function ProcurementWorkbenchPage() {
         </button>
         <button
           type="button"
-          onClick={() => void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh)}
+          onClick={() => setSortByPaymentDate((v) => !v)}
+          className={`rounded-md border px-3 py-1.5 text-xs ${
+            sortByPaymentDate
+              ? 'border-emerald-500/50 bg-emerald-950/35 text-emerald-200'
+              : 'border-slate-600 text-slate-300 hover:bg-slate-900'
+          }`}
+        >
+          {sortByPaymentDate ? 'Sort: payment date ✓' : 'Sort: payment date'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)}
           className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-900"
         >
           Refresh
@@ -1016,19 +2195,30 @@ export default function ProcurementWorkbenchPage() {
             Clear vendor risk filter
           </button>
         ) : null}
+        {stockOutRiskFilterHigh ? (
+          <button
+            type="button"
+            onClick={() => setStockOutRiskFilterHigh(false)}
+            className="rounded-md border border-rose-500/50 bg-rose-950/30 px-3 py-1.5 text-xs text-rose-200 hover:bg-rose-950/50"
+          >
+            Clear stock-out filter
+          </button>
+        ) : null}
       </div>
 
       {loading ? (
         <p className="text-slate-500 text-sm">Loading readiness grid…</p>
-      ) : requirements.length === 0 ? (
+      ) : displayRequirements.length === 0 ? (
         <p className="text-slate-500 text-sm">
           {vendorRiskFilterHigh && riskFilterHigh
             ? 'No rows match both lead-time stress and high vendor risk for this search. Clear one or both filters.'
             : vendorRiskFilterHigh
               ? 'No active rows with grade C suggested suppliers for this search. Clear the vendor risk filter or refresh after new dispatches and reconciliations.'
-              : riskFilterHigh
-                ? 'No high-risk lead-time rows for this search. Clear the lead-time filter or refresh after updating vendor ETAs.'
-                : 'No active material rows for this search. Confirm customer POs and material queue lines (pending through in-transit).'}
+              : stockOutRiskFilterHigh
+                ? 'No rows in stock-out risk for this search. Clear the stock-out filter or set minimum thresholds on spotlight rows.'
+                : riskFilterHigh
+                  ? 'No high-risk lead-time rows for this search. Clear the lead-time filter or refresh after updating vendor ETAs.'
+                  : 'No active material rows for this search. Confirm customer POs and material queue lines (pending through in-transit).'}
         </p>
       ) : (
         <div className={industrialTableClassName()}>
@@ -1048,7 +2238,11 @@ export default function ProcurementWorkbenchPage() {
                 </th>
                 <th className="px-1.5 py-1.5 w-10">Pri</th>
                 <th className="px-1.5 py-1.5">Board / paper</th>
+                <th className="px-1.5 py-1.5 whitespace-nowrap">Safety</th>
                 <th className="px-1.5 py-1.5">Status</th>
+                <th className="px-1.5 py-1.5 whitespace-nowrap">Terms</th>
+                <th className="px-1.5 py-1.5 text-right whitespace-nowrap">Basic ₹/kg</th>
+                <th className="px-1.5 py-1.5 text-right whitespace-nowrap">Landed ₹/kg</th>
                 <th className="px-1.5 py-1.5">Age</th>
                 <th className="px-1.5 py-1.5 whitespace-nowrap">Risk (IST)</th>
                 <th className="px-1.5 py-1.5 whitespace-nowrap">Variance</th>
@@ -1058,9 +2252,9 @@ export default function ProcurementWorkbenchPage() {
               </tr>
             </thead>
             <tbody>
-              {requirements.map((r, rowIdx) => {
+              {displayRequirements.map((r, rowIdx) => {
                 const pri = r.industrialPriority
-                  ? 'ring-2 ring-amber-500/50 shadow-[0_0_22px_rgba(234,88,12,0.22)] bg-amber-950/12'
+                  ? 'ring-2 ring-orange-500/60 shadow-[0_0_26px_rgba(251,146,60,0.38)] bg-gradient-to-r from-orange-950/25 to-amber-950/10'
                   : ''
                 const riskGlow = leadBufferRowGlow(r.leadBuffer)
                 const days = daysSinceRequest(r.oldestCalculatedAt)
@@ -1101,7 +2295,9 @@ export default function ProcurementWorkbenchPage() {
                     <td className="px-1.5 py-1 align-top">
                       <Star
                         className={`h-3.5 w-3.5 ${
-                          r.industrialPriority ? 'text-amber-400 fill-amber-400' : 'text-zinc-600'
+                          r.industrialPriority
+                            ? 'text-orange-400 fill-orange-400 drop-shadow-[0_0_8px_rgba(251,146,60,0.85)]'
+                            : 'text-zinc-600'
                         }`}
                         strokeWidth={r.industrialPriority ? 0 : 1.5}
                       />
@@ -1119,16 +2315,86 @@ export default function ProcurementWorkbenchPage() {
                       </div>
                     </td>
                     <td className="px-1.5 py-1 align-top">
+                      <div className={`space-y-0.5 ${ledgerMono}`}>
+                        <SafetyStatusCell radar={r.reorderRadar} />
+                        <div className="text-[8px] text-zinc-500 leading-tight">
+                          net{' '}
+                          <span className="text-slate-400">
+                            {r.reorderRadar.netAvailable.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-1.5 py-1 align-top">
+                      <div className="flex flex-col gap-1 items-start">
+                        <span
+                          title={shortClosedTitle}
+                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-semibold ${procurementHudBadgeClass(r.procurementHud.variant)}`}
+                        >
+                          {(r.procurementHud.variant === 'in_transit' ||
+                            r.procurementHud.variant === 'in_transit_stale') && (
+                            <Truck className="h-3 w-3 shrink-0 opacity-90" aria-hidden />
+                          )}
+                          {r.procurementHud.variant === 'short_closed' ? 'Short-Closed' : r.procurementHud.label}
+                        </span>
+                        {r.procurementHud.shortageAwaitingReplacement ? (
+                          <span className="rounded border border-rose-500/35 bg-rose-500/20 px-1.5 py-0.5 text-[8px] font-bold text-rose-400">
+                            Shortage: Awaiting
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-1.5 py-1 align-top">
                       <span
-                        title={shortClosedTitle}
-                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-semibold ${procurementHudBadgeClass(r.procurementHud.variant)}`}
+                        title={
+                          r.cashFlowTerms.projectedPaymentYmd
+                            ? `Projected payment ${r.cashFlowTerms.projectedPaymentYmd} (IST calendar)`
+                            : r.cashFlowTerms.isProvisional
+                              ? 'No GRN receipt yet — terms from supplier profile / suggestion'
+                              : undefined
+                        }
+                        className={`inline-flex rounded-full border px-2 py-0.5 text-[8px] font-bold font-mono tabular-nums whitespace-nowrap ${cashTermsBadgeClass(
+                          r.cashFlowTerms.termsBand,
+                        )}`}
                       >
-                        {(r.procurementHud.variant === 'in_transit' ||
-                          r.procurementHud.variant === 'in_transit_stale') && (
-                          <Truck className="h-3 w-3 shrink-0 opacity-90" aria-hidden />
-                        )}
-                        {r.procurementHud.variant === 'short_closed' ? 'Short-Closed' : r.procurementHud.label}
+                        {r.cashFlowTerms.badgeLabel}
                       </span>
+                    </td>
+                    <td className="px-1.5 py-1 align-top text-right">
+                      {r.landedCost.basicRatePerKg != null ? (
+                        <span className={`text-slate-300 text-[10px] ${ledgerMono}`}>
+                          ₹
+                          {r.landedCost.basicRatePerKg.toLocaleString('en-IN', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-600">—</span>
+                      )}
+                    </td>
+                    <td className="px-1.5 py-1 align-top text-right">
+                      {r.landedCost.landedRatePerKg != null ? (
+                        <div className="space-y-0.5">
+                          <div
+                            className={`text-[10px] font-semibold ${ledgerMono} ${STRATEGIC_SOURCING_GOLD}`}
+                          >
+                            ₹
+                            {r.landedCost.landedRatePerKg.toLocaleString('en-IN', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 4,
+                            })}
+                          </div>
+                          {r.landedCost.freightPctOfBasic != null &&
+                          r.landedCost.freightPctOfBasic > 0 ? (
+                            <div className={`text-[8px] text-zinc-500 ${ledgerMono}`}>
+                              Freight: {r.landedCost.freightPctOfBasic.toFixed(1)}%
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-zinc-600">—</span>
+                      )}
                     </td>
                     <td className="px-1.5 py-1 align-top whitespace-nowrap">
                       <span
@@ -1208,6 +2474,78 @@ export default function ProcurementWorkbenchPage() {
               <p className="text-slate-500 mt-0.5">
                 {spotlightRow.sheetSizeLabel} · {spotlightRow.grainDirection}
               </p>
+            </div>
+
+            <div className="rounded-lg border border-zinc-700 bg-black p-3 space-y-3 ring-1 ring-white/5">
+              <p className="text-[10px] uppercase tracking-wide text-amber-500/90 font-semibold">
+                Dynamic reorder radar
+              </p>
+              <div className={`grid grid-cols-2 gap-x-2 gap-y-1 text-[10px] text-slate-400 ${ledgerMono}`}>
+                <span>Physical</span>
+                <span className="text-right text-slate-200">
+                  {spotlightRow.reorderRadar.physicalSheets.toLocaleString('en-IN')} sh
+                </span>
+                <span>Allocated</span>
+                <span className="text-right text-slate-200">
+                  {spotlightRow.reorderRadar.allocatedSheets.toLocaleString('en-IN')} sh
+                </span>
+                <span>Net</span>
+                <span className="text-right text-slate-200">
+                  {spotlightRow.reorderRadar.netAvailable.toLocaleString('en-IN')} sh
+                </span>
+                <span>Status</span>
+                <span className="text-right text-amber-200/90">{spotlightRow.reorderRadar.stockStatus}</span>
+                <span>Rec. qty</span>
+                <span className="text-right text-emerald-200/90">
+                  {spotlightRow.reorderRadar.recommendedReorderSheets.toLocaleString('en-IN')} sh
+                </span>
+              </div>
+              <div className="space-y-2">
+                <p className="text-[10px] text-zinc-500">Safety buffer (sheets)</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block text-[10px] text-zinc-500">
+                    Min threshold
+                    <input
+                      type="number"
+                      min={0}
+                      value={policyMinInput}
+                      onChange={(e) => setPolicyMinInput(e.target.value)}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-[11px] text-white ${ledgerMono}`}
+                    />
+                  </label>
+                  <label className="block text-[10px] text-zinc-500">
+                    Max buffer
+                    <input
+                      type="number"
+                      min={0}
+                      value={policyMaxInput}
+                      onChange={(e) => setPolicyMaxInput(e.target.value)}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-[11px] text-white ${ledgerMono}`}
+                    />
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  disabled={policySaving}
+                  onClick={() => void saveReorderPolicyFromSpotlight()}
+                  className="w-full rounded-md border border-zinc-600 bg-zinc-950 py-1.5 text-[11px] font-medium text-slate-200 hover:bg-zinc-900 disabled:opacity-50"
+                >
+                  {policySaving ? 'Saving…' : 'Save safety buffer'}
+                </button>
+              </div>
+              {(spotlightRow.reorderRadar.isProcurementRisk ||
+                spotlightRow.reorderRadar.safetyStatus !== 'healthy') && (
+                <button
+                  type="button"
+                  disabled={draftReorderSubmitting}
+                  onClick={() => void draftReorderPoFromSpotlight()}
+                  className="w-full rounded-md border border-amber-600/60 bg-amber-950/40 py-2 text-[11px] font-semibold text-amber-200 hover:bg-amber-950/60 disabled:opacity-50"
+                >
+                  {draftReorderSubmitting
+                    ? 'Drafting…'
+                    : 'Draft reorder PO (elite vendor · benchmark ₹/kg · rec. qty)'}
+                </button>
+              )}
             </div>
 
             {spotlightRow.procurementHud.primaryVendorPoId ? (
@@ -1374,7 +2712,7 @@ export default function ProcurementWorkbenchPage() {
                         title={
                           spotlightRow.procurementHud.shortClose.authorityGateMet
                             ? 'Short-close this vendor PO (audit logged)'
-                            : 'Short-close requires ≥95% of ordered kg received at gate'
+                            : 'Short-close requires ≥95% QC-passed usable kg vs ordered'
                         }
                         onClick={(e) => {
                           e.stopPropagation()
@@ -1388,6 +2726,482 @@ export default function ProcurementWorkbenchPage() {
                       </button>
                     ) : null}
                   </div>
+                </div>
+
+                <div className="rounded-lg border border-emerald-500/25 bg-black p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] uppercase tracking-wide text-emerald-400/90 font-semibold flex items-center gap-1.5">
+                      <ClipboardList className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                      Goods Receipt Note (GRN) Ledger
+                    </p>
+                    {grnLoading ? (
+                      <span className="text-[9px] text-zinc-600">Loading…</span>
+                    ) : grnLedger ? (
+                      <span className={`text-[9px] text-zinc-500 ${ledgerMono}`}>
+                        {grnLedger.poNumber}
+                      </span>
+                    ) : null}
+                  </div>
+                  {spotlightRow.procurementHud.shortageAwaitingReplacement ? (
+                    <div className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1.5 text-[9px] font-bold text-rose-300">
+                      Shortage: Awaiting replacement — lead buffer uses committed replacement ETA (
+                      <span className={ledgerMono}>vs production target</span>).
+                    </div>
+                  ) : null}
+                  <p className="text-[9px] text-zinc-600 leading-snug">
+                    QC gate splits each truck into{' '}
+                    <span className="text-emerald-400/90 font-semibold">standard</span>,{' '}
+                    <span className="text-amber-400/90 font-semibold">penalty</span>, and{' '}
+                    <span className="text-rose-400/90 font-semibold">return</span> (must sum to gross kg). Usable =
+                    standard + penalty. Payable accrual uses full rate on standard and adjusted rate on penalty. Mono
+                    alignment for quantities. Signed {PROCUREMENT_LOGISTICS_AUDIT_ACTOR} lane.
+                  </p>
+                  {grnLedger ? (
+                    <>
+                      <div className="overflow-x-auto rounded border border-zinc-900 bg-black">
+                        <table className="w-full text-left text-[9px] text-slate-400 border-collapse">
+                          <thead>
+                            <tr className="border-b border-zinc-800 bg-black text-[8px] uppercase tracking-wide text-zinc-600">
+                              <th className="px-1.5 py-1 font-semibold">Date</th>
+                              <th className="px-1.5 py-1 font-semibold text-right">Qty (kg)</th>
+                              <th className="px-1.5 py-1 font-semibold">Vehicle</th>
+                              <th className="px-1.5 py-1 font-semibold">Slip</th>
+                              <th className="px-1.5 py-1 font-semibold">GSM</th>
+                              <th className="px-1.5 py-1 font-semibold">QC</th>
+                              <th className="px-1.5 py-1 font-semibold">By</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {grnLedger.receipts.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="px-1.5 py-3 text-center text-zinc-600">
+                                  No receipts yet — log the first GRN below.
+                                </td>
+                              </tr>
+                            ) : (
+                              grnLedger.receipts.map((rec) => {
+                                const ordGsm = grnLedger.orderedGsm ?? spotlightRow.gsm
+                                const actGsm = rec.qcDetails?.actualGsm
+                                const gsmLabel =
+                                  actGsm != null && Number.isFinite(actGsm)
+                                    ? `${actGsm} / ${ordGsm}`
+                                    : `— / ${ordGsm}`
+                                const failed = rec.qcStatus === 'FAILED'
+                                const hasSplit =
+                                  rec.qtyAcceptedStandard != null &&
+                                  rec.qtyAcceptedPenalty != null &&
+                                  rec.qtyRejected != null
+                                return (
+                                  <tr
+                                    key={rec.id}
+                                    className={`border-b border-zinc-900/80 ${failed ? 'bg-rose-950/40' : ''}`}
+                                  >
+                                    <td className="px-1.5 py-1 whitespace-nowrap text-slate-500">
+                                      {new Date(rec.receiptDate).toLocaleString('en-IN', {
+                                        timeZone: 'Asia/Kolkata',
+                                        day: '2-digit',
+                                        month: 'short',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
+                                    </td>
+                                    <td
+                                      className={`px-1.5 py-1 text-right text-emerald-400/95 font-semibold ${ledgerMono}`}
+                                    >
+                                      {rec.receivedQty.toLocaleString('en-IN', { maximumFractionDigits: 3 })}
+                                    </td>
+                                    <td className={`px-1.5 py-1 text-slate-300 ${ledgerMono}`}>
+                                      {rec.vehicleNumber}
+                                    </td>
+                                    <td className={`px-1.5 py-1 text-slate-400 ${ledgerMono}`}>
+                                      {rec.scaleSlipId}
+                                    </td>
+                                    <td className={`px-1.5 py-1 text-slate-300 ${ledgerMono}`}>{gsmLabel}</td>
+                                    <td className="px-1.5 py-1 align-top">
+                                      {!rec.qcComplete ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setGrnQcReceiptId(rec.id)
+                                            setGrnQcActualGsm(
+                                              ordGsm != null && Number.isFinite(ordGsm) ? String(ordGsm) : '',
+                                            )
+                                            setGrnQcShadeMatch(true)
+                                            setGrnQcSurfaceClean(true)
+                                            setGrnQcRemarks('')
+                                            setGrnQcQtyStandard(String(rec.receivedQty))
+                                            setGrnQcQtyPenalty('0')
+                                            setGrnQcQtyRejected('0')
+                                            setGrnQcRejectionReason(GRN_REJECTION_REASONS[0] ?? '')
+                                            setGrnQcRejectionRemarks('')
+                                          }}
+                                          className="rounded border border-amber-500/35 bg-amber-500/20 px-1.5 py-0.5 text-[8px] font-bold text-amber-100 hover:bg-amber-500/30"
+                                        >
+                                          Perform QC
+                                        </button>
+                                      ) : rec.qcStatus === 'PASSED_WITH_PENALTY' ? (
+                                        <span className="flex flex-col gap-0.5 items-start">
+                                          <span className="inline-flex rounded border border-emerald-500/55 bg-emerald-950/45 px-1.5 py-0.5 text-[8px] font-bold text-emerald-200">
+                                            QC passed
+                                          </span>
+                                          <span className="inline-flex items-center gap-0.5 rounded border border-amber-500/50 bg-amber-500/15 px-1.5 py-0.5 text-[8px] font-bold text-amber-200">
+                                            <IndianRupee className="h-2.5 w-2.5 shrink-0 opacity-90" aria-hidden />
+                                            Quality-adjusted
+                                          </span>
+                                          {hasSplit ? (
+                                            <span
+                                              className={`text-[7px] leading-tight ${ledgerMono} text-zinc-500 max-w-[5.5rem]`}
+                                            >
+                                              <span className="text-emerald-400/95">{rec.qtyAcceptedStandard}</span> /{' '}
+                                              <span className="text-amber-400/95">{rec.qtyAcceptedPenalty}</span> /{' '}
+                                              <span className="text-rose-400/95">{rec.qtyRejected}</span>
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      ) : rec.qcStatus === 'PASSED' ? (
+                                        <span className="flex flex-col gap-0.5 items-start">
+                                          <span className="inline-flex rounded border border-emerald-500/55 bg-emerald-950/45 px-1.5 py-0.5 text-[8px] font-bold text-emerald-200">
+                                            QC passed
+                                          </span>
+                                          {hasSplit && (rec.qtyRejected ?? 0) > 0 ? (
+                                            <span
+                                              className={`text-[7px] leading-tight ${ledgerMono} text-zinc-500 max-w-[5.5rem]`}
+                                            >
+                                              <span className="text-emerald-400/95">{rec.qtyAcceptedStandard}</span> /{' '}
+                                              <span className="text-amber-400/95">{rec.qtyAcceptedPenalty}</span> /{' '}
+                                              <span className="text-rose-400/95">{rec.qtyRejected}</span>
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex rounded border border-rose-500/55 bg-rose-950/45 px-1.5 py-0.5 text-[8px] font-bold text-rose-200">
+                                          Rejected
+                                        </span>
+                                      )}
+                                      {rec.qcComplete && (rec.qtyRejected ?? 0) > 0 ? (
+                                        <button
+                                          type="button"
+                                          disabled={returnPassWorkingId === rec.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            void generateReturnGatePass(rec.id)
+                                          }}
+                                          className="mt-1 w-full rounded border border-rose-500/45 bg-rose-950/30 px-1 py-0.5 text-[7px] font-bold text-rose-100 hover:bg-rose-950/45 disabled:opacity-50"
+                                        >
+                                          {returnPassWorkingId === rec.id ? '…' : 'Return gate pass'}
+                                        </button>
+                                      ) : null}
+                                    </td>
+                                    <td className="px-1.5 py-1 text-slate-500 truncate max-w-[3.5rem]">
+                                      {rec.receivedByName}
+                                    </td>
+                                  </tr>
+                                )
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                      {grnQcReceiptId ? (
+                        <div
+                          className={`space-y-2 rounded-lg border ${STRATEGIC_SOURCING_GOLD_BORDER} bg-black p-2.5 ring-1 ring-amber-500/15`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <p className={`text-[10px] font-bold ${STRATEGIC_SOURCING_GOLD}`}>QC gate — split tranches</p>
+                          <p className="text-[8px] text-zinc-600">
+                            Enter standard (stock), penalty (GSM shortfall bucket), and rejected (return) kg. Sum must
+                            equal gate weight. Penalty tranche requires actual GSM &lt; ordered. &gt;5% GSM deviation
+                            alerts {PROCUREMENT_LOGISTICS_AUDIT_ACTOR}.
+                          </p>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            <label className="block text-[8px] text-emerald-400/90 font-bold">
+                              Standard (kg)
+                              <input
+                                type="number"
+                                step="any"
+                                min={0}
+                                value={grnQcQtyStandard}
+                                onChange={(e) => setGrnQcQtyStandard(e.target.value)}
+                                className={`mt-0.5 w-full rounded border border-emerald-500/45 bg-black px-1.5 py-1 text-emerald-100 text-[11px] ${ledgerMono}`}
+                              />
+                            </label>
+                            <label className="block text-[8px] text-amber-400/90 font-bold">
+                              Penalty (kg)
+                              <input
+                                type="number"
+                                step="any"
+                                min={0}
+                                value={grnQcQtyPenalty}
+                                onChange={(e) => setGrnQcQtyPenalty(e.target.value)}
+                                className={`mt-0.5 w-full rounded border border-amber-500/45 bg-black px-1.5 py-1 text-amber-100 text-[11px] ${ledgerMono}`}
+                              />
+                            </label>
+                            <label className="block text-[8px] text-rose-400/90 font-bold">
+                              Return (kg)
+                              <input
+                                type="number"
+                                step="any"
+                                min={0}
+                                value={grnQcQtyRejected}
+                                onChange={(e) => setGrnQcQtyRejected(e.target.value)}
+                                className={`mt-0.5 w-full rounded border border-rose-500/45 bg-black px-1.5 py-1 text-rose-100 text-[11px] ${ledgerMono}`}
+                              />
+                            </label>
+                          </div>
+                          {Number(grnQcQtyRejected) > 0 ? (
+                            <div className="space-y-1.5 rounded border border-rose-500/25 bg-black p-2">
+                              <p className="text-[8px] font-bold text-rose-300/95 uppercase tracking-wide">
+                                Rejection — Anik Dua signature lane
+                              </p>
+                              <label className="block text-[8px] text-zinc-500">
+                                Reason
+                                <select
+                                  value={grnQcRejectionReason}
+                                  onChange={(e) => setGrnQcRejectionReason(e.target.value)}
+                                  className="mt-0.5 w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-[10px] text-slate-200"
+                                >
+                                  {GRN_REJECTION_REASONS.map((r) => (
+                                    <option key={r} value={r}>
+                                      {r}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="block text-[8px] text-zinc-500">
+                                Remarks <span className="text-rose-500/80">(required)</span>
+                                <textarea
+                                  value={grnQcRejectionRemarks}
+                                  onChange={(e) => setGrnQcRejectionRemarks(e.target.value)}
+                                  rows={2}
+                                  className="mt-0.5 w-full rounded border border-zinc-800 bg-black px-2 py-1 text-[10px] text-slate-200"
+                                  placeholder="Document rejection for audit…"
+                                />
+                              </label>
+                            </div>
+                          ) : null}
+                          <label className="block text-[9px] text-zinc-500">
+                            Actual GSM
+                            <input
+                              type="number"
+                              step="any"
+                              value={grnQcActualGsm}
+                              onChange={(e) => setGrnQcActualGsm(e.target.value)}
+                              className={`mt-0.5 w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-amber-100 text-[11px] ${ledgerMono}`}
+                            />
+                          </label>
+                          <label className="flex items-center gap-2 text-[9px] text-slate-400">
+                            <input
+                              type="checkbox"
+                              checked={grnQcShadeMatch}
+                              onChange={(e) => setGrnQcShadeMatch(e.target.checked)}
+                              className="rounded border-zinc-600"
+                            />
+                            Shade match
+                          </label>
+                          <label className="flex items-center gap-2 text-[9px] text-slate-400">
+                            <input
+                              type="checkbox"
+                              checked={grnQcSurfaceClean}
+                              onChange={(e) => setGrnQcSurfaceClean(e.target.checked)}
+                              className="rounded border-zinc-600"
+                            />
+                            Surface cleanliness
+                          </label>
+                          <label className="block text-[9px] text-zinc-500">
+                            QC remarks
+                            <textarea
+                              value={grnQcRemarks}
+                              onChange={(e) => setGrnQcRemarks(e.target.value)}
+                              rows={2}
+                              className="mt-0.5 w-full rounded border border-zinc-800 bg-black px-2 py-1 text-[10px] text-slate-200"
+                            />
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={grnQcSaving}
+                              onClick={() => void submitGrnQcSplit()}
+                              className="flex-1 rounded-md border border-amber-500/50 bg-amber-950/35 py-1.5 text-[10px] font-bold text-amber-100 hover:bg-amber-950/50 disabled:opacity-50"
+                            >
+                              {grnQcSaving ? '…' : 'Submit QC gate'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={grnQcSaving}
+                              onClick={() => setGrnQcReceiptId(null)}
+                              className="rounded-md border border-zinc-700 bg-black px-2 py-1.5 text-[10px] text-zinc-500"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {grnLedger.receipts.some(
+                        (r) => r.qcStatus === 'PASSED_WITH_PENALTY' && r.penaltyProofLines?.length,
+                      ) ? (
+                        <div className="rounded-lg border border-zinc-800 bg-black p-2 space-y-2">
+                          <p className="text-[9px] uppercase tracking-wide text-amber-500/90 font-bold">
+                            Vendor-facing penalty proof (export / email)
+                          </p>
+                          {grnLedger.receipts
+                            .filter((r) => r.qcStatus === 'PASSED_WITH_PENALTY' && r.penaltyProofLines?.length)
+                            .map((r) => (
+                              <pre
+                                key={r.id}
+                                className={`whitespace-pre-wrap rounded border border-zinc-900 bg-zinc-950/80 p-2 text-[9px] text-slate-400 leading-relaxed ${ledgerMono}`}
+                              >
+                                {`Slip ${r.scaleSlipId} · vehicle ${r.vehicleNumber}\n${(r.penaltyProofLines ?? []).join('\n')}${r.qualityDebitNote ? `\n\nLedger: ${r.qualityDebitNote.status.replace(/_/g, ' ')}` : ''}`}
+                              </pre>
+                            ))}
+                        </div>
+                      ) : null}
+                      <div className="rounded border border-zinc-800 bg-black px-2 py-2 space-y-1.5">
+                        <p className="text-[8px] uppercase tracking-wide text-zinc-600 font-bold">Summary</p>
+                        <p
+                          className={`text-[9px] text-zinc-500 leading-snug ${ledgerMono}`}
+                          title="Aggregated from completed QC rows (legacy rows: full truck counted as stock or return)"
+                        >
+                          Receipt breakdown:{' '}
+                          <span className="text-emerald-400/95">
+                            Stock {(grnLedger.receiptBreakdownStockKg ?? 0).toLocaleString('en-IN', {
+                              maximumFractionDigits: 3,
+                            })}
+                            kg
+                          </span>{' '}
+                          <span className="text-zinc-600">|</span>{' '}
+                          <span className="text-amber-400/95">
+                            Penalty {(grnLedger.receiptBreakdownPenaltyKg ?? 0).toLocaleString('en-IN', {
+                              maximumFractionDigits: 3,
+                            })}
+                            kg
+                          </span>{' '}
+                          <span className="text-zinc-600">|</span>{' '}
+                          <span className="text-rose-400/95">
+                            Return {(grnLedger.receiptBreakdownReturnKg ?? 0).toLocaleString('en-IN', {
+                              maximumFractionDigits: 3,
+                            })}
+                            kg
+                          </span>
+                        </p>
+                        <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-[10px]">
+                          <span className="text-zinc-500">
+                            Total ordered{' '}
+                            <span className={`text-slate-200 ${ledgerMono}`}>
+                              {grnLedger.orderedKg.toLocaleString('en-IN', { maximumFractionDigits: 3 })} kg
+                            </span>
+                          </span>
+                          <span className="text-zinc-500">
+                            Usable (QC passed){' '}
+                            <span className={`text-emerald-400 font-semibold ${ledgerMono}`}>
+                              {(grnLedger.totalUsableReceivedKg ?? 0).toLocaleString('en-IN', {
+                                maximumFractionDigits: 3,
+                              })}{' '}
+                              kg
+                            </span>
+                          </span>
+                          <span className="text-zinc-500">
+                            At gate (gross){' '}
+                            <span className={`text-slate-400 ${ledgerMono}`}>
+                              {grnLedger.totalReceivedKg.toLocaleString('en-IN', { maximumFractionDigits: 3 })} kg
+                            </span>
+                          </span>
+                          <span className="text-zinc-500">
+                            Outstanding (prod.){' '}
+                            <span className={`text-amber-400 font-semibold ${ledgerMono}`}>
+                              {grnLedger.outstandingKg.toLocaleString('en-IN', { maximumFractionDigits: 3 })} kg
+                            </span>
+                          </span>
+                          <span className="text-zinc-500">
+                            Total payable (accrued){' '}
+                            <span className={`text-amber-200 font-semibold ${ledgerMono}`}>
+                              {formatRupee(grnLedger.accruedReceiptPayableInr ?? 0)}
+                            </span>
+                          </span>
+                        </div>
+                        <p className="text-[8px] text-zinc-600">
+                          PO status:{' '}
+                          <span className="text-slate-400 font-medium">{grnLedger.status.replace(/_/g, ' ')}</span>
+                        </p>
+                      </div>
+                      {['dispatched', 'partially_received', 'fully_received'].includes(grnLedger.status) ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setGrnExpanded((v) => !v)
+                              if (!grnReceiptDate) {
+                                const d = new Date()
+                                const pad = (n: number) => String(n).padStart(2, '0')
+                                setGrnReceiptDate(
+                                  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
+                                )
+                              }
+                            }}
+                            className="w-full rounded-md border border-emerald-500/40 bg-emerald-950/20 py-1.5 text-[10px] font-bold text-emerald-200/95 hover:bg-emerald-950/35"
+                          >
+                            {grnExpanded ? 'Hide add receipt' : '+ Add receipt'}
+                          </button>
+                          {grnExpanded ? (
+                            <div
+                              className="space-y-2 rounded border border-zinc-800 bg-zinc-950/40 p-2"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <label className="block text-[9px] text-zinc-500">
+                                Receipt date / time
+                                <input
+                                  type="datetime-local"
+                                  value={grnReceiptDate}
+                                  onChange={(e) => setGrnReceiptDate(e.target.value)}
+                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-slate-100 text-[11px] ${ledgerMono}`}
+                                />
+                              </label>
+                              <label className="block text-[9px] text-zinc-500">
+                                Received qty (kg)
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min={0}
+                                  value={grnReceivedQty}
+                                  onChange={(e) => setGrnReceivedQty(e.target.value)}
+                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-emerald-200 text-[11px] font-semibold ${ledgerMono}`}
+                                />
+                              </label>
+                              <label className="block text-[9px] text-zinc-500">
+                                Vehicle number
+                                <input
+                                  value={grnVehicle}
+                                  onChange={(e) => setGrnVehicle(e.target.value.toUpperCase())}
+                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-slate-100 text-[11px] ${ledgerMono}`}
+                                />
+                              </label>
+                              <label className="block text-[9px] text-zinc-500">
+                                Scale slip ID
+                                <input
+                                  value={grnScaleSlip}
+                                  onChange={(e) => setGrnScaleSlip(e.target.value)}
+                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-slate-100 text-[11px] ${ledgerMono}`}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                disabled={grnSaving}
+                                onClick={() => void submitGrnReceipt()}
+                                className="w-full rounded-md border border-emerald-500/50 bg-emerald-950/35 py-2 text-[10px] font-bold text-emerald-100 hover:bg-emerald-950/50 disabled:opacity-50"
+                              >
+                                {grnSaving ? 'Saving…' : 'Log receipt (timestamped)'}
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : (
+                        <p className="text-[9px] text-zinc-600">Receipts are closed for this PO.</p>
+                      )}
+                    </>
+                  ) : !grnLoading ? (
+                    <p className="text-[9px] text-zinc-600">Could not load GRN ledger.</p>
+                  ) : null}
                 </div>
               </>
             ) : (
@@ -1728,6 +3542,138 @@ export default function ProcurementWorkbenchPage() {
 
             <div>
               <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-1">
+                Price audit (30d benchmark)
+              </p>
+              {priceIntelLoading ? (
+                <p className="text-slate-500 text-[11px]">Loading…</p>
+              ) : priceIntel?.benchmark30d ? (
+                <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
+                  <div className="flex flex-wrap items-center gap-2 justify-between">
+                    <p className="text-[11px] text-slate-400 leading-snug min-w-0 flex-1">
+                      Market best (30d):{' '}
+                      <span className="font-mono text-amber-200/90 tabular-nums">
+                        ₹
+                        {priceIntel.benchmark30d.ratePerKg.toLocaleString('en-IN', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                        /kg
+                      </span>
+                      <span className="text-zinc-500"> · {priceIntel.benchmark30d.supplierName}</span>
+                    </p>
+                    <PriceTrendSparkline
+                      data={priceIntel.trend6m}
+                      tooltip={priceIntel.trendTooltip}
+                    />
+                  </div>
+                  {(() => {
+                    const cur = grnLedger?.invoiceRatePerKg
+                    const b = priceIntel.benchmark30d
+                    if (cur == null || !Number.isFinite(cur) || cur <= 0 || !b) return null
+                    const v = computePriceVariancePct(cur, b.ratePerKg)
+                    if (v <= PRICE_BENCHMARK_WARN_THRESHOLD_PCT) return null
+                    const kgBase = grnLedger?.orderedKg ?? spotlightRow.totalWeightKg
+                    const amt =
+                      Number.isFinite(kgBase) && kgBase > 0
+                        ? Math.round((cur - b.ratePerKg) * kgBase * 100) / 100
+                        : null
+                    return (
+                      <div className="rounded-md bg-rose-500/10 px-2 py-1.5 text-[10px] text-rose-500 leading-snug">
+                        <p>
+                          Rate is {v.toFixed(1)}% above market best (₹{b.ratePerKg.toFixed(2)} from{' '}
+                          {b.supplierName}).
+                        </p>
+                        {amt != null && amt > 0 ? (
+                          <p className="mt-0.5 font-mono tabular-nums text-rose-500">
+                            Potential Saving: ₹
+                            {amt.toLocaleString('en-IN', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                            .
+                          </p>
+                        ) : null}
+                      </div>
+                    )
+                  })()}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-500">No 30-day benchmark yet for this grade.</p>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-zinc-800 bg-black p-3 space-y-2">
+              <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">
+                Financial impact
+              </p>
+              {(() => {
+                const cf = spotlightRow.cashFlowTerms
+                const proj = cf.projectedPaymentYmd
+                const fmt = proj
+                  ? new Date(`${proj}T12:00:00.000Z`).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                    })
+                  : null
+                const amt = cf.accruedPayableInr
+                const days = cf.paymentTermsDays
+                return (
+                  <>
+                    <p className="text-[11px] text-slate-200">
+                      Payment Due:{' '}
+                      <span className="font-mono tabular-nums text-amber-200/90">
+                        {fmt ?? '—'}
+                      </span>
+                      {cf.isProvisional ? (
+                        <span className="text-zinc-500 text-[10px]"> (no GRN receipt date yet)</span>
+                      ) : null}
+                    </p>
+                    {amt != null && amt > 0 ? (
+                      <p className="text-[11px] text-slate-300">
+                        <span className="font-mono tabular-nums">
+                          Working Capital Impact: ₹
+                          {amt.toLocaleString('en-IN', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          held for {days} days.
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 font-mono tabular-nums">
+                        Working Capital Impact: — (no accrued payable on file)
+                      </p>
+                    )}
+                    {cf.alternativeBetterTerms ? (
+                      <p className="text-[10px] text-sky-200/90 leading-snug border-t border-zinc-800/80 pt-2 mt-1">
+                        Alternative: {cf.alternativeBetterTerms.supplierName} offers{' '}
+                        <span className="font-mono tabular-nums">
+                          {cf.alternativeBetterTerms.extraDays}
+                        </span>{' '}
+                        days extra credit.
+                      </p>
+                    ) : null}
+                  </>
+                )
+              })()}
+            </div>
+
+            <ProcurementLandedCostPanel
+              key={spotlightRow.key}
+              landedCost={spotlightRow.landedCost}
+              primaryVendorPoNumber={spotlightRow.procurementHud.primaryVendorPoNumber}
+              requirementKey={spotlightRow.key}
+              debouncedQ={debouncedQ}
+              riskFilterHigh={riskFilterHigh}
+              vendorRiskFilterHigh={vendorRiskFilterHigh}
+              stockOutRiskFilterHigh={stockOutRiskFilterHigh}
+              loadRequirements={loadRequirements}
+              setSpotlightRow={setSpotlightRow}
+            />
+
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-1">
                 Price history (last purchases)
               </p>
               {priceIntelLoading ? (
@@ -1866,20 +3812,45 @@ export default function ProcurementWorkbenchPage() {
                 </div>
                 {lastPurchaseBenchmark != null && lastPurchaseBenchmark > 0 ? (
                   <p className="text-[10px] text-slate-500">
-                    Last purchase benchmark:{' '}
-                    <span className="text-amber-200/90 font-mono">₹{lastPurchaseBenchmark.toFixed(2)}/kg</span>
-                    {' — '}rates &gt;5% above highlight in rose.
+                    First-line benchmark (30d or last dispatch):{' '}
+                    <span className="text-amber-200/90 font-mono tabular-nums">
+                      ₹{lastPurchaseBenchmark.toFixed(2)}/kg
+                    </span>
+                    {' — '}per-line rates use 30d market low when loaded; {'>'}2% vs benchmark highlights in rose.
                   </p>
                 ) : null}
                 <ul className="space-y-2 border border-slate-800 rounded-md p-2">
                   {draft.lines.map((ln) => {
+                    const lineKey = `${ln.boardGrade}|${ln.gsm}`
+                    const intelLine = benchByLineKey[lineKey] ?? emptyPriceIntelBundle()
+                    const bench = intelLine.benchmark30d
+                    const benchRate = bench?.ratePerKg ?? null
                     const raw = lineRates[ln.id] ?? ''
                     const num = raw === '' ? NaN : Number(raw)
-                    const hot =
+                    let hot = false
+                    if (benchRate != null && benchRate > 0 && Number.isFinite(num)) {
+                      hot = num > benchRate * (1 + PRICE_BENCHMARK_WARN_THRESHOLD_PCT / 100)
+                    } else if (
                       lastPurchaseBenchmark != null &&
                       lastPurchaseBenchmark > 0 &&
+                      Number.isFinite(num)
+                    ) {
+                      hot = num > lastPurchaseBenchmark * 1.05
+                    }
+                    const varPct =
+                      bench &&
                       Number.isFinite(num) &&
-                      num > lastPurchaseBenchmark * 1.05
+                      num > 0 &&
+                      bench.ratePerKg > 0
+                        ? computePriceVariancePct(num, bench.ratePerKg)
+                        : null
+                    const showWarn =
+                      varPct != null && varPct > PRICE_BENCHMARK_WARN_THRESHOLD_PCT && bench != null
+                    const kg = Number(ln.totalWeightKg)
+                    const saving =
+                      showWarn && Number.isFinite(kg) && kg > 0
+                        ? Math.round((num - bench!.ratePerKg) * kg * 100) / 100
+                        : null
                     return (
                       <li key={ln.id} className="border-b border-slate-800/80 pb-2 last:border-0 last:pb-0">
                         <p className="font-medium text-slate-200">
@@ -1890,9 +3861,9 @@ export default function ProcurementWorkbenchPage() {
                           {Number(ln.totalWeightKg).toLocaleString('en-IN', { maximumFractionDigits: 2 })} kg
                         </p>
                         <label
-                          className={`mt-1 flex items-center gap-2 text-[11px] ${hot ? 'text-rose-300' : 'text-slate-400'}`}
+                          className={`mt-1 flex flex-wrap items-center gap-2 text-[11px] ${hot ? 'text-rose-300' : 'text-slate-400'}`}
                         >
-                          Rate / kg (₹)
+                          <span className="shrink-0">Rate / kg (₹)</span>
                           <input
                             type="number"
                             min={0}
@@ -1902,13 +3873,35 @@ export default function ProcurementWorkbenchPage() {
                               setLineRates((prev) => ({ ...prev, [ln.id]: e.target.value }))
                             }
                             disabled={!!draft.dispatchedAt}
-                            className={`w-28 rounded border px-1.5 py-0.5 text-white disabled:opacity-50 ${
+                            className={`w-28 rounded border px-1.5 py-0.5 font-mono tabular-nums text-white disabled:opacity-50 ${
                               hot
                                 ? 'border-rose-500/70 bg-rose-950/40 ring-1 ring-rose-500/30'
                                 : 'border-slate-600 bg-slate-900'
                             }`}
                           />
+                          <PriceTrendSparkline
+                            data={intelLine.trend6m}
+                            tooltip={intelLine.trendTooltip}
+                          />
                         </label>
+                        {showWarn ? (
+                          <div className="mt-1.5 rounded-md border border-rose-500/25 bg-rose-500/10 px-2 py-1.5 text-[10px] text-rose-500 leading-snug">
+                            <p>
+                              Rate is {varPct!.toFixed(1)}% above market best (₹{bench!.ratePerKg.toFixed(2)}{' '}
+                              from {bench!.supplierName}).
+                            </p>
+                            {saving != null && saving > 0 ? (
+                              <p className="mt-0.5 font-mono tabular-nums">
+                                Potential Saving: ₹
+                                {saving.toLocaleString('en-IN', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                                .
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </li>
                     )
                   })}
@@ -2034,6 +4027,152 @@ export default function ProcurementWorkbenchPage() {
                 <ListChecks className="h-3.5 w-3.5" aria-hidden />
                 {shortCloseSubmitting ? 'Closing…' : 'Confirm short-close'}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {shortageActionModal ? (
+        <div
+          className="fixed inset-0 z-[85] flex items-center justify-center bg-black/95 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Shortage action required"
+        >
+          <div
+            className={`w-full max-w-md rounded-xl border bg-black p-4 shadow-2xl ring-1 ring-amber-500/35 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className={`text-[13px] font-bold tracking-tight leading-snug ${STRATEGIC_SOURCING_GOLD}`}>
+              Action Required: Rejection Shortage (
+              <span className={ledgerMono}>
+                {shortageActionModal.rejectKg.toLocaleString('en-IN', { maximumFractionDigits: 3 })}
+              </span>{' '}
+              KG)
+            </h3>
+            <p className="text-[9px] text-zinc-500 mt-2 leading-snug">
+              GRN return logged — choose how to handle the outstanding mill balance. Pure black gate; mono quantities;
+              signed Anik Dua procurement lane.
+            </p>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={shortageActionSubmitting != null}
+                onClick={() => void submitShortageReplacement()}
+                className="rounded-lg border border-amber-500/50 bg-amber-950/30 px-3 py-3 text-[11px] font-bold text-amber-100 hover:bg-amber-950/45 disabled:opacity-50 ring-1 ring-amber-500/30"
+              >
+                {shortageActionSubmitting === 'replacement' ? 'Saving…' : 'Request Replacement'}
+              </button>
+              <button
+                type="button"
+                disabled={shortageActionSubmitting != null || !canAuthorizeShortClose}
+                title={
+                  canAuthorizeShortClose
+                    ? 'Close PO for short-received balance'
+                    : 'Requires md, director, or procurement_manager'
+                }
+                onClick={() => void submitShortageShortClose()}
+                className="rounded-lg border border-orange-500/50 bg-orange-950/25 px-3 py-3 text-[11px] font-bold text-orange-100 hover:bg-orange-950/40 disabled:opacity-45 ring-1 ring-amber-500/35"
+              >
+                {shortageActionSubmitting === 'short_close' ? 'Closing…' : 'Short-Close Balance'}
+              </button>
+            </div>
+            <label className="mt-3 block text-[9px] text-zinc-500 font-bold uppercase tracking-wide">
+              Replacement ETA <span className="text-amber-600/90 normal-case">(required for replacement)</span>
+              <input
+                type="datetime-local"
+                value={shortageReplacementEta}
+                onChange={(e) => setShortageReplacementEta(e.target.value)}
+                className={`mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-2 text-[12px] text-amber-100 ${ledgerMono}`}
+              />
+            </label>
+            <label className="mt-2 block text-[9px] text-zinc-500 font-bold uppercase tracking-wide">
+              Short-close remarks <span className="text-rose-500/80 normal-case">(min 10 chars)</span>
+              <textarea
+                value={shortageShortCloseRemarks}
+                onChange={(e) => setShortageShortCloseRemarks(e.target.value)}
+                rows={2}
+                className="mt-1 w-full rounded-md border border-zinc-800 bg-black px-2 py-1.5 text-[11px] text-slate-200 placeholder:text-zinc-700"
+                placeholder="Closed — short received after rejection (audit)…"
+              />
+            </label>
+            <p className="mt-2 text-[8px] text-zinc-600">
+              Replacement keeps PO open and flags <span className="text-rose-300/90">Awaiting_Replacement</span>; lead
+              buffer uses your ETA vs production target (
+              <span className={ledgerMono}>&lt;48h</span> → amber/red pulse on the row).
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {penaltyFlow ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/92 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Quality penalty and debit draft"
+        >
+          <div
+            className={`w-full max-w-md rounded-xl border bg-black p-4 shadow-2xl ring-1 ring-amber-500/25 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className={`text-[12px] font-bold tracking-tight ${STRATEGIC_SOURCING_GOLD}`}>
+              Financial ledger handoff — penalty tranche
+            </h3>
+            <p className="text-[9px] text-zinc-600 mt-1 leading-snug">
+              Technical variance when Actual GSM &lt; Ordered GSM. Pure black record; mono for GSM and ₹.
+            </p>
+            <div className="mt-3 space-y-2 rounded-lg border border-zinc-900 bg-zinc-950/40 p-2.5 text-[10px]">
+              <div className={`flex justify-between gap-2 text-zinc-500 ${ledgerMono}`}>
+                <span>Ordered GSM vs Actual</span>
+                <span className="text-amber-100/95 font-semibold">
+                  {penaltyFlow.orderedGsm} / {penaltyFlow.actualGsm}
+                </span>
+              </div>
+              <div className={`flex justify-between gap-2 text-zinc-500 ${ledgerMono}`}>
+                <span>Technical shortfall</span>
+                <span className="text-amber-200 font-semibold">{penaltyFlow.shortfallPct.toFixed(2)}%</span>
+              </div>
+              <div className={`flex justify-between gap-2 text-zinc-500 ${ledgerMono}`}>
+                <span>Recommended debit</span>
+                <span className="text-amber-300 font-bold">
+                  ₹{penaltyFlow.recommendedInr.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <pre
+                className={`mt-2 whitespace-pre-wrap border-t border-zinc-800 pt-2 text-[8px] text-zinc-500 leading-relaxed ${ledgerMono}`}
+              >
+                {penaltyFlow.proofLines.join('\n')}
+              </pre>
+            </div>
+            <div className="mt-4 space-y-2">
+              <p className={`text-[9px] text-zinc-500 ${ledgerMono}`}>
+                Penalty qty (kg):{' '}
+                <span className="text-amber-200 font-semibold">{penaltyFlow.penaltyQtyKg}</span>
+              </p>
+              <p className="text-[9px] text-zinc-500">
+                Queue this amount to the financial ledger. Settlement: Quality Settlement Authorized by you —
+                Pending Financial Finalization by Saachi.
+              </p>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={debitDraftSubmitting}
+                  onClick={() => setPenaltyFlow(null)}
+                  className="rounded-md border border-zinc-800 bg-black px-3 py-1.5 text-[10px] text-zinc-400"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  disabled={debitDraftSubmitting}
+                  onClick={() => void submitDebitDraft(penaltyFlow.receiptId)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/55 bg-amber-950/45 px-3 py-1.5 text-[10px] font-bold text-amber-100"
+                >
+                  <IndianRupee className="h-3.5 w-3.5" aria-hidden />
+                  {debitDraftSubmitting ? 'Sending…' : 'Draft debit note'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

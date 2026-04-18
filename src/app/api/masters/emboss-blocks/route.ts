@@ -14,9 +14,13 @@ const createSchema = z.object({
   customerId: z.string().uuid().optional().nullable(),
   blockType: z.string().min(1, 'Block type is required'),
   blockMaterial: z.string().optional(),
+  materialType: z.string().max(32).optional().nullable(),
   blockSize: z.string().optional().nullable(),
   embossDepth: z.number().optional().nullable(),
+  reliefDepthMm: z.number().optional().nullable(),
   storageLocation: z.string().optional().nullable(),
+  linkedDieId: z.string().uuid().optional().nullable(),
+  artworkRefLink: z.string().max(600).optional().nullable(),
   maxImpressions: z.number().int().min(1).optional(),
   condition: z.string().optional(),
   manufactureDate: z.string().optional().nullable(),
@@ -87,6 +91,7 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data
+  const relief = data.reliefDepthMm ?? data.embossDepth ?? null
   const block = await db.embossBlock.create({
     data: {
       blockCode: data.blockCode.trim(),
@@ -95,13 +100,15 @@ export async function POST(req: NextRequest) {
       customerId: data.customerId ?? null,
       blockType: data.blockType.trim(),
       blockMaterial: (data.blockMaterial?.trim() || 'Magnesium') as string,
+      materialType: data.materialType?.trim() || null,
       blockSize: data.blockSize?.trim() ?? null,
-      embossDepth: data.embossDepth != null ? data.embossDepth : null,
+      embossDepth: relief,
+      reliefDepthMm: relief,
       storageLocation: data.storageLocation?.trim() ?? null,
+      linkedDieId: data.linkedDieId ?? null,
+      artworkRefLink: data.artworkRefLink?.trim() ?? null,
       maxImpressions: data.maxImpressions ?? 100000,
       condition: (data.condition?.trim() || 'Good') as string,
-      manufactureDate: data.manufactureDate ? new Date(data.manufactureDate) : null,
-      replacesBlockId: data.replacesBlockId ?? null,
     },
   })
 

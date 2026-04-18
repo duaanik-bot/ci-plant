@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { calculateOEE } from '@/lib/helpers'
+import { toMachinePmHealthRow } from '@/lib/machine-pm-health'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +12,16 @@ export async function GET() {
 
   const machines = await db.machine.findMany({
     orderBy: { machineCode: 'asc' },
-    select: { id: true, machineCode: true, name: true, status: true, capacityPerShift: true },
+    select: {
+      id: true,
+      machineCode: true,
+      name: true,
+      status: true,
+      capacityPerShift: true,
+      usageRunHoursSincePm: true,
+      usageImpressionsSincePm: true,
+      pmSchedule: { select: { intervalRunHours: true, intervalImpressions: true } },
+    },
   })
 
   const today = new Date()
@@ -37,6 +47,7 @@ export async function GET() {
   const list = machines.map((m) => {
     const active = stageByMachineId.get(m.id)
     const oeeData = oeeByMachineId[m.id]
+    const pm = toMachinePmHealthRow(m)
     return {
       id: m.id,
       machineCode: m.machineCode,
@@ -47,6 +58,13 @@ export async function GET() {
       oee: oeeData?.oee ?? null,
       sheetsToday: oeeData?.totalSheets ?? null,
       firstArticle: null as string | null,
+      pmHealth: {
+        healthPct: pm.healthPct,
+        hasSchedule: pm.hasSchedule,
+        overdue: pm.overdue,
+        usageRunHours: pm.usageRunHours,
+        usageImpressions: pm.usageImpressions,
+      },
     }
   })
 

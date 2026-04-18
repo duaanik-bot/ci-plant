@@ -190,7 +190,8 @@ export function SidebarNav({
         { href: '/hub/plates', label: 'Plates', icon: Layers },
         { href: '/hub/dies', label: 'Dies', icon: Droplets },
         { href: '/hub/blocks', label: 'Embossing blocks', icon: Package },
-        { href: '/hub/shade_cards', label: 'Shade cards', icon: Palette },
+        { href: '/hub/shade-card-hub', label: 'Shade Card Hub', icon: Palette },
+        { href: '/hub/shade_cards', label: 'Shade cards (floor)', icon: Palette },
       ],
     },
     {

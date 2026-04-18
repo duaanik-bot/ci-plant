@@ -57,7 +57,9 @@ export async function findVendorCoverageForCustomerLine(
 ): Promise<VendorCoverage | null> {
   const lines = await db.vendorMaterialPurchaseOrderLine.findMany({
     where: {
-      vendorPo: { status: { in: ['draft', 'confirmed', 'dispatched'] } },
+      vendorPo: {
+        status: { in: ['draft', 'confirmed', 'dispatched', 'partially_received', 'fully_received'] },
+      },
     },
     include: { vendorPo: { select: { poNumber: true } } },
   })

@@ -2,7 +2,7 @@
 // Run with: npx prisma db seed
 // Seeds: 10 roles, 12 machines, 13 QC instruments, admin user
 
-import { PrismaClient, PastingStyle } from '@prisma/client'
+import { Prisma, PrismaClient, PastingStyle } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
@@ -302,6 +302,38 @@ async function main() {
     }),
   ])
   console.log(`✅ ${machines.length} machines seeded (CI-01 through CI-12)`)
+
+  const OFFSET_PM_CHECKLIST = [
+    'Lockout/tagout verified; energy isolation documented',
+    'Wash blankets, impression cylinders, and ink train per SOP',
+    'Inspect rollers, dampers, and auto plate — flag wear',
+    'Lubricate per Komori chart; torque guards closed',
+    'Replace air/oil filters if interval due',
+    'Run test strip; record density — FAI sign-off before production',
+  ]
+  const GENERIC_PM_CHECKLIST = [
+    'Isolate power; confirm safe maintenance state',
+    'Inspect wear surfaces, belts, and safety interlocks',
+    'Lubricate and torque per OEM chart',
+    'Replace consumables per PM kit',
+    'Trial run + sign-off before release to production',
+  ]
+  for (const m of machines) {
+    const isOffset = ['CI-01', 'CI-02', 'CI-03'].includes(m.machineCode)
+    await prisma.machinePmSchedule.upsert({
+      where: { machineId: m.id },
+      update: {},
+      create: {
+        machineId: m.id,
+        intervalRunHours: isOffset ? new Prisma.Decimal(500) : new Prisma.Decimal(800),
+        intervalImpressions: isOffset ? BigInt(1_500_000) : BigInt(4_000_000),
+        taskChecklistJson: (isOffset ? OFFSET_PM_CHECKLIST : GENERIC_PM_CHECKLIST) as Prisma.InputJsonValue,
+        sparePartsPlaceholder:
+          'Inventory link pending. Typical: filters, blankets, washup consumables per PM BOM.',
+      },
+    })
+  }
+  console.log(`✅ ${machines.length} machine PM schedules seeded`)
 
   // ─────────────────────────────────────────
   // SUPPLIERS (3)

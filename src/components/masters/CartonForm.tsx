@@ -82,6 +82,8 @@ export type CartonFormData = {
   remarks: string
   /** Linked Die Master (tooling) — UUID or empty */
   dieMasterId: string
+  /** Linked shade card for production kit / color ledger */
+  shadeCardId: string
   active: boolean
 }
 
@@ -107,6 +109,7 @@ const EMPTY: CartonFormData = {
   specialInstructions: '',
   remarks: '',
   dieMasterId: '',
+  shadeCardId: '',
   active: true,
 }
 
@@ -116,10 +119,12 @@ type Props = {
 }
 
 type DieMasterOption = { id: string; dyeNumber: number; dyeType: string }
+type ShadeCardOption = { id: string; shadeCode: string }
 
 export default function CartonForm({ mode, initialData }: Props) {
   const router = useRouter()
   const [dieMasters, setDieMasters] = useState<DieMasterOption[]>([])
+  const [shadeCards, setShadeCards] = useState<ShadeCardOption[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [customerResults, setCustomerResults] = useState<Customer[]>([])
   const [customerState, setCustomerState] = useState<CustomerSearchState>({
@@ -209,6 +214,26 @@ export default function CartonForm({ mode, initialData }: Props) {
         )
       } catch {
         if (!cancelled) setDieMasters([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/hub/shade-card-hub')
+        const j = await res.json()
+        if (cancelled) return
+        const list = Array.isArray(j.rows) ? j.rows : []
+        setShadeCards(
+          list.map((row: { id: string; shadeCode: string }) => ({ id: row.id, shadeCode: row.shadeCode })),
+        )
+      } catch {
+        if (!cancelled) setShadeCards([])
       }
     })()
     return () => {
@@ -395,6 +420,7 @@ export default function CartonForm({ mode, initialData }: Props) {
       }),
       remarks: toCaps(f.remarks || '') || undefined,
       dieMasterId: f.dieMasterId.trim() || undefined,
+      shadeCardId: f.shadeCardId.trim() || undefined,
       active: f.active,
     }
 
@@ -607,6 +633,24 @@ export default function CartonForm({ mode, initialData }: Props) {
                 </select>
                 <p className='mt-1 text-[10px] text-slate-500'>
                   PO and Die Hub use this record for type and L×W×H.
+                </p>
+              </div>
+              <div className='md:col-span-1'>
+                <label className='block text-slate-400 mb-1'>Shade card (production kit)</label>
+                <select
+                  className={cls}
+                  value={f.shadeCardId}
+                  onChange={(e) => patch('shadeCardId', e.target.value)}
+                >
+                  <option value=''>None — unlink</option>
+                  {shadeCards.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.shadeCode}
+                    </option>
+                  ))}
+                </select>
+                <p className='mt-1 text-[10px] text-slate-500'>
+                  Links PO production readiness to Ink Kitchen + approval doc on the shade master.
                 </p>
               </div>
               {/* Open Size removed as requested */}

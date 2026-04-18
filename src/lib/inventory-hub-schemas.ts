@@ -26,8 +26,18 @@ export const shadeCardCreateSchema = z
   .object({
     shadeCode: z.string().min(1).optional(),
     autoGenerateCode: z.boolean().optional().default(true),
-    productMaster: z.string().min(1, 'Product / client name is required'),
-    masterArtworkRef: z.string().min(1, 'AW code is required'),
+    /** Product Master = carton id */
+    productId: z.string().uuid('Product master is required'),
+    mfgDate: z.string().min(1, 'Manufacturing date is required'),
+    substrateType: z.enum(['FBB', 'SBS', 'GREY_BACK', 'KRAFT'], {
+      errorMap: () => ({ message: 'Substrate type is required' }),
+    }),
+    labL: z.number().finite(),
+    labA: z.number().finite(),
+    labB: z.number().finite(),
+    masterArtworkRef: z.string().optional().nullable(),
+    /** Denormalized label; server fills from carton when omitted */
+    productMaster: z.string().optional().nullable(),
     quantity: z.number().int().min(1).max(99).optional().default(1),
     remarks: z.string().max(2000).optional().nullable(),
     approvalDate: z.string().optional().nullable(),

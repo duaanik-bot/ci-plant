@@ -16,6 +16,7 @@ const createSchema = z.object({
   materialTypes: z.array(z.string()).default([]),
   leadTimeDays: z.number().int().min(0).default(7),
   paymentTerms: z.string().optional(),
+  paymentTermsDays: z.number().int().min(0).default(30),
   active: z.boolean().default(true),
 })
 
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest) {
       materialTypes: data.materialTypes,
       leadTimeDays: data.leadTimeDays,
       paymentTerms: data.paymentTerms || null,
+      paymentTermsDays: data.paymentTermsDays,
       active: data.active,
     },
   })

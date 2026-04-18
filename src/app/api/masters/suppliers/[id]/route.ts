@@ -16,6 +16,7 @@ const updateSchema = z.object({
   materialTypes: z.array(z.string()).optional(),
   leadTimeDays: z.number().int().min(0).optional(),
   paymentTerms: z.string().optional(),
+  paymentTermsDays: z.number().int().min(0).optional(),
   active: z.boolean().optional(),
 })
 
@@ -59,6 +60,7 @@ export async function PUT(
       ...(data.materialTypes !== undefined && { materialTypes: data.materialTypes }),
       ...(data.leadTimeDays != null && { leadTimeDays: data.leadTimeDays }),
       ...(data.paymentTerms !== undefined && { paymentTerms: data.paymentTerms || null }),
+      ...(data.paymentTermsDays !== undefined && { paymentTermsDays: data.paymentTermsDays }),
       ...(data.active !== undefined && { active: data.active }),
     },
   })

@@ -40,6 +40,12 @@ import {
 } from '@/lib/hub-ledger-export-columns'
 import { CUSTODY_ON_FLOOR } from '@/lib/inventory-hub-custody'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
+import { Star } from 'lucide-react'
+import { EmbossHubSpotlightDrawer } from '@/components/hub/EmbossHubSpotlightDrawer'
+
+/** JetBrains-style mono for codes & numerics (emboss hub signature). */
+const HUB_EMB_MONO =
+  'font-[family-name:var(--font-designing-queue),ui-monospace,monospace] tabular-nums tracking-tight'
 
 function isDieHubSupervisorRole(role: string | undefined): boolean {
   if (!role?.trim()) return false
@@ -220,12 +226,22 @@ type EmbossRow = {
   id: string
   kind: 'emboss'
   displayCode: string
+  /** Product / carton name — primary identity. */
   title: string
+  productName?: string
+  linkedProductId?: string | null
+  versionDisplay?: string
+  operationalStatus?: 'Ready' | 'In-Use' | 'Repair' | 'Scrap'
   typeLabel: string
   materialLabel: string
   blockSize: string | null
   storageLocation: string | null
   impressionCount: number
+  cumulativeStrikes: number
+  strikeLimit: number
+  strikeOverLimit: boolean
+  reliefDepthMm: number | null
+  maxImpressions: number
   reuseCount: number
   custodyStatus: string
   lastStatusUpdatedAt: string
@@ -236,6 +252,11 @@ type EmbossRow = {
   triageBlockDimensions?: string | null
   hubConditionPoor?: boolean
   issuedOperator?: string | null
+  issuedMachineId?: string | null
+  issuedMachineLabel?: string | null
+  linkedCustomerNames?: string[]
+  industrialPriority?: boolean
+  ledgerRank?: number
 }
 
 type ToolRow = DieRow | EmbossRow
@@ -243,13 +264,20 @@ type ToolRow = DieRow | EmbossRow
 /** Starred PO / director line — surface first on the board. */
 function sortIndustrialPriorityFirst(rows: ToolRow[]): ToolRow[] {
   return [...rows].sort((a, b) => {
-    const pa = a.kind === 'die' && a.industrialPriority === true ? 1 : 0
-    const pb = b.kind === 'die' && b.industrialPriority === true ? 1 : 0
+    const pa = a.industrialPriority === true ? 1 : 0
+    const pb = b.industrialPriority === true ? 1 : 0
     if (pa !== pb) return pb - pa
     if (a.kind === 'die' && b.kind === 'die')
       return (a.ledgerRank ?? 0) - (b.ledgerRank ?? 0)
-    if (a.kind === 'die') return -1
-    if (b.kind === 'die') return 1
+    if (a.kind === 'emboss' && b.kind === 'emboss') {
+      const na = (a.productName ?? a.title ?? '').localeCompare(b.productName ?? b.title ?? '', undefined, {
+        sensitivity: 'base',
+      })
+      if (na !== 0) return na
+      return (a.ledgerRank ?? 0) - (b.ledgerRank ?? 0)
+    }
+    if (a.kind === 'die' && b.kind === 'emboss') return -1
+    if (a.kind === 'emboss' && b.kind === 'die') return 1
     return a.displayCode.localeCompare(b.displayCode)
   })
 }
@@ -336,6 +364,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const { data: session } = useSession()
   const searchParams = useSearchParams()
   const focusDieId = searchParams.get('focusDie')?.trim() || null
+  const focusBlockId = searchParams.get('focusBlock')?.trim() || null
   const tool = mode === 'dies' ? 'dies' : 'blocks'
   const toolKind = mode === 'dies' ? 'die' : 'emboss'
 
@@ -353,12 +382,14 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
   const [hubView, setHubView] = useState<'board' | 'table'>('board')
   const focusDieFlippedToTable = useRef(false)
+  const focusBlockFlippedToTable = useRef(false)
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerZoneFilter, setLedgerZoneFilter] = useState('')
   /** Die Hub only — Lock Bottom / BSO narrows board, table, and zone summary. */
   const [dieHubPastingFilter, setDieHubPastingFilter] = useState<'' | 'LOCK_BOTTOM' | 'BSO'>('')
   const [toolingAudit, setToolingAudit] = useState<ToolingHubAuditContext | null>(null)
 
+  const [embossSpotlightId, setEmbossSpotlightId] = useState<string | null>(null)
   const [returnModal, setReturnModal] = useState<ToolRow | null>(null)
   const [returnDieCarton, setReturnDieCarton] = useState('')
   const [returnDieSheet, setReturnDieSheet] = useState('')
@@ -448,6 +479,10 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   }, [focusDieId])
 
   useEffect(() => {
+    focusBlockFlippedToTable.current = false
+  }, [focusBlockId])
+
+  useEffect(() => {
     if (mode !== 'dies' || !focusDieId || loading) return
     const t = window.setTimeout(() => {
       const el = document.querySelector<HTMLElement>(`[data-hub-die-id="${focusDieId}"]`)
@@ -466,6 +501,26 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     }, 400)
     return () => window.clearTimeout(t)
   }, [mode, focusDieId, loading, data, hubView])
+
+  useEffect(() => {
+    if (mode !== 'blocks' || !focusBlockId || loading) return
+    const t = window.setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-hub-emboss-id="${focusBlockId}"]`)
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        el.classList.add('ring-2', 'ring-emerald-500/60', 'ring-offset-2', 'ring-offset-black')
+        window.setTimeout(() => {
+          el.classList.remove('ring-2', 'ring-emerald-500/60', 'ring-offset-2', 'ring-offset-black')
+        }, 2400)
+        return
+      }
+      if (hubView === 'board' && !focusBlockFlippedToTable.current) {
+        focusBlockFlippedToTable.current = true
+        setHubView('table')
+      }
+    }, 400)
+    return () => window.clearTimeout(t)
+  }, [mode, focusBlockId, loading, data, hubView])
 
   useEffect(() => {
     void (async () => {
@@ -541,7 +596,19 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             ]
               .join(' ')
               .toLowerCase()
-          : [r.displayCode, r.title, r.typeLabel].join(' ').toLowerCase()
+          : [
+              r.displayCode,
+              r.title,
+              r.productName ?? '',
+              r.linkedProductId ?? '',
+              r.versionDisplay ?? '',
+              r.typeLabel,
+              r.materialLabel,
+              r.blockSize,
+              ...(r.linkedCustomerNames ?? []),
+            ]
+              .join(' ')
+              .toLowerCase()
       return hay.includes(s)
     })
   }
@@ -1146,6 +1213,17 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         </p>
         <p>
           Material: <span className="text-zinc-300">{r.materialLabel}</span>
+          <span className="text-zinc-600 ml-1">(Brass · Magnesium · Copper)</span>
+        </p>
+        {r.reliefDepthMm != null && Number.isFinite(r.reliefDepthMm) ? (
+          <p className={HUB_EMB_MONO}>
+            Relief depth: <span className="text-zinc-200">{r.reliefDepthMm} mm</span>
+          </p>
+        ) : null}
+        <p
+          className={`${HUB_EMB_MONO} ${r.strikeOverLimit ? 'text-red-400 animate-pulse font-semibold' : 'text-orange-300/90'}`}
+        >
+          Strikes: {r.cumulativeStrikes.toLocaleString()} / {r.strikeLimit.toLocaleString()}
         </p>
         {r.blockSize ? (
           <p>
@@ -1165,16 +1243,18 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   ) {
     const custodyInUse = zone === 'custody' && r.custodyStatus === CUSTODY_ON_FLOOR
     const industrialGlow =
-      r.kind === 'die' && r.industrialPriority
+      r.industrialPriority === true
         ? ' shadow-[0_0_22px_rgba(234,88,12,0.32)] ring-1 ring-amber-500/45 border-amber-500/75'
         : ''
+    const strikeAlert =
+      r.kind === 'emboss' && r.strikeOverLimit ? ' ring-1 ring-red-500/70 border-red-600/80 animate-pulse' : ''
     const liClass = `rounded-lg border bg-black p-2 overflow-visible ${
       custodyInUse
         ? 'border-2 border-blue-500 hub-tool-in-use-pulse'
         : zone === 'custody' && r.jobCardHub?.key === 'printed'
           ? 'border-emerald-600/70 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
           : 'border-zinc-800'
-    }${industrialGlow}`
+    }${industrialGlow}${strikeAlert}`
 
     if (r.kind === 'die') {
       const mismatch = r.typeMismatchMatches ?? []
@@ -1192,6 +1272,12 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 #{r.ledgerRank}
               </span>
               <span className="font-mono text-[10px] text-amber-300/90 truncate">{r.displayCode}</span>
+              {r.industrialPriority ? (
+                <Star
+                  className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.55)]"
+                  aria-label="Industrial priority"
+                />
+              ) : null}
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <button
@@ -1411,11 +1497,25 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       )
     }
 
+    const prodTitle = (r.productName ?? r.title ?? '').trim() || r.displayCode
+    const verDisp = (r.versionDisplay ?? '—').trim()
+
     return (
-      <li key={`${r.kind}-${r.id}`} className={liClass}>
+      <li key={`${r.kind}-${r.id}`} data-hub-emboss-id={r.id} className={liClass}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-            <p className="font-mono text-amber-300 text-xs">{r.displayCode}</p>
+            <span
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-[10px] font-bold text-zinc-500 ${HUB_EMB_MONO}`}
+              title="Row #"
+            >
+              #{r.ledgerRank ?? '—'}
+            </span>
+            {r.industrialPriority ? (
+              <Star
+                className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.55)]"
+                aria-label="Industrial priority"
+              />
+            ) : null}
             {zone === 'triage' && r.triageManualEntry ? (
               <span className="inline-flex items-center rounded border border-amber-600/60 bg-amber-950/50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200">
                 Manual Entry
@@ -1432,26 +1532,68 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             ↺ Reverse
           </button>
         </div>
-        <button
-          type="button"
-          className="text-left w-full text-white font-semibold text-sm truncate mt-0.5 pr-1 hover:text-blue-300 hover:underline"
-          onClick={() =>
-            setToolingAudit({
-              tool: 'emboss',
-              id: r.id,
-              zoneLabel: zoneLabelForBoard(zone),
-              displayCode: r.displayCode,
-              title: r.title,
-              specSummary: toolingSpecSummaryLine(r),
-              units: toolingCardUnits(r),
-            })
-          }
-        >
-          {r.title}
-        </button>
+        <div className="mt-1 min-w-0 space-y-0.5">
+          {r.linkedProductId ? (
+            <Link
+              href={`/masters/cartons/${r.linkedProductId}`}
+              className="block font-sans text-sm font-bold text-emerald-400 hover:text-emerald-300 hover:underline truncate"
+            >
+              {prodTitle}
+            </Link>
+          ) : (
+            <span className="block font-sans text-sm font-bold text-emerald-400 truncate">{prodTitle}</span>
+          )}
+          <p className={`text-xs text-slate-400 ${HUB_EMB_MONO}`}>
+            <span className="text-slate-500 font-sans">Code: </span>
+            <button
+              type="button"
+              className="text-zinc-200 hover:text-sky-300 hover:underline"
+              onClick={() => setEmbossSpotlightId(r.id)}
+            >
+              {r.displayCode}
+            </button>
+            <span className="text-zinc-600"> | </span>
+            <span className="text-slate-500 font-sans">Ver: </span>
+            <span className="text-zinc-200">{verDisp}</span>
+          </p>
+          <p className="text-[10px] text-zinc-500 font-sans">
+            {r.materialLabel}
+            {r.reliefDepthMm != null && Number.isFinite(r.reliefDepthMm) ? (
+              <>
+                <span className="text-zinc-600"> · </span>
+                <span className={HUB_EMB_MONO}>{r.reliefDepthMm}mm</span>
+              </>
+            ) : null}
+          </p>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          {r.operationalStatus === 'In-Use' && r.issuedMachineId ? (
+            <Link
+              href={`/production/machine-flow?highlightMachineId=${encodeURIComponent(r.issuedMachineId)}`}
+              className="text-[10px] font-bold uppercase tracking-wide text-emerald-400 hover:text-emerald-300 hover:underline"
+            >
+              In production
+            </Link>
+          ) : (
+            <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+              {r.operationalStatus === 'In-Use'
+                ? 'In production'
+                : r.operationalStatus === 'Repair'
+                  ? 'Repair'
+                  : r.operationalStatus === 'Scrap'
+                    ? 'Scrap'
+                    : 'Ready'}
+            </span>
+          )}
+        </div>
         {r.hubConditionPoor ? (
           <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-700/60 rounded px-1.5 py-0.5 w-fit">
             Poor condition
+          </p>
+        ) : null}
+        {r.strikeOverLimit ? (
+          <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-600/70 rounded px-1.5 py-0.5 w-fit animate-pulse">
+            Strike limit exceeded
           </p>
         ) : null}
         {zone === 'custody' ? (
@@ -1463,6 +1605,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           <p className="mt-1 text-[11px] text-sky-300/95 font-medium">
             👤 Issued to: {r.issuedOperator.trim()}
           </p>
+        ) : null}
+        {r.issuedMachineLabel ? (
+          <p className={`mt-0.5 text-[10px] text-zinc-500 ${HUB_EMB_MONO}`}>Press: {r.issuedMachineLabel}</p>
         ) : null}
         {renderSpecs(r, zone)}
         {zone === 'triage' ? (
@@ -2394,6 +2539,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           </div>
         </div>
       )}
+      <EmbossHubSpotlightDrawer blockId={embossSpotlightId} onClose={() => setEmbossSpotlightId(null)} />
     </div>
   )
 }

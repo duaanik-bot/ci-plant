@@ -3,7 +3,10 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { shadeCardCreateSchema } from '@/lib/inventory-hub-schemas'
 import { safeJsonParse, safeJsonStringify } from '@/lib/safe-json'
+import { Prisma } from '@prisma/client'
 import { createShadeCardEvent, SHADE_CARD_ACTION } from '@/lib/shade-card-events'
+import { shadeCardAgeMonthsExact } from '@/lib/shade-card-age'
+import { parseSpectroScanLog } from '@/lib/shade-card-spectro-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +16,19 @@ export async function GET() {
     if (error) return error
 
     const rows = await db.shadeCard.findMany({
+      where: { isActive: true },
       orderBy: { createdAt: 'desc' },
+      include: {
+        customer: { select: { id: true, name: true } },
+        product: {
+          select: {
+            id: true,
+            cartonName: true,
+            artworkCode: true,
+            customer: { select: { id: true, name: true } },
+          },
+        },
+      },
     })
 
     const payload = rows.map((s) => {
@@ -24,17 +39,30 @@ export async function GET() {
       else if (custody === 'at_vendor') cardStatusLabel = 'At vendor'
 
       let locationLabel = '—'
-      if (custody === 'in_stock') locationLabel = 'Rack'
+      if (custody === 'in_stock') locationLabel = 'Master Rack'
       else if (custody === 'at_vendor') locationLabel = 'Vendor'
       else if (custody === 'on_floor') locationLabel = s.currentHolder?.trim() || 'On floor'
+
+      const mfg = s.mfgDate
+      const exact = shadeCardAgeMonthsExact(mfg)
+      const currentAgeMonths = exact != null ? Math.round(exact * 10_000) / 10_000 : null
 
       return {
         id: s.id,
         shadeCode: s.shadeCode,
+        productId: s.productId,
         productMaster: s.productMaster,
         masterArtworkRef: s.masterArtworkRef,
+        substrateType: s.substrateType,
+        labL: s.labL != null ? Number(s.labL) : null,
+        labA: s.labA != null ? Number(s.labA) : null,
+        labB: s.labB != null ? Number(s.labB) : null,
+        inkRecipeNotes: s.inkRecipeNotes,
+        spectroScanLog: parseSpectroScanLog(s.spectroScanLog),
         remarks: s.remarks,
         approvalDate: s.approvalDate?.toISOString().slice(0, 10) ?? null,
+        mfgDate: mfg?.toISOString().slice(0, 10) ?? null,
+        currentAgeMonths,
         inkComponent: s.inkComponent,
         currentHolder: s.currentHolder,
         impressionCount: s.impressionCount,
@@ -46,6 +74,8 @@ export async function GET() {
         issuedAt: s.issuedAt?.toISOString() ?? null,
         entryDate: s.createdAt.toISOString().slice(0, 10),
         createdAt: s.createdAt.toISOString(),
+        product: s.product,
+        customer: s.customer,
       }
     })
 
@@ -82,7 +112,13 @@ export async function POST(req: NextRequest) {
     const {
       autoGenerateCode,
       shadeCode: manualCode,
-      productMaster,
+      productId,
+      mfgDate: mfgDateRaw,
+      substrateType,
+      labL,
+      labA,
+      labB,
+      productMaster: productMasterInput,
       masterArtworkRef,
       quantity = 1,
       remarks,
@@ -90,6 +126,29 @@ export async function POST(req: NextRequest) {
       inkComponent,
       currentHolder,
     } = parsed.data
+
+    const carton = await db.carton.findUnique({
+      where: { id: productId },
+      select: {
+        id: true,
+        cartonName: true,
+        artworkCode: true,
+        customerId: true,
+      },
+    })
+    if (!carton) {
+      return NextResponse.json({ error: 'Product master (carton) not found' }, { status: 404 })
+    }
+
+    const mfgDateParsed = new Date(`${mfgDateRaw.slice(0, 10)}T12:00:00.000Z`)
+    if (Number.isNaN(mfgDateParsed.getTime())) {
+      return NextResponse.json({ error: 'Invalid manufacturing date' }, { status: 400 })
+    }
+
+    const resolvedAw =
+      (masterArtworkRef?.trim() || null) ?? (carton.artworkCode?.trim() || null)
+    const resolvedProductLabel =
+      (productMasterInput?.trim() || null) ?? carton.cartonName?.trim() ?? null
 
     let createdItems: { id: string; shadeCode: string }[]
     try {
@@ -126,11 +185,20 @@ export async function POST(req: NextRequest) {
           const row = await tx.shadeCard.create({
             data: {
               shadeCode: shadeCode!,
-              productMaster: productMaster ?? null,
-              masterArtworkRef: masterArtworkRef ?? null,
+              productId: carton.id,
+              customerId: carton.customerId,
+              productMaster: resolvedProductLabel,
+              masterArtworkRef: resolvedAw,
+              mfgDate: mfgDateParsed,
+              substrateType,
+              labL: new Prisma.Decimal(labL),
+              labA: new Prisma.Decimal(labA),
+              labB: new Prisma.Decimal(labB),
+              isActive: true,
+              custodyStatus: 'in_stock',
+              currentHolder: currentHolder?.trim() || 'Master Rack',
               approvalDate: approvalDate ? new Date(approvalDate) : null,
               inkComponent: inkComponent ?? null,
-              currentHolder: currentHolder ?? null,
               remarks: remarks?.trim() || null,
             },
           })
@@ -138,8 +206,14 @@ export async function POST(req: NextRequest) {
             shadeCardId: row.id,
             actionType: SHADE_CARD_ACTION.CREATED,
             details: {
-              productMaster,
-              masterArtworkRef,
+              productId: carton.id,
+              productMaster: resolvedProductLabel,
+              masterArtworkRef: resolvedAw,
+              mfgDate: mfgDateRaw,
+              substrateType,
+              labL,
+              labA,
+              labB,
               remarks: remarks?.trim() || null,
               quantityIndex: i + 1,
               quantityTotal: quantity,

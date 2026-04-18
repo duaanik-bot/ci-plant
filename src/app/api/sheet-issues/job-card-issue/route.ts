@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/helpers'
+import { requireRole, createAuditLog } from '@/lib/helpers'
 import { db } from '@/lib/db'
-import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
 import { sheetIssueSchema } from '@/lib/validations'
+import {
+  evaluateFifoForLot,
+  fifoOverrideAuditMessage,
+  jobFifoSpecFromPoLine,
+} from '@/lib/inventory-aging-fifo'
+import { logIndustrialStatusChange } from '@/lib/industrial-audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +16,7 @@ const bodySchema = z.object({
   jobCardId: z.string().uuid(),
   qtyRequested: z.number().int().positive(),
   lotNumber: z.string().optional(),
+  fifoSkipReason: z.string().max(600).optional(),
 })
 
 export async function POST(req: NextRequest) {
@@ -31,7 +37,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const { jobCardId, qtyRequested, lotNumber } = parsed.data
+  const { jobCardId, qtyRequested, lotNumber, fifoSkipReason } = parsed.data
 
   const shared = sheetIssueSchema.safeParse({ jobCardId, qtyRequested, lotNumber })
   if (!shared.success) {
@@ -42,6 +48,39 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
   }
+
+  const jcHead = await db.productionJobCard.findUnique({
+    where: { id: jobCardId },
+    select: { jobCardNumber: true },
+  })
+  if (!jcHead) return NextResponse.json({ error: 'Job card not found' }, { status: 404 })
+
+  const poLine = await db.poLineItem.findFirst({
+    where: { jobCardNumber: jcHead.jobCardNumber },
+  })
+  const fifoSpec = poLine ? jobFifoSpecFromPoLine(poLine) : null
+
+  if (fifoSpec && (lotNumber ?? '').trim()) {
+    const fifo = await evaluateFifoForLot(db, fifoSpec, lotNumber)
+    if (fifo.violation) {
+      const reason = (fifoSkipReason ?? '').trim()
+      if (reason.length < 8) {
+        return NextResponse.json(
+          {
+            success: false,
+            fifoViolation: true,
+            message:
+              'FIFO violation: older stock exists for this GSM / grade / paper spec. Enter lot # and a reason to skip (min 8 characters), e.g. older stock inaccessible.',
+            olderBatches: fifo.olderBatches,
+          },
+          { status: 409 },
+        )
+      }
+    }
+  }
+
+  const actor = user!.name?.trim() || 'User'
+  const fifoReasonTrim = (fifoSkipReason ?? '').trim()
 
   const result = await db.$transaction(async (tx) => {
     const jc = await tx.productionJobCard.findUnique({
@@ -58,7 +97,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await tx.sheetIssueRecord.create({
+    let fifoOverrideReason: string | null = null
+    if (fifoSpec && (lotNumber ?? '').trim()) {
+      const fifo = await evaluateFifoForLot(tx, fifoSpec, lotNumber)
+      if (fifo.violation && fifoReasonTrim.length >= 8) {
+        fifoOverrideReason = fifoReasonTrim
+      }
+    }
+
+    const record = await tx.sheetIssueRecord.create({
       data: {
         jobCardId,
         qtyRequested,
@@ -66,6 +113,7 @@ export async function POST(req: NextRequest) {
         issuedBy: user!.id,
         approvedAt: new Date(),
         lotNumber: lotNumber || null,
+        fifoOverrideReason,
       },
     })
 
@@ -80,18 +128,46 @@ export async function POST(req: NextRequest) {
       message: `Issued ${qtyRequested} sheets. Remaining: ${newRemaining}.`,
       remaining: newRemaining,
       issuedQty: qtyRequested,
+      recordId: record.id,
+      fifoOverrideReason,
     }
   })
 
-  if (result.success) {
-    await createAuditLog({
+  if (!result.success) {
+    return NextResponse.json(result, { status: 409 })
+  }
+
+  const insertPayload: Record<string, unknown> = {
+    qtyRequested,
+    jobCardId,
+    lotNumber: lotNumber ?? null,
+  }
+  if (result.fifoOverrideReason) {
+    const msg = fifoOverrideAuditMessage(actor, result.fifoOverrideReason)
+    insertPayload.fifoOverrideAudit = msg
+    insertPayload.fifoOverrideReason = result.fifoOverrideReason
+    await logIndustrialStatusChange({
       userId: user!.id,
-      action: 'INSERT',
-      tableName: 'sheet_issue_records',
-      recordId: jobCardId,
-      newValue: { qtyRequested, jobCardId },
+      action: 'stores_fifo_override',
+      module: 'Inventory',
+      recordId: result.recordId,
+      operatorLabel: actor,
+      payload: { message: msg },
     })
   }
 
-  return NextResponse.json(result, { status: result.success ? 200 : 409 })
+  await createAuditLog({
+    userId: user!.id,
+    action: 'INSERT',
+    tableName: 'sheet_issue_records',
+    recordId: result.recordId,
+    newValue: insertPayload,
+  })
+
+  return NextResponse.json({
+    success: true,
+    message: result.message,
+    remaining: result.remaining,
+    issuedQty: result.issuedQty,
+  })
 }

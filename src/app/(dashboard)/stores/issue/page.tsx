@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Html5Qrcode } from 'html5-qrcode'
@@ -21,6 +21,27 @@ type BomLineInfo = {
   remaining: number
 }
 
+type FifoSpecDto = {
+  gsm: number
+  boardNorm: string
+  paperTypeNorm: string
+  sheetSizeNorm: string
+}
+
+type FifoCheckResponse = {
+  fifoSpec: FifoSpecDto | null
+  violation: boolean
+  olderBatches: {
+    id: string
+    lotNumber: string | null
+    receiptDate: string
+    ageDays: number
+    qtySheets: number
+  }[]
+  selectedReceiptDate: string | null
+  message?: string
+}
+
 type JobContext = {
   type?: 'job' | 'job_card'
   id: string
@@ -28,6 +49,7 @@ type JobContext = {
   productName: string
   customerName: string
   bomLines: BomLineInfo[]
+  fifoSpec?: FifoSpecDto | null
 }
 
 const REASON_CODES = [
@@ -62,6 +84,9 @@ export default function StoresIssuePage() {
   } | null>(null)
   const [excessSubmitting, setExcessSubmitting] = useState(false)
   const [pollingApproval, setPollingApproval] = useState<string | null>(null)
+  const [fifoJobCardCheck, setFifoJobCardCheck] = useState<FifoCheckResponse | null>(null)
+  const [fifoSkipReason, setFifoSkipReason] = useState('')
+  const [fifoDrawerDismissed, setFifoDrawerDismissed] = useState(false)
 
   const contextSearch = useAutoPopulate<IssueContextOption>({
     storageKey: 'issue-job-card',
@@ -238,6 +263,51 @@ export default function StoresIssuePage() {
     return () => clearInterval(t)
   }, [pollingApproval, jobContext])
 
+  const jobCardLotKey = useMemo(() => {
+    if (!jobContext || jobContext.type !== 'job_card') return ''
+    const lineId = jobContext.bomLines[0]?.id
+    if (!lineId) return ''
+    return `${lineId}:${(lotNumber[lineId] ?? '').trim()}`
+  }, [jobContext, lotNumber])
+
+  useEffect(() => {
+    setFifoSkipReason('')
+  }, [jobCardLotKey])
+
+  useEffect(() => {
+    if (!fifoJobCardCheck?.violation) setFifoDrawerDismissed(false)
+  }, [fifoJobCardCheck?.violation])
+
+  useEffect(() => {
+    if (!jobContext || jobContext.type !== 'job_card') {
+      setFifoJobCardCheck(null)
+      return
+    }
+    const lineId = jobContext.bomLines[0]?.id
+    const lot = (lineId ? lotNumber[lineId] ?? '' : '').trim()
+    if (!lineId || !lot) {
+      setFifoJobCardCheck(null)
+      return
+    }
+    const ac = new AbortController()
+    const t = window.setTimeout(() => {
+      fetch(
+        `/api/inventory/fifo-check?jobCardId=${encodeURIComponent(jobContext.id)}&lotNumber=${encodeURIComponent(lot)}`,
+        { signal: ac.signal },
+      )
+        .then((r) => r.json())
+        .then((data: FifoCheckResponse) => {
+          setFifoJobCardCheck(data)
+          if (data.violation) setFifoDrawerDismissed(false)
+        })
+        .catch(() => {})
+    }, 400)
+    return () => {
+      window.clearTimeout(t)
+      ac.abort()
+    }
+  }, [jobContext?.id, jobContext?.type, lotNumber])
+
   async function handleIssue(lineId: string) {
     if (!jobContext) return
     const qtyStr = issueQty[lineId]?.trim()
@@ -252,7 +322,12 @@ export default function StoresIssuePage() {
       const isJobCard = jobContext.type === 'job_card' || line.type === 'job_card'
       const url = isJobCard ? '/api/sheet-issues/job-card-issue' : '/api/sheet-issues/attempt'
       const body = isJobCard
-        ? { jobCardId: lineId, qtyRequested: qty, lotNumber: lotNumber[lineId] || undefined }
+        ? {
+            jobCardId: lineId,
+            qtyRequested: qty,
+            lotNumber: lotNumber[lineId] || undefined,
+            ...(fifoJobCardCheck?.violation ? { fifoSkipReason: fifoSkipReason.trim() } : {}),
+          }
         : { bomLineId: lineId, qtyRequested: qty, lotNumber: lotNumber[lineId] || undefined }
 
       const res = await fetch(url, {
@@ -264,8 +339,25 @@ export default function StoresIssuePage() {
       if (result.success) {
         toast.success(result.message)
         setIssueQty((prev) => ({ ...prev, [lineId]: '' }))
+        setFifoSkipReason('')
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('ci-paper-consumed'))
         if (isJobCard) fetchJobCardContext(jobContext.id)
         else fetchJobContext(jobContext.id)
+      } else if (res.status === 409 && result.fifoViolation) {
+        toast.error(result.message || 'FIFO violation — add a reason to skip.')
+        if (Array.isArray(result.olderBatches)) {
+          setFifoJobCardCheck((prev) =>
+            prev
+              ? { ...prev, violation: true, olderBatches: result.olderBatches }
+              : {
+                  fifoSpec: jobContext.fifoSpec ?? null,
+                  violation: true,
+                  olderBatches: result.olderBatches,
+                  selectedReceiptDate: null,
+                },
+          )
+        }
+        setFifoDrawerDismissed(false)
       } else {
         if (result.excessRequestId) {
           setHardStop({
@@ -328,9 +420,86 @@ export default function StoresIssuePage() {
     return 'text-green-400'
   }
 
+  const showFifoDrawer =
+    jobContext?.type === 'job_card' &&
+    fifoJobCardCheck?.violation === true &&
+    !fifoDrawerDismissed
+
   return (
     <div className="min-h-screen bg-slate-900 text-white p-4 max-w-2xl mx-auto">
       <h1 className="text-xl font-bold mb-4">Stores — Sheet Issue</h1>
+
+      {showFifoDrawer && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-[60] bg-black/55"
+            aria-label="Close FIFO panel"
+            onClick={() => setFifoDrawerDismissed(true)}
+          />
+          <aside
+            className="fixed top-0 right-0 z-[70] h-full w-full max-w-md border-l border-red-600 bg-[#0a0a0a] shadow-2xl flex flex-col p-4 overflow-y-auto"
+            aria-labelledby="fifo-violation-title"
+          >
+            <div className="flex items-start justify-between gap-2 mb-3">
+              <h2 id="fifo-violation-title" className="text-lg font-bold text-red-400">
+                FIFO violation
+              </h2>
+              <button
+                type="button"
+                onClick={() => setFifoDrawerDismissed(true)}
+                className="rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white text-sm"
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-sm text-slate-300 mb-4">
+              Older stock exists for the same GSM, grade, and paper spec. Record a reason to use a newer lot (minimum 8
+              characters).
+            </p>
+            <p className="text-xs font-mono text-slate-500 mb-2">Older batches (gate date)</p>
+            <ul className="space-y-2 mb-4">
+              {fifoJobCardCheck.olderBatches.map((b) => (
+                <li
+                  key={b.id}
+                  className="rounded-lg border border-slate-700 bg-black/40 px-3 py-2 font-mono text-xs text-slate-200"
+                >
+                  <span className="text-amber-300">Lot {b.lotNumber ?? '—'}</span>
+                  <span className="block text-slate-400">
+                    {b.receiptDate} · {b.ageDays}d · {b.qtySheets} sh
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <label htmlFor="fifo-skip-reason" className="text-xs text-slate-500 mb-1 block">
+              Reason for skip
+            </label>
+            <textarea
+              id="fifo-skip-reason"
+              value={fifoSkipReason}
+              onChange={(e) => setFifoSkipReason(e.target.value)}
+              placeholder='e.g. "Older stock inaccessible in rack A3"'
+              rows={4}
+              className="w-full rounded-lg border border-slate-600 bg-black px-3 py-2 font-mono text-sm text-white placeholder:text-slate-600"
+            />
+            <p className="mt-2 text-xs text-slate-500">
+              {fifoSkipReason.trim().length < 8
+                ? `${Math.max(0, 8 - fifoSkipReason.trim().length)} more characters required to issue.`
+                : 'You can issue from the line below.'}
+            </p>
+          </aside>
+        </>
+      )}
+
+      {jobContext?.type === 'job_card' && fifoJobCardCheck?.violation && fifoDrawerDismissed && (
+        <button
+          type="button"
+          onClick={() => setFifoDrawerDismissed(false)}
+          className="fixed bottom-4 right-4 z-50 rounded-full border border-red-600 bg-red-950 px-4 py-2 text-sm font-medium text-red-200 shadow-lg animate-pulse"
+        >
+          FIFO violation — open panel
+        </button>
+      )}
 
       {/* Hard stop overlay — full red */}
       {hardStop && !excessForm && (
@@ -473,13 +642,20 @@ export default function StoresIssuePage() {
             <p className="font-semibold text-amber-400">{jobContext.jobNumber}</p>
             <p>{jobContext.productName}</p>
             <p className="text-slate-400 text-sm">{jobContext.customerName}</p>
+            {jobContext.type === 'job_card' && fifoJobCardCheck?.message && (
+              <p className="mt-2 text-xs text-amber-200/90 font-mono">{fifoJobCardCheck.message}</p>
+            )}
           </div>
 
           <div className="space-y-4">
             {jobContext.bomLines.map((line) => {
               const remaining = line.remaining
               const isLocked = remaining <= 0
-              const pct = line.qtyApproved > 0 ? (remaining / line.qtyApproved) * 100 : 0
+              const isJobCardLine = jobContext.type === 'job_card' || line.type === 'job_card'
+              const fifoBlocked =
+                isJobCardLine &&
+                fifoJobCardCheck?.violation === true &&
+                fifoSkipReason.trim().length < 8
               return (
                 <div
                   key={line.id}
@@ -534,12 +710,23 @@ export default function StoresIssuePage() {
                     <button
                       type="button"
                       onClick={() => handleIssue(line.id)}
-                      disabled={submitting || isLocked || !issueQty[line.id] || parseInt(issueQty[line.id], 10) > remaining}
+                      disabled={
+                        submitting ||
+                        isLocked ||
+                        !issueQty[line.id] ||
+                        parseInt(issueQty[line.id], 10) > remaining ||
+                        fifoBlocked
+                      }
                       className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-medium"
                     >
                       Issue
                     </button>
                   </div>
+                  {isJobCardLine && fifoJobCardCheck?.violation && (
+                    <p className="mt-2 text-xs text-red-300">
+                      FIFO: use the side panel to enter a skip reason before issuing this lot.
+                    </p>
+                  )}
                 </div>
               )
             })}

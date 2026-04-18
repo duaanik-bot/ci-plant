@@ -27,11 +27,28 @@ import {
   effectiveLogisticsLane,
   isInTransitStale,
 } from '@/lib/procurement-logistics-hud'
+import { isVendorPoPostDispatchReceiving } from '@/lib/vendor-po-post-dispatch'
 import {
   canAuthorizeShortCloseRole,
   shortCloseSnapshotsForVendorPos,
   type VendorPoShortCloseSnapshot,
 } from '@/lib/vendor-po-short-close'
+import { PROCUREMENT_SHORTAGE_AWAITING_REPLACEMENT } from '@/lib/vendor-po-shortage'
+import type { CashFlowTermsDto } from '@/lib/procurement-payment-terms'
+import {
+  buildCashFlowTermsFromVendorPo,
+  buildProvisionalCashFlowTerms,
+  loadBetterTermsIndex,
+  loadVendorPoCashRows,
+} from '@/lib/procurement-payment-terms'
+import { boardGradesMatch, normalizeBoardKey } from '@/lib/procurement-price-benchmark'
+import { computeLandedRatePerKg, freightPctOfBasicRate } from '@/lib/total-landed-cost'
+import {
+  aggregateAllocatedSheetsByBoardGsm,
+  aggregatePhysicalPaperByBoardGsm,
+  computeReorderRadarForRow,
+  type ReorderRadarSnapshot,
+} from '@/lib/reorder-radar'
 
 export const dynamic = 'force-dynamic'
 
@@ -108,6 +125,8 @@ export type ProcurementHudDto = {
     closedByName?: string | null
     closedReason?: string | null
   } | null
+  /** Primary mill PO is awaiting replacement material after GRN rejection. */
+  shortageAwaitingReplacement: boolean
 }
 
 type VpoHudRow = {
@@ -125,6 +144,7 @@ type VpoHudRow = {
   transporterName: string | null
   logisticsUpdatedAt: Date | null
   supplierName: string
+  procurementShortageFlag: string | null
 }
 
 function logisticsDtoFromVpo(vpo: VpoHudRow): NonNullable<ProcurementHudDto['logistics']> {
@@ -152,7 +172,7 @@ function resolvePrimaryVendorPoId(
     const ids = lineIdToVendorPoIds.get(c.poLineItemId) ?? []
     for (const vid of ids) {
       const v = vpoById.get(vid)
-      if (v?.status === 'dispatched') return vid
+      if (v && isVendorPoPostDispatchReceiving(v.status)) return vid
       if (v?.status === 'closed' && v.isShortClosed && !closedShortId) closedShortId = vid
     }
   }
@@ -176,7 +196,7 @@ function buildShortCloseHudDto(
       closedReason: primary.shortCloseReason,
     }
   }
-  if (primary.status !== 'dispatched' || primary.isShortClosed) return null
+  if (!isVendorPoPostDispatchReceiving(primary.status) || primary.isShortClosed) return null
   if (!s) return null
   return {
     isRecord: false,
@@ -203,6 +223,8 @@ function buildProcurementHud(
   const primary = primaryId ? vpoById.get(primaryId) ?? null : null
   const shortClose = buildShortCloseHudDto(primary, shortCloseByVpoId)
   const rollup = r.readinessRollup
+  const shortageAwaitingReplacement =
+    primary?.procurementShortageFlag === PROCUREMENT_SHORTAGE_AWAITING_REPLACEMENT
 
   if (primary?.status === 'closed' && primary.isShortClosed) {
     return {
@@ -214,6 +236,7 @@ function buildProcurementHud(
       primarySupplierName: primary.supplierName,
       logistics: null,
       shortClose,
+      shortageAwaitingReplacement: false,
     }
   }
 
@@ -232,6 +255,7 @@ function buildProcurementHud(
         primarySupplierName: primary.supplierName,
         logistics: log,
         shortClose,
+        shortageAwaitingReplacement,
       }
     }
     if (lane === 'in_transit') {
@@ -244,6 +268,7 @@ function buildProcurementHud(
         primarySupplierName: primary.supplierName,
         logistics: log,
         shortClose,
+        shortageAwaitingReplacement,
       }
     }
     if (lane === 'mill_dispatched') {
@@ -256,6 +281,7 @@ function buildProcurementHud(
         primarySupplierName: primary.supplierName,
         logistics: log,
         shortClose,
+        shortageAwaitingReplacement,
       }
     }
   }
@@ -280,6 +306,84 @@ function buildProcurementHud(
     primarySupplierName: primary?.supplierName ?? null,
     logistics: primary ? logisticsDtoFromVpo(primary) : null,
     shortClose: buildShortCloseHudDto(primary, shortCloseByVpoId),
+    shortageAwaitingReplacement,
+  }
+}
+
+export type LandedCostSnapshotDto = {
+  vendorMaterialLineId: string | null
+  vendorPoId: string | null
+  basicRatePerKg: number | null
+  landedRatePerKg: number | null
+  totalWeightKg: number
+  freightTotalInr: number
+  unloadingChargesInr: number
+  insuranceMiscInr: number
+  freightPctOfBasic: number | null
+}
+
+type VendorPoLineForLanded = {
+  id: string
+  boardGrade: string
+  gsm: number
+  linkedPoLineIds: unknown
+  totalWeightKg: unknown
+  ratePerKg: unknown
+  freightTotalInr: unknown
+  unloadingChargesInr: unknown
+  insuranceMiscInr: unknown
+  landedRatePerKg: unknown
+}
+
+function buildLandedCostSnapshot(
+  primaryVpoId: string | null,
+  boardType: string,
+  gsm: number,
+  requirementTotalKg: number,
+  vpoLinesById: Map<string, VendorPoLineForLanded[]>,
+): LandedCostSnapshotDto {
+  const empty: LandedCostSnapshotDto = {
+    vendorMaterialLineId: null,
+    vendorPoId: primaryVpoId,
+    basicRatePerKg: null,
+    landedRatePerKg: null,
+    totalWeightKg: requirementTotalKg,
+    freightTotalInr: 0,
+    unloadingChargesInr: 0,
+    insuranceMiscInr: 0,
+    freightPctOfBasic: null,
+  }
+  if (!primaryVpoId) return empty
+  const lines = vpoLinesById.get(primaryVpoId) ?? []
+  const norm = normalizeBoardKey(boardType)
+  const ln = lines.find((l) => l.gsm === gsm && boardGradesMatch(l.boardGrade, norm))
+  if (!ln) return empty
+  const w = Number(ln.totalWeightKg)
+  const basic = ln.ratePerKg != null ? Number(ln.ratePerKg) : null
+  const freight = Number(ln.freightTotalInr ?? 0)
+  const unload = Number(ln.unloadingChargesInr ?? 0)
+  const ins = Number(ln.insuranceMiscInr ?? 0)
+  let landed: number | null = null
+  if (basic != null && Number.isFinite(basic) && w > 0) {
+    landed = computeLandedRatePerKg({
+      basicRatePerKg: basic,
+      totalWeightKg: w,
+      freightTotalInr: freight,
+      unloadingChargesInr: unload,
+      insuranceMiscInr: ins,
+    })
+  }
+  const freightPct = basic != null && basic > 0 ? freightPctOfBasicRate(basic, w, freight) : null
+  return {
+    vendorMaterialLineId: ln.id,
+    vendorPoId: primaryVpoId,
+    basicRatePerKg: basic,
+    landedRatePerKg: landed,
+    totalWeightKg: w,
+    freightTotalInr: freight,
+    unloadingChargesInr: unload,
+    insuranceMiscInr: ins,
+    freightPctOfBasic: freightPct,
   }
 }
 
@@ -288,6 +392,9 @@ type RequirementRow = AggregatedMaterialRequirement & {
   weightVariance: WeightVarianceAgg | null
   supplierReliability: SupplierReliabilityDto | null
   procurementHud: ProcurementHudDto
+  cashFlowTerms: CashFlowTermsDto
+  landedCost: LandedCostSnapshotDto
+  reorderRadar: ReorderRadarSnapshot
 }
 
 function readinessSortKey(x: MaterialReadinessRollup): number {
@@ -387,10 +494,19 @@ function requirementMatchesQuery(
     String(r.gsm),
     r.grainDirection,
     r.sheetSizeLabel,
+    String(r.reorderRadar.netAvailable),
+    String(r.reorderRadar.physicalSheets),
+    String(r.reorderRadar.allocatedSheets),
+    r.reorderRadar.stockStatus,
+    r.reorderRadar.safetyStatus,
     supplierHay,
     r.suggestedSupplierName ?? '',
     lb?.vendorPoNumber ?? '',
     r.procurementHud.label,
+    r.cashFlowTerms.badgeLabel,
+    r.cashFlowTerms.projectedPaymentYmd ?? '',
+    String(r.landedCost.basicRatePerKg ?? ''),
+    String(r.landedCost.landedRatePerKg ?? ''),
     r.procurementHud.logistics?.lrNumber ?? '',
     r.procurementHud.logistics?.vehicleNumber ?? '',
     r.procurementHud.logistics?.transporterName ?? '',
@@ -424,15 +540,31 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get('q')?.trim().toLowerCase() ?? ''
   const riskParam = req.nextUrl.searchParams.get('risk')?.trim().toLowerCase() ?? ''
   const vendorRiskParam = req.nextUrl.searchParams.get('vendorRisk')?.trim().toLowerCase() ?? ''
+  const stockOutRiskParam = req.nextUrl.searchParams.get('stockOutRisk')?.trim().toLowerCase() ?? ''
 
   const [suppliers, vitals, vendorPosBase, rows, session] = await Promise.all([
     db.supplier.findMany({ where: { active: true } }),
     computeMaterialReadinessVitals(db),
     db.vendorMaterialPurchaseOrder.findMany({
-      where: { status: { in: ['draft', 'confirmed', 'dispatched'] } },
+      where: {
+        status: { in: ['draft', 'confirmed', 'dispatched', 'partially_received', 'fully_received'] },
+      },
       include: {
         supplier: { select: { id: true, name: true } },
-        lines: { select: { id: true, linkedPoLineIds: true, totalWeightKg: true } },
+        lines: {
+          select: {
+            id: true,
+            boardGrade: true,
+            gsm: true,
+            linkedPoLineIds: true,
+            totalWeightKg: true,
+            ratePerKg: true,
+            freightTotalInr: true,
+            unloadingChargesInr: true,
+            insuranceMiscInr: true,
+            landedRatePerKg: true,
+          },
+        },
       },
     }),
     db.materialQueue.findMany({
@@ -458,7 +590,20 @@ export async function GET(req: NextRequest) {
     where: { status: 'closed', isShortClosed: true },
     include: {
       supplier: { select: { id: true, name: true } },
-      lines: { select: { id: true, linkedPoLineIds: true, totalWeightKg: true } },
+      lines: {
+        select: {
+          id: true,
+          boardGrade: true,
+          gsm: true,
+          linkedPoLineIds: true,
+          totalWeightKg: true,
+          ratePerKg: true,
+          freightTotalInr: true,
+          unloadingChargesInr: true,
+          insuranceMiscInr: true,
+          landedRatePerKg: true,
+        },
+      },
     },
   })
   const shortClosedForWorkbench = shortClosedLinked.filter((vpo) =>
@@ -473,6 +618,10 @@ export async function GET(req: NextRequest) {
     ...shortClosedForWorkbench.filter((v) => !baseVpoIds.has(v.id)),
   ]
 
+  const vpoLinesById = new Map<string, VendorPoLineForLanded[]>(
+    vendorPosForIndex.map((v) => [v.id, v.lines as VendorPoLineForLanded[]]),
+  )
+
   const canAuthorizeShortClose = canAuthorizeShortCloseRole(session?.user?.role)
 
   const { byVendorPoId, lineIdToVendorPoIds, atRiskVendorPoCount } = await computeVendorPoLeadBuffers(
@@ -486,6 +635,15 @@ export async function GET(req: NextRequest) {
   const lineSupplierIndex = buildLineSupplierIndex(vendorPosForIndex)
 
   const shortCloseByVpoId = await shortCloseSnapshotsForVendorPos(db, vendorPosForIndex)
+
+  const supplierTermsById = new Map(suppliers.map((s) => [s.id, s.paymentTermsDays ?? 30]))
+  const [betterTermsIndex, cashByVpoId] = await Promise.all([
+    loadBetterTermsIndex(db),
+    loadVendorPoCashRows(
+      db,
+      vendorPosForIndex.map((v) => v.id),
+    ),
+  ])
 
   const vpoById = new Map<string, VpoHudRow>(
     vendorPosForIndex.map((v) => [
@@ -505,6 +663,7 @@ export async function GET(req: NextRequest) {
         transporterName: v.transporterName,
         logisticsUpdatedAt: v.logisticsUpdatedAt,
         supplierName: v.supplier.name,
+        procurementShortageFlag: v.procurementShortageFlag ?? null,
       },
     ]),
   )
@@ -527,13 +686,68 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const baseRequirements = aggregateFromStoredRequirements(flat, suppliers).map((r) => {
+  const aggregatedCore = aggregateFromStoredRequirements(flat, suppliers)
+  const [physicalByBg, policyRows] = await Promise.all([
+    aggregatePhysicalPaperByBoardGsm(db),
+    db.paperSpecReorderPolicy.findMany(),
+  ])
+  const policyByKey = new Map(policyRows.map((p) => [p.radarKey, p]))
+  const allocatedByBg = aggregateAllocatedSheetsByBoardGsm(aggregatedCore)
+
+  const baseRequirements = aggregatedCore.map((r) => {
+    const pol = policyByKey.get(r.key)
+    const reorderRadar = computeReorderRadarForRow({
+      boardType: r.boardType,
+      gsm: r.gsm,
+      radarKey: r.key,
+      totalSheetsDemand: r.totalSheets,
+      physicalByBoardGsm: physicalByBg,
+      allocatedByBoardGsm: allocatedByBg,
+      minimumThreshold: pol?.minimumThreshold ?? 0,
+      maximumBuffer: pol?.maximumBuffer ?? 0,
+    })
     const leadBuffer = worstLeadBufferForRequirement(r.contributions, lineIdToVendorPoIds, byVendorPoId)
+    const procurementHud = buildProcurementHud(r, leadBuffer, lineIdToVendorPoIds, vpoById, shortCloseByVpoId)
+    const primaryId = procurementHud.primaryVendorPoId
+    const cashFlowTerms: CashFlowTermsDto = (() => {
+      if (primaryId) {
+        const row = cashByVpoId.get(primaryId)
+        if (row) {
+          return buildCashFlowTermsFromVendorPo(
+            row,
+            procurementHud.primarySupplierName,
+            r.boardType,
+            r.gsm,
+            betterTermsIndex,
+          )
+        }
+      }
+      const sid = r.suggestedSupplierId
+      const days = sid != null ? supplierTermsById.get(sid) ?? 30 : 30
+      return buildProvisionalCashFlowTerms(
+        days,
+        procurementHud.primarySupplierName ?? r.suggestedSupplierName,
+        r.boardType,
+        r.gsm,
+        sid,
+        betterTermsIndex,
+      )
+    })()
+    const landedCost = buildLandedCostSnapshot(
+      primaryId,
+      r.boardType,
+      r.gsm,
+      r.totalWeightKg,
+      vpoLinesById,
+    )
     return {
       ...r,
+      reorderRadar,
       leadBuffer,
       supplierReliability: reliabilityForSupplier(r.suggestedSupplierId),
-      procurementHud: buildProcurementHud(r, leadBuffer, lineIdToVendorPoIds, vpoById, shortCloseByVpoId),
+      procurementHud,
+      cashFlowTerms,
+      landedCost,
     }
   })
 
@@ -561,7 +775,17 @@ export async function GET(req: NextRequest) {
     weightVariance: worstWeightVariance(r.contributions, reconByLine),
     supplierReliability: r.supplierReliability,
     procurementHud: r.procurementHud,
+    cashFlowTerms: r.cashFlowTerms,
+    landedCost: r.landedCost,
   }))
+
+  const stockOutRisksCount = (() => {
+    const keys = new Set<string>()
+    for (const r of baseRequirements) {
+      if (r.reorderRadar.isProcurementRisk) keys.add(r.reorderRadar.boardGsmKey)
+    }
+    return keys.size
+  })()
 
   if (q) {
     requirements = requirements.filter((r) => requirementMatchesQuery(r, q, lineSupplierIndex))
@@ -575,6 +799,10 @@ export async function GET(req: NextRequest) {
 
   if (vendorRiskParam === 'high') {
     requirements = requirements.filter((r) => r.supplierReliability?.grade === 'C')
+  }
+
+  if (stockOutRiskParam === 'high') {
+    requirements = requirements.filter((r) => r.reorderRadar.isProcurementRisk)
   }
 
   requirements.sort((a, b) => {
@@ -596,6 +824,7 @@ export async function GET(req: NextRequest) {
     vitals,
     atRiskVendorPoCount,
     vendorRiskIndexCount,
+    stockOutRisksCount,
     canAuthorizeShortClose,
     factoryTimeZone: 'Asia/Kolkata',
   })

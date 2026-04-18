@@ -1,7 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { AlertTriangle, History, Inbox, Send } from 'lucide-react'
 import { toast } from 'sonner'
+import { shadeCardAgeTier, shadeCardIsFadingStandard } from '@/lib/shade-card-age'
+import { SHADE_SUBSTRATE_VALUES, shadeSubstrateLabel } from '@/lib/shade-card-substrate'
 import type { HubToolType } from '@/lib/hub-types'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { custodyBadgeClass, custodyLabel } from '@/lib/inventory-hub-custody'
@@ -15,6 +19,9 @@ import {
   inventoryShadeExportColumns,
   inventoryShadeExcelExtraColumns,
 } from '@/lib/hub-ledger-export-columns'
+
+const shadeMono =
+  'font-[family-name:var(--font-designing-queue),ui-monospace,monospace] tabular-nums tracking-tight'
 
 type MachineOpt = { id: string; machineCode: string; name: string }
 type UserOpt = { id: string; name: string }
@@ -50,6 +57,7 @@ type EmbossRow = {
 type ShadeRow = {
   id: string
   shadeCode: string
+  productId?: string | null
   productMaster: string | null
   masterArtworkRef: string | null
   remarks: string | null
@@ -60,6 +68,15 @@ type ShadeRow = {
   locationLabel?: string
   entryDate?: string
   createdAt?: string
+  mfgDate?: string | null
+  currentAgeMonths?: number | null
+  product?: {
+    id: string
+    cartonName: string
+    artworkCode: string | null
+    customer: { id: string; name: string }
+  } | null
+  customer?: { id: string; name: string } | null
 }
 
 type CartonHit = {
@@ -102,10 +119,16 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
   const [vendorCondition, setVendorCondition] = useState<(typeof RECEIVE_CONDITIONS)[number]>('Good')
 
   const [addShadeOpen, setAddShadeOpen] = useState(false)
-  const [addProductLabel, setAddProductLabel] = useState('')
+  const [addProductId, setAddProductId] = useState<string | null>(null)
+  const [addSelectedLabel, setAddSelectedLabel] = useState('')
+  const [addMfgDate, setAddMfgDate] = useState('')
   const [addAwCode, setAddAwCode] = useState('')
   const [addQuantity, setAddQuantity] = useState(1)
   const [addRemarks, setAddRemarks] = useState('')
+  const [addSubstrate, setAddSubstrate] = useState<(typeof SHADE_SUBSTRATE_VALUES)[number]>('FBB')
+  const [addLabL, setAddLabL] = useState('')
+  const [addLabA, setAddLabA] = useState('')
+  const [addLabB, setAddLabB] = useState('')
   const [cartonQuery, setCartonQuery] = useState('')
   const [cartonHits, setCartonHits] = useState<CartonHit[]>([])
   const [cartonSearchLoading, setCartonSearchLoading] = useState(false)
@@ -219,18 +242,30 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
     )
   }, [emboss, search])
 
+  const shadeFadingStandardsCount = useMemo(() => {
+    const list = Array.isArray(shades) ? shades : []
+    return list.filter((s) => shadeCardIsFadingStandard(s.currentAgeMonths ?? null)).length
+  }, [shades])
+
   const filteredShades = useMemo(() => {
     const list = Array.isArray(shades) ? shades : []
     const q = search.trim().toLowerCase()
     if (!q) return list
-    return list.filter(
-      (s) =>
+    return list.filter((s) => {
+      const client = (s.product?.customer?.name ?? s.customer?.name ?? '').toLowerCase()
+      const prodName = (s.product?.cartonName ?? s.productMaster ?? '').toLowerCase()
+      const pid = (s.productId ?? '').toLowerCase()
+      return (
         (s?.shadeCode ?? '').toLowerCase().includes(q) ||
         (s?.productMaster?.toLowerCase().includes(q) ?? false) ||
         (s?.masterArtworkRef?.toLowerCase().includes(q) ?? false) ||
         (s?.remarks?.toLowerCase().includes(q) ?? false) ||
-        (s?.locationLabel?.toLowerCase().includes(q) ?? false),
-    )
+        (s?.locationLabel?.toLowerCase().includes(q) ?? false) ||
+        client.includes(q) ||
+        prodName.includes(q) ||
+        pid.includes(q)
+      )
+    })
   }, [shades, search])
 
   const inventoryExportFilterSummary = useMemo(() => {
@@ -260,7 +295,13 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
   }
 
   function openAddShadeModal() {
-    setAddProductLabel('')
+    setAddProductId(null)
+    setAddSelectedLabel('')
+    setAddMfgDate(new Date().toISOString().slice(0, 10))
+    setAddSubstrate('FBB')
+    setAddLabL('')
+    setAddLabA('')
+    setAddLabB('')
     setAddAwCode('')
     setAddQuantity(1)
     setAddRemarks('')
@@ -319,18 +360,23 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
   }
 
   async function submitAddShade() {
-    const productMaster = addProductLabel.trim()
-    const masterArtworkRef = addAwCode.trim()
-    if (!productMaster) {
-      toast.error('Product name is required')
+    if (!addProductId?.trim()) {
+      toast.error('Select a product from Product Master')
       return
     }
-    if (!masterArtworkRef) {
-      toast.error('AW code is required')
+    if (!addMfgDate.trim()) {
+      toast.error('Manufacturing date is required')
       return
     }
     if (addQuantity < 1 || addQuantity > 99) {
       toast.error('Quantity must be between 1 and 99')
+      return
+    }
+    const l = Number(addLabL)
+    const a = Number(addLabA)
+    const b = Number(addLabB)
+    if (!Number.isFinite(l) || !Number.isFinite(a) || !Number.isFinite(b)) {
+      toast.error('CIE L*, a*, b* are required (numbers)')
       return
     }
     try {
@@ -339,8 +385,13 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
         headers: { 'Content-Type': 'application/json' },
         body: safeJsonStringify({
           autoGenerateCode: true,
-          productMaster,
-          masterArtworkRef,
+          productId: addProductId.trim(),
+          mfgDate: addMfgDate.trim(),
+          substrateType: addSubstrate,
+          labL: l,
+          labA: a,
+          labB: b,
+          masterArtworkRef: addAwCode.trim() || null,
           quantity: addQuantity,
           remarks: addRemarks.trim() || null,
         }),
@@ -396,9 +447,13 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
         body,
       })
       const text = await r.text()
-      const j = safeJsonParse<{ error?: string; duplicate?: boolean }>(text, {})
+      const j = safeJsonParse<{ error?: string; duplicate?: boolean; code?: string }>(text, {})
       if (!r.ok) {
-        toast.error(j.error ?? 'Issue failed')
+        if (j.code === 'SHADE_EXPIRED') {
+          toast.error(j.error ?? 'Shade card expired — replace before issuing to floor')
+        } else {
+          toast.error(j.error ?? 'Issue failed')
+        }
         return
       }
       if (j.duplicate) toast.message('Duplicate issue ignored')
@@ -492,17 +547,32 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
   }
 
   return (
-    <div className="p-4 max-w-7xl mx-auto space-y-4">
+    <div
+      className={`p-4 max-w-7xl mx-auto space-y-4 ${
+        toolType === 'shade_cards' ? 'min-h-screen bg-[#000000] text-zinc-200' : ''
+      }`}
+    >
       <HubCategoryNav active={toolType} />
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h1 className="text-xl font-bold text-amber-400">{title}</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-xl font-bold text-amber-400">{title}</h1>
+          {toolType === 'shade_cards' ? (
+            <div
+              className={`rounded-lg border border-orange-900/40 bg-zinc-950 px-3 py-2 ${shadeMono}`}
+              title="ΔE Limit Enforced < 2.0"
+            >
+              <p className="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Fading Standards</p>
+              <p className="text-xl font-bold text-orange-400 tabular-nums leading-tight">{shadeFadingStandardsCount}</p>
+            </div>
+          ) : null}
+        </div>
         <div className="flex flex-col sm:flex-row gap-2 sm:items-center flex-wrap">
           {toolType === 'shade_cards' && (
             <button
               type="button"
               onClick={() => openAddShadeModal()}
-              className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium whitespace-nowrap"
+              className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium whitespace-nowrap font-sans"
             >
               + Add Shade Card
             </button>
@@ -697,70 +767,139 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
           </table>
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-700 overflow-x-auto">
-          <table className="w-full text-[11px] text-left leading-tight">
-            <thead className="bg-slate-800 text-slate-300">
+        <div
+          className={`rounded-lg border border-zinc-800 overflow-x-auto bg-black ring-1 ring-white/5 ${shadeMono}`}
+        >
+          <table className="w-full text-left text-[11px] leading-tight">
+            <thead className="bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500">
               <tr>
-                <th className="px-1.5 py-1.5 whitespace-nowrap">Entry date</th>
-                <th className="px-1.5 py-1.5 min-w-[9rem]">Client / product</th>
-                <th className="px-1.5 py-1.5 whitespace-nowrap">AW code</th>
-                <th className="px-1.5 py-1.5 whitespace-nowrap">Card status</th>
-                <th className="px-1.5 py-1.5 min-w-[7rem]">Current location</th>
-                <th className="px-1.5 py-1.5 min-w-[6rem]">Remarks</th>
-                <th className="px-1.5 py-1.5 whitespace-nowrap">Actions</th>
+                <th className="px-2 h-12 align-middle whitespace-nowrap">MFG / entry</th>
+                <th className="px-2 h-12 align-middle min-w-[11rem]">Client / product</th>
+                <th className="px-2 h-12 align-middle whitespace-nowrap">Card age</th>
+                <th className="px-2 h-12 align-middle whitespace-nowrap">Status / loc</th>
+                <th className="px-2 h-12 align-middle min-w-[5rem] max-w-[8rem]">Remarks</th>
+                <th className="px-2 h-12 align-middle w-[72px] text-right"> </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-zinc-900">
               {filteredShades.map((s) => {
                 const status = s.custodyStatus ?? ''
                 const label =
                   s.cardStatusLabel ??
                   (status === 'in_stock' ? 'In-Stock' : status === 'on_floor' ? 'Issued' : custodyLabel(status))
-                const loc = s.locationLabel ?? (status === 'in_stock' ? 'Rack' : status === 'at_vendor' ? 'Vendor' : s.currentHolder ?? '—')
+                const loc =
+                  s.locationLabel ??
+                  (status === 'in_stock' ? 'Rack' : status === 'at_vendor' ? 'Vendor' : s.currentHolder ?? '—')
                 const entry = s.entryDate ?? (s.createdAt ? s.createdAt.slice(0, 10) : '—')
+                const mfg = s.mfgDate?.trim()
+                const dateLine = mfg ? mfg : entry
+                const months = s.currentAgeMonths ?? null
+                const tier = shadeCardAgeTier(months)
+                const clientName = s.product?.customer?.name?.trim() || s.customer?.name?.trim() || '—'
+                const productName =
+                  s.product?.cartonName?.trim() || s.productMaster?.trim() || '—'
+                const productLinkId = s.product?.id ?? s.productId ?? null
+                const awCode =
+                  (s.masterArtworkRef?.trim() || s.product?.artworkCode?.trim() || '—') as string
+
                 return (
-                  <tr key={s.id} className="border-t border-slate-800">
-                    <td className="px-1.5 py-1 text-slate-400 whitespace-nowrap">{entry}</td>
-                    <td className="px-1.5 py-1">
-                      <button
-                        type="button"
-                        onClick={() => void openShadeAudit(s.id)}
-                        className="text-left text-sky-300 hover:text-sky-200 hover:underline block w-full"
-                      >
-                        <span className="block">{s.productMaster?.trim() || '—'}</span>
-                        {s.shadeCode ? (
-                          <span className="block text-[10px] font-mono text-amber-300/80 font-normal">{s.shadeCode}</span>
-                        ) : null}
-                      </button>
+                  <tr
+                    key={s.id}
+                    className={`h-12 max-h-12 hover:bg-zinc-950/80 ${
+                      tier === 'critical' ? 'bg-rose-900/40' : ''
+                    }`}
+                  >
+                    <td className={`px-2 align-middle text-zinc-400 whitespace-nowrap ${shadeMono}`}>
+                      {dateLine}
                     </td>
-                    <td className="px-1.5 py-1 font-mono text-slate-200">{s.masterArtworkRef ?? '—'}</td>
-                    <td className="px-1.5 py-1">
-                      <span
-                        className={`inline-block px-1.5 py-0.5 rounded border text-[10px] ${custodyBadgeClass(status)}`}
-                      >
-                        {label}
-                      </span>
+                    <td className="px-2 align-middle min-w-0">
+                      <div className="flex items-start gap-1.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => void openShadeAudit(s.id)}
+                          className="shrink-0 mt-0.5 text-zinc-500 hover:text-sky-400 p-0.5 rounded"
+                          title="Custody history"
+                          aria-label="Open custody history"
+                        >
+                          <History className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="min-w-0">
+                          <p className="font-bold text-emerald-400 truncate leading-tight">{clientName}</p>
+                          {productLinkId ? (
+                            <Link
+                              href={`/product-master/${productLinkId}`}
+                              className="text-sm text-zinc-100 hover:text-sky-300 hover:underline block truncate leading-snug"
+                            >
+                              {productName}
+                            </Link>
+                          ) : (
+                            <span className="text-sm text-zinc-100 block truncate leading-snug">{productName}</span>
+                          )}
+                          <p className={`text-[10px] text-zinc-500 mt-0.5 ${shadeMono}`}>
+                            Code: <span className="text-zinc-400">{awCode}</span>
+                            <span className="text-zinc-700"> | </span>
+                            ID: <span className="text-amber-300/90">{s.shadeCode}</span>
+                          </p>
+                        </div>
+                      </div>
                     </td>
-                    <td className="px-1.5 py-1 text-slate-300">{loc}</td>
-                    <td className="px-1.5 py-1 text-slate-400 max-w-[10rem] truncate" title={s.remarks ?? ''}>
+                    <td className="px-2 align-middle whitespace-nowrap">
+                      {months == null ? (
+                        <span className="text-zinc-600">—</span>
+                      ) : tier === 'fresh' ? (
+                        <span
+                          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/20 text-emerald-200 ${shadeMono}`}
+                        >
+                          {months} Months
+                        </span>
+                      ) : tier === 'reverify' ? (
+                        <span
+                          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold bg-orange-500/20 text-orange-200 animate-pulse ${shadeMono}`}
+                        >
+                          RE-VERIFY · {months} Mo
+                        </span>
+                      ) : (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-rose-500/30 text-rose-100 ${shadeMono}`}
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          CRITICAL: REPLACE · {months} Mo
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 align-middle">
+                      <div className="flex flex-wrap gap-1">
+                        <span className="inline-block rounded px-1.5 py-0.5 text-[9px] font-medium bg-slate-800 text-zinc-200 border border-zinc-700/80">
+                          {label}
+                        </span>
+                        <span
+                          className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-medium bg-slate-800 text-zinc-300 border border-zinc-700/80 ${shadeMono}`}
+                        >
+                          {loc}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-2 align-middle text-zinc-500 max-w-[8rem] truncate" title={s.remarks ?? ''}>
                       {s.remarks?.trim() || '—'}
                     </td>
-                    <td className="px-1.5 py-1 space-x-1 whitespace-nowrap">
+                    <td className="px-2 align-middle text-right whitespace-nowrap">
                       <button
                         type="button"
                         onClick={() => openIssue(s.id)}
                         disabled={status !== 'in_stock'}
-                        className="text-blue-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Issue to machine"
+                        className="inline-flex p-1.5 rounded text-sky-400 hover:bg-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
                       >
-                        Issue
+                        <Send className="h-4 w-4" />
                       </button>
                       <button
                         type="button"
                         onClick={() => openReceive(s.id)}
                         disabled={status !== 'on_floor'}
-                        className="text-emerald-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Receive to rack"
+                        className="inline-flex p-1.5 rounded text-emerald-400 hover:bg-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
                       >
-                        Receive
+                        <Inbox className="h-4 w-4" />
                       </button>
                     </td>
                   </tr>
@@ -908,58 +1047,77 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       )}
 
       {addShadeOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-lg rounded-lg border border-slate-600 bg-slate-900 p-4 space-y-3 text-sm max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-semibold text-white">Add shade card</h2>
-            <p className="text-xs text-slate-500">Codes are auto-generated (SC-####). Add one row per physical card or set quantity for a batch.</p>
-            <label className="block text-slate-300">
-              Product name (search cartons)
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div
+            className={`w-full max-w-lg rounded-xl border border-zinc-700 bg-black p-4 space-y-3 text-sm max-h-[90vh] overflow-y-auto ${shadeMono}`}
+          >
+            <h2 className="text-lg font-semibold text-amber-400">Add shade card</h2>
+            <p className="text-xs text-zinc-500">
+              Card codes auto-generate (SC-####). Status defaults to <span className="text-zinc-300">In-Stock</span>,
+              location <span className="text-zinc-300">Rack</span>.
+            </p>
+            <label className="block text-zinc-300 font-sans">
+              Manufacturing date <span className="text-rose-400">*</span>
+              <input
+                type="date"
+                required
+                value={addMfgDate}
+                onChange={(e) => setAddMfgDate(e.target.value)}
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white ${shadeMono}`}
+              />
+            </label>
+            <label className="block text-zinc-300 font-sans">
+              Product Master <span className="text-rose-400">*</span>
               <input
                 value={cartonQuery}
                 onChange={(e) => setCartonQuery(e.target.value)}
-                placeholder="Type at least 2 characters…"
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                placeholder="Search by product or customer (2+ characters)…"
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white ${shadeMono}`}
               />
             </label>
-            {cartonSearchLoading && <p className="text-xs text-slate-500">Searching…</p>}
+            {cartonSearchLoading && <p className="text-xs text-zinc-500 font-sans">Searching…</p>}
             {cartonHits.length > 0 && (
-              <ul className="max-h-36 overflow-y-auto rounded border border-slate-700 divide-y divide-slate-800 text-xs">
+              <ul className="max-h-36 overflow-y-auto rounded-lg border border-zinc-800 divide-y divide-zinc-900 text-xs font-sans">
                 {cartonHits.map((c) => (
                   <li key={c.id}>
                     <button
                       type="button"
-                      className="w-full text-left px-2 py-1.5 hover:bg-slate-800 text-slate-200"
+                      className="w-full text-left px-2 py-1.5 hover:bg-zinc-900 text-zinc-200"
                       onClick={() => {
-                        setAddProductLabel(`${c.customer.name} / ${c.cartonName}`)
+                        setAddProductId(c.id)
+                        setAddSelectedLabel(`${c.customer.name} · ${c.cartonName}`)
                         setAddAwCode((prev) => (prev.trim() ? prev : (c.artworkCode?.trim() ?? '')))
                       }}
                     >
-                      <span className="text-slate-400">{c.customer.name}</span> · {c.cartonName}
-                      {c.artworkCode ? <span className="ml-1 font-mono text-amber-200/80">({c.artworkCode})</span> : null}
+                      <span className="text-emerald-400 font-semibold">{c.customer.name}</span>
+                      <span className="text-zinc-500"> · </span>
+                      {c.cartonName}
+                      {c.artworkCode ? (
+                        <span className={`ml-1 text-amber-300/90 ${shadeMono}`}>({c.artworkCode})</span>
+                      ) : null}
                     </button>
                   </li>
                 ))}
               </ul>
             )}
-            <label className="block text-slate-300">
-              Client / product name
-              <input
-                value={addProductLabel}
-                onChange={(e) => setAddProductLabel(e.target.value)}
-                placeholder="e.g. Acme Pharma / Carton SKU"
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
-              />
-            </label>
-            <label className="block text-slate-300">
-              AW code
+            {addProductId ? (
+              <p className="text-xs text-zinc-400 font-sans rounded-lg border border-zinc-800 bg-zinc-950/80 px-2 py-1.5">
+                Selected: <span className="text-zinc-200">{addSelectedLabel}</span>
+                <span className={`block mt-0.5 text-[10px] text-zinc-600 ${shadeMono}`}>ID: {addProductId}</span>
+              </p>
+            ) : (
+              <p className="text-[10px] text-zinc-600 font-sans">Pick a row above to link Product Master.</p>
+            )}
+            <label className="block text-zinc-300 font-sans">
+              AW code <span className="text-zinc-500 font-normal">(optional override)</span>
               <input
                 value={addAwCode}
                 onChange={(e) => setAddAwCode(e.target.value)}
-                placeholder="Artwork / AW reference"
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white font-mono"
+                placeholder="Defaults from product master"
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white ${shadeMono}`}
               />
             </label>
-            <label className="block text-slate-300">
+            <label className="block text-zinc-300 font-sans">
               Quantity
               <input
                 type="number"
@@ -967,24 +1125,35 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 max={99}
                 value={addQuantity}
                 onChange={(e) => setAddQuantity(Math.min(99, Math.max(1, Number(e.target.value) || 1)))}
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white ${shadeMono}`}
               />
             </label>
-            <label className="block text-slate-300">
+            <label className="block text-zinc-300 font-sans">
               Remarks
               <textarea
                 value={addRemarks}
                 onChange={(e) => setAddRemarks(e.target.value)}
-                rows={2}
-                placeholder="Optional"
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white resize-y"
+                rows={3}
+                placeholder="Lab notes, batch, etc."
+                className="mt-1 w-full px-2 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-zinc-200 resize-y font-sans"
               />
             </label>
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setAddShadeOpen(false)} className="px-3 py-1.5 rounded border border-slate-600 text-slate-200">
+            <p className="text-[10px] text-zinc-600 font-sans border-t border-zinc-900 pt-2">
+              Color Integrity Audit Enabled - 12 Month Limit Enforced.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setAddShadeOpen(false)}
+                className="px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-900 font-sans"
+              >
                 Cancel
               </button>
-              <button type="button" onClick={() => void submitAddShade()} className="px-3 py-1.5 rounded bg-amber-600 text-white">
+              <button
+                type="button"
+                onClick={() => void submitAddShade()}
+                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-sans font-semibold"
+              >
                 Save
               </button>
             </div>
@@ -1025,6 +1194,12 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
           </div>
         </div>
       )}
+
+      {toolType === 'shade_cards' ? (
+        <p className="text-center text-[10px] text-zinc-600 pt-6 border-t border-zinc-900 font-sans">
+          Color Integrity Audit Enabled - 12 Month Limit Enforced.
+        </p>
+      ) : null}
     </div>
   )
 }

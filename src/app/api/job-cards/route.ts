@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
+import { computeJobYieldMetricsForCard } from '@/lib/production-yield'
 import { z } from 'zod'
 import { jobCardSchema } from '@/lib/validations'
 
@@ -22,6 +23,7 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get('status')
   const customerId = searchParams.get('customerId')
   const jobCardNumber = searchParams.get('jobCardNumber')
+  const yieldMetrics = searchParams.get('yieldMetrics') === '1' || searchParams.get('yieldMetrics') === 'true'
 
   const where: { status?: string; customerId?: string; jobCardNumber?: number } = {}
   if (status) where.status = status
@@ -41,21 +43,78 @@ export async function GET(req: NextRequest) {
   })
 
   const poLineByJcNumber = new Map<number, { id: string; cartonName: string; cartonSize: string | null; quantity: number }>()
+  type PoLineYield = NonNullable<Parameters<typeof computeJobYieldMetricsForCard>[2]>
+  const poLineForYield = new Map<number, PoLineYield>()
+
   if (list.length > 0) {
     const numbers = list.map((j) => j.jobCardNumber)
-    const lines = await db.poLineItem.findMany({
-      where: { jobCardNumber: { in: numbers } },
-      select: { jobCardNumber: true, id: true, cartonName: true, cartonSize: true, quantity: true },
-    })
-    lines.forEach((l) => {
-      if (l.jobCardNumber != null) poLineByJcNumber.set(l.jobCardNumber, l)
-    })
+    if (yieldMetrics) {
+      const lines = await db.poLineItem.findMany({
+        where: { jobCardNumber: { in: numbers } },
+        select: {
+          jobCardNumber: true,
+          id: true,
+          cartonName: true,
+          cartonSize: true,
+          quantity: true,
+          gsm: true,
+          dimLengthMm: true,
+          dimWidthMm: true,
+          carton: {
+            select: {
+              finishedLength: true,
+              finishedWidth: true,
+              blankLength: true,
+              blankWidth: true,
+              gsm: true,
+            },
+          },
+        },
+      })
+      for (const l of lines) {
+        if (l.jobCardNumber == null) continue
+        poLineByJcNumber.set(l.jobCardNumber, {
+          id: l.id,
+          cartonName: l.cartonName,
+          cartonSize: l.cartonSize,
+          quantity: l.quantity,
+        })
+        poLineForYield.set(l.jobCardNumber, {
+          gsm: l.gsm,
+          dimLengthMm: l.dimLengthMm,
+          dimWidthMm: l.dimWidthMm,
+          carton: l.carton,
+        })
+      }
+    } else {
+      const lines = await db.poLineItem.findMany({
+        where: { jobCardNumber: { in: numbers } },
+        select: { jobCardNumber: true, id: true, cartonName: true, cartonSize: true, quantity: true },
+      })
+      for (const l of lines) {
+        if (l.jobCardNumber == null) continue
+        poLineByJcNumber.set(l.jobCardNumber, {
+          id: l.id,
+          cartonName: l.cartonName,
+          cartonSize: l.cartonSize,
+          quantity: l.quantity,
+        })
+      }
+    }
   }
 
-  const mapped = list.map((jc) => ({
-    ...jc,
-    poLine: jc.jobCardNumber != null ? poLineByJcNumber.get(jc.jobCardNumber) ?? null : null,
-  }))
+  const mapped = await Promise.all(
+    list.map(async (jc) => {
+      const base = {
+        ...jc,
+        poLine: jc.jobCardNumber != null ? poLineByJcNumber.get(jc.jobCardNumber) ?? null : null,
+      }
+      if (!yieldMetrics) return base
+      const line = jc.jobCardNumber != null ? poLineForYield.get(jc.jobCardNumber) ?? null : null
+      const yieldM = await computeJobYieldMetricsForCard(db, jc, line)
+      return { ...base, yield: yieldM }
+    }),
+  )
 
   return NextResponse.json(mapped)
 }

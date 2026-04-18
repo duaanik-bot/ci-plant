@@ -125,7 +125,41 @@ export async function GET(req: NextRequest) {
       q,
     )
 
-  const [purchaseOrders, cartons, artworks, dyes] = await Promise.all([
+  const embossOr: Prisma.EmbossBlockWhereInput[] = []
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  for (const t of tokens) {
+    if (uuidRe.test(t)) {
+      embossOr.push({ id: t }, { cartonId: t })
+    }
+    embossOr.push(
+      { blockCode: { contains: t, mode } },
+      { blockType: { contains: t, mode } },
+      { blockMaterial: { contains: t, mode } },
+      { cartonName: { contains: t, mode } },
+      {
+        cartons: { some: { id: { contains: t, mode } } },
+      },
+      {
+        cartons: { some: { cartonName: { contains: t, mode } } },
+      },
+      {
+        cartons: { some: { customer: { name: { contains: t, mode } } } },
+      },
+    )
+  }
+
+  const shadeOr: Prisma.ShadeCardWhereInput[] = []
+  for (const t of tokens) {
+    shadeOr.push(
+      { shadeCode: { contains: t, mode } },
+      { productMaster: { contains: t, mode } },
+      { inkComponent: { contains: t, mode } },
+      { masterArtworkRef: { contains: t, mode } },
+      { customer: { name: { contains: t, mode } } },
+    )
+  }
+
+  const [purchaseOrders, cartons, artworks, dyes, embossBlocks, shadeCards] = await Promise.all([
     db.purchaseOrder.findMany({
       where: { OR: poOr },
       take: TAKE_EACH,
@@ -173,6 +207,28 @@ export async function GET(req: NextRequest) {
         dimLengthMm: true,
         dimWidthMm: true,
         dimHeightMm: true,
+      },
+    }),
+    db.embossBlock.findMany({
+      where: { active: true, OR: embossOr },
+      take: TAKE_EACH,
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        blockCode: true,
+        blockMaterial: true,
+        impressionCount: true,
+        cartonName: true,
+        cartonId: true,
+        cartons: { take: 12, select: { id: true, cartonName: true } },
+      },
+    }),
+    db.shadeCard.findMany({
+      where: { OR: shadeOr },
+      take: TAKE_EACH,
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        customer: { select: { name: true } },
       },
     }),
   ])
@@ -223,6 +279,42 @@ export async function GET(req: NextRequest) {
       } satisfies CommandPaletteResult
     }),
   ]
+
+  const embossResults: CommandPaletteResult[] = embossBlocks.map((b) => {
+    const linkedId = b.cartonId ?? b.cartons[0]?.id ?? null
+    const fromCarton = linkedId ? b.cartons.find((c) => c.id === linkedId) : undefined
+    const productName =
+      fromCarton?.cartonName?.trim() ||
+      b.cartons[0]?.cartonName?.trim() ||
+      b.cartonName?.trim() ||
+      b.blockCode
+    return {
+      id: `emboss-${b.id}`,
+      title: productName,
+      titleMono: false,
+      subtitle: [b.blockCode, b.blockMaterial, `${b.impressionCount.toLocaleString()} strikes`]
+        .filter(Boolean)
+        .join(' · '),
+      subtitleMono: true,
+      href: `/hub/blocks?focusBlock=${encodeURIComponent(b.id)}`,
+      statusBadge: {
+        text: 'Emboss',
+        className: 'bg-orange-800/70 text-orange-50 ring-1 ring-orange-400/30',
+      },
+    }
+  })
+
+  const shadeResults: CommandPaletteResult[] = shadeCards.map((s) => ({
+    id: `shade-${s.id}`,
+    title: s.shadeCode,
+    titleMono: true,
+    subtitle: [s.customer?.name, s.productMaster].filter(Boolean).join(' · ') || 'Shade card',
+    href: `/hub/shade-card-hub?q=${encodeURIComponent(q)}`,
+    statusBadge: {
+      text: 'Shade',
+      className: 'bg-violet-800/65 text-violet-50 ring-1 ring-violet-400/25',
+    },
+  }))
 
   const dieResults: CommandPaletteResult[] = dyes.map((d) => {
     const cond =
@@ -301,7 +393,7 @@ export async function GET(req: NextRequest) {
       {
         id: 'tooling' as const satisfies CommandPaletteGroupId,
         label: 'TOOLING',
-        results: dieResults,
+        results: [...dieResults, ...embossResults, ...shadeResults],
       },
     ] satisfies CommandPaletteGroup[]
   ).filter((g) => g.results.length > 0)

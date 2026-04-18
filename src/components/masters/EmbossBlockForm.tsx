@@ -6,6 +6,8 @@ import { toast } from 'sonner'
 
 const BLOCK_TYPES = ['Embossing', 'Leafing', 'Embossing + Leafing', 'Standard']
 const BLOCK_MATERIALS = ['Magnesium', 'Brass', 'Copper', 'Polymer', 'Other']
+/** Hub production spec — Brass / Magnesium / Copper (maps to `material_type` on save). */
+const HUB_MATERIAL_TYPES = ['', 'Brass', 'Magnesium', 'Copper'] as const
 const CONDITIONS = ['Good', 'Worn', 'Needs Cleaning', 'Damaged', 'Destroyed']
 
 export { BLOCK_TYPES, BLOCK_MATERIALS, CONDITIONS }
@@ -15,9 +17,12 @@ export type EmbossBlockFormData = {
   cartonName: string
   blockType: string
   blockMaterial: string
+  hubMaterialType: string
   blockSize: string
   embossDepth: string
   storageLocation: string
+  linkedDieId: string
+  artworkRefLink: string
   maxImpressions: string
   condition: string
   manufactureDate: string
@@ -30,10 +35,13 @@ const EMPTY: EmbossBlockFormData = {
   cartonName: '',
   blockType: BLOCK_TYPES[0],
   blockMaterial: BLOCK_MATERIALS[0],
+  hubMaterialType: '',
   blockSize: '',
   embossDepth: '',
   storageLocation: '',
-  maxImpressions: '100000',
+  linkedDieId: '',
+  artworkRefLink: '',
+  maxImpressions: '200000',
   condition: 'Good',
   manufactureDate: new Date().toISOString().slice(0, 10),
   replacesBlockId: '',
@@ -41,6 +49,7 @@ const EMPTY: EmbossBlockFormData = {
 }
 
 type BlockOption = { id: string; blockCode: string }
+type DieOption = { id: string; dyeNumber: number; dyeType: string }
 
 type Props = {
   mode: 'ADD' | 'EDIT'
@@ -50,6 +59,7 @@ type Props = {
 export default function EmbossBlockForm({ mode, initialData }: Props) {
   const router = useRouter()
   const [existingBlocks, setExistingBlocks] = useState<BlockOption[]>([])
+  const [dies, setDies] = useState<DieOption[]>([])
   const [saving, setSaving] = useState(false)
 
   const [f, setF] = useState<EmbossBlockFormData>(() => {
@@ -77,6 +87,19 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
     }
   }, [mode])
 
+  useEffect(() => {
+    fetch('/api/masters/dyes')
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setDies(
+            data.map((d: DieOption) => ({ id: d.id, dyeNumber: d.dyeNumber, dyeType: d.dyeType })),
+          )
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   function patch(key: keyof EmbossBlockFormData, value: string | boolean) {
     setF((p) => ({ ...p, [key]: value }))
   }
@@ -88,15 +111,21 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
 
     setSaving(true)
     try {
+      const relief = f.embossDepth ? Number(f.embossDepth) : null
+      const hubMat = f.hubMaterialType.trim() || null
       const payload = mode === 'ADD'
         ? {
             blockCode: f.blockCode.trim(),
             cartonName: f.cartonName.trim() || null,
             blockType: f.blockType,
             blockMaterial: f.blockMaterial,
+            materialType: hubMat,
             blockSize: f.blockSize.trim() || null,
-            embossDepth: f.embossDepth ? Number(f.embossDepth) : null,
+            embossDepth: relief,
+            reliefDepthMm: relief,
             storageLocation: f.storageLocation.trim() || null,
+            linkedDieId: f.linkedDieId.trim() || null,
+            artworkRefLink: f.artworkRefLink.trim() || null,
             maxImpressions: Number(f.maxImpressions) || 100000,
             condition: f.condition.trim() || 'Good',
             manufactureDate: f.manufactureDate || null,
@@ -106,9 +135,13 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
             cartonName: f.cartonName.trim() || null,
             blockType: f.blockType,
             blockMaterial: f.blockMaterial,
+            materialType: hubMat,
             blockSize: f.blockSize.trim() || null,
-            embossDepth: f.embossDepth ? Number(f.embossDepth) : null,
+            embossDepth: relief,
+            reliefDepthMm: relief,
             storageLocation: f.storageLocation.trim() || null,
+            linkedDieId: f.linkedDieId.trim() || null,
+            artworkRefLink: f.artworkRefLink.trim() || null,
             maxImpressions: Number(f.maxImpressions) || 100000,
             condition: f.condition,
             active: f.active,
@@ -175,16 +208,45 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
           </select>
         </div>
         <div>
+          <label className="block text-slate-400 mb-1">Hub material type (Brass / Mg / Cu)</label>
+          <select value={f.hubMaterialType} onChange={(e) => patch('hubMaterialType', e.target.value)} className={cls}>
+            {HUB_MATERIAL_TYPES.map((m, i) => (
+              <option key={i} value={m}>{m ? m : '— Same as material —'}</option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="block text-slate-400 mb-1">Block size</label>
           <input type="text" value={f.blockSize} onChange={(e) => patch('blockSize', e.target.value)} className={cls} placeholder="e.g. 24x18" />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Emboss depth (mm)</label>
+          <label className="block text-slate-400 mb-1">Relief depth (mm)</label>
           <input type="number" step="0.1" value={f.embossDepth} onChange={(e) => patch('embossDepth', e.target.value)} className={cls} />
         </div>
         <div>
           <label className="block text-slate-400 mb-1">Storage location</label>
           <input type="text" value={f.storageLocation} onChange={(e) => patch('storageLocation', e.target.value)} className={cls} />
+        </div>
+        <div className="md:col-span-2">
+          <label className="block text-slate-400 mb-1">Linked die (production kit)</label>
+          <select value={f.linkedDieId} onChange={(e) => patch('linkedDieId', e.target.value)} className={cls}>
+            <option value="">None</option>
+            {dies.map((d) => (
+              <option key={d.id} value={d.id}>
+                DYE-{d.dyeNumber} · {d.dyeType}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="md:col-span-2">
+          <label className="block text-slate-400 mb-1">Artwork reference (approved PDF URL)</label>
+          <input
+            type="url"
+            value={f.artworkRefLink}
+            onChange={(e) => patch('artworkRefLink', e.target.value)}
+            className={cls}
+            placeholder="https://…"
+          />
         </div>
         <div>
           <label className="block text-slate-400 mb-1">Target max impressions</label>
