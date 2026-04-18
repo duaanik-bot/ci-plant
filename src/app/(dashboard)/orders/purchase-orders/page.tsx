@@ -12,6 +12,10 @@ import {
   purchaseOrdersMatchingDeepQuery,
 } from '@/lib/po-list-deep-filter'
 import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
+import {
+  INDUSTRIAL_PRIORITY_ROW_CLASS,
+  INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
+} from '@/lib/industrial-priority-ui'
 
 type LineItem = {
   id: string
@@ -787,7 +791,11 @@ export default function PurchaseOrdersPage() {
                     }
                   }}
                   className={`group/po cursor-pointer border-b border-slate-800/80 transition-[background,box-shadow] duration-150 ${
-                    idx % 2 === 0 ? 'bg-[#0B0F1A]' : 'bg-[#161B26]'
+                    po.isPriority === true
+                      ? INDUSTRIAL_PRIORITY_ROW_CLASS
+                      : idx % 2 === 0
+                        ? 'bg-[#0B0F1A]'
+                        : 'bg-[#161B26]'
                   } hover:brightness-110 hover:shadow-[inset_0_0_0_1px_rgba(251,191,36,0.22),0_0_12px_rgba(251,191,36,0.06)]`}
                 >
                   <td className="px-0.5 py-px align-middle text-center">
@@ -803,7 +811,7 @@ export default function PurchaseOrdersPage() {
                       <Star
                         className={`h-3.5 w-3.5 ${
                           po.isPriority === true
-                            ? 'fill-amber-400 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.55)]'
+                            ? INDUSTRIAL_PRIORITY_STAR_ICON_CLASS
                             : 'text-slate-500 group-hover/po:text-slate-400'
                         }`}
                         strokeWidth={2}

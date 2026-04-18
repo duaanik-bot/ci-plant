@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Suspense, useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { Star } from 'lucide-react'
 import { toast } from 'sonner'
@@ -52,7 +53,10 @@ type StockStateItem = {
 
 type JobCardOpt = { id: string; jobCardNumber: number; customer?: { name: string } }
 
-export default function InventoryPage() {
+function InventoryPageContent() {
+  const searchParams = useSearchParams()
+  const ledgerGsm = searchParams.get('ledgerGsm')?.trim() ?? ''
+  const ledgerBoard = searchParams.get('ledgerBoard')?.trim() ?? ''
   const { data: session } = useSession()
   const [items, setItems] = useState<StockStateItem[]>([])
   const [alerts, setAlerts] = useState<StockStateItem[]>([])
@@ -74,19 +78,26 @@ export default function InventoryPage() {
   const [jobCards, setJobCards] = useState<JobCardOpt[]>([])
   const [jobSearch, setJobSearch] = useState('')
 
-  const loadPaperLedger = useCallback(async (customerPo: string) => {
-    const qs = customerPo.trim() ? `?customerPo=${encodeURIComponent(customerPo.trim())}` : ''
-    const res = await fetch(`/api/inventory/paper-ledger${qs}`)
-    const ledger = await res.json()
-    if (ledger && Array.isArray(ledger.rows)) {
-      setPaperLedger({
-        rows: ledger.rows as PaperLedgerRow[],
-        staleCapitalInr: Number(ledger.staleCapitalInr) || 0,
-      })
-    } else {
-      setPaperLedger({ rows: [], staleCapitalInr: 0 })
-    }
-  }, [])
+  const loadPaperLedger = useCallback(
+    async (opts: { customerPo: string; gsm?: string; board?: string }) => {
+      const params = new URLSearchParams()
+      if (opts.customerPo.trim()) params.set('customerPo', opts.customerPo.trim())
+      if (opts.gsm?.trim()) params.set('gsm', opts.gsm.trim())
+      if (opts.board?.trim()) params.set('board', opts.board.trim())
+      const qs = params.toString()
+      const res = await fetch(`/api/inventory/paper-ledger${qs ? `?${qs}` : ''}`)
+      const ledger = await res.json()
+      if (ledger && Array.isArray(ledger.rows)) {
+        setPaperLedger({
+          rows: ledger.rows as PaperLedgerRow[],
+          staleCapitalInr: Number(ledger.staleCapitalInr) || 0,
+        })
+      } else {
+        setPaperLedger({ rows: [], staleCapitalInr: 0 })
+      }
+    },
+    [],
+  )
 
   const reloadAll = useCallback(async () => {
     setLoading(true)
@@ -98,7 +109,11 @@ export default function InventoryPage() {
         fetch('/api/inventory/alerts')
           .then((r) => r.json())
           .then((al) => setAlerts(Array.isArray(al) ? al : [])),
-        loadPaperLedger(debouncedHubPo),
+        loadPaperLedger({
+          customerPo: debouncedHubPo,
+          gsm: ledgerGsm,
+          board: ledgerBoard,
+        }),
         fetch('/api/job-cards')
           .then((r) => r.json())
           .then((list) => setJobCards(Array.isArray(list) ? list : [])),
@@ -108,7 +123,7 @@ export default function InventoryPage() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedHubPo, loadPaperLedger])
+  }, [debouncedHubPo, ledgerGsm, ledgerBoard, loadPaperLedger])
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedHubPo(hubSearchPo), 320)
@@ -120,10 +135,15 @@ export default function InventoryPage() {
   }, [reloadAll])
 
   useEffect(() => {
-    const onPri = () => void loadPaperLedger(debouncedHubPo)
+    const onPri = () =>
+      void loadPaperLedger({
+        customerPo: debouncedHubPo,
+        gsm: ledgerGsm,
+        board: ledgerBoard,
+      })
     window.addEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
     return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
-  }, [debouncedHubPo, loadPaperLedger])
+  }, [debouncedHubPo, ledgerGsm, ledgerBoard, loadPaperLedger])
 
   useEffect(() => {
     if (!drawerRow) {
@@ -229,7 +249,7 @@ export default function InventoryPage() {
   return (
     <div className="p-4 max-w-6xl mx-auto">
       <section
-        id="warehouse-hub"
+        id="paper-ledger"
         className="mb-8 rounded-xl border border-slate-800 overflow-hidden bg-[#000000] text-slate-200"
       >
         <div className="p-4 md:p-6">
@@ -240,6 +260,11 @@ export default function InventoryPage() {
                 Director priority stars sort to the top. Search customer PO # to trace batches. JetBrains mono for
                 weights and PO numbers.
               </p>
+              {(ledgerGsm || ledgerBoard) && (
+                <p className={`text-xs text-amber-400/90 mt-2 ${ledgerMono}`}>
+                  Job card deep link · GSM {ledgerGsm || '—'} · Board {ledgerBoard || '—'}
+                </p>
+              )}
             </div>
             <div className="rounded-lg border border-red-900/70 bg-red-950/50 px-4 py-3 shrink-0">
               <p className="text-xs uppercase tracking-wide text-red-300/90">Stale capital</p>
@@ -649,5 +674,17 @@ export default function InventoryPage() {
         </table>
       </div>
     </div>
+  )
+}
+
+export default function InventoryPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-4 max-w-6xl mx-auto text-slate-400 bg-[#000000] min-h-[30vh]">Loading warehouse…</div>
+      }
+    >
+      <InventoryPageContent />
+    </Suspense>
   )
 }

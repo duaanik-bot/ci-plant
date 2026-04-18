@@ -5,6 +5,7 @@ import {
   CUSTODY_HUB_TRIAGE,
   CUSTODY_IN_STOCK,
   CUSTODY_ON_FLOOR,
+  CUSTODY_PREPARING_FOR_PRODUCTION,
 } from '@/lib/inventory-hub-custody'
 
 /** Die Hub — human-readable zone labels (event log + UI). */
@@ -30,6 +31,8 @@ export function dieHubZoneLabelFromCustody(status: string): string {
   switch (status) {
     case CUSTODY_HUB_TRIAGE:
       return DIE_HUB_ZONE.INCOMING_TRIAGE
+    case CUSTODY_PREPARING_FOR_PRODUCTION:
+      return 'Preparing for Production'
     case CUSTODY_AT_VENDOR:
       return DIE_HUB_ZONE.OUTSIDE_VENDOR
     case CUSTODY_IN_STOCK:
@@ -47,6 +50,8 @@ export function embossHubZoneLabelFromCustody(status: string): string {
   switch (status) {
     case CUSTODY_HUB_TRIAGE:
       return EMBOSS_HUB_ZONE.INCOMING_TRIAGE
+    case CUSTODY_PREPARING_FOR_PRODUCTION:
+      return 'Preparing for Production'
     case CUSTODY_HUB_ENGRAVING_QUEUE:
       return EMBOSS_HUB_ZONE.IN_HOUSE_ENGRAVING
     case CUSTODY_IN_STOCK:
@@ -72,6 +77,8 @@ export type ToolingLedgerZoneKey =
 export function dieLedgerZoneKeyFromCustody(status: string): ToolingLedgerZoneKey {
   switch (status) {
     case CUSTODY_HUB_TRIAGE:
+      return 'incoming_triage'
+    case CUSTODY_PREPARING_FOR_PRODUCTION:
       return 'incoming_triage'
     case CUSTODY_AT_VENDOR:
       return 'outside_vendor'
@@ -162,6 +169,7 @@ export function dieHubCustodyFromEventZone(z: string | null | undefined): string
     CUSTODY_IN_STOCK,
     CUSTODY_AT_VENDOR,
     CUSTODY_HUB_TRIAGE,
+    CUSTODY_PREPARING_FOR_PRODUCTION,
     CUSTODY_HUB_CUSTODY_READY,
     CUSTODY_ON_FLOOR,
   ]
@@ -180,6 +188,8 @@ export function dieHubCustodyFromEventZone(z: string | null | undefined): string
     case DIE_HUB_ZONE.ON_MACHINE_FLOOR:
     case 'On Floor':
       return CUSTODY_ON_FLOOR
+    case 'Preparing for Production':
+      return CUSTODY_PREPARING_FOR_PRODUCTION
     default:
       return null
   }
@@ -191,6 +201,7 @@ export function embossHubCustodyFromEventZone(z: string | null | undefined): str
   const raw = [
     CUSTODY_IN_STOCK,
     CUSTODY_HUB_TRIAGE,
+    CUSTODY_PREPARING_FOR_PRODUCTION,
     CUSTODY_HUB_CUSTODY_READY,
     CUSTODY_HUB_ENGRAVING_QUEUE,
     CUSTODY_ON_FLOOR,
@@ -208,6 +219,8 @@ export function embossHubCustodyFromEventZone(z: string | null | undefined): str
       return CUSTODY_HUB_CUSTODY_READY
     case DIE_HUB_ZONE.ON_MACHINE_FLOOR:
       return CUSTODY_ON_FLOOR
+    case 'Preparing for Production':
+      return CUSTODY_PREPARING_FOR_PRODUCTION
     default:
       return null
   }

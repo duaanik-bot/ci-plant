@@ -2,25 +2,66 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, Star } from 'lucide-react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { AlertTriangle, Download, RefreshCw, Star } from 'lucide-react'
+import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
+import { ShadeCardKanbanBoard } from '@/components/hub/ShadeCardKanbanBoard'
 import {
   ShadeCardSpotlightDrawer,
   type ShadeCardSpotlightRow,
 } from '@/components/hub/ShadeCardSpotlightDrawer'
-import { shadeCardAgeTier, shadeCardIsFadingStandard } from '@/lib/shade-card-age'
+import {
+  shadeCardAgeTier,
+  shadeCardIsApproachingHardExpiry,
+  shadeCardIsFadingStandard,
+} from '@/lib/shade-card-age'
+import { shadeCardKanbanColumn, type ShadeKanbanColumnId } from '@/lib/shade-card-kanban'
+import { ShadeSmartRemark } from '@/components/hub/ShadeSmartRemark'
+import {
+  INDUSTRIAL_PRIORITY_ROW_CLASS,
+  INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
+} from '@/lib/industrial-priority-ui'
 
 const mono =
   'font-[family-name:var(--font-designing-queue),ui-monospace,monospace] tabular-nums tracking-tight'
 
+const VIEW_STORAGE = 'shade-hub-view-mode'
+
+type HubLaneFilter = 'all' | ShadeKanbanColumnId
+
+function rowMatchesLaneFilter(row: ShadeCardSpotlightRow, lane: HubLaneFilter): boolean {
+  if (lane === 'all') return true
+  return shadeCardKanbanColumn(row) === lane
+}
+
 export default function ShadeCardHubPage() {
   const [q, setQ] = useState('')
+  const [laneFilter, setLaneFilter] = useState<HubLaneFilter>('all')
   const [rows, setRows] = useState<ShadeCardSpotlightRow[]>([])
   const [loading, setLoading] = useState(true)
   const [spotlight, setSpotlight] = useState<ShadeCardSpotlightRow | null>(null)
+  const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table')
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(VIEW_STORAGE)
+      if (v === 'kanban' || v === 'table') setViewMode(v)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_STORAGE, viewMode)
+    } catch {
+      /* ignore */
+    }
+  }, [viewMode])
+
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     try {
       const params = new URLSearchParams()
       if (q.trim()) params.set('q', q.trim())
@@ -30,7 +71,7 @@ export default function ShadeCardHubPage() {
     } catch {
       setRows([])
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
   }, [q])
 
@@ -39,19 +80,54 @@ export default function ShadeCardHubPage() {
     return () => window.clearTimeout(t)
   }, [load])
 
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load({ silent: true })
+    }, 12_000)
+    return () => window.clearInterval(id)
+  }, [load])
+
   const fadingStandardsCount = useMemo(
     () => rows.filter((r) => shadeCardIsFadingStandard(r.currentAgeMonths ?? null)).length,
     [rows],
   )
+
+  const filteredRows = useMemo(
+    () => rows.filter((r) => rowMatchesLaneFilter(r, laneFilter)),
+    [rows, laneFilter],
+  )
+
+  const exportPrimary = useCallback(async () => {
+    try {
+      const params = new URLSearchParams()
+      if (q.trim()) params.set('q', q.trim())
+      if (laneFilter !== 'all') params.set('lane', laneFilter)
+      const r = await fetch(`/api/hub/shade-card-hub/export?${params}`)
+      if (!r.ok) {
+        toast.error('Export failed')
+        return
+      }
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `shade-card-high-intensity-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('Export downloaded')
+    } catch {
+      toast.error('Export failed')
+    }
+  }, [q, laneFilter])
 
   return (
     <div className="min-h-screen bg-[#000000] text-zinc-200">
       <div className="max-w-[1600px] mx-auto p-3 md:p-4 space-y-4 pb-20">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-lg font-bold text-amber-400 tracking-tight">Shade Card Hub</h1>
-            <p className="text-[11px] text-zinc-500 mt-0.5">
-              Color ledger · director spotlight · 12-month card age policy · Product Master links
+            <h1 className="text-lg font-bold text-amber-400 tracking-tight font-sans">Shade Card Hub</h1>
+            <p className="text-[11px] text-zinc-500 mt-0.5 font-sans">
+              Live product sync (12s refresh) · 30.44 d/mo age · custody logged in spotlight
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -59,12 +135,48 @@ export default function ShadeCardHubPage() {
               className={`rounded-lg border border-orange-900/40 bg-zinc-950 px-3 py-2 ${mono}`}
               title="ΔE Limit Enforced < 2.0"
             >
-              <p className="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Fading Standards</p>
+              <p className="text-[9px] uppercase tracking-wider text-zinc-500">Fading Standards</p>
               <p className="text-xl font-bold text-orange-400 tabular-nums leading-tight">{fadingStandardsCount}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void exportPrimary()}
+              className={`inline-flex items-center gap-1.5 rounded-lg border-2 border-amber-500/70 bg-amber-950/30 px-3 py-1.5 text-xs font-semibold text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.15)] hover:bg-amber-950/50 ${mono}`}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              High-Intensity Export
+            </button>
+            <div
+              className={`flex rounded-lg border border-zinc-700 overflow-hidden p-0.5 bg-zinc-950 ${mono}`}
+              role="group"
+              aria-label="View mode"
+            >
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  viewMode === 'table'
+                    ? 'bg-zinc-800 text-white'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Table
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('kanban')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  viewMode === 'kanban'
+                    ? 'bg-zinc-800 text-white'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Kanban
+              </button>
             </div>
             <Link
               href="/hub/shade_cards"
-              className="text-xs px-3 py-1.5 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-900 font-sans"
+              className={`text-xs px-3 py-1.5 rounded-lg border border-zinc-600 text-zinc-300 hover:bg-zinc-900 ${mono}`}
             >
               Floor / custody
             </Link>
@@ -79,41 +191,64 @@ export default function ShadeCardHubPage() {
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search shade, product, customer…"
             className={`flex-1 min-w-[200px] max-w-md rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-white placeholder:text-zinc-600 ${mono}`}
+            aria-label="Search shade cards"
           />
+          <label className={`flex items-center gap-2 text-xs text-zinc-500 font-sans shrink-0`}>
+            <span className="hidden sm:inline">Filter</span>
+            <select
+              value={laneFilter}
+              onChange={(e) => setLaneFilter(e.target.value as HubLaneFilter)}
+              className={`rounded-lg border border-zinc-700 bg-black px-2 py-2 text-sm text-zinc-200 min-w-[11rem] ${mono}`}
+              aria-label="Filter by hub lane"
+            >
+              <option value="all">All lanes</option>
+              <option value="in_stock">In-Stock</option>
+              <option value="on_floor">On-Floor</option>
+              <option value="reverify">Re-Verify (9m+)</option>
+              <option value="expired">Expired (12m+)</option>
+            </select>
+          </label>
         </div>
 
-        <div className={`overflow-x-auto rounded-xl border border-zinc-800 bg-black ring-1 ring-white/5 ${mono}`}>
-          <table className="w-full text-left text-xs">
-            <thead className="bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500">
+        <AnimatePresence mode="wait">
+          {viewMode === 'table' ? (
+            <motion.div
+              key="table"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className={`overflow-x-auto rounded-xl border border-zinc-800 bg-[#000000] ${mono}`}
+            >
+          <p className="px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-600 border-b border-zinc-900 font-sans">
+            Audit ledger
+          </p>
+          <table className="w-full text-left text-xs bg-[#000000]">
+            <thead className="bg-[#000000] border-b border-zinc-900 text-[10px] uppercase tracking-wider text-zinc-500">
               <tr>
-                <th className="px-2 h-12 align-middle w-8">Pri</th>
-                <th className="px-2 h-12 align-middle whitespace-nowrap">Code</th>
-                <th className="px-2 h-12 align-middle min-w-[12rem]">Client / product</th>
-                <th className="px-2 h-12 align-middle whitespace-nowrap">Card age</th>
-                <th className="px-2 h-12 align-middle">Last verified</th>
-                <th className="px-2 h-12 align-middle font-sans" title="ΔE Limit Enforced < 2.0">
-                  ΔE
-                </th>
-                <th className="px-2 h-12 align-middle">Attachment</th>
-                <th className="px-2 h-12 align-middle">Custody</th>
-                <th className="px-2 h-12 align-middle"> </th>
+                <th className="px-3 h-[40px] align-middle min-w-[12rem] font-sans">Identity</th>
+                <th className="px-3 h-[40px] align-middle whitespace-nowrap min-w-[6rem]">Shade · AW</th>
+                <th className="px-3 h-[40px] align-middle whitespace-nowrap">Age (mo)</th>
+                <th className="px-3 h-[40px] align-middle font-sans whitespace-nowrap">Status</th>
+                <th className="px-3 h-[40px] align-middle font-sans min-w-[7rem]">Current Custody</th>
+                <th className="px-3 h-[40px] align-middle font-sans min-w-[8rem]">Remarks</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-900">
+            <tbody className="divide-y divide-zinc-900 bg-[#000000]">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-zinc-500 text-center font-sans">
+                  <td colSpan={6} className="px-3 py-8 text-zinc-500 text-center font-sans">
                     Loading…
                   </td>
                 </tr>
-              ) : rows.length === 0 ? (
+              ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-zinc-600 text-center font-sans">
-                    No shade cards match.
+                  <td colSpan={6} className="px-3 py-8 text-zinc-600 text-center font-sans">
+                    {rows.length === 0 ? 'No shade cards match.' : 'No cards in this lane for the current search.'}
                   </td>
                 </tr>
               ) : (
-                rows.map((r) => {
+                filteredRows.map((r) => {
                   const months = r.currentAgeMonths ?? null
                   const tier = shadeCardAgeTier(months)
                   const clientName =
@@ -121,115 +256,133 @@ export default function ShadeCardHubPage() {
                   const productName =
                     r.product?.cartonName?.trim() || r.productMaster?.trim() || '—'
                   const productLinkId = r.product?.id ?? r.productId ?? null
-                  const aw =
-                    r.masterArtworkRef?.trim() || r.product?.artworkCode?.trim() || '—'
+                  const aw = r.masterArtworkRef?.trim() || r.product?.artworkCode?.trim() || '—'
+                  const ageLabel = months == null ? '—' : months.toFixed(2)
+                  const approaching = shadeCardIsApproachingHardExpiry(months)
+
+                  const statusBadge =
+                    tier === 'expired'
+                      ? { label: 'Expired (12m+)', cls: 'bg-rose-950/80 text-rose-200 border-rose-500/40' }
+                      : tier === 'reverify'
+                        ? { label: 'Re-verify (9m+)', cls: 'bg-amber-950/60 text-amber-200 border-amber-600/40' }
+                        : r.custodyStatus === 'on_floor'
+                          ? { label: 'On-Floor', cls: 'bg-sky-950/50 text-sky-200 border-sky-700/40' }
+                          : { label: 'In-Stock', cls: 'bg-zinc-800 text-zinc-300 border-zinc-700' }
 
                   return (
                     <tr
                       key={r.id}
-                      className={`h-12 max-h-12 hover:bg-zinc-950/80 ${
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSpotlight(r)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          setSpotlight(r)
+                        }
+                      }}
+                      className={`h-[44px] max-h-[44px] hover:bg-zinc-950/50 cursor-pointer ${
                         r.fadeAlert ? 'ring-1 ring-red-900/40' : ''
+                      } ${tier === 'expired' ? 'bg-rose-500/20' : ''} ${
+                        r.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
                       }`}
-                      style={
-                        tier === 'expired' ? { backgroundColor: 'rgba(225, 29, 72, 0.2)' } : undefined
-                      }
                     >
-                      <td className="px-2 align-middle">
-                        {r.industrialPriority ? (
-                          <Star
-                            className="h-3.5 w-3.5 fill-amber-400 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.5)]"
-                          />
-                        ) : (
-                          <span className="text-zinc-700">·</span>
-                        )}
+                      <td className="px-3 align-middle min-w-0 font-sans">
+                        <div className="flex items-start gap-1.5 min-w-0">
+                          {r.industrialPriority ? (
+                            <Star
+                              className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
+                              aria-label="Industrial priority"
+                            />
+                          ) : (
+                            <span className="w-3.5 shrink-0" aria-hidden />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            {productLinkId ? (
+                              <Link
+                                href={`/product/${productLinkId}`}
+                                className="block min-w-0 rounded hover:bg-zinc-900/50 -m-0.5 p-0.5"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <p className="font-bold text-emerald-400 truncate leading-tight text-[11px]">
+                                  {clientName}
+                                </p>
+                                <p className="truncate text-sm text-white">{productName}</p>
+                              </Link>
+                            ) : (
+                              <>
+                                <p className="font-bold text-emerald-400 truncate leading-tight text-[11px]">
+                                  {clientName}
+                                </p>
+                                <p className="truncate text-sm text-white">{productName}</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </td>
-                      <td className={`px-2 align-middle text-amber-300/95 whitespace-nowrap ${mono}`}>
-                        {r.shadeCode}
+                      <td className={`px-3 align-middle text-zinc-300 ${mono}`}>
+                        <div className="leading-tight">
+                          <span className="whitespace-nowrap block text-[11px] text-amber-300/90">{r.shadeCode}</span>
+                          <span className="whitespace-nowrap text-zinc-400">{aw}</span>
+                        </div>
                       </td>
-                      <td className="px-2 align-middle min-w-0 font-sans">
-                        <p className="font-bold text-emerald-400 truncate leading-tight">{clientName}</p>
-                        {productLinkId ? (
-                          <Link
-                            href={`/product-master/${productLinkId}`}
-                            className="text-sm text-white hover:text-sky-300 hover:underline block truncate"
-                          >
-                            {productName}
-                          </Link>
-                        ) : (
-                          <span className="text-sm text-white block truncate">{productName}</span>
-                        )}
-                        <p className={`text-[10px] text-zinc-500 mt-0.5 ${mono}`}>
-                          <span className="text-zinc-400">{aw}</span>
-                          <span className="text-zinc-700"> | </span>
-                          <span className="text-amber-300/90">{r.shadeCode}</span>
-                        </p>
-                      </td>
-                      <td className="px-2 align-middle whitespace-nowrap">
+                      <td className="px-3 align-middle whitespace-nowrap">
                         {months == null ? (
                           <span className="text-zinc-600">—</span>
-                        ) : tier === 'fresh' ? (
-                          <span className={`text-[10px] font-medium text-emerald-500 ${mono}`}>
-                            {months.toFixed(2)} mo
-                          </span>
-                        ) : tier === 'reverify' ? (
-                          <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-orange-500/20 text-orange-200 animate-pulse">
-                            RE-VERIFY · {months.toFixed(2)} mo
-                          </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-rose-500/30 text-rose-100">
-                            <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
-                            EXPIRED
+                          <span className={`inline-flex items-center gap-1 ${mono}`}>
+                            {approaching ? (
+                              <span
+                                className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full border border-amber-500/60 bg-amber-500/10 px-0.5 text-[9px] font-black text-amber-500 animate-pulse"
+                                title="11–12 months: hard expiry window — open spotlight for audit trail."
+                              >
+                                !
+                              </span>
+                            ) : null}
+                            {tier === 'fresh' ? (
+                              <span className="text-[10px] font-medium text-emerald-500">{ageLabel}</span>
+                            ) : tier === 'reverify' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-500">
+                                <RefreshCw className="h-3 w-3 shrink-0 animate-pulse" aria-hidden />
+                                {ageLabel}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-rose-500">
+                                <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+                                {ageLabel}
+                              </span>
+                            )}
                           </span>
                         )}
                       </td>
-                      <td
-                        className={`px-2 align-middle whitespace-nowrap font-sans ${
-                          r.fadeAlert ? 'text-red-400 font-semibold' : 'text-zinc-400'
-                        }`}
-                      >
-                        <span className={mono}>{r.lastVerifiedAt ?? r.approvalDate ?? '—'}</span>
-                      </td>
-                      <td
-                        className={`px-2 align-middle whitespace-nowrap ${
-                          r.deltaEAlert ? 'text-red-400 animate-pulse' : 'text-emerald-400/90'
-                        }`}
-                      >
-                        {r.deltaEReading != null ? r.deltaEReading : '—'}
-                      </td>
-                      <td className="px-2 align-middle font-sans">
-                        {r.approvalAttachmentUrl ? (
-                          <a
-                            href={r.approvalAttachmentUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sky-400 hover:underline"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            PDF / image
-                          </a>
-                        ) : (
-                          <span className="text-zinc-600">—</span>
-                        )}
-                      </td>
-                      <td className="px-2 align-middle font-sans">
+                      <td className="px-3 align-middle font-sans">
                         <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-medium border border-zinc-700/80 ${
-                            tier === 'expired'
-                              ? 'bg-rose-950/80 text-rose-200'
-                              : 'bg-slate-800 text-zinc-200'
-                          }`}
+                          className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-medium border ${statusBadge.cls}`}
                         >
-                          {tier === 'expired' ? 'EXPIRED' : r.custodyStatus}
+                          {statusBadge.label}
                         </span>
                       </td>
-                      <td className="px-2 align-middle font-sans">
-                        <button
-                          type="button"
-                          onClick={() => setSpotlight(r)}
-                          className="text-[10px] font-semibold uppercase tracking-wide text-orange-400 hover:text-orange-300"
-                        >
-                          Spotlight
-                        </button>
+                      <td className="px-3 align-middle font-sans min-w-0">
+                        {r.custodyStatus === 'on_floor' &&
+                        (r.issuedOperator?.trim() || r.currentHolder?.trim()) ? (
+                          <span
+                            className={`inline-flex max-w-full truncate rounded-md border border-sky-400/80 bg-slate-950 px-2 py-0.5 text-[9px] font-semibold text-sky-100 ${mono}`}
+                            title="Current holder on floor"
+                          >
+                            {r.issuedOperator?.trim() || '—'} @ {r.currentHolder?.trim() || '—'}
+                          </span>
+                        ) : (
+                          <span className={`text-zinc-600 text-[10px] ${mono}`}>—</span>
+                        )}
+                      </td>
+                      <td className="px-3 align-middle max-w-[10rem]" onClick={(e) => e.stopPropagation()}>
+                        <ShadeSmartRemark
+                          text={r.remarks}
+                          editedBy={r.remarksEditedByName}
+                          editedAtIso={r.remarksEditedAt}
+                          updatedAtIso={r.updatedAt}
+                          monoClass={mono}
+                        />
                       </td>
                     </tr>
                   )
@@ -237,10 +390,42 @@ export default function ShadeCardHubPage() {
               )}
             </tbody>
           </table>
-        </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="kanban"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="rounded-xl border border-zinc-800 bg-[#000000] p-3 overflow-x-auto"
+            >
+              {loading ? (
+                <p className={`text-zinc-500 text-sm py-8 text-center font-sans ${mono}`}>Loading…</p>
+              ) : filteredRows.length === 0 ? (
+                <p className="text-zinc-600 text-sm py-8 text-center font-sans">
+                  {rows.length === 0 ? 'No shade cards match.' : 'No cards in this lane for the current search.'}
+                </p>
+              ) : (
+                <>
+                  <ShadeCardKanbanBoard
+                    rows={filteredRows}
+                    monoClass={mono}
+                    onCardClick={(r) => setSpotlight(r)}
+                    onDataChange={() => void load({ silent: true })}
+                  />
+                  <p className={`text-[10px] text-zinc-600 mt-2 font-sans ${mono}`}>
+                    Click card for spotlight. Drag the grip (left) to <strong className="text-zinc-400">On-Floor</strong> or{' '}
+                    <strong className="text-zinc-400">In-Stock</strong> to run issue / receive.
+                  </p>
+                </>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <p className="text-center text-[10px] text-zinc-600 pt-4 border-t border-zinc-900 font-sans">
-          Color Integrity Audit Enabled - 12 Month Limit Enforced.
+          Custody Handshake Verified - 100% Audit Traceability Active.
         </p>
       </div>
       <ShadeCardSpotlightDrawer

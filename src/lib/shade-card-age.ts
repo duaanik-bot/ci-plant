@@ -23,15 +23,20 @@ export type ShadeCardAgeTier = 'fresh' | 'reverify' | 'expired'
 
 export function shadeCardAgeTier(ageMonthsExact: number | null): ShadeCardAgeTier {
   if (ageMonthsExact == null) return 'fresh'
-  if (ageMonthsExact > 12) return 'expired'
+  if (ageMonthsExact >= 12) return 'expired'
   if (ageMonthsExact >= 9) return 'reverify'
   return 'fresh'
 }
 
-/** Block issue to floor when card is strictly older than 12 months (30.44-day basis). */
+/** Block issue to floor at 12+ months (30.44-day month basis). */
 export function shadeCardIsExpired(mfgDate: Date | null | undefined): boolean {
   const a = shadeCardAgeMonthsExact(mfgDate)
-  return a != null && a > 12
+  return a != null && a >= 12
+}
+
+/** 11–12 month window: hard-expiry warning (UI pulse). */
+export function shadeCardIsApproachingHardExpiry(ageMonthsExact: number | null): boolean {
+  return ageMonthsExact != null && ageMonthsExact >= 11 && ageMonthsExact < 12
 }
 
 /** KPI: cards past 9 months (re-verify + expired). */

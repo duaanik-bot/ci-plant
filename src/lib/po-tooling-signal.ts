@@ -5,6 +5,7 @@ import {
   CUSTODY_HUB_TRIAGE,
   CUSTODY_IN_STOCK,
   CUSTODY_ON_FLOOR,
+  CUSTODY_PREPARING_FOR_PRODUCTION,
 } from '@/lib/inventory-hub-custody'
 import { lineNeedsNewTooling, type PoLineScheduleInput } from '@/lib/po-delivery-schedule'
 import { dieHubZoneLabelFromCustody } from '@/lib/tooling-hub-zones'
@@ -44,6 +45,7 @@ function isPendingCustody(
   if (status === CUSTODY_HUB_ENGRAVING_QUEUE) return true
   if (hubFlagIsMaintenance(hubStatusFlag)) return true
   if (status === CUSTODY_HUB_TRIAGE) return true
+  if (status === CUSTODY_PREPARING_FOR_PRODUCTION) return true
   if (status === CUSTODY_HUB_CUSTODY_READY) return true
   if (status === CUSTODY_ON_FLOOR) return true
   if (status === CUSTODY_IN_STOCK && !conditionOk) return true

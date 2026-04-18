@@ -10,7 +10,7 @@ import {
   resolveKgPerSheetForPaper,
   warehouseBoardLabel,
 } from '@/lib/paper-interconnect'
-import { normalizeBoardKey } from '@/lib/procurement-price-benchmark'
+import { boardGradesMatch, normalizeBoardKey } from '@/lib/procurement-price-benchmark'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +24,10 @@ export async function GET(req: NextRequest) {
   if (error) return error
 
   const customerPoQ = req.nextUrl.searchParams.get('customerPo')?.trim().toLowerCase() ?? ''
+  const gsmParam = req.nextUrl.searchParams.get('gsm')?.trim() ?? ''
+  const boardParam = req.nextUrl.searchParams.get('board')?.trim() ?? ''
+  const gsmFilter = parseInt(gsmParam, 10)
+  const boardNorm = boardParam ? normalizeBoardKey(boardParam) : ''
 
   const [rows, staleCapitalInr, queues] = await Promise.all([
     db.paperWarehouse.findMany({
@@ -107,6 +111,18 @@ export async function GET(req: NextRequest) {
     payload = payload.filter((p) =>
       p.linkedCustomerPos.some((n) => n.toLowerCase().includes(customerPoQ)),
     )
+  }
+  if (Number.isFinite(gsmFilter) && gsmFilter > 0) {
+    payload = payload.filter((p) => p.gsm === gsmFilter)
+  }
+  if (boardNorm) {
+    payload = payload.filter((p) => {
+      const label = warehouseBoardLabel({
+        boardGrade: p.boardGrade,
+        paperType: p.paperType,
+      })
+      return boardGradesMatch(label, boardNorm)
+    })
   }
 
   payload.sort((a, b) => {

@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { logIndustrialStatusChange } from '@/lib/industrial-audit'
 import { HIGH_PRIORITY_ISSUE_AUDIT_MESSAGE } from '@/lib/paper-interconnect'
+import { syncJobCardFromPaperIssueSource } from '@/lib/allocated-stock-dims'
 
 export const dynamic = 'force-dynamic'
 
@@ -83,6 +84,10 @@ export async function POST(req: NextRequest) {
         supplierGsm: src.supplierGsm,
         status: src.status,
         originatedFromId: src.id,
+        sheetSizeLabel: src.sheetSizeLabel,
+        grainDirection: src.grainDirection,
+        warehouseBayId: src.warehouseBayId,
+        palletId: src.palletId,
       },
     })
 
@@ -132,6 +137,13 @@ export async function POST(req: NextRequest) {
     recordId: result.issueId,
     newValue: auditPayload,
   })
+
+  if (productionJobCardId) {
+    await syncJobCardFromPaperIssueSource(db, {
+      jobCardId: productionJobCardId,
+      sourcePaperWarehouseId: paperWarehouseId,
+    })
+  }
 
   return NextResponse.json({
     success: true,

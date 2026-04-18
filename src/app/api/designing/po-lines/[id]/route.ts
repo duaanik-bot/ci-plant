@@ -57,6 +57,14 @@ export async function GET(
               dimHeightMm: true,
             },
           },
+          embossBlock: {
+            select: {
+              id: true,
+              blockCode: true,
+              storageLocation: true,
+              custodyStatus: true,
+            },
+          },
         },
       })
     : null

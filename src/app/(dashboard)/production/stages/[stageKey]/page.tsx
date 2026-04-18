@@ -13,6 +13,10 @@ import { IndustrialModuleShell, industrialTableClassName } from '@/components/in
 import { IndustrialKpiTile } from '@/components/industrial/IndustrialKpiTile'
 import { AgeTickerCell } from '@/components/industrial/AgeTickerCell'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
+import {
+  INDUSTRIAL_PRIORITY_ROW_CLASS,
+  INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
+} from '@/lib/industrial-priority-ui'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { PRODUCTION_DOWNTIME_CATEGORIES } from '@/lib/production-oee-constants'
 
@@ -507,9 +511,7 @@ export default function ProductionStagePage() {
             {list.map((row) => {
               const { stageRecord, jobCard, idleHours } = row
               const pri =
-                jobCard.industrialPriority === true
-                  ? 'shadow-[inset_0_0_0_1px_rgba(251,146,60,0.45)] bg-orange-950/20'
-                  : ''
+                jobCard.industrialPriority === true ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
               const lock = jobCard.oee?.downtimeLock === true
               return (
                 <tr
@@ -517,7 +519,17 @@ export default function ProductionStagePage() {
                   className={`hover:bg-slate-900/50 cursor-pointer ${pri} ${lock ? 'ring-1 ring-rose-500/40' : ''}`}
                   onClick={() => setSpotlight(row)}
                 >
-                  <td className="px-4 py-2 font-mono text-amber-300">{jobCard.jobCardNumber}</td>
+                  <td className="px-4 py-2 font-mono text-amber-300">
+                    <div className="flex items-center gap-1">
+                      {jobCard.industrialPriority ? (
+                        <Star
+                          className={`h-3.5 w-3.5 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
+                          aria-label="Industrial priority"
+                        />
+                      ) : null}
+                      <span>{jobCard.jobCardNumber}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-2 text-slate-200">{jobCard.customer.name}</td>
                   <td className="px-4 py-2 text-slate-300 max-w-[200px] truncate" title={jobCard.productName ?? ''}>
                     {jobCard.productName ?? '—'}

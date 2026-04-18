@@ -60,6 +60,8 @@ export async function GET() {
         inkRecipeNotes: s.inkRecipeNotes,
         spectroScanLog: parseSpectroScanLog(s.spectroScanLog),
         remarks: s.remarks,
+        remarksEditedAt: s.remarksEditedAt?.toISOString() ?? null,
+        remarksEditedByName: s.remarksEditedByName,
         approvalDate: s.approvalDate?.toISOString().slice(0, 10) ?? null,
         mfgDate: mfg?.toISOString().slice(0, 10) ?? null,
         currentAgeMonths,
@@ -74,6 +76,7 @@ export async function GET() {
         issuedAt: s.issuedAt?.toISOString() ?? null,
         entryDate: s.createdAt.toISOString().slice(0, 10),
         createdAt: s.createdAt.toISOString(),
+        updatedAt: s.updatedAt.toISOString(),
         product: s.product,
         customer: s.customer,
       }
@@ -91,7 +94,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { error } = await requireAuth()
+    const { error, user } = await requireAuth()
     if (error) return error
 
     let raw = ''
@@ -126,6 +129,8 @@ export async function POST(req: NextRequest) {
       inkComponent,
       currentHolder,
     } = parsed.data
+
+    const editorName = (user?.name?.trim() || user?.email?.trim() || null) as string | null
 
     const carton = await db.carton.findUnique({
       where: { id: productId },
@@ -200,6 +205,9 @@ export async function POST(req: NextRequest) {
               approvalDate: approvalDate ? new Date(approvalDate) : null,
               inkComponent: inkComponent ?? null,
               remarks: remarks?.trim() || null,
+              ...(remarks?.trim()
+                ? { remarksEditedAt: new Date(), remarksEditedByName: editorName }
+                : {}),
             },
           })
           await createShadeCardEvent(tx, {

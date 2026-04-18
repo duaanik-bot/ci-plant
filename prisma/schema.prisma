@@ -1185,12 +1185,21 @@ model ProductionJobCard {
   embossBlockId      String?   @map("emboss_block_id")
   /// Shift-attributed operator (HR / incentive attribution).
   shiftOperatorUserId String?   @map("shift_operator_user_id")
+  /// FIFO-allocated main-warehouse batch at job creation (sheet dims + location).
+  allocatedPaperWarehouseId String? @map("allocated_paper_warehouse_id")
+  /// Denormalized: e.g. "Issued Stock: 20×30 in. | Grain: Long"
+  issuedStockDisplay        String? @map("issued_stock_display") @db.VarChar(280)
+  /// Pick pointer: "Pick from: {bay} | Pallet: {id}"
+  inventoryLocationPointer  String? @map("inventory_location_pointer") @db.VarChar(280)
+  /// unknown | ok | critical_mismatch | pre_trim_required (vs AW actualSheetSize)
+  grainFitStatus            String  @default("unknown") @map("grain_fit_status") @db.VarChar(32)
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
   customer    Customer               @relation(fields: [customerId], references: [id])
   shiftOperator User?                @relation("ShiftOperatorJobCard", fields: [shiftOperatorUserId], references: [id], onDelete: SetNull)
   machine     Machine?             @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  allocatedPaperWarehouse PaperWarehouse? @relation("JobCardAllocatedPaper", fields: [allocatedPaperWarehouseId], references: [id], onDelete: SetNull)
   plateSet    PlateStore?            @relation("PlateSetUsedBy", fields: [plateSetId], references: [id])
   embossBlock EmbossBlock?           @relation(fields: [embossBlockId], references: [id])
   stages      ProductionStageRecord[]
@@ -1199,6 +1208,7 @@ model ProductionJobCard {
   plateStoresCreatedForThis PlateStore[] @relation("PlateSetCreatedFor")
   downtimeLogs ProductionDowntimeLog[]
   oeeLedgerEntry ProductionOeeLedger?
+  shadeCardsIssued ShadeCard[] @relation("ShadeCardIssuedJobCard")
 
   @@map("production_job_cards")
 }
@@ -1550,10 +1560,14 @@ model ShadeCard {
   customerId        String?   @map("customer_id")
   inkComponent      String?   @map("ink_component")
   remarks           String?
+  /// Last manual remark edit (for hub tooltips).
+  remarksEditedAt     DateTime? @map("remarks_edited_at")
+  remarksEditedByName String?   @map("remarks_edited_by_name") @db.VarChar(120)
   currentHolder     String?   @map("current_holder")
   impressionCount   Int       @default(0) @map("impression_count")
   custodyStatus     String    @default("in_stock") @map("custody_status") @db.VarChar(32)
   issuedMachineId   String?   @map("issued_machine_id")
+  issuedJobCardId   String?   @map("issued_job_card_id")
   issuedOperator    String?   @map("issued_operator")
   issuedAt          DateTime? @map("issued_at")
   /// Physical card manufacture date — drives 9 / 12 month colour policy.
@@ -1577,12 +1591,14 @@ model ShadeCard {
 
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   product  Carton?   @relation("ShadeCardProductMaster", fields: [productId], references: [id], onDelete: SetNull)
+  issuedJobCard ProductionJobCard? @relation("ShadeCardIssuedJobCard", fields: [issuedJobCardId], references: [id], onDelete: SetNull)
   events   ShadeCardEvent[]
   cartons  Carton[]
   poLines  PoLineItem[]
 
   @@index([customerId])
   @@index([productId])
+  @@index([issuedJobCardId])
   @@map("shade_cards")
 }
 
@@ -1659,12 +1675,18 @@ model PaperWarehouse {
   qcInspectedBy     String?   @map("qc_inspected_by")
   qcInspectedAt     DateTime? @map("qc_inspected_at")
   status            String    @default("quarantine")
+  /// Mill / warehouse sheet size label (e.g. 20×30 in) for inventory-to-job sync.
+  sheetSizeLabel    String?   @map("sheet_size_label") @db.VarChar(80)
+  grainDirection    String?   @map("grain_direction") @db.VarChar(64)
+  warehouseBayId    String?   @map("warehouse_bay_id") @db.VarChar(64)
+  palletId          String?   @map("pallet_id") @db.VarChar(64)
   createdAt         DateTime  @default(now()) @map("created_at")
 
   originatedFrom PaperWarehouse?  @relation("PaperWhFloorSplit", fields: [originatedFromId], references: [id], onDelete: SetNull)
   floorSplits    PaperWarehouse[]   @relation("PaperWhFloorSplit")
   issuesSourced  PaperIssueToFloor[] @relation("PaperIssueSourceWh")
   issuesAsDest   PaperIssueToFloor[] @relation("PaperIssueDestWh")
+  jobCardsAllocated ProductionJobCard[] @relation("JobCardAllocatedPaper")
 
   @@map("paper_warehouse")
 }

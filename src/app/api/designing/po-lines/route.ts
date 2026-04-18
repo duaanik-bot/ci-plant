@@ -17,7 +17,12 @@ export async function GET(req: NextRequest) {
       ...(customerId ? { po: { customerId } } : {}),
       planningStatus: { in: ['planned', 'design_ready', 'job_card_created'] },
     },
-    orderBy: [{ directorPriority: 'desc' }, { directorHold: 'asc' }, { createdAt: 'desc' }],
+    orderBy: [
+      { directorPriority: 'desc' },
+      { po: { isPriority: 'desc' } },
+      { directorHold: 'asc' },
+      { createdAt: 'desc' },
+    ],
     include: {
       po: {
         select: {
@@ -25,6 +30,7 @@ export async function GET(req: NextRequest) {
           poNumber: true,
           status: true,
           poDate: true,
+          isPriority: true,
           customer: { select: { id: true, name: true, logoUrl: true } },
         },
       },

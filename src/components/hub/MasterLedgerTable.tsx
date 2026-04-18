@@ -11,6 +11,7 @@ import { hubLastActionLine } from '@/lib/hub-card-time'
 import type { PlateHubAuditContext } from '@/components/hub/JobAuditModal'
 import type { LedgerZoneKey } from '@/lib/plate-hub-ledger'
 import { ledgerRowPlateVolume } from '@/lib/hub-zone-metrics'
+import { INDUSTRIAL_PRIORITY_ROW_CLASS } from '@/lib/industrial-priority-ui'
 
 export type MasterLedgerRow = {
   entity: 'requirement' | 'plate'
@@ -153,10 +154,7 @@ export function MasterLedgerTable({
               const lastLine = hubLastActionLine(at) ?? '—'
               const sizeLine = hubPlateSizeCardLine(r.plateSize)
               const vol = ledgerRowPlateVolume(r)
-              const pri =
-                r.industrialPriority === true
-                  ? 'ring-2 ring-amber-500/50 shadow-[0_0_22px_rgba(234,88,12,0.22)] bg-amber-950/15'
-                  : ''
+              const pri = r.industrialPriority === true ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
               return (
                 <tr
                   key={`${r.entity}-${r.id}`}

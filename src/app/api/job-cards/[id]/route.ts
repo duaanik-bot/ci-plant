@@ -9,8 +9,25 @@ import {
 import { persistProductionOeeLedger } from '@/lib/production-oee'
 import { incrementEmbossStrikesOnJobClose } from '@/lib/production-emboss-strikes'
 import { z } from 'zod'
+import { computeBoardMaterialForJobCard } from '@/lib/job-card-board-material'
 
 export const dynamic = 'force-dynamic'
+
+function fmtMm(d: unknown): string {
+  const n = Number(d)
+  return Number.isFinite(n) ? String(Math.round(n)) : '—'
+}
+
+function monthsBetweenStart(from: Date, to: Date): number {
+  const a = new Date(from.getFullYear(), from.getMonth(), 1)
+  const b = new Date(to.getFullYear(), to.getMonth(), 1)
+  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())
+}
+
+function formatStorageParts(parts: (string | null | undefined)[]): string {
+  const s = parts.map((p) => (p != null ? String(p).trim() : '')).filter(Boolean)
+  return s.length ? s.join(' · ') : '—'
+}
 
 const stageUpdateSchema = z.object({
   id: z.string().uuid(),
@@ -63,11 +80,61 @@ export async function GET(
   })
   if (!jc) return NextResponse.json({ error: 'Job card not found' }, { status: 404 })
 
-  let poLine: Awaited<ReturnType<typeof db.poLineItem.findFirst>> & { carton?: { id: string; coatingType: string | null; laminateType: string | null; foilType: string | null; embossingLeafing: string | null; embossBlockId: string | null } | null } =
+  let poLine: Awaited<ReturnType<typeof db.poLineItem.findFirst>> & {
+    carton?: {
+      id: string
+      coatingType: string | null
+      laminateType: string | null
+      foilType: string | null
+      embossingLeafing: string | null
+      embossBlockId: string | null
+    } | null
+    materialProcurementStatus?: string
+    materialQueue?: {
+      sheetLengthMm: unknown
+      sheetWidthMm: unknown
+      ups: number
+      grainDirection: string
+      totalSheets: number
+      boardType: string
+      gsm: number
+    } | null
+    shadeCard?: {
+      id: string
+      shadeCode: string
+      mfgDate: Date | null
+      approvalDate: Date | null
+      createdAt: Date
+      custodyStatus: string
+    } | null
+  } =
     jc.jobCardNumber != null
       ? await db.poLineItem.findFirst({
           where: { jobCardNumber: jc.jobCardNumber },
-          include: { po: { select: { poNumber: true } } },
+          include: {
+            po: { select: { poNumber: true } },
+            materialQueue: {
+              select: {
+                sheetLengthMm: true,
+                sheetWidthMm: true,
+                ups: true,
+                grainDirection: true,
+                totalSheets: true,
+                boardType: true,
+                gsm: true,
+              },
+            },
+            shadeCard: {
+              select: {
+                id: true,
+                shadeCode: true,
+                mfgDate: true,
+                approvalDate: true,
+                createdAt: true,
+                custodyStatus: true,
+              },
+            },
+          },
         })
       : null
 
@@ -88,7 +155,114 @@ export async function GET(
     poLine = { ...poLine, carton: null }
   }
 
-  return NextResponse.json({ ...jc, poLine })
+  const mq = poLine?.materialQueue ?? null
+  const sheetSizeLabel =
+    mq != null ? `${fmtMm(mq.sheetLengthMm)}×${fmtMm(mq.sheetWidthMm)} mm` : null
+
+  const scRow = poLine?.shadeCard ?? null
+  let shadeCardBible: {
+    shadeCode: string
+    ageMonths: number
+    expired: boolean
+    custodyStatus: string
+  } | null = null
+  if (scRow) {
+    const ref = scRow.mfgDate ?? scRow.approvalDate ?? scRow.createdAt
+    const ageMonths = monthsBetweenStart(ref, new Date())
+    shadeCardBible = {
+      shadeCode: scRow.shadeCode,
+      ageMonths,
+      expired: ageMonths > 12,
+      custodyStatus: scRow.custodyStatus,
+    }
+  }
+
+  const [plateRow, dieRow, embossRow] = await Promise.all([
+    jc.plateSetId
+      ? db.plateStore.findUnique({
+          where: { id: jc.plateSetId },
+          select: {
+            plateSetCode: true,
+            rackNumber: true,
+            rackLocation: true,
+            slotNumber: true,
+            storageLocation: true,
+            status: true,
+          },
+        })
+      : Promise.resolve(null),
+    poLine?.dyeId
+      ? db.dye.findUnique({
+          where: { id: poLine.dyeId },
+          select: {
+            dyeNumber: true,
+            location: true,
+            custodyStatus: true,
+          },
+        })
+      : Promise.resolve(null),
+    jc.embossBlockId
+      ? db.embossBlock.findUnique({
+          where: { id: jc.embossBlockId },
+          select: {
+            blockCode: true,
+            storageLocation: true,
+            custodyStatus: true,
+          },
+        })
+      : Promise.resolve(null),
+  ])
+
+  const toolingKit = {
+    plate: plateRow
+      ? {
+          code: plateRow.plateSetCode,
+          coordinates: formatStorageParts([
+            plateRow.rackLocation,
+            plateRow.rackNumber ? `Rack ${plateRow.rackNumber}` : null,
+            plateRow.slotNumber ? `Slot ${plateRow.slotNumber}` : null,
+            plateRow.storageLocation,
+          ]),
+          hubStatus: plateRow.status,
+        }
+      : null,
+    die: dieRow
+      ? {
+          code: `#${dieRow.dyeNumber}`,
+          coordinates: formatStorageParts([dieRow.location]),
+          custodyStatus: dieRow.custodyStatus,
+        }
+      : null,
+    emboss: embossRow
+      ? {
+          code: embossRow.blockCode,
+          coordinates: formatStorageParts([embossRow.storageLocation]),
+          custodyStatus: embossRow.custodyStatus,
+        }
+      : null,
+    shade: shadeCardBible,
+  }
+
+  const productionBible = {
+    sheetSizeLabel,
+    ups: mq?.ups ?? null,
+    grainDirection: mq?.grainDirection ?? null,
+    toolingKit,
+    shadeCard: shadeCardBible,
+  }
+
+  const boardMaterial = await computeBoardMaterialForJobCard(
+    db,
+    { id: jc.id, totalSheets: jc.totalSheets, sheetsIssued: jc.sheetsIssued },
+    poLine
+      ? {
+          materialProcurementStatus: poLine.materialProcurementStatus,
+          materialQueue: poLine.materialQueue,
+        }
+      : null,
+  )
+
+  return NextResponse.json({ ...jc, poLine, productionBible, boardMaterial })
 }
 
 export async function PUT(
@@ -132,6 +306,20 @@ export async function PUT(
   const wastageSheets = data.wastageSheets ?? existing.wastageSheets
   const totalSheets = requiredSheets + wastageSheets
   const isClosing = data.status === 'closed' && existing.status !== 'closed'
+
+  const requestsRelease =
+    (data.qaReleased === true && !existing.qaReleased) ||
+    (data.status === 'qa_released' && existing.status !== 'qa_released') ||
+    (data.status === 'closed' && existing.status !== 'closed')
+  if (requestsRelease && existing.grainFitStatus === 'critical_mismatch') {
+    return NextResponse.json(
+      {
+        error:
+          'CRITICAL: STOCK SIZE MISMATCH — inventory sheet size is smaller than AW target sheet size. Resolve material or artwork before release.',
+      },
+      { status: 400 },
+    )
+  }
 
   const updated = await db.$transaction(async (tx) => {
     const header = await tx.productionJobCard.update({

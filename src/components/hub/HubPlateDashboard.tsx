@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { IndustrialKpiTile } from '@/components/industrial/IndustrialKpiTile'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
+import { INDUSTRIAL_PRIORITY_ROW_CLASS } from '@/lib/industrial-priority-ui'
 import { safeJsonParse, safeJsonParseArray, safeJsonStringify } from '@/lib/safe-json'
 import {
   hubChannelRowsFromLabels,
@@ -2413,9 +2414,7 @@ export default function HubPlateDashboard() {
                     <div
                       key={row.id}
                       className={`relative flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3 rounded-lg border border-gray-800 bg-black p-3 overflow-hidden transition-colors hover:border-blue-500/50 ${
-                        row.industrialPriority
-                          ? 'ring-2 ring-amber-500/55 shadow-[0_0_22px_rgba(234,88,12,0.28)]'
-                          : ''
+                        row.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
                       }`}
                     >
                       <PlateCountBadge
@@ -2601,9 +2600,7 @@ export default function HubPlateDashboard() {
                       <li
                         key={job.id}
                         className={`relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-black p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-14 ${
-                          job.industrialPriority
-                            ? 'ring-2 ring-amber-500/55 shadow-[0_0_22px_rgba(234,88,12,0.28)]'
-                            : ''
+                          job.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
                         }`}
                       >
                         <ShopfloorPlateAdjustTrigger
@@ -2743,9 +2740,7 @@ export default function HubPlateDashboard() {
                       <li
                         key={job.id}
                         className={`relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-black p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-14 ${
-                          job.industrialPriority
-                            ? 'ring-2 ring-amber-500/55 shadow-[0_0_22px_rgba(234,88,12,0.28)]'
-                            : ''
+                          job.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
                         }`}
                       >
                         <ShopfloorPlateAdjustTrigger

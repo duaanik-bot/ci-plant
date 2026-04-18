@@ -10,6 +10,7 @@ import type { ToolingHubAuditContext } from '@/components/hub/ToolingJobAuditMod
 import { DieMakeSwitcher } from '@/components/hub/die/DieMakeSwitcher'
 import { SimilarDiesModal, type SimilarDieMatch } from '@/components/hub/die/SimilarDiesModal'
 import { PastingStyleBadge } from '@/components/hub/PastingStyleBadge'
+import { INDUSTRIAL_PRIORITY_ROW_CLASS } from '@/lib/industrial-priority-ui'
 
 export type ToolingSimilarMatch = SimilarDieMatch
 
@@ -215,10 +216,7 @@ export function ToolingHubLedgerTable({
                     ? formatDistanceToNow(d, { addSuffix: true })
                     : '—'
                 const lastLine = hubLastActionLine(at) ?? '—'
-                const priorityRow =
-                  r.industrialPriority === true
-                    ? 'border-amber-500/50 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.25)] bg-amber-950/20'
-                    : ''
+                const priorityRow = r.industrialPriority === true ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
                 return (
                   <tr
                     key={`${r.kind}-${r.id}`}
@@ -319,10 +317,7 @@ export function ToolingHubLedgerTable({
                   Array.isArray(r.similarMatches) &&
                   r.similarMatches.length > 0
                 const rank = r.ledgerRank ?? idx + 1
-                const priorityRowDie =
-                  r.kind === 'die' && r.industrialPriority === true
-                    ? 'border-amber-500/50 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.25)] bg-amber-950/20'
-                    : ''
+                const priorityRowDie = r.industrialPriority === true ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
 
                 return (
                   <tr

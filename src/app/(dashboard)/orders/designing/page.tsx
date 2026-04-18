@@ -6,11 +6,14 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
+  ChevronDown,
+  ChevronUp,
   FileDown,
   ImageOff,
   Layers,
   Pencil,
   Search,
+  Star,
   X,
 } from 'lucide-react'
 import { parseDesignerCommand } from '@/lib/designer-command'
@@ -19,6 +22,14 @@ import {
   CommandPaletteTriggerIcon,
 } from '@/components/command-palette/CommandPalette'
 import { DEFAULT_PREPRESS_AUDIT_LEAD } from '@/lib/pre-press-defaults'
+import {
+  INDUSTRIAL_PRIORITY_ROW_CLASS,
+  INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
+} from '@/lib/industrial-priority-ui'
+import {
+  broadcastIndustrialPriorityChange,
+  INDUSTRIAL_PRIORITY_EVENT,
+} from '@/lib/industrial-priority-sync'
 
 type SpecOverrides = {
   assignedDesignerId?: string
@@ -48,6 +59,7 @@ type Row = {
     poNumber: string
     status: string
     poDate: string
+    isPriority?: boolean
     customer: { id: string; name: string; logoUrl?: string | null }
   }
   jobCard: {
@@ -301,6 +313,51 @@ function ArtworkPreviewCell({
   )
 }
 
+type AuditSortKey = 'days' | 'qty' | 'customer' | 'po'
+
+function rowIndustrialPriority(r: Row): boolean {
+  return r.po.isPriority === true || r.directorPriority === true
+}
+
+function SortHeader({
+  label,
+  column,
+  activeKey,
+  dir,
+  onSort,
+  className = '',
+}: {
+  label: string
+  column: AuditSortKey
+  activeKey: AuditSortKey | null
+  dir: 'asc' | 'desc'
+  onSort: (c: AuditSortKey) => void
+  className?: string
+}) {
+  const active = activeKey === column
+  return (
+    <th className={`px-1 py-1 ${className}`}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={`inline-flex items-center gap-0.5 ${mono} text-[12px] font-medium text-slate-500 hover:text-slate-400`}
+      >
+        {label}
+        <span className="inline-flex flex-col -space-y-1.5" aria-hidden>
+          <ChevronUp
+            className={`h-3 w-3 shrink-0 ${active && dir === 'asc' ? 'text-amber-500' : 'text-slate-600'}`}
+            strokeWidth={2}
+          />
+          <ChevronDown
+            className={`h-3 w-3 shrink-0 ${active && dir === 'desc' ? 'text-amber-500' : 'text-slate-600'}`}
+            strokeWidth={2}
+          />
+        </span>
+      </button>
+    </th>
+  )
+}
+
 function LightboxModal({ src, alt, onClose }: { src: string | null; alt: string; onClose: () => void }) {
   if (!src) return null
   return (
@@ -342,6 +399,9 @@ export default function DesigningQueuePage() {
   const [forwardingId, setForwardingId] = useState<string | null>(null)
   const [recallingPlanningId, setRecallingPlanningId] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
+  const [sortKey, setSortKey] = useState<AuditSortKey | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [priorityBusyPoId, setPriorityBusyPoId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -376,6 +436,14 @@ export default function DesigningQueuePage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  useEffect(() => {
+    const onPri = () => {
+      void load()
+    }
+    window.addEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
+    return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
+  }, [load])
+
   const userById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
 
   const filteredRows = useMemo(() => {
@@ -387,6 +455,88 @@ export default function DesigningQueuePage() {
         r.po.poNumber.toLowerCase().includes(q),
     )
   }, [rows, paletteQuery])
+
+  const cycleSort = useCallback((column: AuditSortKey) => {
+    setSortKey((prev) => {
+      if (prev === column) {
+        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+        return prev
+      }
+      setSortDir('asc')
+      return column
+    })
+  }, [])
+
+  const sortedRows = useMemo(() => {
+    const out = [...filteredRows]
+    const cmpSecondary = (a: Row, b: Row): number => {
+      if (sortKey === null) {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      }
+      let c = 0
+      switch (sortKey) {
+        case 'days': {
+          const da = daysInQueue(a.createdAt)
+          const db = daysInQueue(b.createdAt)
+          c = da - db
+          break
+        }
+        case 'qty':
+          c = a.quantity - b.quantity
+          break
+        case 'customer':
+          c = (a.po.customer.name || '').localeCompare(b.po.customer.name || '', undefined, {
+            sensitivity: 'base',
+          })
+          break
+        case 'po':
+          c = (a.po.poNumber || '').localeCompare(b.po.poNumber || '', undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          })
+          break
+      }
+      return sortDir === 'asc' ? c : -c
+    }
+    out.sort((a, b) => {
+      const pa = rowIndustrialPriority(a) ? 1 : 0
+      const pb = rowIndustrialPriority(b) ? 1 : 0
+      if (pa !== pb) return pb - pa
+      return cmpSecondary(a, b)
+    })
+    return out
+  }, [filteredRows, sortKey, sortDir])
+
+  const togglePoPriority = async (r: Row, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const poId = r.po.id
+    const next = r.po.isPriority !== true
+    setPriorityBusyPoId(poId)
+    try {
+      const res = await fetch(`/api/purchase-orders/${poId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPriority: next }),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) throw new Error(json.error || 'Could not update priority')
+      setRows((prev) =>
+        prev.map((row) =>
+          row.po.id === poId ? { ...row, po: { ...row.po, isPriority: next } } : row,
+        ),
+      )
+      broadcastIndustrialPriorityChange({
+        source: 'po_is_priority',
+        at: new Date().toISOString(),
+      })
+      toast.success(next ? 'PO marked priority — synced to hubs' : 'PO priority cleared')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Priority update failed')
+    } finally {
+      setPriorityBusyPoId(null)
+    }
+  }
 
   const readyCount = useMemo(
     () => rows.filter((r) => r.readiness?.readyForProduction).length,
@@ -554,19 +704,47 @@ export default function DesigningQueuePage() {
             <thead className="border-b border-white/10 bg-[#000000] text-[10px] font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="w-[52px] px-1 py-1">Preview</th>
-                <th className="w-[5.5rem] px-1 py-1">PO #</th>
-                <th className="w-[6.5rem] px-1 py-1">Customer</th>
+                <SortHeader
+                  label="PO #"
+                  column="po"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onSort={cycleSort}
+                  className="w-[6.25rem]"
+                />
+                <SortHeader
+                  label="Customer"
+                  column="customer"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onSort={cycleSort}
+                  className="w-[6.5rem]"
+                />
                 <th className="min-w-[9rem] px-1 py-1">Carton</th>
-                <th className="w-10 px-1 py-1 text-right">Qty</th>
+                <SortHeader
+                  label="Qty"
+                  column="qty"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onSort={cycleSort}
+                  className="w-10 text-right [&_button]:justify-end [&_button]:w-full"
+                />
                 <th className="w-9 px-1 py-1">Set</th>
                 <th className="w-[5rem] px-1 py-1">Designer</th>
                 <th className="w-[8.5rem] px-1 py-1">Pipeline</th>
-                <th className="w-12 px-1 py-1 text-right">Days</th>
+                <SortHeader
+                  label="Days"
+                  column="days"
+                  activeKey={sortKey}
+                  dir={sortDir}
+                  onSort={cycleSort}
+                  className="w-14 text-right [&_button]:justify-end [&_button]:w-full"
+                />
                 <th className="min-w-[11rem] px-1 py-1">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 bg-[#000000]">
-              {filteredRows.map((r) => {
+              {sortedRows.map((r) => {
                 const designerId = r.specOverrides?.assignedDesignerId
                 const designerName = designerId ? (userById[designerId]?.name ?? '—') : '—'
                 const approvalsDone = !!r.readiness.approvalsComplete
@@ -585,10 +763,13 @@ export default function DesigningQueuePage() {
                 const badge = pipelineBadge(phase)
                 const previewUrl = r.artworkPreviewUrl ?? null
 
+                const priRow = rowIndustrialPriority(r)
                 return (
                   <tr
                     key={r.id}
-                    className={`border-l-2 border-transparent transition-colors hover:border-amber-500 hover:bg-white/[0.03] ${r.directorHold ? 'opacity-45' : ''}`}
+                    className={`transition-colors hover:bg-white/[0.03] ${
+                      priRow ? INDUSTRIAL_PRIORITY_ROW_CLASS : 'border-l-2 border-transparent hover:border-amber-500'
+                    } ${r.directorHold ? 'opacity-45' : ''}`}
                   >
                     <td className="px-1 py-0.5 align-middle">
                       <ArtworkPreviewCell
@@ -601,7 +782,31 @@ export default function DesigningQueuePage() {
                     </td>
                     <td className={`px-1 py-0.5 align-middle ${mono} text-amber-200/95`}>
                       <div className="flex flex-col gap-0.5 leading-tight">
-                        <span className="break-all">{r.po.poNumber}</span>
+                        <div className="flex items-start gap-0.5 min-w-0">
+                          <button
+                            type="button"
+                            title={
+                              r.po.isPriority === true ? 'Clear PO priority (pin)' : 'Mark PO priority (pin to top)'
+                            }
+                            aria-pressed={r.po.isPriority === true}
+                            aria-label={
+                              r.po.isPriority === true ? 'Clear PO priority' : 'Mark PO priority'
+                            }
+                            disabled={priorityBusyPoId === r.po.id}
+                            onClick={(e) => void togglePoPriority(r, e)}
+                            className="mt-0.5 shrink-0 rounded p-0.5 text-slate-500 hover:bg-white/5 hover:text-amber-400 disabled:opacity-40"
+                          >
+                            <Star
+                              className={`h-3.5 w-3.5 ${
+                                r.po.isPriority === true
+                                  ? INDUSTRIAL_PRIORITY_STAR_ICON_CLASS
+                                  : 'text-slate-500'
+                              }`}
+                              strokeWidth={2}
+                            />
+                          </button>
+                          <span className="break-all min-w-0">{r.po.poNumber}</span>
+                        </div>
                         {r.directorPriority ? (
                           <span className="w-fit rounded bg-amber-500/15 px-1 text-[8px] font-bold uppercase text-amber-300 ring-1 ring-amber-500/30">
                             Priority
@@ -739,7 +944,7 @@ export default function DesigningQueuePage() {
           </table>
         </div>
 
-        {filteredRows.length === 0 && (
+        {sortedRows.length === 0 && (
           <p className="py-8 text-center text-sm text-slate-600">
             {paletteQuery.trim().length >= 2 ? 'No rows match filter.' : 'No items in designing queue.'}
           </p>

@@ -40,6 +40,10 @@ import {
 } from '@/lib/hub-ledger-export-columns'
 import { CUSTODY_ON_FLOOR } from '@/lib/inventory-hub-custody'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
+import {
+  INDUSTRIAL_PRIORITY_ROW_CLASS,
+  INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
+} from '@/lib/industrial-priority-ui'
 import { Star } from 'lucide-react'
 import { EmbossHubSpotlightDrawer } from '@/components/hub/EmbossHubSpotlightDrawer'
 
@@ -1243,9 +1247,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   ) {
     const custodyInUse = zone === 'custody' && r.custodyStatus === CUSTODY_ON_FLOOR
     const industrialGlow =
-      r.industrialPriority === true
-        ? ' shadow-[0_0_22px_rgba(234,88,12,0.32)] ring-1 ring-amber-500/45 border-amber-500/75'
-        : ''
+      r.industrialPriority === true ? ` ${INDUSTRIAL_PRIORITY_ROW_CLASS}` : ''
     const strikeAlert =
       r.kind === 'emboss' && r.strikeOverLimit ? ' ring-1 ring-red-500/70 border-red-600/80 animate-pulse' : ''
     const liClass = `rounded-lg border bg-black p-2 overflow-visible ${
@@ -1274,7 +1276,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <span className="font-mono text-[10px] text-amber-300/90 truncate">{r.displayCode}</span>
               {r.industrialPriority ? (
                 <Star
-                  className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.55)]"
+                  className={`h-3.5 w-3.5 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
                   aria-label="Industrial priority"
                 />
               ) : null}
@@ -1512,7 +1514,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             </span>
             {r.industrialPriority ? (
               <Star
-                className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.55)]"
+                className={`h-3.5 w-3.5 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
                 aria-label="Industrial priority"
               />
             ) : null}

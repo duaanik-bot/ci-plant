@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
+import { createShadeCardEvent, SHADE_CARD_ACTION } from '@/lib/shade-card-events'
 import { COLOR_VERIFICATION_AUDIT } from '@/lib/shade-card-hub-audit'
 import { SHADE_SUBSTRATE_VALUES } from '@/lib/shade-card-substrate'
 
@@ -60,6 +61,9 @@ export async function POST(
     nextSpectroLog = logArr as Prisma.InputJsonValue
   }
 
+  const shouldLogVerification =
+    (verifiedDate != null && !Number.isNaN(verifiedDate.getTime())) || d.deltaEReading != null
+
   const updated = await db.shadeCard.update({
     where: { id },
     data: {
@@ -116,6 +120,19 @@ export async function POST(
       at: new Date().toISOString(),
     },
   })
+
+  if (shouldLogVerification) {
+    await createShadeCardEvent(db, {
+      shadeCardId: id,
+      actionType: SHADE_CARD_ACTION.VERIFICATION_SCAN,
+      details: {
+        deltaE: d.deltaEReading ?? null,
+        lastVerifiedAt:
+          verifiedDate && !Number.isNaN(verifiedDate.getTime()) ? verifiedDate.toISOString() : null,
+        performedByUserId: user!.id,
+      },
+    })
+  }
 
   return NextResponse.json({ ok: true, message: COLOR_VERIFICATION_AUDIT })
 }

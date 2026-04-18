@@ -9,7 +9,14 @@ export async function GET() {
   if (error) return error
 
   const machines = await db.machine.findMany({
-    select: { id: true, machineCode: true, name: true, stdWastePct: true },
+    select: {
+      id: true,
+      machineCode: true,
+      name: true,
+      stdWastePct: true,
+      capacityPerShift: true,
+      specification: true,
+    },
     orderBy: { machineCode: 'asc' },
   })
   return NextResponse.json(machines)

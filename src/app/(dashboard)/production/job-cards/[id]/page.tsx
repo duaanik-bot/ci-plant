@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { PRODUCTION_STAGES } from '@/lib/constants'
 import { getPostPressRouting, isEmbossingRequired } from '@/lib/emboss-conditions'
 
 type Stage = {
@@ -40,7 +39,32 @@ type PoLine = {
   dyeId: string | null
   po: { poNumber: string }
   carton: CartonSpecs
+  materialQueue?: {
+    sheetLengthMm: unknown
+    sheetWidthMm: unknown
+    ups: number
+    grainDirection: string
+    totalSheets: number
+    boardType?: string
+    gsm?: number
+  } | null
+  shadeCard?: unknown
 } | null
+
+type BoardMaterial = {
+  requiredSheets: number
+  issuedToFloorSheets: number
+  balanceSheets: number
+  sheetsIssuedJobField: number
+  batchLotNumber: string | null
+  boardStatus: 'available' | 'out_of_stock'
+  materialShortage: boolean
+  paperWarehouseSheetsForSpec: number
+  planningMaterialGateStatus: string
+  materialPendingWatermark: boolean
+  warehouseHandshake: { issuedAt: string; custodianName: string } | null
+  ledgerLink: { gsm: number; board: string } | null
+}
 
 export type PostPressRouting = {
   chemicalCoating?: boolean
@@ -48,6 +72,41 @@ export type PostPressRouting = {
   spotUv?: boolean
   leafing?: boolean
   embossing?: boolean
+}
+
+type ProductionBible = {
+  sheetSizeLabel: string | null
+  ups: number | null
+  grainDirection: string | null
+  toolingKit: {
+    plate: {
+      code: string
+      coordinates: string
+      hubStatus: string
+    } | null
+    die: {
+      code: string
+      coordinates: string
+      custodyStatus: string
+    } | null
+    emboss: {
+      code: string
+      coordinates: string
+      custodyStatus: string
+    } | null
+    shade: {
+      shadeCode: string
+      ageMonths: number
+      expired: boolean
+      custodyStatus: string
+    } | null
+  }
+  shadeCard: {
+    shadeCode: string
+    ageMonths: number
+    expired: boolean
+    custodyStatus: string
+  } | null
 }
 
 type JobCard = {
@@ -72,21 +131,28 @@ type JobCard = {
   embossBlockId: string | null
   stages: Stage[]
   poLine: PoLine
+  productionBible?: ProductionBible
+  boardMaterial?: BoardMaterial
+  issuedStockDisplay?: string | null
+  inventoryLocationPointer?: string | null
+  grainFitStatus?: string
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'border-slate-700 text-slate-300',
+  pending: 'border-zinc-600 text-zinc-400',
   ready: 'border-amber-600 text-amber-200',
-  in_progress: 'border-blue-600 text-blue-200',
-  completed: 'border-green-600 text-green-200',
+  in_progress: 'border-sky-600 text-sky-200',
+  completed: 'border-emerald-600 text-emerald-200',
 }
 
-const POST_PRESS_KEYS: { key: keyof PostPressRouting; label: string; hint: string }[] = [
-  { key: 'chemicalCoating', label: 'Chemical Coating', hint: 'Required if coating = Aqueous Varnish or Chemical Coating' },
-  { key: 'lamination', label: 'Lamination', hint: 'Required if laminate type ≠ None' },
-  { key: 'spotUv', label: 'Spot UV', hint: 'Required if coating contains UV' },
-  { key: 'leafing', label: 'Leafing/Foiling', hint: 'Required if foil type ≠ None' },
-  { key: 'embossing', label: 'Embossing', hint: 'Required if embossing/leafing ≠ None' },
+const mono = 'font-designing-queue tabular-nums tracking-tight'
+
+const POST_PRESS_LABELS: { key: keyof PostPressRouting; label: string }[] = [
+  { key: 'chemicalCoating', label: 'Chemical coating' },
+  { key: 'lamination', label: 'Lamination' },
+  { key: 'spotUv', label: 'Spot UV' },
+  { key: 'leafing', label: 'Leafing / foiling' },
+  { key: 'embossing', label: 'Embossing' },
 ]
 
 function suggestPostPressRouting(poLine: PoLine): PostPressRouting {
@@ -104,6 +170,48 @@ function suggestPostPressRouting(poLine: PoLine): PostPressRouting {
     spotUv: routing.needsSpotUv,
     leafing: foil !== '' && foil !== 'none',
     embossing: routing.needsEmbossing,
+  }
+}
+
+function stageAppliesToRouting(
+  stageName: string,
+  routing: PostPressRouting,
+  embossRequired: boolean,
+): boolean {
+  const r = routing
+  switch (stageName) {
+    case 'Cutting':
+    case 'Printing':
+    case 'Dye Cutting':
+    case 'Pasting':
+      return true
+    case 'Chemical Coating':
+      return !!r.chemicalCoating
+    case 'Lamination':
+      return !!r.lamination
+    case 'Spot UV':
+      return !!r.spotUv
+    case 'Leafing':
+      return !!r.leafing
+    case 'Embossing':
+      return !!r.embossing && embossRequired
+    default:
+      return false
+  }
+}
+
+function ribbonTone(
+  kind: 'ok' | 'warn' | 'bad' | 'na',
+): { bar: string; text: string } {
+  switch (kind) {
+    case 'ok':
+      return { bar: 'bg-emerald-500', text: 'text-emerald-300' }
+    case 'warn':
+      return { bar: 'bg-amber-500', text: 'text-amber-200' }
+    case 'bad':
+      return { bar: 'bg-rose-500', text: 'text-rose-200' }
+    default:
+      return { bar: 'bg-zinc-600', text: 'text-zinc-500' }
   }
 }
 
@@ -144,9 +252,6 @@ export default function JobCardDetailPage() {
     dieNumber?: number | null
     lifeRemaining?: number
   } | null>(null)
-  const [platesReturned, setPlatesReturned] = useState(false)
-  const [dieReturned, setDieReturned] = useState(false)
-  const [embossReturned, setEmbossReturned] = useState(false)
 
   useEffect(() => {
     fetch(`/api/job-cards/${id}`)
@@ -168,6 +273,11 @@ export default function JobCardDetailPage() {
   const cartonId = jc?.poLine?.cartonId ?? jc?.poLine?.carton?.id ?? null
   const embossBlockId = jc?.embossBlockId ?? jc?.poLine?.carton?.embossBlockId ?? null
   const embossRequired = isEmbossingRequired(jc?.poLine?.carton?.embossingLeafing ?? jc?.poLine?.embossingLeafing)
+  const bible = jc?.productionBible
+  const effectiveRouting = {
+    ...suggestPostPressRouting(jc?.poLine ?? null),
+    ...(jc.postPressRouting ?? {}),
+  }
 
   useEffect(() => {
     if (!cartonId || !artworkVersion.trim()) {
@@ -251,6 +361,60 @@ export default function JobCardDetailPage() {
     return map
   }, [jc])
 
+  const visibleStages = useMemo(() => {
+    if (!jc) return []
+    return [...jc.stages].filter((s) => stageAppliesToRouting(s.stageName, effectiveRouting, embossRequired))
+  }, [jc, effectiveRouting, embossRequired])
+
+  const stageChain = useMemo(() => {
+    if (!jc || visibleStages.length === 0) return []
+    const n = visibleStages.length
+    const wpt = n > 1 ? jc.wastageSheets / (n - 1) : 0
+    let prev = jc.totalSheets
+    return visibleStages.map((s) => {
+      const expectedInput = Math.round(prev)
+      const afterWaste = Math.max(0, Math.round(expectedInput - wpt))
+      const out = s.counter != null ? s.counter : afterWaste
+      prev = out
+      return {
+        stage: s,
+        expectedInput,
+        afterWaste,
+      }
+    })
+  }, [jc, visibleStages])
+
+  const cumulativeWastePct =
+    jc && jc.requiredSheets > 0 ? (jc.wastageSheets / jc.requiredSheets) * 100 : 0
+  const wasteHot = cumulativeWastePct > 5
+
+  const readinessRibbon = useMemo(() => {
+    let plates: 'ok' | 'warn' | 'bad' | 'na' = 'na'
+    if (plateCheck) {
+      if (plateCheck.status === 'all_available') plates = 'ok'
+      else if (plateCheck.status === 'partial') plates = 'warn'
+      else plates = 'bad'
+    }
+    let die: 'ok' | 'warn' | 'bad' | 'na' = 'na'
+    if (dieStoreCheck) {
+      if (dieStoreCheck.status === 'available') die = 'ok'
+      else if (dieStoreCheck.status === 'needs_attention') die = 'warn'
+      else die = 'bad'
+    }
+    let block: 'ok' | 'warn' | 'bad' | 'na' = 'na'
+    if (!embossRequired) block = 'na'
+    else if (embossDetail === 'unavailable' || !embossBlockId) block = 'bad'
+    else if (embossDetail) {
+      const life = embossDetail.maxImpressions
+        ? (embossDetail.impressionCount / embossDetail.maxImpressions) * 100
+        : 0
+      if (!embossDetail.active) block = 'bad'
+      else if (life > 85) block = 'warn'
+      else block = 'ok'
+    }
+    return { plates, die, block }
+  }, [plateCheck, dieStoreCheck, embossDetail, embossRequired, embossBlockId])
+
   const update = <K extends keyof JobCard>(key: K, value: JobCard[K]) => {
     setJc((prev) => (prev ? { ...prev, [key]: value } : prev))
   }
@@ -265,7 +429,7 @@ export default function JobCardDetailPage() {
     })
   }
 
-  async function saveChanges(payload: any) {
+  async function saveChanges(payload: Record<string, unknown>) {
     if (!jc) return
     setSaving(true)
     try {
@@ -277,7 +441,6 @@ export default function JobCardDetailPage() {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Save failed')
       toast.success('Updated')
-      // refresh
       const refreshed = await fetch(`/api/job-cards/${jc.id}`).then((r) => r.json())
       setJc(refreshed)
     } catch (e) {
@@ -287,530 +450,672 @@ export default function JobCardDetailPage() {
     }
   }
 
-  if (!jc) return <div className="p-4 text-slate-400">Loading…</div>
+  if (!jc) {
+    return (
+      <div className={`min-h-[30vh] p-4 text-slate-500 bg-[#000000] ${mono}`}>Loading…</div>
+    )
+  }
+
+  const productName = jc.poLine?.cartonName ?? '—'
+  const sheetSizeDisplay =
+    bible?.sheetSizeLabel ??
+    (jc.poLine?.materialQueue
+      ? `${Number(jc.poLine.materialQueue.sheetLengthMm) || '—'}×${Number(jc.poLine.materialQueue.sheetWidthMm) || '—'} mm`
+      : '—')
+  const upsDisplay = bible?.ups ?? jc.poLine?.materialQueue?.ups ?? '—'
+  const grainDisplay = bible?.grainDirection ?? jc.poLine?.materialQueue?.grainDirection ?? '—'
 
   return (
-    <div className="p-4 max-w-6xl mx-auto space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-amber-400">
-            Job Card #{jc.jobCardNumber}
-          </h1>
-          <p className="text-sm text-slate-400">
-            {jc.customer.name}
-            {jc.setNumber ? ` · Set ${jc.setNumber}` : ''}{' '}
-            {jc.batchNumber ? ` · Batch ${jc.batchNumber}` : ''}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => router.push('/production/job-cards')}
-            className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
-          >
-            Back
-          </button>
-          <a
-            href={`/api/job-cards/${jc.id}/card-pdf`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
-          >
-            Job Card PDF
-          </a>
-          {jc.poLine && (
-            <a
-              href={`/api/designing/po-lines/${jc.poLine.id}/job-spec-pdf`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
-            >
-              Job Spec PDF
-            </a>
-          )}
-          {jc.poLine && (
-            <Link
-              href={`/orders/designing/${jc.poLine.id}`}
-              className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
-            >
-              Designing
-            </Link>
-          )}
-          <Link
-            href={`/stores/issue?jobCardId=${jc.id}`}
-            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm"
-          >
-            Issue sheets
-          </Link>
-        </div>
-      </div>
-
-      {jc.poLine && (
-        <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-          <h2 className="text-sm font-semibold text-slate-200 mb-2">Specs (from PO line)</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm text-slate-300">
-            <div><span className="text-slate-500">PO</span> {jc.poLine.po.poNumber}</div>
-            <div><span className="text-slate-500">Carton</span> {jc.poLine.cartonName}</div>
-            <div><span className="text-slate-500">Size</span> {jc.poLine.cartonSize ?? '—'}</div>
-            <div><span className="text-slate-500">Qty</span> {jc.poLine.quantity}</div>
-            <div><span className="text-slate-500">Paper</span> {jc.poLine.paperType ?? '—'}</div>
-            <div><span className="text-slate-500">Coating</span> {jc.poLine.coatingType ?? '—'}</div>
-            <div><span className="text-slate-500">Emboss/Leaf</span> {jc.poLine.embossingLeafing ?? '—'}</div>
-            <div><span className="text-slate-500">GSM</span> {jc.poLine.gsm ?? '—'}</div>
+    <div className="min-h-screen bg-[#000000] text-slate-200 pb-10">
+      <div className="max-w-6xl mx-auto px-3 py-4 space-y-4">
+        {/* Intelligent header — Production Bible */}
+        <div className="rounded-xl border border-white/10 bg-black p-4 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Production Bible
+              </p>
+              <h1 className={`text-xl font-bold text-amber-400 ${mono}`}>JC #{jc.jobCardNumber}</h1>
+              <p className="text-sm text-slate-400 mt-1">
+                <span className="text-slate-200">{jc.customer.name}</span>
+                <span className="text-slate-600"> · </span>
+                <span>{productName}</span>
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div
+                className={`rounded-lg border px-3 py-2 text-right ${
+                  wasteHot
+                    ? 'border-rose-500/60 bg-rose-500/10 animate-pulse'
+                    : 'border-white/10 bg-zinc-950/80'
+                }`}
+              >
+                <p className="text-[9px] uppercase tracking-wide text-slate-500">Cumulative waste</p>
+                <p
+                  className={`text-lg font-semibold ${mono} ${
+                    wasteHot ? 'text-rose-400' : 'text-slate-200'
+                  }`}
+                >
+                  {cumulativeWastePct.toFixed(1)}%
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => router.push('/production/job-cards')}
+                className="px-3 py-1.5 rounded-lg border border-white/15 text-sm text-slate-200"
+              >
+                Back
+              </button>
+              <a
+                href={`/api/job-cards/${jc.id}/card-pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
+              >
+                PDF
+              </a>
+              {jc.poLine && (
+                <>
+                  <a
+                    href={`/api/designing/po-lines/${jc.poLine.id}/job-spec-pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg border border-white/15 text-sm"
+                  >
+                    Job spec PDF
+                  </a>
+                  <Link
+                    href={`/orders/designing/${jc.poLine.id}`}
+                    className="px-3 py-1.5 rounded-lg border border-white/15 text-sm"
+                  >
+                    AW queue
+                  </Link>
+                </>
+              )}
+              <Link
+                href={`/stores/issue?jobCardId=${jc.id}`}
+                className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-sm"
+              >
+                Issue sheets
+              </Link>
+            </div>
           </div>
-        </div>
-      )}
 
-      <div className="rounded-xl bg-black border border-zinc-800 p-4">
-        <h2 className="text-sm font-semibold text-orange-400 mb-2">Shift operator (attribution)</h2>
-        <p className="text-xs text-zinc-500 mb-2">
-          Links this job to a user for OEE / yield leaderboard and incentive eligibility on close.
-        </p>
-        <select
-          className="w-full max-w-md px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-slate-200 text-sm font-designing-queue"
-          value={jc.shiftOperator?.id ?? ''}
-          disabled={saving}
-          onChange={(e) =>
-            saveChanges({
-              shiftOperatorUserId: e.target.value ? e.target.value : null,
-            })
-          }
-        >
-          <option value="">— Unassigned —</option>
-          {shiftOperators.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Availability: Plate, Dye, Emboss */}
-      <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-        <h2 className="text-sm font-semibold text-slate-200 mb-3">Availability</h2>
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-            <h3 className="text-xs font-medium text-slate-400 mb-2">Plates</h3>
-            {!cartonId ? (
-              <p className="text-xs text-slate-500">No carton linked to PO line</p>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 mb-2">
-                  <label className="text-xs text-slate-500">Artwork ver.</label>
-                  <input
-                    type="text"
-                    value={artworkVersion}
-                    onChange={(e) => setArtworkVersion(e.target.value)}
-                    placeholder="R0"
-                    className="w-16 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-xs"
-                  />
-                </div>
-                {plateCheck === null ? (
-                  <p className="text-xs text-slate-500">Checking…</p>
-                ) : (
-                  <div className={`rounded p-2 text-xs ${
-                    plateCheck.status === 'all_available'
-                      ? 'bg-green-900/20 text-green-300'
-                      : plateCheck.status === 'partial'
-                        ? 'bg-amber-900/20 text-amber-300'
-                        : 'bg-red-900/20 text-red-300'
-                  }`}>
-                    <p>{plateCheck.message}</p>
-                    <p>Old Available: {plateCheck.oldAvailable} | New Needed: {plateCheck.newNeeded}</p>
-                    {plateCheck.plateSetCode ? <p className="font-mono">{plateCheck.plateSetCode}</p> : null}
-                  </div>
-                )}
-                <div className="flex gap-2 mt-2">
-                  <Link href="/pre-press/plate-store" className="text-xs text-amber-400 hover:underline inline-block">Plate store →</Link>
-                  <Link href={`/pre-press/plate-store`} className="text-xs text-blue-300 hover:underline inline-block">Issue Plates to Press</Link>
-                </div>
-              </>
-            )}
-          </div>
-          <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-            <h3 className="text-xs font-medium text-slate-400 mb-2">Die</h3>
-            {dieStoreCheck ? (
-              <div className={`rounded p-2 text-xs mb-2 ${
-                dieStoreCheck.status === 'available'
-                  ? 'bg-green-900/20 text-green-300'
-                  : dieStoreCheck.status === 'needs_attention'
-                    ? 'bg-amber-900/20 text-amber-300'
-                    : 'bg-red-900/20 text-red-300'
-              }`}>
-                <p>{dieStoreCheck.message}</p>
-                {dieStoreCheck.dieCode ? <p className="font-mono">{dieStoreCheck.dieCode}{dieStoreCheck.dieNumber ? ` · No. ${dieStoreCheck.dieNumber}` : ''}</p> : null}
+          <div
+            className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs border-t border-white/10 pt-3 ${mono}`}
+          >
+            <div>
+              <p className="text-slate-500 uppercase tracking-wide text-[9px]">Client</p>
+              <p className="text-slate-200">{jc.customer.name}</p>
+            </div>
+            <div>
+              <p className="text-slate-500 uppercase tracking-wide text-[9px]">Product</p>
+              <p className="text-slate-200 truncate" title={productName}>
+                {productName}
+              </p>
+            </div>
+            <div>
+              <p className="text-slate-500 uppercase tracking-wide text-[9px]">Batch</p>
+              <p className="text-amber-200/90">{jc.batchNumber ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-slate-500 uppercase tracking-wide text-[9px]">Set</p>
+              <p className="text-amber-200/90">{jc.setNumber ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-slate-500 uppercase tracking-wide text-[9px]">Sheet size</p>
+              <p>{sheetSizeDisplay}</p>
+            </div>
+            <div>
+              <p className="text-slate-500 uppercase tracking-wide text-[9px]">UPS</p>
+              <p>{upsDisplay}</p>
+            </div>
+            <div className="col-span-2 sm:col-span-1">
+              <p className="text-slate-500 uppercase tracking-wide text-[9px]">Grain</p>
+              <p>{grainDisplay}</p>
+            </div>
+            {jc.poLine ? (
+              <div>
+                <p className="text-slate-500 uppercase tracking-wide text-[9px]">PO</p>
+                <p>{jc.poLine.po.poNumber}</p>
               </div>
             ) : null}
-            {!jc?.poLine?.dyeId ? (
-              <p className="text-xs text-slate-500">No dye set for this PO line</p>
-            ) : dyeDetail === null ? (
-              <p className="text-xs text-slate-500">Loading…</p>
-            ) : dyeDetail === 'unavailable' ? (
-              <p className="text-xs text-slate-500">Dye assigned — details unavailable</p>
-            ) : (
-              <>
-                <p className="text-sm font-mono text-slate-200">#{dyeDetail.dyeNumber}</p>
-                <p className="text-xs text-slate-400">Condition: {dyeDetail.condition}</p>
-                <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden mt-1">
+          </div>
+
+          {/* Readiness ribbon */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
+              Readiness ribbon · hubs
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(['Plates', 'Die', 'Blocks'] as const).map((label, i) => {
+                const key = i === 0 ? 'plates' : i === 1 ? 'die' : 'block'
+                const state = readinessRibbon[key]
+                const t = ribbonTone(state)
+                const sub =
+                  key === 'plates'
+                    ? plateCheck?.message ?? '—'
+                    : key === 'die'
+                      ? dieStoreCheck?.message ?? '—'
+                      : embossRequired
+                        ? embossDetail && embossDetail !== 'unavailable'
+                          ? `${embossDetail.blockCode} · ${embossDetail.condition}`
+                          : '—'
+                        : 'N/A'
+                return (
                   <div
-                    className="h-full bg-amber-500"
-                    style={{ width: `${dyeDetail.maxImpressions ? Math.min(100, (dyeDetail.impressionCount / dyeDetail.maxImpressions) * 100) : 0}%` }}
-                  />
-                </div>
-                <p className="text-xs text-slate-500 mt-1">{dyeDetail.impressionCount.toLocaleString()} / {dyeDetail.maxImpressions.toLocaleString()} imp.</p>
-                {!dyeDetail.active && <p className="text-xs text-amber-400">Inactive</p>}
-                <div className="flex gap-2 mt-2">
-                  <Link href={`/masters/dyes/${jc.poLine!.dyeId}`} className="text-xs text-amber-400 hover:underline inline-block">Dye detail →</Link>
-                  <Link href="/masters/dies" className="text-xs text-blue-300 hover:underline inline-block">Issue/Return Die →</Link>
-                </div>
-              </>
-            )}
-          </div>
-          <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-            <h3 className="text-xs font-medium text-slate-400 mb-2">Emboss block</h3>
-            {!embossRequired ? (
-              <div className="text-xs text-slate-500 border border-slate-800 rounded p-3">
-                Embossing Block: Not applicable for this product
-              </div>
-            ) : !embossBlockId ? (
-              (jc?.postPressRouting?.embossing || (jc?.poLine?.embossingLeafing && jc.poLine.embossingLeafing !== 'None')) ? (
-                <p className="text-xs text-amber-400">Embossing required — block not assigned</p>
-              ) : (
-                <p className="text-xs text-slate-500">Not required</p>
-              )
-            ) : embossDetail === null ? (
-              <p className="text-xs text-slate-500">Loading…</p>
-            ) : embossDetail === 'unavailable' ? (
-              <p className="text-xs text-slate-500">Block assigned — details unavailable</p>
-            ) : (
-              <>
-                <p className="text-sm font-mono text-slate-200">{embossDetail.blockCode}</p>
-                <p className="text-xs text-slate-400">Condition: {embossDetail.condition}</p>
-                <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden mt-1">
-                  <div
-                    className="h-full bg-amber-500"
-                    style={{ width: `${embossDetail.maxImpressions ? Math.min(100, (embossDetail.impressionCount / embossDetail.maxImpressions) * 100) : 0}%` }}
-                  />
-                </div>
-                <p className="text-xs text-slate-500 mt-1">{embossDetail.impressionCount.toLocaleString()} / {embossDetail.maxImpressions.toLocaleString()} imp.</p>
-                {!embossDetail.active && <p className="text-xs text-amber-400">Inactive</p>}
-                <Link href={`/masters/emboss-blocks/${embossBlockId}`} className="text-xs text-amber-400 hover:underline mt-2 inline-block">Block detail →</Link>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Post-Press Routing — conditional stages */}
-      <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-        <h2 className="text-sm font-semibold text-slate-200 mb-2">Post-Press Routing — Select applicable stages</h2>
-        <p className="text-xs text-slate-500 mb-3">
-          After Printing, which stages apply? Toggles are auto-suggested from carton specs; you can override.
-        </p>
-        <div className="space-y-2">
-          {POST_PRESS_KEYS.map(({ key, label, hint }) => {
-            const effective = jc.postPressRouting ?? suggestPostPressRouting(jc.poLine)
-            const checked = key === 'embossing' && !embossRequired ? false : (effective[key] ?? false)
-            const embossBypassed = key === 'embossing' && !embossRequired
-            return (
-              <label
-                key={key}
-                className="flex items-center gap-3 py-1.5 rounded-lg px-2 hover:bg-slate-800/50 cursor-pointer"
-              >
+                    key={label}
+                    className="flex-1 min-w-[7rem] rounded-lg border border-white/10 bg-zinc-950/80 overflow-hidden"
+                  >
+                    <div className={`h-1 ${t.bar}`} />
+                    <div className="px-2 py-1.5">
+                      <p className={`text-[10px] font-semibold ${t.text}`}>{label}</p>
+                      <p className="text-[9px] text-slate-500 line-clamp-2">{sub}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {cartonId ? (
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-[10px] text-slate-500">Plate check · AW ver.</label>
                 <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={embossBypassed}
-                  onChange={() => {
-                    const next = { ...(jc.postPressRouting ?? suggestPostPressRouting(jc.poLine)), [key]: !checked }
-                    update('postPressRouting', next)
-                  }}
-                  className="rounded border-slate-600 bg-slate-800 text-amber-500"
+                  type="text"
+                  value={artworkVersion}
+                  onChange={(e) => setArtworkVersion(e.target.value)}
+                  className={`w-14 px-1.5 py-0.5 rounded border border-white/15 bg-black text-[10px] ${mono}`}
                 />
-                <span className={`text-sm font-medium ${embossBypassed ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{label}</span>
-                <span className="text-xs text-slate-500">{embossBypassed ? 'Not applicable - Embossing not required' : hint}</span>
-              </label>
-            )
-          })}
-        </div>
-        <button
-          disabled={saving}
-          onClick={() =>
-            saveChanges({
-              postPressRouting: jc.postPressRouting ?? suggestPostPressRouting(jc.poLine),
-            })
-          }
-          className="mt-3 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-medium"
-        >
-          {saving ? 'Saving…' : 'Save post-press routing'}
-        </button>
-      </div>
-
-      <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-        <h2 className="text-sm font-semibold text-slate-200 mb-2">Sheet calc</h2>
-        <div className="flex flex-wrap gap-6 text-sm">
-          <div><span className="text-slate-500">Required</span> <span className="text-slate-200 font-mono">{jc.requiredSheets}</span></div>
-          <div><span className="text-slate-500">Wastage</span> <span className="text-slate-200 font-mono">{jc.wastageSheets}</span></div>
-          <div><span className="text-slate-500">Total</span> <span className="text-amber-300 font-mono">{jc.totalSheets}</span></div>
-          <div><span className="text-slate-500">Issued</span> <span className="text-slate-200 font-mono">{jc.sheetsIssued}</span></div>
-        </div>
-      </div>
-
-      <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-        <h2 className="text-sm font-semibold text-slate-200 mb-3">Tools Issued for This Job</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-slate-400">
-              <tr>
-                <th className="text-left py-2">Tool</th>
-                <th className="text-left py-2">Code</th>
-                <th className="text-left py-2">Location</th>
-                <th className="text-left py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              <tr>
-                <td className="py-2 text-slate-300">Plates</td>
-                <td className="py-2 font-mono text-slate-200">{plateCheck?.plateSetCode || '-'}</td>
-                <td className="py-2 text-slate-400">Rack B-1</td>
-                <td className="py-2">
-                  <Link href="/pre-press/plate-store" className="text-blue-300 hover:underline mr-3">Issue</Link>
-                  <Link href="/pre-press/plate-store" className="text-amber-300 hover:underline">View</Link>
-                </td>
-              </tr>
-              <tr>
-                <td className="py-2 text-slate-300">Die</td>
-                <td className="py-2 font-mono text-slate-200">{dieStoreCheck?.dieCode || '-'}</td>
-                <td className="py-2 text-slate-400">Rack A-1</td>
-                <td className="py-2">
-                  <Link href="/masters/dies" className="text-blue-300 hover:underline mr-3">Issue</Link>
-                  <Link href="/masters/dies" className="text-amber-300 hover:underline">View</Link>
-                </td>
-              </tr>
-              <tr>
-                <td className="py-2 text-slate-300">Emb. Block</td>
-                <td className="py-2 font-mono text-slate-200">{embossRequired ? embossDetail && embossDetail !== 'unavailable' ? embossDetail.blockCode : '-' : 'N/A'}</td>
-                <td className="py-2 text-slate-400">Rack C-1</td>
-                <td className="py-2">
-                  <Link href="/masters/emboss-blocks" className="text-blue-300 hover:underline mr-3">Issue</Link>
-                  <Link href="/masters/emboss-blocks" className="text-amber-300 hover:underline">View</Link>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-        <h2 className="text-sm font-semibold text-slate-200 mb-2">Return All Tools</h2>
-        <p className="text-xs text-slate-500 mb-3">All tools must be returned before job can be closed.</p>
-        <div className="space-y-2 text-sm mb-3">
-          <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={platesReturned} onChange={(e) => setPlatesReturned(e.target.checked)} /> Plates returned to rack</label>
-          <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={dieReturned} onChange={(e) => setDieReturned(e.target.checked)} /> Die returned to location</label>
-          {embossRequired ? <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={embossReturned} onChange={(e) => setEmbossReturned(e.target.checked)} /> Emboss block returned</label> : null}
-        </div>
-        <button
-          type="button"
-          disabled={!platesReturned || !dieReturned || (embossRequired && !embossReturned)}
-          onClick={() => saveChanges({ status: 'closed' })}
-          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs"
-        >
-          Mark Job Complete
-        </button>
-      </div>
-
-      {/* Header controls */}
-      <div className="grid md:grid-cols-4 gap-3 bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm">
-        <div>
-          <label className="block text-slate-400 mb-1">Assigned operator</label>
-          <input
-            type="text"
-            value={jc.assignedOperator ?? ''}
-            onChange={(e) => update('assignedOperator', e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-          />
-        </div>
-        <div>
-          <label className="block text-slate-400 mb-1">Batch number</label>
-          <input
-            type="text"
-            value={jc.batchNumber ?? ''}
-            onChange={(e) => update('batchNumber', e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-          />
-        </div>
-        <div>
-          <label className="block text-slate-400 mb-1">Required sheets</label>
-          <input
-            type="number"
-            min={1}
-            value={jc.requiredSheets}
-            onChange={(e) => update('requiredSheets', Number(e.target.value) || jc.requiredSheets)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-          />
-        </div>
-        <div>
-          <label className="block text-slate-400 mb-1">Wastage sheets</label>
-          <input
-            type="number"
-            min={0}
-            value={jc.wastageSheets}
-            onChange={(e) => update('wastageSheets', Number(e.target.value) || 0)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
-          />
-        </div>
-
-        <div className="md:col-span-4 pt-2">
-          <p className="text-slate-400 text-xs mb-2">Compliance checklist</p>
-          <div className="flex flex-wrap gap-4 text-xs">
-            {[
-              { key: 'artworkApproved', label: 'Artwork approved' },
-              { key: 'firstArticlePass', label: 'First article pass' },
-              { key: 'finalQcPass', label: 'Final QC pass' },
-              { key: 'qaReleased', label: 'QA released' },
-            ].map((f) => (
-              <label key={f.key} className="flex items-center gap-2 text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={(jc as any)[f.key] as boolean}
-                  onChange={(e) => update(f.key as keyof JobCard, e.target.checked)}
-                  className="rounded border-slate-600 bg-slate-800"
-                />
-                {f.label}
-              </label>
-            ))}
-          </div>
-          <button
-            disabled={saving}
-            onClick={() =>
-              saveChanges({
-                assignedOperator: jc.assignedOperator,
-                batchNumber: jc.batchNumber,
-                requiredSheets: jc.requiredSheets,
-                wastageSheets: jc.wastageSheets,
-                artworkApproved: jc.artworkApproved,
-                firstArticlePass: jc.firstArticlePass,
-                finalQcPass: jc.finalQcPass,
-                qaReleased: jc.qaReleased,
-              })
-            }
-            className="ml-auto px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-medium"
-          >
-            {saving ? 'Saving…' : 'Save header'}
-          </button>
-        </div>
-      </div>
-
-      {/* Stage tiles */}
-      <div className="grid md:grid-cols-3 gap-3">
-        {PRODUCTION_STAGES.map((s) => {
-          const stage = stageByLabel.get(s.label)
-          if (!stage) {
-            return (
-              <div
-                key={s.key}
-                className="rounded-lg border border-slate-700 bg-slate-900 p-3"
-              >
-                <p className="text-sm font-semibold text-slate-200">{s.label}</p>
-                <p className="text-xs text-slate-500 mt-1">Not created</p>
               </div>
-            )
-          }
-          const cls = STATUS_COLORS[stage.status] ?? STATUS_COLORS.pending
-          return (
-            <div
-              key={stage.id}
-              className="rounded-lg border bg-slate-900 p-3 border-slate-700"
+            ) : null}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        {/* Tooling kit — coordinates */}
+        <div className="rounded-xl border border-white/10 bg-black p-4">
+          <h2 className="text-sm font-semibold text-amber-400 mb-3">Tooling kit · coordinates</h2>
+          <p className="text-[10px] text-slate-500 mb-3">
+            Physical rack / drawer from masters. Returns use Tooling Hub <strong>Receive</strong> — not this
+            screen.
+          </p>
+          <div className="overflow-x-auto">
+            <table className={`w-full text-xs ${mono}`}>
+              <thead className="text-slate-500 text-[10px] uppercase tracking-wide">
+                <tr className="border-b border-white/10">
+                  <th className="text-left py-2 pr-2">Asset</th>
+                  <th className="text-left py-2 pr-2">ID</th>
+                  <th className="text-left py-2">Rack / drawer / slot</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                <tr>
+                  <td className="py-2 text-slate-300">Plates</td>
+                  <td className="py-2 text-slate-200">
+                    {bible?.toolingKit.plate?.code ?? plateCheck?.plateSetCode ?? '—'}
+                  </td>
+                  <td className="py-2 text-emerald-200/90">
+                    {bible?.toolingKit.plate?.coordinates ?? '—'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2 text-slate-300">Die</td>
+                  <td className="py-2 text-slate-200">
+                    {bible?.toolingKit.die?.code ??
+                      (dieStoreCheck?.dieCode
+                        ? `${dieStoreCheck.dieCode}${dieStoreCheck.dieNumber != null ? ` · ${dieStoreCheck.dieNumber}` : ''}`
+                        : dyeDetail && dyeDetail !== 'unavailable'
+                          ? `#${dyeDetail.dyeNumber}`
+                          : '—')}
+                  </td>
+                  <td className="py-2 text-emerald-200/90">{bible?.toolingKit.die?.coordinates ?? '—'}</td>
+                </tr>
+                <tr>
+                  <td className="py-2 text-slate-300">Emboss block</td>
+                  <td className="py-2 text-slate-200">
+                    {embossRequired
+                      ? bible?.toolingKit.emboss?.code ??
+                        (embossDetail && embossDetail !== 'unavailable'
+                          ? embossDetail.blockCode
+                          : '—')
+                      : 'N/A'}
+                  </td>
+                  <td className="py-2 text-emerald-200/90">
+                    {embossRequired ? bible?.toolingKit.emboss?.coordinates ?? '—' : '—'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2 text-slate-300">Shade card</td>
+                  <td className="py-2 text-slate-200">{bible?.shadeCard?.shadeCode ?? '—'}</td>
+                  <td className="py-2">
+                    {bible?.shadeCard ? (
+                      <div>
+                        <span className="text-slate-300">
+                          Age {bible.shadeCard.ageMonths} mo · {bible.shadeCard.custodyStatus}
+                        </span>
+                        {bible.shadeCard.expired ? (
+                          <div className="mt-1 rounded border border-rose-500 bg-rose-500/15 px-2 py-1 text-rose-200 font-semibold text-[10px] uppercase tracking-wide">
+                            EXPIRED — DO NOT PRINT
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <span className="text-slate-500">—</span>
+                    )}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-3 text-[10px]">
+            <Link href="/pre-press/plate-store" className="text-amber-400 hover:underline">
+              Plate hub →
+            </Link>
+            <Link href="/hub/dies" className="text-amber-400 hover:underline">
+              Die hub →
+            </Link>
+            <Link href="/hub/blocks" className="text-amber-400 hover:underline">
+              Emboss hub →
+            </Link>
+          </div>
+        </div>
+
+        {/* Board status · material allocation */}
+        <div className="rounded-xl border border-white/10 bg-[#000000] p-4">
+          <h2 className="text-sm font-semibold text-amber-400 mb-1">Board status · material allocation</h2>
+          <p className="text-[10px] text-slate-500 mb-3">
+            Mill / warehouse batch and floor issuance. Click the panel to open the paper ledger for this GSM / grade.
+          </p>
+          {jc.boardMaterial ? (
+            <Link
+              href={
+                jc.boardMaterial.ledgerLink
+                  ? `/inventory?ledgerGsm=${jc.boardMaterial.ledgerLink.gsm}&ledgerBoard=${encodeURIComponent(jc.boardMaterial.ledgerLink.board)}#paper-ledger`
+                  : '/inventory#paper-ledger'
+              }
+              className="block rounded-lg border border-white/10 bg-zinc-950/80 p-3 hover:border-amber-500/40 hover:bg-zinc-900/50 transition-colors"
             >
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-200">{stage.stageName}</p>
-                <span className={`px-2 py-0.5 rounded text-xs border ${cls}`}>
-                  {stage.status}
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <span className="text-[10px] uppercase tracking-wide text-slate-500">Status</span>
+                <span
+                  className={`text-xs font-semibold ${
+                    jc.boardMaterial.boardStatus === 'available' ? 'text-emerald-400' : 'text-rose-500'
+                  }`}
+                >
+                  {jc.boardMaterial.boardStatus === 'available' ? 'Available' : 'Out of stock'}
                 </span>
               </div>
-
-              <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
+              <div className={`space-y-2 text-xs ${mono}`}>
                 <div>
-                  <label className="block text-slate-500 mb-1">Operator</label>
-                  <input
-                    type="text"
-                    value={stage.operator ?? ''}
-                    onChange={(e) =>
-                      updateStage(stage.id, { operator: e.target.value || null })
-                    }
-                    className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-white"
-                  />
+                  <span className="text-slate-500">Batch ID </span>
+                  <span className="text-amber-200/90">{jc.boardMaterial.batchLotNumber ?? '—'}</span>
                 </div>
-                <div>
-                  <label className="block text-slate-500 mb-1">Counter</label>
-                  <input
-                    type="number"
-                    value={stage.counter ?? ''}
-                    onChange={(e) =>
-                      updateStage(stage.id, {
-                        counter: e.target.value ? Number(e.target.value) : null,
-                      })
-                    }
-                    className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-white"
-                  />
+                <div className="text-slate-200">
+                  <span className="text-slate-500">Allocation </span>
+                  Required: {jc.boardMaterial.requiredSheets} | Issued: {jc.boardMaterial.issuedToFloorSheets} |
+                  Balance: {jc.boardMaterial.balanceSheets}
                 </div>
-                <div className="col-span-2">
-                  <label className="block text-slate-500 mb-1">Sheet size</label>
-                  <input
-                    type="text"
-                    value={stage.sheetSize ?? ''}
-                    onChange={(e) =>
-                      updateStage(stage.id, { sheetSize: e.target.value || null })
-                    }
-                    className="w-full px-2 py-1 rounded bg-slate-800 border border-slate-700 text-white"
-                  />
+                <div className="text-[10px] text-slate-500">
+                  WH on-hand (spec){' '}
+                  <span className="text-slate-400">{jc.boardMaterial.paperWarehouseSheetsForSpec}</span> sheets ·
+                  Planning paper <span className="text-slate-400">{jc.boardMaterial.planningMaterialGateStatus}</span>
                 </div>
               </div>
+              {jc.boardMaterial.materialShortage ? (
+                <p className="mt-3 text-sm font-bold text-rose-500">Material shortage</p>
+              ) : null}
+              {jc.boardMaterial.warehouseHandshake ? (
+                <div className={`mt-3 pt-3 border-t border-white/10 text-[10px] text-slate-400 ${mono}`}>
+                  <p>
+                    <span className="text-slate-500">Issued to floor </span>
+                    {new Date(jc.boardMaterial.warehouseHandshake.issuedAt).toLocaleString()}
+                  </p>
+                  <p className="mt-1">
+                    <span className="text-slate-500">Custodian (verified) </span>
+                    <span className="text-slate-300">{jc.boardMaterial.warehouseHandshake.custodianName}</span>
+                  </p>
+                </div>
+              ) : (
+                <p className={`mt-3 text-[10px] text-slate-600 ${mono}`}>No warehouse floor issue logged for this job yet.</p>
+              )}
+              <p className={`mt-3 text-[10px] text-slate-500 border-t border-white/5 pt-2`}>
+                Material Verified against Batch {jc.boardMaterial.batchLotNumber ?? '—'}. Board Status:{' '}
+                {jc.boardMaterial.boardStatus === 'available' ? 'Available' : 'Out of stock'}.
+              </p>
+            </Link>
+          ) : (
+            <p className="text-xs text-slate-500">Loading board context…</p>
+          )}
+        </div>
+        </div>
 
-              <div className="flex gap-2 mt-3">
-                <button
-                  disabled={saving}
-                  onClick={() =>
-                    saveChanges({
-                      stages: [
-                        {
-                          id: stage.id,
-                          status: stage.status === 'in_progress' ? 'completed' : 'in_progress',
-                          operator: stage.operator,
-                          counter: stage.counter,
-                          sheetSize: stage.sheetSize,
-                        },
-                      ],
-                    })
-                  }
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs disabled:opacity-50"
-                >
-                  {stage.status === 'in_progress' ? 'Mark completed' : 'Start stage'}
-                </button>
-                <button
-                  disabled={saving}
-                  onClick={() =>
-                    saveChanges({
-                      stages: [
-                        {
-                          id: stage.id,
-                          status: 'pending',
-                          operator: stage.operator,
-                          counter: stage.counter,
-                          sheetSize: stage.sheetSize,
-                        },
-                      ],
-                    })
-                  }
-                  className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs disabled:opacity-50"
-                >
-                  Reset
-                </button>
-              </div>
+        {/* Material specification — inventory handshake (dims from allocated / issued batch) */}
+        <div className="rounded-xl border border-white/10 bg-[#000000] p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-amber-400">Material specification · inventory handshake</h2>
+          <p className="text-[10px] text-slate-500">
+            Sheet size and grain follow the allocated mill batch (FIFO). Validated against AW queue target sheet size.
+          </p>
+          {jc.grainFitStatus === 'critical_mismatch' ? (
+            <div
+              className="rounded-lg border border-rose-600 bg-rose-950/50 px-3 py-2 text-rose-400 text-sm font-bold"
+              role="alert"
+            >
+              CRITICAL: STOCK SIZE MISMATCH — inventory sheet is smaller than AW target. Job card cannot be QA
+              released until resolved.
             </div>
-          )
-        })}
+          ) : null}
+          {jc.grainFitStatus === 'pre_trim_required' ? (
+            <div className="rounded-lg border border-amber-500/50 bg-amber-950/30 px-3 py-1.5 text-amber-300 text-xs font-semibold">
+              Pre-trim required — stock sheet larger than AW target layout.
+            </div>
+          ) : null}
+          <div className={`rounded-lg border border-white/10 bg-zinc-950/80 p-3 space-y-2 text-xs ${mono}`}>
+            <p className="text-slate-200">
+              {jc.issuedStockDisplay?.trim() || (
+                <span className="text-slate-600">No inventory dimensions synced yet — issue paper to floor or regenerate from planning.</span>
+              )}
+            </p>
+            {jc.inventoryLocationPointer?.trim() ? (
+              <p className="text-slate-300">{jc.inventoryLocationPointer.trim()}</p>
+            ) : (
+              <p className="text-slate-600">Location pointer: —</p>
+            )}
+          </div>
+          <p className={`text-[10px] text-slate-500 border-t border-white/5 pt-2 ${mono}`}>
+            Inventory Handshake Verified. Material Batch {jc.boardMaterial?.batchLotNumber ?? '—'} locked for Job{' '}
+            {jc.jobCardNumber}.
+          </p>
+        </div>
+
+        {/* Routing from AW — read-only */}
+        <div className="rounded-xl border border-white/10 bg-zinc-950/40 p-4">
+          <h2 className="text-sm font-semibold text-slate-200 mb-2">Smart routing · AW queue</h2>
+          <p className="text-[10px] text-slate-500 mb-2">
+            Stages below follow toggles saved on this job card (from artwork / planning). Only applicable
+            stages are shown.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {POST_PRESS_LABELS.map(({ key, label }) => {
+              const on = effectiveRouting[key]
+              const embossNa = key === 'embossing' && !embossRequired
+              if (embossNa) return null
+              if (!on) return null
+              return (
+                <span
+                  key={key}
+                  className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200"
+                >
+                  {label}
+                </span>
+              )
+            })}
+            {!POST_PRESS_LABELS.some(({ key }) => {
+              if (key === 'embossing' && !embossRequired) return false
+              return !!effectiveRouting[key]
+            }) ? (
+              <span className="text-[10px] text-slate-500">Post-press: none · print → die-cut → paste</span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className={`rounded-xl border border-white/10 bg-black p-3 flex flex-wrap gap-6 text-xs ${mono}`}>
+          <div>
+            <span className="text-slate-500">Required</span>{' '}
+            <span className="text-slate-200">{jc.requiredSheets}</span>
+          </div>
+          <div>
+            <span className="text-slate-500">Wastage</span>{' '}
+            <span className="text-slate-200">{jc.wastageSheets}</span>
+          </div>
+          <div>
+            <span className="text-slate-500">Total</span>{' '}
+            <span className="text-amber-300">{jc.totalSheets}</span>
+          </div>
+          <div>
+            <span className="text-slate-500">Issued</span>{' '}
+            <span className="text-slate-200">{jc.sheetsIssued}</span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-orange-500/25 bg-black p-4">
+          <h2 className="text-sm font-semibold text-orange-300 mb-2">Shift operator</h2>
+          <select
+            className={`w-full max-w-md px-3 py-2 rounded-lg bg-black border border-white/15 text-slate-200 text-sm ${mono}`}
+            value={jc.shiftOperator?.id ?? ''}
+            disabled={saving}
+            onChange={(e) =>
+              saveChanges({
+                shiftOperatorUserId: e.target.value ? e.target.value : null,
+              })
+            }
+          >
+            <option value="">— Unassigned —</option>
+            {shiftOperators.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-zinc-950/50 p-4 text-sm space-y-3">
+          <div className="grid md:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-slate-500 mb-1 text-xs">Assigned operator</label>
+              <input
+                type="text"
+                value={jc.assignedOperator ?? ''}
+                onChange={(e) => update('assignedOperator', e.target.value || null)}
+                className={`w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white ${mono}`}
+              />
+            </div>
+            <div>
+              <label className="block text-slate-500 mb-1 text-xs">Batch number</label>
+              <input
+                type="text"
+                value={jc.batchNumber ?? ''}
+                onChange={(e) => update('batchNumber', e.target.value || null)}
+                className={`w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white ${mono}`}
+              />
+            </div>
+            <div>
+              <label className="block text-slate-500 mb-1 text-xs">Required sheets</label>
+              <input
+                type="number"
+                min={1}
+                value={jc.requiredSheets}
+                onChange={(e) => update('requiredSheets', Number(e.target.value) || jc.requiredSheets)}
+                className={`w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white ${mono}`}
+              />
+            </div>
+            <div>
+              <label className="block text-slate-500 mb-1 text-xs">Wastage sheets</label>
+              <input
+                type="number"
+                min={0}
+                value={jc.wastageSheets}
+                onChange={(e) => update('wastageSheets', Number(e.target.value) || 0)}
+                className={`w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white ${mono}`}
+              />
+            </div>
+          </div>
+          <div>
+            <p className="text-slate-500 text-xs mb-2">Compliance</p>
+            <div className="flex flex-wrap gap-4 text-xs">
+              {(
+                [
+                  ['artworkApproved', 'Artwork approved'],
+                  ['firstArticlePass', 'First article pass'],
+                  ['finalQcPass', 'Final QC pass'],
+                  ['qaReleased', 'QA released'],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={
+                      key === 'artworkApproved'
+                        ? jc.artworkApproved
+                        : key === 'firstArticlePass'
+                          ? jc.firstArticlePass
+                          : key === 'finalQcPass'
+                            ? jc.finalQcPass
+                            : jc.qaReleased
+                    }
+                    onChange={(e) => {
+                      if (key === 'artworkApproved') update('artworkApproved', e.target.checked)
+                      else if (key === 'firstArticlePass') update('firstArticlePass', e.target.checked)
+                      else if (key === 'finalQcPass') update('finalQcPass', e.target.checked)
+                      else update('qaReleased', e.target.checked)
+                    }}
+                    className="rounded border-white/20 bg-black"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() =>
+                saveChanges({
+                  assignedOperator: jc.assignedOperator,
+                  batchNumber: jc.batchNumber,
+                  requiredSheets: jc.requiredSheets,
+                  wastageSheets: jc.wastageSheets,
+                  artworkApproved: jc.artworkApproved,
+                  firstArticlePass: jc.firstArticlePass,
+                  finalQcPass: jc.finalQcPass,
+                  qaReleased: jc.qaReleased,
+                })
+              }
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs"
+            >
+              {saving ? 'Saving…' : 'Save header'}
+            </button>
+            <button
+              type="button"
+              disabled={saving || jc.status === 'closed'}
+              onClick={() => {
+                if (!confirm('Close this job card? Confirm tooling received back in hubs via Receive.')) return
+                void saveChanges({ status: 'closed' })
+              }}
+              className="px-3 py-1.5 rounded-lg border border-emerald-500/50 bg-emerald-500/10 text-emerald-200 text-xs hover:bg-emerald-500/20 disabled:opacity-40"
+            >
+              Mark job complete
+            </button>
+          </div>
+        </div>
+
+        {/* Stage tiles — filtered + sequential counts */}
+        <div>
+          <h2 className="text-sm font-semibold text-slate-200 mb-2">Production stages</h2>
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {stageChain.map(({ stage, expectedInput, afterWaste }) => {
+              const cls = STATUS_COLORS[stage.status] ?? STATUS_COLORS.pending
+              return (
+                <div
+                  key={stage.id}
+                  className="rounded-lg border border-white/10 bg-black p-3 flex flex-col"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-100">{stage.stageName}</p>
+                    <span className={`px-2 py-0.5 rounded text-[10px] border ${cls}`}>{stage.status}</span>
+                  </div>
+                  <div className={`mt-2 space-y-1 text-[10px] ${mono} text-slate-400`}>
+                    <p>
+                      <span className="text-slate-500">Input (expect)</span>{' '}
+                      <span className="text-slate-200">{expectedInput}</span>
+                      <span className="text-slate-600"> · after wastage Δ </span>
+                      <span className="text-slate-200">{afterWaste}</span>
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
+                    <div>
+                      <label className="block text-slate-500 mb-1">Operator</label>
+                      <input
+                        type="text"
+                        value={stage.operator ?? ''}
+                        onChange={(e) => updateStage(stage.id, { operator: e.target.value || null })}
+                        className="w-full px-2 py-1 rounded bg-black border border-white/15 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-500 mb-1">Output count</label>
+                      <input
+                        type="number"
+                        value={stage.counter ?? ''}
+                        onChange={(e) =>
+                          updateStage(stage.id, {
+                            counter: e.target.value ? Number(e.target.value) : null,
+                          })
+                        }
+                        className={`w-full px-2 py-1 rounded bg-black border border-white/15 text-white text-xs ${mono}`}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-slate-500 mb-1">Sheet size</label>
+                      <input
+                        type="text"
+                        value={stage.sheetSize ?? ''}
+                        onChange={(e) => updateStage(stage.id, { sheetSize: e.target.value || null })}
+                        className={`w-full px-2 py-1 rounded bg-black border border-white/15 text-white text-xs ${mono}`}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-3 mt-auto">
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() =>
+                        saveChanges({
+                          stages: [
+                            {
+                              id: stage.id,
+                              status: stage.status === 'in_progress' ? 'completed' : 'in_progress',
+                              operator: stage.operator,
+                              counter: stage.counter,
+                              sheetSize: stage.sheetSize,
+                            },
+                          ],
+                        })
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-xs disabled:opacity-50"
+                    >
+                      {stage.status === 'in_progress' ? 'Mark completed' : 'Start stage'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() =>
+                        saveChanges({
+                          stages: [
+                            {
+                              id: stage.id,
+                              status: 'pending',
+                              operator: stage.operator,
+                              counter: stage.counter,
+                              sheetSize: stage.sheetSize,
+                            },
+                          ],
+                        })
+                      }
+                      className="px-3 py-1.5 rounded-lg border border-white/15 text-slate-200 text-xs"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        <footer className={`border-t border-white/10 pt-4 text-center text-[10px] text-slate-500 ${mono}`}>
+          Instruction Set Synchronized from Melbourne Strategy Hub.
+        </footer>
       </div>
     </div>
   )
 }
-

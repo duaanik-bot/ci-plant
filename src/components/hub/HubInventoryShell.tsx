@@ -2,13 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, History, Inbox, Send } from 'lucide-react'
+import { AlertTriangle, History, Inbox, RefreshCw, Send } from 'lucide-react'
 import { toast } from 'sonner'
-import { shadeCardAgeTier, shadeCardIsFadingStandard } from '@/lib/shade-card-age'
+import {
+  shadeCardAgeTier,
+  shadeCardIsApproachingHardExpiry,
+  shadeCardIsFadingStandard,
+} from '@/lib/shade-card-age'
 import { SHADE_SUBSTRATE_VALUES, shadeSubstrateLabel } from '@/lib/shade-card-substrate'
 import type { HubToolType } from '@/lib/hub-types'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
-import { custodyBadgeClass, custodyLabel } from '@/lib/inventory-hub-custody'
+import { custodyBadgeClass, custodyLabel, SHADE_MASTER_RACK_LOCATION } from '@/lib/inventory-hub-custody'
 import { safeJsonParse, safeJsonParseArray, safeJsonStringify } from '@/lib/safe-json'
 import { TableExportMenu } from '@/components/hub/TableExportMenu'
 import {
@@ -19,6 +23,8 @@ import {
   inventoryShadeExportColumns,
   inventoryShadeExcelExtraColumns,
 } from '@/lib/hub-ledger-export-columns'
+import { ShadeSmartRemark } from '@/components/hub/ShadeSmartRemark'
+import { shadeCardPhysicalLabel } from '@/lib/shade-card-custody-condition'
 
 const shadeMono =
   'font-[family-name:var(--font-designing-queue),ui-monospace,monospace] tabular-nums tracking-tight'
@@ -61,6 +67,9 @@ type ShadeRow = {
   productMaster: string | null
   masterArtworkRef: string | null
   remarks: string | null
+  remarksEditedAt?: string | null
+  remarksEditedByName?: string | null
+  updatedAt?: string
   currentHolder: string | null
   impressionCount: number
   custodyStatus: string
@@ -93,6 +102,13 @@ type ShadeAuditPayload = {
 
 const RECEIVE_CONDITIONS = ['Good', 'Damaged', 'Needs Repair'] as const
 
+type JobCardHit = {
+  id: string
+  jobCardNumber: number
+  status: string
+  customer: { name: string }
+}
+
 export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubToolType, 'plates'> }) {
   const [loading, setLoading] = useState(true)
   const [dies, setDies] = useState<DieRow[]>([])
@@ -107,11 +123,25 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
   const [issueToolId, setIssueToolId] = useState<string | null>(null)
   const [machineId, setMachineId] = useState('')
   const [operatorId, setOperatorId] = useState('')
+  const [issueJobCardId, setIssueJobCardId] = useState('')
+  const [issueJobCardNumber, setIssueJobCardNumber] = useState<number | null>(null)
+  const [jobCardQuery, setJobCardQuery] = useState('')
+  const [jobCardHits, setJobCardHits] = useState<JobCardHit[]>([])
+  const [jobCardLoading, setJobCardLoading] = useState(false)
 
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [receiveToolId, setReceiveToolId] = useState<string | null>(null)
   const [finalImpressions, setFinalImpressions] = useState<number | ''>('')
   const [receiveCondition, setReceiveCondition] = useState<(typeof RECEIVE_CONDITIONS)[number]>('Good')
+  const [shadeIssueInitialCondition, setShadeIssueInitialCondition] = useState<
+    'mint' | 'used' | 'minor_damage'
+  >('mint')
+  const [issueOperatorSearch, setIssueOperatorSearch] = useState('')
+  const [receiveOperatorId, setReceiveOperatorId] = useState('')
+  const [receiveOperatorSearch, setReceiveOperatorSearch] = useState('')
+  const [shadeReceiveEndCondition, setShadeReceiveEndCondition] = useState<'mint' | 'used' | 'minor_damage'>(
+    'mint',
+  )
 
   const [vendorOpen, setVendorOpen] = useState(false)
   const [vendorToolId, setVendorToolId] = useState<string | null>(null)
@@ -137,8 +167,8 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditPayload, setAuditPayload] = useState<ShadeAuditPayload | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     try {
       const [mRes, uRes] = await Promise.all([fetch('/api/machines'), fetch('/api/users')])
       const mText = await mRes.text()
@@ -182,6 +212,34 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (toolType !== 'shade_cards') return
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load({ silent: true })
+    }, 12_000)
+    return () => window.clearInterval(id)
+  }, [toolType, load])
+
+  useEffect(() => {
+    if (!issueOpen || toolType !== 'shade_cards') return
+    const q = jobCardQuery.trim()
+    const t = window.setTimeout(() => {
+      void (async () => {
+        setJobCardLoading(true)
+        try {
+          const r = await fetch(`/api/inventory-hub/job-cards-quick?q=${encodeURIComponent(q)}`)
+          const j = (await r.json()) as { rows?: JobCardHit[] }
+          setJobCardHits(Array.isArray(j.rows) ? j.rows : [])
+        } catch {
+          setJobCardHits([])
+        } finally {
+          setJobCardLoading(false)
+        }
+      })()
+    }, q ? 220 : 0)
+    return () => window.clearTimeout(t)
+  }, [issueOpen, toolType, jobCardQuery])
 
   useEffect(() => {
     if (!addShadeOpen) {
@@ -280,10 +338,28 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
   const shadeExportColumns = useMemo(() => inventoryShadeExportColumns(), [])
   const shadeExcelExtraColumns = useMemo(() => inventoryShadeExcelExtraColumns(), [])
 
+  const filteredIssueOperators = useMemo(() => {
+    const q = issueOperatorSearch.trim().toLowerCase()
+    if (!q) return users
+    return users.filter((u) => u.name.toLowerCase().includes(q))
+  }, [users, issueOperatorSearch])
+
+  const filteredReceiveOperators = useMemo(() => {
+    const q = receiveOperatorSearch.trim().toLowerCase()
+    if (!q) return users
+    return users.filter((u) => u.name.toLowerCase().includes(q))
+  }, [users, receiveOperatorSearch])
+
   function openIssue(id: string) {
     setIssueToolId(id)
     setMachineId('')
     setOperatorId('')
+    setIssueOperatorSearch('')
+    setShadeIssueInitialCondition('mint')
+    setIssueJobCardId('')
+    setIssueJobCardNumber(null)
+    setJobCardQuery('')
+    setJobCardHits([])
     setIssueOpen(true)
   }
 
@@ -291,6 +367,9 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
     setReceiveToolId(id)
     setFinalImpressions(toolType === 'shade_cards' ? 0 : '')
     setReceiveCondition('Good')
+    setReceiveOperatorId('')
+    setReceiveOperatorSearch('')
+    setShadeReceiveEndCondition('mint')
     setReceiveOpen(true)
   }
 
@@ -342,13 +421,19 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
         const op = typeof d.operatorName === 'string' ? d.operatorName : '—'
         const mc = typeof d.machineCode === 'string' ? d.machineCode : '—'
         const mn = typeof d.machineName === 'string' ? d.machineName : ''
-        return `Issued to ${op} · machine ${mc}${mn ? ` (${mn})` : ''}`
+        const jn = typeof d.jobCardNumber === 'number' ? d.jobCardNumber : null
+        const jc = jn != null ? ` · JC #${jn}` : ''
+        return `Issued to ${op} · machine ${mc}${mn ? ` (${mn})` : ''}${jc}`
       }
       case 'RECEIVED': {
         const imp = typeof d.finalImpressions === 'number' ? d.finalImpressions : 0
         const cond = typeof d.condition === 'string' ? d.condition : '—'
-        if (imp === 0 && cond === 'Good') return 'Received to rack'
-        return `Received to rack · +${imp} impressions · ${cond}`
+        const loc = typeof d.returnLocation === 'string' ? d.returnLocation : null
+        const tail = [loc ? `→ ${loc}` : null, imp > 0 ? `+${imp} imp` : null, cond !== '—' ? cond : null]
+          .filter(Boolean)
+          .join(' · ')
+        if (!tail) return 'Received to rack'
+        return `Received to rack · ${tail}`
       }
       case 'VENDOR_RECEIVED': {
         const notes = typeof d.notes === 'string' && d.notes.trim() ? d.notes.trim() : null
@@ -433,6 +518,10 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       toast.error('Operator is required')
       return
     }
+    if (toolType === 'shade_cards' && !issueJobCardId.trim()) {
+      toast.error('Link an active production job (job card) — required for custody handshake')
+      return
+    }
     const path =
       toolType === 'dies'
         ? `/api/inventory-hub/dies/${issueToolId}/issue`
@@ -440,7 +529,15 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
           ? `/api/inventory-hub/emboss-blocks/${issueToolId}/issue`
           : `/api/inventory-hub/shade-cards/${issueToolId}/issue`
     try {
-      const body = safeJsonStringify({ machineId, operatorUserId: operatorId })
+      const body =
+        toolType === 'shade_cards'
+          ? safeJsonStringify({
+              machineId,
+              operatorUserId: operatorId,
+              jobCardId: issueJobCardId.trim(),
+              initialCondition: shadeIssueInitialCondition,
+            })
+          : safeJsonStringify({ machineId, operatorUserId: operatorId })
       const r = await fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -484,23 +581,37 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
           ? `/api/inventory-hub/emboss-blocks/${receiveToolId}/receive`
           : `/api/inventory-hub/shade-cards/${receiveToolId}/receive`
     try {
-      const body = safeJsonStringify({
-        finalImpressions: toolType === 'shade_cards' ? 0 : Number(finalImpressions),
-        condition: toolType === 'shade_cards' ? 'Good' : receiveCondition,
-      })
+      if (toolType === 'shade_cards' && !receiveOperatorId.trim()) {
+        toast.error('Select returning operator')
+        return
+      }
+      const body =
+        toolType === 'shade_cards'
+          ? safeJsonStringify({
+              finalImpressions: 0,
+              endCondition: shadeReceiveEndCondition,
+              returningOperatorUserId: receiveOperatorId,
+            })
+          : safeJsonStringify({
+              finalImpressions: Number(finalImpressions),
+              condition: receiveCondition,
+            })
       const r = await fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
       })
       const text = await r.text()
-      const j = safeJsonParse<{ error?: string; duplicate?: boolean }>(text, {})
+      const j = safeJsonParse<{ error?: string; duplicate?: boolean; damageReport?: boolean }>(text, {})
       if (!r.ok) {
         toast.error(j.error ?? 'Receive failed')
         return
       }
       if (j.duplicate) toast.message('Duplicate receive ignored')
       else toast.success('Received to rack')
+      if (toolType === 'shade_cards' && j.damageReport) {
+        toast.warning('Damage report logged — end condition below checkout baseline.')
+      }
       setReceiveOpen(false)
       await load()
     } catch (e) {
@@ -562,7 +673,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               className={`rounded-lg border border-orange-900/40 bg-zinc-950 px-3 py-2 ${shadeMono}`}
               title="ΔE Limit Enforced < 2.0"
             >
-              <p className="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Fading Standards</p>
+              <p className="text-[9px] uppercase tracking-wider text-zinc-500">Fading Standards</p>
               <p className="text-xl font-bold text-orange-400 tabular-nums leading-tight">{shadeFadingStandardsCount}</p>
             </div>
           ) : null}
@@ -621,7 +732,9 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search…"
-            className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm max-w-md"
+            className={`px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm max-w-md ${
+              toolType === 'shade_cards' ? shadeMono : ''
+            }`}
           />
         </div>
       </div>
@@ -767,34 +880,36 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
           </table>
         </div>
       ) : (
-        <div
-          className={`rounded-lg border border-zinc-800 overflow-x-auto bg-black ring-1 ring-white/5 ${shadeMono}`}
-        >
-          <table className="w-full text-left text-[11px] leading-tight">
-            <thead className="bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500">
+        <div className={`rounded-lg border border-zinc-800 overflow-x-auto bg-[#000000] ${shadeMono}`}>
+          <table className="w-full text-left text-[11px] leading-tight bg-[#000000]">
+            <thead className="bg-[#000000] border-b border-zinc-900 text-[10px] uppercase tracking-wider text-zinc-500">
               <tr>
-                <th className="px-2 h-12 align-middle whitespace-nowrap">MFG / entry</th>
-                <th className="px-2 h-12 align-middle min-w-[11rem]">Client / product</th>
-                <th className="px-2 h-12 align-middle whitespace-nowrap">Card age</th>
-                <th className="px-2 h-12 align-middle whitespace-nowrap">Status / loc</th>
-                <th className="px-2 h-12 align-middle min-w-[5rem] max-w-[8rem]">Remarks</th>
-                <th className="px-2 h-12 align-middle w-[72px] text-right"> </th>
+                <th className="px-2 h-[44px] align-middle whitespace-nowrap">MFG / entry</th>
+                <th className="px-2 h-[44px] align-middle min-w-[10rem] font-sans">Client / product</th>
+                <th className="px-2 h-[44px] align-middle whitespace-nowrap min-w-[7rem]">Shade · AW</th>
+                <th className="px-2 h-[44px] align-middle whitespace-nowrap">Card age</th>
+                <th className="px-2 h-[44px] align-middle whitespace-nowrap font-sans">Status / loc</th>
+                <th className="px-2 h-[44px] align-middle min-w-[5rem] max-w-[8rem] font-sans">Remarks</th>
+                <th className="px-2 h-[44px] align-middle w-[72px] text-right"> </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-900">
+            <tbody className="divide-y divide-zinc-900 bg-[#000000]">
               {filteredShades.map((s) => {
                 const status = s.custodyStatus ?? ''
-                const label =
-                  s.cardStatusLabel ??
-                  (status === 'in_stock' ? 'In-Stock' : status === 'on_floor' ? 'Issued' : custodyLabel(status))
-                const loc =
-                  s.locationLabel ??
-                  (status === 'in_stock' ? 'Rack' : status === 'at_vendor' ? 'Vendor' : s.currentHolder ?? '—')
                 const entry = s.entryDate ?? (s.createdAt ? s.createdAt.slice(0, 10) : '—')
                 const mfg = s.mfgDate?.trim()
                 const dateLine = mfg ? mfg : entry
                 const months = s.currentAgeMonths ?? null
                 const tier = shadeCardAgeTier(months)
+                const ageLabel = months == null ? '—' : months.toFixed(2)
+                const label =
+                  tier === 'expired'
+                    ? 'STATUS: EXPIRED'
+                    : (s.cardStatusLabel ??
+                      (status === 'in_stock' ? 'In-Stock' : status === 'on_floor' ? 'Issued' : custodyLabel(status)))
+                const loc =
+                  s.locationLabel ??
+                  (status === 'in_stock' ? 'Master Rack' : status === 'at_vendor' ? 'Vendor' : s.currentHolder ?? '—')
                 const clientName = s.product?.customer?.name?.trim() || s.customer?.name?.trim() || '—'
                 const productName =
                   s.product?.cartonName?.trim() || s.productMaster?.trim() || '—'
@@ -805,8 +920,8 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 return (
                   <tr
                     key={s.id}
-                    className={`h-12 max-h-12 hover:bg-zinc-950/80 ${
-                      tier === 'critical' ? 'bg-rose-900/40' : ''
+                    className={`h-[44px] max-h-[44px] hover:bg-zinc-950/50 ${
+                      tier === 'expired' ? 'bg-[rgba(225,29,72,0.15)]' : ''
                     }`}
                   >
                     <td className={`px-2 align-middle text-zinc-400 whitespace-nowrap ${shadeMono}`}>
@@ -823,53 +938,62 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                         >
                           <History className="h-3.5 w-3.5" />
                         </button>
-                        <div className="min-w-0">
-                          <p className="font-bold text-emerald-400 truncate leading-tight">{clientName}</p>
-                          {productLinkId ? (
-                            <Link
-                              href={`/product-master/${productLinkId}`}
-                              className="text-sm text-zinc-100 hover:text-sky-300 hover:underline block truncate leading-snug"
-                            >
-                              {productName}
-                            </Link>
-                          ) : (
-                            <span className="text-sm text-zinc-100 block truncate leading-snug">{productName}</span>
-                          )}
-                          <p className={`text-[10px] text-zinc-500 mt-0.5 ${shadeMono}`}>
-                            Code: <span className="text-zinc-400">{awCode}</span>
-                            <span className="text-zinc-700"> | </span>
-                            ID: <span className="text-amber-300/90">{s.shadeCode}</span>
-                          </p>
-                        </div>
+                        {productLinkId ? (
+                          <Link
+                            href={`/product/${productLinkId}`}
+                            className="min-w-0 flex-1 block rounded hover:bg-zinc-900/50 -m-0.5 p-0.5"
+                          >
+                            <p className="font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
+                            <p className="text-[14px] text-white truncate leading-snug font-sans">{productName}</p>
+                          </Link>
+                        ) : (
+                          <div className="min-w-0">
+                            <p className="font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
+                            <p className="text-[14px] text-white truncate leading-snug font-sans">{productName}</p>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className={`px-2 align-middle text-zinc-300 ${shadeMono}`}>
+                      <div className="leading-tight">
+                        <p className="text-[11px] text-amber-300/95 whitespace-nowrap">{s.shadeCode}</p>
+                        <p className="text-[10px] text-zinc-500 whitespace-nowrap">{awCode}</p>
                       </div>
                     </td>
                     <td className="px-2 align-middle whitespace-nowrap">
                       {months == null ? (
                         <span className="text-zinc-600">—</span>
                       ) : tier === 'fresh' ? (
-                        <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-500/20 text-emerald-200 ${shadeMono}`}
-                        >
-                          {months} Months
-                        </span>
+                        <span className={`text-[10px] font-medium text-emerald-500 ${shadeMono}`}>{ageLabel} mo</span>
                       ) : tier === 'reverify' ? (
-                        <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold bg-orange-500/20 text-orange-200 animate-pulse ${shadeMono}`}
-                        >
-                          RE-VERIFY · {months} Mo
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-medium text-amber-500 ${shadeMono}`}>
+                          {shadeCardIsApproachingHardExpiry(months) ? (
+                            <span
+                              className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full border border-amber-500/60 bg-amber-500/10 px-0.5 text-[9px] font-black text-amber-500 animate-pulse"
+                              title="Approaching 12-month expiry. Prepare replacement."
+                            >
+                              !
+                            </span>
+                          ) : null}
+                          <RefreshCw className="h-3 w-3 shrink-0 animate-pulse" aria-hidden />
+                          {ageLabel} mo
                         </span>
                       ) : (
-                        <span
-                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-rose-500/30 text-rose-100 ${shadeMono}`}
-                        >
-                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                          CRITICAL: REPLACE · {months} Mo
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-medium text-rose-500 ${shadeMono}`}>
+                          <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+                          EXPIRED · {ageLabel} mo
                         </span>
                       )}
                     </td>
                     <td className="px-2 align-middle">
                       <div className="flex flex-wrap gap-1">
-                        <span className="inline-block rounded px-1.5 py-0.5 text-[9px] font-medium bg-slate-800 text-zinc-200 border border-zinc-700/80">
+                        <span
+                          className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-medium border font-sans ${
+                            tier === 'expired'
+                              ? 'bg-rose-950/80 text-rose-100 border-rose-500/40'
+                              : 'bg-slate-800 text-zinc-200 border-zinc-700/80'
+                          }`}
+                        >
                           {label}
                         </span>
                         <span
@@ -879,15 +1003,21 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                         </span>
                       </div>
                     </td>
-                    <td className="px-2 align-middle text-zinc-500 max-w-[8rem] truncate" title={s.remarks ?? ''}>
-                      {s.remarks?.trim() || '—'}
+                    <td className="px-2 align-middle max-w-[8rem]">
+                      <ShadeSmartRemark
+                        text={s.remarks}
+                        editedBy={s.remarksEditedByName}
+                        editedAtIso={s.remarksEditedAt}
+                        updatedAtIso={s.updatedAt}
+                        monoClass={shadeMono}
+                      />
                     </td>
                     <td className="px-2 align-middle text-right whitespace-nowrap">
                       <button
                         type="button"
                         onClick={() => openIssue(s.id)}
-                        disabled={status !== 'in_stock'}
-                        title="Issue to machine"
+                        disabled={status !== 'in_stock' || tier === 'expired'}
+                        title={tier === 'expired' ? 'Card expired (≥12 mo) — replace before issue' : 'Issue to machine'}
                         className="inline-flex p-1.5 rounded text-sky-400 hover:bg-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
                       >
                         <Send className="h-4 w-4" />
@@ -912,10 +1042,72 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
 
       {issueOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-900 p-4 space-y-3 text-sm">
-            <h2 className="text-lg font-semibold text-white">Issue to machine</h2>
-            <label className="block text-slate-300">
-              Machine
+          <div
+            className={`w-full max-w-md rounded-lg border border-slate-600 bg-slate-900 p-4 space-y-3 text-sm ${
+              toolType === 'shade_cards' ? shadeMono : ''
+            }`}
+          >
+            <h2 className="text-lg font-semibold text-white font-sans">
+              {toolType === 'shade_cards' ? 'Issue to floor (live custody)' : 'Issue to machine'}
+            </h2>
+            {toolType === 'shade_cards' ? (
+              <>
+                <label className="block text-slate-300 font-sans">
+                  Job card link <span className="text-amber-400/90 font-normal">(required)</span>
+                  <input
+                    value={jobCardQuery}
+                    onChange={(e) => {
+                      setJobCardQuery(e.target.value)
+                      setIssueJobCardId('')
+                      setIssueJobCardNumber(null)
+                    }}
+                    placeholder="Search # or customer…"
+                    className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  />
+                </label>
+                {issueJobCardId && issueJobCardNumber != null ? (
+                  <p className="text-xs text-emerald-300 font-sans">
+                    <span className={shadeMono}>JC #{issueJobCardNumber}</span> linked
+                    <button
+                      type="button"
+                      className="ml-2 text-sky-400 underline font-sans"
+                      onClick={() => {
+                        setIssueJobCardId('')
+                        setIssueJobCardNumber(null)
+                        setJobCardQuery('')
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </p>
+                ) : null}
+                {jobCardLoading ? <p className="text-xs text-slate-500 font-sans">Searching…</p> : null}
+                {!issueJobCardId && jobCardHits.length > 0 ? (
+                  <ul className="max-h-32 overflow-y-auto rounded border border-slate-700 divide-y divide-slate-800 text-xs font-sans">
+                    {jobCardHits.map((jc) => (
+                      <li key={jc.id}>
+                        <button
+                          type="button"
+                          className="w-full text-left px-2 py-1.5 hover:bg-slate-800 text-slate-200"
+                          onClick={() => {
+                            setIssueJobCardId(jc.id)
+                            setIssueJobCardNumber(jc.jobCardNumber)
+                            setJobCardQuery(`#${jc.jobCardNumber} · ${jc.customer.name}`)
+                          }}
+                        >
+                          <span className={shadeMono}>JC #{jc.jobCardNumber}</span>
+                          <span className="text-slate-500"> · </span>
+                          {jc.customer.name}
+                          <span className="text-slate-600"> · {jc.status}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            ) : null}
+            <label className="block text-slate-300 font-sans">
+              {toolType === 'shade_cards' ? 'Assign to machine' : 'Machine'}
               <select
                 value={machineId}
                 onChange={(e) => setMachineId(e.target.value)}
@@ -929,7 +1121,34 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 ))}
               </select>
             </label>
-            <label className="block text-slate-300">
+            {toolType === 'shade_cards' ? (
+              <label className="block text-slate-300 font-sans">
+                Initial condition (checkout)
+                <select
+                  value={shadeIssueInitialCondition}
+                  onChange={(e) =>
+                    setShadeIssueInitialCondition(e.target.value as 'mint' | 'used' | 'minor_damage')
+                  }
+                  className={`mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white ${shadeMono}`}
+                >
+                  <option value="mint">{shadeCardPhysicalLabel('mint')}</option>
+                  <option value="used">{shadeCardPhysicalLabel('used')}</option>
+                  <option value="minor_damage">{shadeCardPhysicalLabel('minor_damage')}</option>
+                </select>
+              </label>
+            ) : null}
+            {toolType === 'shade_cards' ? (
+              <label className="block text-slate-300 font-sans">
+                Operator search
+                <input
+                  value={issueOperatorSearch}
+                  onChange={(e) => setIssueOperatorSearch(e.target.value)}
+                  placeholder="Filter staff…"
+                  className={`mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white ${shadeMono}`}
+                />
+              </label>
+            ) : null}
+            <label className="block text-slate-300 font-sans">
               Operator
               <select
                 value={operatorId}
@@ -937,19 +1156,24 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
               >
                 <option value="">Select operator</option>
-                {users.map((u) => (
+                {(toolType === 'shade_cards' ? filteredIssueOperators : users).map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
                   </option>
                 ))}
               </select>
             </label>
+            {toolType === 'shade_cards' ? (
+              <p className="text-[10px] text-slate-500 font-sans">
+                Sets custody to <span className="text-slate-300">On-Floor</span> and location to the machine code.
+              </p>
+            ) : null}
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setIssueOpen(false)} className="px-3 py-1.5 rounded border border-slate-600 text-slate-200">
+              <button type="button" onClick={() => setIssueOpen(false)} className="px-3 py-1.5 rounded border border-slate-600 text-slate-200 font-sans">
                 Cancel
               </button>
-              <button type="button" onClick={() => void submitIssue()} className="px-3 py-1.5 rounded bg-blue-600 text-white">
-                Issue to machine
+              <button type="button" onClick={() => void submitIssue()} className="px-3 py-1.5 rounded bg-blue-600 text-white font-sans">
+                {toolType === 'shade_cards' ? 'Confirm issue' : 'Issue to machine'}
               </button>
             </div>
           </div>
@@ -1032,7 +1256,55 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               </>
             )}
             {toolType === 'shade_cards' && (
-              <p className="text-slate-400 text-xs">Confirms the shade card is back in rack stock (no extra fields required).</p>
+              <div className="space-y-3 font-sans">
+                <p className="text-slate-400 text-xs">Return the card to master rack stock and set custody to In-Stock.</p>
+                <label className="block text-slate-300 text-sm">
+                  Returning operator (verify)
+                  <input
+                    value={receiveOperatorSearch}
+                    onChange={(e) => setReceiveOperatorSearch(e.target.value)}
+                    placeholder="Search staff…"
+                    className={`mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white ${shadeMono}`}
+                  />
+                </label>
+                <label className="block text-slate-300 text-sm">
+                  Staff pick
+                  <select
+                    value={receiveOperatorId}
+                    onChange={(e) => setReceiveOperatorId(e.target.value)}
+                    className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  >
+                    <option value="">Select operator</option>
+                    {filteredReceiveOperators.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-slate-300 text-sm">
+                  End condition
+                  <select
+                    value={shadeReceiveEndCondition}
+                    onChange={(e) =>
+                      setShadeReceiveEndCondition(e.target.value as 'mint' | 'used' | 'minor_damage')
+                    }
+                    className={`mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white ${shadeMono}`}
+                  >
+                    <option value="mint">{shadeCardPhysicalLabel('mint')}</option>
+                    <option value="used">{shadeCardPhysicalLabel('used')}</option>
+                    <option value="minor_damage">{shadeCardPhysicalLabel('minor_damage')}</option>
+                  </select>
+                </label>
+                <label className="block text-slate-300 text-sm">
+                  Return to rack
+                  <input
+                    readOnly
+                    value={SHADE_MASTER_RACK_LOCATION}
+                    className={`mt-1 w-full px-2 py-2 rounded bg-slate-950 border border-slate-600 text-slate-300 ${shadeMono}`}
+                  />
+                </label>
+              </div>
             )}
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setReceiveOpen(false)} className="px-3 py-1.5 rounded border border-slate-600 text-slate-200">
@@ -1054,7 +1326,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
             <h2 className="text-lg font-semibold text-amber-400">Add shade card</h2>
             <p className="text-xs text-zinc-500">
               Card codes auto-generate (SC-####). Status defaults to <span className="text-zinc-300">In-Stock</span>,
-              location <span className="text-zinc-300">Rack</span>.
+              location <span className="text-zinc-300">Master Rack</span>.
             </p>
             <label className="block text-zinc-300 font-sans">
               Manufacturing date <span className="text-rose-400">*</span>
@@ -1108,6 +1380,52 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
             ) : (
               <p className="text-[10px] text-zinc-600 font-sans">Pick a row above to link Product Master.</p>
             )}
+            <label className="block text-zinc-300 font-sans">
+              Substrate type <span className="text-rose-400">*</span>
+              <select
+                value={addSubstrate}
+                onChange={(e) => setAddSubstrate(e.target.value as (typeof SHADE_SUBSTRATE_VALUES)[number])}
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white ${shadeMono}`}
+              >
+                {SHADE_SUBSTRATE_VALUES.map((v) => (
+                  <option key={v} value={v}>
+                    {shadeSubstrateLabel(v)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <label className="block text-zinc-300 font-sans col-span-1">
+                L* <span className="text-rose-400">*</span>
+                <input
+                  value={addLabL}
+                  onChange={(e) => setAddLabL(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="e.g. 82.4"
+                  className={`mt-1 w-full px-2 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white ${shadeMono}`}
+                />
+              </label>
+              <label className="block text-zinc-300 font-sans col-span-1">
+                a* <span className="text-rose-400">*</span>
+                <input
+                  value={addLabA}
+                  onChange={(e) => setAddLabA(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="e.g. 2.1"
+                  className={`mt-1 w-full px-2 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white ${shadeMono}`}
+                />
+              </label>
+              <label className="block text-zinc-300 font-sans col-span-1">
+                b* <span className="text-rose-400">*</span>
+                <input
+                  value={addLabB}
+                  onChange={(e) => setAddLabB(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="e.g. -4.2"
+                  className={`mt-1 w-full px-2 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white ${shadeMono}`}
+                />
+              </label>
+            </div>
             <label className="block text-zinc-300 font-sans">
               AW code <span className="text-zinc-500 font-normal">(optional override)</span>
               <input

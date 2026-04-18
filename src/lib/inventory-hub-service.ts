@@ -4,16 +4,19 @@ import {
   CUSTODY_HUB_CUSTODY_READY,
   CUSTODY_IN_STOCK,
   CUSTODY_ON_FLOOR,
+  SHADE_MASTER_RACK_LOCATION,
 } from '@/lib/inventory-hub-custody'
 import { createDieHubEvent, DIE_HUB_ACTION } from '@/lib/die-hub-events'
 import { createShadeCardEvent, SHADE_CARD_ACTION } from '@/lib/shade-card-events'
 import { shadeCardIsExpired } from '@/lib/shade-card-age'
+import type { ShadeCardPhysicalCondition } from '@/lib/shade-card-custody-condition'
+import { shadeCardConditionIndicatesDamage, shadeCardPhysicalToLegacyCondition } from '@/lib/shade-card-custody-condition'
 import { dieHubZoneLabelFromCustody } from '@/lib/tooling-hub-zones'
 
 export type InventoryToolKind = 'die' | 'emboss_block' | 'shade_card'
 
 export type IssueResult =
-  | { ok: true }
+  | { ok: true; shadeDamageReport?: boolean }
   | {
       ok: false
       code:
@@ -24,6 +27,8 @@ export type IssueResult =
         | 'INVALID_STATE'
         | 'NOT_ON_FLOOR'
         | 'NOT_AT_VENDOR'
+        | 'SHADE_EXPIRED'
+        | 'BAD_JOB_CARD'
       message: string
     }
 
@@ -33,6 +38,7 @@ export async function issueToolToMachine(
   machineId: string,
   operatorUserId: string | undefined,
   operatorNameText?: string | null,
+  extras?: { jobCardId?: string | null; initialCondition?: ShadeCardPhysicalCondition },
 ): Promise<IssueResult> {
   if (!toolId?.trim() || !machineId?.trim()) {
     return { ok: false, code: 'INVALID_STATE', message: 'toolId and machineId are required' }
@@ -125,6 +131,7 @@ export async function issueToolToMachine(
 
       const row = await tx.shadeCard.findUnique({ where: { id: toolId } })
       if (!row) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
+      const fromLocation = row.currentHolder?.trim() || SHADE_MASTER_RACK_LOCATION
       if (shadeCardIsExpired(row.mfgDate)) {
         throw Object.assign(new Error('SHADE_EXPIRED'), { code: 'SHADE_EXPIRED' })
       }
@@ -134,19 +141,36 @@ export async function issueToolToMachine(
         }
         throw Object.assign(new Error('INVALID_STATE'), { code: 'INVALID_STATE' })
       }
+      const jcId = extras?.jobCardId?.trim()
+      if (!jcId) {
+        throw Object.assign(new Error('Active production job (job card) link is required'), {
+          code: 'BAD_JOB_CARD',
+        })
+      }
+      const jc = await tx.productionJobCard.findUnique({
+        where: { id: jcId },
+        select: { id: true, jobCardNumber: true },
+      })
+      if (!jc) {
+        throw Object.assign(new Error('Job card not found'), { code: 'BAD_JOB_CARD' })
+      }
+      const jobCardNumber = jc.jobCardNumber
       const upd = await tx.shadeCard.updateMany({
         where: { id: toolId, custodyStatus: CUSTODY_IN_STOCK },
         data: {
           custodyStatus: CUSTODY_ON_FLOOR,
           issuedMachineId: machineId,
+          issuedJobCardId: jcId,
           issuedOperator: operatorLabel,
           issuedAt: new Date(),
-          currentHolder: `${machine.machineCode} · ${operatorLabel}`,
+          currentHolder: machine.machineCode,
         },
       })
       if (upd.count !== 1) {
         throw Object.assign(new Error('INVALID_STATE'), { code: 'INVALID_STATE' })
       }
+      const initialCondition: ShadeCardPhysicalCondition = extras?.initialCondition ?? 'mint'
+      const readingAtIssue = row.deltaEReading != null ? Number(row.deltaEReading) : null
       await createShadeCardEvent(tx, {
         shadeCardId: toolId,
         actionType: SHADE_CARD_ACTION.ISSUED,
@@ -155,6 +179,20 @@ export async function issueToolToMachine(
           machineCode: machine.machineCode,
           machineName: machine.name,
           operatorName: operatorLabel,
+          initialCondition,
+          jobCardId: jcId,
+          jobCardNumber,
+          resultingDeltaE: readingAtIssue,
+          ...(operatorUserId?.trim() ? { operatorUserId: operatorUserId.trim() } : {}),
+        },
+      })
+      await createShadeCardEvent(tx, {
+        shadeCardId: toolId,
+        actionType: SHADE_CARD_ACTION.LOCATION_CHANGE,
+        details: {
+          fromLocation,
+          toLocation: machine.machineCode,
+          phase: 'issue_to_floor',
         },
       })
     })
@@ -172,10 +210,25 @@ export async function issueToolToMachine(
       return {
         ok: false,
         code: 'SHADE_EXPIRED',
-        message: 'Shade card is EXPIRED (>12 months on 30.44-day basis). Replace before issuing to floor.',
+        message: 'Shade card is EXPIRED (≥12 months on 30.44-day basis). Replace before issuing to floor.',
+      }
+    }
+    if (code === 'BAD_JOB_CARD') {
+      return {
+        ok: false,
+        code: 'BAD_JOB_CARD',
+        message: e instanceof Error ? e.message : 'Job card error',
       }
     }
     throw e
+  }
+}
+
+export type ReceiveFromFloorOptions = {
+  shadeReceive?: {
+    endConditionPhysical: ShadeCardPhysicalCondition
+    returningOperatorUserId?: string | null
+    returningOperatorName?: string | null
   }
 }
 
@@ -184,11 +237,13 @@ export async function receiveToolFromFloor(
   toolId: string,
   finalImpressions: number,
   condition: 'Good' | 'Damaged' | 'Needs Repair',
+  options?: ReceiveFromFloorOptions,
 ): Promise<IssueResult> {
   if (!toolId?.trim()) {
     return { ok: false, code: 'INVALID_STATE', message: 'toolId is required' }
   }
 
+  const shadeOut = { damageReport: false }
   try {
     await db.$transaction(async (tx) => {
       if (kind === 'die') {
@@ -247,15 +302,48 @@ export async function receiveToolFromFloor(
         return
       }
 
+      if (!options?.shadeReceive) {
+        throw Object.assign(new Error('SHADE_RECEIVE_META'), { code: 'SHADE_RECEIVE_META' })
+      }
+      const prev = await tx.shadeCard.findUnique({ where: { id: toolId } })
+      if (!prev) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
+      const fromLocation = prev.currentHolder?.trim() || '—'
+      const endPhysical = options.shadeReceive.endConditionPhysical
+      const legacyCondition = shadeCardPhysicalToLegacyCondition(endPhysical)
+
+      let returningOperatorName = options.shadeReceive.returningOperatorName?.trim() || ''
+      if (!returningOperatorName && options.shadeReceive.returningOperatorUserId?.trim()) {
+        const u = await tx.user.findUnique({
+          where: { id: options.shadeReceive.returningOperatorUserId.trim() },
+          select: { name: true, active: true },
+        })
+        if (u?.active) returningOperatorName = u.name
+      }
+      if (!returningOperatorName) returningOperatorName = 'Unknown operator'
+
+      const lastIssue = await tx.shadeCardEvent.findFirst({
+        where: { shadeCardId: toolId, actionType: SHADE_CARD_ACTION.ISSUED },
+        orderBy: { createdAt: 'desc' },
+      })
+      let checkoutInitial: ShadeCardPhysicalCondition | null = null
+      const issueDet = lastIssue?.details
+      if (issueDet && typeof issueDet === 'object' && !Array.isArray(issueDet)) {
+        const ic = (issueDet as Record<string, unknown>).initialCondition
+        if (ic === 'mint' || ic === 'used' || ic === 'minor_damage') checkoutInitial = ic
+      }
+      const damageReport = shadeCardConditionIndicatesDamage(checkoutInitial, endPhysical)
+      shadeOut.damageReport = damageReport
+
       const upd = await tx.shadeCard.updateMany({
         where: { id: toolId, custodyStatus: CUSTODY_ON_FLOOR },
         data: {
           custodyStatus: CUSTODY_IN_STOCK,
           issuedMachineId: null,
+          issuedJobCardId: null,
           issuedOperator: null,
           issuedAt: null,
           impressionCount: { increment: finalImpressions },
-          currentHolder: null,
+          currentHolder: SHADE_MASTER_RACK_LOCATION,
         },
       })
       if (upd.count !== 1) {
@@ -263,15 +351,42 @@ export async function receiveToolFromFloor(
         if (!row) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
         throw Object.assign(new Error('NOT_ON_FLOOR'), { code: 'NOT_ON_FLOOR' })
       }
+      const readingAtReturn = prev.deltaEReading != null ? Number(prev.deltaEReading) : null
       await createShadeCardEvent(tx, {
         shadeCardId: toolId,
         actionType: SHADE_CARD_ACTION.RECEIVED,
-        details: { finalImpressions, condition },
+        details: {
+          finalImpressions,
+          condition: legacyCondition,
+          endCondition: endPhysical,
+          returnLocation: SHADE_MASTER_RACK_LOCATION,
+          usable: legacyCondition === 'Good',
+          returningOperatorName,
+          returningOperatorUserId: options.shadeReceive.returningOperatorUserId?.trim() || null,
+          checkoutInitialCondition: checkoutInitial,
+          damageReport,
+          resultingDeltaE: readingAtReturn,
+          returnedAt: new Date().toISOString(),
+        },
+      })
+      await createShadeCardEvent(tx, {
+        shadeCardId: toolId,
+        actionType: SHADE_CARD_ACTION.LOCATION_CHANGE,
+        details: {
+          fromLocation,
+          toLocation: SHADE_MASTER_RACK_LOCATION,
+          phase: 'receive_to_rack',
+        },
       })
     })
-    return { ok: true }
+    return kind === 'shade_card'
+      ? { ok: true, shadeDamageReport: shadeOut.damageReport }
+      : { ok: true }
   } catch (e: unknown) {
     const code = (e as { code?: string })?.code
+    if (code === 'SHADE_RECEIVE_META') {
+      return { ok: false, code: 'INVALID_STATE', message: 'Shade receive requires operator and end condition' }
+    }
     if (code === 'NOT_FOUND') return { ok: false, code: 'NOT_FOUND', message: 'Tool not found' }
     if (code === 'NOT_ON_FLOOR') {
       return { ok: false, code: 'NOT_ON_FLOOR', message: 'Tool is not on the floor (nothing to receive).' }

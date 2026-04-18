@@ -1,10 +1,15 @@
 /** DB values for emboss_blocks / dyes / shade_cards custody_status */
 
+/** Default rack location label when a shade card is received from floor. */
+export const SHADE_MASTER_RACK_LOCATION = 'Master Rack'
+
 export const CUSTODY_IN_STOCK = 'in_stock'
 export const CUSTODY_ON_FLOOR = 'on_floor'
 export const CUSTODY_AT_VENDOR = 'at_vendor'
 /** Plate-style tooling hub — incoming triage column */
 export const CUSTODY_HUB_TRIAGE = 'hub_triage'
+/** Designing queue — die reserved for a linked job, shown in Die Hub triage lane */
+export const CUSTODY_PREPARING_FOR_PRODUCTION = 'preparing_for_production'
 /** Die / emboss marked ready on custody floor (pre-press staging) */
 export const CUSTODY_HUB_CUSTODY_READY = 'hub_custody_ready'
 /** Emboss hub — in-house engraving queue */
@@ -22,6 +27,8 @@ export function custodyLabel(s: string): string {
       return 'At Vendor'
     case CUSTODY_HUB_TRIAGE:
       return 'Hub triage'
+    case CUSTODY_PREPARING_FOR_PRODUCTION:
+      return 'Preparing for Production'
     case CUSTODY_HUB_CUSTODY_READY:
       return 'Custody staging'
     case CUSTODY_HUB_ENGRAVING_QUEUE:
@@ -41,6 +48,8 @@ export function custodyBadgeClass(s: string): string {
       return 'bg-amber-900/50 border-amber-600 text-amber-200'
     case CUSTODY_HUB_TRIAGE:
       return 'bg-zinc-800 border-zinc-500 text-zinc-200'
+    case CUSTODY_PREPARING_FOR_PRODUCTION:
+      return 'bg-amber-950/70 border-amber-500 text-amber-100'
     case CUSTODY_HUB_CUSTODY_READY:
       return 'bg-amber-950/60 border-amber-600 text-amber-200'
     case CUSTODY_HUB_ENGRAVING_QUEUE:

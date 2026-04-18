@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
-import { inventoryIssueBodySchema } from '@/lib/inventory-hub-schemas'
+import { shadeCardIssueBodySchema } from '@/lib/inventory-hub-schemas'
 import { issueToolToMachine } from '@/lib/inventory-hub-service'
 import { safeJsonParse, safeJsonStringify } from '@/lib/safe-json'
 import { buildIssueDedupeKey, isDuplicateIssue, recordIssueSuccess } from '@/lib/inventory-issue-idempotency'
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       return NextResponse.json({ error: 'Could not read request body' }, { status: 400 })
     }
     const body = safeJsonParse<Record<string, unknown>>(raw, {})
-    const parsed = inventoryIssueBodySchema.safeParse(body)
+    const parsed = shadeCardIssueBodySchema.safeParse(body)
     if (!parsed.success) {
       return NextResponse.json(
         { error: 'Validation failed', details: parsed.error.flatten() },
@@ -44,12 +44,16 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       parsed.data.machineId,
       parsed.data.operatorUserId,
       parsed.data.operatorName,
+      {
+        jobCardId: parsed.data.jobCardId,
+        initialCondition: parsed.data.initialCondition ?? 'mint',
+      },
     )
     if (result.ok === false) {
       const status =
         result.code === 'NOT_FOUND'
           ? 404
-          : result.code === 'BAD_MACHINE' || result.code === 'BAD_OPERATOR'
+          : result.code === 'BAD_MACHINE' || result.code === 'BAD_OPERATOR' || result.code === 'BAD_JOB_CARD'
             ? 400
             : result.code === 'ALREADY_ISSUED'
               ? 409
