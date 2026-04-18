@@ -77,6 +77,8 @@ export type ToolingHubLedgerRowJson = {
   similarMatches?: DieSimilarMatchJson[]
   /** Same L×W×H as this die, but a different master die type — not interchangeable. */
   typeMismatchMatches?: DieSimilarMatchJson[]
+  industrialPriority?: boolean
+  linkedCustomerNames?: string[]
 }
 
 function mapDie(d: {
@@ -109,7 +111,7 @@ function mapDie(d: {
   conditionRating: string | null
   hubStatusFlag: string | null
   hubPoorReportedBy: string | null
-  cartonsWork: { cartonName: string }[]
+  cartonsWork: { cartonName: string; customer: { name: string } | null }[]
 }) {
   const physicalPoor =
     d.condition?.trim() === 'Poor' || (d.conditionRating?.trim() ?? '') === 'Poor'
@@ -124,12 +126,20 @@ function mapDie(d: {
       (parsedDims ? formatDimsLwhFromParsed(parsedDims) : null) ??
       d.cartonSize?.trim()) ||
     '—'
+  const linkedCustomerNames = Array.from(
+    new Set(
+      d.cartonsWork
+        .map((c) => c.customer?.name?.trim())
+        .filter((n): n is string => Boolean(n)),
+    ),
+  )
   return {
     id: d.id,
     kind: 'die' as const,
     displayCode: `DYE-${d.dyeNumber}`,
     dyeNumber: d.dyeNumber,
     title: d.cartonsWork[0]?.cartonName ?? `Die #${d.dyeNumber}`,
+    linkedCustomerNames,
     ups: d.ups,
     dimensionsLabel: dimensionsLwh,
     dimensionsLwh,
@@ -223,9 +233,29 @@ export async function GET(req: NextRequest) {
       const rows = await db.dye.findMany({
         where: { active: true },
         orderBy: { dyeNumber: 'asc' },
-        include: { cartonsWork: { take: 1, select: { cartonName: true } } },
+        include: {
+          cartonsWork: {
+            take: 12,
+            select: { cartonName: true, customer: { select: { name: true } } },
+          },
+        },
       })
       const mapped = rows.map(mapDie)
+      const dieIds = mapped.map((r) => r.id)
+      const priorityLines =
+        dieIds.length > 0
+          ? await db.poLineItem.findMany({
+              where: {
+                dieMasterId: { in: dieIds },
+                OR: [{ directorPriority: true }, { po: { isPriority: true } }],
+              },
+              select: { dieMasterId: true },
+              distinct: ['dieMasterId'],
+            })
+          : []
+      const priorityDieIds = new Set(
+        priorityLines.map((l) => l.dieMasterId).filter((id): id is string => Boolean(id)),
+      )
       const similarBuckets = buildDieSimilarityBuckets(rows)
       const dimOnlyBuckets = buildDieDimensionOnlyBuckets(rows)
       const rankById = new Map(
@@ -233,6 +263,7 @@ export async function GET(req: NextRequest) {
       )
       const withSimilar = mapped.map((r, i) => {
         const raw = rows[i]!
+        const industrialPriority = priorityDieIds.has(r.id)
         const sim = similarDiesForRow(
           raw.id,
           raw.dimLengthMm,
@@ -253,6 +284,7 @@ export async function GET(req: NextRequest) {
         )
         return {
           ...r,
+          industrialPriority,
           ledgerRank: rankById.get(r.id) ?? 0,
           similarMatches: sim.map((e) => ({
             id: e.id,
@@ -309,6 +341,8 @@ export async function GET(req: NextRequest) {
           similarMatches: r.similarMatches,
           typeMismatchMatches: r.typeMismatchMatches,
           hubConditionPoor: r.hubConditionPoor,
+          industrialPriority: r.industrialPriority,
+          linkedCustomerNames: r.linkedCustomerNames,
         }
       })
       return new NextResponse(

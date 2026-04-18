@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { paperSupplyIconMeta } from '@/lib/po-paper-supply-ui'
 import { parseDeliveryYmdFromRemarks } from '@/lib/po-delivery-parse'
+import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
 
 type Customer = {
   id: string
@@ -553,6 +554,10 @@ export default function EditPurchaseOrderPage() {
         throw new Error((json.error as string) || 'Failed to save PO')
       }
       toast.success('PO updated')
+      broadcastIndustrialPriorityChange({
+        source: 'line_director_priority',
+        at: new Date().toISOString(),
+      })
       router.push('/orders/purchase-orders')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save')

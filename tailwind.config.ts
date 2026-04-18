@@ -24,9 +24,14 @@ const config: Config = {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.65' },
         },
+        'industrial-age-pulse': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.55' },
+        },
       },
       animation: {
         'po-age-alert': 'po-age-alert 2.2s ease-in-out infinite',
+        'industrial-age-pulse': 'industrial-age-pulse 2.2s ease-in-out infinite',
       },
       colors: {
         border: 'hsl(var(--border))',

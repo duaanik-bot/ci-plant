@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { PastingStyle } from '@prisma/client'
+import { PastingStyle, Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
@@ -86,10 +86,24 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const status = searchParams.get('status')
   const customerId = searchParams.get('customerId')
+  const deepSearch = searchParams.get('deepSearch')?.trim() ?? ''
 
-  const where: { status?: string; customerId?: string } = {}
+  const where: Prisma.PurchaseOrderWhereInput = {}
   if (status) where.status = status
   if (customerId) where.customerId = customerId
+
+  if (deepSearch.length >= 2) {
+    const mode = Prisma.QueryMode.insensitive
+    where.OR = [
+      { poNumber: { contains: deepSearch, mode } },
+      { customer: { name: { contains: deepSearch, mode } } },
+      {
+        lineItems: {
+          some: { cartonName: { contains: deepSearch, mode } },
+        },
+      },
+    ]
+  }
 
   const list = await db.purchaseOrder.findMany({
     where,
@@ -134,11 +148,24 @@ export async function GET(req: NextRequest) {
       : []
   const dyeById = dyeMapFromRows(dyes)
 
-  const withTooling = mapped.map((po) => ({
-    ...po,
-    toolingCritical: poHasCriticalTooling(po.lineItems, dyeById),
-    readiness: computePoReadiness(po.lineItems, dyeById),
-  }))
+  const dsLower = deepSearch.length >= 2 ? deepSearch.toLowerCase() : ''
+
+  const withTooling = mapped.map((po) => {
+    let deepMatchProductName: string | null = null
+    if (dsLower) {
+      const headerMatch =
+        po.poNumber.toLowerCase().includes(dsLower) ||
+        po.customer.name.toLowerCase().includes(dsLower)
+      const lineHit = po.lineItems.find((li) => li.cartonName.toLowerCase().includes(dsLower))
+      if (lineHit && !headerMatch) deepMatchProductName = lineHit.cartonName
+    }
+    return {
+      ...po,
+      toolingCritical: poHasCriticalTooling(po.lineItems, dyeById),
+      readiness: computePoReadiness(po.lineItems, dyeById),
+      deepMatchProductName,
+    }
+  })
 
   return NextResponse.json(withTooling)
 }

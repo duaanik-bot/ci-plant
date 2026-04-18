@@ -37,6 +37,10 @@ export type ToolingLedgerRow = {
   similarMatches?: ToolingSimilarMatch[]
   typeMismatchMatches?: ToolingSimilarMatch[]
   hubConditionPoor?: boolean
+  /** PO / director priority — sort to top + highlight. */
+  industrialPriority?: boolean
+  /** Die Hub — customers linked via carton work (deep search). */
+  linkedCustomerNames?: string[]
 }
 
 function hubSearchMatch(q: string, parts: Array<string | null | undefined>): boolean {
@@ -53,7 +57,7 @@ export function getFilteredToolingLedgerRows(
   pastingStyleFilter?: PastingStyle | null,
 ): ToolingLedgerRow[] {
   const q = searchQuery.trim().toLowerCase()
-  return rows.filter((r) => {
+  const filtered = rows.filter((r) => {
     if (
       pastingStyleFilter &&
       r.kind === 'die' &&
@@ -77,12 +81,21 @@ export function getFilteredToolingLedgerRows(
             pastingStyleLabel(r.pastingStyle),
             r.masterType,
             r.dieMake,
+            ...(r.linkedCustomerNames ?? []),
           ]
         : [r.displayCode, r.title, r.specSummary, r.zoneLabel]
     if (!hubSearchMatch(q, dieParts)) {
       return false
     }
     return true
+  })
+  return [...filtered].sort((a, b) => {
+    const pa = a.industrialPriority === true ? 1 : 0
+    const pb = b.industrialPriority === true ? 1 : 0
+    if (pa !== pb) return pb - pa
+    const ra = a.ledgerRank ?? 999999
+    const rb = b.ledgerRank ?? 999999
+    return ra - rb
   })
 }
 
@@ -190,10 +203,14 @@ export function ToolingHubLedgerTable({
                     ? formatDistanceToNow(d, { addSuffix: true })
                     : '—'
                 const lastLine = hubLastActionLine(at) ?? '—'
+                const priorityRow =
+                  r.industrialPriority === true
+                    ? 'border-amber-500/50 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.25)] bg-amber-950/20'
+                    : ''
                 return (
                   <tr
                     key={`${r.kind}-${r.id}`}
-                    className="border-b border-zinc-800/80 hover:bg-zinc-900/50"
+                    className={`border-b border-zinc-800/80 hover:bg-zinc-900/50 ${priorityRow}`}
                   >
                     <td className="px-3 py-2 font-mono text-amber-200/90 text-xs whitespace-nowrap">
                       {r.displayCode}
@@ -289,13 +306,17 @@ export function ToolingHubLedgerTable({
                   !hasTypeMismatch &&
                   Array.isArray(r.similarMatches) &&
                   r.similarMatches.length > 0
-                const rank = idx + 1
+                const rank = r.ledgerRank ?? idx + 1
+                const priorityRowDie =
+                  r.kind === 'die' && r.industrialPriority === true
+                    ? 'border-amber-500/50 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.25)] bg-amber-950/20'
+                    : ''
 
                 return (
                   <tr
                     key={`${r.kind}-${r.id}`}
                     data-hub-die-id={r.kind === 'die' ? r.id : undefined}
-                    className="border-b border-zinc-800/80 hover:bg-zinc-900/50"
+                    className={`border-b border-zinc-800/80 hover:bg-zinc-900/50 ${priorityRowDie}`}
                   >
                     <td className="px-2 py-1.5 text-zinc-500 tabular-nums font-mono text-[11px]">
                       {rank}

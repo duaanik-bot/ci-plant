@@ -7,6 +7,7 @@ import { Star, PauseCircle, PlayCircle } from 'lucide-react'
 import type { BarPart, DirectorLifeBars } from '@/lib/director-command-center-lifecycle'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { DirectorWorkspaceSidebar } from '@/components/director/DirectorWorkspaceSidebar'
+import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
 
 const mono = 'font-director-cc tabular-nums tracking-tight'
 
@@ -298,6 +299,12 @@ export default function DirectorCommandCenterPage() {
       })
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((j as { error?: string }).error || 'Update failed')
+      if (Object.prototype.hasOwnProperty.call(body, 'directorPriority')) {
+        broadcastIndustrialPriorityChange({
+          source: 'line_director_priority',
+          at: new Date().toISOString(),
+        })
+      }
       await loadAll()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed')

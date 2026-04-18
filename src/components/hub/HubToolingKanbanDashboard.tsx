@@ -39,6 +39,7 @@ import {
   toolingMasterLedgerExcelExtraColumns,
 } from '@/lib/hub-ledger-export-columns'
 import { CUSTODY_ON_FLOOR } from '@/lib/inventory-hub-custody'
+import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
 
 function isDieHubSupervisorRole(role: string | undefined): boolean {
   if (!role?.trim()) return false
@@ -209,6 +210,10 @@ type DieRow = {
   hubCustodySource?: string | null
   hubTriageHoldReason?: string | null
   issuedOperator?: string | null
+  /** Customers linked via carton work (deep search). */
+  linkedCustomerNames?: string[]
+  /** PO starred or director line priority. */
+  industrialPriority?: boolean
 }
 
 type EmbossRow = {
@@ -234,6 +239,20 @@ type EmbossRow = {
 }
 
 type ToolRow = DieRow | EmbossRow
+
+/** Starred PO / director line — surface first on the board. */
+function sortIndustrialPriorityFirst(rows: ToolRow[]): ToolRow[] {
+  return [...rows].sort((a, b) => {
+    const pa = a.kind === 'die' && a.industrialPriority === true ? 1 : 0
+    const pb = b.kind === 'die' && b.industrialPriority === true ? 1 : 0
+    if (pa !== pb) return pb - pa
+    if (a.kind === 'die' && b.kind === 'die')
+      return (a.ledgerRank ?? 0) - (b.ledgerRank ?? 0)
+    if (a.kind === 'die') return -1
+    if (b.kind === 'die') return 1
+    return a.displayCode.localeCompare(b.displayCode)
+  })
+}
 
 type DashboardPayload = {
   tool: 'dies' | 'blocks'
@@ -417,6 +436,14 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   }, [load])
 
   useEffect(() => {
+    const onPriority = () => {
+      void load()
+    }
+    window.addEventListener(INDUSTRIAL_PRIORITY_EVENT, onPriority)
+    return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPriority)
+  }, [load])
+
+  useEffect(() => {
     focusDieFlippedToTable.current = false
   }, [focusDieId])
 
@@ -510,6 +537,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               pastingStyleLabel(r.pastingStyle),
               r.masterType,
               r.dieMake,
+              ...(r.linkedCustomerNames ?? []),
             ]
               .join(' ')
               .toLowerCase()
@@ -528,19 +556,31 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   )
 
   const triageF = useMemo(
-    () => applyDieHubPastingBoard(filterRows(data?.triage ?? [], triageSearch)),
+    () =>
+      sortIndustrialPriorityFirst(
+        applyDieHubPastingBoard(filterRows(data?.triage ?? [], triageSearch)),
+      ),
     [data?.triage, triageSearch, applyDieHubPastingBoard],
   )
   const prepF = useMemo(
-    () => applyDieHubPastingBoard(filterRows(data?.prep ?? [], prepSearch)),
+    () =>
+      sortIndustrialPriorityFirst(
+        applyDieHubPastingBoard(filterRows(data?.prep ?? [], prepSearch)),
+      ),
     [data?.prep, prepSearch, applyDieHubPastingBoard],
   )
   const invF = useMemo(
-    () => applyDieHubPastingBoard(filterRows(data?.inventory ?? [], invSearch)),
+    () =>
+      sortIndustrialPriorityFirst(
+        applyDieHubPastingBoard(filterRows(data?.inventory ?? [], invSearch)),
+      ),
     [data?.inventory, invSearch, applyDieHubPastingBoard],
   )
   const custF = useMemo(
-    () => applyDieHubPastingBoard(filterRows(data?.custody ?? [], custSearch)),
+    () =>
+      sortIndustrialPriorityFirst(
+        applyDieHubPastingBoard(filterRows(data?.custody ?? [], custSearch)),
+      ),
     [data?.custody, custSearch, applyDieHubPastingBoard],
   )
 
@@ -1124,13 +1164,17 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     zone: 'triage' | 'prep' | 'inventory' | 'custody',
   ) {
     const custodyInUse = zone === 'custody' && r.custodyStatus === CUSTODY_ON_FLOOR
+    const industrialGlow =
+      r.kind === 'die' && r.industrialPriority
+        ? ' shadow-[0_0_22px_rgba(234,88,12,0.32)] ring-1 ring-amber-500/45 border-amber-500/75'
+        : ''
     const liClass = `rounded-lg border bg-black p-2 overflow-visible ${
       custodyInUse
         ? 'border-2 border-blue-500 hub-tool-in-use-pulse'
         : zone === 'custody' && r.jobCardHub?.key === 'printed'
           ? 'border-emerald-600/70 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
           : 'border-zinc-800'
-    }`
+    }${industrialGlow}`
 
     if (r.kind === 'die') {
       const mismatch = r.typeMismatchMatches ?? []

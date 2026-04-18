@@ -1,15 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
 import { toast } from 'sonner'
 import { Search, AlertTriangle, FileDown, Pencil, Star, Trash2, X } from 'lucide-react'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
+import { CommandPaletteTriggerIcon } from '@/components/command-palette/CommandPalette'
+import { PoDrawerSpotlightLines } from '@/components/orders/PoDrawerSpotlightLines'
 import {
-  useCommandPalette,
-  CommandPaletteTriggerIcon,
-} from '@/components/command-palette/CommandPalette'
+  lineItemMatchesDrawerQuery,
+  purchaseOrdersMatchingDeepQuery,
+} from '@/lib/po-list-deep-filter'
+import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
 
 type LineItem = {
   id: string
@@ -39,6 +41,8 @@ type PurchaseOrder = {
   toolingCritical?: boolean
   readiness?: PoReadiness
   isPriority?: boolean
+  /** Set when row matched via line-item name (server or client deep filter). */
+  deepMatchProductName?: string | null
 }
 
 type Customer = { id: string; name: string }
@@ -169,52 +173,56 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
   }
 }
 
-function NeonCommandTrigger({
-  pageActive,
-  paletteQuery,
-  onClearQuery,
-}: {
-  pageActive: boolean
-  paletteQuery: string
-  onClearQuery: () => void
-}) {
-  const { open } = useCommandPalette()
-  const [kbd, setKbd] = useState('Cmd + K')
+function useDebouncedValue<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value)
   useEffect(() => {
-    const mac = /Mac|iPod|iPhone|iPad/i.test(navigator.userAgent)
-    setKbd(mac ? 'Cmd + K' : 'Ctrl + K')
-  }, [])
+    const t = window.setTimeout(() => setDebounced(value), ms)
+    return () => window.clearTimeout(t)
+  }, [value, ms])
+  return debounced
+}
+
+/** In-page deep filter only — does not open global command palette or navigate to masters. */
+function PoDeepFilterBar({
+  value,
+  onChange,
+  onClear,
+  filterActive,
+}: {
+  value: string
+  onChange: (v: string) => void
+  onClear: () => void
+  filterActive: boolean
+}) {
   return (
     <div className="flex w-full max-w-2xl mx-auto items-stretch gap-2">
-      <button
-        type="button"
-        onClick={() => open()}
-        className={`group min-w-0 flex-1 flex items-center gap-2 rounded-xl border bg-slate-900/50 px-4 py-2.5 text-left text-sm backdrop-blur-md transition-all duration-300 ${
-          pageActive
-            ? 'border-emerald-500/45 shadow-[0_0_32px_rgba(52,211,153,0.22),0_0_56px_rgba(245,158,11,0.12)] ring-2 ring-emerald-400/35 hover:border-amber-400/70 hover:shadow-[0_0_36px_rgba(245,158,11,0.22)]'
-            : 'border-amber-500/45 shadow-[0_0_14px_rgba(245,158,11,0.12)] ring-1 ring-amber-400/25 hover:border-amber-400/80 hover:shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:ring-amber-300/35'
+      <div
+        className={`group min-w-0 flex-1 flex items-center gap-2 rounded-xl border bg-slate-900/50 px-3 py-1.5 sm:px-4 sm:py-2 text-sm backdrop-blur-md transition-all duration-300 ${
+          filterActive
+            ? 'border-emerald-500/45 shadow-[0_0_32px_rgba(52,211,153,0.22),0_0_56px_rgba(245,158,11,0.12)] ring-2 ring-emerald-400/35'
+            : 'border-amber-500/45 shadow-[0_0_14px_rgba(245,158,11,0.12)] ring-1 ring-amber-400/25'
         }`}
-        aria-label="Open command palette"
       >
         <Search className="h-4 w-4 text-amber-400 shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-center text-slate-400 group-hover:text-slate-200 sm:text-left">
-          {paletteQuery.trim().length >= 2 ? (
-            <>
-              <span className="text-emerald-400/90">Filtering:</span>{' '}
-              <span className="text-slate-200">{paletteQuery.trim()}</span>
-            </>
-          ) : (
-            <>
-              Search POs, Customers, or Dies…{' '}
-              <span className="text-amber-500/95">({kbd})</span>
-            </>
-          )}
-        </span>
-      </button>
-      {paletteQuery.trim().length >= 2 ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {value.trim().length >= 2 ? (
+            <span className="shrink-0 text-emerald-400/90 text-xs sm:text-sm">Filtering:</span>
+          ) : null}
+          <input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="PO #, customer, or product on lines…"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Filter purchase orders"
+            className="min-w-0 flex-1 bg-transparent py-1 text-slate-200 placeholder:text-slate-500 focus:outline-none text-center sm:text-left text-sm"
+          />
+        </div>
+      </div>
+      {value.trim().length >= 2 ? (
         <button
           type="button"
-          onClick={() => onClearQuery()}
+          onClick={() => onClear()}
           className="shrink-0 self-center rounded-xl border border-slate-600/80 bg-slate-900/60 px-2.5 py-2 text-slate-500 backdrop-blur-md hover:border-amber-500/40 hover:bg-slate-800/80 hover:text-amber-300"
           title="Clear list filter"
           aria-label="Clear list filter"
@@ -227,9 +235,12 @@ function NeonCommandTrigger({
 }
 
 export default function PurchaseOrdersPage() {
-  const pathname = usePathname()
-  const commandBarActive = pathname === '/orders/purchase-orders'
-  const { paletteQuery, clearPaletteQuery } = useCommandPalette()
+  const [listFilterQuery, setListFilterQuery] = useState('')
+  const debouncedListFilter = useDebouncedValue(listFilterQuery, 200)
+  const catalogHeavyRef = useRef(false)
+  const prevDebouncedFilterRef = useRef('')
+  const debouncedLiveRef = useRef('')
+  debouncedLiveRef.current = debouncedListFilter
 
   const [list, setList] = useState<PurchaseOrder[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -247,24 +258,27 @@ export default function PurchaseOrdersPage() {
   const [drawerPo, setDrawerPo] = useState<DrawerPo | null>(null)
   const [drawerLoading, setDrawerLoading] = useState(false)
   const [toolingResults, setToolingResults] = useState<ToolingResult[] | null>(null)
+  const debouncedAuditFilter = useDebouncedValue(listFilterQuery, 350)
 
-  async function load() {
-    try {
+  const loadPurchaseOrders = useCallback(
+    async (opts?: { deepSearch?: string }) => {
       const params = new URLSearchParams()
       if (status) params.set('status', status)
       if (customerId) params.set('customerId', customerId)
-      const [poRes, custRes] = await Promise.all([
-        fetch(`/api/purchase-orders?${params.toString()}`),
-        fetch('/api/masters/customers'),
-      ])
+      if (opts?.deepSearch && opts.deepSearch.trim().length >= 2) {
+        params.set('deepSearch', opts.deepSearch.trim())
+      }
+      const poRes = await fetch(`/api/purchase-orders?${params.toString()}`)
       const poJson = await poRes.json()
-      const custJson = await custRes.json()
-      setList(Array.isArray(poJson) ? poJson : [])
-      setCustomers(Array.isArray(custJson) ? custJson : [])
-    } finally {
-      setLoading(false)
-    }
-  }
+      const arr = Array.isArray(poJson) ? (poJson as PurchaseOrder[]) : []
+      if (!opts?.deepSearch) {
+        catalogHeavyRef.current = arr.length >= 100
+      }
+      setList(arr)
+      return arr
+    },
+    [status, customerId],
+  )
 
   async function loadMetrics() {
     setMetricsLoading(true)
@@ -281,13 +295,73 @@ export default function PurchaseOrdersPage() {
   }
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
-    void load()
-  }, [status, customerId])
+    void (async () => {
+      try {
+        await loadPurchaseOrders()
+        const custRes = await fetch('/api/masters/customers')
+        const custJson = await custRes.json()
+        if (cancelled) return
+        setCustomers(Array.isArray(custJson) ? custJson : [])
+        if (
+          catalogHeavyRef.current &&
+          debouncedLiveRef.current.trim().length >= 2
+        ) {
+          await loadPurchaseOrders({ deepSearch: debouncedLiveRef.current.trim() })
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [status, customerId, loadPurchaseOrders])
+
+  useEffect(() => {
+    const q = debouncedListFilter.trim()
+    const prev = prevDebouncedFilterRef.current
+    prevDebouncedFilterRef.current = q
+
+    if (!catalogHeavyRef.current) return
+
+    if (q.length >= 2) {
+      let cancelled = false
+      setLoading(true)
+      void loadPurchaseOrders({ deepSearch: q }).finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+
+    if (prev.length >= 2 && q.length < 2) {
+      let cancelled = false
+      setLoading(true)
+      void loadPurchaseOrders().finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+  }, [debouncedListFilter, loadPurchaseOrders])
 
   useEffect(() => {
     void loadMetrics()
   }, [])
+
+  useEffect(() => {
+    const q = debouncedAuditFilter.trim()
+    if (q.length < 2) return
+    void fetch('/api/purchase-orders/deep-filter-audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q }),
+    }).catch(() => {})
+  }, [debouncedAuditFilter])
 
   useEffect(() => {
     if (!drawerPoId) {
@@ -351,22 +425,88 @@ export default function PurchaseOrdersPage() {
   }, [toolingResults])
 
   const viewRows = useMemo(() => {
-    const q = paletteQuery.trim().toLowerCase()
-    let rows = list
-    if (q.length >= 2) {
-      rows = list.filter(
-        (p) =>
-          p.poNumber.toLowerCase().includes(q) ||
-          (p.customer?.name ?? '').toLowerCase().includes(q),
-      )
+    const qRaw = listFilterQuery.trim()
+    const q = qRaw.toLowerCase()
+    let rows: PurchaseOrder[]
+
+    if (q.length < 2) {
+      rows = list.map((p) => ({ ...p, deepMatchProductName: null }))
+    } else {
+      const matched = purchaseOrdersMatchingDeepQuery(list, qRaw)
+      rows = matched.map((p) => {
+        const poM = p.poNumber.toLowerCase().includes(q)
+        const custM = (p.customer?.name ?? '').toLowerCase().includes(q)
+        const lineHit = p.lineItems.find((li) => lineItemMatchesDrawerQuery(li.cartonName, qRaw))
+        const deepMatchProductName =
+          lineHit && !poM && !custM ? lineHit.cartonName : null
+        return {
+          ...p,
+          deepMatchProductName: deepMatchProductName ?? p.deepMatchProductName ?? null,
+        }
+      })
     }
+
     return [...rows].sort((a, b) => {
       const paNum = a.isPriority === true ? 1 : 0
       const pbNum = b.isPriority === true ? 1 : 0
       if (pbNum !== paNum) return pbNum - paNum
       return poAgeCalendarDays(b.poDate) - poAgeCalendarDays(a.poDate)
     })
-  }, [list, paletteQuery])
+  }, [list, listFilterQuery])
+
+  /** Filtered KPIs: all POs that match the live filter (any status). */
+  const filteredExecutiveKpi = useMemo((): ExecutiveMetrics => {
+    const rows = viewRows
+    if (rows.length === 0) {
+      return {
+        totalActivePosCount: 0,
+        pendingItemsSum: 0,
+        liveOrderValue: 0,
+        avgAgingDaysActive: 0,
+      }
+    }
+    const pendingItemsSum = rows.reduce(
+      (s, p) => s + p.lineItems.reduce((a, li) => a + li.quantity, 0),
+      0,
+    )
+    const liveOrderValue = rows.reduce((s, p) => s + p.value, 0)
+    const avgAgingDaysActive =
+      rows.reduce((s, p) => s + poAgeCalendarDays(p.poDate), 0) / rows.length
+    return {
+      totalActivePosCount: rows.length,
+      pendingItemsSum,
+      liveOrderValue,
+      avgAgingDaysActive,
+    }
+  }, [viewRows])
+
+  const kpi = listFilterQuery.trim().length >= 2 ? filteredExecutiveKpi : metrics
+  const kpiLoading = listFilterQuery.trim().length < 2 && metricsLoading
+
+  const [masterProductExists, setMasterProductExists] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const q = listFilterQuery.trim()
+    if (q.length < 2 || viewRows.length > 0) {
+      setMasterProductExists(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/masters/cartons/product-exists?q=${encodeURIComponent(q)}`,
+        )
+        const j = (await res.json()) as { exists?: boolean }
+        if (!cancelled) setMasterProductExists(Boolean(j.exists))
+      } catch {
+        if (!cancelled) setMasterProductExists(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [listFilterQuery, viewRows.length])
 
   async function handleDelete(po: PurchaseOrder, e: React.MouseEvent) {
     e.stopPropagation()
@@ -454,6 +594,10 @@ export default function PurchaseOrdersPage() {
       if (!res.ok) throw new Error((json as { error?: string }).error || 'Could not update priority')
       setList((prev) => prev.map((p) => (p.id === po.id ? { ...p, isPriority: next } : p)))
       if (drawerPo?.id === po.id) setDrawerPo((d) => (d ? { ...d, isPriority: next } : d))
+      broadcastIndustrialPriorityChange({
+        source: 'po_is_priority',
+        at: new Date().toISOString(),
+      })
       toast.success(next ? 'PO pinned to top' : 'Priority cleared')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Priority update failed')
@@ -523,10 +667,11 @@ export default function PurchaseOrdersPage() {
 
       <div className="px-1 flex justify-center">
         <div className="w-full max-w-2xl">
-          <NeonCommandTrigger
-            pageActive={commandBarActive}
-            paletteQuery={paletteQuery}
-            onClearQuery={clearPaletteQuery}
+          <PoDeepFilterBar
+            value={listFilterQuery}
+            onChange={setListFilterQuery}
+            onClear={() => setListFilterQuery('')}
+            filterActive={listFilterQuery.trim().length >= 2}
           />
         </div>
       </div>
@@ -537,38 +682,46 @@ export default function PurchaseOrdersPage() {
             Total active POs
           </div>
           <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-slate-100 ${poMono}`}>
-            {metricsLoading ? '—' : (metrics?.totalActivePosCount ?? 0).toLocaleString('en-IN')}
+            {kpiLoading ? '—' : (kpi?.totalActivePosCount ?? 0).toLocaleString('en-IN')}
           </div>
-          <div className="text-[10px] text-slate-600 mt-0.5">Confirmed orders only</div>
+          <div className="text-[10px] text-slate-600 mt-0.5">
+            {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
+          </div>
         </div>
         <div className="rounded-xl border border-white/10 bg-slate-950/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07)]">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
             Pending line items
           </div>
           <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-slate-100 ${poMono}`}>
-            {metricsLoading ? '—' : (metrics?.pendingItemsSum ?? 0).toLocaleString('en-IN')}
+            {kpiLoading ? '—' : (kpi?.pendingItemsSum ?? 0).toLocaleString('en-IN')}
           </div>
-          <div className="text-[10px] text-slate-600 mt-0.5">Σ qty · confirmed POs</div>
+          <div className="text-[10px] text-slate-600 mt-0.5">
+            {listFilterQuery.trim().length >= 2 ? 'Σ qty · matching POs' : 'Σ qty · confirmed POs'}
+          </div>
         </div>
         <div className="rounded-xl border border-emerald-500/30 bg-slate-950/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_0_28px_rgba(16,185,129,0.14)]">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/90">
             Live order book
           </div>
           <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-emerald-300 ${poMono}`}>
-            {metricsLoading ? '—' : formatRupee(metrics?.liveOrderValue ?? 0)}
+            {kpiLoading ? '—' : formatRupee(kpi?.liveOrderValue ?? 0)}
           </div>
-          <div className="text-[10px] text-emerald-700/80 mt-0.5">₹ total · confirmed</div>
+          <div className="text-[10px] text-emerald-700/80 mt-0.5">
+            {listFilterQuery.trim().length >= 2 ? '₹ filtered order book' : '₹ total · confirmed'}
+          </div>
         </div>
         <div className="rounded-xl border border-amber-500/35 bg-slate-950/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_0_26px_rgba(245,158,11,0.12)]">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-500/90">
             System velocity
           </div>
           <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-amber-200 ${poMono}`}>
-            {metricsLoading
+            {kpiLoading
               ? '—'
-              : `${(metrics?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
+              : `${(kpi?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
           </div>
-          <div className="text-[10px] text-amber-700/75 mt-0.5">Avg. age · confirmed</div>
+          <div className="text-[10px] text-amber-700/75 mt-0.5">
+            {listFilterQuery.trim().length >= 2 ? 'Avg. age · matching POs' : 'Avg. age · confirmed'}
+          </div>
         </div>
       </div>
 
@@ -658,12 +811,22 @@ export default function PurchaseOrdersPage() {
                     </button>
                   </td>
                   <td className="px-1.5 py-px align-middle">
-                    <div className="flex flex-wrap items-center gap-1">
-                      <span className={`${poMono} font-bold text-amber-300`}>{po.poNumber}</span>
-                      {po.toolingCritical ? (
-                        <span title="Critical tooling on one or more lines">
-                          <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" aria-hidden />
-                        </span>
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className={`${poMono} font-bold text-amber-300`}>{po.poNumber}</span>
+                        {po.toolingCritical ? (
+                          <span title="Critical tooling on one or more lines">
+                            <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" aria-hidden />
+                          </span>
+                        ) : null}
+                      </div>
+                      {po.deepMatchProductName ? (
+                        <div
+                          className="text-[10px] text-amber-500/85 truncate max-w-[14rem]"
+                          title={`Matched line: ${po.deepMatchProductName}`}
+                        >
+                          Matched: {po.deepMatchProductName}
+                        </div>
                       ) : null}
                     </div>
                   </td>
@@ -761,11 +924,18 @@ export default function PurchaseOrdersPage() {
         </table>
       </div>
 
-      {list.length === 0 ? (
+      {list.length === 0 && !loading ? (
         <p className="text-slate-500 text-center py-8 text-sm">No purchase orders found.</p>
-      ) : viewRows.length === 0 ? (
-        <p className="text-slate-500 text-center py-8 text-sm">
-          No rows match this search. Clear the filter or refine your Cmd+K query.
+      ) : viewRows.length === 0 && listFilterQuery.trim().length >= 2 && !loading ? (
+        <p className="text-slate-500 text-center py-8 text-sm max-w-lg mx-auto leading-relaxed">
+          {masterProductExists === true ? (
+            <>
+              Product &apos;{listFilterQuery.trim()}&apos; found in Master, but no active Purchase
+              Orders contain this item.
+            </>
+          ) : (
+            <>No rows match this search. Clear the filter or try another PO #, customer, or product.</>
+          )}
         </p>
       ) : null}
 
@@ -775,12 +945,12 @@ export default function PurchaseOrdersPage() {
         onClose={() => setDrawerPoId(null)}
         widthClass="max-w-lg"
         backdropClassName="bg-black/55"
-        panelClassName="border-l border-slate-700/80 bg-slate-950/92 backdrop-blur-xl shadow-2xl"
+        panelClassName="border-l border-slate-800 bg-black backdrop-blur-xl shadow-2xl"
       >
         {drawerLoading || !drawerPo ? (
           <p className="text-slate-500 text-sm">Loading…</p>
         ) : (
-          <div className="space-y-4 text-sm">
+          <div className="space-y-4 text-sm text-slate-200">
             <p className="text-[10px] text-slate-600 leading-snug">
               Default operator / metadata:{' '}
               <span className="text-slate-400 font-medium">{PO_DASHBOARD_OPERATOR}</span>
@@ -800,7 +970,7 @@ export default function PurchaseOrdersPage() {
               <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
                 Tooling readiness
               </div>
-              <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-800 ring-1 ring-slate-700/80">
+              <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-900 ring-1 ring-slate-800">
                 {toolingBar.total > 0 ? (
                   <>
                     <div
@@ -817,7 +987,7 @@ export default function PurchaseOrdersPage() {
                     />
                   </>
                 ) : (
-                  <div className="h-full flex-1 bg-slate-700/50" />
+                  <div className="h-full flex-1 bg-slate-800/80" />
                 )}
               </div>
               <div className="mt-1 text-[10px] text-slate-500 tabular-nums">
@@ -827,56 +997,18 @@ export default function PurchaseOrdersPage() {
             </div>
 
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                Line items
-              </div>
-              <div className="mb-2 grid grid-cols-[1fr_auto_auto] gap-x-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-800 pb-1">
-                <span>Carton</span>
-                <span className="text-right">Qty</span>
-                <span className="text-right">₹</span>
-              </div>
-              <ul className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
-                {drawerPo.lineItems.map((li, i) => {
-                  const tr = toolingResults?.find((t) => t.key === i)
-                  const dot =
-                    tr?.signal === 'green'
-                      ? 'bg-emerald-500'
-                      : tr?.signal === 'yellow'
-                        ? 'bg-amber-500'
-                        : 'bg-rose-500'
-                  return (
-                    <li
-                      key={li.id}
-                      className="rounded-md border border-slate-800/90 bg-slate-900/50 px-2 py-1.5 text-xs"
-                    >
-                      <div className="flex items-start gap-2">
-                        <span
-                          className={`mt-1 h-2 w-2 shrink-0 rounded-full ring-2 ring-slate-950 ${dot}`}
-                          title={tr?.tooltip}
-                        />
-                        <div className="min-w-0 flex-1 grid grid-cols-[1fr_auto_auto] gap-x-2 items-start">
-                          <div className="font-medium text-slate-200 truncate">{li.cartonName}</div>
-                          <span className={`${poMono} text-slate-300 text-[11px] text-right tabular-nums`}>
-                            {li.quantity}
-                          </span>
-                          <span className={`${poMono} text-slate-200 text-[11px] text-right tabular-nums`}>
-                            {li.rate != null
-                              ? (Number(li.rate) * li.quantity).toLocaleString('en-IN', {
-                                  maximumFractionDigits: 0,
-                                })
-                              : '—'}
-                          </span>
-                          <div className={`col-span-3 ${poMono} text-slate-500 text-[10px]`}>
-                            {li.rate != null
-                              ? `₹${Number(li.rate).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ea`
-                              : ''}
-                          </div>
-                        </div>
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
+              <PoDrawerSpotlightLines
+                key={drawerPo.id}
+                lineItems={drawerPo.lineItems}
+                toolingResults={toolingResults}
+                spotlightQuery={listFilterQuery.trim().length >= 2 ? listFilterQuery.trim() : ''}
+                poMono={poMono}
+              />
+              {listFilterQuery.trim().length >= 2 ? (
+                <p className="mt-2 text-[9px] text-slate-600 leading-snug">
+                  Deep Audit Performed by Anik Dua.
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-2 border-t border-slate-800 pt-3">
@@ -885,7 +1017,7 @@ export default function PurchaseOrdersPage() {
                 value={drawerPo.status}
                 disabled={updatingId === drawerPo.id}
                 onChange={(e) => handleStatusChange(drawerPo, e.target.value)}
-                className="w-full rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-xs text-white"
+                className="w-full rounded-lg border border-slate-700 bg-black px-2 py-1.5 text-xs text-white"
               >
                 <option value="draft">draft</option>
                 <option value="confirmed">confirmed</option>
