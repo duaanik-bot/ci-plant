@@ -56,7 +56,7 @@ export async function GET() {
       include: { lineItems: true },
     }),
     db.vendorMaterialPurchaseOrder.findMany({
-      where: { status: { in: ['draft', 'confirmed'] } },
+      where: { status: { in: ['draft', 'confirmed'] }, isShortClosed: false },
       include: { lines: true, supplier: { select: { id: true, name: true } } },
     }),
     db.dispatch.findMany({

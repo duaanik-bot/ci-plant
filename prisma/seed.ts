@@ -1,6 +1,6 @@
 // prisma/seed.ts
 // Run with: npx prisma db seed
-// Seeds: 8 roles, 12 machines, 13 QC instruments, admin user
+// Seeds: 10 roles, 12 machines, 13 QC instruments, admin user
 
 import { PrismaClient, PastingStyle } from '@prisma/client'
 import bcrypt from 'bcryptjs'
@@ -131,6 +131,21 @@ async function main() {
           jobs: 'none', artwork: 'none', production: 'none',
           inventory: 'wms', qms: 'none', dispatch: 'pick',
           reports: 'none', admin: 'none',
+        },
+      },
+    }),
+    prisma.role.upsert({
+      where: { roleName: 'procurement_manager' },
+      update: {},
+      create: {
+        roleName: 'procurement_manager',
+        wastageApproveLimitPct: 0,
+        canApproveArtwork: false,
+        canReleaseDispatch: false,
+        permissions: {
+          jobs: 'view', artwork: 'none', production: 'view',
+          inventory: 'view', qms: 'none', dispatch: 'view',
+          reports: 'partial', admin: 'none',
         },
       },
     }),

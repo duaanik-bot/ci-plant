@@ -28,10 +28,15 @@ const config: Config = {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.55' },
         },
+        'slide-over-enter': {
+          from: { transform: 'translateX(100%)' },
+          to: { transform: 'translateX(0)' },
+        },
       },
       animation: {
         'po-age-alert': 'po-age-alert 2.2s ease-in-out infinite',
         'industrial-age-pulse': 'industrial-age-pulse 2.2s ease-in-out infinite',
+        'slide-over-enter': 'slide-over-enter 200ms ease-in-out both',
       },
       colors: {
         border: 'hsl(var(--border))',

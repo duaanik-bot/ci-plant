@@ -22,19 +22,36 @@ export type MrpLineContribution = {
   jobCardNumber: number | null
   customerDeliveryYmd: string | null
   vendorRequiredDeliveryYmd: string | null
+  /** Customer PO line board procurement state. */
+  materialProcurementStatus: string
 }
+
+export type MaterialReadinessRollup =
+  | 'planned'
+  | 'ordered'
+  | 'in_transit'
+  | 'received'
+  | 'mixed'
 
 export type AggregatedMaterialRequirement = {
   key: string
   boardType: string
   gsm: number
   grainDirection: string
+  /** e.g. `787×546 mm` from material queue sheet dimensions. */
+  sheetSizeLabel: string
   totalSheets: number
   totalWeightKg: number
   totalMetricTons: number
   contributions: MrpLineContribution[]
   suggestedSupplierId: string | null
   suggestedSupplierName: string | null
+  /** Earliest `material_queue.calculated_at` in this bucket (ISO). */
+  oldestCalculatedAt: string
+  /** Starred PO or director line priority on any contributing line. */
+  industrialPriority: boolean
+  /** Rolled up from contributing line `materialProcurementStatus` values. */
+  readinessRollup: MaterialReadinessRollup
 }
 
 type SpecJson = Record<string, unknown> | null
@@ -178,12 +195,15 @@ export function aggregateContributions(
       totalSheets: number
       totalWeightKg: number
       contributions: MrpLineContribution[]
+      oldestLineCreatedAt: Date
+      industrialPriority: boolean
     }
   >()
 
   for (const { line, po, die } of rows) {
     const computed = computeLineBoardMrp(line, die)
     if (!computed.ok) continue
+    const linePri = line.directorPriority === true || po.isPriority === true
     const custDel = customerDeliveryYmd(po)
     const vendorDel = custDel ? addCalendarDaysYmd(custDel, -5) : null
     const contrib: MrpLineContribution = {
@@ -198,12 +218,17 @@ export function aggregateContributions(
       jobCardNumber: line.jobCardNumber ?? null,
       customerDeliveryYmd: custDel,
       vendorRequiredDeliveryYmd: vendorDel,
+      materialProcurementStatus: line.materialProcurementStatus,
     }
     const existing = map.get(computed.key)
     if (existing) {
       existing.totalSheets += contrib.sheets
       existing.totalWeightKg += contrib.weightKg
       existing.contributions.push(contrib)
+      if (line.createdAt.getTime() < existing.oldestLineCreatedAt.getTime()) {
+        existing.oldestLineCreatedAt = line.createdAt
+      }
+      existing.industrialPriority = existing.industrialPriority || linePri
     } else {
       map.set(computed.key, {
         boardType: computed.boardType,
@@ -212,6 +237,8 @@ export function aggregateContributions(
         totalSheets: contrib.sheets,
         totalWeightKg: contrib.weightKg,
         contributions: [contrib],
+        oldestLineCreatedAt: line.createdAt,
+        industrialPriority: linePri,
       })
     }
   }
@@ -224,14 +251,36 @@ export function aggregateContributions(
       boardType: v.boardType,
       gsm: v.gsm,
       grainDirection: v.grainDirection,
+      sheetSizeLabel: '—',
       totalSheets: v.totalSheets,
       totalWeightKg: v.totalWeightKg,
       totalMetricTons: kgToMetricTons(v.totalWeightKg),
       contributions: v.contributions,
       suggestedSupplierId: sug?.id ?? null,
       suggestedSupplierName: sug?.name ?? null,
+      oldestCalculatedAt: v.oldestLineCreatedAt.toISOString(),
+      industrialPriority: v.industrialPriority,
+      readinessRollup: rollupMaterialReadiness(v.contributions.map((c) => c.materialProcurementStatus)),
     }
   })
+}
+
+const PROC_STAT = (s: string) => s.trim().toLowerCase()
+
+/** Derive a single readiness lane from customer line procurement statuses. */
+export function rollupMaterialReadiness(statuses: string[]): MaterialReadinessRollup {
+  if (statuses.length === 0) return 'planned'
+  const set = new Set(statuses.map(PROC_STAT))
+  if (set.has('pending')) return 'planned'
+  if (set.has('dispatched')) return 'in_transit'
+  if (set.has('on_order') || set.has('paper_ordered')) {
+    const onlyOrdered = Array.from(set).every((x) => x === 'on_order' || x === 'paper_ordered')
+    if (onlyOrdered && set.size > 0) return 'ordered'
+  }
+  const arr = Array.from(set)
+  const onlyReceived = arr.length > 0 && arr.every((x) => x === 'received')
+  if (onlyReceived) return 'received'
+  return 'mixed'
 }
 
 export function aggregateFromStoredRequirements(
@@ -248,9 +297,12 @@ export function aggregateFromStoredRequirements(
       boardType: string
       gsm: number
       grainDirection: string
+      sheetSizeLabel: string
       totalSheets: number
       totalWeightKg: number
       contributions: MrpLineContribution[]
+      oldestCalculatedAt: Date
+      industrialPriority: boolean
     }
   >()
 
@@ -260,6 +312,13 @@ export function aggregateFromStoredRequirements(
     const vendorDel = custDel ? addCalendarDaysYmd(custDel, -5) : null
     const sheets = mr.totalSheets
     const weightKg = Number(mr.totalWeightKg)
+    const linePri = line.directorPriority === true || po.isPriority === true
+    const lMm = Number(mr.sheetLengthMm)
+    const wMm = Number(mr.sheetWidthMm)
+    const sheetSizeLabel =
+      Number.isFinite(lMm) && Number.isFinite(wMm) && lMm > 0 && wMm > 0
+        ? `${Math.round(lMm)}×${Math.round(wMm)} mm`
+        : '—'
     const contrib: MrpLineContribution = {
       poLineItemId: line.id,
       poId: po.id,
@@ -272,20 +331,28 @@ export function aggregateFromStoredRequirements(
       jobCardNumber: line.jobCardNumber ?? null,
       customerDeliveryYmd: custDel,
       vendorRequiredDeliveryYmd: vendorDel,
+      materialProcurementStatus: line.materialProcurementStatus,
     }
     const existing = map.get(key)
     if (existing) {
       existing.totalSheets += sheets
       existing.totalWeightKg += weightKg
       existing.contributions.push(contrib)
+      if (mr.calculatedAt.getTime() < existing.oldestCalculatedAt.getTime()) {
+        existing.oldestCalculatedAt = mr.calculatedAt
+      }
+      existing.industrialPriority = existing.industrialPriority || linePri
     } else {
       map.set(key, {
         boardType: mr.boardType,
         gsm: mr.gsm,
         grainDirection: mr.grainDirection,
+        sheetSizeLabel,
         totalSheets: sheets,
         totalWeightKg: weightKg,
         contributions: [contrib],
+        oldestCalculatedAt: mr.calculatedAt,
+        industrialPriority: linePri,
       })
     }
   }
@@ -299,12 +366,16 @@ export function aggregateFromStoredRequirements(
       boardType: v.boardType,
       gsm: v.gsm,
       grainDirection: v.grainDirection,
+      sheetSizeLabel: v.sheetSizeLabel,
       totalSheets: v.totalSheets,
       totalWeightKg: v.totalWeightKg,
       totalMetricTons: kgToMetricTons(v.totalWeightKg),
       contributions: v.contributions,
       suggestedSupplierId: sug?.id ?? null,
       suggestedSupplierName: sug?.name ?? null,
+      oldestCalculatedAt: v.oldestCalculatedAt.toISOString(),
+      industrialPriority: v.industrialPriority,
+      readinessRollup: rollupMaterialReadiness(v.contributions.map((c) => c.materialProcurementStatus)),
     }
   })
 }

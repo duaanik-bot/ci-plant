@@ -29,7 +29,9 @@ export function IndustrialModuleShell({
           {subtitle ? <p className="text-[11px] text-slate-500">{subtitle}</p> : null}
         </header>
         {kpiRow ? (
-          <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">{kpiRow}</div>
+          <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-8">
+            {kpiRow}
+          </div>
         ) : null}
         {children}
       </div>

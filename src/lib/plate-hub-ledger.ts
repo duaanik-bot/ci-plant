@@ -89,4 +89,9 @@ export type PlateHubLedgerRowJson = {
   partialRemake?: boolean
   custodySource?: 'ctp' | 'vendor' | 'rack'
   jobCardId: string | null
+  industrialPriority?: boolean
+  /** Resolved from PO line / plate customer — deep search. */
+  linkedCustomerNames?: string[]
+  /** Customer PO number when linked to a line */
+  poNumber?: string | null
 }

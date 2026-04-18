@@ -34,6 +34,32 @@ export type MasterLedgerRow = {
   statusLabel: string
   partialRemake?: boolean
   custodySource?: 'ctp' | 'vendor' | 'rack'
+  industrialPriority?: boolean
+  linkedCustomerNames?: string[]
+  poNumber?: string | null
+}
+
+function stageAgeHours(iso: string | undefined): number {
+  if (!iso) return 0
+  const t = new Date(iso).getTime()
+  return Number.isNaN(t) ? 0 : (Date.now() - t) / 3_600_000
+}
+
+function PlateStageDaysCell({ lastStatusUpdatedAt }: { lastStatusUpdatedAt: string | undefined }) {
+  const h = stageAgeHours(lastStatusUpdatedAt)
+  if (!lastStatusUpdatedAt || h <= 0) return <span className="text-zinc-500 text-[11px]">—</span>
+  const days = h / 24
+  const critical = h >= 24
+  return (
+    <span
+      className={`tabular-nums text-[11px] font-medium ${
+        critical ? 'text-rose-400 animate-industrial-age-pulse' : 'text-slate-400'
+      }`}
+      title="Days since last status update in this zone"
+    >
+      {days.toFixed(1)}d
+    </span>
+  )
 }
 
 function hubSearchMatch(q: string, parts: Array<string | null | undefined>): boolean {
@@ -49,7 +75,7 @@ export function getFilteredMasterLedgerRows(
   sizeFilter: string,
 ): MasterLedgerRow[] {
   const q = searchQuery.trim().toLowerCase()
-  return rows.filter((r) => {
+  const filtered = rows.filter((r) => {
     if (zoneFilter && r.zoneKey !== zoneFilter) return false
     if (sizeFilter && String(r.plateSize ?? '') !== sizeFilter) return false
     if (
@@ -60,11 +86,20 @@ export function getFilteredMasterLedgerRows(
         r.artworkCode,
         r.statusLabel,
         r.zoneLabel,
+        r.poLineId,
+        r.poNumber,
+        ...(r.linkedCustomerNames ?? []),
       ])
     ) {
       return false
     }
     return true
+  })
+  return [...filtered].sort((a, b) => {
+    const pa = a.industrialPriority === true ? 1 : 0
+    const pb = b.industrialPriority === true ? 1 : 0
+    if (pa !== pb) return pb - pa
+    return stageAgeHours(b.lastStatusUpdatedAt) - stageAgeHours(a.lastStatusUpdatedAt)
   })
 }
 
@@ -95,6 +130,7 @@ export function MasterLedgerTable({
               Plate volume
             </th>
             <th className="px-3 py-2 font-semibold min-w-[160px]">Size &amp; colours</th>
+            <th className="px-3 py-2 font-semibold whitespace-nowrap">Days in stage</th>
             <th className="px-3 py-2 font-semibold whitespace-nowrap">Time in zone</th>
             <th className="px-3 py-2 font-semibold min-w-[180px]">Last action</th>
           </tr>
@@ -102,7 +138,7 @@ export function MasterLedgerTable({
         <tbody>
           {filtered.length === 0 ? (
             <tr>
-              <td colSpan={7} className="px-3 py-8 text-center text-zinc-500">
+              <td colSpan={8} className="px-3 py-8 text-center text-zinc-500">
                 No rows match the current filters.
               </td>
             </tr>
@@ -117,8 +153,15 @@ export function MasterLedgerTable({
               const lastLine = hubLastActionLine(at) ?? '—'
               const sizeLine = hubPlateSizeCardLine(r.plateSize)
               const vol = ledgerRowPlateVolume(r)
+              const pri =
+                r.industrialPriority === true
+                  ? 'ring-2 ring-amber-500/50 shadow-[0_0_22px_rgba(234,88,12,0.22)] bg-amber-950/15'
+                  : ''
               return (
-                <tr key={`${r.entity}-${r.id}`} className="border-b border-zinc-800/80 hover:bg-zinc-900/50">
+                <tr
+                  key={`${r.entity}-${r.id}`}
+                  className={`border-b border-zinc-800/80 hover:bg-zinc-900/50 ${pri}`}
+                >
                   <td className="px-3 py-2 font-mono text-amber-200/90 text-xs whitespace-nowrap">
                     {r.jobId}
                   </td>
@@ -177,6 +220,9 @@ export function MasterLedgerTable({
                       size="sm"
                       className="flex flex-wrap gap-1 content-start"
                     />
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <PlateStageDaysCell lastStatusUpdatedAt={r.lastStatusUpdatedAt} />
                   </td>
                   <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap tabular-nums">
                     {timeInZone}

@@ -172,7 +172,7 @@ export function SidebarNav({
       links: [
         { href: '/rfq', label: 'RFQ Pipeline', icon: FileText },
         { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart },
-        { href: '/orders/procurement', label: 'Procurement Workbench', icon: PackageCheck },
+        { href: '/orders/procurement', label: 'Material Readiness Hub', icon: PackageCheck },
       ],
     },
     {

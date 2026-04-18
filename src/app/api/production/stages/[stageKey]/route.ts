@@ -63,41 +63,75 @@ export async function GET(
     uniqJcNumbers.length > 0
       ? await db.poLineItem.findMany({
           where: { jobCardNumber: { in: uniqJcNumbers } },
-          select: { jobCardNumber: true, cartonName: true },
+          select: {
+            jobCardNumber: true,
+            cartonName: true,
+            directorPriority: true,
+            po: { select: { isPriority: true } },
+          },
         })
       : []
   const productNameByJc = new Map<number, string>()
+  const priorityByJc = new Map<number, boolean>()
   poLines.forEach((l) => {
-    if (l.jobCardNumber != null) productNameByJc.set(l.jobCardNumber, l.cartonName)
+    if (l.jobCardNumber != null) {
+      productNameByJc.set(l.jobCardNumber, l.cartonName)
+      if (l.directorPriority || l.po.isPriority) {
+        priorityByJc.set(l.jobCardNumber, true)
+      }
+    }
   })
 
-  const jobCards = records.map((r) => ({
-    stageRecord: {
-      id: r.id,
-      stageName: r.stageName,
-      status: r.status,
-      operator: r.operator,
-      counter: r.counter,
-      sheetSize: r.sheetSize,
-      completedAt: r.completedAt?.toISOString() ?? null,
-    },
-    jobCard: r.jobCard
-      ? {
-          id: r.jobCard.id,
-          jobCardNumber: r.jobCard.jobCardNumber,
-          setNumber: r.jobCard.setNumber,
-          batchNumber: r.jobCard.batchNumber,
-          requiredSheets: r.jobCard.requiredSheets,
-          totalSheets: r.jobCard.totalSheets,
-          status: r.jobCard.status,
-          customer: r.jobCard.customer,
-          productName:
-            r.jobCard.jobCardNumber != null
-              ? productNameByJc.get(r.jobCard.jobCardNumber) ?? null
-              : null,
-        }
-      : null,
-  }))
+  function idleHoursForStage(
+    status: string,
+    stageCreatedAt: Date,
+    jobUpdatedAt: Date,
+  ): number | null {
+    if (status === 'completed') return null
+    if (status === 'pending') {
+      return (Date.now() - stageCreatedAt.getTime()) / 3_600_000
+    }
+    if (status === 'in_progress') {
+      return (Date.now() - jobUpdatedAt.getTime()) / 3_600_000
+    }
+    return (Date.now() - stageCreatedAt.getTime()) / 3_600_000
+  }
+
+  const jobCards = records.map((r) => {
+    const jc = r.jobCard
+    const idleHours =
+      jc != null ? idleHoursForStage(r.status, r.createdAt, jc.updatedAt) : null
+    return {
+      stageRecord: {
+        id: r.id,
+        stageName: r.stageName,
+        status: r.status,
+        operator: r.operator,
+        counter: r.counter,
+        sheetSize: r.sheetSize,
+        completedAt: r.completedAt?.toISOString() ?? null,
+        createdAt: r.createdAt.toISOString(),
+      },
+      idleHours,
+      jobCard: jc
+        ? {
+            id: jc.id,
+            jobCardNumber: jc.jobCardNumber,
+            setNumber: jc.setNumber,
+            batchNumber: jc.batchNumber,
+            requiredSheets: jc.requiredSheets,
+            totalSheets: jc.totalSheets,
+            status: jc.status,
+            customer: jc.customer,
+            updatedAt: jc.updatedAt.toISOString(),
+            industrialPriority:
+              jc.jobCardNumber != null && priorityByJc.get(jc.jobCardNumber) === true,
+            productName:
+              jc.jobCardNumber != null ? productNameByJc.get(jc.jobCardNumber) ?? null : null,
+          }
+        : null,
+    }
+  })
 
   return NextResponse.json({
     stageKey,

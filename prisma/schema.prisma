@@ -853,8 +853,37 @@ model PoLineItem {
   carton              Carton?              @relation(fields: [cartonId], references: [id])
   dieMaster           Dye?                 @relation("PoLineDieMaster", fields: [dieMasterId], references: [id])
   materialQueue MaterialQueue?
+  weightReconciliation MaterialWeightReconciliation?
 
   @@map("po_line_items")
+}
+
+// ─────────────────────────────────────────
+// SMART WEIGHT RECONCILIATION (gate scale vs vendor invoice)
+// ─────────────────────────────────────────
+
+model MaterialWeightReconciliation {
+  id                     String    @id @default(uuid())
+  poLineItemId           String    @unique @map("po_line_item_id")
+  vendorMaterialPoLineId String?   @map("vendor_material_po_line_id")
+  invoiceNumber          String?   @map("invoice_number") @db.VarChar(64)
+  invoiceWeightKg        Decimal   @map("invoice_weight_kg") @db.Decimal(16, 6)
+  scaleWeightKg          Decimal   @map("scale_weight_kg") @db.Decimal(16, 6)
+  coreWeightKg           Decimal   @map("core_weight_kg") @db.Decimal(16, 6)
+  netReceivedKg          Decimal   @map("net_received_kg") @db.Decimal(16, 6)
+  varianceKg             Decimal   @map("variance_kg") @db.Decimal(16, 6)
+  variancePercent        Decimal?  @map("variance_percent") @db.Decimal(12, 6)
+  ratePerKgInr           Decimal?  @map("rate_per_kg_inr") @db.Decimal(14, 4)
+  /// ok | reconciliation_pending
+  reconciliationStatus   String    @default("ok") @map("reconciliation_status") @db.VarChar(40)
+  debitNoteDraftText     String?   @map("debit_note_draft_text") @db.Text
+  debitNoteDraftedAt     DateTime? @map("debit_note_drafted_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  poLineItem PoLineItem @relation(fields: [poLineItemId], references: [id], onDelete: Cascade)
+
+  @@map("material_weight_reconciliations")
 }
 
 // ─────────────────────────────────────────
@@ -921,6 +950,21 @@ model VendorMaterialPurchaseOrder {
   remarks              String?
   dispatchedAt         DateTime? @map("dispatched_at")
   dispatchActor        String?   @map("dispatch_actor") @db.VarChar(120)
+  /// Mill → gate logistics (IST timestamps in DB as UTC instants)
+  transporterName      String?   @map("transporter_name") @db.VarChar(200)
+  lrNumber             String?   @map("lr_number") @db.VarChar(120)
+  vehicleNumber        String?   @map("vehicle_number") @db.VarChar(64)
+  estimatedArrivalAt   DateTime? @map("estimated_arrival_at")
+  /// mill_dispatched | in_transit | at_gate
+  logisticsStatus      String?   @map("logistics_status") @db.VarChar(32)
+  logisticsUpdatedAt   DateTime? @map("logistics_updated_at")
+  isShortClosed        Boolean   @default(false) @map("is_short_closed")
+  shortCloseReason     String?   @map("short_close_reason") @db.VarChar(120)
+  shortCloseRemarks    String?   @map("short_close_remarks") @db.Text
+  shortClosedAt        DateTime? @map("short_closed_at")
+  shortClosedByUserId  String?   @map("short_closed_by_user_id")
+  shortClosedByName    String?   @map("short_closed_by_name") @db.VarChar(120)
+  shortCloseCompletionPct Decimal? @map("short_close_completion_pct") @db.Decimal(6, 2)
   createdBy            String    @map("created_by")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { requireAuth, createAuditLog } from '@/lib/helpers'
+import { requireAuth } from '@/lib/helpers'
+import { logIndustrialStatusChange } from '@/lib/industrial-audit'
 import {
   CUSTODY_AT_VENDOR,
   CUSTODY_HUB_CUSTODY_READY,
@@ -442,12 +443,16 @@ export async function POST(req: NextRequest) {
     }
 
     const id = 'id' in body ? body.id : ''
-    await createAuditLog({
-      userId: user!.id,
-      action: 'UPDATE',
-      tableName: body.tool === 'die' ? 'dyes' : 'emboss_blocks',
+    await logIndustrialStatusChange({
+      userId: user!.id ?? '',
+      action: `${body.tool}:${body.action}`,
+      module: 'ToolingHub',
       recordId: id,
-      newValue: { toolingHubAction: body.action, ...body } as unknown as Record<string, unknown>,
+      operatorLabel: body.actorName,
+      payload: {
+        toolingHubAction: body.action,
+        tool: body.tool,
+      },
     })
 
     return NextResponse.json({ ok: true })

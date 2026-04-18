@@ -47,6 +47,9 @@ function ledgerRequirementRow(
     status: string
     plateSize?: HubPlateSize | null
     partialRemake?: boolean
+    linkedCustomerNames?: string[]
+    poNumber?: string | null
+    industrialPriority?: boolean
   },
   zoneKey: LedgerZoneKey,
 ): PlateHubLedgerRowJson {
@@ -59,6 +62,9 @@ function ledgerRequirementRow(
     artworkCode: r.artworkCode,
     artworkVersion: r.artworkVersion,
     poLineId: r.poLineId ?? null,
+    linkedCustomerNames: r.linkedCustomerNames,
+    poNumber: r.poNumber ?? null,
+    industrialPriority: r.industrialPriority,
     zoneKey,
     zoneLabel: ledgerZoneLabel(zoneKey),
     zoneBadgeClass: ledgerZoneBadgeClass(zoneKey),
@@ -97,9 +103,12 @@ function ledgerPlateRow(
     ledgerEntryAt: string
     status: string
     plateSize?: HubPlateSize | null
+    customer?: { name: string } | null
+    industrialPriority?: boolean
   },
   zoneKey: LedgerZoneKey,
 ): PlateHubLedgerRowJson {
+  const cust = p.customer?.name?.trim()
   return {
     entity: 'plate',
     id: p.id,
@@ -109,6 +118,9 @@ function ledgerPlateRow(
     artworkCode: p.artworkCode,
     artworkVersion: p.artworkVersion,
     poLineId: null,
+    linkedCustomerNames: cust ? [cust] : [],
+    poNumber: null,
+    industrialPriority: p.industrialPriority,
     zoneKey,
     zoneLabel: ledgerZoneLabel(zoneKey),
     zoneBadgeClass: ledgerZoneBadgeClass(zoneKey),
@@ -146,10 +158,22 @@ function ledgerCustodyRow(c: {
   ledgerEntryAt: string
   plateSize?: HubPlateSize | null
   jobCardId: string | null
+  customer?: { name: string } | null
+  industrialPriority?: boolean
+  poLineId?: string | null
+  linkedCustomerNames?: string[]
+  poNumber?: string | null
 }): PlateHubLedgerRowJson {
   const zoneKey: LedgerZoneKey = 'custody_floor'
   const src =
     c.custodySource === 'vendor' ? 'Vendor' : c.custodySource === 'ctp' ? 'CTP' : 'Rack'
+  const cn = c.customer?.name?.trim()
+  const names =
+    c.linkedCustomerNames && c.linkedCustomerNames.length > 0
+      ? c.linkedCustomerNames
+      : cn
+        ? [cn]
+        : []
   return {
     entity: c.kind === 'requirement' ? 'requirement' : 'plate',
     id: c.id,
@@ -158,7 +182,10 @@ function ledgerCustodyRow(c: {
     cartonName: c.cartonName,
     artworkCode: c.artworkCode,
     artworkVersion: c.artworkVersion,
-    poLineId: null,
+    poLineId: c.poLineId ?? null,
+    linkedCustomerNames: names,
+    poNumber: c.poNumber ?? null,
+    industrialPriority: c.industrialPriority,
     zoneKey,
     zoneLabel: ledgerZoneLabel(zoneKey),
     zoneBadgeClass: ledgerZoneBadgeClass(zoneKey),
@@ -258,22 +285,56 @@ export async function GET() {
         }),
       ),
     )
-    const triageLinesForMaster =
-      triageEffectivePoLineIds.length > 0
+    const ctpVendorLineIds = Array.from(
+      new Set(
+        [...ctpRows, ...vendorRows]
+          .map((r) => r.poLineId?.trim())
+          .filter((id): id is string => Boolean(id)),
+      ),
+    )
+    const allIntelLineIds = Array.from(new Set([...triageEffectivePoLineIds, ...ctpVendorLineIds]))
+    const linesForIntel =
+      allIntelLineIds.length > 0
         ? await db.poLineItem.findMany({
-            where: { id: { in: triageEffectivePoLineIds } },
+            where: { id: { in: allIntelLineIds } },
             select: {
               id: true,
               cartonId: true,
-              po: { select: { id: true, poNumber: true } },
+              directorPriority: true,
+              po: {
+                select: {
+                  id: true,
+                  poNumber: true,
+                  isPriority: true,
+                  customer: { select: { name: true } },
+                },
+              },
             },
           })
         : []
+    const lineIntelByLineId = new Map<
+      string,
+      {
+        purchaseOrderId: string
+        poNumber: string
+        linkedCustomerNames: string[]
+        industrialPriority: boolean
+      }
+    >()
+    for (const line of linesForIntel) {
+      const cust = line.po.customer?.name?.trim()
+      lineIntelByLineId.set(line.id, {
+        purchaseOrderId: line.po.id,
+        poNumber: line.po.poNumber,
+        linkedCustomerNames: cust ? [cust] : [],
+        industrialPriority: Boolean(line.directorPriority) || Boolean(line.po.isPriority),
+      })
+    }
     const triagePoMetaByLineId = new Map<
       string,
       { purchaseOrderId: string; poNumber: string }
     >()
-    for (const line of triageLinesForMaster) {
+    for (const line of linesForIntel) {
       triagePoMetaByLineId.set(line.id, {
         purchaseOrderId: line.po.id,
         poNumber: line.po.poNumber,
@@ -281,9 +342,7 @@ export async function GET() {
     }
     const triageCartonIds = Array.from(
       new Set(
-        triageLinesForMaster
-          .map((l) => l.cartonId)
-          .filter((id): id is string => Boolean(id)),
+        linesForIntel.map((l) => l.cartonId).filter((id): id is string => Boolean(id)),
       ),
     )
     const triageCartonsMaster =
@@ -300,7 +359,7 @@ export async function GET() {
       string,
       (typeof triageCartonsMaster)[0]['plateSize']
     >()
-    for (const line of triageLinesForMaster) {
+    for (const line of linesForIntel) {
       if (!line.cartonId) {
         cartonMasterPlateByPoLineId.set(line.id, null)
         continue
@@ -314,6 +373,7 @@ export async function GET() {
       const extractedLineId = extractPoLineIdFromCartonLabel(r.cartonName)
       const effectivePoLineId = poKey || extractedLineId || null
       const poMeta = effectivePoLineId ? triagePoMetaByLineId.get(effectivePoLineId) : undefined
+      const intel = effectivePoLineId ? lineIntelByLineId.get(effectivePoLineId) : undefined
       const poLinkHint: 'linked' | 'missing_row' | 'manual' = poMeta
         ? 'linked'
         : effectivePoLineId
@@ -323,9 +383,11 @@ export async function GET() {
         id: r.id,
         poLineId: r.poLineId,
         effectivePoLineId,
-        poNumber: poMeta?.poNumber ?? null,
-        purchaseOrderId: poMeta?.purchaseOrderId ?? null,
+        poNumber: poMeta?.poNumber ?? intel?.poNumber ?? null,
+        purchaseOrderId: poMeta?.purchaseOrderId ?? intel?.purchaseOrderId ?? null,
         poLinkHint,
+        linkedCustomerNames: intel?.linkedCustomerNames ?? [],
+        industrialPriority: intel?.industrialPriority ?? false,
         requirementCode: r.requirementCode,
         cartonName: r.cartonName,
         artworkCode: r.artworkCode,
@@ -344,6 +406,8 @@ export async function GET() {
 
     const ctpQueue = ctpRows.map((r) => {
       const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
+      const lid = r.poLineId?.trim()
+      const intel = lid ? lineIntelByLineId.get(lid) : undefined
       return {
         id: r.id,
         poLineId: r.poLineId,
@@ -360,6 +424,10 @@ export async function GET() {
         lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
         ledgerEntryAt: r.createdAt.toISOString(),
         plateSize: r.plateSize,
+        linkedCustomerNames: intel?.linkedCustomerNames ?? [],
+        industrialPriority: intel?.industrialPriority ?? false,
+        poNumber: intel?.poNumber ?? null,
+        purchaseOrderId: intel?.purchaseOrderId ?? null,
         shopfloorInactiveCanonicalKeys: shopfloorInactiveCanonicalKeysFromJson(r.coloursNeeded),
         shopfloorActiveColourCount: countActiveShopfloorColours(r.coloursNeeded),
       }
@@ -367,6 +435,8 @@ export async function GET() {
 
     const vendorQueue = vendorRows.map((r) => {
       const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
+      const lid = r.poLineId?.trim()
+      const intel = lid ? lineIntelByLineId.get(lid) : undefined
       return {
         id: r.id,
         poLineId: r.poLineId,
@@ -383,6 +453,10 @@ export async function GET() {
         lastStatusUpdatedAt: r.lastStatusUpdatedAt.toISOString(),
         ledgerEntryAt: r.createdAt.toISOString(),
         plateSize: r.plateSize,
+        linkedCustomerNames: intel?.linkedCustomerNames ?? [],
+        industrialPriority: intel?.industrialPriority ?? false,
+        poNumber: intel?.poNumber ?? null,
+        purchaseOrderId: intel?.purchaseOrderId ?? null,
         shopfloorInactiveCanonicalKeys: shopfloorInactiveCanonicalKeysFromJson(r.coloursNeeded),
         shopfloorActiveColourCount: countActiveShopfloorColours(r.coloursNeeded),
       }
@@ -429,6 +503,9 @@ export async function GET() {
       const colourChannelNames = channelNamesFromActiveJson(activeNeeded)
       const jobCardHub =
         r.jobCardId && jcHubById.has(r.jobCardId) ? jcHubById.get(r.jobCardId)! : null
+      const lid = r.poLineId?.trim()
+      const intel = lid ? lineIntelByLineId.get(lid) : undefined
+      const custName = intel?.linkedCustomerNames?.[0]
       return {
         kind: 'requirement' as const,
         id: r.id,
@@ -452,6 +529,11 @@ export async function GET() {
         jobCardId: r.jobCardId,
         jobCardHub,
         plateSize: r.plateSize,
+        poLineId: r.poLineId,
+        linkedCustomerNames: intel?.linkedCustomerNames ?? [],
+        poNumber: intel?.poNumber ?? null,
+        industrialPriority: intel?.industrialPriority ?? false,
+        customer: custName ? { name: custName } : null,
       }
     })
 
@@ -504,7 +586,7 @@ export async function GET() {
           {
             id: r.id,
             requirementCode: r.requirementCode,
-            poLineId: r.poLineId,
+            poLineId: r.effectivePoLineId ?? r.poLineId,
             jobCardId: null,
             cartonName: r.cartonName,
             artworkCode: r.artworkCode,
@@ -516,6 +598,9 @@ export async function GET() {
             status: r.status,
             plateSize: r.plateSize ?? null,
             partialRemake: undefined,
+            linkedCustomerNames: r.linkedCustomerNames,
+            poNumber: r.poNumber ?? null,
+            industrialPriority: r.industrialPriority,
           },
           'incoming_triage',
         ),
@@ -538,6 +623,9 @@ export async function GET() {
             status: r.status,
             plateSize: r.plateSize ?? null,
             partialRemake: r.partialRemake,
+            linkedCustomerNames: r.linkedCustomerNames,
+            poNumber: r.poNumber ?? null,
+            industrialPriority: r.industrialPriority,
           },
           'ctp_queue',
         ),
@@ -560,6 +648,9 @@ export async function GET() {
             status: r.status,
             plateSize: r.plateSize ?? null,
             partialRemake: r.partialRemake,
+            linkedCustomerNames: r.linkedCustomerNames,
+            poNumber: r.poNumber ?? null,
+            industrialPriority: r.industrialPriority,
           },
           'outside_vendor',
         ),
@@ -581,6 +672,7 @@ export async function GET() {
             ledgerEntryAt: p.createdAt,
             status: p.status,
             plateSize: p.plateSize ?? null,
+            customer: p.customer,
           },
           'live_inventory',
         ),
@@ -596,6 +688,27 @@ export async function GET() {
       ),
     ]
 
+    const ledgerPoLineIds = ledgerRows
+      .map((row) => row.poLineId)
+      .filter((id): id is string => Boolean(id))
+    const priorityLineRows =
+      ledgerPoLineIds.length > 0
+        ? await db.poLineItem.findMany({
+            where: {
+              id: { in: ledgerPoLineIds },
+              OR: [{ directorPriority: true }, { po: { isPriority: true } }],
+            },
+            select: { id: true },
+          })
+        : []
+    const priorityLineSet = new Set(priorityLineRows.map((l) => l.id))
+    const ledgerRowsWithPriority = ledgerRows.map((row) => ({
+      ...row,
+      industrialPriority:
+        row.industrialPriority === true ||
+        (row.poLineId ? priorityLineSet.has(row.poLineId) : false),
+    }))
+
     return new NextResponse(
       safeJsonStringify({
         triage,
@@ -603,7 +716,7 @@ export async function GET() {
         vendorQueue,
         inventory,
         custody,
-        ledgerRows,
+        ledgerRows: ledgerRowsWithPriority,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )

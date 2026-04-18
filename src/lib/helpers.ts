@@ -44,7 +44,9 @@ export async function requireAuth(requiredPermission?: string) {
 export async function requireRole(...allowedRoles: string[]) {
   const { error, user } = await requireAuth()
   if (error) return { error, user: null }
-  if (!allowedRoles.includes(user!.role)) {
+  const userRole = (user!.role ?? '').trim().toLowerCase()
+  const ok = allowedRoles.some((r) => r.trim().toLowerCase() === userRole)
+  if (!ok) {
     return {
       error: NextResponse.json({ error: 'Forbidden — insufficient role' }, { status: 403 }),
       user: null,

@@ -10,8 +10,10 @@ type SlideOverPanelProps = {
   widthClass?: string
   /** Backdrop (full-screen button) classes */
   backdropClassName?: string
-  /** Panel container classes (glass, border, etc.) */
+  /** Panel container classes (glass, border, etc.) — default pure black for color-accurate previews */
   panelClassName?: string
+  /** Animate panel from the right (200ms ease-in-out) */
+  animateEnter?: boolean
 }
 
 export function SlideOverPanel({
@@ -21,7 +23,8 @@ export function SlideOverPanel({
   children,
   widthClass = 'max-w-xl',
   backdropClassName = 'bg-black/50',
-  panelClassName = 'border-l border-slate-800 bg-slate-900 shadow-xl',
+  panelClassName = 'border-l border-zinc-800 bg-[#000000] shadow-xl',
+  animateEnter = true,
 }: SlideOverPanelProps) {
   useEffect(() => {
     if (!isOpen) return
@@ -43,7 +46,9 @@ export function SlideOverPanel({
         onClick={onClose}
       />
       <div
-        className={`relative h-full w-full ${widthClass} flex flex-col ${panelClassName}`}
+        className={`relative h-full w-full ${widthClass} flex flex-col ${panelClassName} ${
+          animateEnter ? 'animate-slide-over-enter' : ''
+        }`}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/80 shrink-0">
           <h2 className="text-sm font-semibold text-slate-100">{title}</h2>

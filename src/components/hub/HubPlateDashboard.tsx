@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
+import { IndustrialKpiTile } from '@/components/industrial/IndustrialKpiTile'
+import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
 import { safeJsonParse, safeJsonParseArray, safeJsonStringify } from '@/lib/safe-json'
 import {
   hubChannelRowsFromLabels,
@@ -93,6 +95,9 @@ type TriageRow = {
   lastStatusUpdatedAt?: string
   plateSize?: HubPlateSize | null
   cartonMasterPlateSize?: HubPlateSize | null
+  linkedCustomerNames?: string[]
+  industrialPriority?: boolean
+  ledgerEntryAt?: string
 }
 
 type CtpRow = {
@@ -110,6 +115,11 @@ type CtpRow = {
   partialRemake?: boolean
   lastStatusUpdatedAt?: string
   plateSize?: HubPlateSize | null
+  poNumber?: string | null
+  purchaseOrderId?: string | null
+  linkedCustomerNames?: string[]
+  industrialPriority?: boolean
+  ledgerEntryAt?: string
   /** Canonical keys (`plateColourCanonicalKey`) dimmed on shop floor (still in `plateColours`). */
   shopfloorInactiveCanonicalKeys?: string[]
   shopfloorActiveColourCount?: number
@@ -203,6 +213,39 @@ function hubSearchMatch(
   if (!q) return true
   const hay = parts.map((p) => String(p ?? '').toLowerCase()).join(' ')
   return hay.includes(q)
+}
+
+function plateStageHoursPlateHub(iso?: string | null): number {
+  if (!iso) return 0
+  const t = new Date(iso).getTime()
+  return Number.isNaN(t) ? 0 : (Date.now() - t) / 3_600_000
+}
+
+function sortPlatePrepRows<
+  T extends { industrialPriority?: boolean; lastStatusUpdatedAt?: string | null },
+>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const pa = a.industrialPriority === true ? 1 : 0
+    const pb = b.industrialPriority === true ? 1 : 0
+    if (pa !== pb) return pb - pa
+    return plateStageHoursPlateHub(b.lastStatusUpdatedAt) - plateStageHoursPlateHub(a.lastStatusUpdatedAt)
+  })
+}
+
+function PlateHubStageDays({ lastStatusUpdatedAt }: { lastStatusUpdatedAt?: string | null }) {
+  const h = plateStageHoursPlateHub(lastStatusUpdatedAt)
+  if (!lastStatusUpdatedAt || h <= 0) return null
+  const days = h / 24
+  const critical = h >= 24
+  return (
+    <p
+      className={`text-[10px] font-semibold tabular-nums mt-0.5 ${
+        critical ? 'text-rose-400 animate-industrial-age-pulse' : 'text-zinc-500'
+      }`}
+    >
+      {days.toFixed(1)}d in stage
+    </p>
+  )
 }
 
 function normHubKey(s: string | null | undefined): string {
@@ -888,6 +931,7 @@ export default function HubPlateDashboard() {
   >('')
   const [returnSizeRemarks, setReturnSizeRemarks] = useState('')
 
+  const [triageSearch, setTriageSearch] = useState('')
   const [ctpSearch, setCtpSearch] = useState('')
   const [vendorSearch, setVendorSearch] = useState('')
   const [invSearch, setInvSearch] = useState('')
@@ -993,6 +1037,40 @@ export default function HubPlateDashboard() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    const onPri = () => void load({ silent: true })
+    window.addEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
+    return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
+  }, [load])
+
+  const plateIntelKpis = useMemo(() => {
+    if (!data) {
+      return { active: 0, pending: 0, bottlenecks: 0, leadDays: 0, priLedger: 0 }
+    }
+    const prep = [...data.triage, ...data.ctpQueue, ...data.vendorQueue]
+    const active = prep.length
+    const pending = data.triage.length
+    const bottlenecks = prep.filter((r) => plateStageHoursPlateHub(r.lastStatusUpdatedAt) > 24).length
+    const leadHours =
+      prep.length === 0
+        ? 0
+        : prep.reduce(
+            (s, r) =>
+              s +
+              plateStageHoursPlateHub(
+                (r as { ledgerEntryAt?: string }).ledgerEntryAt ?? r.lastStatusUpdatedAt,
+              ),
+            0,
+          ) / prep.length
+    return {
+      active,
+      pending,
+      bottlenecks,
+      leadDays: leadHours / 24,
+      priLedger: data.ledgerRows.filter((r) => r.industrialPriority === true).length,
+    }
+  }, [data])
 
   useEffect(() => {
     if (!addStockOpen) return
@@ -1935,18 +2013,55 @@ export default function HubPlateDashboard() {
     return map
   }, [data.inventory, data.triage])
 
+  const filteredTriageBoard = useMemo(() => {
+    const q = triageSearch.trim().toLowerCase()
+    let list = data.triage
+    if (q) {
+      list = data.triage.filter((row) =>
+        hubSearchMatch(q, [
+          row.cartonName,
+          row.artworkCode,
+          row.requirementCode,
+          row.poNumber,
+          ...(row.linkedCustomerNames ?? []),
+        ]),
+      )
+    }
+    return sortPlatePrepRows(list)
+  }, [data.triage, triageSearch])
+
   const filteredCtp = useMemo(() => {
     const q = ctpSearch.trim().toLowerCase()
-    return data.ctpQueue.filter((job) =>
-      hubSearchMatch(q, [job.cartonName, job.artworkCode, job.requirementCode]),
-    )
+    let list = data.ctpQueue
+    if (q) {
+      list = data.ctpQueue.filter((job) =>
+        hubSearchMatch(q, [
+          job.cartonName,
+          job.artworkCode,
+          job.requirementCode,
+          job.poNumber,
+          ...(job.linkedCustomerNames ?? []),
+        ]),
+      )
+    }
+    return sortPlatePrepRows(list)
   }, [data.ctpQueue, ctpSearch])
 
   const filteredVendor = useMemo(() => {
     const q = vendorSearch.trim().toLowerCase()
-    return data.vendorQueue.filter((job) =>
-      hubSearchMatch(q, [job.cartonName, job.artworkCode, job.requirementCode]),
-    )
+    let list = data.vendorQueue
+    if (q) {
+      list = data.vendorQueue.filter((job) =>
+        hubSearchMatch(q, [
+          job.cartonName,
+          job.artworkCode,
+          job.requirementCode,
+          job.poNumber,
+          ...(job.linkedCustomerNames ?? []),
+        ]),
+      )
+    }
+    return sortPlatePrepRows(list)
   }, [data.vendorQueue, vendorSearch])
 
   const filteredCustody = useMemo(() => {
@@ -1959,8 +2074,8 @@ export default function HubPlateDashboard() {
   }, [data.custody, custSearch])
 
   const triageZoneMetrics = useMemo(
-    () => calculateZoneMetrics(data.triage, hubZonePlateVolumeTriage),
-    [data.triage],
+    () => calculateZoneMetrics(filteredTriageBoard, hubZonePlateVolumeTriage),
+    [filteredTriageBoard],
   )
   const ctpZoneMetrics = useMemo(
     () => calculateZoneMetrics(filteredCtp, hubZonePlateVolumeShopfloorJob),
@@ -2163,6 +2278,26 @@ export default function HubPlateDashboard() {
               </button>
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4 pt-2">
+            <IndustrialKpiTile
+              label="Active (prep lanes)"
+              value={plateIntelKpis.active}
+              hint="Triage + CTP + vendor"
+            />
+            <IndustrialKpiTile label="Pending triage" value={plateIntelKpis.pending} hint="Awaiting channel" />
+            <IndustrialKpiTile
+              label="Bottlenecks >24h"
+              value={plateIntelKpis.bottlenecks}
+              hint="Stale status clock"
+              valueClassName={plateIntelKpis.bottlenecks > 0 ? 'text-rose-300' : 'text-slate-100'}
+            />
+            <IndustrialKpiTile
+              label="Avg lead (days)"
+              value={plateIntelKpis.leadDays.toLocaleString('en-IN', { maximumFractionDigits: 1 })}
+              hint={`Ledger priority rows: ${plateIntelKpis.priLedger}`}
+              valueClassName="text-amber-200/95"
+            />
+          </div>
         </header>
 
         {loading ? (
@@ -2260,15 +2395,28 @@ export default function HubPlateDashboard() {
                   plateCount={triageZoneMetrics.plateCount}
                 />
               </div>
+              <label className="block mb-2">
+                <span className="sr-only">Search triage</span>
+                <input
+                  value={triageSearch}
+                  onChange={(e) => setTriageSearch(e.target.value)}
+                  placeholder="Customer, product, PO #, job code…"
+                  className="w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
+                />
+              </label>
               <pre className="sr-only">Designer queue — AW / job codes</pre>
               <div className="space-y-3">
-                {data.triage.length === 0 ? (
+                {filteredTriageBoard.length === 0 ? (
                   <p className="text-zinc-500 text-sm">No jobs awaiting triage.</p>
                 ) : (
-                  data.triage.map((row) => (
+                  filteredTriageBoard.map((row) => (
                     <div
                       key={row.id}
-                      className="relative flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3 rounded-lg border border-gray-800 bg-black p-3 overflow-hidden transition-colors hover:border-blue-500/50"
+                      className={`relative flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3 rounded-lg border border-gray-800 bg-black p-3 overflow-hidden transition-colors hover:border-blue-500/50 ${
+                        row.industrialPriority
+                          ? 'ring-2 ring-amber-500/55 shadow-[0_0_22px_rgba(234,88,12,0.28)]'
+                          : ''
+                      }`}
                     >
                       <PlateCountBadge
                         count={hubPlateBadgeCount({
@@ -2278,6 +2426,7 @@ export default function HubPlateDashboard() {
                       />
                       <div className="flex-1 min-w-0 flex flex-col space-y-2 pr-10 lg:pr-11">
                         <p className="font-mono text-amber-300 text-sm">{row.requirementCode}</p>
+                        <PlateHubStageDays lastStatusUpdatedAt={row.lastStatusUpdatedAt} />
                         <div className="min-w-0 w-full pr-8">
                           <HubCartonAuditTitle
                             onOpenAudit={() =>
@@ -2441,7 +2590,7 @@ export default function HubPlateDashboard() {
                 <input
                   value={ctpSearch}
                   onChange={(e) => setCtpSearch(e.target.value)}
-                  placeholder="Search…"
+                  placeholder="Customer, product, PO #, job code…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
@@ -2451,7 +2600,11 @@ export default function HubPlateDashboard() {
                     filteredCtp.map((job) => (
                       <li
                         key={job.id}
-                        className="relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-black p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-14"
+                        className={`relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-black p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-14 ${
+                          job.industrialPriority
+                            ? 'ring-2 ring-amber-500/55 shadow-[0_0_22px_rgba(234,88,12,0.28)]'
+                            : ''
+                        }`}
                       >
                         <ShopfloorPlateAdjustTrigger
                           disabled={saving}
@@ -2468,6 +2621,7 @@ export default function HubPlateDashboard() {
                           }
                         />
                         <p className="font-mono text-amber-300 text-xs">{job.requirementCode}</p>
+                        <PlateHubStageDays lastStatusUpdatedAt={job.lastStatusUpdatedAt} />
                         <div className="flex flex-wrap items-start gap-x-1 gap-y-0.5 min-w-0 w-full pr-8">
                           <HubCartonAuditTitle
                             className="!w-auto flex-1 min-w-0"
@@ -2578,7 +2732,7 @@ export default function HubPlateDashboard() {
                 <input
                   value={vendorSearch}
                   onChange={(e) => setVendorSearch(e.target.value)}
-                  placeholder="Search…"
+                  placeholder="Customer, product, PO #, job code…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white text-sm placeholder:text-zinc-500"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
@@ -2588,7 +2742,11 @@ export default function HubPlateDashboard() {
                     filteredVendor.map((job) => (
                       <li
                         key={job.id}
-                        className="relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-black p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-14"
+                        className={`relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-black p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-14 ${
+                          job.industrialPriority
+                            ? 'ring-2 ring-amber-500/55 shadow-[0_0_22px_rgba(234,88,12,0.28)]'
+                            : ''
+                        }`}
                       >
                         <ShopfloorPlateAdjustTrigger
                           disabled={saving}
@@ -2605,6 +2763,7 @@ export default function HubPlateDashboard() {
                           }
                         />
                         <p className="font-mono text-violet-200 text-xs">{job.requirementCode}</p>
+                        <PlateHubStageDays lastStatusUpdatedAt={job.lastStatusUpdatedAt} />
                         <div className="flex flex-wrap items-start gap-x-1 gap-y-0.5 min-w-0 w-full pr-8">
                           <HubCartonAuditTitle
                             className="!w-auto flex-1 min-w-0"

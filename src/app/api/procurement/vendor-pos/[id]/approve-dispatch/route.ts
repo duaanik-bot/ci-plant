@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog, sendWhatsApp } from '@/lib/helpers'
+import { logIndustrialStatusChange } from '@/lib/industrial-audit'
 import { PROCUREMENT_DEFAULT_SIGNATORY } from '@/lib/procurement-mrp-service'
+import { PROCUREMENT_APPROVAL_SIGNATORY } from '@/lib/material-readiness-vitals'
 import { buildVendorMaterialPoPdfBuffer } from '@/lib/vendor-po-pdf'
 import { sendVendorPoEmail, vendorPoEmailSubject } from '@/lib/procurement-dispatch-email'
 import { logCommunication } from '@/lib/communication-log'
@@ -77,7 +79,9 @@ export async function POST(
         status: 'dispatched',
         signatoryName: signatory,
         dispatchedAt: new Date(),
-        dispatchActor: signatory,
+        dispatchActor: PROCUREMENT_APPROVAL_SIGNATORY,
+        logisticsStatus: 'mill_dispatched',
+        logisticsUpdatedAt: new Date(),
       },
     })
     await tx.poLineItem.updateMany({
@@ -176,6 +180,20 @@ export async function POST(
       emailOk: emailResult.ok,
       whatsappOk: waOk,
       actor: signatory,
+      industrialRelease: PROCUREMENT_APPROVAL_SIGNATORY,
+    },
+  })
+
+  await logIndustrialStatusChange({
+    userId: user!.id ?? '',
+    action: 'vendor_material_order_released',
+    module: 'VendorMaterialPO',
+    recordId: id,
+    operatorLabel: PROCUREMENT_APPROVAL_SIGNATORY,
+    payload: {
+      poNumber: fresh.poNumber,
+      supplierId: fresh.supplierId,
+      signatoryOnDocument: signatory,
     },
   })
 

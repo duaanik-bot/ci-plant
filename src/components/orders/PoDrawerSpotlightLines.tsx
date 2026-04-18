@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef } from 'react'
 import { lineItemMatchesDrawerQuery } from '@/lib/po-list-deep-filter'
+import { spotlightHighlightText } from '@/lib/spotlight-highlight'
 
 type Line = {
   id: string
@@ -73,7 +74,11 @@ export function PoDrawerSpotlightLines({
                 />
                 <div className="min-w-0 flex-1 grid grid-cols-[1fr_auto_auto] gap-x-2 items-start">
                   <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
-                    <span className="font-medium text-slate-200 truncate">{li.cartonName}</span>
+                    <span className="font-medium text-slate-200 truncate">
+                      {active
+                        ? spotlightHighlightText(li.cartonName, spotlightQuery.trim())
+                        : li.cartonName}
+                    </span>
                     {isSpotlight ? (
                       <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-orange-400/95 ring-1 ring-orange-500/35 bg-orange-500/10">
                         Match found

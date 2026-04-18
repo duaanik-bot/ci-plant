@@ -614,7 +614,7 @@ export default function PurchaseOrdersPage() {
         const res = await fetch(`/api/purchase-orders/${po.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: newStatus }),
+          body: JSON.stringify({ status: newStatus, industrialVerification: true }),
         })
         const json = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to update status')
@@ -886,15 +886,18 @@ export default function PurchaseOrdersPage() {
                       >
                         <FileDown className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
-                      <Link
-                        href={`/orders/purchase-orders/${po.id}`}
-                        title="Quick edit"
-                        aria-label="Edit purchase order"
-                        onClick={(e) => e.stopPropagation()}
+                      <button
+                        type="button"
+                        title="Open spotlight drawer"
+                        aria-label="Edit purchase order in drawer"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setDrawerPoId(po.id)
+                        }}
                         className="inline-flex items-center justify-center rounded-md border border-transparent bg-transparent px-1.5 py-1 text-slate-400 transition-colors hover:border-amber-500/45 hover:bg-amber-500/10 hover:text-amber-400"
                       >
                         <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
-                      </Link>
+                      </button>
                       {po.status === 'draft' && (
                         <button
                           type="button"
@@ -945,7 +948,7 @@ export default function PurchaseOrdersPage() {
         onClose={() => setDrawerPoId(null)}
         widthClass="max-w-lg"
         backdropClassName="bg-black/55"
-        panelClassName="border-l border-slate-800 bg-black backdrop-blur-xl shadow-2xl"
+        panelClassName="border-l border-zinc-800 bg-[#000000] shadow-2xl"
       >
         {drawerLoading || !drawerPo ? (
           <p className="text-slate-500 text-sm">Loading…</p>
@@ -1027,9 +1030,9 @@ export default function PurchaseOrdersPage() {
 
             <Link
               href={`/orders/purchase-orders/${drawerPo.id}`}
-              className="flex w-full items-center justify-center rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow hover:bg-amber-500 transition"
+              className="block w-full text-center text-[11px] text-slate-500 hover:text-amber-400/90 underline-offset-2 hover:underline"
             >
-              Go to Full Edit
+              Open full-page editor (advanced)
             </Link>
           </div>
         )}

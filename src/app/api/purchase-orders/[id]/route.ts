@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { PastingStyle } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
+import { logIndustrialStatusChange } from '@/lib/industrial-audit'
 import { z } from 'zod'
 import { purchaseOrderSchema } from '@/lib/validations'
 import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
@@ -62,6 +63,8 @@ const updateSchema = purchaseOrderSchema.partial().omit({
   isPriority: z.boolean().optional(),
   deliveryRequiredBy: z.string().optional().nullable(),
   lineItems: z.array(lineItemUpdateSchema).optional(),
+  /** Spotlight drawer — audit trail uses director verification label */
+  industrialVerification: z.boolean().optional(),
 })
 
 export async function GET(
@@ -253,6 +256,21 @@ export async function PUT(
     recordId: id,
     newValue: { ...data, actorLabel: 'Anik Dua' },
   })
+
+  if (
+    data.industrialVerification === true &&
+    data.status &&
+    data.status !== existing.status
+  ) {
+    await logIndustrialStatusChange({
+      userId: user!.id ?? '',
+      action: 'po_status_drawer_verified',
+      module: 'CustomerPO',
+      recordId: id,
+      operatorLabel: 'Verified by Anik Dua',
+      payload: { fromStatus: existing.status, toStatus: data.status },
+    })
+  }
 
   return NextResponse.json(updated)
 }

@@ -264,7 +264,7 @@ export async function GET(req: NextRequest) {
         },
         {
           id: 'biz-procurement',
-          title: 'Procurement workbench',
+          title: 'Material Readiness Hub',
           subtitle: 'Vendor material POs',
           href: '/orders/procurement',
         },
