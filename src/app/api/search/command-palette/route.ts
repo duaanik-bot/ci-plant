@@ -16,7 +16,7 @@ const TAKE_EACH = 12
 function poStatusBadge(status: string): { text: string; className: string } {
   const s = status.toLowerCase()
   if (s === 'confirmed') {
-    return { text: 'Confirmed', className: 'bg-sky-600/70 text-white ring-1 ring-sky-300/30' }
+    return { text: 'Confirmed', className: 'bg-sky-600/70 text-primary-foreground ring-1 ring-sky-300/30' }
   }
   if (s === 'draft') {
     return { text: 'Pending', className: 'bg-amber-700/55 text-amber-50 ring-1 ring-amber-400/30' }

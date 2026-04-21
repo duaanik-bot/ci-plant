@@ -99,12 +99,12 @@ export default function DieHubSettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100 p-4 md:p-6">
+    <div className="min-h-screen bg-background text-zinc-100 p-4 md:p-6">
       <div className="max-w-[720px] mx-auto space-y-6">
         <HubCategoryNav active="dies" />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-white">Die Hub settings</h1>
+            <h1 className="text-2xl font-bold text-foreground">Die Hub settings</h1>
             <p className="text-sm text-zinc-400 mt-1">Staff management and floor operator directory.</p>
           </div>
           <Link
@@ -131,14 +131,14 @@ export default function DieHubSettingsPage() {
               Active operators appear in issuance and return modals. Inactive names stay in the audit history.
             </p>
 
-            <div className="rounded-lg border border-zinc-800 bg-black/40 p-3 space-y-2">
+            <div className="rounded-lg border border-zinc-800 bg-background/40 p-3 space-y-2">
               <h3 className="text-xs font-bold uppercase text-zinc-500">Add new operator</h3>
               <label className="block text-sm text-zinc-300">
                 Name
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white"
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
                   placeholder="e.g. Jane Smith"
                 />
               </label>
@@ -146,7 +146,7 @@ export default function DieHubSettingsPage() {
                 type="button"
                 disabled={saving || !name.trim()}
                 onClick={() => void addOperator()}
-                className="w-full py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold disabled:opacity-50"
+                className="w-full py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-bold disabled:opacity-50"
               >
                 Add operator
               </button>
@@ -157,7 +157,7 @@ export default function DieHubSettingsPage() {
                 <li className="px-3 py-6 text-center text-zinc-500 text-sm">No operators yet.</li>
               ) : (
                 operators.map((o) => (
-                  <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-black/30">
+                  <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-background/30">
                     <div>
                       <p className="text-sm font-medium text-zinc-100">{o.name}</p>
                       <p className="text-[11px] text-zinc-500">

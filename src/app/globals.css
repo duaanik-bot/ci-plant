@@ -34,7 +34,7 @@
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
+    --primary: 221.2 83.2% 53.3%;
     --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
@@ -46,7 +46,7 @@
     --destructive-foreground: 210 40% 98%;
     --border: 214 32% 91%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --ring: 221.2 83.2% 53.3%;
     --radius: 0.5rem;
   }
 
@@ -55,7 +55,7 @@
     --foreground: 210 40% 98%;
     --card: 222.2 84% 4.9%;
     --card-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 47.4% 11.2%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
@@ -67,7 +67,7 @@
     --destructive-foreground: 210 40% 98%;
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --ring: 217.2 91.2% 59.8%;
   }
 }
 
@@ -79,6 +79,13 @@
     @apply bg-background text-foreground antialiased text-sm leading-normal;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     line-height: 1.5;
+  }
+  ::selection {
+    @apply bg-primary/20 text-foreground;
+  }
+  :where(button, [role='button'], a, input, select, textarea, [tabindex]):focus-visible {
+    @apply outline-none ring-2 ring-ring/40 ring-offset-2 ring-offset-background;
+    box-shadow: 0 0 0 1px hsl(var(--ring) / 0.12), 0 0 20px hsl(var(--ring) / 0.18);
   }
 }
 
@@ -201,10 +208,10 @@
     @apply text-[11px] font-bold uppercase tracking-widest text-zinc-100 border-b border-zinc-800/90 pb-2 -mt-0.5;
   }
   .ci-btn-save-industrial {
-    @apply px-3 py-2 rounded-md bg-gradient-to-b from-amber-500 to-orange-600 text-white text-sm font-semibold shadow-sm disabled:opacity-50 hover:from-amber-400 hover:to-orange-500 border border-orange-800/40;
+    @apply px-3 py-2 rounded-md bg-gradient-to-b from-amber-500 to-orange-600 text-foreground text-sm font-semibold shadow-sm disabled:opacity-50 hover:from-amber-400 hover:to-orange-500 border border-orange-800/40;
   }
   /** Procurement workbench — golden-orange primary actions */
   .ci-btn-procurement {
-    @apply px-3 py-2 rounded-md bg-gradient-to-b from-amber-400 via-orange-500 to-orange-600 text-white text-sm font-semibold shadow-md disabled:opacity-50 hover:from-amber-300 hover:via-orange-400 hover:to-orange-500 border border-amber-700/50;
+    @apply px-3 py-2 rounded-md bg-gradient-to-b from-amber-400 via-orange-500 to-orange-600 text-foreground text-sm font-semibold shadow-md disabled:opacity-50 hover:from-amber-300 hover:via-orange-400 hover:to-orange-500 border border-amber-700/50;
   }
 }

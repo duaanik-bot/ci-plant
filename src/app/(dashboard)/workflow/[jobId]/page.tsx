@@ -75,7 +75,7 @@ export default function JobWorkflowPage() {
             <p className="text-slate-200">{jobInfo.productName}</p>
             <p className="text-slate-400 text-xs">{jobInfo.customerName}</p>
           </div>
-          <Link href="/workflow" className="text-slate-400 hover:text-white text-xs">
+          <Link href="/workflow" className="text-slate-400 hover:text-foreground text-xs">
             ← Back to workflow
           </Link>
         </div>
@@ -125,7 +125,7 @@ export default function JobWorkflowPage() {
                     <button
                       type="button"
                       onClick={() => completeStage(stage.stageNumber)}
-                      className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-xs font-medium text-white"
+                      className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-xs font-medium text-primary-foreground"
                     >
                       Complete Stage
                     </button>

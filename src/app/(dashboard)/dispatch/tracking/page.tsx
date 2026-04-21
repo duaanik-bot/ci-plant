@@ -164,7 +164,7 @@ export default function DispatchTrackingPage() {
         <select
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white min-w-[220px]"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground min-w-[220px]"
         >
           <option value="">All clients</option>
           {customers.map((c) => (
@@ -176,7 +176,7 @@ export default function DispatchTrackingPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
         >
           <option value="">All statuses</option>
           <option value="pending_qa">Pending QA</option>
@@ -232,7 +232,7 @@ export default function DispatchTrackingPage() {
                   className={`px-3 py-2 rounded-lg text-sm font-medium border ${
                     r.status === 'pod_received'
                       ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
-                      : 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500/40'
+                      : 'bg-amber-600 hover:bg-amber-500 text-primary-foreground border-amber-500/40'
                   }`}
                 >
                   Mark Delivered
@@ -249,7 +249,7 @@ export default function DispatchTrackingPage() {
       {podOpen && podRow && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
-            className="absolute inset-0 bg-black/50"
+            className="absolute inset-0 bg-background/50"
             onClick={() => setPodOpen(false)}
             aria-label="Close"
             type="button"
@@ -257,7 +257,7 @@ export default function DispatchTrackingPage() {
           <div className="relative w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-white">Confirm POD</h2>
+                <h2 className="text-lg font-semibold text-foreground">Confirm POD</h2>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {podRow.jobNumber} · {podRow.customerName}
                 </p>
@@ -265,7 +265,7 @@ export default function DispatchTrackingPage() {
               <button
                 type="button"
                 onClick={() => setPodOpen(false)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-foreground"
               >
                 ✕
               </button>
@@ -286,7 +286,7 @@ export default function DispatchTrackingPage() {
                 <input
                   value={receivedBy}
                   onChange={(e) => setReceivedBy(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div>
@@ -295,7 +295,7 @@ export default function DispatchTrackingPage() {
                   type="datetime-local"
                   value={receivedAt}
                   onChange={(e) => setReceivedAt(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div className="md:col-span-2">
@@ -304,7 +304,7 @@ export default function DispatchTrackingPage() {
                   rows={3}
                   value={remarks}
                   onChange={(e) => setRemarks(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
             </div>
@@ -313,7 +313,7 @@ export default function DispatchTrackingPage() {
               <button
                 type="button"
                 onClick={submitPod}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
               >
                 Confirm POD
               </button>

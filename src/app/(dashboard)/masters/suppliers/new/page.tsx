@@ -71,14 +71,14 @@ export default function NewSupplierPage() {
 
   return (
     <div className="max-w-lg">
-      <h2 className="text-lg font-semibold text-white mb-4">New supplier</h2>
+      <h2 className="text-lg font-semibold text-foreground mb-4">New supplier</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm text-slate-400 mb-1">Supplier name *</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               fieldErrors.name ? 'border-red-500' : 'border-slate-600'
             }`}
           />
@@ -89,7 +89,7 @@ export default function NewSupplierPage() {
           <input
             value={gstNumber}
             onChange={(e) => setGstNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -98,7 +98,7 @@ export default function NewSupplierPage() {
             <input
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -106,7 +106,7 @@ export default function NewSupplierPage() {
             <input
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
         </div>
@@ -116,7 +116,7 @@ export default function NewSupplierPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -125,7 +125,7 @@ export default function NewSupplierPage() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -151,7 +151,7 @@ export default function NewSupplierPage() {
             min={0}
             value={leadTimeDays}
             onChange={(e) => setLeadTimeDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -161,7 +161,7 @@ export default function NewSupplierPage() {
             min={0}
             value={paymentTermsDays}
             onChange={(e) => setPaymentTermsDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white font-mono tabular-nums"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground font-mono tabular-nums"
           />
         </div>
         <div>
@@ -170,7 +170,7 @@ export default function NewSupplierPage() {
             value={paymentTerms}
             onChange={(e) => setPaymentTerms(e.target.value)}
             placeholder="e.g. 30 days credit"
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -187,11 +187,11 @@ export default function NewSupplierPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-white"
+            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/suppliers" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white">
+          <Link href="/masters/suppliers" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground">
             Cancel
           </Link>
         </div>

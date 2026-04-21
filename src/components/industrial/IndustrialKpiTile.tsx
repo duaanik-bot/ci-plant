@@ -23,7 +23,7 @@ export function IndustrialKpiTile({
       ? 'cursor-pointer text-left w-full transition hover:bg-slate-900/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50'
       : ''
   const active = isActive ? 'ring-2 ring-amber-400/45' : ''
-  const cls = `rounded-xl border border-white/10 bg-slate-950/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07)] ${shellClassName} ${interactive} ${active}`
+  const cls = `rounded-xl border border-border/10 bg-slate-950/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07)] ${shellClassName} ${interactive} ${active}`
 
   if (onClick) {
     return (

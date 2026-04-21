@@ -5,6 +5,18 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { MachineHealthMeter } from '@/components/industrial/MachineHealthMeter'
 import { PmSpotlightDrawer } from '@/components/industrial/PmSpotlightDrawer'
+import {
+  EnterpriseTableShell,
+  enterpriseTableClass,
+  enterpriseTheadClass,
+  enterpriseTbodyClass,
+  enterpriseTrClass,
+  enterpriseThClass,
+  enterpriseTdClass,
+  enterpriseTdBase,
+  enterpriseTdMonoClass,
+  enterpriseTdMutedClass,
+} from '@/components/ui/EnterpriseTableShell'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -54,39 +66,41 @@ export default function MastersMachinesPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <div className="text-slate-400">Loading…</div>
+  if (loading) {
+    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+  }
 
   return (
     <div>
-      <h2 className="text-lg font-semibold text-white mb-4">Machine Master (CI-01 to CI-12)</h2>
-      <div className="overflow-x-auto rounded-lg border border-zinc-800 bg-black ring-1 ring-white/5">
-        <table className={`w-full text-sm text-left ${mono}`}>
-          <thead className="bg-zinc-950 text-zinc-400 text-[10px] uppercase tracking-wider">
+      <h2 className="mb-4 text-base font-semibold text-slate-900 dark:text-slate-50">Machine Master (CI-01 to CI-12)</h2>
+      <EnterpriseTableShell>
+        <table className={`w-full min-w-[900px] border-collapse text-left text-sm text-slate-900 dark:text-slate-50 ${mono}`}>
+          <thead className={enterpriseTheadClass}>
             <tr>
-              <th className="px-4 py-2">Code</th>
-              <th className="px-4 py-2">Name</th>
-              <th className="px-4 py-2">Health</th>
-              <th className="px-4 py-2">PM usage</th>
-              <th className="px-4 py-2">Make</th>
-              <th className="px-4 py-2">Capacity/Shift</th>
-              <th className="px-4 py-2">Std Waste %</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Last PM</th>
-              <th className="px-4 py-2">Next PM Due</th>
-              <th className="px-4 py-2">Actions</th>
+              <th className={enterpriseThClass}>Code</th>
+              <th className={enterpriseThClass}>Name</th>
+              <th className={enterpriseThClass}>Health</th>
+              <th className={enterpriseThClass}>PM usage</th>
+              <th className={enterpriseThClass}>Make</th>
+              <th className={enterpriseThClass}>Capacity/Shift</th>
+              <th className={enterpriseThClass}>Std Waste %</th>
+              <th className={enterpriseThClass}>Status</th>
+              <th className={enterpriseThClass}>Last PM</th>
+              <th className={enterpriseThClass}>Next PM Due</th>
+              <th className={enterpriseThClass}>Actions</th>
             </tr>
           </thead>
-          <tbody className="text-zinc-200">
+          <tbody className={enterpriseTbodyClass}>
             {list.map((m) => {
               const pm = pmById[m.id]
               return (
                 <tr
                   key={m.id}
-                  className={`border-t border-zinc-800 ${pm?.overdue ? 'bg-rose-950/20 border-l-4 border-rose-600' : ''}`}
+                  className={`${enterpriseTrClass} ${pm?.overdue ? 'bg-rose-50 dark:bg-rose-950/20' : ''}`}
                 >
-                  <td className="px-4 py-2 font-mono text-amber-300">{m.machineCode}</td>
-                  <td className="px-4 py-2">{m.name}</td>
-                  <td className="px-4 py-2">
+                  <td className={`${enterpriseTdClass} text-amber-700 dark:text-amber-300`}>{m?.machineCode ?? '—'}</td>
+                  <td className={enterpriseTdClass}>{m?.name ?? '—'}</td>
+                  <td className={enterpriseTdBase}>
                     {pm?.hasSchedule ? (
                       <MachineHealthMeter
                         healthPct={pm.healthPct}
@@ -97,33 +111,33 @@ export default function MastersMachinesPage() {
                       <MachineHealthMeter healthPct={0} hasSchedule={false} />
                     )}
                   </td>
-                  <td className="px-4 py-2 text-xs text-zinc-500">
+                  <td className={enterpriseTdMutedClass}>
                     {pm?.hasSchedule ? `${pm.usageRunHours}h · ${pm.usageImpressions}` : '—'}
                   </td>
-                  <td className="px-4 py-2 text-slate-400">{m.make ?? '—'}</td>
-                  <td className="px-4 py-2">{m.capacityPerShift.toLocaleString()}</td>
-                  <td className="px-4 py-2">{m.stdWastePct}%</td>
-                  <td className="px-4 py-2">
+                  <td className={enterpriseTdMutedClass}>{m?.make ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{(m?.capacityPerShift ?? 0).toLocaleString()}</td>
+                  <td className={enterpriseTdMonoClass}>{m?.stdWastePct ?? '—'}%</td>
+                  <td className={enterpriseTdClass}>
                     <span
                       className={
-                        m.status === 'active'
-                          ? 'text-green-400'
-                          : m.status === 'under_maintenance'
-                            ? 'text-amber-400'
-                            : 'text-red-400'
+                        m?.status === 'active'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : m?.status === 'under_maintenance'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-rose-600 dark:text-rose-400'
                       }
                     >
-                      {m.status.replace('_', ' ')}
+                      {(m?.status ?? '—').replace('_', ' ')}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-slate-400">{m.lastPmDate ?? '—'}</td>
-                  <td className="px-4 py-2">
-                    <span className={m.nextPmDue && new Date(m.nextPmDue) < new Date() ? 'text-red-400' : ''}>
-                      {m.nextPmDue ?? '—'}
+                  <td className={enterpriseTdMonoClass}>{m?.lastPmDate ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>
+                    <span className={m?.nextPmDue && new Date(m.nextPmDue) < new Date() ? 'text-rose-600 dark:text-rose-400' : ''}>
+                      {m?.nextPmDue ?? '—'}
                     </span>
                   </td>
-                  <td className="px-4 py-2">
-                    <Link href={`/masters/machines/${m.id}`} className="text-amber-400 hover:underline">
+                  <td className={enterpriseTdClass}>
+                    <Link href={`/masters/machines/${m?.id ?? ''}`} className="text-blue-600 hover:underline dark:text-blue-400">
                       Edit
                     </Link>
                   </td>
@@ -132,8 +146,8 @@ export default function MastersMachinesPage() {
             })}
           </tbody>
         </table>
-      </div>
-      {list.length === 0 && <p className="text-slate-400 mt-4">No machines. Run seed.</p>}
+      </EnterpriseTableShell>
+      {list.length === 0 && <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No machines. Run seed.</p>}
       <PmSpotlightDrawer machineId={pmMachineId} onClose={() => setPmMachineId(null)} />
     </div>
   )

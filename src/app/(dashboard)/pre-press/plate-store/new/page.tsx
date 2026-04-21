@@ -119,7 +119,7 @@ export default function NewPlateStorePage() {
 
   return (
     <div className="p-4 max-w-2xl mx-auto">
-      <Link href="/pre-press/plate-store" className="text-slate-400 hover:text-white text-sm mb-4 inline-block">
+      <Link href="/pre-press/plate-store" className="text-slate-400 hover:text-foreground text-sm mb-4 inline-block">
         ← Plate store
       </Link>
       <h1 className="text-xl font-bold text-amber-400 mb-4">Add plate record</h1>
@@ -154,7 +154,7 @@ export default function NewPlateStorePage() {
             value={artworkCode}
             onChange={(e) => setArtworkCode(e.target.value)}
             placeholder="e.g. BSJ.2.5CT-0325"
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
 
@@ -165,7 +165,7 @@ export default function NewPlateStorePage() {
             value={artworkVersion}
             onChange={(e) => setArtworkVersion(e.target.value)}
             placeholder="R0 / R1 / R2…"
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
 
@@ -177,7 +177,7 @@ export default function NewPlateStorePage() {
             max={6}
             value={numberOfColours}
             onChange={(e) => setNumberOfColours(Number(e.target.value) || 1)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
 
@@ -195,7 +195,7 @@ export default function NewPlateStorePage() {
                     )
                   }
                   placeholder="C / M / Y / K / Pantone"
-                  className="w-24 px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white text-sm"
+                  className="w-24 px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground text-sm"
                 />
                 <select
                   value={row.status}
@@ -206,7 +206,7 @@ export default function NewPlateStorePage() {
                       )
                     )
                   }
-                  className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white text-sm"
+                  className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground text-sm"
                 >
                   <option value="new">New</option>
                   <option value="old">Old</option>
@@ -224,7 +224,7 @@ export default function NewPlateStorePage() {
             value={rackLocation}
             onChange={(e) => setRackLocation(e.target.value)}
             placeholder="e.g. Rack B-3"
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
 
@@ -235,7 +235,7 @@ export default function NewPlateStorePage() {
             value={slotNumber}
             onChange={(e) => setSlotNumber(e.target.value)}
             placeholder="e.g. Slot 12"
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
 
@@ -244,7 +244,7 @@ export default function NewPlateStorePage() {
           <select
             value={ctpOperator}
             onChange={(e) => setCtpOperator(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           >
             <option value="">Select…</option>
             {users.map((u) => (
@@ -259,7 +259,7 @@ export default function NewPlateStorePage() {
             type="date"
             value={ctpDate}
             onChange={(e) => setCtpDate(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
 
@@ -269,7 +269,7 @@ export default function NewPlateStorePage() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
 
@@ -284,7 +284,7 @@ export default function NewPlateStorePage() {
           <button
             type="submit"
             disabled={saving}
-            className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+            className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

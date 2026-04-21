@@ -34,7 +34,7 @@ function VendorPill({ stage, active }: { stage: VendorPipelineStage; active: Ven
     <span
       className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-medium border ${
         current
-          ? 'bg-amber-700/90 border-amber-500 text-white'
+          ? 'bg-amber-700/90 border-amber-500 text-primary-foreground'
           : done
             ? 'bg-emerald-900/40 border-emerald-700 text-emerald-200'
             : 'bg-slate-800 border-slate-600 text-slate-500'
@@ -274,12 +274,12 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
   const toggleBtn = (active: boolean) =>
     `px-3 py-1.5 text-[11px] font-semibold rounded-md border transition-colors ${
       active
-        ? 'bg-amber-700/90 border-amber-500 text-white'
+        ? 'bg-amber-700/90 border-amber-500 text-primary-foreground'
         : 'bg-slate-800/90 border-slate-600 text-slate-300 hover:bg-slate-700'
     }`
 
   return (
-    <div className="flex flex-col min-h-[calc(100dvh-4rem)] max-w-[1920px] mx-auto w-full bg-slate-950 text-white">
+    <div className="flex flex-col min-h-[calc(100dvh-4rem)] max-w-[1920px] mx-auto w-full bg-background text-foreground">
       <header className="sticky top-0 z-30 border-b border-slate-700 bg-slate-950/95 backdrop-blur-sm px-4 py-3 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -436,7 +436,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                     onClick={() => setBlockCond(c)}
                     className={`px-2 py-1 rounded text-[11px] border ${
                       blockCond === c
-                        ? 'bg-violet-700 border-violet-500 text-white'
+                        ? 'bg-violet-700 border-violet-500 text-primary-foreground'
                         : 'bg-slate-800 border-slate-600 text-slate-300'
                     }`}
                   >
@@ -507,7 +507,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
             <input
               value={invSearch}
               onChange={(e) => setInvSearch(e.target.value)}
-              className="mt-1 w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-sm text-white placeholder:text-slate-500"
+              className="mt-1 w-full px-2 py-1.5 rounded bg-card border border-slate-600 text-sm text-foreground placeholder:text-slate-500"
               placeholder={toolType === 'shade_cards' ? 'Slot, ref, master artwork…' : 'Block code, condition…'}
             />
           </label>
@@ -644,7 +644,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
       </div>
 
       {returnOpen && toolType !== 'shade_cards' ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-background/60 p-4">
           <div className="bg-slate-900 border border-slate-600 rounded-xl p-4 max-w-md w-full shadow-xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-2">Return to rack</h3>
             <p className="text-[11px] text-slate-500 mb-3">
@@ -660,7 +660,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                     onClick={() => setReturnToolCondition(c)}
                     className={`px-2 py-1 rounded text-[11px] border ${
                       returnToolCondition === c
-                        ? 'bg-emerald-800 border-emerald-500 text-white'
+                        ? 'bg-emerald-800 border-emerald-500 text-primary-foreground'
                         : 'bg-slate-800 border-slate-600 text-slate-300'
                     }`}
                   >
@@ -678,7 +678,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                 onChange={(e) =>
                   setReturnImpressions(e.target.value === '' ? '' : Number(e.target.value))
                 }
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="mt-1 w-full px-2 py-2 rounded bg-card border border-slate-600 text-foreground"
               />
             </label>
             <label className="block text-sm text-slate-400 mb-2">
@@ -686,7 +686,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
               <input
                 value={returnRack}
                 onChange={(e) => setReturnRack(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="mt-1 w-full px-2 py-2 rounded bg-card border border-slate-600 text-foreground"
                 placeholder="e.g. D-4"
               />
             </label>
@@ -695,7 +695,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
               <input
                 value={returnJobCardId}
                 onChange={(e) => setReturnJobCardId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white font-mono text-xs"
+                className="mt-1 w-full px-2 py-2 rounded bg-card border border-slate-600 text-foreground font-mono text-xs"
               />
             </label>
             <label className="block text-sm text-slate-400 mb-2">
@@ -703,7 +703,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
               <input
                 value={returnArtworkId}
                 onChange={(e) => setReturnArtworkId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white font-mono text-xs"
+                className="mt-1 w-full px-2 py-2 rounded bg-card border border-slate-600 text-foreground font-mono text-xs"
               />
             </label>
             <label className="block text-sm text-slate-400 mb-4">
@@ -711,7 +711,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
               <input
                 value={returnSetNumber}
                 onChange={(e) => setReturnSetNumber(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-slate-800 border border-slate-600 text-white font-mono text-xs"
+                className="mt-1 w-full px-2 py-2 rounded bg-card border border-slate-600 text-foreground font-mono text-xs"
                 placeholder="e.g. 01"
               />
             </label>

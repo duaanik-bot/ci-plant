@@ -65,7 +65,7 @@ export default function JobDetailPage() {
   return (
     <div className="p-4 max-w-4xl mx-auto">
       <div className="flex items-center gap-4 mb-4">
-        <Link href="/jobs" className="text-slate-400 hover:text-white text-sm">← Jobs</Link>
+        <Link href="/jobs" className="text-slate-400 hover:text-foreground text-sm">← Jobs</Link>
         <h1 className="text-xl font-bold text-amber-400">{job.jobNumber}</h1>
         <span className="px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300">{job.status.replace(/_/g, ' ')}</span>
         <a
@@ -85,7 +85,7 @@ export default function JobDetailPage() {
             type="button"
             onClick={() => setTab(t)}
             className={`px-3 py-1.5 rounded text-sm whitespace-nowrap ${
-              tab === t ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
+              tab === t ? 'bg-amber-600 text-primary-foreground' : 'bg-slate-800 text-slate-400 hover:text-foreground'
             }`}
           >
             {t}

@@ -3,6 +3,17 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import {
+  EnterpriseTableShell,
+  enterpriseTableClass,
+  enterpriseTheadClass,
+  enterpriseTbodyClass,
+  enterpriseTrClass,
+  enterpriseThClass,
+  enterpriseTdClass,
+  enterpriseTdMonoClass,
+  enterpriseTdMutedClass,
+} from '@/components/ui/EnterpriseTableShell'
 
 type User = {
   id: string
@@ -26,49 +37,51 @@ export default function MastersUsersPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <div className="text-slate-400">Loading…</div>
+  if (loading) {
+    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">User Master</h2>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">User Master</h2>
         <Link
           href="/masters/users/new"
-          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-primary-foreground hover:bg-blue-700"
         >
           Add user
         </Link>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-slate-700">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-slate-800 text-slate-300">
+      <EnterpriseTableShell>
+        <table className={enterpriseTableClass}>
+          <thead className={enterpriseTheadClass}>
             <tr>
-              <th className="px-4 py-2">Name</th>
-              <th className="px-4 py-2">Email</th>
-              <th className="px-4 py-2">Role</th>
-              <th className="px-4 py-2">WhatsApp</th>
-              <th className="px-4 py-2">Last login</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Actions</th>
+              <th className={enterpriseThClass}>Name</th>
+              <th className={enterpriseThClass}>Email</th>
+              <th className={enterpriseThClass}>Role</th>
+              <th className={enterpriseThClass}>WhatsApp</th>
+              <th className={enterpriseThClass}>Last login</th>
+              <th className={enterpriseThClass}>Status</th>
+              <th className={enterpriseThClass}>Actions</th>
             </tr>
           </thead>
-          <tbody className="text-white">
+          <tbody className={enterpriseTbodyClass}>
             {list.map((u) => (
-              <tr key={u.id} className="border-t border-slate-700">
-                <td className="px-4 py-2">{u.name}</td>
-                <td className="px-4 py-2">{u.email}</td>
-                <td className="px-4 py-2">{u.role?.roleName ?? '—'}</td>
-                <td className="px-4 py-2 text-slate-400">{u.whatsappNumber ?? '—'}</td>
-                <td className="px-4 py-2 text-slate-400">
-                  {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}
+              <tr key={u.id} className={enterpriseTrClass}>
+                <td className={enterpriseTdClass}>{u?.name ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{u?.email ?? '—'}</td>
+                <td className={enterpriseTdClass}>{u?.role?.roleName ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{u?.whatsappNumber ?? '—'}</td>
+                <td className={enterpriseTdMonoClass}>
+                  {u?.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}
                 </td>
-                <td className="px-4 py-2">
-                  <span className={u.active ? 'text-green-400' : 'text-red-400'}>
-                    {u.active ? 'Active' : 'Inactive'}
+                <td className={enterpriseTdClass}>
+                  <span className={u?.active ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                    {u?.active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
-                <td className="px-4 py-2">
-                  <Link href={`/masters/users/${u.id}`} className="text-amber-400 hover:underline">
+                <td className={enterpriseTdClass}>
+                  <Link href={`/masters/users/${u?.id ?? ''}`} className="text-blue-600 hover:underline dark:text-blue-400">
                     Edit
                   </Link>
                 </td>
@@ -76,8 +89,8 @@ export default function MastersUsersPage() {
             ))}
           </tbody>
         </table>
-      </div>
-      {list.length === 0 && <p className="text-slate-400 mt-4">No users.</p>}
+      </EnterpriseTableShell>
+      {list.length === 0 && <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No users.</p>}
     </div>
   )
 }

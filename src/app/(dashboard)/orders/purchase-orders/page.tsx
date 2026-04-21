@@ -16,6 +16,7 @@ import {
   INDUSTRIAL_PRIORITY_ROW_CLASS,
   INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
 } from '@/lib/industrial-priority-ui'
+import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 
 type LineItem = {
   id: string
@@ -643,7 +644,7 @@ export default function PurchaseOrdersPage() {
     <div className="p-3 md:p-4 max-w-[1480px] mx-auto space-y-4 pb-24">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-lg md:text-xl font-bold text-amber-400 tracking-tight">
+          <h1 className="text-lg md:text-xl font-bold text-foreground tracking-tight">
             Predictive command center · Customer POs
           </h1>
           <p className="text-[11px] text-slate-500 mt-0.5">
@@ -653,13 +654,13 @@ export default function PurchaseOrdersPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/orders/designing"
-            className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-xs"
+            className="px-3 py-1.5 rounded-lg border border-border text-foreground text-xs hover:bg-accent"
           >
             Prepress →
           </Link>
           <Link
             href="/orders/purchase-orders/new"
-            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold"
+            className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold"
           >
             New PO
           </Link>
@@ -681,7 +682,7 @@ export default function PurchaseOrdersPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
-        <div className="rounded-xl border border-white/10 bg-slate-950/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_0_24px_rgba(16,185,129,0.05)]">
+        <div className="rounded-xl border border-border bg-card/80 px-3 py-2 backdrop-blur-xl shadow-sm">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
             Total active POs
           </div>
@@ -692,7 +693,7 @@ export default function PurchaseOrdersPage() {
             {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
           </div>
         </div>
-        <div className="rounded-xl border border-white/10 bg-slate-950/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07)]">
+        <div className="rounded-xl border border-border bg-card/80 px-3 py-2 backdrop-blur-xl shadow-sm">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
             Pending line items
           </div>
@@ -733,7 +734,7 @@ export default function PurchaseOrdersPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="px-2 py-1 rounded-lg bg-slate-900/80 border border-slate-600 text-white"
+          className="px-2 py-1 rounded-lg bg-card border border-border text-foreground"
         >
           <option value="">All statuses</option>
           <option value="draft">Draft</option>
@@ -743,7 +744,7 @@ export default function PurchaseOrdersPage() {
         <select
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value)}
-          className="px-2 py-1 rounded-lg bg-slate-900/80 border border-slate-600 text-white min-w-[160px]"
+          className="px-2 py-1 rounded-lg bg-card border border-border text-foreground min-w-[160px]"
         >
           <option value="">All customers</option>
           {customers.map((c) => (
@@ -754,10 +755,10 @@ export default function PurchaseOrdersPage() {
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-700/80 ring-1 ring-white/5">
-        <table className="w-full text-left text-[10px] md:text-[11px] border-collapse min-w-[920px] leading-tight">
+      <EnterpriseTableShell>
+        <table className="w-full min-w-[920px] border-collapse text-left text-sm leading-tight">
           <thead className="sticky top-0 z-[30]">
-            <tr className="border-b border-slate-700/90 bg-[#0B0F1A]/92 backdrop-blur-md text-slate-400 shadow-[inset_0_-1px_0_0_rgb(51_65_85)]">
+            <tr className="border-b border-border bg-card text-muted-foreground backdrop-blur-md">
               <th className="w-8 px-1 py-1 font-semibold text-center" aria-label="Priority">
                 ★
               </th>
@@ -793,10 +794,8 @@ export default function PurchaseOrdersPage() {
                   className={`group/po cursor-pointer border-b border-slate-800/80 transition-[background,box-shadow] duration-150 ${
                     po.isPriority === true
                       ? INDUSTRIAL_PRIORITY_ROW_CLASS
-                      : idx % 2 === 0
-                        ? 'bg-[#0B0F1A]'
-                        : 'bg-[#161B26]'
-                  } hover:brightness-110 hover:shadow-[inset_0_0_0_1px_rgba(251,191,36,0.22),0_0_12px_rgba(251,191,36,0.06)]`}
+                      : ''
+                  } hover:bg-accent`}
                 >
                   <td className="px-0.5 py-px align-middle text-center">
                     <button
@@ -846,7 +845,7 @@ export default function PurchaseOrdersPage() {
                       >
                         {customerInitials(po.customer?.name ?? '')}
                       </span>
-                      <span className="truncate text-slate-200 text-[10px] md:text-[11px]">{po.customer?.name}</span>
+                      <span className="truncate text-slate-700 dark:text-slate-200 text-[10px] md:text-[11px]">{po.customer?.name}</span>
                     </div>
                   </td>
                   <td className={`px-1.5 py-px align-middle whitespace-nowrap text-slate-400 ${poMono}`}>
@@ -911,7 +910,7 @@ export default function PurchaseOrdersPage() {
                           type="button"
                           onClick={(e) => handleConfirm(po, e)}
                           disabled={confirmingId === po.id}
-                          className="rounded px-1.5 py-px text-[9px] font-semibold bg-emerald-800/90 text-white hover:bg-emerald-700 disabled:opacity-40"
+                        className="rounded px-1.5 py-px text-[9px] font-semibold bg-emerald-600 text-primary-foreground hover:bg-emerald-700 disabled:opacity-40"
                         >
                           {confirmingId === po.id ? '…' : 'Confirm'}
                         </button>
@@ -933,7 +932,7 @@ export default function PurchaseOrdersPage() {
             })}
           </tbody>
         </table>
-      </div>
+      </EnterpriseTableShell>
 
       {list.length === 0 && !loading ? (
         <p className="text-slate-500 text-center py-8 text-sm">No purchase orders found.</p>
@@ -955,13 +954,13 @@ export default function PurchaseOrdersPage() {
         isOpen={Boolean(drawerPoId)}
         onClose={() => setDrawerPoId(null)}
         widthClass="max-w-lg"
-        backdropClassName="bg-black/55"
-        panelClassName="border-l border-zinc-800 bg-[#000000] shadow-2xl"
+        backdropClassName="bg-background/60"
+        panelClassName="border-l border-border bg-card shadow-2xl"
       >
         {drawerLoading || !drawerPo ? (
           <p className="text-slate-500 text-sm">Loading…</p>
         ) : (
-          <div className="space-y-4 text-sm text-slate-200">
+          <div className="space-y-4 text-sm text-foreground">
             <p className="text-[10px] text-slate-600 leading-snug">
               Default operator / metadata:{' '}
               <span className="text-slate-400 font-medium">{PO_DASHBOARD_OPERATOR}</span>
@@ -1028,7 +1027,7 @@ export default function PurchaseOrdersPage() {
                 value={drawerPo.status}
                 disabled={updatingId === drawerPo.id}
                 onChange={(e) => handleStatusChange(drawerPo, e.target.value)}
-                className="w-full rounded-lg border border-slate-700 bg-black px-2 py-1.5 text-xs text-white"
+                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground"
               >
                 <option value="draft">draft</option>
                 <option value="confirmed">confirmed</option>

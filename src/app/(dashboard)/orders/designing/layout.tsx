@@ -1,4 +1,5 @@
 import { JetBrains_Mono } from 'next/font/google'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
@@ -7,5 +8,9 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export default function DesigningSectionLayout({ children }: { children: React.ReactNode }) {
-  return <div className={`${jetbrainsMono.variable} min-h-0`}>{children}</div>
+  return (
+    <div className={`${jetbrainsMono.variable} min-h-0`}>
+      <ErrorBoundary moduleName="Artwork queue">{children}</ErrorBoundary>
+    </div>
+  )
 }

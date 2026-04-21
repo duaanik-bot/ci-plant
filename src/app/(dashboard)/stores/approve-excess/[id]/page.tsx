@@ -91,7 +91,7 @@ export default function ApproveExcessPage() {
   const excessPct = issue.qtyApproved > 0 ? (issue.qtyRequested / issue.qtyApproved) * 100 : 0
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white p-4 max-w-lg mx-auto">
+    <div className="min-h-screen bg-slate-900 text-foreground p-4 max-w-lg mx-auto">
       <h1 className="text-xl font-bold text-amber-400 mb-4">Approve Excess Sheets</h1>
 
       <div className="rounded-lg border border-slate-600 bg-slate-800/50 p-4 space-y-3 mb-6">
@@ -113,7 +113,7 @@ export default function ApproveExcessPage() {
           type="button"
           onClick={handleApprove}
           disabled={!!action}
-          className="w-full py-3 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-bold text-lg"
+          className="w-full py-3 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-primary-foreground font-bold text-lg"
         >
           {action === 'approve' ? '…' : 'APPROVE'}
         </button>
@@ -129,20 +129,20 @@ export default function ApproveExcessPage() {
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
             placeholder="Rejection reason"
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white mb-2"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground mb-2"
           />
           <button
             type="button"
             onClick={handleReject}
             disabled={!!action || !rejectReason.trim()}
-            className="w-full py-2 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white font-medium"
+            className="w-full py-2 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-50 text-foreground font-medium"
           >
             {action === 'reject' ? '…' : 'REJECT'}
           </button>
         </div>
       </div>
 
-      <Link href="/stores/issue" className="mt-6 inline-block text-slate-400 hover:text-white text-sm">
+      <Link href="/stores/issue" className="mt-6 inline-block text-slate-400 hover:text-foreground text-sm">
         ← Back to Issue
       </Link>
     </div>

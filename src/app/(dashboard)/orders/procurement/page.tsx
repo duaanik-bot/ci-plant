@@ -324,7 +324,7 @@ function PriceTrendSparkline({
           <Tooltip
             cursor={{ stroke: '#f59e0b', strokeOpacity: 0.35 }}
             content={() => (
-              <div className="rounded border border-zinc-700 bg-black px-2 py-1.5 text-[9px] text-slate-200 shadow-xl space-y-0.5">
+              <div className="rounded border border-zinc-700 bg-background px-2 py-1.5 text-[9px] text-slate-200 shadow-xl space-y-0.5">
                 <div className="font-mono tabular-nums">
                   High:{' '}
                   {tooltip.high != null ? `₹${tooltip.high.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
@@ -702,7 +702,7 @@ function ProcurementLandedCostPanel({
 
   if (!lineId || basic == null) {
     return (
-      <div className="rounded-lg border border-zinc-800 bg-black px-3 py-2 text-[11px] text-zinc-500">
+      <div className="rounded-lg border border-zinc-800 bg-background px-3 py-2 text-[11px] text-zinc-500">
         Landed cost needs a linked mill PO line with a basic ₹/kg rate.
       </div>
     )
@@ -712,7 +712,7 @@ function ProcurementLandedCostPanel({
 
   return (
     <div
-      className="rounded-lg border border-zinc-800 bg-black p-3 space-y-2"
+      className="rounded-lg border border-zinc-800 bg-background p-3 space-y-2"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       role="presentation"
@@ -1984,7 +1984,7 @@ export default function ProcurementWorkbenchPage() {
 
   const qTrim = debouncedQ.trim()
   const glassKpi =
-    'ring-1 ring-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.35)] bg-gradient-to-br from-slate-950/50 to-slate-900/30'
+    'ring-1 ring-ring/30 shadow-[0_8px_32px_rgba(0,0,0,0.35)] bg-gradient-to-br from-slate-950/50 to-slate-900/30'
 
   return (
     <IndustrialModuleShell
@@ -2119,7 +2119,7 @@ export default function ProcurementWorkbenchPage() {
         </>
       }
     >
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 backdrop-blur-xl ring-1 ring-white/5">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border/40 bg-slate-950/40 px-3 py-3 backdrop-blur-xl ring-1 ring-ring/20">
         <label className="block flex-1 min-w-[200px]">
           <span className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">
             Deep relational search
@@ -2128,7 +2128,7 @@ export default function ProcurementWorkbenchPage() {
             value={searchQ}
             onChange={(e) => setSearchQ(e.target.value)}
             placeholder="Customer PO #, vendor name, product/carton, JC…"
-            className="mt-1 w-full rounded-md border border-slate-600 bg-black px-3 py-2 text-sm text-white placeholder:text-slate-500"
+            className="mt-1 w-full rounded-md border border-slate-600 bg-card px-3 py-2 text-sm text-foreground placeholder:text-slate-500"
           />
         </label>
         <div>
@@ -2136,7 +2136,7 @@ export default function ProcurementWorkbenchPage() {
           <select
             value={supplierId}
             onChange={(e) => setSupplierId(e.target.value)}
-            className="min-w-[14rem] rounded-md border border-slate-600 bg-slate-950 px-2 py-1.5 text-xs text-white"
+            className="min-w-[14rem] rounded-md border border-slate-600 bg-card px-2 py-1.5 text-xs text-foreground"
           >
             <option value="">Select…</option>
             {suppliers.map((s) => (
@@ -2280,7 +2280,7 @@ export default function ProcurementWorkbenchPage() {
                       }
                     }}
                     className={`border-b border-slate-800/80 text-slate-200 cursor-pointer ${
-                      rowIdx % 2 === 0 ? 'bg-black/40' : 'bg-slate-950/30'
+                      rowIdx % 2 === 0 ? 'bg-background/40' : 'bg-slate-950/30'
                     } ${pri} ${riskGlow}`}
                   >
                     <td className="px-1.5 py-1 align-top" onClick={(e) => e.stopPropagation()}>
@@ -2461,8 +2461,8 @@ export default function ProcurementWorkbenchPage() {
         isOpen={!!spotlightRow}
         onClose={() => setSpotlightRow(null)}
         widthClass="max-w-md"
-        backdropClassName="bg-black/55"
-        panelClassName="border-l border-zinc-800 bg-[#000000] shadow-2xl"
+        backdropClassName="bg-background/55"
+        panelClassName="border-l border-zinc-800 bg-background shadow-2xl"
       >
         {spotlightRow ? (
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-slate-300">
@@ -2476,7 +2476,7 @@ export default function ProcurementWorkbenchPage() {
               </p>
             </div>
 
-            <div className="rounded-lg border border-zinc-700 bg-black p-3 space-y-3 ring-1 ring-white/5">
+            <div className="rounded-lg border border-zinc-700 bg-background p-3 space-y-3 ring-1 ring-ring/5">
               <p className="text-[10px] uppercase tracking-wide text-amber-500/90 font-semibold">
                 Dynamic reorder radar
               </p>
@@ -2510,7 +2510,7 @@ export default function ProcurementWorkbenchPage() {
                       min={0}
                       value={policyMinInput}
                       onChange={(e) => setPolicyMinInput(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-[11px] text-white ${ledgerMono}`}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1 text-[11px] text-foreground ${ledgerMono}`}
                     />
                   </label>
                   <label className="block text-[10px] text-zinc-500">
@@ -2520,7 +2520,7 @@ export default function ProcurementWorkbenchPage() {
                       min={0}
                       value={policyMaxInput}
                       onChange={(e) => setPolicyMaxInput(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-[11px] text-white ${ledgerMono}`}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1 text-[11px] text-foreground ${ledgerMono}`}
                     />
                   </label>
                 </div>
@@ -2623,7 +2623,7 @@ export default function ProcurementWorkbenchPage() {
                       list="ci-transporter-picks"
                       value={logisticsTransporter}
                       onChange={(e) => setLogisticsTransporter(e.target.value)}
-                      className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-slate-100 text-[11px]"
+                      className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-slate-100 text-[11px]"
                       placeholder="Carrier name"
                     />
                   </label>
@@ -2661,7 +2661,7 @@ export default function ProcurementWorkbenchPage() {
                       type="datetime-local"
                       value={logisticsEta}
                       onChange={(e) => setLogisticsEta(e.target.value)}
-                      className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-slate-100 text-[11px]"
+                      className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-slate-100 text-[11px]"
                     />
                   </label>
                   <label className="block text-[10px] text-slate-500">
@@ -2671,7 +2671,7 @@ export default function ProcurementWorkbenchPage() {
                       onChange={(e) =>
                         setLogisticsStatusPick(e.target.value as typeof logisticsStatusPick)
                       }
-                      className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-slate-100 text-[11px]"
+                      className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-slate-100 text-[11px]"
                     >
                       <option value="mill_dispatched">Mill dispatched</option>
                       <option value="in_transit">In-transit</option>
@@ -2728,7 +2728,7 @@ export default function ProcurementWorkbenchPage() {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-emerald-500/25 bg-black p-3 space-y-2">
+                <div className="rounded-lg border border-emerald-500/25 bg-background p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[10px] uppercase tracking-wide text-emerald-400/90 font-semibold flex items-center gap-1.5">
                       <ClipboardList className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
@@ -2758,10 +2758,10 @@ export default function ProcurementWorkbenchPage() {
                   </p>
                   {grnLedger ? (
                     <>
-                      <div className="overflow-x-auto rounded border border-zinc-900 bg-black">
+                      <div className="overflow-x-auto rounded border border-zinc-900 bg-background">
                         <table className="w-full text-left text-[9px] text-slate-400 border-collapse">
                           <thead>
-                            <tr className="border-b border-zinc-800 bg-black text-[8px] uppercase tracking-wide text-zinc-600">
+                            <tr className="border-b border-zinc-800 bg-background text-[8px] uppercase tracking-wide text-zinc-600">
                               <th className="px-1.5 py-1 font-semibold">Date</th>
                               <th className="px-1.5 py-1 font-semibold text-right">Qty (kg)</th>
                               <th className="px-1.5 py-1 font-semibold">Vehicle</th>
@@ -2905,7 +2905,7 @@ export default function ProcurementWorkbenchPage() {
                       </div>
                       {grnQcReceiptId ? (
                         <div
-                          className={`space-y-2 rounded-lg border ${STRATEGIC_SOURCING_GOLD_BORDER} bg-black p-2.5 ring-1 ring-amber-500/15`}
+                          className={`space-y-2 rounded-lg border ${STRATEGIC_SOURCING_GOLD_BORDER} bg-background p-2.5 ring-1 ring-amber-500/15`}
                           onClick={(e) => e.stopPropagation()}
                         >
                           <p className={`text-[10px] font-bold ${STRATEGIC_SOURCING_GOLD}`}>QC gate — split tranches</p>
@@ -2923,7 +2923,7 @@ export default function ProcurementWorkbenchPage() {
                                 min={0}
                                 value={grnQcQtyStandard}
                                 onChange={(e) => setGrnQcQtyStandard(e.target.value)}
-                                className={`mt-0.5 w-full rounded border border-emerald-500/45 bg-black px-1.5 py-1 text-emerald-100 text-[11px] ${ledgerMono}`}
+                                className={`mt-0.5 w-full rounded border border-emerald-500/45 bg-background px-1.5 py-1 text-emerald-100 text-[11px] ${ledgerMono}`}
                               />
                             </label>
                             <label className="block text-[8px] text-amber-400/90 font-bold">
@@ -2934,7 +2934,7 @@ export default function ProcurementWorkbenchPage() {
                                 min={0}
                                 value={grnQcQtyPenalty}
                                 onChange={(e) => setGrnQcQtyPenalty(e.target.value)}
-                                className={`mt-0.5 w-full rounded border border-amber-500/45 bg-black px-1.5 py-1 text-amber-100 text-[11px] ${ledgerMono}`}
+                                className={`mt-0.5 w-full rounded border border-amber-500/45 bg-background px-1.5 py-1 text-amber-100 text-[11px] ${ledgerMono}`}
                               />
                             </label>
                             <label className="block text-[8px] text-rose-400/90 font-bold">
@@ -2945,12 +2945,12 @@ export default function ProcurementWorkbenchPage() {
                                 min={0}
                                 value={grnQcQtyRejected}
                                 onChange={(e) => setGrnQcQtyRejected(e.target.value)}
-                                className={`mt-0.5 w-full rounded border border-rose-500/45 bg-black px-1.5 py-1 text-rose-100 text-[11px] ${ledgerMono}`}
+                                className={`mt-0.5 w-full rounded border border-rose-500/45 bg-background px-1.5 py-1 text-rose-100 text-[11px] ${ledgerMono}`}
                               />
                             </label>
                           </div>
                           {Number(grnQcQtyRejected) > 0 ? (
-                            <div className="space-y-1.5 rounded border border-rose-500/25 bg-black p-2">
+                            <div className="space-y-1.5 rounded border border-rose-500/25 bg-background p-2">
                               <p className="text-[8px] font-bold text-rose-300/95 uppercase tracking-wide">
                                 Rejection — Anik Dua signature lane
                               </p>
@@ -2974,7 +2974,7 @@ export default function ProcurementWorkbenchPage() {
                                   value={grnQcRejectionRemarks}
                                   onChange={(e) => setGrnQcRejectionRemarks(e.target.value)}
                                   rows={2}
-                                  className="mt-0.5 w-full rounded border border-zinc-800 bg-black px-2 py-1 text-[10px] text-slate-200"
+                                  className="mt-0.5 w-full rounded border border-zinc-800 bg-background px-2 py-1 text-[10px] text-slate-200"
                                   placeholder="Document rejection for audit…"
                                 />
                               </label>
@@ -3014,7 +3014,7 @@ export default function ProcurementWorkbenchPage() {
                               value={grnQcRemarks}
                               onChange={(e) => setGrnQcRemarks(e.target.value)}
                               rows={2}
-                              className="mt-0.5 w-full rounded border border-zinc-800 bg-black px-2 py-1 text-[10px] text-slate-200"
+                              className="mt-0.5 w-full rounded border border-zinc-800 bg-background px-2 py-1 text-[10px] text-slate-200"
                             />
                           </label>
                           <div className="flex flex-wrap gap-2">
@@ -3030,7 +3030,7 @@ export default function ProcurementWorkbenchPage() {
                               type="button"
                               disabled={grnQcSaving}
                               onClick={() => setGrnQcReceiptId(null)}
-                              className="rounded-md border border-zinc-700 bg-black px-2 py-1.5 text-[10px] text-zinc-500"
+                              className="rounded-md border border-zinc-700 bg-background px-2 py-1.5 text-[10px] text-zinc-500"
                             >
                               Cancel
                             </button>
@@ -3040,7 +3040,7 @@ export default function ProcurementWorkbenchPage() {
                       {grnLedger.receipts.some(
                         (r) => r.qcStatus === 'PASSED_WITH_PENALTY' && r.penaltyProofLines?.length,
                       ) ? (
-                        <div className="rounded-lg border border-zinc-800 bg-black p-2 space-y-2">
+                        <div className="rounded-lg border border-zinc-800 bg-background p-2 space-y-2">
                           <p className="text-[9px] uppercase tracking-wide text-amber-500/90 font-bold">
                             Vendor-facing penalty proof (export / email)
                           </p>
@@ -3056,7 +3056,7 @@ export default function ProcurementWorkbenchPage() {
                             ))}
                         </div>
                       ) : null}
-                      <div className="rounded border border-zinc-800 bg-black px-2 py-2 space-y-1.5">
+                      <div className="rounded border border-zinc-800 bg-background px-2 py-2 space-y-1.5">
                         <p className="text-[8px] uppercase tracking-wide text-zinc-600 font-bold">Summary</p>
                         <p
                           className={`text-[9px] text-zinc-500 leading-snug ${ledgerMono}`}
@@ -3154,7 +3154,7 @@ export default function ProcurementWorkbenchPage() {
                                   type="datetime-local"
                                   value={grnReceiptDate}
                                   onChange={(e) => setGrnReceiptDate(e.target.value)}
-                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-slate-100 text-[11px] ${ledgerMono}`}
+                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1 text-slate-100 text-[11px] ${ledgerMono}`}
                                 />
                               </label>
                               <label className="block text-[9px] text-zinc-500">
@@ -3165,7 +3165,7 @@ export default function ProcurementWorkbenchPage() {
                                   min={0}
                                   value={grnReceivedQty}
                                   onChange={(e) => setGrnReceivedQty(e.target.value)}
-                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-emerald-200 text-[11px] font-semibold ${ledgerMono}`}
+                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1 text-emerald-200 text-[11px] font-semibold ${ledgerMono}`}
                                 />
                               </label>
                               <label className="block text-[9px] text-zinc-500">
@@ -3173,7 +3173,7 @@ export default function ProcurementWorkbenchPage() {
                                 <input
                                   value={grnVehicle}
                                   onChange={(e) => setGrnVehicle(e.target.value.toUpperCase())}
-                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-slate-100 text-[11px] ${ledgerMono}`}
+                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1 text-slate-100 text-[11px] ${ledgerMono}`}
                                 />
                               </label>
                               <label className="block text-[9px] text-zinc-500">
@@ -3181,7 +3181,7 @@ export default function ProcurementWorkbenchPage() {
                                 <input
                                   value={grnScaleSlip}
                                   onChange={(e) => setGrnScaleSlip(e.target.value)}
-                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 text-slate-100 text-[11px] ${ledgerMono}`}
+                                  className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1 text-slate-100 text-[11px] ${ledgerMono}`}
                                 />
                               </label>
                               <button
@@ -3342,7 +3342,7 @@ export default function ProcurementWorkbenchPage() {
                     </p>
                     <div className="grid grid-cols-1 gap-2 text-[11px]">
                       <div
-                        className={`rounded-md border px-2.5 py-2 ${STRATEGIC_SOURCING_GOLD_BORDER} bg-black/40`}
+                        className={`rounded-md border px-2.5 py-2 ${STRATEGIC_SOURCING_GOLD_BORDER} bg-background/40`}
                       >
                         <p className="text-zinc-500 text-[9px] uppercase tracking-wide font-semibold">
                           Total weight loss (cumulative)
@@ -3355,7 +3355,7 @@ export default function ProcurementWorkbenchPage() {
                         </p>
                       </div>
                       <div
-                        className={`rounded-md border px-2.5 py-2 ${STRATEGIC_SOURCING_GOLD_BORDER} bg-black/40`}
+                        className={`rounded-md border px-2.5 py-2 ${STRATEGIC_SOURCING_GOLD_BORDER} bg-background/40`}
                       >
                         <p className="text-zinc-500 text-[9px] uppercase tracking-wide font-semibold">
                           Average lead time
@@ -3440,7 +3440,7 @@ export default function ProcurementWorkbenchPage() {
                                     [c.poLineItemId]: e.target.value,
                                   }))
                                 }
-                                className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 font-mono text-slate-100 text-[11px]"
+                                className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1 font-mono text-slate-100 text-[11px]"
                               />
                             </label>
                             <label className="text-slate-500">
@@ -3456,7 +3456,7 @@ export default function ProcurementWorkbenchPage() {
                                     [c.poLineItemId]: e.target.value,
                                   }))
                                 }
-                                className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1 font-mono text-slate-100 text-[11px]"
+                                className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1 font-mono text-slate-100 text-[11px]"
                               />
                             </label>
                           </div>
@@ -3527,7 +3527,7 @@ export default function ProcurementWorkbenchPage() {
                           ) : null}
                           {rec?.debitNoteDraftText ? (
                             <div>
-                              <pre className="whitespace-pre-wrap rounded border border-zinc-800 bg-black p-2 text-[10px] font-mono text-slate-300 leading-relaxed">
+                              <pre className="whitespace-pre-wrap rounded border border-zinc-800 bg-background p-2 text-[10px] font-mono text-slate-300 leading-relaxed">
                                 {rec.debitNoteDraftText}
                               </pre>
                               <p className="text-[9px] text-zinc-500 mt-1 leading-snug">{DEBIT_NOTE_DRAFT_SIGNATURE}</p>
@@ -3602,7 +3602,7 @@ export default function ProcurementWorkbenchPage() {
               )}
             </div>
 
-            <div className="rounded-lg border border-zinc-800 bg-black p-3 space-y-2">
+            <div className="rounded-lg border border-zinc-800 bg-background p-3 space-y-2">
               <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">
                 Financial impact
               </p>
@@ -3750,7 +3750,7 @@ export default function ProcurementWorkbenchPage() {
 
       {draft || draftLoading ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Vendor PO draft"
@@ -3758,7 +3758,7 @@ export default function ProcurementWorkbenchPage() {
           <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-600 bg-slate-950 p-4 shadow-2xl">
             <div className="flex items-start justify-between gap-2 mb-3">
               <div>
-                <h2 className="text-sm font-semibold text-white">
+                <h2 className="text-sm font-semibold text-foreground">
                   {draft?.dispatchedAt ? 'Vendor PO (dispatched)' : 'Vendor PO draft'}
                 </h2>
                 {draft ? (
@@ -3773,7 +3773,7 @@ export default function ProcurementWorkbenchPage() {
                   setDraft(null)
                   setLastPurchaseBenchmark(null)
                 }}
-                className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-foreground"
                 aria-label="Close"
               >
                 <X className="h-4 w-4" />
@@ -3806,7 +3806,7 @@ export default function ProcurementWorkbenchPage() {
                       value={draft.signatoryName}
                       onChange={(e) => setDraft({ ...draft, signatoryName: e.target.value })}
                       disabled={!!draft.dispatchedAt}
-                      className="mt-0.5 w-full rounded border border-slate-600 bg-slate-900 px-2 py-1 text-white disabled:opacity-50"
+                      className="mt-0.5 w-full rounded border border-slate-600 bg-slate-900 px-2 py-1 text-foreground disabled:opacity-50"
                     />
                   </div>
                 </div>
@@ -3873,7 +3873,7 @@ export default function ProcurementWorkbenchPage() {
                               setLineRates((prev) => ({ ...prev, [ln.id]: e.target.value }))
                             }
                             disabled={!!draft.dispatchedAt}
-                            className={`w-28 rounded border px-1.5 py-0.5 font-mono tabular-nums text-white disabled:opacity-50 ${
+                            className={`w-28 rounded border px-1.5 py-0.5 font-mono tabular-nums text-foreground disabled:opacity-50 ${
                               hot
                                 ? 'border-rose-500/70 bg-rose-950/40 ring-1 ring-rose-500/30'
                                 : 'border-slate-600 bg-slate-900'
@@ -3940,13 +3940,13 @@ export default function ProcurementWorkbenchPage() {
       !spotlightRow.procurementHud.shortClose.isRecord &&
       spotlightRow.procurementHud.shortClose.authorityGateMet ? (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-background/90 p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Short-close vendor PO"
         >
           <div
-            className={`w-full max-w-md rounded-xl border bg-black p-4 shadow-2xl ring-1 ring-amber-500/20 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
+            className={`w-full max-w-md rounded-xl border bg-background p-4 shadow-2xl ring-1 ring-amber-500/20 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
           >
             <h3 className={`text-[13px] font-bold tracking-tight ${STRATEGIC_SOURCING_GOLD}`}>
               Short-close vendor PO
@@ -4006,7 +4006,7 @@ export default function ProcurementWorkbenchPage() {
                 value={shortCloseRemarks}
                 onChange={(e) => setShortCloseRemarks(e.target.value)}
                 rows={3}
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-black px-2 py-1.5 text-[11px] text-slate-200 placeholder:text-zinc-700"
+                className="mt-1 w-full rounded-md border border-zinc-800 bg-background px-2 py-1.5 text-[11px] text-slate-200 placeholder:text-zinc-700"
                 placeholder="Document context for audit (e.g. variance detail, director instruction)…"
               />
             </label>
@@ -4014,7 +4014,7 @@ export default function ProcurementWorkbenchPage() {
               <button
                 type="button"
                 onClick={() => setShortCloseModalOpen(false)}
-                className="rounded-md border border-zinc-800 bg-black px-3 py-1.5 text-[11px] text-slate-400 hover:border-zinc-700 hover:text-slate-200"
+                className="rounded-md border border-zinc-800 bg-background px-3 py-1.5 text-[11px] text-slate-400 hover:border-zinc-700 hover:text-slate-200"
               >
                 Cancel
               </button>
@@ -4034,13 +4034,13 @@ export default function ProcurementWorkbenchPage() {
 
       {shortageActionModal ? (
         <div
-          className="fixed inset-0 z-[85] flex items-center justify-center bg-black/95 p-4"
+          className="fixed inset-0 z-[85] flex items-center justify-center bg-background/95 p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Shortage action required"
         >
           <div
-            className={`w-full max-w-md rounded-xl border bg-black p-4 shadow-2xl ring-1 ring-amber-500/35 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
+            className={`w-full max-w-md rounded-xl border bg-background p-4 shadow-2xl ring-1 ring-amber-500/35 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className={`text-[13px] font-bold tracking-tight leading-snug ${STRATEGIC_SOURCING_GOLD}`}>
@@ -4092,7 +4092,7 @@ export default function ProcurementWorkbenchPage() {
                 value={shortageShortCloseRemarks}
                 onChange={(e) => setShortageShortCloseRemarks(e.target.value)}
                 rows={2}
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-black px-2 py-1.5 text-[11px] text-slate-200 placeholder:text-zinc-700"
+                className="mt-1 w-full rounded-md border border-zinc-800 bg-background px-2 py-1.5 text-[11px] text-slate-200 placeholder:text-zinc-700"
                 placeholder="Closed — short received after rejection (audit)…"
               />
             </label>
@@ -4107,13 +4107,13 @@ export default function ProcurementWorkbenchPage() {
 
       {penaltyFlow ? (
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/92 p-4"
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-background/92 p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Quality penalty and debit draft"
         >
           <div
-            className={`w-full max-w-md rounded-xl border bg-black p-4 shadow-2xl ring-1 ring-amber-500/25 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
+            className={`w-full max-w-md rounded-xl border bg-background p-4 shadow-2xl ring-1 ring-amber-500/25 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className={`text-[12px] font-bold tracking-tight ${STRATEGIC_SOURCING_GOLD}`}>
@@ -4159,7 +4159,7 @@ export default function ProcurementWorkbenchPage() {
                   type="button"
                   disabled={debitDraftSubmitting}
                   onClick={() => setPenaltyFlow(null)}
-                  className="rounded-md border border-zinc-800 bg-black px-3 py-1.5 text-[10px] text-zinc-400"
+                  className="rounded-md border border-zinc-800 bg-background px-3 py-1.5 text-[10px] text-zinc-400"
                 >
                   Close
                 </button>

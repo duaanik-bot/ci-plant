@@ -73,7 +73,7 @@ export function EmbossHubSpotlightDrawer({
       onClose={onClose}
       widthClass="max-w-lg"
     >
-      <div className={`space-y-5 text-sm text-zinc-300 bg-black min-h-[100px] ${mono}`}>
+      <div className={`space-y-5 text-sm text-zinc-300 bg-background min-h-[100px] ${mono}`}>
         {loading ? (
           <p className="text-zinc-500 font-sans">Loading…</p>
         ) : data && b ? (
@@ -142,7 +142,7 @@ export function EmbossHubSpotlightDrawer({
                   {data.timeline.map((e) => (
                     <li key={e.id} className="relative">
                       <span
-                        className="absolute -start-[21px] top-1.5 flex h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-black"
+                        className="absolute -start-[21px] top-1.5 flex h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-ring"
                         aria-hidden
                       />
                       <p className="text-[10px] text-zinc-500 font-sans">{formatAt(e.atIso)}</p>

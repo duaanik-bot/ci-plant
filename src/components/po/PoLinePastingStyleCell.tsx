@@ -24,9 +24,9 @@ export type PoLinePastingStyleCellProps = {
 
 function badgeClassForLine(style: string): string {
   if (style === 'BSO') {
-    return 'inline-flex items-center justify-center rounded-md bg-violet-600/75 px-2 py-1 text-[11px] font-bold text-white shadow-sm ring-1 ring-inset ring-violet-300/40 transition-opacity hover:bg-violet-600/90'
+    return 'inline-flex items-center justify-center rounded-md bg-violet-600/75 px-2 py-1 text-[11px] font-bold text-primary-foreground shadow-sm ring-1 ring-inset ring-violet-300/40 transition-opacity hover:bg-violet-600/90'
   }
-  return 'inline-flex items-center justify-center rounded-md bg-indigo-600/75 px-2 py-1 text-[11px] font-bold text-white shadow-sm ring-1 ring-inset ring-indigo-300/40 transition-opacity hover:bg-indigo-600/90'
+  return 'inline-flex items-center justify-center rounded-md bg-indigo-600/75 px-2 py-1 text-[11px] font-bold text-primary-foreground shadow-sm ring-1 ring-inset ring-indigo-300/40 transition-opacity hover:bg-indigo-600/90'
 }
 
 export function PoLinePastingStyleCell({
@@ -85,7 +85,7 @@ export function PoLinePastingStyleCell({
         <p className="text-[9px] font-bold uppercase tracking-wider text-red-400 mb-1">SYNC REQUIRED</p>
         <div
           id={`paste-warn-${lineIndex}`}
-          className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[16rem] rounded-md border border-red-800 bg-red-600 px-2.5 py-2 text-[10px] font-semibold leading-snug text-white shadow-xl group-hover/pasteWarn:block"
+          className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[16rem] rounded-md border border-red-800 bg-red-600 px-2.5 py-2 text-[10px] font-semibold leading-snug text-foreground shadow-xl group-hover/pasteWarn:block"
           role="tooltip"
         >
           Critical: Product Master has no Pasting Style. Choose Lock Bottom or BSO and sync to master before

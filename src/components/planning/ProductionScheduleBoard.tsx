@@ -127,7 +127,7 @@ function ScheduleCell({
   return (
     <div
       ref={setNodeRef}
-      className={`border border-slate-800 bg-[#000000] p-1 min-h-[7rem] align-top transition-colors ${
+      className={`border border-slate-800 bg-background p-1 min-h-[7rem] align-top transition-colors ${
         isOver ? 'bg-zinc-900/80 ring-1 ring-amber-500/30' : ''
       }`}
     >
@@ -420,7 +420,7 @@ export function ProductionScheduleBoard({
           onDragEnd={(e) => void handleDragEnd(e)}
         >
           <div className="flex flex-col lg:flex-row gap-3">
-            <aside className="w-full lg:w-52 shrink-0 rounded border border-slate-800 bg-[#000000] p-2">
+            <aside className="w-full lg:w-52 shrink-0 rounded border border-slate-800 bg-background p-2">
               <p className={`text-[10px] font-semibold uppercase text-slate-500 mb-2 ${mono}`}>
                 Ready sidebar
               </p>
@@ -470,7 +470,7 @@ export function ProductionScheduleBoard({
                   gridTemplateColumns: `6.5rem repeat(${SHIFTS.length}, minmax(0, 1fr))`,
                 }}
               >
-                <div className="border border-slate-800 bg-black p-1" />
+                <div className="border border-slate-800 bg-background p-1" />
                 {SHIFTS.map((s) => (
                   <div
                     key={s}
@@ -483,7 +483,7 @@ export function ProductionScheduleBoard({
                 {machines.map((m) => (
                   <Fragment key={m.id}>
                     <div
-                      className={`border border-slate-800 bg-black px-2 py-2 flex items-center ${mono} text-[10px] text-amber-400/95 font-semibold`}
+                      className={`border border-slate-800 bg-background px-2 py-2 flex items-center ${mono} text-[10px] text-amber-400/95 font-semibold`}
                     >
                       {m.machineCode}
                     </div>

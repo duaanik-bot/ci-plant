@@ -121,7 +121,7 @@ export default function ShadeCardHubPage() {
   }, [q, laneFilter])
 
   return (
-    <div className="min-h-screen bg-[#000000] text-zinc-200">
+    <div className="min-h-screen bg-background text-zinc-200">
       <div className="max-w-[1600px] mx-auto p-3 md:p-4 space-y-4 pb-20">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -156,7 +156,7 @@ export default function ShadeCardHubPage() {
                 onClick={() => setViewMode('table')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                   viewMode === 'table'
-                    ? 'bg-zinc-800 text-white'
+                    ? 'bg-zinc-800 text-foreground'
                     : 'text-zinc-500 hover:text-zinc-300'
                 }`}
               >
@@ -167,7 +167,7 @@ export default function ShadeCardHubPage() {
                 onClick={() => setViewMode('kanban')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                   viewMode === 'kanban'
-                    ? 'bg-zinc-800 text-white'
+                    ? 'bg-zinc-800 text-foreground'
                     : 'text-zinc-500 hover:text-zinc-300'
                 }`}
               >
@@ -190,7 +190,7 @@ export default function ShadeCardHubPage() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search shade, product, customer…"
-            className={`flex-1 min-w-[200px] max-w-md rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-white placeholder:text-zinc-600 ${mono}`}
+            className={`flex-1 min-w-[200px] max-w-md rounded-lg border border-zinc-700 bg-card px-3 py-2 text-sm text-foreground placeholder:text-zinc-600 ${mono}`}
             aria-label="Search shade cards"
           />
           <label className={`flex items-center gap-2 text-xs text-zinc-500 font-sans shrink-0`}>
@@ -198,7 +198,7 @@ export default function ShadeCardHubPage() {
             <select
               value={laneFilter}
               onChange={(e) => setLaneFilter(e.target.value as HubLaneFilter)}
-              className={`rounded-lg border border-zinc-700 bg-black px-2 py-2 text-sm text-zinc-200 min-w-[11rem] ${mono}`}
+              className={`rounded-lg border border-zinc-700 bg-card px-2 py-2 text-sm text-zinc-200 min-w-[11rem] ${mono}`}
               aria-label="Filter by hub lane"
             >
               <option value="all">All lanes</option>
@@ -218,13 +218,13 @@ export default function ShadeCardHubPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
-              className={`overflow-x-auto rounded-xl border border-zinc-800 bg-[#000000] ${mono}`}
+              className={`overflow-x-auto rounded-xl border border-zinc-800 bg-background ${mono}`}
             >
           <p className="px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-600 border-b border-zinc-900 font-sans">
             Audit ledger
           </p>
-          <table className="w-full text-left text-xs bg-[#000000]">
-            <thead className="bg-[#000000] border-b border-zinc-900 text-[10px] uppercase tracking-wider text-zinc-500">
+          <table className="w-full text-left text-xs bg-background">
+            <thead className="bg-background border-b border-zinc-900 text-[10px] uppercase tracking-wider text-zinc-500">
               <tr>
                 <th className="px-3 h-[40px] align-middle min-w-[12rem] font-sans">Identity</th>
                 <th className="px-3 h-[40px] align-middle whitespace-nowrap min-w-[6rem]">Shade · AW</th>
@@ -234,7 +234,7 @@ export default function ShadeCardHubPage() {
                 <th className="px-3 h-[40px] align-middle font-sans min-w-[8rem]">Remarks</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-900 bg-[#000000]">
+            <tbody className="divide-y divide-zinc-900 bg-background">
               {loading ? (
                 <tr>
                   <td colSpan={6} className="px-3 py-8 text-zinc-500 text-center font-sans">
@@ -307,14 +307,14 @@ export default function ShadeCardHubPage() {
                                 <p className="font-bold text-emerald-400 truncate leading-tight text-[11px]">
                                   {clientName}
                                 </p>
-                                <p className="truncate text-sm text-white">{productName}</p>
+                                <p className="truncate text-sm text-foreground">{productName}</p>
                               </Link>
                             ) : (
                               <>
                                 <p className="font-bold text-emerald-400 truncate leading-tight text-[11px]">
                                   {clientName}
                                 </p>
-                                <p className="truncate text-sm text-white">{productName}</p>
+                                <p className="truncate text-sm text-foreground">{productName}</p>
                               </>
                             )}
                           </div>
@@ -398,7 +398,7 @@ export default function ShadeCardHubPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="rounded-xl border border-zinc-800 bg-[#000000] p-3 overflow-x-auto"
+              className="rounded-xl border border-zinc-800 bg-background p-3 overflow-x-auto"
             >
               {loading ? (
                 <p className={`text-zinc-500 text-sm py-8 text-center font-sans ${mono}`}>Loading…</p>

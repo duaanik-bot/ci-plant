@@ -41,7 +41,7 @@ function LoginForm() {
       <div className="w-full max-w-md">
         {/* Branding */}
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-white tracking-tight">
+          <h1 className="text-2xl font-bold text-foreground tracking-tight">
             Colour Impressions
           </h1>
           <p className="text-slate-400 mt-1 text-sm">
@@ -51,7 +51,7 @@ function LoginForm() {
 
         {/* Card */}
         <div className="bg-slate-800/80 border border-slate-700 rounded-xl shadow-xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-4">Sign in</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-4">Sign in</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-slate-300 mb-1">
@@ -64,7 +64,7 @@ function LoginForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-3 py-2.5 rounded-lg bg-slate-900 border border-slate-600 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                className="w-full px-3 py-2.5 rounded-lg bg-card border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                 placeholder="you@company.com"
               />
             </div>
@@ -81,7 +81,7 @@ function LoginForm() {
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                 required
-                className="w-full px-3 py-2.5 rounded-lg bg-slate-900 border border-slate-600 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent font-mono text-lg tracking-widest"
+                className="w-full px-3 py-2.5 rounded-lg bg-card border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent font-mono text-lg tracking-widest"
                 placeholder="••••••"
               />
             </div>
@@ -93,7 +93,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 px-4 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium transition-colors"
+              className="w-full py-2.5 px-4 rounded-lg bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed text-primary-foreground font-medium transition-colors"
             >
               {loading ? 'Signing in…' : 'Sign in'}
             </button>

@@ -20,7 +20,7 @@ export default function SettingsPage() {
               onClick={() => setTheme('light')}
               className={`rounded-md border px-3 py-1.5 text-sm ${
                 theme === 'light'
-                  ? 'border-blue-500 bg-blue-600 text-white'
+                  ? 'border-blue-500 bg-blue-600 text-primary-foreground'
                   : 'border-slate-700 text-slate-200 hover:bg-slate-800'
               }`}
             >
@@ -30,7 +30,7 @@ export default function SettingsPage() {
               onClick={() => setTheme('dark')}
               className={`rounded-md border px-3 py-1.5 text-sm ${
                 theme === 'dark'
-                  ? 'border-blue-500 bg-blue-600 text-white'
+                  ? 'border-blue-500 bg-blue-600 text-primary-foreground'
                   : 'border-slate-700 text-slate-200 hover:bg-slate-800'
               }`}
             >
@@ -40,7 +40,7 @@ export default function SettingsPage() {
               onClick={() => setTheme('system')}
               className={`rounded-md border px-3 py-1.5 text-sm ${
                 theme === 'system'
-                  ? 'border-blue-500 bg-blue-600 text-white'
+                  ? 'border-blue-500 bg-blue-600 text-primary-foreground'
                   : 'border-slate-700 text-slate-200 hover:bg-slate-800'
               }`}
             >

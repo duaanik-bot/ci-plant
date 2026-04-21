@@ -58,7 +58,7 @@ export function DieMakeSwitcher({
       }}
       className={`px-2 py-0.5 min-w-[3.25rem] transition-colors disabled:opacity-50 ${
         v === key
-          ? 'bg-amber-600 text-white'
+          ? 'bg-amber-600 text-primary-foreground'
           : 'bg-zinc-950 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
       }`}
     >

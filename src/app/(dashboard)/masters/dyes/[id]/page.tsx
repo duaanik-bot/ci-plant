@@ -166,15 +166,15 @@ export default function DyeEditPage() {
   if (lifePct >= 80) barColor = 'bg-red-500'
   else if (lifePct >= 50) barColor = 'bg-amber-500'
 
-  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white'
+  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground'
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <Link href="/masters/dyes" className="text-slate-400 hover:text-white text-sm">
+        <Link href="/masters/dyes" className="text-slate-400 hover:text-foreground text-sm">
           &larr; Dye Master
         </Link>
-        <h2 className="text-lg font-semibold text-white">Die #{dye.dyeNumber}</h2>
+        <h2 className="text-lg font-semibold text-foreground">Die #{dye.dyeNumber}</h2>
       </div>
 
       {/* Impression bar */}
@@ -194,7 +194,7 @@ export default function DyeEditPage() {
       <div className="flex gap-2 border-b border-slate-700 pb-2">
         {(['overview', 'usage', 'maintenance'] as const).map((t) => (
           <button key={t} type="button" onClick={() => setTab(t)}
-            className={`px-3 py-1.5 rounded-t text-sm capitalize ${tab === t ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}>
+            className={`px-3 py-1.5 rounded-t text-sm capitalize ${tab === t ? 'bg-slate-700 text-foreground' : 'text-slate-400 hover:text-foreground'}`}>
             {t}
           </button>
         ))}
@@ -225,7 +225,7 @@ export default function DyeEditPage() {
       {tab === 'usage' && (
         <div>
           <div className="flex justify-end mb-2">
-            <button type="button" onClick={() => setShowUsage(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm">Add usage</button>
+            <button type="button" onClick={() => setShowUsage(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm">Add usage</button>
           </div>
           <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
@@ -239,7 +239,7 @@ export default function DyeEditPage() {
                   <th className="px-4 py-2 text-left">Notes</th>
                 </tr>
               </thead>
-              <tbody className="text-white">
+              <tbody className="text-foreground">
                 {(dye.usageLogs ?? []).map((u) => (
                   <tr key={u.id} className="border-t border-slate-700">
                     <td className="px-4 py-2">{u.usedOn.slice(0, 10)}</td>
@@ -256,9 +256,9 @@ export default function DyeEditPage() {
           {(!dye.usageLogs || dye.usageLogs.length === 0) && <p className="text-slate-400 text-sm mt-2">No usage logged yet.</p>}
 
           {showUsage && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="fixed inset-0 bg-background/60 flex items-center justify-center z-50 p-4">
               <form onSubmit={handleAddUsage} className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-w-md w-full space-y-3">
-                <h3 className="text-white font-medium">Log usage</h3>
+                <h3 className="text-foreground font-medium">Log usage</h3>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Impressions *</label>
                   <input type="number" min={0} value={usageForm.impressions} onChange={(e) => setUsageForm((g) => ({ ...g, impressions: e.target.value }))} className={cls} />
@@ -285,7 +285,7 @@ export default function DyeEditPage() {
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button type="button" onClick={() => setShowUsage(false)} className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm">Cancel</button>
-                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm">{saving ? 'Saving...' : 'Add'}</button>
+                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
                 </div>
               </form>
             </div>
@@ -297,7 +297,7 @@ export default function DyeEditPage() {
       {tab === 'maintenance' && (
         <div>
           <div className="flex justify-end mb-2">
-            <button type="button" onClick={() => setShowMaintenance(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm">Add maintenance</button>
+            <button type="button" onClick={() => setShowMaintenance(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm">Add maintenance</button>
           </div>
           <div className="overflow-x-auto rounded-lg border border-slate-700">
             <table className="w-full text-sm">
@@ -311,7 +311,7 @@ export default function DyeEditPage() {
                   <th className="px-4 py-2 text-left">Notes</th>
                 </tr>
               </thead>
-              <tbody className="text-white">
+              <tbody className="text-foreground">
                 {(dye.maintenanceLogs ?? []).map((m) => (
                   <tr key={m.id} className="border-t border-slate-700">
                     <td className="px-4 py-2">{m.performedAt.slice(0, 16).replace('T', ' ')}</td>
@@ -328,9 +328,9 @@ export default function DyeEditPage() {
           {(!dye.maintenanceLogs || dye.maintenanceLogs.length === 0) && <p className="text-slate-400 text-sm mt-2">No maintenance logged yet.</p>}
 
           {showMaintenance && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="fixed inset-0 bg-background/60 flex items-center justify-center z-50 p-4">
               <form onSubmit={handleAddMaintenance} className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-w-md w-full space-y-3">
-                <h3 className="text-white font-medium">Log maintenance</h3>
+                <h3 className="text-foreground font-medium">Log maintenance</h3>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Action type *</label>
                   <input type="text" value={maintForm.actionType} onChange={(e) => setMaintForm((g) => ({ ...g, actionType: e.target.value }))} className={cls} placeholder="e.g. Sharpen, Inspect, Repair" />
@@ -357,7 +357,7 @@ export default function DyeEditPage() {
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button type="button" onClick={() => setShowMaintenance(false)} className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm">Cancel</button>
-                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm">{saving ? 'Saving...' : 'Add'}</button>
+                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
                 </div>
               </form>
             </div>

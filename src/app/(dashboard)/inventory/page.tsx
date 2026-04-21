@@ -250,7 +250,7 @@ function InventoryPageContent() {
     <div className="p-4 max-w-6xl mx-auto">
       <section
         id="paper-ledger"
-        className="mb-8 rounded-xl border border-slate-800 overflow-hidden bg-[#000000] text-slate-200"
+        className="mb-8 rounded-xl border border-slate-800 overflow-hidden bg-background text-slate-200"
       >
         <div className="p-4 md:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-4">
@@ -282,7 +282,7 @@ function InventoryPageContent() {
               value={hubSearchPo}
               onChange={(e) => setHubSearchPo(e.target.value)}
               placeholder="e.g. CI-PO-2026-0001"
-              className={`mt-1 w-full max-w-md rounded-lg border border-slate-700 bg-black px-3 py-2 text-sm text-white placeholder:text-slate-600 ${ledgerMono}`}
+              className={`mt-1 w-full max-w-md rounded-lg border border-slate-700 bg-background px-3 py-2 text-sm text-foreground placeholder:text-slate-600 ${ledgerMono}`}
             />
           </label>
 
@@ -292,8 +292,8 @@ function InventoryPageContent() {
               onClick={() => setPaperLedgerSort('oldest')}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
                 paperLedgerSort === 'oldest'
-                  ? 'bg-amber-600 border-amber-500 text-black'
-                  : 'bg-black border-slate-700 text-slate-400 hover:border-slate-500'
+                  ? 'bg-amber-600 border-amber-500 text-primary-foreground'
+                  : 'bg-background border-slate-700 text-slate-400 hover:border-slate-500'
               }`}
             >
               Oldest first
@@ -303,8 +303,8 @@ function InventoryPageContent() {
               onClick={() => setPaperLedgerSort('newest')}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
                 paperLedgerSort === 'newest'
-                  ? 'bg-amber-600 border-amber-500 text-black'
-                  : 'bg-black border-slate-700 text-slate-400 hover:border-slate-500'
+                  ? 'bg-amber-600 border-amber-500 text-primary-foreground'
+                  : 'bg-background border-slate-700 text-slate-400 hover:border-slate-500'
               }`}
             >
               Newest first
@@ -312,7 +312,7 @@ function InventoryPageContent() {
           </div>
           <div className="overflow-x-auto rounded-lg border border-slate-800">
             <table className="w-full text-sm">
-              <thead className="bg-black text-left border-b border-slate-800">
+              <thead className="bg-background text-left border-b border-slate-800">
                 <tr className="text-slate-400 text-xs uppercase tracking-wide">
                   <th className="px-2 py-2 w-8">Pri</th>
                   <th className="px-3 py-2">Lot</th>
@@ -394,8 +394,8 @@ function InventoryPageContent() {
         isOpen={!!drawerRow}
         onClose={() => setDrawerRow(null)}
         widthClass="max-w-md"
-        backdropClassName="bg-black/60"
-        panelClassName="border-l border-zinc-800 bg-[#000000] shadow-2xl"
+        backdropClassName="bg-background/60"
+        panelClassName="border-l border-zinc-800 bg-background shadow-2xl"
       >
         {drawerRow ? (
           <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-slate-300 ${ledgerMono}`}>
@@ -462,7 +462,7 @@ function InventoryPageContent() {
               </div>
             )}
 
-            <div className="rounded-lg border border-zinc-700 bg-black p-3 space-y-3 ring-1 ring-white/5">
+            <div className="rounded-lg border border-zinc-700 bg-background p-3 space-y-3 ring-1 ring-ring/5">
               <p className="text-[10px] uppercase tracking-wide text-amber-500/90 font-semibold">Issue to floor</p>
               <p className="text-[10px] text-slate-500">
                 Moves sheets from main warehouse to <strong className="text-slate-300">FLOOR</strong> stock (new split
@@ -475,13 +475,13 @@ function InventoryPageContent() {
                   value={jobSearch}
                   onChange={(e) => setJobSearch(e.target.value)}
                   placeholder="Search JC# or customer…"
-                  className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-[11px] text-white"
+                  className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-[11px] text-foreground"
                 />
               </label>
               <select
                 value={issueJobCardId}
                 onChange={(e) => setIssueJobCardId(e.target.value)}
-                className="w-full rounded border border-zinc-700 bg-black px-2 py-2 text-[11px] text-white"
+                className="w-full rounded border border-zinc-700 bg-background px-2 py-2 text-[11px] text-foreground"
               >
                 <option value="">— Select job card —</option>
                 {filteredJobCards.map((j) => (
@@ -498,7 +498,7 @@ function InventoryPageContent() {
                   max={drawerRow.qtySheets}
                   value={issueQty}
                   onChange={(e) => setIssueQty(e.target.value)}
-                  className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-[11px] text-white"
+                  className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-[11px] text-foreground"
                 />
               </label>
               <label className="flex items-center gap-2 text-[11px] text-slate-400">
@@ -514,7 +514,7 @@ function InventoryPageContent() {
                 type="button"
                 disabled={issueSubmitting}
                 onClick={() => void submitIssueToFloor()}
-                className="w-full rounded-md bg-amber-600 hover:bg-amber-500 py-2 text-[12px] font-semibold text-black disabled:opacity-50"
+                className="w-full rounded-md bg-amber-600 hover:bg-amber-500 py-2 text-[12px] font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {issueSubmitting ? 'Saving…' : 'Save — issue to floor'}
               </button>
@@ -528,25 +528,25 @@ function InventoryPageContent() {
         <div className="flex gap-2">
           <Link
             href="/inventory/flow"
-            className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-white text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-foreground text-sm font-medium"
           >
             Inventory Flow
           </Link>
           <Link
             href="/inventory/simulation"
-            className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-white text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-foreground text-sm font-medium"
           >
             Live Simulation
           </Link>
           <Link
             href="/inventory/purchase-requisitions"
-            className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-white text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-foreground text-sm font-medium"
           >
             Purchase Requisitions
           </Link>
           <Link
             href="/inventory/grn"
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
           >
             Goods receipt (GRN)
           </Link>
@@ -681,7 +681,7 @@ export default function InventoryPage() {
   return (
     <Suspense
       fallback={
-        <div className="p-4 max-w-6xl mx-auto text-slate-400 bg-[#000000] min-h-[30vh]">Loading warehouse…</div>
+        <div className="p-4 max-w-6xl mx-auto text-slate-400 bg-background min-h-[30vh]">Loading warehouse…</div>
       }
     >
       <InventoryPageContent />

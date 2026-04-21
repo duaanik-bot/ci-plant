@@ -3,6 +3,16 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import {
+  EnterpriseTableShell,
+  enterpriseTableClass,
+  enterpriseTheadClass,
+  enterpriseTbodyClass,
+  enterpriseTrClass,
+  enterpriseThClass,
+  enterpriseTdClass,
+  enterpriseTdMutedClass,
+} from '@/components/ui/EnterpriseTableShell'
 
 type Supplier = {
   id: string
@@ -14,8 +24,6 @@ type Supplier = {
   leadTimeDays: number
   active: boolean
 }
-
-const MATERIAL_OPTIONS = ['Paperboard', 'Inks', 'Foil', 'UV Varnish', 'Laminate Film', 'Consumables', 'Plates']
 
 export default function MastersSuppliersPage() {
   const [list, setList] = useState<Supplier[]>([])
@@ -29,55 +37,57 @@ export default function MastersSuppliersPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <div className="text-slate-400">Loading…</div>
+  if (loading) {
+    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">Supplier Master</h2>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">Supplier Master</h2>
         <Link
           href="/masters/suppliers/new"
-          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-primary-foreground hover:bg-blue-700"
         >
           Add supplier
         </Link>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-slate-700">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-slate-800 text-slate-300">
+      <EnterpriseTableShell>
+        <table className={enterpriseTableClass}>
+          <thead className={enterpriseTheadClass}>
             <tr>
-              <th className="px-4 py-2">Name</th>
-              <th className="px-4 py-2">GST</th>
-              <th className="px-4 py-2">Contact</th>
-              <th className="px-4 py-2">Material types</th>
-              <th className="px-4 py-2">Lead time</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Actions</th>
+              <th className={enterpriseThClass}>Name</th>
+              <th className={enterpriseThClass}>GST</th>
+              <th className={enterpriseThClass}>Contact</th>
+              <th className={enterpriseThClass}>Material types</th>
+              <th className={enterpriseThClass}>Lead time</th>
+              <th className={enterpriseThClass}>Status</th>
+              <th className={enterpriseThClass}>Actions</th>
             </tr>
           </thead>
-          <tbody className="text-white">
+          <tbody className={enterpriseTbodyClass}>
             {list.map((s) => (
-              <tr key={s.id} className="border-t border-slate-700">
-                <td className="px-4 py-2">{s.name}</td>
-                <td className="px-4 py-2 text-slate-400">{s.gstNumber ?? '—'}</td>
-                <td className="px-4 py-2 text-slate-400">{s.contactName ?? '—'}</td>
-                <td className="px-4 py-2">
-                  {s.materialTypes.length
+              <tr key={s.id} className={enterpriseTrClass}>
+                <td className={enterpriseTdClass}>{s?.name ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{s?.gstNumber ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{s?.contactName ?? '—'}</td>
+                <td className={`${enterpriseTdClass} max-w-[14rem]`}>
+                  {s?.materialTypes?.length
                     ? s.materialTypes.map((t) => (
-                        <span key={t} className="mr-1 px-1.5 py-0.5 rounded bg-slate-700 text-xs">
+                        <span key={t} className="mr-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-800 dark:bg-slate-800 dark:text-slate-200">
                           {t}
                         </span>
                       ))
                     : '—'}
                 </td>
-                <td className="px-4 py-2">{s.leadTimeDays} days</td>
-                <td className="px-4 py-2">
-                  <span className={s.active ? 'text-green-400' : 'text-red-400'}>
-                    {s.active ? 'Active' : 'Inactive'}
+                <td className={enterpriseTdClass}>{s?.leadTimeDays ?? '—'} days</td>
+                <td className={enterpriseTdClass}>
+                  <span className={s?.active ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                    {s?.active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
-                <td className="px-4 py-2">
-                  <Link href={`/masters/suppliers/${s.id}`} className="text-amber-400 hover:underline">
+                <td className={enterpriseTdClass}>
+                  <Link href={`/masters/suppliers/${s?.id ?? ''}`} className="text-blue-600 hover:underline dark:text-blue-400">
                     Edit
                   </Link>
                 </td>
@@ -85,8 +95,8 @@ export default function MastersSuppliersPage() {
             ))}
           </tbody>
         </table>
-      </div>
-      {list.length === 0 && <p className="text-slate-400 mt-4">No suppliers.</p>}
+      </EnterpriseTableShell>
+      {list.length === 0 && <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No suppliers.</p>}
     </div>
   )
 }

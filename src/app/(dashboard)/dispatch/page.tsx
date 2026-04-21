@@ -195,7 +195,7 @@ export default function DispatchPlanningPage() {
         <select
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white min-w-[220px]"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground min-w-[220px]"
         >
           <option value="">All clients</option>
           {customers.map((c) => (
@@ -207,7 +207,7 @@ export default function DispatchPlanningPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
         >
           <option value="">All statuses</option>
           <option value="ready">Ready</option>
@@ -220,13 +220,13 @@ export default function DispatchPlanningPage() {
           type="date"
           value={from}
           onChange={(e) => setFrom(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
         />
         <input
           type="date"
           value={to}
           onChange={(e) => setTo(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
         />
       </div>
 
@@ -290,7 +290,7 @@ export default function DispatchPlanningPage() {
       {planOpen && planJob && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
-            className="absolute inset-0 bg-black/50"
+            className="absolute inset-0 bg-background/50"
             onClick={() => setPlanOpen(false)}
             aria-label="Close"
             type="button"
@@ -298,7 +298,7 @@ export default function DispatchPlanningPage() {
           <div className="relative w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-white">Plan Dispatch</h2>
+                <h2 className="text-lg font-semibold text-foreground">Plan Dispatch</h2>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {planJob.jobNumber} · {planJob.customerName}
                 </p>
@@ -306,7 +306,7 @@ export default function DispatchPlanningPage() {
               <button
                 type="button"
                 onClick={() => setPlanOpen(false)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-foreground"
               >
                 ✕
               </button>
@@ -318,7 +318,7 @@ export default function DispatchPlanningPage() {
                 <select
                   value={transportMode}
                   onChange={(e) => setTransportMode(e.target.value as 'Road' | 'Air' | 'Sea')}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 >
                   <option value="Road">Road</option>
                   <option value="Air">Air</option>
@@ -332,7 +332,7 @@ export default function DispatchPlanningPage() {
                   min={1}
                   value={qtyDispatched || ''}
                   onChange={(e) => setQtyDispatched(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div>
@@ -340,7 +340,7 @@ export default function DispatchPlanningPage() {
                 <input
                   value={vehicleNumber}
                   onChange={(e) => setVehicleNumber(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div>
@@ -348,7 +348,7 @@ export default function DispatchPlanningPage() {
                 <input
                   value={driverName}
                   onChange={(e) => setDriverName(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div>
@@ -356,7 +356,7 @@ export default function DispatchPlanningPage() {
                 <input
                   value={driverPhone}
                   onChange={(e) => setDriverPhone(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div>
@@ -365,7 +365,7 @@ export default function DispatchPlanningPage() {
                   type="datetime-local"
                   value={departureAt}
                   onChange={(e) => setDepartureAt(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div className="md:col-span-2">
@@ -374,7 +374,7 @@ export default function DispatchPlanningPage() {
                   value={deliveryAddress}
                   onChange={(e) => setDeliveryAddress(e.target.value)}
                   rows={3}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
             </div>
@@ -386,7 +386,7 @@ export default function DispatchPlanningPage() {
               <button
                 type="button"
                 onClick={submitPlan}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
               >
                 Confirm Dispatch
               </button>

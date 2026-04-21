@@ -3,6 +3,17 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { format, differenceInDays } from 'date-fns'
+import {
+  EnterpriseTableShell,
+  enterpriseTableClass,
+  enterpriseTheadClass,
+  enterpriseTbodyClass,
+  enterpriseTrClass,
+  enterpriseThClass,
+  enterpriseTdClass,
+  enterpriseTdMonoClass,
+  enterpriseTdMutedClass,
+} from '@/components/ui/EnterpriseTableShell'
 
 type Job = {
   id: string
@@ -32,45 +43,39 @@ export default function JobsPage() {
       .finally(() => setLoading(false))
   }, [statusFilter, customerFilter])
 
-  if (loading) return <div className="p-4 text-slate-400">Loading…</div>
+  if (loading) {
+    return <div className="p-4 text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+  }
 
   const statusBadge = (status: string) => {
     const colours: Record<string, string> = {
-      pending_artwork: 'bg-amber-900/50 text-amber-200',
-      artwork_approved: 'bg-blue-900/50 text-blue-200',
-      in_production: 'bg-green-900/50 text-green-200',
-      closed: 'bg-slate-700 text-slate-300',
-      dispatched: 'bg-purple-900/50 text-purple-200',
+      pending_artwork: 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-200',
+      artwork_approved: 'bg-blue-100 text-blue-900 dark:bg-blue-900/50 dark:text-blue-200',
+      in_production: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-200',
+      closed: 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300',
+      dispatched: 'bg-purple-100 text-purple-900 dark:bg-purple-900/50 dark:text-purple-200',
     }
     return (
-      <span
-        className={`px-2 py-0.5 rounded text-xs ${
-          colours[status] ?? 'bg-slate-700 text-slate-300'
-        }`}
-      >
+      <span className={`rounded px-2 py-0.5 text-xs font-medium ${colours[status] ?? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300'}`}>
         {status.replace(/_/g, ' ')}
       </span>
     )
   }
 
+  const inputCls =
+    'min-h-[40px] min-w-[80px] rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-card-foreground'
+
   return (
-    <div className="p-4 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-amber-400">Jobs</h1>
-        <Link
-          href="/jobs/new"
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
-        >
+    <div className="mx-auto max-w-6xl p-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-base font-semibold text-slate-900 dark:text-slate-50">Jobs</h1>
+        <Link href="/jobs/new" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
           New job
         </Link>
       </div>
 
-      <div className="flex gap-4 mb-4 flex-wrap">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white text-sm"
-        >
+      <div className="mb-4 flex flex-wrap gap-4">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={inputCls}>
           <option value="">All statuses</option>
           <option value="pending_artwork">Pending artwork</option>
           <option value="artwork_approved">Artwork approved</option>
@@ -86,51 +91,52 @@ export default function JobsPage() {
           placeholder="Customer ID filter"
           value={customerFilter}
           onChange={(e) => setCustomerFilter(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white text-sm w-48"
+          className={`${inputCls} w-48`}
         />
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-700">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-800 text-left">
+      <EnterpriseTableShell>
+        <table className={enterpriseTableClass}>
+          <thead className={enterpriseTheadClass}>
             <tr>
-              <th className="px-4 py-2 font-medium">Job #</th>
-              <th className="px-4 py-2 font-medium">Customer</th>
-              <th className="px-4 py-2 font-medium">Product</th>
-              <th className="px-4 py-2 font-medium">Qty</th>
-              <th className="px-4 py-2 font-medium">Status</th>
-              <th className="px-4 py-2 font-medium">Due date</th>
-              <th className="px-4 py-2 font-medium">Days left</th>
-              <th className="px-4 py-2 font-medium">Actions</th>
+              <th className={enterpriseThClass}>Job #</th>
+              <th className={enterpriseThClass}>Customer</th>
+              <th className={enterpriseThClass}>Product</th>
+              <th className={enterpriseThClass}>Qty</th>
+              <th className={enterpriseThClass}>Status</th>
+              <th className={enterpriseThClass}>Due date</th>
+              <th className={enterpriseThClass}>Days left</th>
+              <th className={enterpriseThClass}>Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700">
+          <tbody className={enterpriseTbodyClass}>
             {jobs.map((job) => {
-              const due = new Date(job.dueDate)
-              const daysLeft = differenceInDays(due, new Date())
+              const due = new Date(job?.dueDate ?? '')
+              const daysLeft = Number.isNaN(due.getTime()) ? '—' : differenceInDays(due, new Date())
               return (
-                <tr key={job.id} className="hover:bg-slate-800/50">
-                  <td className="px-4 py-2 font-mono text-amber-400">{job.jobNumber}</td>
-                  <td className="px-4 py-2">{job.customer.name}</td>
-                  <td className="px-4 py-2">{job.productName}</td>
-                  <td className="px-4 py-2">{job.qtyOrdered}</td>
-                  <td className="px-4 py-2">{statusBadge(job.status)}</td>
-                  <td className="px-4 py-2">{format(due, 'dd MMM yyyy')}</td>
-                  <td className={`px-4 py-2 ${daysLeft < 2 ? 'text-red-400 font-semibold' : ''}`}>
+                <tr key={job.id} className={enterpriseTrClass}>
+                  <td className={`${enterpriseTdMonoClass} text-amber-800 dark:text-amber-400`}>{job?.jobNumber ?? '—'}</td>
+                  <td className={enterpriseTdClass}>{job?.customer?.name ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{job?.productName ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{job?.qtyOrdered ?? '—'}</td>
+                  <td className={enterpriseTdClass}>{statusBadge(job?.status ?? '')}</td>
+                  <td className={enterpriseTdMonoClass}>{Number.isNaN(due.getTime()) ? '—' : format(due, 'dd MMM yyyy')}</td>
+                  <td
+                    className={`${enterpriseTdMonoClass} ${
+                      typeof daysLeft === 'number' && daysLeft < 2 ? 'font-semibold text-rose-600 dark:text-rose-400' : ''
+                    }`}
+                  >
                     {daysLeft}
                   </td>
-                  <td className="px-4 py-2">
-                    <Link
-                      href={`/jobs/${job.id}`}
-                      className="text-amber-400 hover:underline mr-2"
-                    >
+                  <td className={enterpriseTdClass}>
+                    <Link href={`/jobs/${job?.id ?? ''}`} className="mr-2 text-blue-600 hover:underline dark:text-blue-400">
                       View
                     </Link>
                     <a
-                      href={`/api/jobs/${job.id}/card-pdf`}
+                      href={`/api/jobs/${job?.id ?? ''}/card-pdf`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-slate-400 hover:underline"
+                      className="text-slate-600 hover:underline dark:text-slate-400"
                     >
                       PDF
                     </a>
@@ -140,10 +146,8 @@ export default function JobsPage() {
             })}
           </tbody>
         </table>
-      </div>
-      {jobs.length === 0 && (
-        <p className="text-slate-400 text-center py-8">No jobs found.</p>
-      )}
+      </EnterpriseTableShell>
+      {jobs.length === 0 && <p className="py-8 text-center text-sm text-slate-600 dark:text-slate-400">No jobs found.</p>}
     </div>
   )
 }

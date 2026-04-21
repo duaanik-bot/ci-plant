@@ -145,11 +145,11 @@ export default function GrnPage() {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm'
+  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground text-sm'
 
   return (
     <div className="p-4 max-w-2xl mx-auto">
-      <Link href="/inventory" className="text-slate-400 hover:text-white text-sm mb-4 inline-block">&larr; Inventory</Link>
+      <Link href="/inventory" className="text-slate-400 hover:text-foreground text-sm mb-4 inline-block">&larr; Inventory</Link>
       <h1 className="text-xl font-bold text-amber-400 mb-4">Goods Receipt (GRN)</h1>
 
       <form onSubmit={handleSubmit} className="space-y-5">
@@ -182,37 +182,37 @@ export default function GrnPage() {
             <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
               <div className="bg-slate-800 rounded p-2">
                 <span className="text-slate-400">Board type</span>
-                <p className="text-white font-medium">{selectedMaterial.boardType}</p>
+                <p className="text-foreground font-medium">{selectedMaterial.boardType}</p>
               </div>
               <div className="bg-slate-800 rounded p-2">
                 <span className="text-slate-400">GSM</span>
-                <p className="text-white font-medium">{selectedMaterial.gsm}</p>
+                <p className="text-foreground font-medium">{selectedMaterial.gsm}</p>
               </div>
               <div className="bg-slate-800 rounded p-2">
                 <span className="text-slate-400">Size (mm)</span>
-                <p className="text-white font-medium">{selectedMaterial.sheetLength} &times; {selectedMaterial.sheetWidth}</p>
+                <p className="text-foreground font-medium">{selectedMaterial.sheetLength} &times; {selectedMaterial.sheetWidth}</p>
               </div>
               <div className="bg-slate-800 rounded p-2">
                 <span className="text-slate-400">Grain</span>
-                <p className="text-white font-medium">{selectedMaterial.grainDirection ?? '—'}</p>
+                <p className="text-foreground font-medium">{selectedMaterial.grainDirection ?? '—'}</p>
               </div>
               <div className="bg-slate-800 rounded p-2">
                 <span className="text-slate-400">Sheet weight</span>
-                <p className="text-white font-medium">{sheetWeightG > 0 ? `${sheetWeightG} g` : '—'}</p>
+                <p className="text-foreground font-medium">{sheetWeightG > 0 ? `${sheetWeightG} g` : '—'}</p>
               </div>
               {selectedMaterial.caliperMicrons && (
                 <div className="bg-slate-800 rounded p-2">
                   <span className="text-slate-400">Caliper</span>
-                  <p className="text-white font-medium">{selectedMaterial.caliperMicrons} &mu;</p>
+                  <p className="text-foreground font-medium">{selectedMaterial.caliperMicrons} &mu;</p>
                 </div>
               )}
               <div className="bg-slate-800 rounded p-2">
                 <span className="text-slate-400">Current stock</span>
-                <p className="text-white font-medium">{Number(selectedMaterial.qtyAvailable).toLocaleString()} {selectedMaterial.unit}</p>
+                <p className="text-foreground font-medium">{Number(selectedMaterial.qtyAvailable).toLocaleString()} {selectedMaterial.unit}</p>
               </div>
               <div className="bg-slate-800 rounded p-2">
                 <span className="text-slate-400">In quarantine</span>
-                <p className="text-white font-medium">{Number(selectedMaterial.qtyQuarantine).toLocaleString()}</p>
+                <p className="text-foreground font-medium">{Number(selectedMaterial.qtyQuarantine).toLocaleString()}</p>
               </div>
             </div>
           )}
@@ -226,11 +226,11 @@ export default function GrnPage() {
           {isBoardType && sheetWeightG > 0 && (
             <div className="flex gap-1 bg-slate-800 rounded-lg p-0.5 w-fit text-sm">
               <button type="button" onClick={() => setEntryUnit('sheets')}
-                className={`px-3 py-1 rounded-md transition-colors ${entryUnit === 'sheets' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                className={`px-3 py-1 rounded-md transition-colors ${entryUnit === 'sheets' ? 'bg-amber-600 text-primary-foreground' : 'text-slate-400 hover:text-foreground'}`}>
                 Sheets
               </button>
               <button type="button" onClick={() => setEntryUnit('kg')}
-                className={`px-3 py-1 rounded-md transition-colors ${entryUnit === 'kg' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                className={`px-3 py-1 rounded-md transition-colors ${entryUnit === 'kg' ? 'bg-amber-600 text-primary-foreground' : 'text-slate-400 hover:text-foreground'}`}>
                 kg
               </button>
             </div>
@@ -247,9 +247,9 @@ export default function GrnPage() {
           {conversion && isBoardType && sheetWeightG > 0 && (
             <div className="text-xs text-slate-400 bg-slate-800/50 rounded p-2">
               {entryUnit === 'sheets' ? (
-                <span>&asymp; <strong className="text-white">{conversion.totalWeightKg.toFixed(2)} kg</strong> ({conversion.totalSheets.toLocaleString()} sheets &times; {sheetWeightG}g / 1000)</span>
+                <span>&asymp; <strong className="text-foreground">{conversion.totalWeightKg.toFixed(2)} kg</strong> ({conversion.totalSheets.toLocaleString()} sheets &times; {sheetWeightG}g / 1000)</span>
               ) : (
-                <span>&asymp; <strong className="text-white">{conversion.totalSheets.toLocaleString()} sheets</strong> ({conversion.totalWeightKg.toFixed(2)} kg &times; 1000 / {sheetWeightG}g)</span>
+                <span>&asymp; <strong className="text-foreground">{conversion.totalSheets.toLocaleString()} sheets</strong> ({conversion.totalWeightKg.toFixed(2)} kg &times; 1000 / {sheetWeightG}g)</span>
               )}
             </div>
           )}
@@ -335,7 +335,7 @@ export default function GrnPage() {
 
         {/* Submit */}
         <button type="submit" disabled={submitting || (toleranceWarning != null && !approvalOverride)}
-          className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium text-sm">
+          className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-primary-foreground font-medium text-sm">
           {submitting ? 'Posting...' : 'Post GRN'}
         </button>
       </form>

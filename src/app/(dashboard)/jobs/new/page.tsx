@@ -160,7 +160,7 @@ export default function NewJobPage() {
   return (
     <div className="p-4 max-w-2xl mx-auto">
       <div className="flex items-center gap-4 mb-6">
-        <Link href="/jobs" className="text-slate-400 hover:text-white text-sm">
+        <Link href="/jobs" className="text-slate-400 hover:text-foreground text-sm">
           ← Jobs
         </Link>
         <h1 className="text-xl font-bold text-amber-400">New job</h1>
@@ -194,7 +194,7 @@ export default function NewJobPage() {
             value={customerId}
             onChange={(ev) => { setCustomerId(ev.target.value); setFieldErrors((prev) => ({ ...prev, customerId: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               (fieldErrors.customerId || requiredErrors.customerId) ? 'border-red-500' : 'border-slate-600'
             }`}
           >
@@ -214,7 +214,7 @@ export default function NewJobPage() {
             value={productName}
             onChange={(ev) => { setProductName(ev.target.value); setFieldErrors((prev) => ({ ...prev, productName: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               (fieldErrors.productName || requiredErrors.productName) ? 'border-red-500' : 'border-slate-600'
             }`}
           />
@@ -231,7 +231,7 @@ export default function NewJobPage() {
               value={qtyOrdered}
               onChange={(ev) => { setQtyOrdered(ev.target.value); setFieldErrors((prev) => ({ ...prev, qtyOrdered: '' })) }}
               required
-              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
                 (fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) ? 'border-red-500' : 'border-slate-600'
               }`}
             />
@@ -247,7 +247,7 @@ export default function NewJobPage() {
               value={imposition}
               onChange={(ev) => { setImposition(ev.target.value); setFieldErrors((prev) => ({ ...prev, imposition: '' })) }}
               required
-              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
                 (fieldErrors.imposition || requiredErrors.imposition) ? 'border-red-500' : 'border-slate-600'
               }`}
             />
@@ -263,7 +263,7 @@ export default function NewJobPage() {
             value={dueDate}
             onChange={(ev) => { setDueDate(ev.target.value); setFieldErrors((prev) => ({ ...prev, dueDate: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               (fieldErrors.dueDate || requiredErrors.dueDate) ? 'border-red-500' : 'border-slate-600'
             }`}
           />
@@ -281,8 +281,8 @@ export default function NewJobPage() {
                   key={id}
                   className="flex items-center gap-2 px-3 py-2 rounded bg-slate-800 border border-slate-600"
                 >
-                  <button type="button" onClick={() => moveMachine(i, -1)} className="text-slate-400 hover:text-white">↑</button>
-                  <button type="button" onClick={() => moveMachine(i, 1)} className="text-slate-400 hover:text-white">↓</button>
+                  <button type="button" onClick={() => moveMachine(i, -1)} className="text-slate-400 hover:text-foreground">↑</button>
+                  <button type="button" onClick={() => moveMachine(i, 1)} className="text-slate-400 hover:text-foreground">↓</button>
                   <span className="flex-1">{m?.machineCode ?? id} — {m?.name ?? ''}</span>
                 </div>
               )
@@ -297,7 +297,7 @@ export default function NewJobPage() {
           <select
             value={boardMaterialId}
             onChange={(ev) => { setBoardMaterialId(ev.target.value); setFieldErrors((prev) => ({ ...prev, boardMaterialId: '' })) }}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               fieldErrors.boardMaterialId ? 'border-red-500' : 'border-slate-600'
             }`}
           >
@@ -316,7 +316,7 @@ export default function NewJobPage() {
             value={specialInstructions}
             onChange={(e) => setSpecialInstructions(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
 
@@ -331,7 +331,7 @@ export default function NewJobPage() {
         <button
           type="submit"
           disabled={submitting || !isFormValid}
-          className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium"
+          className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-primary-foreground font-medium"
         >
           {submitting ? 'Creating…' : isFormValid ? 'Create job' : 'Fill required fields to continue'}
         </button>

@@ -64,12 +64,12 @@ export function PoDrawerSpotlightLines({
               className={`rounded-md border px-2 py-1.5 text-xs transition-colors ${
                 isSpotlight
                   ? 'border-l-2 border-l-orange-500 bg-orange-500/10 border-slate-800/90'
-                  : 'border border-slate-800/90 bg-black'
+                  : 'border border-slate-800/90 bg-background'
               }`}
             >
               <div className="flex items-start gap-2">
                 <span
-                  className={`mt-1 h-2 w-2 shrink-0 rounded-full ring-2 ring-black ${dot}`}
+                  className={`mt-1 h-2 w-2 shrink-0 rounded-full ring-2 ring-ring ${dot}`}
                   title={tr?.tooltip}
                 />
                 <div className="min-w-0 flex-1 grid grid-cols-[1fr_auto_auto] gap-x-2 items-start">

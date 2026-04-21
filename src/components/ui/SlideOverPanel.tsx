@@ -10,7 +10,7 @@ type SlideOverPanelProps = {
   widthClass?: string
   /** Backdrop (full-screen button) classes */
   backdropClassName?: string
-  /** Panel container classes (glass, border, etc.) — default pure black for color-accurate previews */
+  /** Panel container classes (glass, border, etc.). */
   panelClassName?: string
   /** Animate panel from the right (200ms ease-in-out) */
   animateEnter?: boolean
@@ -22,8 +22,8 @@ export function SlideOverPanel({
   onClose,
   children,
   widthClass = 'max-w-xl',
-  backdropClassName = 'bg-black/50',
-  panelClassName = 'border-l border-zinc-800 bg-[#000000] shadow-xl',
+  backdropClassName = 'bg-background/60',
+  panelClassName = 'border-l border-border bg-card text-card-foreground shadow-xl',
   animateEnter = true,
 }: SlideOverPanelProps) {
   useEffect(() => {
@@ -50,12 +50,12 @@ export function SlideOverPanel({
           animateEnter ? 'animate-slide-over-enter' : ''
         }`}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/80 shrink-0">
-          <h2 className="text-sm font-semibold text-slate-100">{title}</h2>
+        <div className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
+          <h2 className="text-sm font-semibold text-card-foreground">{title}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white text-sm px-2 py-1 rounded"
+            className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           >
             ✕
           </button>

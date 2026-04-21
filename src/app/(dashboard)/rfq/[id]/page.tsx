@@ -212,7 +212,7 @@ export default function RfqDetailPage() {
             <input
               value={feas.boardSpec}
               onChange={(e) => setFeas((p) => ({ ...p, boardSpec: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
               placeholder="e.g. FBB 300gsm + matte lamination"
             />
           </div>
@@ -221,7 +221,7 @@ export default function RfqDetailPage() {
             <input
               value={feas.printProcess}
               onChange={(e) => setFeas((p) => ({ ...p, printProcess: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
               placeholder="e.g. Offset + Aqueous Varnish"
             />
           </div>
@@ -232,7 +232,7 @@ export default function RfqDetailPage() {
               min={0}
               value={feas.estimatedCostPer1000}
               onChange={(e) => setFeas((p) => ({ ...p, estimatedCostPer1000: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -242,7 +242,7 @@ export default function RfqDetailPage() {
               min={0}
               value={feas.toolingCost}
               onChange={(e) => setFeas((p) => ({ ...p, toolingCost: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -252,7 +252,7 @@ export default function RfqDetailPage() {
               min={0}
               value={feas.moq}
               onChange={(e) => setFeas((p) => ({ ...p, moq: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             />
           </div>
         </div>
@@ -268,7 +268,7 @@ export default function RfqDetailPage() {
           <button
             onClick={saveFeasibility}
             disabled={saving}
-            className="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm"
+            className="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm"
           >
             {saving ? 'Saving…' : 'Save Feasibility'}
           </button>
@@ -295,7 +295,7 @@ export default function RfqDetailPage() {
             <input
               value={quote.quotationNumber}
               onChange={(e) => setQuote((p) => ({ ...p, quotationNumber: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white font-mono"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground font-mono"
               placeholder="QT-YYYY-NNNN"
             />
           </div>
@@ -306,7 +306,7 @@ export default function RfqDetailPage() {
               min={0}
               value={quote.unitPrice}
               onChange={(e) => setQuote((p) => ({ ...p, unitPrice: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -316,7 +316,7 @@ export default function RfqDetailPage() {
               min={0}
               value={quote.tooling}
               onChange={(e) => setQuote((p) => ({ ...p, tooling: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -324,7 +324,7 @@ export default function RfqDetailPage() {
             <input
               value={quote.paymentTerms}
               onChange={(e) => setQuote((p) => ({ ...p, paymentTerms: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -332,7 +332,7 @@ export default function RfqDetailPage() {
             <input
               value={quote.validity}
               onChange={(e) => setQuote((p) => ({ ...p, validity: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
               placeholder="e.g. 30 days"
             />
           </div>
@@ -342,7 +342,7 @@ export default function RfqDetailPage() {
               rows={2}
               value={quote.notes}
               onChange={(e) => setQuote((p) => ({ ...p, notes: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -350,7 +350,7 @@ export default function RfqDetailPage() {
             <select
               value={quote.clientDecision}
               onChange={(e) => setQuote((p) => ({ ...p, clientDecision: e.target.value as any }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             >
               <option value="">—</option>
               <option value="approved">Client Approved</option>
@@ -363,7 +363,7 @@ export default function RfqDetailPage() {
               <input
                 value={quote.rejectReason}
                 onChange={(e) => setQuote((p) => ({ ...p, rejectReason: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
               />
             </div>
           )}
@@ -380,7 +380,7 @@ export default function RfqDetailPage() {
           <button
             onClick={saveQuotation}
             disabled={saving}
-            className="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm"
+            className="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm"
           >
             {saving ? 'Saving…' : 'Save Quotation'}
           </button>
@@ -396,7 +396,7 @@ export default function RfqDetailPage() {
             <input
               value={quote.poNumber}
               onChange={(e) => setQuote((p) => ({ ...p, poNumber: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -406,7 +406,7 @@ export default function RfqDetailPage() {
               min={0}
               value={quote.poValue}
               onChange={(e) => setQuote((p) => ({ ...p, poValue: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
             />
           </div>
         </div>
@@ -422,7 +422,7 @@ export default function RfqDetailPage() {
             type="button"
             disabled={saving || !canConfirmPo}
             onClick={confirmPo}
-            className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm"
+            className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-primary-foreground text-sm"
           >
             Confirm PO (Push to Production)
           </button>

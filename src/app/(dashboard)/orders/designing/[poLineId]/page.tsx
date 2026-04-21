@@ -199,7 +199,7 @@ function normalizeSheetSizeKey(s: string): string {
 }
 
 const manualInputClass =
-  'mt-1 w-full px-2 py-1.5 rounded bg-[#000000] text-white text-sm border border-slate-800 focus:border-amber-500/80 focus:outline-none focus:ring-1 focus:ring-amber-500/40 placeholder:text-slate-600'
+  'mt-1 w-full px-2 py-1.5 rounded bg-card text-foreground text-sm border border-slate-800 focus:border-amber-500/80 focus:outline-none focus:ring-1 focus:ring-amber-500/40 placeholder:text-slate-600'
 
 const monoInputClass = `${manualInputClass} ${techMono}`
 
@@ -249,7 +249,7 @@ function CartonDimensionsRow({
   const showH = (H ?? (parsed ? String(parsed.h) : null)) as string | null
   return (
     <div
-      className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:col-span-3 border-b border-white/10 sm:border-0 pb-2 sm:pb-0 ${
+      className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:col-span-3 border-b border-border/40 sm:border-0 pb-2 sm:pb-0 ${
         smartHighlight ? 'rounded-md px-1 -mx-1 border border-amber-400' : ''
       }`}
     >
@@ -1862,8 +1862,8 @@ export default function DesigningDetailPage() {
   const specLocked = !editSpecsEnabled || awPoClosed
 
   return (
-    <div className="flex flex-col min-h-[calc(100dvh-0px)] bg-[#000000] text-slate-200">
-      <header className="sticky top-0 z-30 border-b border-slate-800 bg-[#000000] backdrop-blur-sm px-3 py-2">
+    <div className="flex flex-col min-h-[calc(100dvh-0px)] bg-background text-slate-200">
+      <header className="sticky top-0 z-30 border-b border-slate-800 bg-background backdrop-blur-sm px-3 py-2">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-4 max-w-7xl mx-auto w-full">
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-2 min-w-0">
@@ -1882,7 +1882,7 @@ export default function DesigningDetailPage() {
               {line.po.customer.name} | PO {line.po.poNumber} | Qty {line.quantity}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] leading-tight">
-              <div className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-white/15 bg-[#000000] px-1.5 py-0.5">
+              <div className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-border/50 bg-background px-1.5 py-0.5">
                 <span className={`text-slate-200 ${techMono}`}>
                   <span className="text-slate-500 font-sans font-normal mr-1">AW</span>
                   {artworkCodeInput.trim() || '—'}
@@ -1919,7 +1919,7 @@ export default function DesigningDetailPage() {
                   value={designerId}
                   onChange={(e) => saveDesigner(e.target.value || undefined)}
                   disabled={savingDesigner || specLocked}
-                  className="px-2 py-1 rounded bg-[#000000] border border-slate-800 text-white text-xs min-w-[140px] max-w-[200px]"
+                  className="px-2 py-1 rounded bg-card border border-slate-800 text-foreground text-xs min-w-[140px] max-w-[200px]"
                   title="Assigned designer"
                 >
                   <option value="">Designer…</option>
@@ -1981,7 +1981,7 @@ export default function DesigningDetailPage() {
                 type="button"
                 disabled={savingSpecs || specLocked}
                 onClick={() => void saveAllSpecs()}
-                className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+                className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
               >
                 {savingSpecs ? 'Saving…' : 'Save specs'}
               </button>
@@ -2003,7 +2003,7 @@ export default function DesigningDetailPage() {
                 className={`px-2.5 py-1.5 rounded-lg text-sm font-medium disabled:cursor-not-allowed ${
                   plateHubSent
                     ? 'border border-emerald-500 bg-emerald-950/50 text-emerald-500'
-                    : 'bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-400 text-white'
+                    : 'bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-400 text-primary-foreground'
                 }`}
               >
                 {plateHubSent ? 'Sent' : finalizing ? 'Sending…' : 'Finalize job'}
@@ -2034,10 +2034,10 @@ export default function DesigningDetailPage() {
         onReload={() => void reloadLine()}
       />
 
-      <div className="flex-1 p-3 max-w-7xl mx-auto w-full space-y-1 pb-6 bg-[#000000]">
+      <div className="flex-1 p-3 max-w-7xl mx-auto w-full space-y-1 pb-6 bg-background">
           <section
             className={clsx(
-              'rounded-xl bg-[#000000] border p-3 pb-2',
+              'rounded-xl bg-card border p-3 pb-2',
               plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-slate-800',
             )}
           >
@@ -2047,14 +2047,14 @@ export default function DesigningDetailPage() {
               </h2>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] text-slate-500 shrink-0">Job type</span>
-                <div className="inline-flex rounded-lg border border-white/15 overflow-hidden">
+                <div className="inline-flex rounded-lg border border-border/50 overflow-hidden">
                   <button
                     type="button"
                     disabled={specLocked}
                     onClick={() => void persistJobType('new')}
                     className={`px-3 py-1.5 text-xs font-medium ${
                       jobType === 'new'
-                        ? 'bg-amber-600 text-white'
+                        ? 'bg-amber-600 text-primary-foreground'
                         : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
                     }`}
                   >
@@ -2064,9 +2064,9 @@ export default function DesigningDetailPage() {
                     type="button"
                     disabled={specLocked}
                     onClick={() => void persistJobType('repeat')}
-                    className={`px-3 py-1.5 text-xs font-medium border-l border-white/15 ${
+                    className={`px-3 py-1.5 text-xs font-medium border-l border-border/50 ${
                       jobType === 'repeat'
-                        ? 'bg-amber-600 text-white'
+                        ? 'bg-amber-600 text-primary-foreground'
                         : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
                     }`}
                   >
@@ -2112,14 +2112,14 @@ export default function DesigningDetailPage() {
             ) : null}
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <span className="text-[11px] text-slate-500 shrink-0">Pre-batch Printed</span>
-              <div className="inline-flex rounded-lg border border-white/15 overflow-hidden">
+              <div className="inline-flex rounded-lg border border-border/50 overflow-hidden">
                 <button
                   type="button"
                   disabled={specLocked}
                   onClick={() => void persistPreBatchPrinted(true)}
                   className={`px-3 py-1.5 text-xs font-medium ${
                     preBatchPrinted
-                      ? 'bg-amber-600 text-white'
+                      ? 'bg-amber-600 text-primary-foreground'
                       : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
                   }`}
                 >
@@ -2129,9 +2129,9 @@ export default function DesigningDetailPage() {
                   type="button"
                   disabled={specLocked}
                   onClick={() => void persistPreBatchPrinted(false)}
-                  className={`px-3 py-1.5 text-xs font-medium border-l border-white/15 ${
+                  className={`px-3 py-1.5 text-xs font-medium border-l border-border/50 ${
                     !preBatchPrinted
-                      ? 'bg-amber-600 text-white'
+                      ? 'bg-amber-600 text-primary-foreground'
                       : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
                   }`}
                 >
@@ -2150,10 +2150,10 @@ export default function DesigningDetailPage() {
                     </button>
                   </Dialog.Trigger>
                   <Dialog.Portal>
-                    <Dialog.Overlay className="fixed inset-0 z-[90] bg-black/60 data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0" />
+                    <Dialog.Overlay className="fixed inset-0 z-[90] bg-background/60 data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0" />
                     <Dialog.Content
                       className={clsx(
-                        'fixed z-[91] inset-y-0 right-0 flex w-[min(100vw-1rem,22rem)] flex-col border-l border-slate-800 bg-[#000000] p-4 shadow-2xl',
+                        'fixed z-[91] inset-y-0 right-0 flex w-[min(100vw-1rem,22rem)] flex-col border-l border-slate-800 bg-background p-4 shadow-2xl',
                         'data-[state=open]:animate-in data-[state=closed]:animate-out slide-in-from-right duration-200',
                       )}
                     >
@@ -2429,7 +2429,7 @@ export default function DesigningDetailPage() {
 
         <section
           className={clsx(
-            'rounded-xl bg-[#000000] border p-3 space-y-2',
+            'rounded-xl bg-card border p-3 space-y-2',
             plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-slate-800',
           )}
         >
@@ -2438,7 +2438,7 @@ export default function DesigningDetailPage() {
           </h2>
 
           <div className="grid md:grid-cols-2 gap-3">
-            <div className="space-y-3 rounded-lg border border-slate-800 bg-[#000000] p-3">
+            <div className="space-y-3 rounded-lg border border-slate-800 bg-card p-3">
               <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
                 Die inventory
               </h3>
@@ -2500,7 +2500,7 @@ export default function DesigningDetailPage() {
                     type="button"
                     disabled={savingDesignerCommand || designerCommand.dieSource === 'old' || specLocked}
                     onClick={() => void dieSendToVendor()}
-                    className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                    className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                   >
                     Send to Vendor
                   </button>
@@ -2524,7 +2524,7 @@ export default function DesigningDetailPage() {
                           : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                       }
                       onClick={() => void diePushToHub()}
-                      className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                      className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
                       Push to Die Hub
                     </button>
@@ -2536,7 +2536,7 @@ export default function DesigningDetailPage() {
             </div>
 
             {embossRequired ? (
-              <div className="space-y-3 rounded-lg border border-slate-800 bg-[#000000] p-3">
+              <div className="space-y-3 rounded-lg border border-slate-800 bg-card p-3">
                 <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
                   Emboss blocks
                 </h3>
@@ -2585,7 +2585,7 @@ export default function DesigningDetailPage() {
                       type="button"
                       disabled={savingDesignerCommand || designerCommand.embossSource === 'old' || specLocked}
                       onClick={() => void embossSendToVendor()}
-                      className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                      className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
                       Send to Vendor
                     </button>
@@ -2609,7 +2609,7 @@ export default function DesigningDetailPage() {
                             : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                         }
                         onClick={() => void embossPushToHub()}
-                        className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                        className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                       >
                         Push to Embossing Hub
                       </button>
@@ -2620,13 +2620,13 @@ export default function DesigningDetailPage() {
                 )}
               </div>
             ) : (
-              <div className="rounded-lg border border-slate-800 bg-[#000000] p-3 text-[11px] text-slate-500">
+              <div className="rounded-lg border border-slate-800 bg-card p-3 text-[11px] text-slate-500">
                 Emboss tooling not required for this carton (no embossing on spec).
               </div>
             )}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-slate-800 bg-[#000000] p-3">
+          <div className="space-y-3 rounded-lg border border-slate-800 bg-card p-3">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
               <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
                 Plate hub — requirement
@@ -2656,7 +2656,7 @@ export default function DesigningDetailPage() {
                   className={`inline-flex items-center rounded-md px-2.5 py-0.5 text-[11px] font-semibold disabled:opacity-45 disabled:cursor-not-allowed ${
                     plateHubSent
                       ? 'border border-emerald-500 bg-emerald-950/50 text-emerald-500'
-                      : 'border border-emerald-500/70 bg-emerald-700 hover:bg-emerald-600 text-white'
+                      : 'border border-emerald-500/70 bg-emerald-700 hover:bg-emerald-600 text-primary-foreground'
                   }`}
                 >
                   {plateHubSent ? 'Sent' : finalizing ? 'Sending…' : 'Push to Plate Hub'}
@@ -2736,7 +2736,7 @@ export default function DesigningDetailPage() {
                 >
                   <input
                     type="checkbox"
-                    className="rounded border-white/30 bg-black/40"
+                    className="rounded border-border/30 bg-background/40"
                     disabled={specLocked}
                     checked={designerCommand.plateRequirement[key]}
                     onChange={(e) =>
@@ -2864,7 +2864,7 @@ export default function DesigningDetailPage() {
                     setType: e.target.value as DesignerCommand['setType'],
                   }))
                 }
-                className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white text-sm max-w-xs"
+                className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground text-sm max-w-xs"
               >
                 <option value="">Select…</option>
                 <option value="new_set">New set</option>
@@ -2879,7 +2879,7 @@ export default function DesigningDetailPage() {
           </div>
         </section>
 
-        <section className="rounded-xl bg-[#000000] border border-slate-800 px-3 py-2">
+        <section className="rounded-xl bg-card border border-slate-800 px-3 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-[11px] font-semibold text-slate-200 shrink-0">Post-press routing</span>
             <div className="flex flex-wrap gap-1.5 text-xs">
@@ -2935,7 +2935,7 @@ function ToolSourceRow({
             onClick={() => onChange(k)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
               value === k
-                ? 'bg-amber-600/90 border-amber-500 text-white'
+                ? 'bg-amber-600/90 border-amber-500 text-primary-foreground'
                 : 'bg-slate-800 border-slate-600 text-slate-300'
             } disabled:opacity-40 disabled:cursor-not-allowed`}
           >

@@ -177,12 +177,12 @@ export function AwQueueCommandPanel({
   const closed = awPo === AW_PO_STATUS.CLOSED
 
   return (
-    <div className="border-b border-slate-800 bg-[#000000] px-3 py-2">
+    <div className="border-b border-slate-800 bg-background px-3 py-2">
       <div className="max-w-7xl mx-auto w-full space-y-2">
         <div
           className={clsx(
             'flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between rounded-lg border px-2.5 py-2',
-            closed ? 'border-slate-700 bg-slate-950/50 opacity-80' : 'border-slate-800 bg-black',
+            closed ? 'border-slate-700 bg-slate-950/50 opacity-80' : 'border-slate-800 bg-background',
           )}
         >
           <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
@@ -218,7 +218,7 @@ export function AwQueueCommandPanel({
               type="button"
               disabled={!!busy || closed}
               onClick={() => void postLifecycle('manual_close')}
-              className="rounded-md bg-slate-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-slate-500 disabled:opacity-40"
+              className="rounded-md bg-slate-600 px-2.5 py-1 text-[10px] font-semibold text-foreground hover:bg-slate-500 disabled:opacity-40"
             >
               {busy === 'manual_close' ? '…' : 'Manual close'}
             </button>
@@ -226,7 +226,7 @@ export function AwQueueCommandPanel({
               type="button"
               disabled={!!busy || jobType !== 'repeat' || awPo !== AW_PO_STATUS.CLOSED}
               onClick={() => void postLifecycle('force_reopen')}
-              className="rounded-md bg-orange-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-orange-500 disabled:opacity-40"
+              className="rounded-md bg-orange-600 px-2.5 py-1 text-[10px] font-semibold text-foreground hover:bg-orange-500 disabled:opacity-40"
             >
               {busy === 'force_reopen' ? '…' : 'Force reopen'}
             </button>
@@ -262,7 +262,7 @@ export function AwQueueCommandPanel({
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
-          <div className="rounded-lg border border-slate-800 bg-black p-2 space-y-2">
+          <div className="rounded-lg border border-slate-800 bg-background p-2 space-y-2">
             <p className="text-[10px] font-semibold uppercase text-slate-500">Push mode</p>
             <div className="inline-flex rounded-lg border border-slate-700 overflow-hidden">
               <button
@@ -272,7 +272,7 @@ export function AwQueueCommandPanel({
                 className={clsx(
                   'px-3 py-1.5 text-[11px] font-medium',
                   pushMode === AW_PUSH_MODE.ONE_GO
-                    ? 'bg-amber-600 text-white'
+                    ? 'bg-amber-600 text-primary-foreground'
                     : 'bg-zinc-950 text-slate-400 hover:bg-zinc-900',
                 )}
               >
@@ -285,7 +285,7 @@ export function AwQueueCommandPanel({
                 className={clsx(
                   'px-3 py-1.5 text-[11px] font-medium border-l border-slate-700',
                   pushMode === AW_PUSH_MODE.PARTIAL
-                    ? 'bg-amber-600 text-white'
+                    ? 'bg-amber-600 text-primary-foreground'
                     : 'bg-zinc-950 text-slate-400 hover:bg-zinc-900',
                 )}
               >
@@ -301,7 +301,7 @@ export function AwQueueCommandPanel({
                   disabled={!!busy || closed}
                   defaultValue={totalB || ''}
                   key={`t-${totalB}`}
-                  className={`mt-0.5 w-full rounded border border-slate-800 bg-black px-2 py-1 text-xs text-white ${mono}`}
+                  className={`mt-0.5 w-full rounded border border-slate-800 bg-background px-2 py-1 text-xs text-foreground ${mono}`}
                   onBlur={(e) => {
                     const v = e.target.value === '' ? 0 : Number(e.target.value)
                     if (!Number.isFinite(v) || v < 0) return
@@ -317,7 +317,7 @@ export function AwQueueCommandPanel({
                   disabled={!!busy || closed}
                   defaultValue={typeof spec.awInProductionBatches === 'number' ? spec.awInProductionBatches : ''}
                   key={`ip-${String(spec.awInProductionBatches)}`}
-                  className={`mt-0.5 w-full rounded border border-slate-800 bg-black px-2 py-1 text-xs text-white ${mono}`}
+                  className={`mt-0.5 w-full rounded border border-slate-800 bg-background px-2 py-1 text-xs text-foreground ${mono}`}
                   onBlur={(e) => {
                     const v = e.target.value === '' ? 0 : Number(e.target.value)
                     if (!Number.isFinite(v) || v < 0) return
@@ -347,7 +347,7 @@ export function AwQueueCommandPanel({
                 </button>
               </Dialog.Trigger>
               <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 z-[95] bg-black/70" />
+                <Dialog.Overlay className="fixed inset-0 z-[95] bg-background/70" />
                 <Dialog.Content className="fixed left-1/2 top-1/2 z-[96] max-h-[min(70vh,28rem)] w-[min(96vw,24rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border border-slate-700 bg-[#0a0a0a] p-0 shadow-xl">
                   <div className="border-b border-slate-800 px-3 py-2">
                     <Dialog.Title className="text-sm font-semibold text-slate-100">Push ledger</Dialog.Title>
@@ -392,7 +392,7 @@ export function AwQueueCommandPanel({
             </Dialog.Root>
           </div>
 
-          <div className="rounded-lg border border-slate-800 bg-black p-2 space-y-2">
+          <div className="rounded-lg border border-slate-800 bg-background p-2 space-y-2">
             <p className="text-[10px] font-semibold uppercase text-slate-500 flex items-center gap-1">
               <Package className="h-3 w-3" aria-hidden />
               Material handshake

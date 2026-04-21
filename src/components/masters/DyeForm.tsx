@@ -122,11 +122,11 @@ export default function DyeForm({ mode, initialData }: Props) {
   }
 
   const inpCls = (errKey?: string) =>
-    `w-full px-3 py-2 rounded-lg bg-slate-800 border text-white text-sm ${errKey && fieldErrors[errKey] ? 'border-red-500' : 'border-slate-600'}`
+    `w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground text-sm ${errKey && fieldErrors[errKey] ? 'border-red-500' : 'border-slate-600'}`
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
-      <h2 className="text-lg font-semibold text-white">{mode === 'ADD' ? 'Add Die' : 'Edit Die'}</h2>
+      <h2 className="text-lg font-semibold text-foreground">{mode === 'ADD' ? 'Add Die' : 'Edit Die'}</h2>
 
       {/* Die Number + Auto Toggle */}
       <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm space-y-3">
@@ -136,7 +136,7 @@ export default function DyeForm({ mode, initialData }: Props) {
             <button type="button" onClick={toggleAutoGenerate} className="flex items-center gap-2 text-xs">
               <span className="text-slate-400">Auto-generate</span>
               <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoGenerate ? 'bg-amber-500' : 'bg-slate-600'}`}>
-                <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${autoGenerate ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                <span className={`inline-block h-3.5 w-3.5 rounded-full bg-card transition-transform ${autoGenerate ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
               </span>
             </button>
           )}
@@ -221,7 +221,7 @@ export default function DyeForm({ mode, initialData }: Props) {
 
       <div className="flex justify-end gap-2">
         <button type="button" onClick={() => router.push('/masters/dyes')} className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm">Cancel</button>
-        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium">
+        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium">
           {saving ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
         </button>
       </div>

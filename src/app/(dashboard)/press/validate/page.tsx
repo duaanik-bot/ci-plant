@@ -70,16 +70,16 @@ export default function PressValidatePage() {
   }, [scanner])
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white p-4 max-w-2xl mx-auto flex flex-col">
+    <div className="min-h-screen bg-slate-900 text-foreground p-4 max-w-2xl mx-auto flex flex-col">
       <h1 className="text-xl font-bold mb-4">Press — Validate plate</h1>
 
       {!result ? (
         <>
-          <div id="press-qr-reader" className="rounded-lg overflow-hidden bg-black mb-4 hidden" />
+          <div id="press-qr-reader" className="rounded-lg overflow-hidden bg-background mb-4 hidden" />
           <button
             type="button"
             onClick={startScanner}
-            className="w-full py-6 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-lg mb-4"
+            className="w-full py-6 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-primary-foreground font-bold text-lg mb-4"
           >
             TAP TO SCAN PLATE
           </button>
@@ -91,12 +91,12 @@ export default function PressValidatePage() {
               onChange={(e) => setManualBarcode(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && validatePlate(manualBarcode)}
               placeholder="e.g. PLT-CI-JOB-2025-0001-XXXX"
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white font-mono"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground font-mono"
             />
             <button
               type="button"
               onClick={() => validatePlate(manualBarcode)}
-              className="mt-2 w-full py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-white text-sm"
+              className="mt-2 w-full py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-foreground text-sm"
             >
               Validate
             </button>
@@ -120,7 +120,7 @@ export default function PressValidatePage() {
           <button
             type="button"
             onClick={() => { setResult(null); setManualBarcode('') }}
-            className="mt-8 w-full max-w-xs py-3 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-medium"
+            className="mt-8 w-full max-w-xs py-3 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground font-medium"
           >
             Scan Another Plate
           </button>

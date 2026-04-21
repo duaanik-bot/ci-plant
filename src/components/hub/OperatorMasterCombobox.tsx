@@ -60,7 +60,7 @@ export function OperatorMasterCombobox({
             window.setTimeout(() => setOpen(false), 120)
           }}
           placeholder="Search operator…"
-          className="w-full px-3 py-2 rounded-md bg-black border border-zinc-600 text-white placeholder:text-zinc-500"
+          className="w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground placeholder:text-zinc-500"
           autoComplete="off"
         />
         {open && !disabled && filtered.length > 0 ? (

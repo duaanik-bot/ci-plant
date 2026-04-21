@@ -272,14 +272,14 @@ export default function JobCardsPage() {
 
   if (loading && list.length === 0) {
     return (
-      <div className="min-h-[40vh] flex items-center justify-center bg-[#000000] text-slate-500 text-sm">
+      <div className="min-h-[40vh] flex items-center justify-center bg-background text-slate-500 text-sm">
         Loading job card hub…
       </div>
     )
   }
 
   return (
-    <div className="min-h-0 flex flex-col bg-[#000000] text-slate-100">
+    <div className="min-h-0 flex flex-col bg-background text-slate-100">
       <div className="border-b border-slate-800 px-4 py-3 flex flex-wrap items-center gap-3">
         <div>
           <h1 className="text-lg font-bold text-amber-400 tracking-tight">Job Card Hub</h1>
@@ -300,7 +300,7 @@ export default function JobCardsPage() {
           </a>
           <Link
             href="/production/job-cards/new"
-            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium"
+            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-xs font-medium"
           >
             New job card
           </Link>

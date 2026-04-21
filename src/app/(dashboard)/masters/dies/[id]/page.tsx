@@ -50,7 +50,7 @@ export default function DieDetailPage() {
 
   return (
     <div className="p-4 max-w-6xl mx-auto space-y-4">
-      <Link href="/masters/dies" className="text-slate-400 hover:text-white text-sm">← Die Store</Link>
+      <Link href="/masters/dies" className="text-slate-400 hover:text-foreground text-sm">← Die Store</Link>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-amber-400">{die.dieCode}</h1>
@@ -59,7 +59,7 @@ export default function DieDetailPage() {
       </div>
       <div className="flex gap-2">
         {(['overview', 'issue', 'vendor', 'history', 'audit'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded border text-xs ${tab === t ? 'bg-amber-600 border-amber-500 text-white' : 'border-slate-700 text-slate-300'}`}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded border text-xs ${tab === t ? 'bg-amber-600 border-amber-500 text-primary-foreground' : 'border-slate-700 text-slate-300'}`}>{t}</button>
         ))}
       </div>
 
@@ -153,24 +153,24 @@ function IssuePanel({ die }: { die: DieDetail }) {
   return die.status === 'issued' ? (
     <div className="space-y-2 text-sm">
       <p className="text-slate-300">Currently issued. Return required.</p>
-      <input value={impressionsThisRun} onChange={(e) => setImpressionsThisRun(e.target.value)} placeholder="Impressions this run" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
-      <select value={returnCondition} onChange={(e) => setReturnCondition(e.target.value)} className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full">
+      <input value={impressionsThisRun} onChange={(e) => setImpressionsThisRun(e.target.value)} placeholder="Impressions this run" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm w-full" />
+      <select value={returnCondition} onChange={(e) => setReturnCondition(e.target.value)} className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm w-full">
         <option>Good</option><option>Fair</option><option>Needs Sharpening</option><option>Damaged</option>
       </select>
-      <select value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full">
+      <select value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm w-full">
         <option value="store">store</option><option value="sent_for_sharpening">sent_for_sharpening</option><option value="scrapped">scrapped</option>
       </select>
-      <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Storage location" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
-      <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
-      <button onClick={ret} className="px-3 py-2 rounded bg-amber-600 text-white text-xs">Confirm Return</button>
+      <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Storage location" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm w-full" />
+      <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm w-full" />
+      <button onClick={ret} className="px-3 py-2 rounded bg-amber-600 text-primary-foreground text-xs">Confirm Return</button>
     </div>
   ) : (
     <div className="space-y-2 text-sm">
-      <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
-      <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
-      <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full" />
-      <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm w-full"><option>CI-06</option><option>CI-07</option></select>
-      <button onClick={issue} className="px-3 py-2 rounded bg-amber-600 text-white text-xs">Issue Die</button>
+      <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm w-full" />
+      <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm w-full" />
+      <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm w-full" />
+      <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm w-full"><option>CI-06</option><option>CI-07</option></select>
+      <button onClick={issue} className="px-3 py-2 rounded bg-amber-600 text-primary-foreground text-xs">Issue Die</button>
     </div>
   )
 }

@@ -50,7 +50,7 @@ export default function BillingPage() {
         <h1 className="text-xl font-bold text-amber-400">Billing</h1>
         <Link
           href="/billing/new"
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
+          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
         >
           New bill
         </Link>
@@ -60,7 +60,7 @@ export default function BillingPage() {
         <select
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white min-w-[180px]"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground min-w-[180px]"
         >
           <option value="">All customers</option>
           {customers.map((c) => (
@@ -72,7 +72,7 @@ export default function BillingPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
         >
           <option value="">All statuses</option>
           <option value="draft">Draft</option>

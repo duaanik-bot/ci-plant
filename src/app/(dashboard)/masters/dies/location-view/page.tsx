@@ -30,7 +30,7 @@ export default function DieLocationViewPage() {
         <h1 className="text-xl font-bold text-amber-400">Die Location View</h1>
         <Link href="/masters/dies" className="px-3 py-2 rounded-lg border border-slate-600 text-slate-200 text-sm">Back</Link>
       </div>
-      <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search die or carton" className="w-full md:w-96 px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm" />
+      <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search die or carton" className="w-full md:w-96 px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm" />
       <div className="space-y-4">
         {Object.entries(data).map(([rack, dies]) => (
           <div key={rack} className="rounded-xl border border-slate-700 bg-slate-900 p-3">

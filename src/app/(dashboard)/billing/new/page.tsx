@@ -139,7 +139,7 @@ export default function NewBillPage() {
             type="date"
             value={billDate}
             onChange={(e) => setBillDate(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
       </div>
@@ -147,7 +147,7 @@ export default function NewBillPage() {
       <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-slate-200">Line items</h2>
-          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg bg-slate-800 text-white text-xs">
+          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg bg-slate-800 text-foreground text-xs">
             + Add line
           </button>
         </div>
@@ -160,7 +160,7 @@ export default function NewBillPage() {
                   placeholder="Description"
                   value={l.description}
                   onChange={(e) => updateLine(idx, { description: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div className="col-span-1">
@@ -169,7 +169,7 @@ export default function NewBillPage() {
                   placeholder="Qty"
                   value={l.quantity}
                   onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div className="col-span-2">
@@ -178,7 +178,7 @@ export default function NewBillPage() {
                   placeholder="Rate"
                   value={l.rate}
                   onChange={(e) => updateLine(idx, { rate: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div className="col-span-1">
@@ -187,14 +187,14 @@ export default function NewBillPage() {
                   placeholder="GST%"
                   value={l.gstPct}
                   onChange={(e) => updateLine(idx, { gstPct: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div className="col-span-3">
                 <select
                   value={l.jobCardId}
                   onChange={(e) => updateLine(idx, { jobCardId: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
                 >
                   <option value="">No job card</option>
                   {filteredJcs.map((jc) => (
@@ -227,7 +227,7 @@ export default function NewBillPage() {
         <button
           type="submit"
           disabled={saving}
-          className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+          className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
         >
           {saving ? 'Saving…' : 'Create bill'}
         </button>

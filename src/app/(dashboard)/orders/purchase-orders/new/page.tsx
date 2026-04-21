@@ -1089,7 +1089,7 @@ export default function NewPurchaseOrderPage() {
 
   const inputBase =
     'w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 text-xs placeholder:text-slate-500'
-  const inputCls = `${inputBase} text-white`
+  const inputCls = `${inputBase} text-foreground`
   const inputClsGhost = `${inputBase} text-slate-400`
   const inputErr = 'border-red-500'
   /** High density: ~10–12 rows visible on 14″ class displays */
@@ -1155,7 +1155,7 @@ export default function NewPurchaseOrderPage() {
               type="date"
               value={poDate}
               onChange={(e) => setPoDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <DeliveryDateInput
@@ -1186,7 +1186,7 @@ export default function NewPurchaseOrderPage() {
                   return next
                 })
               }}
-              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${fieldErrors.poNumber ? 'border-red-500' : 'border-slate-600'}`}
+              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${fieldErrors.poNumber ? 'border-red-500' : 'border-slate-600'}`}
               placeholder="Leave blank to auto-generate"
             />
             {fieldErrors.poNumber ? (
@@ -1199,7 +1199,7 @@ export default function NewPurchaseOrderPage() {
               type="text"
               value={paymentTerms}
               onChange={(e) => setPaymentTerms(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               placeholder="e.g. 30 days"
             />
           </div>
@@ -1212,7 +1212,7 @@ export default function NewPurchaseOrderPage() {
               type="text"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <div className="text-slate-500 text-xs pb-2 leading-snug">
@@ -1224,7 +1224,7 @@ export default function NewPurchaseOrderPage() {
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs space-y-3">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-slate-200 font-semibold text-sm">Line items</h2>
-          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs">
+          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-foreground text-xs">
             + Add line
           </button>
         </div>
@@ -1527,7 +1527,7 @@ export default function NewPurchaseOrderPage() {
                     <td className={lineCellPad}>
                       <input type="number" min={0} max={28} value={ln.gstPct} onChange={(e) => updateLine(idx, { gstPct: e.target.value })} className={`w-full min-w-0 ${inputCls}`} />
                     </td>
-                    <td className={`${lineCellPad} text-white ${poMono}`}>{amount.toFixed(2)}</td>
+                    <td className={`${lineCellPad} text-foreground ${poMono}`}>{amount.toFixed(2)}</td>
                     <td className={lineCellPad}>
                       <PackagingEnumCombobox
                         aria-label="Board grade"
@@ -1745,17 +1745,17 @@ export default function NewPurchaseOrderPage() {
           <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1 text-slate-400">
             <span>
               Total qty{' '}
-              <span className={`${poMono} text-white`}>{totalQty}</span>
+              <span className={`${poMono} text-foreground`}>{totalQty}</span>
             </span>
             <span>
               Subtotal{' '}
-              <span className={`${poMono} text-white`}>
+              <span className={`${poMono} text-foreground`}>
                 ₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>
             <span>
               GST{' '}
-              <span className={`${poMono} text-white`}>
+              <span className={`${poMono} text-foreground`}>
                 ₹ {totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>
@@ -1777,20 +1777,20 @@ export default function NewPurchaseOrderPage() {
               type="text"
               value={qcCustomer.name}
               onChange={(e) => setQcCustomer((prev) => ({ ...prev, name: e.target.value }))}
-              className={`w-full px-3 py-2 rounded bg-slate-800 border ${qcErrors.name ? 'border-red-500' : 'border-slate-600'} text-white`}
+              className={`w-full px-3 py-2 rounded bg-slate-800 border ${qcErrors.name ? 'border-red-500' : 'border-slate-600'} text-foreground`}
             />
             {qcErrors.name && <p className="text-xs text-red-400 mt-1">{qcErrors.name}</p>}
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">GST</label>
-            <input type="text" value={qcCustomer.gstNumber} onChange={(e) => setQcCustomer((prev) => ({ ...prev, gstNumber: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+            <input type="text" value={qcCustomer.gstNumber} onChange={(e) => setQcCustomer((prev) => ({ ...prev, gstNumber: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground" />
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">Contact / Phone / Email / Address</label>
-            <input type="text" value={qcCustomer.contactName} onChange={(e) => setQcCustomer((prev) => ({ ...prev, contactName: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white mb-1" placeholder="Contact" />
-            <input type="text" value={qcCustomer.contactPhone} onChange={(e) => setQcCustomer((prev) => ({ ...prev, contactPhone: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white mb-1" placeholder="Phone" />
-            <input type="email" value={qcCustomer.email} onChange={(e) => setQcCustomer((prev) => ({ ...prev, email: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white mb-1" placeholder="Email" />
-            <textarea rows={2} value={qcCustomer.address} onChange={(e) => setQcCustomer((prev) => ({ ...prev, address: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" placeholder="Address" />
+            <input type="text" value={qcCustomer.contactName} onChange={(e) => setQcCustomer((prev) => ({ ...prev, contactName: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground mb-1" placeholder="Contact" />
+            <input type="text" value={qcCustomer.contactPhone} onChange={(e) => setQcCustomer((prev) => ({ ...prev, contactPhone: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground mb-1" placeholder="Phone" />
+            <input type="email" value={qcCustomer.email} onChange={(e) => setQcCustomer((prev) => ({ ...prev, email: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground mb-1" placeholder="Email" />
+            <textarea rows={2} value={qcCustomer.address} onChange={(e) => setQcCustomer((prev) => ({ ...prev, address: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground" placeholder="Address" />
           </div>
           <div className="flex items-center gap-2">
             <input id="qc-artwork" type="checkbox" checked={qcCustomer.requiresArtworkApproval} onChange={(e) => setQcCustomer((prev) => ({ ...prev, requiresArtworkApproval: e.target.checked }))} className="h-4 w-4 rounded border-slate-500 bg-slate-800" />
@@ -1810,7 +1810,7 @@ export default function NewPurchaseOrderPage() {
               type="text"
               value={qcCarton.cartonName}
               onChange={(e) => setQcCarton((prev) => ({ ...prev, cartonName: e.target.value }))}
-              className={`w-full px-3 py-2 rounded bg-slate-800 border ${qcCartonErrors.cartonName ? 'border-red-500' : 'border-slate-600'} text-white`}
+              className={`w-full px-3 py-2 rounded bg-slate-800 border ${qcCartonErrors.cartonName ? 'border-red-500' : 'border-slate-600'} text-foreground`}
             />
             {qcCartonErrors.cartonName && <p className="text-xs text-red-400 mt-1">{qcCartonErrors.cartonName}</p>}
           </div>
@@ -1820,32 +1820,32 @@ export default function NewPurchaseOrderPage() {
               type="text"
               value={qcCarton.artworkCode}
               onChange={(e) => setQcCarton((prev) => ({ ...prev, artworkCode: e.target.value.toUpperCase() }))}
-              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white font-mono"
+              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground font-mono"
               placeholder="e.g. AW-12345"
             />
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div>
               <label className="block text-xs text-slate-400 mb-1">L</label>
-              <input type="number" step={0.01} value={qcCarton.sizeL} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeL: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" step={0.01} value={qcCarton.sizeL} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeL: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">W</label>
-              <input type="number" step={0.01} value={qcCarton.sizeW} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeW: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" step={0.01} value={qcCarton.sizeW} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeW: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">H</label>
-              <input type="number" step={0.01} value={qcCarton.sizeH} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeH: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" step={0.01} value={qcCarton.sizeH} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeH: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs text-slate-400 mb-1">Rate</label>
-              <input type="number" step={0.01} value={qcCarton.rate} onChange={(e) => setQcCarton((prev) => ({ ...prev, rate: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" step={0.01} value={qcCarton.rate} onChange={(e) => setQcCarton((prev) => ({ ...prev, rate: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">GST%</label>
-              <input type="number" min={0} max={28} value={qcCarton.gstPct} onChange={(e) => setQcCarton((prev) => ({ ...prev, gstPct: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" min={0} max={28} value={qcCarton.gstPct} onChange={(e) => setQcCarton((prev) => ({ ...prev, gstPct: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground" />
             </div>
           </div>
           <div>
@@ -1856,13 +1856,13 @@ export default function NewPurchaseOrderPage() {
               value={qcCarton.boardGrade || null}
               onChange={(v) => setQcCarton((prev) => ({ ...prev, boardGrade: v ?? '' }))}
               controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-              inputClassName="text-white placeholder:text-slate-500"
+              inputClassName="text-foreground placeholder:text-slate-500"
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs text-slate-400 mb-1">GSM</label>
-              <input type="number" value={qcCarton.gsm} onChange={(e) => setQcCarton((prev) => ({ ...prev, gsm: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" value={qcCarton.gsm} onChange={(e) => setQcCarton((prev) => ({ ...prev, gsm: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">Paper</label>
@@ -1872,7 +1872,7 @@ export default function NewPurchaseOrderPage() {
                 value={qcCarton.paperType || null}
                 onChange={(v) => setQcCarton((prev) => ({ ...prev, paperType: v ?? '' }))}
                 controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-                inputClassName="text-white placeholder:text-slate-500"
+                inputClassName="text-foreground placeholder:text-slate-500"
               />
             </div>
           </div>
@@ -1885,7 +1885,7 @@ export default function NewPurchaseOrderPage() {
                 value={qcCarton.coatingType || null}
                 onChange={(v) => setQcCarton((prev) => ({ ...prev, coatingType: v ?? '' }))}
                 controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-                inputClassName="text-white placeholder:text-slate-500"
+                inputClassName="text-foreground placeholder:text-slate-500"
               />
             </div>
             <div className="mb-1">
@@ -1895,7 +1895,7 @@ export default function NewPurchaseOrderPage() {
                 value={qcCarton.embossingLeafing || null}
                 onChange={(v) => setQcCarton((prev) => ({ ...prev, embossingLeafing: v ?? '' }))}
                 controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-                inputClassName="text-white placeholder:text-slate-500"
+                inputClassName="text-foreground placeholder:text-slate-500"
               />
             </div>
             <PackagingEnumCombobox
@@ -1904,7 +1904,7 @@ export default function NewPurchaseOrderPage() {
               value={qcCarton.foilType || null}
               onChange={(v) => setQcCarton((prev) => ({ ...prev, foilType: v ?? '' }))}
               controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-              inputClassName="text-white placeholder:text-slate-500"
+              inputClassName="text-foreground placeholder:text-slate-500"
             />
           </div>
           <div className="flex justify-end pt-2">

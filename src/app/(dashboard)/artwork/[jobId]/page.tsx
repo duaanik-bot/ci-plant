@@ -149,7 +149,7 @@ export default function ArtworkJobPage() {
               <span
                 key={n}
                 className={`px-3 py-1 rounded text-sm ${
-                  done ? 'bg-green-700 text-white' : current ? 'bg-blue-700 text-white' : 'bg-slate-600 text-slate-400'
+                  done ? 'bg-green-700 text-primary-foreground' : current ? 'bg-blue-700 text-primary-foreground' : 'bg-slate-600 text-slate-400'
                 }`}
               >
                 Lock {n} {done ? '✓' : current ? '●' : '○'}
@@ -162,7 +162,7 @@ export default function ArtworkJobPage() {
       {!art && (
         <div className="bg-slate-800 rounded-lg p-4">
           <p className="text-slate-400 mb-2">No artwork yet.</p>
-          <label className="inline-block px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white cursor-pointer">
+          <label className="inline-block px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground cursor-pointer">
             {uploading ? 'Uploading…' : 'Upload customer approval document'}
             <input
               type="file"
@@ -191,7 +191,7 @@ export default function ArtworkJobPage() {
             ) : (
               <div className="flex items-center gap-4">
                 <span className="text-red-400 text-sm">Not completed</span>
-                <label className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-sm cursor-pointer">
+                <label className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm cursor-pointer">
                   Upload document
                   <input
                     type="file"
@@ -235,7 +235,7 @@ export default function ArtworkJobPage() {
                   type="button"
                   disabled={!lock2AllChecked || submittingLock !== null}
                   onClick={() => submitLock(2)}
-                  className="mt-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-sm"
+                  className="mt-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-primary-foreground text-sm"
                 >
                   {submittingLock === 2 ? 'Submitting…' : 'Submit checklist'}
                 </button>
@@ -261,7 +261,7 @@ export default function ArtworkJobPage() {
                   type="button"
                   disabled={submittingLock !== null}
                   onClick={() => submitLock(3)}
-                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-white text-sm"
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground text-sm"
                 >
                   {submittingLock === 3 ? 'Submitting…' : 'Sign off'}
                 </button>

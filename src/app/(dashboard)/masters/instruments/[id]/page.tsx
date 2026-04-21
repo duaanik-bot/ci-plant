@@ -102,14 +102,14 @@ export default function EditInstrumentPage() {
 
   return (
     <div className="max-w-lg">
-      <h2 className="text-lg font-semibold text-white mb-4">Edit instrument</h2>
+      <h2 className="text-lg font-semibold text-foreground mb-4">Edit instrument</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm text-slate-400 mb-1">Instrument name</label>
           <input
             value={instrumentName}
             onChange={(e) => setInstrumentName(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -117,7 +117,7 @@ export default function EditInstrumentPage() {
           <input
             value={specification}
             onChange={(e) => setSpecification(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -125,7 +125,7 @@ export default function EditInstrumentPage() {
           <input
             value={range}
             onChange={(e) => setRange(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -133,7 +133,7 @@ export default function EditInstrumentPage() {
           <input
             value={frequency}
             onChange={(e) => setFrequency(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -141,7 +141,7 @@ export default function EditInstrumentPage() {
           <input
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -151,7 +151,7 @@ export default function EditInstrumentPage() {
               type="date"
               value={lastCalibration}
               onChange={(e) => setLastCalibration(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -160,7 +160,7 @@ export default function EditInstrumentPage() {
               type="date"
               value={calibrationDue}
               onChange={(e) => setCalibrationDue(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
         </div>
@@ -171,7 +171,7 @@ export default function EditInstrumentPage() {
             min={1}
             value={calibrationFreqDays}
             onChange={(e) => setCalibrationFreqDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -180,7 +180,7 @@ export default function EditInstrumentPage() {
             value={certificateUrl}
             onChange={(e) => setCertificateUrl(e.target.value)}
             placeholder="https://..."
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -197,11 +197,11 @@ export default function EditInstrumentPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-white"
+            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/instruments" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white">
+          <Link href="/masters/instruments" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground">
             Cancel
           </Link>
         </div>

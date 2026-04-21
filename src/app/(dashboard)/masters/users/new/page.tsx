@@ -78,14 +78,14 @@ export default function NewUserPage() {
 
   return (
     <div className="max-w-lg">
-      <h2 className="text-lg font-semibold text-white mb-4">New user</h2>
+      <h2 className="text-lg font-semibold text-foreground mb-4">New user</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm text-slate-400 mb-1">Full name *</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               fieldErrors.name ? 'border-red-500' : 'border-slate-600'
             }`}
           />
@@ -97,7 +97,7 @@ export default function NewUserPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               fieldErrors.email ? 'border-red-500' : 'border-slate-600'
             }`}
           />
@@ -111,7 +111,7 @@ export default function NewUserPage() {
             onChange={(e) => setPin(e.target.value)}
             maxLength={6}
             placeholder="••••••"
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               fieldErrors.pin ? 'border-red-500' : 'border-slate-600'
             }`}
           />
@@ -122,7 +122,7 @@ export default function NewUserPage() {
           <select
             value={roleId}
             onChange={(e) => setRoleId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           >
             <option value="">Select role</option>
             {roles.map((r) => (
@@ -152,7 +152,7 @@ export default function NewUserPage() {
             value={whatsappNumber}
             onChange={(e) => setWhatsappNumber(e.target.value)}
             placeholder="+91..."
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -169,11 +169,11 @@ export default function NewUserPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-white"
+            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/users" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white">
+          <Link href="/masters/users" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground">
             Cancel
           </Link>
         </div>

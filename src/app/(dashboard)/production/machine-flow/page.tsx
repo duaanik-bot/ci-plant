@@ -128,7 +128,7 @@ export default function MachineFlowPage() {
     <div className="p-4 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-amber-400">Machine Flow</h1>
-        <Link href="/jobs" className="text-slate-400 hover:text-white text-sm">Active Jobs</Link>
+        <Link href="/jobs" className="text-slate-400 hover:text-foreground text-sm">Active Jobs</Link>
       </div>
 
       <div className="space-y-6">
@@ -206,7 +206,7 @@ export default function MachineFlowPage() {
         </section>
       </div>
 
-      <div className="mt-8 overflow-x-auto rounded-xl border border-zinc-800 bg-black ring-1 ring-white/5">
+      <div className="mt-8 overflow-x-auto rounded-xl border border-zinc-800 bg-background ring-1 ring-ring/5">
         <h2 className="text-sm font-semibold text-slate-400 mb-2 px-4 pt-4">Machine ledger — changeover & PM health</h2>
         <table className={`w-full text-sm ${mono}`}>
           <thead className="bg-zinc-950 text-left text-zinc-500 text-[10px] uppercase tracking-wider">

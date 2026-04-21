@@ -515,7 +515,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, contactPerson: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -528,7 +528,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, contactPhone: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -539,7 +539,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, contactEmail: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
           </div>
@@ -587,7 +587,7 @@ export default function NewRfqPage() {
                 }
                 className={`w-full px-3 py-2 rounded bg-slate-800 border ${
                   errors.productName ? 'border-red-500' : 'border-slate-600'
-                } text-white`}
+                } text-foreground`}
               />
               {errors.productName && (
                 <p className="text-xs text-red-400 mt-1">{errors.productName}</p>
@@ -604,7 +604,7 @@ export default function NewRfqPage() {
                 }
                 className={`w-full px-3 py-2 rounded bg-slate-800 border ${
                   errors.packType ? 'border-red-500' : 'border-slate-600'
-                } text-white`}
+                } text-foreground`}
               >
                 <option value="">Select…</option>
                 <option value="Mono Carton">Mono Carton</option>
@@ -622,7 +622,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, drugSchedule: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 {DRUG_SCHEDULES.map((s) => (
@@ -646,7 +646,7 @@ export default function NewRfqPage() {
                   }
                   className={`w-full px-3 py-2 rounded bg-slate-800 border ${
                     errors.annualVolume ? 'border-red-500' : 'border-slate-600'
-                  } text-white`}
+                  } text-foreground`}
                 />
                 {errors.annualVolume && (
                   <p className="text-xs text-red-400 mt-1">{errors.annualVolume}</p>
@@ -659,7 +659,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCore((prev) => ({ ...prev, annualVolumeUnit: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 >
                   <option value="cartons">Cartons</option>
                   <option value="labels">Labels</option>
@@ -675,7 +675,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, sampleQty: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -686,7 +686,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, deliveryTimeline: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -701,7 +701,7 @@ export default function NewRfqPage() {
                     referenceSampleAvailable: e.target.value as 'yes' | 'no' | '',
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 <option value="yes">Yes</option>
@@ -716,7 +716,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, specialRequirements: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
           </div>
@@ -735,7 +735,7 @@ export default function NewRfqPage() {
                 min={0}
                 value={spec.sizeL}
                 onChange={(e) => setSpec((prev) => ({ ...prev, sizeL: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -745,7 +745,7 @@ export default function NewRfqPage() {
                 min={0}
                 value={spec.sizeW}
                 onChange={(e) => setSpec((prev) => ({ ...prev, sizeW: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -755,7 +755,7 @@ export default function NewRfqPage() {
                 min={0}
                 value={spec.sizeH}
                 onChange={(e) => setSpec((prev) => ({ ...prev, sizeH: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
           </div>
@@ -767,7 +767,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, boardGrade: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 {['SBS', 'FBB', 'Duplex', 'Art Card', 'Kraft'].map((b) => (
@@ -788,7 +788,7 @@ export default function NewRfqPage() {
                 onChange={(e) => setSpec((prev) => ({ ...prev, gsm: e.target.value }))}
                 className={`w-full px-3 py-2 rounded bg-slate-800 border ${
                   errors.gsm ? 'border-red-500' : 'border-slate-600'
-                } text-white`}
+                } text-foreground`}
               />
               {errors.gsm && <p className="text-xs text-red-400 mt-1">{errors.gsm}</p>}
             </div>
@@ -799,7 +799,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, colours: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 {['1C', '2C', '4C', '5C', '6C'].map((c) => (
@@ -817,7 +817,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, colourBreakdown: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 placeholder="e.g. CMYK + PANTONE 300C"
               />
             </div>
@@ -828,7 +828,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, coatingType: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 {COATING_TYPES.map((c) => (
@@ -845,7 +845,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, lamination: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 {LAMINATE_TYPES.map((l) => (
@@ -860,7 +860,7 @@ export default function NewRfqPage() {
               <select
                 value={spec.foil}
                 onChange={(e) => setSpec((prev) => ({ ...prev, foil: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 {FOIL_TYPES.map((f) => (
@@ -877,7 +877,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, embossing: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 {EMBOSSING_TYPES.map((x) => (
@@ -894,7 +894,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, construction: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 {CARTON_CONSTRUCTIONS.map((c) => (
@@ -911,7 +911,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, barcodeType: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 {BARCODE_TYPES.map((b) => (
@@ -942,7 +942,7 @@ export default function NewRfqPage() {
                     regulatoryText: e.target.value as 'yes' | 'no' | '',
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 <option value="yes">Yes</option>
@@ -959,7 +959,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCompliance((prev) => ({ ...prev, batchSpaceW: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div className="flex-1">
@@ -971,7 +971,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCompliance((prev) => ({ ...prev, batchSpaceH: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
             </div>
@@ -985,7 +985,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCompliance((prev) => ({ ...prev, mrpSpaceW: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
               <div className="flex-1">
@@ -997,7 +997,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCompliance((prev) => ({ ...prev, mrpSpaceH: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
             </div>
@@ -1064,7 +1064,7 @@ export default function NewRfqPage() {
                       e.target.value === 'yes' ? prev.existingSupplierName : '',
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select…</option>
                 <option value="yes">Yes</option>
@@ -1112,7 +1112,7 @@ export default function NewRfqPage() {
                     targetPricePerThousand: e.target.value,
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -1126,7 +1126,7 @@ export default function NewRfqPage() {
                     competitorRef: e.target.value,
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -1139,7 +1139,7 @@ export default function NewRfqPage() {
                     priority: e.target.value as 'Normal' | 'Urgent' | 'Critical',
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="Normal">Normal</option>
                 <option value="Urgent">Urgent</option>
@@ -1153,7 +1153,7 @@ export default function NewRfqPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-6 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-medium text-sm"
+            className="px-6 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground font-medium text-sm"
           >
             {submitting ? 'Saving…' : 'Create RFQ'}
           </button>
@@ -1178,7 +1178,7 @@ export default function NewRfqPage() {
               }
               className={`w-full px-3 py-2 rounded bg-slate-800 border ${
                 qcErrors.name ? 'border-red-500' : 'border-slate-600'
-              } text-white`}
+              } text-foreground`}
             />
             {qcErrors.name && (
               <p className="text-xs text-red-400 mt-1">{qcErrors.name}</p>
@@ -1192,7 +1192,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, gstNumber: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -1203,7 +1203,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, contactName: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -1214,7 +1214,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, contactPhone: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -1225,7 +1225,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, email: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -1236,7 +1236,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, address: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -1260,7 +1260,7 @@ export default function NewRfqPage() {
             <button
               type="submit"
               disabled={qcSubmitting}
-              className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+              className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
             >
               {qcSubmitting ? 'Saving…' : 'Save Customer'}
             </button>

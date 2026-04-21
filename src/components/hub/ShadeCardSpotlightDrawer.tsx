@@ -328,9 +328,9 @@ export function ShadeCardSpotlightDrawer({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-[2px]" />
+        <Dialog.Overlay className="fixed inset-0 z-[70] bg-background/60 backdrop-blur-[2px]" />
         <Dialog.Content
-          className={`fixed z-[70] right-0 top-0 flex h-full w-full max-w-lg flex-col border-l border-zinc-800 bg-[#000000] shadow-2xl outline-none ${mono}`}
+          className={`fixed z-[70] right-0 top-0 flex h-full w-full max-w-lg flex-col border-l border-zinc-800 bg-background shadow-2xl outline-none ${mono}`}
         >
           <Dialog.Title className="sr-only">
             {row ? `Product DNA — ${productTitle}` : 'Shade card'}
@@ -342,12 +342,12 @@ export function ShadeCardSpotlightDrawer({
           <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 shrink-0">
             <h2 className="min-w-0 text-sm font-semibold leading-tight text-zinc-100 font-sans">
               <span className="text-zinc-500 font-normal">Product DNA — </span>
-              <span className="text-white">{row ? productTitle : '—'}</span>
+              <span className="text-foreground">{row ? productTitle : '—'}</span>
             </h2>
             <Dialog.Close asChild>
               <button
                 type="button"
-                className="rounded px-2 py-1 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white font-sans"
+                className="rounded px-2 py-1 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-foreground font-sans"
                 aria-label="Close"
               >
                 ✕
@@ -389,12 +389,12 @@ export function ShadeCardSpotlightDrawer({
                     {productLinkId ? (
                       <Link
                         href={`/product/${productLinkId}`}
-                        className="mt-0.5 block truncate text-sm text-white hover:text-sky-300 hover:underline"
+                        className="mt-0.5 block truncate text-sm text-foreground hover:text-sky-300 hover:underline"
                       >
                         {productTitle}
                       </Link>
                     ) : (
-                      <p className="mt-0.5 truncate text-sm text-white">{productTitle}</p>
+                      <p className="mt-0.5 truncate text-sm text-foreground">{productTitle}</p>
                     )}
                     <p className={`mt-1 text-[10px] text-zinc-500 ${mono}`}>
                       <span className="text-zinc-400">{awLine}</span>
@@ -440,15 +440,15 @@ export function ShadeCardSpotlightDrawer({
                     LAB values
                   </h3>
                   <div className={`grid grid-cols-3 gap-2 text-center ${mono}`}>
-                    <div className="rounded-lg border border-zinc-800 bg-black px-2 py-2">
+                    <div className="rounded-lg border border-zinc-800 bg-background px-2 py-2">
                       <p className="text-[9px] uppercase text-zinc-500">L*</p>
                       <p className="text-base font-semibold text-zinc-100 tabular-nums">{labL.trim() || '—'}</p>
                     </div>
-                    <div className="rounded-lg border border-zinc-800 bg-black px-2 py-2">
+                    <div className="rounded-lg border border-zinc-800 bg-background px-2 py-2">
                       <p className="text-[9px] uppercase text-zinc-500">a*</p>
                       <p className="text-base font-semibold text-zinc-100 tabular-nums">{labA.trim() || '—'}</p>
                     </div>
-                    <div className="rounded-lg border border-zinc-800 bg-black px-2 py-2">
+                    <div className="rounded-lg border border-zinc-800 bg-background px-2 py-2">
                       <p className="text-[9px] uppercase text-zinc-500">b*</p>
                       <p className="text-base font-semibold text-zinc-100 tabular-nums">{labB.trim() || '—'}</p>
                     </div>
@@ -459,7 +459,7 @@ export function ShadeCardSpotlightDrawer({
                       <input
                         value={labL}
                         onChange={(e) => setLabL(e.target.value)}
-                        className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200"
+                        className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
                         inputMode="decimal"
                       />
                     </label>
@@ -468,7 +468,7 @@ export function ShadeCardSpotlightDrawer({
                       <input
                         value={labA}
                         onChange={(e) => setLabA(e.target.value)}
-                        className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200"
+                        className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
                         inputMode="decimal"
                       />
                     </label>
@@ -477,7 +477,7 @@ export function ShadeCardSpotlightDrawer({
                       <input
                         value={labB}
                         onChange={(e) => setLabB(e.target.value)}
-                        className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200"
+                        className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
                         inputMode="decimal"
                       />
                     </label>
@@ -491,7 +491,7 @@ export function ShadeCardSpotlightDrawer({
                     </h3>
                     <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/50">
                       {previewIsImage(proofUrl) ? (
-                        <div className="relative h-64 w-full bg-black">
+                        <div className="relative h-64 w-full bg-background">
                           <Image
                             src={proofUrl}
                             alt="Client-signed approval"
@@ -550,7 +550,7 @@ export function ShadeCardSpotlightDrawer({
                     <select
                       value={substrate}
                       onChange={(e) => setSubstrate(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
                     >
                       <option value="">—</option>
                       {SHADE_SUBSTRATE_VALUES.map((v) => (
@@ -566,7 +566,7 @@ export function ShadeCardSpotlightDrawer({
                       value={inkRecipeNotes}
                       onChange={(e) => setInkRecipeNotes(e.target.value)}
                       rows={3}
-                      className="mt-0.5 w-full resize-y rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200"
+                      className="mt-0.5 w-full resize-y rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
                       placeholder="Pigment loads, varnish, white underprint…"
                     />
                   </label>
@@ -598,7 +598,7 @@ export function ShadeCardSpotlightDrawer({
                       type="date"
                       value={verified}
                       onChange={(e) => setVerified(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
                     />
                   </label>
                   <label className="block text-[10px] text-zinc-500 font-sans">
@@ -606,7 +606,7 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={deltaE}
                       onChange={(e) => setDeltaE(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
                       inputMode="decimal"
                     />
                   </label>
@@ -615,7 +615,7 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={attach}
                       onChange={(e) => setAttach(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
                     />
                   </label>
                   <label className="block text-[10px] text-zinc-500 font-sans">
@@ -623,7 +623,7 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={inkLink}
                       onChange={(e) => setInkLink(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
                       placeholder="https://…"
                     />
                   </label>
@@ -632,7 +632,7 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={custDoc}
                       onChange={(e) => setCustDoc(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
                       placeholder="https://…"
                     />
                   </label>
@@ -642,7 +642,7 @@ export function ShadeCardSpotlightDrawer({
                       value={spectro}
                       onChange={(e) => setSpectro(e.target.value)}
                       rows={3}
-                      className="mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200"
+                      className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
                     />
                   </label>
                   <label className="block text-[10px] text-zinc-500 font-sans">
@@ -650,7 +650,7 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={hex}
                       onChange={(e) => setHex(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-black px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
                       placeholder="#C41E3A"
                     />
                   </label>
@@ -658,7 +658,7 @@ export function ShadeCardSpotlightDrawer({
                     type="button"
                     disabled={busy}
                     onClick={() => void saveVerification()}
-                    className="w-full rounded-lg bg-emerald-800 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 font-sans"
+                    className="w-full rounded-lg bg-emerald-800 py-2 text-xs font-semibold text-primary-foreground hover:bg-emerald-700 disabled:opacity-50 font-sans"
                   >
                     {busy ? '…' : `Save & log — ${COLOR_VERIFICATION_AUDIT}`}
                   </button>

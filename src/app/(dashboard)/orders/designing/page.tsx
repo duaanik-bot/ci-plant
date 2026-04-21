@@ -38,6 +38,7 @@ import {
   INDUSTRIAL_PRIORITY_EVENT,
 } from '@/lib/industrial-priority-sync'
 import { readPlanningCore } from '@/lib/planning-decision-spec'
+import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 
 type SpecOverrides = {
   assignedDesignerId?: string
@@ -134,7 +135,7 @@ function ageClass(days: number): string {
 
 function pipelineBadge(phase: Row['readiness']['pipelinePhase']) {
   const base =
-    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1'
+    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ring-1'
   switch (phase) {
     case 'finalized':
       return {
@@ -201,7 +202,7 @@ function CustomerAvatar({
   }
   return (
     <span
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold tabular-nums ring-1 ring-white/15"
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold tabular-nums ring-1 ring-ring/15"
       style={{
         backgroundColor: `hsl(${hue} 42% 28%)`,
         color: `hsl(${hue} 25% 94%)`,
@@ -231,19 +232,19 @@ function NeonCommandFilterTrigger({
       <button
         type="button"
         onClick={() => open()}
-        className="group min-w-0 flex-1 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-black px-4 py-2.5 text-left text-sm shadow-[0_0_20px_rgba(245,158,11,0.08)] ring-1 ring-white/10 backdrop-blur-sm transition hover:border-amber-400/70 hover:ring-amber-400/25"
+        className="group min-w-0 flex-1 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-left text-sm text-card-foreground shadow-sm ring-1 ring-ring/30 transition hover:border-slate-300 dark:border-amber-500/40 dark:shadow-[0_0_20px_rgba(245,158,11,0.08)] dark:hover:border-amber-400/70"
         aria-label="Open command palette"
       >
-        <Search className="h-4 w-4 text-amber-400 shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-center text-slate-400 group-hover:text-slate-200 sm:text-left">
+        <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-amber-400" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-center text-slate-600 group-hover:text-slate-800 sm:text-left dark:text-slate-400 dark:group-hover:text-slate-200">
           {paletteQuery.trim().length >= 2 ? (
             <>
-              <span className="text-emerald-400/90">Filtering queue:</span>{' '}
-              <span className="text-slate-100">{paletteQuery.trim()}</span>
+              <span className="text-emerald-600 dark:text-emerald-400/90">Filtering queue:</span>{' '}
+              <span className="text-slate-900 dark:text-slate-100">{paletteQuery.trim()}</span>
             </>
           ) : (
             <>
-              Search carton or PO # <span className="text-amber-500/90">({kbd})</span>
+              Search carton or PO # <span className="text-blue-600 dark:text-amber-500/90">({kbd})</span>
             </>
           )}
         </span>
@@ -252,7 +253,7 @@ function NeonCommandFilterTrigger({
         <button
           type="button"
           onClick={() => onClearQuery()}
-          className="shrink-0 self-center rounded-xl border border-white/15 bg-black px-2.5 py-2 text-slate-500 hover:border-amber-500/40 hover:text-amber-300"
+          className="shrink-0 self-center rounded-xl border border-border bg-card px-2.5 py-2 text-slate-500 hover:border-slate-300 hover:text-slate-800 dark:border-border/15 dark:hover:border-amber-500/40 dark:hover:text-amber-300"
           title="Clear filter"
           aria-label="Clear filter"
         >
@@ -276,7 +277,7 @@ function ArtworkPreviewCell({
   const [peek, setPeek] = useState(false)
 
   const thumbClass =
-    'h-12 w-12 shrink-0 overflow-hidden rounded-[4px] border border-slate-700 bg-black'
+    'h-12 w-12 shrink-0 overflow-hidden rounded-[4px] border border-slate-700 bg-background'
 
   if (!url || broken) {
     return (
@@ -318,10 +319,10 @@ function ArtworkPreviewCell({
       {peek && typeof document !== 'undefined'
         ? createPortal(
             <div
-              className="pointer-events-none fixed inset-0 z-[85] flex items-center justify-center bg-black/35 backdrop-blur-[2px]"
+              className="pointer-events-none fixed inset-0 z-[85] flex items-center justify-center bg-background/35 backdrop-blur-[2px]"
               aria-hidden
             >
-              <div className="h-[144px] w-[144px] overflow-hidden rounded-[4px] border border-slate-700 shadow-2xl ring-1 ring-black/50">
+              <div className="h-[144px] w-[144px] overflow-hidden rounded-[4px] border border-slate-700 shadow-2xl ring-1 ring-ring/50">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={url} alt="" className="h-full w-full object-cover" />
               </div>
@@ -356,20 +357,20 @@ function SortHeader({
 }) {
   const active = activeKey === column
   return (
-    <th className={`px-1 py-1 ${className}`}>
+    <th className={`px-4 py-3 ${className}`}>
       <button
         type="button"
         onClick={() => onSort(column)}
-        className={`inline-flex items-center gap-0.5 ${mono} text-[12px] font-medium text-slate-500 hover:text-slate-400`}
+        className={`inline-flex items-center gap-0.5 ${mono} text-xs font-medium uppercase tracking-wider text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200`}
       >
         {label}
         <span className="inline-flex flex-col -space-y-1.5" aria-hidden>
           <ChevronUp
-            className={`h-3 w-3 shrink-0 ${active && dir === 'asc' ? 'text-amber-500' : 'text-slate-600'}`}
+            className={`h-3 w-3 shrink-0 ${active && dir === 'asc' ? 'text-blue-600 dark:text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
             strokeWidth={2}
           />
           <ChevronDown
-            className={`h-3 w-3 shrink-0 ${active && dir === 'desc' ? 'text-amber-500' : 'text-slate-600'}`}
+            className={`h-3 w-3 shrink-0 ${active && dir === 'desc' ? 'text-blue-600 dark:text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
             strokeWidth={2}
           />
         </span>
@@ -382,7 +383,7 @@ function LightboxModal({ src, alt, onClose }: { src: string | null; alt: string;
   if (!src) return null
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/92 p-4 backdrop-blur-md"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-background/90 p-4 backdrop-blur-md"
       role="dialog"
       aria-modal="true"
       aria-label="Artwork preview"
@@ -390,7 +391,7 @@ function LightboxModal({ src, alt, onClose }: { src: string | null; alt: string;
     >
       <button
         type="button"
-        className="absolute right-3 top-3 rounded-lg border border-white/20 bg-black p-2 text-slate-400 hover:text-white"
+        className="absolute right-3 top-3 rounded-lg border border-border bg-card p-2 text-slate-400 hover:text-foreground"
         onClick={onClose}
         aria-label="Close preview"
       >
@@ -401,7 +402,7 @@ function LightboxModal({ src, alt, onClose }: { src: string | null; alt: string;
         onClick={(e) => e.stopPropagation()}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt} className="max-h-[85vh] w-auto max-w-full object-contain shadow-2xl ring-1 ring-white/10" />
+        <img src={src} alt={alt} className="max-h-[85vh] w-auto max-w-full object-contain shadow-2xl ring-1 ring-ring/20" />
       </div>
     </div>
   )
@@ -661,20 +662,20 @@ export default function DesigningQueuePage() {
 
   if (loading) {
     return (
-      <div className={`min-h-[40vh] p-4 text-slate-500 ${mono}`}>Loading…</div>
+      <div className={`min-h-[40vh] p-4 text-sm text-slate-600 dark:text-slate-400 ${mono}`}>Loading…</div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#000000] text-slate-200">
-      <div className="border-b border-white/10 bg-black px-3 py-2 md:hidden flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-amber-400 truncate">Artwork queue</span>
+    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 text-card-foreground md:hidden">
+        <span className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50">Artwork queue</span>
         <CommandPaletteTriggerIcon />
       </div>
 
       <div className="mx-auto max-w-[1600px] space-y-3 px-2 py-3 pb-10 sm:px-3">
-        <div className="rounded-lg border border-white/10 bg-black px-2 py-1.5 sm:px-3">
-          <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+        <div className="rounded-lg border border-border bg-card px-2 py-1.5 sm:px-3">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
             <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-300/90">
               Customer PO ✓
             </span>
@@ -687,9 +688,9 @@ export default function DesigningQueuePage() {
               AW queue
             </span>
             <span>→</span>
-            <span className="rounded border border-white/10 px-1.5 py-0.5 text-slate-400">Plate Hub</span>
+            <span className="rounded border border-border px-1.5 py-0.5 text-slate-400">Plate Hub</span>
             <span>→</span>
-            <span className="rounded border border-white/10 px-1.5 py-0.5 text-slate-400">Downstream</span>
+            <span className="rounded border border-border px-1.5 py-0.5 text-slate-400">Downstream</span>
           </div>
         </div>
 
@@ -714,8 +715,8 @@ export default function DesigningQueuePage() {
               onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
               aria-label="Filter by designer"
               title="Filter by designer — All Designers, Unassigned, or pick a designer"
-              className={`h-full min-h-[42px] w-full min-w-[12rem] appearance-none rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] py-2 pl-8 pr-9 text-sm font-medium text-[#0F172A] shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-500/30 sm:min-w-[13.5rem] sm:min-h-0 ${
-                designerFilter !== 'all' ? 'bg-blue-50 hover:bg-slate-50' : 'hover:bg-slate-50'
+              className={`h-full min-h-[42px] w-full min-w-[12rem] appearance-none rounded-xl border border-border bg-card py-2 pl-8 pr-9 text-sm font-medium text-card-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 sm:min-w-[13.5rem] sm:min-h-0 ${
+                designerFilter !== 'all' ? 'bg-blue-50/70 hover:bg-muted/70' : 'hover:bg-muted/70'
               }`}
             >
               <option value="all">Filter by Designer…</option>
@@ -728,33 +729,33 @@ export default function DesigningQueuePage() {
 
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h1 className="text-lg font-bold text-amber-400 sm:text-xl">Visual audit station</h1>
-            <p className="text-[10px] text-slate-500 sm:text-xs">
-              Pre-press audit · <span className="text-slate-400">{PREPRESS_AUDIT_LEAD}</span> · Ready:{' '}
-              <span className="font-semibold text-amber-300">{readyCount}</span> / {rows.length}
+            <h1 className="text-base font-semibold text-slate-900 dark:text-slate-50">Visual audit station</h1>
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Pre-press audit · <span className="text-slate-500 dark:text-slate-500">{PREPRESS_AUDIT_LEAD}</span> · Ready:{' '}
+              <span className="font-semibold text-slate-900 dark:text-amber-300">{readyCount}</span> / {rows.length}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
               href="/orders/purchase-orders"
-              className="rounded-lg border border-white/15 bg-black px-2.5 py-1 text-xs text-slate-200 hover:border-amber-500/40"
+              className="rounded-lg border border-border bg-card px-2.5 py-1 text-sm text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-amber-500/40"
             >
               POs
             </Link>
             <Link
               href="/hub/plates"
-              className="rounded-lg border border-white/15 bg-black px-2.5 py-1 text-xs text-slate-200 hover:border-amber-500/40"
+              className="rounded-lg border border-border bg-card px-2.5 py-1 text-sm text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-amber-500/40"
             >
               Plate Hub
             </Link>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-xs items-center">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
           <select
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
-            className={`min-w-[160px] rounded border border-white/15 bg-black px-2 py-1 text-slate-200 ${mono}`}
+            className={`min-w-[160px] rounded border border-border bg-card px-2 py-1.5 text-card-foreground ${mono}`}
           >
             <option value="">All customers</option>
             {customers.map((c) => (
@@ -766,10 +767,10 @@ export default function DesigningQueuePage() {
           <button
             type="button"
             onClick={() => setMyJobsOnly((o) => !o)}
-            className={`rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${mono} ${
+            className={`rounded border px-2.5 py-1.5 text-sm font-medium transition-colors ${mono} ${
               myJobsOnly
-                ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
-                : 'border-white/15 bg-black text-slate-400 hover:border-white/25'
+                ? 'border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200'
+                : 'border-border bg-card text-slate-600 hover:border-slate-300 dark:text-slate-400 dark:hover:border-slate-600'
             }`}
             title="Show only lines allocated to you in Planning"
           >
@@ -777,11 +778,11 @@ export default function DesigningQueuePage() {
           </button>
         </div>
 
-        <div className="overflow-x-auto rounded-lg border border-white/10 bg-[#000000]">
-          <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-[11px]">
-            <thead className="border-b border-white/10 bg-[#000000] text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <EnterpriseTableShell>
+          <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-sm">
+            <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               <tr>
-                <th className="w-[52px] px-1 py-1">Preview</th>
+                <th className="w-[52px] px-4 py-3">Preview</th>
                 <SortHeader
                   label="PO #"
                   column="po"
@@ -798,7 +799,7 @@ export default function DesigningQueuePage() {
                   onSort={cycleSort}
                   className="w-[6.5rem]"
                 />
-                <th className="min-w-[9rem] px-1 py-1">Carton</th>
+                <th className="min-w-[9rem] px-4 py-3">Carton</th>
                 <SortHeader
                   label="Qty"
                   column="qty"
@@ -807,9 +808,9 @@ export default function DesigningQueuePage() {
                   onSort={cycleSort}
                   className="w-10 text-right [&_button]:justify-end [&_button]:w-full"
                 />
-                <th className="w-9 px-1 py-1">Set</th>
-                <th className="w-[5rem] px-1 py-1">Designer</th>
-                <th className="w-[8.5rem] px-1 py-1">Pipeline</th>
+                <th className="w-9 px-4 py-3">Set</th>
+                <th className="w-[5rem] px-4 py-3">Designer</th>
+                <th className="w-[8.5rem] px-4 py-3">Pipeline</th>
                 <SortHeader
                   label="Days"
                   column="days"
@@ -818,16 +819,16 @@ export default function DesigningQueuePage() {
                   onSort={cycleSort}
                   className="w-14 text-right [&_button]:justify-end [&_button]:w-full"
                 />
-                <th className="min-w-[11rem] px-1 py-1">Actions</th>
+                <th className="min-w-[11rem] px-4 py-3">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5 bg-[#000000]">
+            <tbody className="divide-y divide-slate-200 bg-card dark:divide-slate-800">
               {sortedRows.map((r) => {
                 const designerId = r.specOverrides?.assignedDesignerId
                 const designerName = designerId ? (userById[designerId]?.name ?? '—') : '—'
-                const approvalsDone = !!r.readiness.approvalsComplete
-                const finalized = !!r.readiness.prePressFinalized
-                const planningForwarded = !!r.readiness.planningForwarded
+                const approvalsDone = !!r.readiness?.approvalsComplete
+                const finalized = !!r.readiness?.prePressFinalized
+                const planningForwarded = !!r.readiness?.planningForwarded
                 const spec = (r.specOverrides || {}) as Record<string, unknown>
                 const awPo = readAwPoStatus(spec)
                 const rowClosed = awPo === AW_PO_STATUS.CLOSED
@@ -843,7 +844,7 @@ export default function DesigningQueuePage() {
                   planningForwarded &&
                   !machineAllocated &&
                   !['in_production', 'closed'].includes(r.planningStatus)
-                const phase = r.readiness.pipelinePhase ?? 'drafting'
+                const phase = r.readiness?.pipelinePhase ?? 'drafting'
                 const dQ = daysInQueue(r.createdAt)
                 const badge = pipelineBadge(phase)
                 const previewUrl = r.artworkPreviewUrl ?? null
@@ -852,11 +853,13 @@ export default function DesigningQueuePage() {
                 return (
                   <tr
                     key={r.id}
-                    className={`transition-colors hover:bg-white/[0.03] ${
-                      priRow ? INDUSTRIAL_PRIORITY_ROW_CLASS : 'border-l-2 border-transparent hover:border-amber-500'
+                    className={`transition-colors ${
+                      priRow
+                        ? `${INDUSTRIAL_PRIORITY_ROW_CLASS} hover:bg-amber-50/90 dark:hover:bg-amber-900/25`
+                        : 'border-l-2 border-transparent hover:border-amber-500 hover:bg-slate-50 dark:hover:bg-slate-800/50'
                     } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''}`}
                   >
-                    <td className="px-1 py-0.5 align-middle">
+                    <td className="px-4 py-3 align-middle">
                       <ArtworkPreviewCell
                         url={previewUrl}
                         alt={r.cartonName}
@@ -865,9 +868,11 @@ export default function DesigningQueuePage() {
                         }
                       />
                     </td>
-                    <td className={`px-1 py-0.5 align-middle ${mono} text-amber-200/95`}>
+                    <td
+                      className={`px-4 py-3 align-middle text-sm font-medium ${mono} whitespace-nowrap text-slate-900 dark:text-amber-200/95`}
+                    >
                       <div className="flex flex-col gap-0.5 leading-tight">
-                        <div className="flex items-start gap-0.5 min-w-0">
+                        <div className="flex min-w-0 items-start gap-0.5">
                           <button
                             type="button"
                             title={
@@ -879,7 +884,7 @@ export default function DesigningQueuePage() {
                             }
                             disabled={priorityBusyPoId === r.po.id}
                             onClick={(e) => void togglePoPriority(r, e)}
-                            className="mt-0.5 shrink-0 rounded p-0.5 text-slate-500 hover:bg-white/5 hover:text-amber-400 disabled:opacity-40"
+                            className="mt-0.5 shrink-0 rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-amber-600 disabled:opacity-40 dark:hover:bg-card/5 dark:hover:text-amber-400"
                           >
                             <Star
                               className={`h-3.5 w-3.5 ${
@@ -890,7 +895,7 @@ export default function DesigningQueuePage() {
                               strokeWidth={2}
                             />
                           </button>
-                          <span className="break-all min-w-0">{r.po.poNumber}</span>
+                          <span className="min-w-0 overflow-hidden text-ellipsis break-all">{r.po?.poNumber ?? '—'}</span>
                         </div>
                         {totalContractBatches(spec) > 0 ? (
                           <div
@@ -912,52 +917,58 @@ export default function DesigningQueuePage() {
                           </div>
                         ) : null}
                         {r.directorPriority ? (
-                          <span className="w-fit rounded bg-amber-500/15 px-1 text-[8px] font-bold uppercase text-amber-300 ring-1 ring-amber-500/30">
+                          <span className="w-fit rounded bg-amber-500/15 px-1 text-xs font-bold uppercase text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300">
                             Priority
                           </span>
                         ) : null}
                         {r.directorHold ? (
-                          <span className="w-fit rounded bg-slate-600/30 px-1 text-[8px] text-slate-400">Hold</span>
+                          <span className="w-fit rounded bg-slate-600/30 px-1 text-xs text-slate-500 dark:text-slate-400">
+                            Hold
+                          </span>
                         ) : null}
                       </div>
                     </td>
-                    <td className="px-1 py-0.5 align-middle text-slate-300 leading-tight break-words">
+                    <td className="px-4 py-3 align-middle text-sm font-medium leading-tight text-slate-700 break-words dark:text-slate-300">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <CustomerAvatar
-                          name={r.po.customer.name}
-                          logoUrl={r.po.customer.logoUrl}
+                          name={r.po?.customer?.name ?? '—'}
+                          logoUrl={r.po?.customer?.logoUrl}
                         />
-                        <span className="min-w-0">{r.po.customer.name}</span>
+                        <span className="min-w-0 overflow-hidden text-ellipsis">{r.po?.customer?.name ?? '—'}</span>
                       </div>
                     </td>
-                    <td className="px-1 py-0.5 align-middle text-slate-100 leading-snug break-words">
-                      <div className="flex flex-col gap-0.5">
-                        <span>{r.cartonName}</span>
+                    <td className="px-4 py-3 align-middle text-sm font-medium leading-snug text-slate-900 break-words dark:text-slate-100">
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="min-w-0">{r.cartonName ?? '—'}</span>
                         {readPlanningCore(spec).layoutType === 'gang' ? (
-                          <span className="w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-sky-300">
+                          <span className="w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
                             Gang print
                           </span>
                         ) : readPlanningCore(spec).savedAt ? (
-                          <span className="w-fit rounded border border-slate-600 px-1 py-0.5 text-[8px] text-slate-500">
+                          <span className="w-fit rounded border border-slate-300 px-1 py-0.5 text-xs text-slate-600 dark:border-slate-600 dark:text-slate-500">
                             Single product
                           </span>
                         ) : null}
                       </div>
                     </td>
-                    <td className={`px-1 py-0.5 align-middle text-right ${mono} text-slate-200`}>
+                    <td
+                      className={`px-4 py-3 align-middle text-right text-sm font-medium ${mono} whitespace-nowrap text-slate-900 dark:text-slate-200`}
+                    >
                       {r.quantity}
                     </td>
-                    <td className={`px-1 py-0.5 align-middle ${mono} text-slate-300`}>
+                    <td
+                      className={`px-4 py-3 align-middle text-sm font-medium ${mono} whitespace-nowrap overflow-hidden text-ellipsis text-slate-900 dark:text-slate-300`}
+                    >
                       {r.setNumber ?? '—'}
                     </td>
-                    <td className="px-1 py-0.5 align-middle text-[10px] text-slate-400 leading-tight">
+                    <td className="px-4 py-3 align-middle text-xs leading-tight text-slate-600 dark:text-slate-400">
                       {designerName}
                     </td>
-                    <td className="px-1 py-0.5 align-middle">
+                    <td className="px-4 py-3 align-middle">
                       <span
                         className={`${badge.className} ${badge.pulse ? 'animate-pulse motion-reduce:animate-none' : ''}`}
                         title={
-                          (r.readiness.artworkStatusLabel ?? '') +
+                          (r.readiness?.artworkStatusLabel ?? '') +
                           (planningForwarded ? ' · Plate Hub: forwarded to planning' : ' · Plate Hub: pending')
                         }
                       >
@@ -970,14 +981,16 @@ export default function DesigningQueuePage() {
                         {badge.label}
                       </span>
                     </td>
-                    <td className={`px-1 py-0.5 align-middle text-right ${mono} text-xs ${ageClass(dQ)}`}>
+                    <td
+                      className={`px-4 py-3 align-middle text-right text-sm font-medium ${mono} whitespace-nowrap ${ageClass(dQ)}`}
+                    >
                       {dQ}d
                     </td>
-                    <td className="px-1 py-0.5 align-middle">
+                    <td className="px-4 py-3 align-middle">
                       <div className="flex flex-wrap items-center gap-1">
                         <Link
                           href={`/orders/designing/${r.id}`}
-                          className="inline-flex items-center gap-1 rounded border border-white/20 bg-transparent px-2 py-0.5 text-[10px] font-medium text-slate-100 hover:border-amber-500/50 hover:bg-amber-500/10"
+                          className="inline-flex min-w-[80px] items-center justify-center gap-1 rounded border border-slate-200 bg-transparent px-2 py-0.5 text-xs font-medium text-slate-800 hover:border-amber-500/50 hover:bg-amber-500/10 dark:border-border/20 dark:text-slate-100"
                         >
                           <Pencil className="h-3 w-3 opacity-70" aria-hidden />
                           Edit
@@ -987,7 +1000,7 @@ export default function DesigningQueuePage() {
                             type="button"
                             disabled={forwardingId === r.id || rowClosed}
                             onClick={() => void forwardPlanning(r)}
-                            className="rounded border border-white/20 bg-transparent px-2 py-0.5 text-[10px] font-medium text-slate-100 hover:border-violet-400/50 hover:bg-violet-500/10 disabled:opacity-40"
+                            className="min-w-[80px] rounded border border-slate-200 bg-transparent px-2 py-0.5 text-xs font-medium text-slate-800 hover:border-violet-400/50 hover:bg-violet-500/10 disabled:opacity-40 dark:border-border/20 dark:text-slate-100"
                           >
                             {forwardingId === r.id ? '…' : 'Forward'}
                           </button>
@@ -997,7 +1010,7 @@ export default function DesigningQueuePage() {
                             type="button"
                             disabled={finalizingId === r.id || rowClosed}
                             onClick={() => void finalizeFromList(r)}
-                            className="rounded border border-emerald-500/40 bg-transparent px-2 py-0.5 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40"
+                            className="min-w-[80px] rounded border border-emerald-500/40 bg-transparent px-2 py-0.5 text-xs font-medium text-emerald-800 hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-200"
                           >
                             {finalizingId === r.id ? '…' : 'Plate Hub'}
                           </button>
@@ -1005,7 +1018,7 @@ export default function DesigningQueuePage() {
                         {finalized && (
                           <Link
                             href="/hub/plates"
-                            className="rounded border border-emerald-500/30 px-2 py-0.5 text-[10px] text-emerald-300 hover:bg-emerald-500/10"
+                            className="rounded border border-emerald-500/30 px-2 py-0.5 text-xs text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
                           >
                             Plates
                           </Link>
@@ -1013,7 +1026,7 @@ export default function DesigningQueuePage() {
                         {planningForwarded && (
                           <Link
                             href="/orders/planning"
-                            className="rounded border border-emerald-500/30 px-2 py-0.5 text-[10px] text-emerald-300 hover:bg-emerald-500/10"
+                            className="rounded border border-emerald-500/30 px-2 py-0.5 text-xs text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
                           >
                             Planning
                           </Link>
@@ -1023,7 +1036,7 @@ export default function DesigningQueuePage() {
                             type="button"
                             disabled={recallingPlanningId === r.id}
                             onClick={() => void recallPlanning(r)}
-                            className="rounded border border-rose-500/35 px-2 py-0.5 text-[10px] text-rose-300 hover:bg-rose-500/10 disabled:opacity-40"
+                            className="min-w-[80px] rounded border border-rose-500/35 px-2 py-0.5 text-xs text-rose-700 hover:bg-rose-500/10 disabled:opacity-40 dark:text-rose-300"
                           >
                             {recallingPlanningId === r.id ? '…' : 'Recall'}
                           </button>
@@ -1043,10 +1056,10 @@ export default function DesigningQueuePage() {
                           <FileDown className="h-3.5 w-3.5" strokeWidth={2.25} />
                         </a>
                         <Link
-                          href={`/orders/purchase-orders/${r.po.id}`}
+                          href={r.po?.id ? `/orders/purchase-orders/${r.po.id}` : '#'}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-slate-300"
+                          className="rounded border border-slate-200 px-1.5 py-0.5 text-xs text-slate-600 hover:text-slate-900 dark:border-border/10 dark:text-slate-500 dark:hover:text-slate-300"
                         >
                           PO
                         </Link>
@@ -1057,7 +1070,7 @@ export default function DesigningQueuePage() {
               })}
             </tbody>
           </table>
-        </div>
+        </EnterpriseTableShell>
 
         {sortedRows.length === 0 && (
           <p className="py-8 text-center text-sm text-slate-600">

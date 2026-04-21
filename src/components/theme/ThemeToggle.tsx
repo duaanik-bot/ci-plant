@@ -9,16 +9,17 @@ export function ThemeToggle() {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
-  const active = mounted ? (resolvedTheme ?? theme ?? 'light') : 'light'
+  const active = mounted ? (theme ?? 'system') : 'system'
+  const activeResolved = mounted ? (resolvedTheme ?? 'light') : 'light'
 
   const btn =
-    'rounded-md px-2.5 py-1 text-xs font-medium transition-colors border border-[#E2E8F0] bg-white text-[#1A1A1B] hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+    'rounded-md border border-border bg-card px-2 py-1 text-xs font-medium text-card-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
 
-  const activeCls = 'ring-2 ring-amber-500/80 ring-offset-2 ring-offset-white dark:ring-offset-slate-900'
+  const activeCls = 'ring-2 ring-ring/70 ring-offset-2 ring-offset-background'
 
   return (
     <div
-      className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-900/80"
+      className="inline-flex items-center gap-1 rounded-lg border border-border bg-background/90 p-0.5"
       role="group"
       aria-label="Theme"
     >
@@ -28,6 +29,14 @@ export function ThemeToggle() {
         onClick={() => setTheme('light')}
       >
         Light
+      </button>
+      <button
+        type="button"
+        className={`${btn} ${active === 'system' ? activeCls : ''}`}
+        onClick={() => setTheme('system')}
+        title={`System (${activeResolved})`}
+      >
+        System
       </button>
       <button
         type="button"

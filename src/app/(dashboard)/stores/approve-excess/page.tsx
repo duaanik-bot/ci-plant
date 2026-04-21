@@ -33,7 +33,7 @@ export default function ApproveExcessListPage() {
   return (
     <div className="p-4 max-w-2xl mx-auto">
       <h1 className="text-xl font-bold text-amber-400 mb-4">Approve Excess Requests</h1>
-      <Link href="/stores/issue" className="text-slate-400 hover:text-white text-sm mb-4 inline-block">
+      <Link href="/stores/issue" className="text-slate-400 hover:text-foreground text-sm mb-4 inline-block">
         ← Issue Sheets
       </Link>
 

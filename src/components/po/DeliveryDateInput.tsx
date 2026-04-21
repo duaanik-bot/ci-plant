@@ -23,7 +23,7 @@ export function DeliveryDateInput({
   autoHint,
   suggestedYmd,
   onUseAutoSuggestion,
-  inputClassName = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white',
+  inputClassName = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground',
 }: DeliveryDateInputProps) {
   return (
     <div>

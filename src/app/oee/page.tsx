@@ -44,7 +44,7 @@ export default function OeePage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-8">
+    <div className="min-h-screen bg-slate-950 text-foreground p-8">
       <h1 className="text-4xl font-bold text-amber-400 text-center mb-8">
         OEE Live — Colour Impressions
       </h1>

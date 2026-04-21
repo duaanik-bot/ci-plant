@@ -89,7 +89,7 @@ export function DieTriageCard({
   return (
     <li
       data-hub-die-id={r.id}
-      className={`rounded-lg border bg-black p-2 overflow-visible ${
+      className={`rounded-lg border bg-background p-2 overflow-visible ${
         onHold
           ? 'border-yellow-500/70 shadow-[0_0_16px_rgba(234,179,8,0.22)] ring-2 ring-yellow-400/35'
           : 'border-zinc-800'
@@ -163,7 +163,7 @@ export function DieTriageCard({
           <button
             type="button"
             disabled={triageLocked}
-            className="py-1.5 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold disabled:opacity-50 shadow-sm"
+            className="py-1.5 rounded-md bg-orange-600 hover:bg-orange-500 text-foreground text-xs font-bold disabled:opacity-50 shadow-sm"
             onClick={onRouteToVendor}
           >
             Route to vendor
@@ -187,10 +187,10 @@ export function DieTriageCard({
             onBlur={() => window.setTimeout(() => setManualFocused(false), 160)}
             disabled={triageLocked}
             placeholder="Search DYE #, dimensions, pasting…"
-            className="w-full px-2 py-1.5 rounded border border-zinc-600 bg-black text-white text-xs placeholder:text-zinc-600"
+            className="w-full px-2 py-1.5 rounded border border-zinc-600 bg-background text-foreground text-xs placeholder:text-zinc-600"
           />
           {manualFocused && (pickLoading || pickItems.length > 0) ? (
-            <ul className="mt-1 max-h-36 overflow-y-auto rounded border border-zinc-800 bg-black text-xs">
+            <ul className="mt-1 max-h-36 overflow-y-auto rounded border border-zinc-800 bg-background text-xs">
               {pickLoading && pickItems.length === 0 ? (
                 <li className="px-2 py-2 text-zinc-500">Searching…</li>
               ) : null}
@@ -235,13 +235,13 @@ export function DieTriageCard({
                   onChange={(e) => setHoldReasonDraft(e.target.value)}
                   rows={2}
                   disabled={saving}
-                  className="mt-1 w-full px-2 py-1.5 rounded border border-zinc-600 bg-black text-white text-xs"
+                  className="mt-1 w-full px-2 py-1.5 rounded border border-zinc-600 bg-background text-foreground text-xs"
                 />
               </label>
               <button
                 type="button"
                 disabled={saving || !holdReasonDraft.trim()}
-                className="w-full py-1.5 rounded-md bg-yellow-700 hover:bg-yellow-600 text-white text-xs font-bold disabled:opacity-50"
+                className="w-full py-1.5 rounded-md bg-yellow-700 hover:bg-yellow-600 text-foreground text-xs font-bold disabled:opacity-50"
                 onClick={() => onTriageHold(true, holdReasonDraft.trim())}
               >
                 On-hold

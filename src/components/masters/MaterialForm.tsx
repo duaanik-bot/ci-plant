@@ -183,7 +183,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm'
+  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground text-sm'
   const errCls = (k: string) => fieldErrors[k] ? 'border-red-500' : 'border-slate-600'
 
   const health = mode === 'EDIT' ? stockHealth(qtyAvailable, Number(f.reorderPoint), Number(f.safetyStock)) : null
@@ -193,7 +193,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
   return (
     <div className="max-w-3xl">
       <div className="sticky top-0 z-20 mb-4 rounded-lg border border-slate-700 bg-slate-950/95 backdrop-blur p-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-white">
+        <h2 className="text-lg font-semibold text-foreground">
           {mode === 'ADD' ? 'New Board / Paper Material' : 'Edit Board / Paper Material'}
         </h2>
         <div className="flex items-center gap-3">
@@ -206,7 +206,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
               type="button"
               onClick={handleDelete}
               disabled={deleting || submitting}
-              className="px-3 py-1.5 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm"
+              className="px-3 py-1.5 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-50 text-foreground text-sm"
             >
               {deleting ? 'Deleting...' : 'Delete'}
             </button>
@@ -222,7 +222,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
             type="submit"
             form="material-form"
             disabled={submitting}
-            className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+            className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {submitting ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
           </button>
@@ -250,7 +250,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
               <button type="button" onClick={() => { setAutoCode((p) => !p); if (!autoCode) patch('materialCode', '') }} className="flex items-center gap-2 text-xs">
                 <span className="text-slate-400">Auto-generate</span>
                 <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoCode ? 'bg-amber-500' : 'bg-slate-600'}`}>
-                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${autoCode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-card transition-transform ${autoCode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
                 </span>
               </button>
             )}

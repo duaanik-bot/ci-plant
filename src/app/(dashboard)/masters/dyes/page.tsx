@@ -3,6 +3,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import {
+  EnterpriseTableShell,
+  enterpriseTableClass,
+  enterpriseTheadClass,
+  enterpriseTbodyClass,
+  enterpriseTrClass,
+  enterpriseThClass,
+  enterpriseTdClass,
+  enterpriseTdMonoClass,
+  enterpriseTdMutedClass,
+} from '@/components/ui/EnterpriseTableShell'
+
 type DyeRow = {
   id: string
   dyeNumber: number
@@ -34,81 +46,70 @@ export default function DyeMasterPage() {
     const q = search.toLowerCase()
     return rows.filter(
       (d) =>
-        String(d.dyeNumber).includes(q) ||
-        d.dyeType.toLowerCase().includes(q) ||
-        d.cartonSize.toLowerCase().includes(q)
+        String(d?.dyeNumber ?? '').includes(q) ||
+        (d?.dyeType ?? '').toLowerCase().includes(q) ||
+        (d?.cartonSize ?? '').toLowerCase().includes(q)
     )
   }, [rows, search])
 
-  if (loading) return <div className="text-slate-400">Loading dyes…</div>
+  if (loading) {
+    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading dyes…</div>
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">Dye Master</h2>
-        <Link
-          href="/masters/dyes/new"
-          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
-        >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">Dye Master</h2>
+        <Link href="/masters/dyes/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
           Add dye
         </Link>
       </div>
 
-      <div className="flex gap-3 mb-3 text-sm">
+      <div className="mb-3 flex gap-3 text-sm">
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by dye no, type, size…"
-          className="flex-1 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-slate-100"
+          className="min-h-[40px] min-w-[80px] flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-card-foreground"
         />
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-700">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-slate-800 text-slate-300">
+      <EnterpriseTableShell>
+        <table className={enterpriseTableClass}>
+          <thead className={enterpriseTheadClass}>
             <tr>
-              <th className="px-4 py-2">Dye No.</th>
-              <th className="px-4 py-2">Type</th>
-              <th className="px-4 py-2">UPS</th>
-              <th className="px-4 py-2">Sheet Size</th>
-              <th className="px-4 py-2">Carton Size</th>
-              <th className="px-4 py-2">Impressions</th>
-              <th className="px-4 py-2">Condition</th>
-              <th className="px-4 py-2">Action</th>
+              <th className={enterpriseThClass}>Dye No.</th>
+              <th className={enterpriseThClass}>Type</th>
+              <th className={enterpriseThClass}>UPS</th>
+              <th className={enterpriseThClass}>Sheet Size</th>
+              <th className={enterpriseThClass}>Carton Size</th>
+              <th className={enterpriseThClass}>Impressions</th>
+              <th className={enterpriseThClass}>Condition</th>
+              <th className={enterpriseThClass}>Action</th>
             </tr>
           </thead>
-          <tbody className="text-white">
+          <tbody className={enterpriseTbodyClass}>
             {filtered.map((d) => (
-                <tr key={d.id} className="border-t border-slate-700">
-                  <td className="px-4 py-2 font-mono">{d.dyeNumber}</td>
-                  <td className="px-4 py-2 text-slate-300">{d.dyeType}</td>
-                  <td className="px-4 py-2 text-slate-300">{d.ups}</td>
-                  <td className="px-4 py-2 text-slate-300">{d.sheetSize}</td>
-                  <td className="px-4 py-2 text-slate-300">{d.cartonSize}</td>
-                  <td className="px-4 py-2 text-slate-300">
-                    {d.impressionCount.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-2 text-slate-300">
-                    {d.conditionRating ?? 'Good'}
-                  </td>
-                  <td className="px-4 py-2">
-                    <Link
-                      href={`/masters/dyes/${d.id}`}
-                      className="text-amber-400 hover:underline"
-                    >
-                      Edit
-                    </Link>
-                  </td>
-                </tr>
+              <tr key={d.id} className={enterpriseTrClass}>
+                <td className={enterpriseTdMonoClass}>{d?.dyeNumber ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{d?.dyeType ?? '—'}</td>
+                <td className={enterpriseTdMonoClass}>{d?.ups ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{d?.sheetSize ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{d?.cartonSize ?? '—'}</td>
+                <td className={enterpriseTdMonoClass}>{(d?.impressionCount ?? 0).toLocaleString()}</td>
+                <td className={enterpriseTdMutedClass}>{d?.conditionRating ?? 'Good'}</td>
+                <td className={enterpriseTdClass}>
+                  <Link href={`/masters/dyes/${d?.id ?? ''}`} className="text-blue-600 hover:underline dark:text-blue-400">
+                    Edit
+                  </Link>
+                </td>
+              </tr>
             ))}
           </tbody>
         </table>
-      </div>
-      {filtered.length === 0 && (
-        <p className="text-slate-400 mt-4 text-sm">No dyes found.</p>
-      )}
+      </EnterpriseTableShell>
+      {filtered.length === 0 && <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No dyes found.</p>}
     </div>
   )
 }
-

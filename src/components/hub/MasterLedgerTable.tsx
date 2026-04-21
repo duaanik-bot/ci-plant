@@ -12,6 +12,12 @@ import type { PlateHubAuditContext } from '@/components/hub/JobAuditModal'
 import type { LedgerZoneKey } from '@/lib/plate-hub-ledger'
 import { ledgerRowPlateVolume } from '@/lib/hub-zone-metrics'
 import { INDUSTRIAL_PRIORITY_ROW_CLASS } from '@/lib/industrial-priority-ui'
+import {
+  EnterpriseTableShell,
+  enterpriseTheadClass,
+  enterpriseTbodyClass,
+  enterpriseTrClass,
+} from '@/components/ui/EnterpriseTableShell'
 
 export type MasterLedgerRow = {
   entity: 'requirement' | 'plate'
@@ -48,13 +54,13 @@ function stageAgeHours(iso: string | undefined): number {
 
 function PlateStageDaysCell({ lastStatusUpdatedAt }: { lastStatusUpdatedAt: string | undefined }) {
   const h = stageAgeHours(lastStatusUpdatedAt)
-  if (!lastStatusUpdatedAt || h <= 0) return <span className="text-zinc-500 text-[11px]">—</span>
+  if (!lastStatusUpdatedAt || h <= 0) return <span className="text-sm text-slate-500 dark:text-slate-400">—</span>
   const days = h / 24
   const critical = h >= 24
   return (
     <span
-      className={`tabular-nums text-[11px] font-medium ${
-        critical ? 'text-rose-400 animate-industrial-age-pulse' : 'text-slate-400'
+      className={`font-designing-queue text-sm font-medium tabular-nums ${
+        critical ? 'text-rose-600 animate-industrial-age-pulse dark:text-rose-400' : 'text-slate-600 dark:text-slate-400'
       }`}
       title="Days since last status update in this zone"
     >
@@ -120,26 +126,26 @@ export function MasterLedgerTable({
   const filtered = getFilteredMasterLedgerRows(rows, searchQuery, zoneFilter, sizeFilter)
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-zinc-700 bg-zinc-950">
-      <table className="min-w-[920px] w-full text-left text-sm border-collapse">
-        <thead>
-          <tr className="border-b border-zinc-700 text-[10px] uppercase tracking-wide text-zinc-500">
-            <th className="px-3 py-2 font-semibold whitespace-nowrap">Job ID</th>
-            <th className="px-3 py-2 font-semibold min-w-[140px]">Carton</th>
-            <th className="px-3 py-2 font-semibold whitespace-nowrap">Zone</th>
-            <th className="px-3 py-2 font-semibold whitespace-nowrap text-right tabular-nums w-[1%]">
+    <EnterpriseTableShell>
+      <table className="min-w-[920px] w-full border-collapse text-left text-sm text-slate-900 dark:text-slate-50">
+        <thead className={enterpriseTheadClass}>
+          <tr>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Job ID</th>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider min-w-[140px]">Carton</th>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Zone</th>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-right tabular-nums w-[1%]">
               Plate volume
             </th>
-            <th className="px-3 py-2 font-semibold min-w-[160px]">Size &amp; colours</th>
-            <th className="px-3 py-2 font-semibold whitespace-nowrap">Days in stage</th>
-            <th className="px-3 py-2 font-semibold whitespace-nowrap">Time in zone</th>
-            <th className="px-3 py-2 font-semibold min-w-[180px]">Last action</th>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider min-w-[160px]">Size &amp; colours</th>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Days in stage</th>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Time in zone</th>
+            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider min-w-[180px]">Last action</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className={enterpriseTbodyClass}>
           {filtered.length === 0 ? (
             <tr>
-              <td colSpan={8} className="px-3 py-8 text-center text-zinc-500">
+              <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
                 No rows match the current filters.
               </td>
             </tr>
@@ -158,12 +164,12 @@ export function MasterLedgerTable({
               return (
                 <tr
                   key={`${r.entity}-${r.id}`}
-                  className={`border-b border-zinc-800/80 hover:bg-zinc-900/50 ${pri}`}
+                  className={`${enterpriseTrClass} border-b border-slate-200 dark:border-slate-800 ${pri}`}
                 >
-                  <td className="px-3 py-2 font-mono text-amber-200/90 text-xs whitespace-nowrap">
+                  <td className="px-4 py-3 font-designing-queue text-xs font-medium whitespace-nowrap text-amber-800 dark:text-amber-200/90">
                     {r.jobId}
                   </td>
-                  <td className="px-3 py-2 min-w-0">
+                  <td className="px-4 py-3 min-w-0">
                     <button
                       type="button"
                       onClick={() =>
@@ -182,35 +188,35 @@ export function MasterLedgerTable({
                           statusLabel: r.statusLabel,
                         })
                       }
-                      className="text-left text-blue-400 hover:text-blue-300 hover:underline text-sm font-bold leading-snug tracking-tight break-words whitespace-normal min-w-0 w-full max-w-md block"
+                      className="block w-full max-w-md min-w-0 break-words whitespace-normal text-left text-sm font-bold leading-snug tracking-tight text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
                     >
                       {r.cartonName}
                       {r.partialRemake ? (
-                        <span className="text-rose-400 font-bold ml-1">(Remake)</span>
+                        <span className="ml-1 font-bold text-rose-600 dark:text-rose-400">(Remake)</span>
                       ) : null}
                     </button>
-                    <p className="text-[11px] font-medium text-gray-300 opacity-90 whitespace-normal break-words mt-0.5">
+                    <p className="mt-0.5 break-words text-xs font-medium text-slate-600 whitespace-normal dark:text-slate-300">
                       AW: {r.artworkCode?.trim() || '—'}
                       {r.poLineId ? (
                         <>
-                          <span className="text-zinc-600"> · </span>
+                          <span className="text-slate-400"> · </span>
                           PO: {r.poLineId}
                         </>
                       ) : null}
                     </p>
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
+                  <td className="px-4 py-3 whitespace-nowrap">
                     <span
-                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${r.zoneBadgeClass}`}
+                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${r.zoneBadgeClass}`}
                     >
                       {r.zoneLabel}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right text-xs text-zinc-300 tabular-nums font-semibold whitespace-nowrap">
+                  <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums text-slate-900 whitespace-nowrap dark:text-slate-300">
                     {vol}
                   </td>
-                  <td className="px-3 py-2">
-                    <p className="text-[11px] text-zinc-300 mb-1 break-words whitespace-normal">
+                  <td className="px-4 py-3">
+                    <p className="mb-1 break-words text-sm text-slate-700 whitespace-normal dark:text-slate-300">
                       {sizeLine}
                     </p>
                     <PlateHubColourSwatchStrip
@@ -219,13 +225,13 @@ export function MasterLedgerTable({
                       className="flex flex-wrap gap-1 content-start"
                     />
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
+                  <td className="px-4 py-3 whitespace-nowrap">
                     <PlateStageDaysCell lastStatusUpdatedAt={r.lastStatusUpdatedAt} />
                   </td>
-                  <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap tabular-nums">
+                  <td className="px-4 py-3 font-designing-queue text-xs tabular-nums text-slate-600 whitespace-nowrap dark:text-slate-400">
                     {timeInZone}
                   </td>
-                  <td className="px-3 py-2 text-[11px] text-zinc-500 leading-snug max-w-[240px] break-words whitespace-normal">
+                  <td className="px-4 py-3 max-w-[240px] break-words text-sm leading-snug text-slate-600 whitespace-normal dark:text-slate-500">
                     {lastLine}
                   </td>
                 </tr>
@@ -234,7 +240,7 @@ export function MasterLedgerTable({
           )}
         </tbody>
       </table>
-    </div>
+    </EnterpriseTableShell>
   )
 }
 

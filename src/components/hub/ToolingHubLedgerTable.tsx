@@ -11,6 +11,12 @@ import { DieMakeSwitcher } from '@/components/hub/die/DieMakeSwitcher'
 import { SimilarDiesModal, type SimilarDieMatch } from '@/components/hub/die/SimilarDiesModal'
 import { PastingStyleBadge } from '@/components/hub/PastingStyleBadge'
 import { INDUSTRIAL_PRIORITY_ROW_CLASS } from '@/lib/industrial-priority-ui'
+import {
+  EnterpriseTableShell,
+  enterpriseTheadClass,
+  enterpriseTbodyClass,
+  enterpriseTrClass,
+} from '@/components/ui/EnterpriseTableShell'
 
 export type ToolingSimilarMatch = SimilarDieMatch
 
@@ -187,23 +193,23 @@ export function ToolingHubLedgerTable({
 
   if (hubMode === 'blocks') {
     return (
-      <div className="overflow-x-auto rounded-xl border border-zinc-700 bg-zinc-950">
-        <table className="min-w-[800px] w-full text-left text-sm border-collapse">
-          <thead>
-            <tr className="border-b border-zinc-700 text-[10px] uppercase tracking-wide text-zinc-500">
-              <th className="px-3 py-2 font-semibold whitespace-nowrap">Code</th>
-              <th className="px-3 py-2 font-semibold min-w-[140px]">Title</th>
-              <th className="px-3 py-2 font-semibold whitespace-nowrap">Zone</th>
-              <th className="px-3 py-2 font-semibold text-right tabular-nums w-[1%]">Units</th>
-              <th className="px-3 py-2 font-semibold min-w-[200px]">Specs</th>
-              <th className="px-3 py-2 font-semibold whitespace-nowrap">Time in zone</th>
-              <th className="px-3 py-2 font-semibold min-w-[160px]">Last action</th>
+      <EnterpriseTableShell>
+        <table className="min-w-[800px] w-full border-collapse text-left text-sm text-slate-900 dark:text-slate-50">
+          <thead className={enterpriseTheadClass}>
+            <tr>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Code</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider min-w-[140px]">Title</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Zone</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-right tabular-nums w-[1%]">Units</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider min-w-[200px]">Specs</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Time in zone</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider min-w-[160px]">Last action</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className={enterpriseTbodyClass}>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-zinc-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
                   No rows match the current filters.
                 </td>
               </tr>
@@ -220,12 +226,12 @@ export function ToolingHubLedgerTable({
                 return (
                   <tr
                     key={`${r.kind}-${r.id}`}
-                    className={`border-b border-zinc-800/80 hover:bg-zinc-900/50 ${priorityRow}`}
+                    className={`${enterpriseTrClass} border-b border-slate-200 dark:border-slate-800 ${priorityRow}`}
                   >
-                    <td className="px-3 py-2 font-mono text-amber-200/90 text-xs whitespace-nowrap">
+                    <td className="px-4 py-3 font-designing-queue text-xs font-medium whitespace-nowrap text-amber-800 dark:text-amber-200/90">
                       {r.displayCode}
                     </td>
-                    <td className="px-3 py-2 min-w-0">
+                    <td className="px-4 py-3 min-w-0">
                       <button
                         type="button"
                         onClick={() =>
@@ -239,28 +245,28 @@ export function ToolingHubLedgerTable({
                             units: r.units,
                           })
                         }
-                        className="text-left text-blue-400 hover:text-blue-300 hover:underline font-medium truncate max-w-[220px] block text-xs"
+                        className="block max-w-[220px] truncate text-left text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
                       >
                         {r.title}
                       </button>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <span
-                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${r.zoneBadgeClass}`}
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${r.zoneBadgeClass}`}
                       >
                         {r.zoneLabel}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-right text-xs text-zinc-300 tabular-nums font-semibold whitespace-nowrap">
+                    <td className="px-4 py-3 text-right text-sm font-medium tabular-nums text-slate-900 whitespace-nowrap dark:text-slate-300">
                       {r.units}
                     </td>
-                    <td className="px-3 py-2 text-[11px] text-zinc-400 leading-snug">
+                    <td className="px-4 py-3 text-sm leading-snug text-slate-600 dark:text-slate-400">
                       {r.specSummary}
                     </td>
-                    <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap tabular-nums">
+                    <td className="px-4 py-3 font-designing-queue text-xs tabular-nums text-slate-600 whitespace-nowrap dark:text-slate-400">
                       {timeInZone}
                     </td>
-                    <td className="px-3 py-2 text-[11px] text-zinc-500 leading-snug max-w-[220px]">
+                    <td className="px-4 py-3 max-w-[220px] text-sm leading-snug text-slate-600 dark:text-slate-500">
                       {lastLine}
                     </td>
                   </tr>
@@ -269,33 +275,33 @@ export function ToolingHubLedgerTable({
             )}
           </tbody>
         </table>
-      </div>
+      </EnterpriseTableShell>
     )
   }
 
   return (
     <>
-      <div className="overflow-x-auto rounded-xl border border-zinc-700 bg-zinc-950">
-        <table className="min-w-[1100px] w-full text-left text-xs border-collapse">
-          <thead>
-            <tr className="border-b border-zinc-700 text-[10px] uppercase tracking-wide text-zinc-500">
-              <th className="px-2 py-2 font-semibold whitespace-nowrap w-[1%]">#</th>
-              <th className="px-2 py-2 font-semibold min-w-[100px]">L×W×H</th>
-              <th className="px-2 py-2 font-semibold text-right tabular-nums w-[1%]">UPS</th>
-              <th className="px-2 py-2 font-semibold min-w-[88px]">Master type</th>
-              <th className="px-2 py-2 font-semibold whitespace-nowrap">Make</th>
-              <th className="px-2 py-2 font-semibold whitespace-nowrap">Match</th>
-              <th className="px-2 py-2 font-semibold whitespace-nowrap">DOM</th>
-              <th className="px-2 py-2 font-semibold whitespace-nowrap">Zone</th>
-              <th className="px-2 py-2 font-semibold whitespace-nowrap w-[1%]">Flags</th>
-              <th className="px-2 py-2 font-semibold whitespace-nowrap">Time in zone</th>
-              <th className="px-2 py-2 font-semibold min-w-[140px]">Last action</th>
+      <EnterpriseTableShell>
+        <table className="min-w-[1100px] w-full border-collapse text-left text-xs text-slate-900 dark:text-slate-50">
+          <thead className={enterpriseTheadClass}>
+            <tr>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap w-[1%]">#</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider min-w-[100px]">L×W×H</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-right tabular-nums w-[1%]">UPS</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider min-w-[88px]">Master type</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Make</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Match</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">DOM</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Zone</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap w-[1%]">Flags</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Time in zone</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider min-w-[140px]">Last action</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className={enterpriseTbodyClass}>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-zinc-500 text-sm">
+                <td colSpan={11} className="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
                   No rows match the current filters.
                 </td>
               </tr>
@@ -324,39 +330,39 @@ export function ToolingHubLedgerTable({
                     key={`${r.kind}-${r.id}`}
                     data-hub-die-id={r.kind === 'die' ? r.id : undefined}
                     data-hub-emboss-id={r.kind === 'emboss' ? r.id : undefined}
-                    className={`border-b border-zinc-800/80 hover:bg-zinc-900/50 ${priorityRowDie}`}
+                    className={`${enterpriseTrClass} border-b border-slate-200 dark:border-slate-800 ${priorityRowDie}`}
                   >
-                    <td className="px-2 py-1.5 text-zinc-500 tabular-nums font-mono text-[11px]">
+                    <td className="px-4 py-3 font-designing-queue text-[11px] tabular-nums text-slate-500 dark:text-slate-400">
                       {rank}
                     </td>
-                    <td className="px-2 py-1.5 min-w-0">
+                    <td className="px-4 py-3 min-w-0">
                       {r.kind === 'die' ? (
                         <button
                           type="button"
                           onClick={() => openAuditForDie(r, dimTitle)}
-                          className="text-left text-blue-400 hover:text-blue-300 hover:underline font-semibold truncate max-w-[140px] block text-xs"
+                          className="block max-w-[140px] truncate text-left text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
                         >
                           {dimTitle}
                         </button>
                       ) : (
-                        <span className="text-zinc-500">—</span>
+                        <span className="text-slate-500 dark:text-slate-500">—</span>
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums font-semibold whitespace-nowrap">
+                    <td className="px-4 py-3 text-right font-designing-queue text-sm font-semibold tabular-nums text-slate-900 whitespace-nowrap dark:text-slate-300">
                       {r.kind === 'die' ? (r.ups ?? '—') : '—'}
                     </td>
-                    <td className="px-2 py-1.5 text-[11px] text-zinc-300 max-w-[140px] min-w-0">
+                    <td className="px-4 py-3 max-w-[140px] min-w-0 text-[11px] text-slate-700 dark:text-slate-300">
                       {r.kind === 'die' ? (
                         <div className="flex flex-col gap-1">
                           <div className="flex flex-wrap items-center gap-1">
                             <PastingStyleBadge value={r.pastingStyle} />
                             {r.hubPastingNeedsMasterUpdate ? (
-                              <span className="inline-flex items-center rounded border border-amber-500/70 bg-amber-950/50 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-amber-200 whitespace-nowrap">
+                              <span className="inline-flex items-center rounded border border-amber-500/70 bg-amber-50 px-1 py-0.5 text-xs font-bold uppercase tracking-wide text-amber-900 whitespace-nowrap dark:bg-amber-950/50 dark:text-amber-200">
                                 Master update
                               </span>
                             ) : null}
                           </div>
-                          <span className="truncate text-zinc-400">
+                          <span className="truncate text-slate-500 dark:text-slate-400">
                             {r.masterType?.trim() || '—'}
                           </span>
                         </div>
@@ -364,7 +370,7 @@ export function ToolingHubLedgerTable({
                         '—'
                       )}
                     </td>
-                    <td className="px-2 py-1.5 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       {r.kind === 'die' && r.dieMake ? (
                         <DieMakeSwitcher
                           dyeId={r.id}
@@ -373,10 +379,10 @@ export function ToolingHubLedgerTable({
                           onPersisted={() => onDieDataChanged?.()}
                         />
                       ) : (
-                        <span className="text-zinc-600">—</span>
+                        <span className="text-slate-500 dark:text-slate-600">—</span>
                       )}
                     </td>
-                    <td className="px-2 py-1.5 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       {r.kind === 'die' && hasTypeMismatch ? (
                         <button
                           type="button"
@@ -407,32 +413,32 @@ export function ToolingHubLedgerTable({
                           Similar
                         </button>
                       ) : (
-                        <span className="text-zinc-600">—</span>
+                        <span className="text-slate-500 dark:text-slate-600">—</span>
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-[11px] text-zinc-400 whitespace-nowrap tabular-nums">
+                    <td className="px-4 py-3 font-designing-queue text-[11px] tabular-nums text-slate-600 whitespace-nowrap dark:text-slate-400">
                       {r.kind === 'die' ? formatDom(r.dateOfManufacturing) : '—'}
                     </td>
-                    <td className="px-2 py-1.5 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <span
-                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${r.zoneBadgeClass}`}
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${r.zoneBadgeClass}`}
                       >
                         {r.zoneLabel}
                       </span>
                     </td>
-                    <td className="px-2 py-1.5 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       {r.hubConditionPoor ? (
-                        <span className="inline-flex items-center rounded border border-red-600/70 bg-red-950/50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-red-300 whitespace-nowrap">
+                        <span className="inline-flex items-center rounded border border-red-600/70 bg-red-50 px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide text-red-800 whitespace-nowrap dark:bg-red-950/50 dark:text-red-300">
                           Maintenance
                         </span>
                       ) : (
-                        <span className="text-zinc-600">—</span>
+                        <span className="text-slate-500 dark:text-slate-600">—</span>
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-[11px] text-zinc-400 whitespace-nowrap tabular-nums">
+                    <td className="px-4 py-3 font-designing-queue text-[11px] tabular-nums text-slate-600 whitespace-nowrap dark:text-slate-400">
                       {timeInZone}
                     </td>
-                    <td className="px-2 py-1.5 text-[10px] text-zinc-500 leading-snug max-w-[200px]">
+                    <td className="px-4 py-3 max-w-[200px] text-sm leading-snug text-slate-600 dark:text-slate-500">
                       {lastLine}
                     </td>
                   </tr>
@@ -441,7 +447,7 @@ export function ToolingHubLedgerTable({
             )}
           </tbody>
         </table>
-      </div>
+      </EnterpriseTableShell>
       <SimilarDiesModal
         open={!!similarModal}
         onClose={() => setSimilarModal(null)}

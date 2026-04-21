@@ -76,7 +76,7 @@ export function DieTakeFromStockModal({
 
   return (
     <div
-      className="fixed inset-0 z-[55] flex items-center justify-center bg-black/85 p-4"
+      className="fixed inset-0 z-[55] flex items-center justify-center bg-background/85 p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

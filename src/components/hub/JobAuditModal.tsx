@@ -96,7 +96,7 @@ export function JobAuditModal({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/85 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -111,7 +111,7 @@ export function JobAuditModal({
         <div className="p-4 border-b border-zinc-800 shrink-0">
           <div className="flex justify-between gap-2 items-start">
             <div className="min-w-0">
-              <h2 id="job-audit-title" className="text-lg font-semibold text-white">
+              <h2 id="job-audit-title" className="text-lg font-semibold text-foreground">
                 Job details &amp; history
               </h2>
               <p className="text-sm font-bold leading-snug tracking-tight text-blue-400 mt-1 break-words whitespace-normal">
@@ -144,7 +144,7 @@ export function JobAuditModal({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-2">
               Current specs
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-zinc-800 bg-black/50 p-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-zinc-800 bg-background/50 p-3">
               <div>
                 <p className="text-[10px] text-zinc-500 uppercase">Plate size</p>
                 <p className="text-sm text-zinc-200 font-medium">{sizeMm}</p>

@@ -22,11 +22,14 @@ import {
   MASTER_EMBOSSING_AND_LEAFING,
 } from '@/lib/master-enums'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
+import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
+
 const cellBase =
-  'px-2 py-2.5 text-[13px] text-slate-900 border-b border-[#E2E8F0] whitespace-nowrap overflow-hidden text-ellipsis max-w-[14rem]'
-const monoStrong = "font-[family-name:var(--font-jetbrains-mono)] font-semibold tabular-nums"
+  'px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 whitespace-nowrap overflow-hidden text-ellipsis max-w-[14rem]'
+const monoStrong =
+  'font-designing-queue font-semibold tabular-nums text-slate-900 dark:text-slate-100'
 const theadBtn =
-  'inline-flex items-center gap-0.5 text-left font-medium text-slate-700 hover:text-[#1D4ED8] uppercase tracking-wider text-[11px]'
+  'inline-flex items-center gap-0.5 text-left text-xs font-medium uppercase tracking-wider text-slate-600 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400'
 
 type DieMaster = { id: string; dyeNumber: number; ups: number; sheetSize: string }
 
@@ -449,7 +452,7 @@ export function PlanningDecisionGrid({
   const isProcessedRow = (r: PlanningGridLine) => r.planningStatus !== 'pending'
 
   return (
-    <div className="rounded-lg border border-[#E2E8F0] bg-white shadow-sm overflow-hidden pb-8">
+    <div className="rounded-lg border border-border bg-card shadow-sm overflow-hidden pb-8">
       {mixConflictMessage || coatingConflict || gsmConflict ? (
         <div
           className={`px-3 py-2 text-sm ${flash ? 'bg-red-100 text-red-800 animate-pulse' : 'bg-red-50 text-red-700'}`}
@@ -463,10 +466,10 @@ export function PlanningDecisionGrid({
         </div>
       ) : null}
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[2200px] border-collapse text-left font-[family-name:var(--font-inter)]">
+      <EnterpriseTableShell>
+        <table className="w-full min-w-[2200px] border-collapse text-left text-sm">
           <thead>
-            <tr className="bg-[#F1F5F9] border-b border-[#E2E8F0]">
+            <tr className="bg-slate-100 border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-800">
               <th
                 colSpan={12}
                 className="px-2 py-2 text-[11px] font-semibold text-slate-600 uppercase tracking-wide"
@@ -486,12 +489,12 @@ export function PlanningDecisionGrid({
                     }`}
                     title="When on, the PO priority star runs a what-if only and does not change priority"
                   >
-                    <span className="pointer-events-none block h-5 w-5 rounded-full bg-white shadow" />
+                    <span className="pointer-events-none block h-5 w-5 rounded-full bg-card shadow" />
                   </button>
                 </div>
               </th>
             </tr>
-            <tr className="bg-[#F8FAFC] border-b border-[#E2E8F0] text-[12px]">
+            <tr className="bg-slate-50 border-b border-slate-200 text-sm dark:bg-slate-900/60 dark:border-slate-800">
               <th className="px-2 py-2 w-10" />
               <th className="px-2 py-2 min-w-[7rem]">
                 <input
@@ -504,7 +507,7 @@ export function PlanningDecisionGrid({
               <th className="px-2 py-2 min-w-[6rem]" />
               <th className="px-2 py-2 min-w-[8rem]">
                 <select
-                  className="w-full h-8 rounded border border-[#E2E8F0] bg-white text-[12px] text-slate-800"
+                  className="w-full h-8 rounded border border-border bg-card text-[12px] text-card-foreground"
                   value={fClient}
                   onChange={(e) => setFClient(e.target.value)}
                 >
@@ -545,7 +548,7 @@ export function PlanningDecisionGrid({
               <th className="px-2 py-2" />
               <th className="px-2 py-2 min-w-[7rem]">
                 <select
-                  className="w-full h-8 rounded border border-[#E2E8F0] bg-white text-[12px]"
+                  className="w-full h-8 rounded border border-border bg-card text-[12px]"
                   value={fCoating}
                   onChange={(e) => setFCoating(e.target.value)}
                 >
@@ -559,7 +562,7 @@ export function PlanningDecisionGrid({
               </th>
               <th className="px-2 py-2 min-w-[7rem]">
                 <select
-                  className="w-full h-8 rounded border border-[#E2E8F0] bg-white text-[12px]"
+                  className="w-full h-8 rounded border border-border bg-card text-[12px]"
                   value={fOtherCoating}
                   onChange={(e) => setFOtherCoating(e.target.value)}
                 >
@@ -573,7 +576,7 @@ export function PlanningDecisionGrid({
               </th>
               <th className="px-2 py-2 min-w-[7rem]">
                 <select
-                  className="w-full h-8 rounded border border-[#E2E8F0] bg-white text-[12px]"
+                  className="w-full h-8 rounded border border-border bg-card text-[12px]"
                   value={fEmboss}
                   onChange={(e) => setFEmboss(e.target.value)}
                 >
@@ -587,7 +590,7 @@ export function PlanningDecisionGrid({
               </th>
               <th className="px-2 py-2 min-w-[7rem]">
                 <select
-                  className="w-full h-8 rounded border border-[#E2E8F0] bg-white text-[12px]"
+                  className="w-full h-8 rounded border border-border bg-card text-[12px]"
                   value={fPaper}
                   onChange={(e) => setFPaper(e.target.value)}
                 >
@@ -611,91 +614,91 @@ export function PlanningDecisionGrid({
               <th className="px-2 py-2" />
               <th className="px-2 py-2" />
             </tr>
-            <tr className="bg-white border-b border-[#E2E8F0]">
+            <tr className="border-b border-slate-200 bg-card dark:border-slate-800">
               <th className={`${cellBase} w-10 bg-[#F8FAFC]`}>
                 <span className="text-[11px] font-medium text-slate-600">Si</span>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC] min-w-[7rem]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60 min-w-[7rem]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('poNumber')}>
                   PO No. {sortKey === 'poNumber' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC] min-w-[6rem]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60 min-w-[6rem]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('poDate')}>
                   PO Date {sortKey === 'poDate' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('client')}>
                   Client {sortKey === 'client' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC] min-w-[10rem]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60 min-w-[10rem]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('cartonName')}>
                   Carton {sortKey === 'cartonName' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('artworkCode')}>
                   AW Code {sortKey === 'artworkCode' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('cartonSize')}>
                   Carton Size {sortKey === 'cartonSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('qty')}>
                   Qty {sortKey === 'qty' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('dyeUps')}>
                   Dye/UPS {sortKey === 'dyeUps' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('sheetSize')}>
                   Sheet Size {sortKey === 'sheetSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('coating')}>
                   Coating {sortKey === 'coating' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('otherCoating')}>
                   Oth coat {sortKey === 'otherCoating' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('emboss')}>
                   Emb/Leaf {sortKey === 'emboss' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('paper')}>
                   Paper {sortKey === 'paper' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('gsm')}>
                   GSM {sortKey === 'gsm' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('ups')}>
                   UPS {sortKey === 'ups' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC]`}>
+              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('remarks')}>
                   Remarks {sortKey === 'remarks' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-[#F8FAFC] text-right`}>Action</th>
+              <th className={`${cellBase} bg-slate-50 text-right dark:bg-slate-900/60`}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -706,7 +709,8 @@ export function PlanningDecisionGrid({
               const otherCoat = r.otherCoating ?? r.carton?.laminateType ?? '—'
               const coating = r.coatingType ?? r.carton?.coatingType ?? '—'
               const processed = isProcessedRow(r)
-              const stripe = idx % 2 === 0 ? 'bg-white' : 'bg-[#F8FAFC]'
+              const stripe =
+                idx % 2 === 0 ? 'bg-card' : 'bg-muted/40 dark:bg-slate-900/70'
               const bpiRow = computeBatchProfitabilityIndex({
                 quantity: r.quantity,
                 ratePerUnitInr: r.rate,
@@ -718,7 +722,7 @@ export function PlanningDecisionGrid({
               return (
                 <Fragment key={r.id}>
                   <tr
-                    className={`${stripe} hover:bg-slate-100/80`}
+                    className={`${stripe} transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50`}
                     onClick={(e) => {
                       const t = e.target as HTMLElement
                       if (t.closest('input,select,button,a,[data-po-priority-star]')) return
@@ -930,7 +934,7 @@ export function PlanningDecisionGrid({
                         type="number"
                         min={1}
                         disabled={processed}
-                        className="h-8 w-[4.5rem] rounded border border-[#E2E8F0] px-1 text-[13px] text-slate-900 disabled:opacity-50"
+                        className="h-8 min-w-[80px] w-[4.5rem] rounded border border-slate-200 px-2 text-sm text-slate-900 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         value={planCore.ups ?? r.materialQueue?.ups ?? ''}
                         onChange={(e) => {
                           const ups = Math.max(1, parseInt(e.target.value, 10) || 1)
@@ -968,7 +972,7 @@ export function PlanningDecisionGrid({
                       <input
                         type="text"
                         disabled={processed}
-                        className="h-8 w-full min-w-[8rem] max-w-[12rem] rounded border border-[#E2E8F0] px-1 text-[13px] text-slate-900 disabled:opacity-50"
+                        className="h-8 w-full min-w-[80px] max-w-[12rem] rounded border border-slate-200 px-2 text-sm text-slate-900 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         value={r.remarks ?? ''}
                         onChange={(e) => updateRow(r.id, { remarks: e.target.value || null })}
                         onBlur={() => void onSaveRow?.(r.id)}
@@ -989,7 +993,7 @@ export function PlanningDecisionGrid({
             })}
           </tbody>
         </table>
-      </div>
+      </EnterpriseTableShell>
 
       {sorted.length === 0 ? (
         <p className="px-4 py-6 text-center text-slate-500 text-sm">No lines in this view.</p>
@@ -997,11 +1001,11 @@ export function PlanningDecisionGrid({
 
       {planningSelection.size >= 2 ? (
         <div className="fixed bottom-6 left-1/2 z-[75] -translate-x-1/2 pointer-events-none flex flex-col items-center gap-2">
-          <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-full border border-[#E2E8F0] bg-white px-4 py-2 shadow-lg">
+          <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-full border border-border bg-card px-4 py-2 shadow-lg">
             <button
               type="button"
               onClick={() => setBulkOpen(true)}
-              className="rounded-full bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-900"
+              className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
             >
               Apply UPS &amp; Designer to selected
             </button>
@@ -1011,7 +1015,7 @@ export function PlanningDecisionGrid({
 
       {bulkOpen ? (
         <div className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-900/30 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-xl">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-xl">
             <h3 className="text-sm font-semibold text-slate-900">Bulk apply</h3>
             <p className="text-xs text-slate-500 mt-1">Applies to {selectedLines.length} selected row(s).</p>
             <label className="mt-3 block text-xs font-medium text-slate-600">
@@ -1019,7 +1023,7 @@ export function PlanningDecisionGrid({
               <input
                 type="number"
                 min={1}
-                className="mt-1 w-full h-9 rounded border border-[#E2E8F0] px-2"
+                className="mt-1 w-full h-9 rounded border border-border bg-card px-2"
                 value={bulkUps}
                 onChange={(e) => setBulkUps(e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value, 10) || 1))}
               />
@@ -1027,7 +1031,7 @@ export function PlanningDecisionGrid({
             <label className="mt-3 block text-xs font-medium text-slate-600">
               Designer
               <select
-                className="mt-1 w-full h-9 rounded border border-[#E2E8F0] px-2"
+                className="mt-1 w-full h-9 rounded border border-border bg-card px-2"
                 value={bulkDesigner}
                 onChange={(e) => setBulkDesigner(e.target.value as PlanningDesignerKey | '')}
               >
@@ -1042,7 +1046,7 @@ export function PlanningDecisionGrid({
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-[#1D4ED8] px-3 py-1.5 text-sm font-semibold text-white"
+                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground"
                 onClick={applyBulk}
               >
                 Apply

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import { Providers } from '@/components/providers'
-import { Toaster } from 'sonner'
+import { AppToaster } from '@/components/theme/AppToaster'
 import './globals.css'
 
 const inter = Inter({
@@ -30,10 +30,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} font-sans text-sm antialiased bg-background text-foreground`}
+        className={`${inter.variable} ${jetbrainsMono.variable} bg-background font-sans text-sm text-foreground antialiased`}
       >
         <Providers>{children}</Providers>
-        <Toaster position="top-center" richColors />
+        <AppToaster />
       </body>
     </html>
   )

@@ -3,6 +3,17 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import {
+  EnterpriseTableShell,
+  enterpriseTableClass,
+  enterpriseTheadClass,
+  enterpriseTbodyClass,
+  enterpriseTrClass,
+  enterpriseThClass,
+  enterpriseTdClass,
+  enterpriseTdMonoClass,
+  enterpriseTdMutedClass,
+} from '@/components/ui/EnterpriseTableShell'
 
 type Customer = {
   id: string
@@ -28,7 +39,9 @@ export default function MastersCustomersPage() {
       .catch(() => toast.error('Failed to load customers'))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+  }, [])
 
   async function deactivate(c: Customer) {
     if (!confirm(`Deactivate ${c.name}?`)) return
@@ -43,55 +56,53 @@ export default function MastersCustomersPage() {
     } else toast.error('Failed')
   }
 
-  if (loading) return <div className="text-slate-400">Loading…</div>
+  if (loading) {
+    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">Customer Master</h2>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">Customer Master</h2>
         <Link
           href="/masters/customers/new"
-          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-primary-foreground hover:bg-blue-700"
         >
           Add customer
         </Link>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-slate-700">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-slate-800 text-slate-300">
+      <EnterpriseTableShell>
+        <table className={enterpriseTableClass}>
+          <thead className={enterpriseTheadClass}>
             <tr>
-              <th className="px-4 py-2">Name</th>
-              <th className="px-4 py-2">GST</th>
-              <th className="px-4 py-2">Contact</th>
-              <th className="px-4 py-2">Phone</th>
-              <th className="px-4 py-2">Credit Limit</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Actions</th>
+              <th className={enterpriseThClass}>Name</th>
+              <th className={enterpriseThClass}>GST</th>
+              <th className={enterpriseThClass}>Contact</th>
+              <th className={enterpriseThClass}>Phone</th>
+              <th className={enterpriseThClass}>Credit Limit</th>
+              <th className={enterpriseThClass}>Status</th>
+              <th className={enterpriseThClass}>Actions</th>
             </tr>
           </thead>
-          <tbody className="text-white">
+          <tbody className={enterpriseTbodyClass}>
             {list.map((c) => (
-              <tr key={c.id} className="border-t border-slate-700">
-                <td className="px-4 py-2">{c.name}</td>
-                <td className="px-4 py-2 text-slate-400">{c.gstNumber ?? '—'}</td>
-                <td className="px-4 py-2 text-slate-400">{c.contactName ?? '—'}</td>
-                <td className="px-4 py-2 text-slate-400">{c.contactPhone ?? '—'}</td>
-                <td className="px-4 py-2">{c.creditLimit}</td>
-                <td className="px-4 py-2">
-                  <span className={c.active ? 'text-green-400' : 'text-red-400'}>
-                    {c.active ? 'Active' : 'Inactive'}
+              <tr key={c.id} className={enterpriseTrClass}>
+                <td className={enterpriseTdClass}>{c?.name ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{c?.gstNumber ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{c?.contactName ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{c?.contactPhone ?? '—'}</td>
+                <td className={enterpriseTdMonoClass}>{c?.creditLimit ?? '—'}</td>
+                <td className={enterpriseTdClass}>
+                  <span className={c?.active ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                    {c?.active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
-                <td className="px-4 py-2">
-                  <Link href={`/masters/customers/${c.id}`} className="text-amber-400 hover:underline mr-2">
+                <td className={enterpriseTdClass}>
+                  <Link href={`/masters/customers/${c?.id ?? ''}`} className="mr-2 text-blue-600 hover:underline dark:text-blue-400">
                     Edit
                   </Link>
-                  {c.active && (
-                    <button
-                      type="button"
-                      onClick={() => deactivate(c)}
-                      className="text-slate-400 hover:underline"
-                    >
+                  {c?.active && (
+                    <button type="button" onClick={() => deactivate(c)} className="text-slate-600 hover:underline dark:text-slate-400">
                       Deactivate
                     </button>
                   )}
@@ -100,9 +111,9 @@ export default function MastersCustomersPage() {
             ))}
           </tbody>
         </table>
-      </div>
+      </EnterpriseTableShell>
       {list.length === 0 && (
-        <p className="text-slate-400 mt-4">No customers. Add one to get started.</p>
+        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No customers. Add one to get started.</p>
       )}
     </div>
   )

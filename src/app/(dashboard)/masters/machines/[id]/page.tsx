@@ -109,11 +109,11 @@ export default function EditMachinePage() {
   return (
     <div className="max-w-lg">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">Edit {machine.machineCode}</h2>
+        <h2 className="text-lg font-semibold text-foreground">Edit {machine.machineCode}</h2>
         <button
           type="button"
           onClick={logMaintenance}
-          className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm"
+          className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground text-sm"
         >
           Log maintenance
         </button>
@@ -124,7 +124,7 @@ export default function EditMachinePage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -132,7 +132,7 @@ export default function EditMachinePage() {
           <input
             value={make}
             onChange={(e) => setMake(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -140,7 +140,7 @@ export default function EditMachinePage() {
           <input
             value={specification}
             onChange={(e) => setSpecification(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -150,7 +150,7 @@ export default function EditMachinePage() {
             min={1}
             value={capacityPerShift}
             onChange={(e) => setCapacityPerShift(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               fieldErrors.capacityPerShift ? 'border-red-500' : 'border-slate-600'
             }`}
           />
@@ -164,7 +164,7 @@ export default function EditMachinePage() {
             step="0.1"
             value={stdWastePct}
             onChange={(e) => setStdWastePct(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-white ${
+            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
               fieldErrors.stdWastePct ? 'border-red-500' : 'border-slate-600'
             }`}
           />
@@ -175,7 +175,7 @@ export default function EditMachinePage() {
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           >
             <option value="active">Active</option>
             <option value="under_maintenance">Under maintenance</option>
@@ -189,7 +189,7 @@ export default function EditMachinePage() {
               type="date"
               value={lastPmDate}
               onChange={(e) => setLastPmDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
           <div>
@@ -198,7 +198,7 @@ export default function EditMachinePage() {
               type="date"
               value={nextPmDue}
               onChange={(e) => setNextPmDue(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
             />
           </div>
         </div>
@@ -208,18 +208,18 @@ export default function EditMachinePage() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={3}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div className="flex gap-2">
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-white"
+            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/machines" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white">
+          <Link href="/masters/machines" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground">
             Cancel
           </Link>
         </div>

@@ -163,11 +163,11 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm'
+  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground text-sm'
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
-      {mode === 'ADD' && <h2 className="text-lg font-semibold text-white">Add Emboss Block</h2>}
+      {mode === 'ADD' && <h2 className="text-lg font-semibold text-foreground">Add Emboss Block</h2>}
 
       <div className="grid md:grid-cols-2 gap-4 bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm">
         <div>
@@ -290,7 +290,7 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
 
       <div className="flex justify-end gap-2">
         <button type="button" onClick={() => router.push('/masters/emboss-blocks')} className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm">Cancel</button>
-        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium">
+        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium">
           {saving ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
         </button>
       </div>

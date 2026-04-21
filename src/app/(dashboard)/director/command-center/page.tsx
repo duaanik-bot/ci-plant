@@ -105,7 +105,7 @@ function RevenueSparkline({ series }: { series: { day: string; value: number }[]
   const h = 52
   const pad = 4
   if (!series.length) {
-    return <div className={`h-[52px] rounded bg-zinc-950 ring-1 ring-white/5 ${mono} text-[10px] text-slate-600 flex items-center justify-center`}>No data</div>
+    return <div className={`h-[52px] rounded bg-zinc-950 ring-1 ring-ring/30 ${mono} text-[10px] text-slate-600 flex items-center justify-center`}>No data</div>
   }
   const vals = series.map((d) => d.value)
   const max = Math.max(...vals, 1)
@@ -162,7 +162,7 @@ function StageDistributionStack({
   const total = parts.reduce((s, p) => s + p.n, 0)
   return (
     <div>
-      <div className="flex h-5 w-full overflow-hidden rounded-sm ring-1 ring-white/10 bg-zinc-950">
+      <div className="flex h-5 w-full overflow-hidden rounded-sm ring-1 ring-ring/40 bg-zinc-950">
         {total === 0 ? (
           <div className="h-full flex-1 bg-zinc-900" title="No open pipeline sample" />
         ) : (
@@ -317,7 +317,7 @@ export default function DirectorCommandCenterPage() {
   const alerts = vitals?.alerts ?? []
 
   return (
-    <div className="min-h-screen bg-black text-slate-200 flex">
+    <div className="min-h-screen bg-background text-slate-200 flex">
       <DirectorWorkspaceSidebar
         rows={rows}
         focusedLineId={focusedLineId}
@@ -365,7 +365,7 @@ export default function DirectorCommandCenterPage() {
             </Link>
             <Link
               href="/orders/purchase-orders"
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold"
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground font-semibold"
             >
               Customer POs
             </Link>
@@ -373,7 +373,7 @@ export default function DirectorCommandCenterPage() {
         </div>
 
         <section aria-label="Business vitals" className="grid gap-3 lg:grid-cols-3">
-          <div className="rounded-xl border border-amber-500/35 bg-black p-3 shadow-[inset_0_1px_0_0_rgba(251,191,36,0.12)]">
+          <div className="rounded-xl border border-amber-500/35 bg-card p-3 shadow-[inset_0_1px_0_0_rgba(251,191,36,0.12)]">
             <h2 className="text-[10px] font-bold uppercase tracking-widest text-amber-400/95">
               Zone 1 · Sales
             </h2>
@@ -410,7 +410,7 @@ export default function DirectorCommandCenterPage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-sky-500/40 bg-black p-3 shadow-[inset_0_1px_0_0_rgba(56,189,248,0.12)]">
+          <div className="rounded-xl border border-sky-500/40 bg-card p-3 shadow-[inset_0_1px_0_0_rgba(56,189,248,0.12)]">
             <h2 className="text-[10px] font-bold uppercase tracking-widest text-sky-300">
               Zone 2 · Procurement
             </h2>
@@ -443,7 +443,7 @@ export default function DirectorCommandCenterPage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-emerald-500/40 bg-black p-3 shadow-[inset_0_1px_0_0_rgba(52,211,153,0.12)]">
+          <div className="rounded-xl border border-emerald-500/40 bg-card p-3 shadow-[inset_0_1px_0_0_rgba(52,211,153,0.12)]">
             <h2 className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">
               Zone 3 · Production
             </h2>
@@ -475,7 +475,7 @@ export default function DirectorCommandCenterPage() {
         </section>
 
         <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-xl border border-white/10 bg-black px-3 py-3">
+          <div className="rounded-xl border border-border/40 bg-card px-3 py-3">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
               Revenue trend (30 days)
             </div>
@@ -486,7 +486,7 @@ export default function DirectorCommandCenterPage() {
               <RevenueSparkline series={vitals?.sales.revenueTrend30d ?? []} />
             </div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black px-3 py-3">
+          <div className="rounded-xl border border-border/40 bg-card px-3 py-3">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
               Stage distribution
             </div>
@@ -510,28 +510,28 @@ export default function DirectorCommandCenterPage() {
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-          <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
+          <div className="rounded-xl border border-border/40 bg-card px-3 py-2">
             <div className="text-[10px] font-semibold uppercase text-slate-500">Total WIP value</div>
             <div className={`text-lg font-semibold text-emerald-300 ${mono}`}>
               {loading ? '—' : formatRupee(metrics?.totalWipValue ?? 0)}
             </div>
             <div className="text-[9px] text-slate-600">Tooling · Material · Printing</div>
           </div>
-          <div className="rounded-xl border border-amber-500/25 bg-black px-3 py-2">
+          <div className="rounded-xl border border-amber-500/25 bg-card px-3 py-2">
             <div className="text-[10px] font-semibold uppercase text-amber-500/80">Priority jobs</div>
             <div className={`text-lg font-semibold text-amber-200 ${mono}`}>
               {loading ? '—' : (metrics?.priorityJobs ?? 0).toLocaleString('en-IN')}
             </div>
             <div className="text-[9px] text-slate-600">Director star</div>
           </div>
-          <div className="rounded-xl border border-rose-500/25 bg-black px-3 py-2">
+          <div className="rounded-xl border border-rose-500/25 bg-card px-3 py-2">
             <div className="text-[10px] font-semibold uppercase text-rose-400/90">Bottlenecks</div>
             <div className={`text-lg font-semibold text-rose-200 ${mono}`}>
               {loading ? '—' : (metrics?.systemBottlenecks ?? 0).toLocaleString('en-IN')}
             </div>
             <div className="text-[9px] text-slate-600">&gt; 48h in stage</div>
           </div>
-          <div className="rounded-xl border border-sky-500/25 bg-black px-3 py-2">
+          <div className="rounded-xl border border-sky-500/25 bg-card px-3 py-2">
             <div className="text-[10px] font-semibold uppercase text-sky-400/90">Velocity</div>
             <div className={`text-lg font-semibold text-sky-200 ${mono}`}>
               {loading
@@ -545,9 +545,9 @@ export default function DirectorCommandCenterPage() {
         </div>
 
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
-          <div className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-slate-800 bg-black">
+          <div className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-slate-800 bg-card">
             <table className="w-full min-w-[1100px] border-collapse text-left text-[10px]">
-              <thead className="sticky top-0 z-30 border-b border-slate-800 bg-black text-slate-500 backdrop-blur-md">
+              <thead className="sticky top-0 z-30 border-b border-slate-800 bg-card text-slate-500 backdrop-blur-md">
             <tr>
               <th className="px-1 py-1 w-8">★</th>
               <th className="px-1 py-1 w-10">Hold</th>
@@ -558,7 +558,7 @@ export default function DirectorCommandCenterPage() {
               <th className="px-1 py-1 min-w-[8rem]">Broadcast</th>
             </tr>
               </thead>
-              <tbody className="bg-black text-slate-200">
+              <tbody className="bg-card text-slate-200">
             {rows.map((r) => {
               const ageCls =
                 r.ageDaysSincePoReceipt > 7
@@ -660,7 +660,7 @@ export default function DirectorCommandCenterPage() {
                         void patchLine(r.id, { directorBroadcastNote: next || null })
                       }}
                       placeholder="Floor note…"
-                      className="w-full min-w-[7rem] rounded border border-slate-800 bg-black px-1 py-0.5 text-[10px] text-slate-200 placeholder:text-slate-700 focus:border-amber-500/50 focus:outline-none"
+                      className="w-full min-w-[7rem] rounded border border-slate-800 bg-card px-1 py-0.5 text-[10px] text-slate-200 placeholder:text-slate-700 focus:border-amber-500/50 focus:outline-none"
                     />
                   </td>
                 </tr>
@@ -674,13 +674,13 @@ export default function DirectorCommandCenterPage() {
             className="w-full shrink-0 space-y-2 xl:sticky xl:top-3 xl:w-80 xl:self-start"
             aria-label="Director action feed"
           >
-            <div className="rounded-xl border border-rose-500/30 bg-black px-3 py-2">
+            <div className="rounded-xl border border-rose-500/30 bg-card px-3 py-2">
               <div className="text-[10px] font-bold uppercase tracking-widest text-rose-300">
                 Alert center
               </div>
               <p className="text-[9px] text-slate-600">Critical issues for review.</p>
             </div>
-            <div className="max-h-[min(70vh,520px)] space-y-2 overflow-y-auto rounded-xl border border-white/10 bg-black p-2">
+            <div className="max-h-[min(70vh,520px)] space-y-2 overflow-y-auto rounded-xl border border-border/40 bg-card p-2">
               {vitalsLoading ? (
                 <p className={`px-2 py-4 text-center text-[11px] text-slate-500 ${mono}`}>Loading alerts…</p>
               ) : alerts.length === 0 ? (
@@ -719,7 +719,7 @@ export default function DirectorCommandCenterPage() {
         isOpen={Boolean(drawerId)}
         onClose={() => setDrawerId(null)}
         widthClass="max-w-lg"
-        backdropClassName="bg-black/60"
+        backdropClassName="bg-background/60"
         panelClassName="border-l border-slate-800 bg-slate-950/95 backdrop-blur-xl"
       >
         {drawerLoading || !drawerDetail ? (
@@ -757,7 +757,7 @@ function DrawerBody({
     <div className="space-y-4 text-sm">
       <div>
         <div className="text-xs text-slate-500">Carton</div>
-        <div className="font-medium text-white">{String(line?.cartonName ?? '')}</div>
+        <div className="font-medium text-foreground">{String(line?.cartonName ?? '')}</div>
       </div>
       <div className={`grid grid-cols-2 gap-2 text-xs ${mono}`}>
         <div>
@@ -796,7 +796,7 @@ function DrawerBody({
       {d.links?.po ? (
         <Link
           href={d.links.po}
-          className="inline-flex rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
+          className="inline-flex rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-amber-500"
         >
           Open PO
         </Link>

@@ -72,7 +72,7 @@ export function OperatorHandshakeDrawer({
     <div className="fixed inset-0 z-[80] flex justify-end">
       <button
         type="button"
-        className="absolute inset-0 bg-black/70"
+        className="absolute inset-0 bg-background/70"
         aria-label="Close drawer"
         onClick={onClose}
       />
@@ -105,7 +105,7 @@ export function OperatorHandshakeDrawer({
             <select
               value={operatorUserId}
               onChange={(e) => setOperatorUserId(e.target.value)}
-              className={`w-full h-9 rounded border border-slate-700 bg-black px-2 text-xs text-slate-200 ${mono}`}
+              className={`w-full h-9 rounded border border-slate-700 bg-background px-2 text-xs text-slate-200 ${mono}`}
             >
               <option value="">— Select —</option>
               {users.map((u) => (
@@ -127,7 +127,7 @@ export function OperatorHandshakeDrawer({
               step={0.5}
               value={targetOeePct}
               onChange={(e) => setTargetOeePct(Number(e.target.value))}
-              className={`w-full h-9 rounded border border-slate-700 bg-black px-2 text-xs text-slate-200 ${mono}`}
+              className={`w-full h-9 rounded border border-slate-700 bg-background px-2 text-xs text-slate-200 ${mono}`}
             />
             <p className="text-[10px] text-slate-600">
               Auto-filled from product / press baseline; adjust per run.
@@ -145,7 +145,7 @@ export function OperatorHandshakeDrawer({
                   type="datetime-local"
                   value={pmStart}
                   onChange={(e) => setPmStart(e.target.value)}
-                  className={`w-full h-9 rounded border border-slate-700 bg-black px-1 text-[11px] text-slate-200 ${mono} [color-scheme:dark]`}
+                  className={`w-full h-9 rounded border border-slate-700 bg-background px-1 text-[11px] text-slate-200 ${mono} [color-scheme:dark]`}
                 />
               </label>
               <label className="space-y-0.5">
@@ -154,7 +154,7 @@ export function OperatorHandshakeDrawer({
                   type="datetime-local"
                   value={pmEnd}
                   onChange={(e) => setPmEnd(e.target.value)}
-                  className={`w-full h-9 rounded border border-slate-700 bg-black px-1 text-[11px] text-slate-200 ${mono} [color-scheme:dark]`}
+                  className={`w-full h-9 rounded border border-slate-700 bg-background px-1 text-[11px] text-slate-200 ${mono} [color-scheme:dark]`}
                 />
               </label>
             </div>
@@ -165,7 +165,7 @@ export function OperatorHandshakeDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-white/15 px-3 py-1.5 text-xs text-slate-400 hover:border-white/25"
+            className="rounded border border-border/15 px-3 py-1.5 text-xs text-slate-400 hover:border-border/25"
           >
             Cancel
           </button>

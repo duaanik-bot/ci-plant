@@ -72,7 +72,7 @@ export default function BillDetailPage() {
     <div className="p-4 max-w-4xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <Link href="/billing" className="text-sm text-slate-400 hover:text-white mb-1 inline-block">
+          <Link href="/billing" className="text-sm text-slate-400 hover:text-foreground mb-1 inline-block">
             ← Bills
           </Link>
           <h1 className="text-xl font-bold text-amber-400">{bill.billNumber}</h1>
@@ -84,7 +84,7 @@ export default function BillDetailPage() {
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-white text-sm"
+            className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-foreground text-sm"
           >
             <option value="draft">Draft</option>
             <option value="sent">Sent</option>
@@ -93,7 +93,7 @@ export default function BillDetailPage() {
           <button
             onClick={handleSaveStatus}
             disabled={saving}
-            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm"
+            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

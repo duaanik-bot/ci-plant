@@ -154,7 +154,7 @@ export default function NewJobCardPage() {
           <select
             value={lineId}
             onChange={(e) => setLineId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
             disabled={!selectedPo}
           >
             <option value="">Select line…</option>
@@ -176,7 +176,7 @@ export default function NewJobCardPage() {
             min={1}
             value={requiredSheets}
             onChange={(e) => setRequiredSheets(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
           {selectedLine && (
             <p className="text-xs text-slate-500 mt-1">
@@ -191,7 +191,7 @@ export default function NewJobCardPage() {
             min={0}
             value={wastageSheets}
             onChange={(e) => setWastageSheets(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -200,7 +200,7 @@ export default function NewJobCardPage() {
             type="text"
             value={assignedOperator}
             onChange={(e) => setAssignedOperator(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
         <div>
@@ -209,7 +209,7 @@ export default function NewJobCardPage() {
             type="text"
             value={batchNumber}
             onChange={(e) => setBatchNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
           />
         </div>
       </div>
@@ -225,7 +225,7 @@ export default function NewJobCardPage() {
         <button
           type="submit"
           disabled={saving}
-          className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+          className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
         >
           {saving ? 'Saving…' : 'Create job card'}
         </button>

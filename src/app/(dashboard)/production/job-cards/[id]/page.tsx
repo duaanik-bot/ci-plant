@@ -452,7 +452,7 @@ export default function JobCardDetailPage() {
 
   if (!jc) {
     return (
-      <div className={`min-h-[30vh] p-4 text-slate-500 bg-[#000000] ${mono}`}>Loading…</div>
+      <div className={`min-h-[30vh] p-4 text-slate-500 bg-background ${mono}`}>Loading…</div>
     )
   }
 
@@ -466,10 +466,10 @@ export default function JobCardDetailPage() {
   const grainDisplay = bible?.grainDirection ?? jc.poLine?.materialQueue?.grainDirection ?? '—'
 
   return (
-    <div className="min-h-screen bg-[#000000] text-slate-200 pb-10">
+    <div className="min-h-screen bg-background text-slate-200 pb-10">
       <div className="max-w-6xl mx-auto px-3 py-4 space-y-4">
         {/* Intelligent header — Production Bible */}
-        <div className="rounded-xl border border-white/10 bg-black p-4 space-y-3">
+        <div className="rounded-xl border border-border/40 bg-card p-4 space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -487,7 +487,7 @@ export default function JobCardDetailPage() {
                 className={`rounded-lg border px-3 py-2 text-right ${
                   wasteHot
                     ? 'border-rose-500/60 bg-rose-500/10 animate-pulse'
-                    : 'border-white/10 bg-zinc-950/80'
+                    : 'border-border/10 bg-zinc-950/80'
                 }`}
               >
                 <p className="text-[9px] uppercase tracking-wide text-slate-500">Cumulative waste</p>
@@ -502,7 +502,7 @@ export default function JobCardDetailPage() {
               <button
                 type="button"
                 onClick={() => router.push('/production/job-cards')}
-                className="px-3 py-1.5 rounded-lg border border-white/15 text-sm text-slate-200"
+                className="px-3 py-1.5 rounded-lg border border-border/50 text-sm text-slate-200"
               >
                 Back
               </button>
@@ -510,7 +510,7 @@ export default function JobCardDetailPage() {
                 href={`/api/job-cards/${jc.id}/card-pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm"
+                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm"
               >
                 PDF
               </a>
@@ -520,13 +520,13 @@ export default function JobCardDetailPage() {
                     href={`/api/designing/po-lines/${jc.poLine.id}/job-spec-pdf`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 rounded-lg border border-white/15 text-sm"
+                    className="px-3 py-1.5 rounded-lg border border-border/50 text-sm"
                   >
                     Job spec PDF
                   </a>
                   <Link
                     href={`/orders/designing/${jc.poLine.id}`}
-                    className="px-3 py-1.5 rounded-lg border border-white/15 text-sm"
+                    className="px-3 py-1.5 rounded-lg border border-border/50 text-sm"
                   >
                     AW queue
                   </Link>
@@ -534,7 +534,7 @@ export default function JobCardDetailPage() {
               )}
               <Link
                 href={`/stores/issue?jobCardId=${jc.id}`}
-                className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-sm"
+                className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-primary-foreground text-sm"
               >
                 Issue sheets
               </Link>
@@ -542,7 +542,7 @@ export default function JobCardDetailPage() {
           </div>
 
           <div
-            className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs border-t border-white/10 pt-3 ${mono}`}
+            className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs border-t border-border/40 pt-3 ${mono}`}
           >
             <div>
               <p className="text-slate-500 uppercase tracking-wide text-[9px]">Client</p>
@@ -605,7 +605,7 @@ export default function JobCardDetailPage() {
                 return (
                   <div
                     key={label}
-                    className="flex-1 min-w-[7rem] rounded-lg border border-white/10 bg-zinc-950/80 overflow-hidden"
+                    className="flex-1 min-w-[7rem] rounded-lg border border-border/10 bg-zinc-950/80 overflow-hidden"
                   >
                     <div className={`h-1 ${t.bar}`} />
                     <div className="px-2 py-1.5">
@@ -623,7 +623,7 @@ export default function JobCardDetailPage() {
                   type="text"
                   value={artworkVersion}
                   onChange={(e) => setArtworkVersion(e.target.value)}
-                  className={`w-14 px-1.5 py-0.5 rounded border border-white/15 bg-black text-[10px] ${mono}`}
+                  className={`w-14 px-1.5 py-0.5 rounded border border-border/50 bg-card text-[10px] ${mono}`}
                 />
               </div>
             ) : null}
@@ -632,7 +632,7 @@ export default function JobCardDetailPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* Tooling kit — coordinates */}
-        <div className="rounded-xl border border-white/10 bg-black p-4">
+        <div className="rounded-xl border border-border/40 bg-card p-4">
           <h2 className="text-sm font-semibold text-amber-400 mb-3">Tooling kit · coordinates</h2>
           <p className="text-[10px] text-slate-500 mb-3">
             Physical rack / drawer from masters. Returns use Tooling Hub <strong>Receive</strong> — not this
@@ -641,7 +641,7 @@ export default function JobCardDetailPage() {
           <div className="overflow-x-auto">
             <table className={`w-full text-xs ${mono}`}>
               <thead className="text-slate-500 text-[10px] uppercase tracking-wide">
-                <tr className="border-b border-white/10">
+                <tr className="border-b border-border/40">
                   <th className="text-left py-2 pr-2">Asset</th>
                   <th className="text-left py-2 pr-2">ID</th>
                   <th className="text-left py-2">Rack / drawer / slot</th>
@@ -720,7 +720,7 @@ export default function JobCardDetailPage() {
         </div>
 
         {/* Board status · material allocation */}
-        <div className="rounded-xl border border-white/10 bg-[#000000] p-4">
+        <div className="rounded-xl border border-border/40 bg-background p-4">
           <h2 className="text-sm font-semibold text-amber-400 mb-1">Board status · material allocation</h2>
           <p className="text-[10px] text-slate-500 mb-3">
             Mill / warehouse batch and floor issuance. Click the panel to open the paper ledger for this GSM / grade.
@@ -732,7 +732,7 @@ export default function JobCardDetailPage() {
                   ? `/inventory?ledgerGsm=${jc.boardMaterial.ledgerLink.gsm}&ledgerBoard=${encodeURIComponent(jc.boardMaterial.ledgerLink.board)}#paper-ledger`
                   : '/inventory#paper-ledger'
               }
-              className="block rounded-lg border border-white/10 bg-zinc-950/80 p-3 hover:border-amber-500/40 hover:bg-zinc-900/50 transition-colors"
+              className="block rounded-lg border border-border/10 bg-zinc-950/80 p-3 hover:border-amber-500/40 hover:bg-zinc-900/50 transition-colors"
             >
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <span className="text-[10px] uppercase tracking-wide text-slate-500">Status</span>
@@ -764,7 +764,7 @@ export default function JobCardDetailPage() {
                 <p className="mt-3 text-sm font-bold text-rose-500">Material shortage</p>
               ) : null}
               {jc.boardMaterial.warehouseHandshake ? (
-                <div className={`mt-3 pt-3 border-t border-white/10 text-[10px] text-slate-400 ${mono}`}>
+                <div className={`mt-3 pt-3 border-t border-border/40 text-[10px] text-slate-400 ${mono}`}>
                   <p>
                     <span className="text-slate-500">Issued to floor </span>
                     {new Date(jc.boardMaterial.warehouseHandshake.issuedAt).toLocaleString()}
@@ -777,7 +777,7 @@ export default function JobCardDetailPage() {
               ) : (
                 <p className={`mt-3 text-[10px] text-slate-600 ${mono}`}>No warehouse floor issue logged for this job yet.</p>
               )}
-              <p className={`mt-3 text-[10px] text-slate-500 border-t border-white/5 pt-2`}>
+              <p className={`mt-3 text-[10px] text-slate-500 border-t border-border/25 pt-2`}>
                 Material Verified against Batch {jc.boardMaterial.batchLotNumber ?? '—'}. Board Status:{' '}
                 {jc.boardMaterial.boardStatus === 'available' ? 'Available' : 'Out of stock'}.
               </p>
@@ -789,7 +789,7 @@ export default function JobCardDetailPage() {
         </div>
 
         {/* Material specification — inventory handshake (dims from allocated / issued batch) */}
-        <div className="rounded-xl border border-white/10 bg-[#000000] p-4 space-y-3">
+        <div className="rounded-xl border border-border/40 bg-background p-4 space-y-3">
           <h2 className="text-sm font-semibold text-amber-400">Material specification · inventory handshake</h2>
           <p className="text-[10px] text-slate-500">
             Sheet size and grain follow the allocated mill batch (FIFO). Validated against AW queue target sheet size.
@@ -808,7 +808,7 @@ export default function JobCardDetailPage() {
               Pre-trim required — stock sheet larger than AW target layout.
             </div>
           ) : null}
-          <div className={`rounded-lg border border-white/10 bg-zinc-950/80 p-3 space-y-2 text-xs ${mono}`}>
+          <div className={`rounded-lg border border-border/40 bg-zinc-950/80 p-3 space-y-2 text-xs ${mono}`}>
             <p className="text-slate-200">
               {jc.issuedStockDisplay?.trim() || (
                 <span className="text-slate-600">No inventory dimensions synced yet — issue paper to floor or regenerate from planning.</span>
@@ -820,14 +820,14 @@ export default function JobCardDetailPage() {
               <p className="text-slate-600">Location pointer: —</p>
             )}
           </div>
-          <p className={`text-[10px] text-slate-500 border-t border-white/5 pt-2 ${mono}`}>
+          <p className={`text-[10px] text-slate-500 border-t border-border/25 pt-2 ${mono}`}>
             Inventory Handshake Verified. Material Batch {jc.boardMaterial?.batchLotNumber ?? '—'} locked for Job{' '}
             {jc.jobCardNumber}.
           </p>
         </div>
 
         {/* Routing from AW — read-only */}
-        <div className="rounded-xl border border-white/10 bg-zinc-950/40 p-4">
+        <div className="rounded-xl border border-border/10 bg-zinc-950/40 p-4">
           <h2 className="text-sm font-semibold text-slate-200 mb-2">Smart routing · AW queue</h2>
           <p className="text-[10px] text-slate-500 mb-2">
             Stages below follow toggles saved on this job card (from artwork / planning). Only applicable
@@ -857,7 +857,7 @@ export default function JobCardDetailPage() {
           </div>
         </div>
 
-        <div className={`rounded-xl border border-white/10 bg-black p-3 flex flex-wrap gap-6 text-xs ${mono}`}>
+        <div className={`rounded-xl border border-border/40 bg-card p-3 flex flex-wrap gap-6 text-xs ${mono}`}>
           <div>
             <span className="text-slate-500">Required</span>{' '}
             <span className="text-slate-200">{jc.requiredSheets}</span>
@@ -876,10 +876,10 @@ export default function JobCardDetailPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-orange-500/25 bg-black p-4">
+        <div className="rounded-xl border border-orange-500/25 bg-card p-4">
           <h2 className="text-sm font-semibold text-orange-300 mb-2">Shift operator</h2>
           <select
-            className={`w-full max-w-md px-3 py-2 rounded-lg bg-black border border-white/15 text-slate-200 text-sm ${mono}`}
+            className={`w-full max-w-md px-3 py-2 rounded-lg bg-card border border-border/50 text-slate-200 text-sm ${mono}`}
             value={jc.shiftOperator?.id ?? ''}
             disabled={saving}
             onChange={(e) =>
@@ -897,7 +897,7 @@ export default function JobCardDetailPage() {
           </select>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-zinc-950/50 p-4 text-sm space-y-3">
+        <div className="rounded-xl border border-border/10 bg-zinc-950/50 p-4 text-sm space-y-3">
           <div className="grid md:grid-cols-4 gap-3">
             <div>
               <label className="block text-slate-500 mb-1 text-xs">Assigned operator</label>
@@ -905,7 +905,7 @@ export default function JobCardDetailPage() {
                 type="text"
                 value={jc.assignedOperator ?? ''}
                 onChange={(e) => update('assignedOperator', e.target.value || null)}
-                className={`w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white ${mono}`}
+                className={`w-full px-3 py-2 rounded-lg bg-card border border-border/50 text-foreground ${mono}`}
               />
             </div>
             <div>
@@ -914,7 +914,7 @@ export default function JobCardDetailPage() {
                 type="text"
                 value={jc.batchNumber ?? ''}
                 onChange={(e) => update('batchNumber', e.target.value || null)}
-                className={`w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white ${mono}`}
+                className={`w-full px-3 py-2 rounded-lg bg-card border border-border/50 text-foreground ${mono}`}
               />
             </div>
             <div>
@@ -924,7 +924,7 @@ export default function JobCardDetailPage() {
                 min={1}
                 value={jc.requiredSheets}
                 onChange={(e) => update('requiredSheets', Number(e.target.value) || jc.requiredSheets)}
-                className={`w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white ${mono}`}
+                className={`w-full px-3 py-2 rounded-lg bg-card border border-border/50 text-foreground ${mono}`}
               />
             </div>
             <div>
@@ -934,7 +934,7 @@ export default function JobCardDetailPage() {
                 min={0}
                 value={jc.wastageSheets}
                 onChange={(e) => update('wastageSheets', Number(e.target.value) || 0)}
-                className={`w-full px-3 py-2 rounded-lg bg-black border border-white/15 text-white ${mono}`}
+                className={`w-full px-3 py-2 rounded-lg bg-card border border-border/50 text-foreground ${mono}`}
               />
             </div>
           </div>
@@ -967,7 +967,7 @@ export default function JobCardDetailPage() {
                       else if (key === 'finalQcPass') update('finalQcPass', e.target.checked)
                       else update('qaReleased', e.target.checked)
                     }}
-                    className="rounded border-white/20 bg-black"
+                    className="rounded border-border/20 bg-background"
                   />
                   {label}
                 </label>
@@ -990,7 +990,7 @@ export default function JobCardDetailPage() {
                   qaReleased: jc.qaReleased,
                 })
               }
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs"
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-xs"
             >
               {saving ? 'Saving…' : 'Save header'}
             </button>
@@ -1017,7 +1017,7 @@ export default function JobCardDetailPage() {
               return (
                 <div
                   key={stage.id}
-                  className="rounded-lg border border-white/10 bg-black p-3 flex flex-col"
+                  className="rounded-lg border border-border/40 bg-card p-3 flex flex-col"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-slate-100">{stage.stageName}</p>
@@ -1038,7 +1038,7 @@ export default function JobCardDetailPage() {
                         type="text"
                         value={stage.operator ?? ''}
                         onChange={(e) => updateStage(stage.id, { operator: e.target.value || null })}
-                        className="w-full px-2 py-1 rounded bg-black border border-white/15 text-white text-xs"
+                        className="w-full px-2 py-1 rounded bg-card border border-border/50 text-foreground text-xs"
                       />
                     </div>
                     <div>
@@ -1051,7 +1051,7 @@ export default function JobCardDetailPage() {
                             counter: e.target.value ? Number(e.target.value) : null,
                           })
                         }
-                        className={`w-full px-2 py-1 rounded bg-black border border-white/15 text-white text-xs ${mono}`}
+                        className={`w-full px-2 py-1 rounded bg-card border border-border/50 text-foreground text-xs ${mono}`}
                       />
                     </div>
                     <div className="col-span-2">
@@ -1060,7 +1060,7 @@ export default function JobCardDetailPage() {
                         type="text"
                         value={stage.sheetSize ?? ''}
                         onChange={(e) => updateStage(stage.id, { sheetSize: e.target.value || null })}
-                        className={`w-full px-2 py-1 rounded bg-black border border-white/15 text-white text-xs ${mono}`}
+                        className={`w-full px-2 py-1 rounded bg-card border border-border/50 text-foreground text-xs ${mono}`}
                       />
                     </div>
                   </div>
@@ -1081,7 +1081,7 @@ export default function JobCardDetailPage() {
                           ],
                         })
                       }
-                      className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-xs disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-foreground text-xs disabled:opacity-50"
                     >
                       {stage.status === 'in_progress' ? 'Mark completed' : 'Start stage'}
                     </button>
@@ -1101,7 +1101,7 @@ export default function JobCardDetailPage() {
                           ],
                         })
                       }
-                      className="px-3 py-1.5 rounded-lg border border-white/15 text-slate-200 text-xs"
+                      className="px-3 py-1.5 rounded-lg border border-border/50 text-slate-200 text-xs"
                     >
                       Reset
                     </button>
@@ -1112,7 +1112,7 @@ export default function JobCardDetailPage() {
           </div>
         </div>
 
-        <footer className={`border-t border-white/10 pt-4 text-center text-[10px] text-slate-500 ${mono}`}>
+        <footer className={`border-t border-border/40 pt-4 text-center text-[10px] text-slate-500 ${mono}`}>
           Instruction Set Synchronized from Melbourne Strategy Hub.
         </footer>
       </div>

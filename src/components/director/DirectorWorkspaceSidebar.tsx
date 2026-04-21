@@ -224,7 +224,7 @@ export function DirectorWorkspaceSidebar({
         </div>
         {!collapsed ? (
           <div
-            className="pointer-events-none absolute left-full top-1/2 z-[60] ml-2 w-max max-w-[240px] -translate-y-1/2 rounded border border-slate-700 bg-slate-950/95 px-2 py-1.5 text-[10px] leading-snug text-slate-200 opacity-0 shadow-xl backdrop-blur-md ring-1 ring-white/5 transition-opacity duration-150 group-hover:opacity-100"
+            className="pointer-events-none absolute left-full top-1/2 z-[60] ml-2 w-max max-w-[240px] -translate-y-1/2 rounded border border-slate-700 bg-slate-950/95 px-2 py-1.5 text-[10px] leading-snug text-slate-200 opacity-0 shadow-xl backdrop-blur-md ring-1 ring-ring/20 transition-opacity duration-150 group-hover:opacity-100"
             role="tooltip"
           >
             {tip}

@@ -36,7 +36,7 @@ export function SimilarDiesModal({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 p-4"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-background/90 p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -81,7 +81,7 @@ export function SimilarDiesModal({
               <div
                 key={m.id}
                 className={`rounded-lg border px-3 py-2 text-xs ${
-                  isMismatch ? 'border-red-900/80 bg-red-950/20' : 'border-zinc-800 bg-black'
+                  isMismatch ? 'border-red-900/80 bg-red-950/20' : 'border-zinc-800 bg-background'
                 }`}
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">

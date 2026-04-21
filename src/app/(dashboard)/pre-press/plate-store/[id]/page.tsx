@@ -209,7 +209,7 @@ export default function PlateStoreDetailPage() {
 
   return (
     <div className="p-4 max-w-5xl mx-auto space-y-4">
-      <Link href="/pre-press/plate-store" className="text-slate-400 hover:text-white text-sm mb-4 inline-block">
+      <Link href="/pre-press/plate-store" className="text-slate-400 hover:text-foreground text-sm mb-4 inline-block">
         ← Plate store
       </Link>
       <div className="flex items-start justify-between gap-4">
@@ -230,7 +230,7 @@ export default function PlateStoreDetailPage() {
           { key: 'history', label: 'History' },
           { key: 'audit', label: 'Audit Log' },
         ].map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key as typeof tab)} className={`px-3 py-1.5 rounded text-xs border ${tab === t.key ? 'bg-amber-600 border-amber-500 text-white' : 'border-slate-700 text-slate-300'}`}>
+          <button key={t.key} onClick={() => setTab(t.key as typeof tab)} className={`px-3 py-1.5 rounded text-xs border ${tab === t.key ? 'bg-amber-600 border-amber-500 text-primary-foreground' : 'border-slate-700 text-slate-300'}`}>
             {t.label}
           </button>
         ))}
@@ -263,10 +263,10 @@ export default function PlateStoreDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <a href={`/api/plate-store/${id}/label`} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-xs">Print Label</a>
+            <a href={`/api/plate-store/${id}/label`} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-primary-foreground text-xs">Print Label</a>
             <button onClick={handleRackUpdate} disabled={savingRack} className="px-3 py-1.5 rounded border border-slate-600 text-slate-200 text-xs">{savingRack ? 'Saving…' : 'Update Rack Location'}</button>
-            <input value={rackLocation} onChange={(e) => setRackLocation(e.target.value)} placeholder="Rack" className="px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-xs" />
-            <input value={slotNumber} onChange={(e) => setSlotNumber(e.target.value)} placeholder="Slot" className="px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-xs" />
+            <input value={rackLocation} onChange={(e) => setRackLocation(e.target.value)} placeholder="Rack" className="px-2 py-1 rounded bg-slate-800 border border-slate-600 text-foreground text-xs" />
+            <input value={slotNumber} onChange={(e) => setSlotNumber(e.target.value)} placeholder="Slot" className="px-2 py-1 rounded bg-slate-800 border border-slate-600 text-foreground text-xs" />
           </div>
         </div>
       )}
@@ -275,12 +275,12 @@ export default function PlateStoreDetailPage() {
         <div className="rounded-xl bg-slate-900 border border-slate-700 p-4 grid md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-slate-200">Issue Form</h2>
-            <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm" />
-            <select value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm">
+            <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm" />
+            <select value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm">
               <option value="">Issue to operator</option>
               {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
             </select>
-            <select value={purpose} onChange={(e) => setPurpose(e.target.value as typeof purpose)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm">
+            <select value={purpose} onChange={(e) => setPurpose(e.target.value as typeof purpose)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm">
               <option value="production">Production</option>
               <option value="reprint">Reprint</option>
               <option value="sample">Sample</option>
@@ -294,24 +294,24 @@ export default function PlateStoreDetailPage() {
                 </label>
               ))}
             </div>
-            <button onClick={handleIssue} disabled={saving} className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-xs">{saving ? 'Issuing…' : 'Issue Plates'}</button>
+            <button onClick={handleIssue} disabled={saving} className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-primary-foreground text-xs">{saving ? 'Issuing…' : 'Issue Plates'}</button>
           </div>
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-slate-200">Return Form</h2>
-            <select value={returnIssueId} onChange={(e) => setReturnIssueId(e.target.value)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm">
+            <select value={returnIssueId} onChange={(e) => setReturnIssueId(e.target.value)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm">
               <option value="">Select issue record</option>
               {(plate.issueRecords || []).map((r) => <option key={r.id} value={r.id}>{r.jobCardNumber ? `Job ${r.jobCardNumber}` : r.id.slice(0, 8)} · {r.status}</option>)}
             </select>
-            <input value={returnRack} onChange={(e) => setReturnRack(e.target.value)} placeholder="Rack location" className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm" />
-            <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Return notes" className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm" />
+            <input value={returnRack} onChange={(e) => setReturnRack(e.target.value)} placeholder="Rack location" className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm" />
+            <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Return notes" className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm" />
             <button onClick={handleReturn} disabled={saving} className="px-3 py-1.5 rounded border border-slate-600 text-slate-200 text-xs">{saving ? 'Returning…' : 'Confirm Return'}</button>
             <div className="pt-2 border-t border-slate-700">
               <h3 className="text-xs text-slate-300 mb-2">Destroy Colour</h3>
-              <select value={destroyColour} onChange={(e) => setDestroyColour(e.target.value)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm mb-2">
+              <select value={destroyColour} onChange={(e) => setDestroyColour(e.target.value)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm mb-2">
                 {availableColours.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
-              <input value={destroyReason} onChange={(e) => setDestroyReason(e.target.value)} placeholder="Reason" className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm mb-2" />
-              <select value={destroyedBy} onChange={(e) => setDestroyedBy(e.target.value)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white text-sm mb-2">
+              <input value={destroyReason} onChange={(e) => setDestroyReason(e.target.value)} placeholder="Reason" className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm mb-2" />
+              <select value={destroyedBy} onChange={(e) => setDestroyedBy(e.target.value)} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm mb-2">
                 <option value="">Destroyed by</option>
                 {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
               </select>

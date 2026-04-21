@@ -212,8 +212,8 @@ export default function ShopfloorPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col pb-20">
-      <header className="p-4 border-b border-zinc-800 sticky top-0 bg-black z-10">
+    <div className="min-h-screen bg-background text-foreground flex flex-col pb-20">
+      <header className="p-4 border-b border-zinc-800 sticky top-0 bg-background z-10">
         <h1 className="text-xl font-bold text-orange-400">Shopfloor</h1>
         <p className="text-xs text-slate-500 mt-0.5">Production job cards</p>
       </header>
@@ -251,7 +251,7 @@ export default function ShopfloorPage() {
                         {stage && (
                           <span
                             className={`inline-block px-2 py-0.5 rounded text-xs ${
-                              stage.status === 'in_progress' ? 'bg-amber-600 text-white' : 'bg-slate-600 text-slate-200'
+                              stage.status === 'in_progress' ? 'bg-amber-600 text-primary-foreground' : 'bg-slate-600 text-slate-200'
                             }`}
                           >
                             {stage.stageName}
@@ -262,7 +262,7 @@ export default function ShopfloorPage() {
                       </div>
                     </button>
                     {isExpanded && (
-                      <div className="border-t border-zinc-800 p-4 space-y-3 bg-black/40">
+                      <div className="border-t border-zinc-800 p-4 space-y-3 bg-background/40">
                         {jc.stages.map((s) => {
                           const idleSec = idleSecondsInProgress(s, jc.createdAt)
                           const lock = s.status === 'in_progress' && idleSec > PRODUCTION_DOWNTIME_LOCK_SECONDS
@@ -277,7 +277,7 @@ export default function ShopfloorPage() {
                                 s.status === 'completed'
                                   ? 'bg-green-800 text-green-200'
                                   : s.status === 'in_progress'
-                                    ? 'bg-amber-600 text-white'
+                                    ? 'bg-amber-600 text-primary-foreground'
                                     : 'bg-slate-700 text-slate-400'
                               }`}
                             >
@@ -291,7 +291,7 @@ export default function ShopfloorPage() {
                                   placeholder="Counter"
                                   value={counterVal[s.id] ?? ''}
                                   onChange={(e) => setCounterVal((prev) => ({ ...prev, [s.id]: e.target.value }))}
-                                  className={`w-24 px-2 py-1 rounded bg-zinc-900 border text-white text-sm font-designing-queue ${
+                                  className={`w-24 px-2 py-1 rounded bg-zinc-900 border text-foreground text-sm font-designing-queue ${
                                     lock
                                       ? 'border-rose-500 ring-2 ring-rose-500/70 animate-pulse'
                                       : 'border-zinc-600'
@@ -305,7 +305,7 @@ export default function ShopfloorPage() {
                                   onChange={(e) =>
                                     setExcessSheetsVal((prev) => ({ ...prev, [s.id]: e.target.value }))
                                   }
-                                  className="w-28 px-2 py-1 rounded bg-zinc-900 border border-zinc-600 text-white text-sm"
+                                  className="w-28 px-2 py-1 rounded bg-zinc-900 border border-zinc-600 text-foreground text-sm"
                                 />
                                 <button
                                   type="button"
@@ -315,7 +315,7 @@ export default function ShopfloorPage() {
                                       counter: parseInt(counterVal[s.id], 10),
                                     })
                                   }
-                                  className="px-2 py-1.5 rounded-lg bg-orange-600/90 hover:bg-orange-500 disabled:opacity-40 text-white text-xs font-medium"
+                                  className="px-2 py-1.5 rounded-lg bg-orange-600/90 hover:bg-orange-500 disabled:opacity-40 text-foreground text-xs font-medium"
                                 >
                                   Log pulse
                                 </button>
@@ -330,7 +330,7 @@ export default function ShopfloorPage() {
                                         ? parseInt(excessSheetsVal[s.id], 10) : null,
                                     })
                                   }
-                                  className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium"
+                                  className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
                                 >
                                   Complete
                                 </button>
@@ -341,7 +341,7 @@ export default function ShopfloorPage() {
                                 type="button"
                                 disabled={saving}
                                 onClick={() => updateStage(jc.id, s.id, { status: 'in_progress' })}
-                                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+                                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
                               >
                                 Start
                               </button>
@@ -386,7 +386,7 @@ export default function ShopfloorPage() {
                 <button
                   type="button"
                   onClick={() => setStageKey(null)}
-                  className="text-sm text-slate-400 hover:text-white mb-2"
+                  className="text-sm text-slate-400 hover:text-foreground mb-2"
                 >
                   ← Back to stages
                 </button>
@@ -449,9 +449,9 @@ export default function ShopfloorPage() {
       </main>
 
       {downtimeOpen ? (
-        <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/95 p-4">
+        <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-background/95 p-4">
           <div
-            className="w-full max-w-md rounded-2xl border border-orange-500/40 bg-black p-5 shadow-[0_0_40px_rgba(251,146,60,0.15)] space-y-4"
+            className="w-full max-w-md rounded-2xl border border-orange-500/40 bg-background p-5 shadow-[0_0_40px_rgba(251,146,60,0.15)] space-y-4"
             role="dialog"
             aria-modal="true"
             aria-labelledby="downtime-title"
@@ -467,7 +467,7 @@ export default function ShopfloorPage() {
             <select
               value={downtimeCategory}
               onChange={(e) => setDowntimeCategory(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white text-sm"
+              className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-foreground text-sm"
             >
               {PRODUCTION_DOWNTIME_CATEGORIES.map((c) => (
                 <option key={c.key} value={c.key}>
@@ -480,13 +480,13 @@ export default function ShopfloorPage() {
               value={downtimeNotes}
               onChange={(e) => setDowntimeNotes(e.target.value)}
               rows={2}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-white text-sm"
+              className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-foreground text-sm"
             />
             <button
               type="button"
               disabled={downtimeSubmitting || !session?.user}
               onClick={() => void submitDowntimeReason()}
-              className="w-full py-3 rounded-xl bg-gradient-to-b from-amber-500 to-orange-600 text-white font-semibold disabled:opacity-50"
+              className="w-full py-3 rounded-xl bg-gradient-to-b from-amber-500 to-orange-600 text-foreground font-semibold disabled:opacity-50"
             >
               {downtimeSubmitting ? 'Saving…' : 'Submit downtime log'}
             </button>
@@ -497,7 +497,7 @@ export default function ShopfloorPage() {
         </div>
       ) : null}
 
-      <nav className="fixed bottom-0 left-0 right-0 border-t border-zinc-800 bg-black flex justify-around py-2 safe-area-pb">
+      <nav className="fixed bottom-0 left-0 right-0 border-t border-zinc-800 bg-background flex justify-around py-2 safe-area-pb">
         {TABS.map((t) => (
           <button
             key={t.id}

@@ -92,7 +92,7 @@ export default function PurchaseRequisitionsPage() {
     <div className="p-4 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-amber-400">Purchase Requisitions</h1>
-        <Link href="/inventory" className="text-slate-400 hover:text-white text-sm">
+        <Link href="/inventory" className="text-slate-400 hover:text-foreground text-sm">
           ← Stock States
         </Link>
       </div>
@@ -101,7 +101,7 @@ export default function PurchaseRequisitionsPage() {
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm"
+          className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground text-sm"
         >
           <option value="">All statuses</option>
           <option value="pending">Pending</option>
@@ -145,7 +145,7 @@ export default function PurchaseRequisitionsPage() {
                     <button
                       onClick={() => handleApprove(pr.id)}
                       disabled={!!approving}
-                      className="px-2 py-1 rounded bg-green-700 hover:bg-green-600 text-white text-xs disabled:opacity-50"
+                      className="px-2 py-1 rounded bg-green-700 hover:bg-green-600 text-primary-foreground text-xs disabled:opacity-50"
                     >
                       {approving === pr.id ? '…' : 'Approve'}
                     </button>
@@ -159,12 +159,12 @@ export default function PurchaseRequisitionsPage() {
                             value={poRef}
                             onChange={(e) => setPoRef(e.target.value)}
                             placeholder="PO ref"
-                            className="w-28 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-xs"
+                            className="w-28 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-foreground text-xs"
                           />
                           <button
                             onClick={() => handleConvert(pr.id)}
                             disabled={!!approving || !poRef.trim()}
-                            className="px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white text-xs disabled:opacity-50"
+                            className="px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-primary-foreground text-xs disabled:opacity-50"
                           >
                             Convert
                           </button>
@@ -178,7 +178,7 @@ export default function PurchaseRequisitionsPage() {
                       ) : (
                         <button
                           onClick={() => setConvertId(pr.id)}
-                          className="px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white text-xs"
+                          className="px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-primary-foreground text-xs"
                         >
                           Convert to PO
                         </button>

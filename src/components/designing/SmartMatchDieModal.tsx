@@ -47,13 +47,13 @@ export function SmartMatchDieModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-3 bg-background/80 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="smart-match-title"
     >
-      <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-xl border border-white/15 bg-black shadow-2xl ring-1 ring-white/10">
-        <div className="flex items-start justify-between gap-3 border-b border-white/10 px-3 py-2 shrink-0">
+      <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-xl border border-border/15 bg-background shadow-2xl ring-1 ring-ring/10">
+        <div className="flex items-start justify-between gap-3 border-b border-border/10 px-3 py-2 shrink-0">
           <div>
             <h2 id="smart-match-title" className="text-sm font-semibold text-amber-400">
               Smart Match — Die inventory
@@ -66,7 +66,7 @@ export function SmartMatchDieModal({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
+            className="p-1.5 rounded-lg text-slate-400 hover:bg-card/10 hover:text-foreground"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -77,7 +77,7 @@ export function SmartMatchDieModal({
             <p className="p-6 text-center text-sm text-slate-500">No dies within tolerance.</p>
           ) : (
             <table className="w-full text-left text-[11px] border-collapse">
-              <thead className="sticky top-0 bg-zinc-950/95 border-b border-white/10 text-slate-500 uppercase tracking-wide">
+              <thead className="sticky top-0 bg-zinc-950/95 border-b border-border/10 text-slate-500 uppercase tracking-wide">
                 <tr>
                   <th className="px-2 py-1.5 font-semibold">Serial #</th>
                   <th className="px-2 py-1.5 font-semibold">Type</th>
@@ -92,7 +92,7 @@ export function SmartMatchDieModal({
                 {rows.map((r) => (
                   <tr
                     key={r.id}
-                    className="border-b border-white/5 hover:bg-white/[0.04]"
+                    className="border-b border-border/5 hover:bg-card/[0.04]"
                   >
                     <td className="px-2 py-1 font-mono tabular-nums text-amber-200/95">
                       {r.serialNumber}
@@ -119,7 +119,7 @@ export function SmartMatchDieModal({
                         type="button"
                         disabled={busyId === r.id}
                         onClick={() => onSelect(r)}
-                        className="px-2 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-[10px] font-semibold"
+                        className="px-2 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-primary-foreground text-[10px] font-semibold"
                       >
                         {busyId === r.id ? '…' : 'Link'}
                       </button>

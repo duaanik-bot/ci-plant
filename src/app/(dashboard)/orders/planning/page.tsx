@@ -616,27 +616,31 @@ export default function PlanningPage() {
   }, [planningSelection, rows])
 
   return (
-    <div className="min-h-screen bg-white text-slate-900 pb-24">
+    <div className="min-h-screen bg-slate-50 pb-24 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
       <div className="mx-auto max-w-[1920px] space-y-4 px-4 py-4">
-        <div className="sticky top-0 z-30 -mx-4 px-4 py-3 bg-white/95 backdrop-blur-sm border-b border-[#E2E8F0]">
+        <div className="sticky top-0 z-30 -mx-4 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
           <div className="flex flex-wrap items-center gap-3 justify-between">
             <div>
-              <h1 className="text-lg font-bold text-slate-900 sm:text-xl tracking-tight font-[family-name:var(--font-inter)]">
+              <h1 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">
                 Planning
               </h1>
-              <p className={`text-[13px] text-slate-600 ${mono}`}>
+              <p className={`text-sm text-slate-600 dark:text-slate-400 ${mono}`}>
                 {rows.length} line(s) · Σ qty{' '}
-                <span className="text-slate-900 font-semibold">{totalQty.toLocaleString('en-IN')}</span>
+                <span className="font-semibold text-slate-900 dark:text-slate-100">{totalQty.toLocaleString('en-IN')}</span>
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2 flex-1 min-w-[min(100%,16rem)]">
-              <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">View</span>
-              <div className="inline-flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5">
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                View
+              </span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800">
                 <button
                   type="button"
                   onClick={() => setLedgerView('pending')}
                   className={`rounded-md px-4 py-1.5 text-sm font-medium ${
-                    ledgerView === 'pending' ? 'bg-white text-[#1D4ED8] shadow-sm' : 'text-slate-600'
+                    ledgerView === 'pending'
+                      ? 'bg-card text-blue-600 shadow-sm dark:text-blue-400'
+                      : 'text-slate-600 dark:text-slate-400'
                   }`}
                 >
                   Pending
@@ -645,7 +649,9 @@ export default function PlanningPage() {
                   type="button"
                   onClick={() => setLedgerView('processed')}
                   className={`rounded-md px-4 py-1.5 text-sm font-medium ${
-                    ledgerView === 'processed' ? 'bg-white text-[#1D4ED8] shadow-sm' : 'text-slate-600'
+                    ledgerView === 'processed'
+                      ? 'bg-card text-blue-600 shadow-sm dark:text-blue-400'
+                      : 'text-slate-600 dark:text-slate-400'
                   }`}
                 >
                   Processed
@@ -662,25 +668,25 @@ export default function PlanningPage() {
                   !!selectedForMix.conflict ||
                   !!mixConflictMessage
                 }
-                className="rounded-lg bg-[#1D4ED8] px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-md transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {makeProcessingBusy ? 'Processing…' : 'Make processing'}
               </button>
               <Link
                 href="/hub/dies"
-                className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-900"
+                className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
               >
                 Update Dye Details
               </Link>
               <Link
                 href="/orders/purchase-orders"
-                className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs text-slate-800 shadow-sm hover:bg-slate-50"
+                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70"
               >
                 Customer POs
               </Link>
               <Link
                 href="/orders/designing"
-                className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs text-slate-800 shadow-sm hover:bg-slate-50"
+                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70"
               >
                 Artwork queue
               </Link>
@@ -690,7 +696,7 @@ export default function PlanningPage() {
                   downloadPlanningAuditCsv(rows)
                   toast.success('Audit CSV exported')
                 }}
-                className={`inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs text-slate-800 shadow-sm hover:bg-slate-50 ${mono}`}
+                className={`inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70 ${mono}`}
               >
                 <Download className="h-3.5 w-3.5 text-slate-500" aria-hidden />
                 Audit export
@@ -787,7 +793,7 @@ export default function PlanningPage() {
             <button
               type="button"
               onClick={() => linkAsMixSet()}
-              className="pointer-events-auto rounded-full border border-pharma-border bg-pharma-action px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-900/10 transition-colors hover:bg-pharma-action-hover"
+              className="pointer-events-auto rounded-full border border-pharma-border bg-pharma-action px-5 py-3 text-sm font-semibold text-foreground shadow-lg shadow-blue-900/10 transition-colors hover:bg-pharma-action-hover"
             >
               Group as Mix-Set
             </button>

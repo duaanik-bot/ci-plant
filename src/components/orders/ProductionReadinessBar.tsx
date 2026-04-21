@@ -39,7 +39,7 @@ export function ProductionReadinessBar({
 }) {
   if (loading) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-black px-3 py-3 text-[11px] text-zinc-500 animate-pulse">
+      <div className="rounded-xl border border-zinc-800 bg-background px-3 py-3 text-[11px] text-zinc-500 animate-pulse">
         Loading production readiness…
       </div>
     )
@@ -47,7 +47,7 @@ export function ProductionReadinessBar({
 
   if (lines.length === 0) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-black px-3 py-3 text-[11px] text-zinc-500">
+      <div className="rounded-xl border border-zinc-800 bg-background px-3 py-3 text-[11px] text-zinc-500">
         Add line items to evaluate production readiness (die, block, shade links).
       </div>
     )
@@ -59,7 +59,7 @@ export function ProductionReadinessBar({
     loading ? 'bg-zinc-800' : allOk && !anyRose ? 'bg-emerald-500' : 'bg-rose-500'
 
   return (
-    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-3 text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <div className="rounded-xl border border-zinc-800 bg-background px-3 py-3 text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Production readiness</p>
@@ -83,7 +83,7 @@ export function ProductionReadinessBar({
           <div
             key={s.key}
             title={`${s.label}: ${s.detail}${s.technicalId ? ` (${s.technicalId})` : ''}`}
-            className={`flex-1 min-w-[4px] border-r border-black/40 last:border-r-0 transition-colors ${
+            className={`flex-1 min-w-[4px] border-r border-border/40 last:border-r-0 transition-colors ${
               s.ok ? fillTone : loading ? 'bg-zinc-800' : 'bg-rose-500'
             } ${allOk && !anyRose && !loading ? 'opacity-100' : ''}`}
           />

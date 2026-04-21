@@ -166,7 +166,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
         autoComplete="off"
         className={`w-full px-3 py-2 rounded bg-slate-800 border ${
           error ? 'border-red-500' : 'border-slate-600'
-        } text-white disabled:opacity-60 disabled:cursor-not-allowed ${inputClassName ?? ''}`}
+        } text-foreground disabled:opacity-60 disabled:cursor-not-allowed ${inputClassName ?? ''}`}
       />
       {error ? <p className="text-xs text-red-400 mt-1">{error}</p> : null}
 

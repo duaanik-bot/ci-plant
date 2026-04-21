@@ -39,7 +39,7 @@ export default function RfqPage() {
         <h1 className="text-xl font-bold text-amber-400">RFQ Pipeline</h1>
         <Link
           href="/rfq/new"
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
+          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
         >
           New RFQ
         </Link>

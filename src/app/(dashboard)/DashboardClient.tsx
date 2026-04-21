@@ -143,7 +143,7 @@ function dueDateClass(dueDate: string): string {
   const diff = due.getTime() - today.getTime()
   if (diff < 0) return 'text-red-400'
   if (diff === 0) return 'text-amber-400'
-  return 'text-white'
+  return 'text-foreground'
 }
 
 export default function DashboardClient() {
@@ -201,7 +201,7 @@ export default function DashboardClient() {
   })()
 
   return (
-    <div className="min-h-screen bg-[#0F172A] text-white w-full p-4 md:p-6">
+    <div className="min-h-screen bg-[#0F172A] text-foreground w-full p-4 md:p-6">
       {/* ROW 1 — STAT BAR */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         {STAT_CARDS.map((card) => {
@@ -222,7 +222,7 @@ export default function DashboardClient() {
               <div className="absolute top-4 right-4 text-slate-500">
                 <Icon className="h-6 w-6" />
               </div>
-              <span className="text-3xl font-bold text-white mt-2">{display}</span>
+              <span className="text-3xl font-bold text-foreground mt-2">{display}</span>
               <span className="text-sm text-slate-400 mt-1">{card.label}</span>
             </Link>
           )
@@ -448,7 +448,7 @@ export default function DashboardClient() {
                 href={`/rfq?status=${stage.key}`}
                 className="bg-slate-700 rounded-lg px-4 py-3 text-center hover:bg-slate-600 transition-colors min-w-[100px]"
               >
-                <span className="block text-xl font-bold text-white">
+                <span className="block text-xl font-bold text-foreground">
                   {rfqCountByStatus[stage.key] ?? 0}
                 </span>
                 <span className="block text-xs text-slate-400 mt-0.5">{stage.label}</span>
@@ -478,7 +478,7 @@ export default function DashboardClient() {
                     key={item.materialCode}
                     className="flex justify-between items-center text-sm gap-2"
                   >
-                    <span className="text-white truncate flex-1">{item.description || item.materialCode}</span>
+                    <span className="text-foreground truncate flex-1">{item.description || item.materialCode}</span>
                     <span className="text-slate-400 shrink-0">
                       {available.toLocaleString()} / {reorder.toLocaleString()}
                     </span>

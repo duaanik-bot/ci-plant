@@ -90,7 +90,7 @@ function SortableGanttBlock({
       className={`shrink-0 rounded border px-1 py-1 cursor-grab active:cursor-grabbing ${
         priorityGlow
           ? 'border-amber-500 bg-amber-500/15 shadow-[0_0_22px_rgba(245,158,11,0.45)] ring-1 ring-amber-500/60'
-          : 'border-white/20 bg-zinc-900/90'
+          : 'border-border/20 bg-zinc-900/90'
       } ${isDragging ? 'opacity-70 z-10' : ''}`}
       {...attributes}
       {...listeners}
@@ -239,7 +239,7 @@ export function PlanningGanttBoard({
         })
 
         return (
-          <div key={machine.id} className="rounded-lg border border-white/10 bg-black p-2">
+          <div key={machine.id} className="rounded-lg border border-border/10 bg-background p-2">
             <div className={`flex items-center justify-between text-[10px] text-slate-400 mb-1.5 ${mono}`}>
               <span className="text-amber-400/90 font-semibold">{machine.machineCode}</span>
               <span>

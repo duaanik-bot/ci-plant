@@ -9,13 +9,13 @@ import {
 } from '@/lib/hub-plate-card-ui'
 
 const ACTIVE_CLASSES: Record<PlateHubSwatchKind, string> = {
-  cyan: 'bg-cyan-500 text-white',
-  magenta: 'bg-plateMagenta text-white',
+  cyan: 'bg-cyan-500 text-primary-foreground',
+  magenta: 'bg-plateMagenta text-foreground',
   yellow: 'bg-yellow-400 text-gray-900',
-  black: 'bg-black text-white border border-zinc-500',
-  spotOrange: 'bg-orange-500 text-white',
-  spotPurple: 'bg-purple-600 text-white',
-  other: 'bg-orange-500 text-white',
+  black: 'bg-background text-foreground border border-zinc-500',
+  spotOrange: 'bg-orange-500 text-foreground',
+  spotPurple: 'bg-purple-600 text-foreground',
+  other: 'bg-orange-500 text-foreground',
 }
 
 const SIZE_CLASSES = {
@@ -44,7 +44,7 @@ export function PlateHubColourSwatch({
     return (
       <div
         title={label}
-        className={`${base} bg-gray-700/30 text-white border border-zinc-500/50 ${className}`}
+        className={`${base} bg-gray-700/30 text-foreground border border-zinc-500/50 ${className}`}
       >
         {display}
       </div>

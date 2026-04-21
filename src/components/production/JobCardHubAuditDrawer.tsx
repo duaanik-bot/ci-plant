@@ -240,7 +240,7 @@ export function JobCardHubAuditDrawer({
               href={jobCardId ? `/api/job-cards/${jobCardId}/card-pdf` : '#'}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-500"
+              className="px-3 py-2 rounded-lg bg-amber-600 text-primary-foreground text-sm font-medium hover:bg-amber-500"
             >
               Print official card
             </a>

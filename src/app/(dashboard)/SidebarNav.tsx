@@ -104,8 +104,8 @@ function NavItem({
 }) {
   const router = useRouter()
   const className = isActive
-    ? 'flex items-center gap-2 px-2 py-1.5 rounded-md bg-[#1D4ED8] text-white shadow-sm'
-    : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-pharma-secondary hover:bg-pharma-hover hover:text-pharma-primary dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white'
+    ? 'flex items-center gap-2 px-2 py-1.5 rounded-md bg-primary text-primary-foreground shadow-sm'
+    : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-pharma-secondary hover:bg-pharma-hover hover:text-pharma-primary dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-foreground'
   if (external) {
     return (
       <a

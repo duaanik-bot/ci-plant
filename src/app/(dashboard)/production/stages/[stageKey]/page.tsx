@@ -460,7 +460,7 @@ export default function ProductionStagePage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/production/stages"
-          className="text-sm text-slate-400 hover:text-white"
+          className="text-sm text-slate-400 hover:text-foreground"
         >
           ← All stages
         </Link>
@@ -786,7 +786,7 @@ export default function ProductionStagePage() {
                     type="button"
                     disabled={incentiveBusy}
                     onClick={() => void verifyPerformanceIncentive(spotlight.jobCard.id)}
-                    className="mt-1 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium disabled:opacity-50"
+                    className="mt-1 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-primary-foreground text-xs font-medium disabled:opacity-50"
                   >
                     {incentiveBusy ? '…' : 'Verify performance incentive'}
                   </button>

@@ -690,8 +690,8 @@ export default function EditPurchaseOrderPage() {
       className="min-h-screen bg-[#0B0F1A] px-3 py-3 sm:px-4 space-y-3 pb-36 max-w-[1920px] mx-auto w-full"
     >
       {/* Director's glass — metadata */}
-      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 backdrop-blur-md sm:px-4">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-3">
+      <div className="rounded-xl border border-border/40 bg-card/30 px-3 py-3 backdrop-blur-md sm:px-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/40 pb-3">
           <div className="min-w-0">
             <div className="text-xs font-medium uppercase tracking-wide text-slate-400">PO #</div>
             <input
@@ -810,13 +810,13 @@ export default function EditPurchaseOrderPage() {
       />
 
       {/* Zero-scroll line grid */}
-      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-2 text-[11px] backdrop-blur-sm sm:p-3">
+      <div className="rounded-xl border border-border/40 bg-card/20 p-2 text-[11px] backdrop-blur-sm sm:p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Line items</h2>
           <button
             type="button"
             onClick={addLine}
-            className="rounded-lg border border-slate-800 bg-[#111827] px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:border-blue-500/40 hover:text-white"
+            className="rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground/80 hover:border-blue-500/40 hover:text-foreground"
           >
             + Add line
           </button>
@@ -1016,7 +1016,7 @@ export default function EditPurchaseOrderPage() {
                           />
                         </div>
                         <div
-                          className={`mt-0.5 border-t border-slate-700/80 pt-0.5 text-right text-[10px] font-semibold text-white ${poMono}`}
+                          className={`mt-0.5 border-t border-slate-700/80 pt-0.5 text-right text-[10px] font-semibold text-foreground ${poMono}`}
                         >
                           {beforeGst.toFixed(2)}
                         </div>
@@ -1084,7 +1084,7 @@ export default function EditPurchaseOrderPage() {
       </div>
 
       <div
-        className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-black/85 shadow-[0_-8px_32px_rgba(0,0,0,0.55)] backdrop-blur-md"
+        className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/40 bg-background/85 shadow-[0_-8px_32px_rgba(0,0,0,0.55)] backdrop-blur-md"
         aria-live="polite"
         aria-label="Purchase order financial summary"
       >
@@ -1177,7 +1177,7 @@ export default function EditPurchaseOrderPage() {
               type="text"
               value={qcCarton.cartonName}
               onChange={(e) => setQcCarton((prev) => ({ ...prev, cartonName: e.target.value }))}
-              className={`w-full px-3 py-2 rounded bg-slate-800 border ${qcCartonErrors.cartonName ? 'border-red-500' : 'border-slate-600'} text-white`}
+              className={`w-full px-3 py-2 rounded bg-card border ${qcCartonErrors.cartonName ? 'border-red-500' : 'border-border'} text-foreground`}
             />
             {qcCartonErrors.cartonName && <p className="text-xs text-red-400 mt-1">{qcCartonErrors.cartonName}</p>}
           </div>
@@ -1187,32 +1187,32 @@ export default function EditPurchaseOrderPage() {
               type="text"
               value={qcCarton.artworkCode}
               onChange={(e) => setQcCarton((prev) => ({ ...prev, artworkCode: e.target.value.toUpperCase() }))}
-              className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white font-mono"
+              className="w-full px-3 py-2 rounded bg-card border border-border text-foreground font-mono"
               placeholder="e.g. AW-12345"
             />
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div>
               <label className="block text-xs text-slate-400 mb-1">L</label>
-              <input type="number" step={0.01} value={qcCarton.sizeL} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeL: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" step={0.01} value={qcCarton.sizeL} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeL: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">W</label>
-              <input type="number" step={0.01} value={qcCarton.sizeW} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeW: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" step={0.01} value={qcCarton.sizeW} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeW: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">H</label>
-              <input type="number" step={0.01} value={qcCarton.sizeH} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeH: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" step={0.01} value={qcCarton.sizeH} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeH: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs text-slate-400 mb-1">Rate</label>
-              <input type="number" step={0.01} value={qcCarton.rate} onChange={(e) => setQcCarton((prev) => ({ ...prev, rate: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" step={0.01} value={qcCarton.rate} onChange={(e) => setQcCarton((prev) => ({ ...prev, rate: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">GST%</label>
-              <input type="number" min={0} max={28} value={qcCarton.gstPct} onChange={(e) => setQcCarton((prev) => ({ ...prev, gstPct: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" min={0} max={28} value={qcCarton.gstPct} onChange={(e) => setQcCarton((prev) => ({ ...prev, gstPct: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
           </div>
           <div>
@@ -1223,13 +1223,13 @@ export default function EditPurchaseOrderPage() {
               value={qcCarton.boardGrade || null}
               onChange={(v) => setQcCarton((prev) => ({ ...prev, boardGrade: v ?? '' }))}
               controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-              inputClassName="text-white placeholder:text-slate-500"
+              inputClassName="text-foreground placeholder:text-muted-foreground"
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs text-slate-400 mb-1">GSM</label>
-              <input type="number" value={qcCarton.gsm} onChange={(e) => setQcCarton((prev) => ({ ...prev, gsm: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white" />
+              <input type="number" value={qcCarton.gsm} onChange={(e) => setQcCarton((prev) => ({ ...prev, gsm: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">Paper</label>
@@ -1239,7 +1239,7 @@ export default function EditPurchaseOrderPage() {
                 value={qcCarton.paperType || null}
                 onChange={(v) => setQcCarton((prev) => ({ ...prev, paperType: v ?? '' }))}
                 controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-                inputClassName="text-white placeholder:text-slate-500"
+                inputClassName="text-foreground placeholder:text-muted-foreground"
               />
             </div>
           </div>
@@ -1252,7 +1252,7 @@ export default function EditPurchaseOrderPage() {
                 value={qcCarton.coatingType || null}
                 onChange={(v) => setQcCarton((prev) => ({ ...prev, coatingType: v ?? '' }))}
                 controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-                inputClassName="text-white placeholder:text-slate-500"
+                inputClassName="text-foreground placeholder:text-muted-foreground"
               />
             </div>
             <div className="mb-1">
@@ -1262,7 +1262,7 @@ export default function EditPurchaseOrderPage() {
                 value={qcCarton.embossingLeafing || null}
                 onChange={(v) => setQcCarton((prev) => ({ ...prev, embossingLeafing: v ?? '' }))}
                 controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-                inputClassName="text-white placeholder:text-slate-500"
+                inputClassName="text-foreground placeholder:text-muted-foreground"
               />
             </div>
             <PackagingEnumCombobox
@@ -1271,11 +1271,11 @@ export default function EditPurchaseOrderPage() {
               value={qcCarton.foilType || null}
               onChange={(v) => setQcCarton((prev) => ({ ...prev, foilType: v ?? '' }))}
               controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
-              inputClassName="text-white placeholder:text-slate-500"
+              inputClassName="text-foreground placeholder:text-muted-foreground"
             />
           </div>
           <div className="flex justify-end pt-2">
-            <button type="submit" disabled={qcCartonSaving} className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium">
+            <button type="submit" disabled={qcCartonSaving} className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground text-sm font-medium">
               {qcCartonSaving ? 'Saving…' : 'Save Carton'}
             </button>
           </div>

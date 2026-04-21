@@ -243,7 +243,7 @@ function CommandPaletteModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex justify-center bg-black/75 px-3 pt-[10vh] backdrop-blur-md sm:pt-[12vh]"
+      className="fixed inset-0 z-[100] flex justify-center bg-background/80 px-3 pt-[10vh] backdrop-blur-md sm:pt-[12vh]"
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onOpenChange(false)
@@ -251,17 +251,17 @@ function CommandPaletteModal({
     >
       <div
         ref={panelRef}
-        className="flex h-[min(70vh,560px)] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-slate-800/80 bg-[#000000] shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur-xl"
+        className="flex h-[min(70vh,560px)] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl ring-1 ring-ring/20 backdrop-blur-xl"
         onKeyDown={onPaletteKeyDown}
       >
-        <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <Search className="h-4 w-4 shrink-0 text-amber-400/90" aria-hidden />
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder="PO #, customer, carton, die, artwork code…"
-            className="min-w-0 flex-1 bg-transparent py-1 text-sm text-white placeholder:text-slate-600 focus:outline-none"
+            className="min-w-0 flex-1 bg-transparent py-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             autoComplete="off"
             spellCheck={false}
             aria-autocomplete="list"
@@ -296,7 +296,7 @@ function CommandPaletteModal({
           ) : null}
           {displayGroups.map((g) => (
             <div key={g.id} className="mb-3">
-              <div className="sticky top-0 z-10 bg-[#000000] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+              <div className="sticky top-0 z-10 bg-card px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
                 [ {g.label} ]
               </div>
               <ul className="space-y-0.5">
@@ -364,7 +364,7 @@ function CommandPaletteModal({
             </div>
           ))}
         </div>
-        <div className="border-t border-slate-800 px-3 py-1.5 text-[10px] text-slate-500">
+        <div className="border-t border-border px-3 py-1.5 text-[10px] text-muted-foreground">
           <span className="text-slate-600">Navigator: </span>
           <span className="text-[#f97316]/90">Anik Dua</span>
           <span className="text-slate-600"> · audits navigation</span>
@@ -424,7 +424,7 @@ export function CommandPaletteTrigger() {
     <button
       type="button"
       onClick={() => open()}
-      className="flex w-full max-w-xl items-center gap-2 rounded-lg border border-slate-700/90 bg-slate-900/60 px-3 py-2 text-left text-sm text-slate-400 shadow-inner ring-1 ring-white/5 backdrop-blur-md transition hover:border-amber-500/35 hover:bg-slate-800/70 hover:text-slate-200"
+      className="flex w-full max-w-xl items-center gap-2 rounded-lg border border-border bg-card/70 px-3 py-2 text-left text-sm text-muted-foreground shadow-inner ring-1 ring-ring/20 backdrop-blur-md transition hover:border-primary/40 hover:bg-accent hover:text-accent-foreground"
       aria-label="Open command palette"
     >
       <Search className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
@@ -442,7 +442,7 @@ export function CommandPaletteTriggerIcon() {
     <button
       type="button"
       onClick={() => open()}
-      className="p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-amber-300"
+      className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-primary"
       aria-label="Open command palette"
     >
       <Search className="h-5 w-5" />

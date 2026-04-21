@@ -119,7 +119,7 @@ function KanbanCardInner({
           <span className="w-3.5 shrink-0" />
         )}
       </div>
-      <p className="mt-1 text-base font-medium text-white leading-snug line-clamp-2 font-sans">{productName}</p>
+      <p className="mt-1 text-base font-medium text-foreground leading-snug line-clamp-2 font-sans">{productName}</p>
       <div
         className="mt-2 h-14 w-full rounded-md border border-zinc-800 shadow-inner"
         style={{ backgroundColor: dna }}
@@ -205,7 +205,7 @@ function KanbanColumn({
   })
 
   return (
-    <div className="flex min-w-[220px] max-w-[280px] flex-1 flex-col rounded-xl border border-zinc-800 bg-black/40">
+    <div className="flex min-w-[220px] max-w-[280px] flex-1 flex-col rounded-xl border border-zinc-800 bg-background/40">
       <div className={`border-b border-zinc-800 px-2 py-2 ${monoClass}`}>
         <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
           {col.title}{' '}
@@ -470,9 +470,9 @@ export function ShadeCardKanbanBoard({
       </DndContext>
 
       {issueOpen && issueRow ? (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-background/70 p-4">
           <div className={`w-full max-w-md rounded-lg border border-zinc-600 bg-zinc-900 p-4 space-y-3 text-sm ${monoClass}`}>
-            <h2 className="text-lg font-semibold text-white font-sans">Issue to floor</h2>
+            <h2 className="text-lg font-semibold text-foreground font-sans">Issue to floor</h2>
             <p className="text-xs text-zinc-500 font-sans">
               Card <span className="text-amber-300">{issueRow.shadeCode}</span> → On-Floor
             </p>
@@ -485,7 +485,7 @@ export function ShadeCardKanbanBoard({
                   setIssueJobCardId('')
                   setIssueJobCardNumber(null)
                 }}
-                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-white"
+                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground"
                 placeholder="Search # or customer…"
               />
             </label>
@@ -532,7 +532,7 @@ export function ShadeCardKanbanBoard({
                 onChange={(e) =>
                   setIssueInitialCondition(e.target.value as 'mint' | 'used' | 'minor_damage')
                 }
-                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-white ${monoClass}`}
+                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground ${monoClass}`}
               >
                 <option value="mint">{shadeCardPhysicalLabel('mint')}</option>
                 <option value="used">{shadeCardPhysicalLabel('used')}</option>
@@ -544,7 +544,7 @@ export function ShadeCardKanbanBoard({
               <select
                 value={machineId}
                 onChange={(e) => setMachineId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-white"
+                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground"
               >
                 <option value="">Select</option>
                 {machines.map((m) => (
@@ -560,7 +560,7 @@ export function ShadeCardKanbanBoard({
                 value={operatorSearch}
                 onChange={(e) => setOperatorSearch(e.target.value)}
                 placeholder="Filter by name…"
-                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-white ${monoClass}`}
+                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground ${monoClass}`}
               />
             </label>
             <label className="block text-zinc-300 font-sans">
@@ -568,7 +568,7 @@ export function ShadeCardKanbanBoard({
               <select
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-white"
+                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground"
               >
                 <option value="">Select</option>
                 {filteredOperators.map((u) => (
@@ -589,7 +589,7 @@ export function ShadeCardKanbanBoard({
               <button
                 type="button"
                 onClick={() => void submitIssue()}
-                className="px-3 py-1.5 rounded bg-blue-600 text-white font-sans"
+                className="px-3 py-1.5 rounded bg-blue-600 text-primary-foreground font-sans"
               >
                 Confirm issue
               </button>
@@ -599,9 +599,9 @@ export function ShadeCardKanbanBoard({
       ) : null}
 
       {receiveOpen && receiveRow ? (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-background/70 p-4">
           <div className="w-full max-w-md rounded-lg border border-zinc-600 bg-zinc-900 p-4 space-y-3 text-sm font-sans">
-            <h2 className="text-lg font-semibold text-white">Receive to rack</h2>
+            <h2 className="text-lg font-semibold text-foreground">Receive to rack</h2>
             <p className="text-xs text-zinc-500">
               Card <span className={`text-amber-300 ${monoClass}`}>{receiveRow.shadeCode}</span>
             </p>
@@ -611,7 +611,7 @@ export function ShadeCardKanbanBoard({
                 value={receiveOperatorSearch}
                 onChange={(e) => setReceiveOperatorSearch(e.target.value)}
                 placeholder="Search staff…"
-                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-white ${monoClass}`}
+                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground ${monoClass}`}
               />
             </label>
             <label className="block text-zinc-300 text-sm">
@@ -619,7 +619,7 @@ export function ShadeCardKanbanBoard({
               <select
                 value={receiveOperatorId}
                 onChange={(e) => setReceiveOperatorId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-white"
+                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground"
               >
                 <option value="">Select operator</option>
                 {filteredReceiveOperators.map((u) => (
@@ -636,7 +636,7 @@ export function ShadeCardKanbanBoard({
                 onChange={(e) =>
                   setReceiveEndCondition(e.target.value as 'mint' | 'used' | 'minor_damage')
                 }
-                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-white ${monoClass}`}
+                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground ${monoClass}`}
               >
                 <option value="mint">{shadeCardPhysicalLabel('mint')}</option>
                 <option value="used">{shadeCardPhysicalLabel('used')}</option>
@@ -662,7 +662,7 @@ export function ShadeCardKanbanBoard({
               <button
                 type="button"
                 onClick={() => void submitReceive()}
-                className="px-3 py-1.5 rounded bg-emerald-600 text-white"
+                className="px-3 py-1.5 rounded bg-emerald-600 text-primary-foreground"
               >
                 Receive
               </button>

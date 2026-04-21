@@ -120,7 +120,7 @@ export function PackagingEnumCombobox({
   return (
     <div ref={containerRef} className={`relative min-w-0 ${className}`}>
       <div
-        className={`flex items-center gap-0.5 rounded border border-[#E2E8F0] bg-white shadow-sm transition-colors ${
+        className={`flex items-center gap-0.5 rounded border border-[#E2E8F0] bg-card shadow-sm transition-colors ${
           disabled ? 'opacity-50 pointer-events-none' : 'hover:bg-slate-50 focus-within:ring-2 focus-within:ring-blue-500/25'
         } ${controlClassName}`}
       >
@@ -184,7 +184,7 @@ export function PackagingEnumCombobox({
         <ul
           id={listId}
           role="listbox"
-          className="absolute left-0 right-0 top-full z-50 mt-0.5 max-h-48 overflow-auto rounded-md border border-[#E2E8F0] bg-white py-0.5 shadow-lg"
+          className="absolute left-0 right-0 top-full z-50 mt-0.5 max-h-48 overflow-auto rounded-md border border-[#E2E8F0] bg-card py-0.5 shadow-lg"
         >
           {allowEmpty ? (
             <li

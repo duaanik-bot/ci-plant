@@ -7,7 +7,7 @@ export default function HubToolingShell({ mode }: { mode: 'dies' | 'blocks' }) {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-black text-zinc-400 p-8 text-sm flex items-center justify-center">
+        <div className="min-h-screen bg-background p-8 text-sm text-muted-foreground flex items-center justify-center">
           Loading…
         </div>
       }

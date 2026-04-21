@@ -124,7 +124,7 @@ export default function NcrListPage() {
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
+          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
         >
           {showForm ? 'Cancel' : 'Raise NCR'}
         </button>
@@ -139,7 +139,7 @@ export default function NcrListPage() {
               <select
                 value={form.jobId}
                 onChange={(e) => setForm((f) => ({ ...f, jobId: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select job…</option>
                 {jobs.map((j) => (
@@ -154,7 +154,7 @@ export default function NcrListPage() {
               <select
                 value={form.trigger}
                 onChange={(e) => setForm((f) => ({ ...f, trigger: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               >
                 {TRIGGERS.map((t) => (
                   <option key={t} value={t}>
@@ -168,7 +168,7 @@ export default function NcrListPage() {
               <select
                 value={form.severity}
                 onChange={(e) => setForm((f) => ({ ...f, severity: e.target.value as any }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="critical">Critical</option>
                 <option value="major">Major</option>
@@ -182,7 +182,7 @@ export default function NcrListPage() {
                 min={0}
                 value={form.quantityAffected}
                 onChange={(e) => setForm((f) => ({ ...f, quantityAffected: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div className="md:col-span-2">
@@ -191,14 +191,14 @@ export default function NcrListPage() {
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                 rows={2}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
           </div>
           <button
             type="submit"
             disabled={saving}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {saving ? 'Saving…' : 'Create NCR'}
           </button>
@@ -209,7 +209,7 @@ export default function NcrListPage() {
         <select
           value={jobId}
           onChange={(e) => setJobId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
         >
           <option value="">All jobs</option>
           {jobs.map((j) => (
@@ -221,7 +221,7 @@ export default function NcrListPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
         >
           <option value="">All statuses</option>
           <option value="open">Open</option>

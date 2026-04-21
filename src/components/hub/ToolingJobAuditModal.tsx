@@ -146,7 +146,7 @@ export function ToolingJobAuditModal({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/85 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -161,7 +161,7 @@ export function ToolingJobAuditModal({
         <div className="p-4 border-b border-zinc-800 shrink-0">
           <div className="flex justify-between gap-2 items-start">
             <div className="min-w-0">
-              <h2 id="tooling-audit-title" className="text-lg font-semibold text-white truncate">
+              <h2 id="tooling-audit-title" className="text-lg font-semibold text-foreground truncate">
                 Tool details &amp; history
               </h2>
               <p className="text-sm font-medium text-blue-300/90 mt-1 truncate">{context.title}</p>
@@ -178,7 +178,7 @@ export function ToolingJobAuditModal({
             </button>
           </div>
           <div
-            className="mt-3 flex rounded-lg border border-zinc-700 overflow-hidden p-0.5 bg-black/50"
+            className="mt-3 flex rounded-lg border border-zinc-700 overflow-hidden p-0.5 bg-background/50"
             role="tablist"
             aria-label="Audit sections"
           >
@@ -188,7 +188,7 @@ export function ToolingJobAuditModal({
               aria-selected={tab === 'timeline'}
               onClick={() => setTab('timeline')}
               className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-                tab === 'timeline' ? 'bg-amber-600 text-white' : 'text-zinc-400 hover:text-white'
+                tab === 'timeline' ? 'bg-amber-600 text-primary-foreground' : 'text-zinc-400 hover:text-foreground'
               }`}
             >
               Timeline
@@ -199,7 +199,7 @@ export function ToolingJobAuditModal({
               aria-selected={tab === 'usage'}
               onClick={() => setTab('usage')}
               className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-                tab === 'usage' ? 'bg-amber-600 text-white' : 'text-zinc-400 hover:text-white'
+                tab === 'usage' ? 'bg-amber-600 text-primary-foreground' : 'text-zinc-400 hover:text-foreground'
               }`}
             >
               Usage history
@@ -212,7 +212,7 @@ export function ToolingJobAuditModal({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-2">
               Current specs
             </h3>
-            <div className="rounded-lg border border-zinc-800 bg-black/50 p-3 space-y-2">
+            <div className="rounded-lg border border-zinc-800 bg-background/50 p-3 space-y-2">
               <p className="text-[10px] text-zinc-500 uppercase">Units</p>
               <p className="text-sm text-zinc-200 font-medium tabular-nums">{context.units}</p>
               <p className="text-[10px] text-zinc-500 uppercase">Specification</p>
@@ -237,7 +237,7 @@ export function ToolingJobAuditModal({
                   <li key={e.id ?? `${e.timeLabel}-${i}`} className="relative">
                     <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-4 ring-zinc-950" />
                     {context.tool === 'die' ? (
-                      <div className="rounded-lg border border-zinc-800 bg-black/40 p-2.5 space-y-1.5">
+                      <div className="rounded-lg border border-zinc-800 bg-background/40 p-2.5 space-y-1.5">
                         <p className="text-[11px] text-zinc-500 font-mono tabular-nums">{e.timeLabel}</p>
                         <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-1 text-xs">
                           <dt className="text-zinc-500 font-semibold uppercase tracking-wide">Operator</dt>

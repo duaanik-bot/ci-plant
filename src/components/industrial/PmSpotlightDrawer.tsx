@@ -106,7 +106,7 @@ export function PmSpotlightDrawer({
       onClose={onClose}
       widthClass="max-w-lg"
     >
-      <div className={`space-y-5 text-sm text-zinc-300 bg-black min-h-[120px] ${mono}`}>
+      <div className={`space-y-5 text-sm text-zinc-300 bg-background min-h-[120px] ${mono}`}>
         {loading ? (
           <p className="text-zinc-500 text-sm">Loading…</p>
         ) : data ? (
@@ -143,7 +143,7 @@ export function PmSpotlightDrawer({
                   {data.serviceHistory.map((h) => (
                     <li
                       key={h.verifiedAt}
-                      className="rounded-lg border border-zinc-800 bg-black px-2 py-2 text-xs text-zinc-400"
+                      className="rounded-lg border border-zinc-800 bg-background px-2 py-2 text-xs text-zinc-400"
                     >
                       <span className="text-zinc-200">{new Date(h.verifiedAt).toLocaleString()}</span>
                       <p className="mt-0.5 text-zinc-500">{h.signedOffNote}</p>
@@ -185,7 +185,7 @@ export function PmSpotlightDrawer({
                 type="button"
                 disabled={busy}
                 onClick={() => void signOff()}
-                className="w-full rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium py-2.5"
+                className="w-full rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-primary-foreground text-sm font-medium py-2.5"
               >
                 {busy ? '…' : 'Sign off PM completion'}
               </button>

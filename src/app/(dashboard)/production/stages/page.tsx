@@ -127,7 +127,7 @@ export default function ProductionStagesHubPage() {
 
   return (
     <>
-    <div className="min-h-screen bg-black text-slate-200">
+    <div className="min-h-screen bg-background text-slate-200">
       <div className="p-4 max-w-5xl mx-auto space-y-8">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-orange-400">Production Planning</h1>
@@ -151,7 +151,7 @@ export default function ProductionStagesHubPage() {
           <ProductionScheduleBoardContainer />
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-black px-4 py-5 space-y-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]">
+        <section className="rounded-2xl border border-border/10 bg-background px-4 py-5 space-y-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]">
           <div className="flex items-center gap-2">
             <Star className="h-4 w-4 text-orange-400 fill-orange-400 drop-shadow-[0_0_8px_rgba(251,146,60,0.75)]" />
             <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
@@ -219,7 +219,7 @@ export default function ProductionStagesHubPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-black px-4 py-5 space-y-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]">
+        <section className="rounded-2xl border border-border/10 bg-background px-4 py-5 space-y-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
             Machine health — PM scheduler
           </h2>
@@ -320,7 +320,7 @@ export default function ProductionStagesHubPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-black px-4 py-5 space-y-3">
+        <section className="rounded-2xl border border-border/10 bg-background px-4 py-5 space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
             Top performers — operator performance index
           </h2>

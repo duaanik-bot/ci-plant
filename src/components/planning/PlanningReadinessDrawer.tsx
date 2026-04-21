@@ -317,7 +317,7 @@ export function PlanningReadinessDrawer({
                   v === 'avneet_singh' || v === 'shamsher_inder' ? (v as PlanningDesignerKey) : ''
                 onDesignerKeyChange?.(line.id, key)
               }}
-              className={`mt-1 w-full h-9 rounded border border-[#E2E8F0] bg-white px-2 text-xs text-[#1A1A1B] dark:border-white/15 dark:bg-black dark:text-slate-200 ${mono}`}
+              className={`mt-1 w-full h-9 rounded border border-border bg-card px-2 text-xs text-foreground dark:border-border/40 dark:bg-card dark:text-slate-200 ${mono}`}
             >
               <option value="">— Designer —</option>
               {(Object.entries(PLANNING_DESIGNERS) as [PlanningDesignerKey, string][]).map(([k, label]) => (
@@ -356,7 +356,7 @@ export function PlanningReadinessDrawer({
 
           <div>
             <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>Material Efficiency</p>
-            <div className="mt-2 flex flex-col gap-3 rounded-lg border border-[#E2E8F0] bg-white/80 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+            <div className="mt-2 flex flex-col gap-3 rounded-lg border border-border bg-card/80 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/40">
               {util && util.yieldPct > 0 ? (
                 <div className="flex flex-col items-center">
                   <SemiGaugeUtilization pct={util.yieldPct} />

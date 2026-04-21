@@ -106,7 +106,7 @@ export default function QcRecordsPage() {
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium"
+          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
         >
           {showForm ? 'Cancel' : 'Add QC record'}
         </button>
@@ -121,7 +121,7 @@ export default function QcRecordsPage() {
               <select
                 value={form.jobId}
                 onChange={(e) => setForm((f) => ({ ...f, jobId: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="">Select job…</option>
                 {jobs.map((j) => (
@@ -137,7 +137,7 @@ export default function QcRecordsPage() {
                 type="text"
                 value={form.checkType}
                 onChange={(e) => setForm((f) => ({ ...f, checkType: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -145,7 +145,7 @@ export default function QcRecordsPage() {
               <select
                 value={form.instrumentName}
                 onChange={(e) => setForm((f) => ({ ...f, instrumentName: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               >
                 {QC_INSTRUMENTS.map((inst) => (
                   <option key={inst} value={inst}>
@@ -159,7 +159,7 @@ export default function QcRecordsPage() {
               <select
                 value={form.result}
                 onChange={(e) => setForm((f) => ({ ...f, result: e.target.value as 'PASS' | 'FAIL' }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               >
                 <option value="PASS">PASS</option>
                 <option value="FAIL">FAIL</option>
@@ -171,7 +171,7 @@ export default function QcRecordsPage() {
                 type="text"
                 value={form.measuredValue}
                 onChange={(e) => setForm((f) => ({ ...f, measuredValue: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
             <div>
@@ -182,14 +182,14 @@ export default function QcRecordsPage() {
                   placeholder="Min"
                   value={form.specMin}
                   onChange={(e) => setForm((f) => ({ ...f, specMin: e.target.value }))}
-                  className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                  className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
                 />
                 <input
                   type="text"
                   placeholder="Max"
                   value={form.specMax}
                   onChange={(e) => setForm((f) => ({ ...f, specMax: e.target.value }))}
-                  className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                  className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
                 />
               </div>
             </div>
@@ -211,14 +211,14 @@ export default function QcRecordsPage() {
                 type="text"
                 value={form.notes}
                 onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-white"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
               />
             </div>
           </div>
           <button
             type="submit"
             disabled={saving}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -229,7 +229,7 @@ export default function QcRecordsPage() {
         <select
           value={jobId}
           onChange={(e) => setJobId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-white"
+          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
         >
           <option value="">All jobs</option>
           {jobs.map((j) => (

@@ -1,6 +1,16 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import {
+  EnterpriseTableShell,
+  enterpriseTheadClass,
+  enterpriseTbodyClass,
+  enterpriseTrClass,
+  enterpriseThClass,
+  enterpriseTdClass,
+  enterpriseTdMonoClass,
+  enterpriseTdMutedClass,
+} from '@/components/ui/EnterpriseTableShell'
 
 type Order = {
   id: string
@@ -20,16 +30,23 @@ export default function EmbossVendorOrdersPage() {
   const [refresh, setRefresh] = useState(0)
 
   useEffect(() => {
-    fetch('/api/emboss-vendor-orders').then((r) => r.json()).then((d) => setRows(Array.isArray(d) ? d : []))
+    fetch('/api/emboss-vendor-orders')
+      .then((r) => r.json())
+      .then((d) => setRows(Array.isArray(d) ? d : []))
   }, [refresh])
 
   const today = Date.now()
-  const withOverdue = useMemo(() => rows.map((r) => {
-    const overdueDays = r.expectedBy && r.status !== 'received'
-      ? Math.max(0, Math.floor((today - new Date(r.expectedBy).getTime()) / (1000 * 60 * 60 * 24)))
-      : 0
-    return { ...r, overdueDays }
-  }), [rows, today])
+  const withOverdue = useMemo(
+    () =>
+      rows.map((r) => {
+        const overdueDays =
+          r.expectedBy && r.status !== 'received'
+            ? Math.max(0, Math.floor((today - new Date(r.expectedBy).getTime()) / (1000 * 60 * 60 * 24)))
+            : 0
+        return { ...r, overdueDays }
+      }),
+    [rows, today]
+  )
 
   async function updateStatus(id: string, status: string) {
     await fetch(`/api/emboss-vendor-orders/${id}`, {
@@ -49,44 +66,71 @@ export default function EmbossVendorOrdersPage() {
     setRefresh((x) => x + 1)
   }
 
+  const selectCls =
+    'min-h-[32px] min-w-[80px] rounded border border-slate-200 bg-card px-1 py-0.5 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100'
+
   return (
-    <div className="p-4 max-w-7xl mx-auto space-y-4">
-      <h1 className="text-xl font-bold text-amber-400">Emboss Vendor Orders</h1>
-      <div className="rounded-xl border border-slate-700 overflow-x-auto">
-        <table className="w-full text-xs text-left">
-          <thead className="bg-slate-800 text-slate-300">
+    <div className="mx-auto max-w-7xl space-y-4">
+      <h1 className="text-base font-semibold text-slate-900 dark:text-slate-50">Emboss Vendor Orders</h1>
+      <EnterpriseTableShell>
+        <table className="w-full min-w-[960px] border-collapse text-left text-sm text-slate-900 dark:text-slate-50">
+          <thead className={enterpriseTheadClass}>
             <tr>
-              <th className="px-2 py-2">Order</th><th className="px-2 py-2">Date</th><th className="px-2 py-2">Type</th>
-              <th className="px-2 py-2">Carton</th><th className="px-2 py-2">Block</th><th className="px-2 py-2">Vendor</th>
-              <th className="px-2 py-2">Expected</th><th className="px-2 py-2">Priority</th><th className="px-2 py-2">Status</th><th className="px-2 py-2">Action</th>
+              <th className={enterpriseThClass}>Order</th>
+              <th className={enterpriseThClass}>Date</th>
+              <th className={enterpriseThClass}>Type</th>
+              <th className={enterpriseThClass}>Carton</th>
+              <th className={enterpriseThClass}>Block</th>
+              <th className={enterpriseThClass}>Vendor</th>
+              <th className={enterpriseThClass}>Expected</th>
+              <th className={enterpriseThClass}>Priority</th>
+              <th className={enterpriseThClass}>Status</th>
+              <th className={enterpriseThClass}>Action</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className={enterpriseTbodyClass}>
             {withOverdue.map((o) => (
-              <tr key={o.id} className="border-t border-slate-800">
-                <td className="px-2 py-2 font-mono text-amber-300">{o.orderCode}</td>
-                <td className="px-2 py-2">{new Date(o.orderedAt).toLocaleDateString('en-IN')}</td>
-                <td className="px-2 py-2">{o.orderType}</td>
-                <td className="px-2 py-2">{o.cartonName ?? '-'}</td>
-                <td className="px-2 py-2">{o.blockType ?? '-'}</td>
-                <td className="px-2 py-2">{o.vendorName}</td>
-                <td className="px-2 py-2">{o.expectedBy ? new Date(o.expectedBy).toLocaleDateString('en-IN') : '-'} {o.overdueDays > 0 ? <span className="text-red-400">OVERDUE {o.overdueDays}d</span> : null}</td>
-                <td className="px-2 py-2">{o.priority}</td>
-                <td className="px-2 py-2">{o.status}</td>
-                <td className="px-2 py-2">
-                  <div className="flex gap-2">
-                    <select value={o.status} onChange={(e) => updateStatus(o.id, e.target.value)} className="bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-xs">
-                      <option>ordered</option><option>confirmed</option><option>in_production</option><option>dispatched</option><option>received</option><option>cancelled</option>
+              <tr key={o.id} className={enterpriseTrClass}>
+                <td className={`${enterpriseTdMonoClass} text-amber-700 dark:text-amber-300`}>{o?.orderCode ?? '—'}</td>
+                <td className={enterpriseTdMonoClass}>
+                  {o?.orderedAt ? new Date(o.orderedAt).toLocaleDateString('en-IN') : '—'}
+                </td>
+                <td className={enterpriseTdMutedClass}>{o?.orderType ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{o?.cartonName ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{o?.blockType ?? '—'}</td>
+                <td className={enterpriseTdClass}>{o?.vendorName ?? '—'}</td>
+                <td className={enterpriseTdMonoClass}>
+                  {o?.expectedBy ? new Date(o.expectedBy).toLocaleDateString('en-IN') : '—'}{' '}
+                  {o.overdueDays > 0 ? (
+                    <span className="text-rose-600 dark:text-rose-400">OVERDUE {o.overdueDays}d</span>
+                  ) : null}
+                </td>
+                <td className={enterpriseTdClass}>{o?.priority ?? '—'}</td>
+                <td className={enterpriseTdClass}>{o?.status ?? '—'}</td>
+                <td className={enterpriseTdClass}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select value={o.status} onChange={(e) => updateStatus(o.id, e.target.value)} className={selectCls}>
+                      <option>ordered</option>
+                      <option>confirmed</option>
+                      <option>in_production</option>
+                      <option>dispatched</option>
+                      <option>received</option>
+                      <option>cancelled</option>
                     </select>
-                    <button onClick={() => markReceived(o.id)} className="text-green-300 hover:underline">Receive</button>
+                    <button
+                      type="button"
+                      onClick={() => markReceived(o.id)}
+                      className="text-sm text-emerald-600 hover:underline dark:text-emerald-400"
+                    >
+                      Receive
+                    </button>
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
+      </EnterpriseTableShell>
     </div>
   )
 }
-
