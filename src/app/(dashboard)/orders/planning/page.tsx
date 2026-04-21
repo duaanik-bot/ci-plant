@@ -245,11 +245,11 @@ function ReadinessFiveBar({ segments }: { segments: ReadinessFiveSegment[] }) {
             title={s.title}
             className={`inline-flex h-6 w-[1.35rem] shrink-0 cursor-help items-center justify-center rounded text-[8px] font-bold leading-none ${mono} ${
               green
-                ? 'border border-emerald-500/45 bg-emerald-500/12 text-emerald-300'
+                ? 'border border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:border-emerald-500/45 dark:bg-emerald-500/12 dark:text-emerald-300'
                 : grey
-                  ? 'border border-white/10 bg-zinc-900 text-zinc-500'
-                  : 'border border-rose-500 bg-rose-500/10 text-rose-100 shadow-[0_0_0_1px_rgba(244,63,94,0.55),0_0_10px_rgba(244,63,94,0.25)]'
-            } ${blocked ? 'ring-1 ring-rose-500/35' : ''}`}
+                  ? 'border border-[#E2E8F0] bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-500'
+                  : 'border border-rose-400 bg-rose-50 text-rose-900 shadow-sm dark:border-rose-500 dark:bg-rose-500/10 dark:text-rose-100 dark:shadow-[0_0_0_1px_rgba(244,63,94,0.55),0_0_10px_rgba(244,63,94,0.25)]'
+            } ${blocked ? 'ring-1 ring-rose-400/50 dark:ring-rose-500/35' : ''}`}
           >
             {s.abbr}
           </span>
@@ -432,6 +432,14 @@ export default function PlanningPage() {
   const [planningSetIdMode, setPlanningSetIdMode] = useState<PlanningSetIdMode>('auto')
   const [planningDrawerLineId, setPlanningDrawerLineId] = useState<string | null>(null)
   const [savingPlanningHandoff, setSavingPlanningHandoff] = useState(false)
+  /** When true, readiness ledger shows only checkbox-selected rows (Make Processing). */
+  const [selectionOnlyView, setSelectionOnlyView] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('view') === 'pending') setPlanningStatus('pending')
+  }, [])
 
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'planning-customer',
@@ -911,7 +919,18 @@ export default function PlanningPage() {
 
   const groupSortedPlanningRows = useMemo(() => {
     const list = [...sortedPlanningRows]
-    if (planningGroupBy === 'cartonSize') {
+    const cmpStr = (x: string, y: string) => x.localeCompare(y)
+    if (planningGroupBy === 'board') {
+      list.sort((a, b) => {
+        let c = cmpStr(String(a.paperType ?? ''), String(b.paperType ?? ''))
+        if (c !== 0) return c
+        c = (a.gsm ?? 0) - (b.gsm ?? 0)
+        if (c !== 0) return c
+        c = cmpStr(String(a.coatingType ?? ''), String(b.coatingType ?? ''))
+        if (c !== 0) return c
+        return cmpStr(String(a.cartonSize ?? ''), String(b.cartonSize ?? ''))
+      })
+    } else if (planningGroupBy === 'cartonSize') {
       list.sort((a, b) => String(a.cartonSize ?? '').localeCompare(String(b.cartonSize ?? '')))
     } else if (planningGroupBy === 'gsm') {
       list.sort((a, b) => (a.gsm ?? 0) - (b.gsm ?? 0))
@@ -920,6 +939,11 @@ export default function PlanningPage() {
     }
     return list
   }, [sortedPlanningRows, planningGroupBy])
+
+  const displayPlanningRows = useMemo(() => {
+    if (!selectionOnlyView || planningSelection.size === 0) return groupSortedPlanningRows
+    return groupSortedPlanningRows.filter((r) => planningSelection.has(r.id))
+  }, [groupSortedPlanningRows, selectionOnlyView, planningSelection])
 
   const scheduleBoardLines = useMemo(
     () => rows.filter((r) => r.planningStatus !== 'closed'),
@@ -938,32 +962,45 @@ export default function PlanningPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#000000] text-slate-200 pb-16">
+    <div className="min-h-screen bg-white text-[#1A1A1B] dark:bg-[#000000] dark:text-slate-200 pb-20">
       <div className="mx-auto max-w-[1600px] space-y-3 px-3 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-lg font-bold text-amber-400 sm:text-xl">Planning queue</h1>
-            <p className={`text-[11px] text-slate-500 ${mono}`}>
+            <h1 className="text-lg font-bold text-amber-700 dark:text-amber-400 sm:text-xl">Planning queue</h1>
+            <p className={`text-[11px] text-slate-600 dark:text-slate-500 ${mono}`}>
               {rows.length} line(s) · Σ qty{' '}
-              <span className="text-amber-300 font-semibold">{totalQty.toLocaleString('en-IN')}</span>
+              <span className="text-amber-700 dark:text-amber-300 font-semibold">{totalQty.toLocaleString('en-IN')}</span>
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={planningSelection.size === 0}
+              onClick={() => {
+                if (planningSelection.size === 0) return
+                setQueueTab('ready')
+                setSelectionOnlyView(true)
+                toast.success('Make processing: filtered to selected rows · Ready to process')
+              }}
+              className="rounded-lg border border-emerald-600/50 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:bg-slate-300 dark:disabled:bg-slate-800"
+            >
+              Make processing
+            </button>
             <Link
               href="/orders/purchase-orders"
-              className="rounded-lg border border-white/15 bg-black px-2.5 py-1 text-xs text-slate-200 hover:border-amber-500/40"
+              className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1 text-xs text-[#1A1A1B] hover:border-amber-500/50 dark:border-white/15 dark:bg-black dark:text-slate-200 dark:hover:border-amber-500/40"
             >
               Customer POs
             </Link>
             <Link
               href="/orders/designing"
-              className="rounded-lg border border-white/15 bg-black px-2.5 py-1 text-xs text-slate-200 hover:border-amber-500/40"
+              className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1 text-xs text-[#1A1A1B] hover:border-amber-500/50 dark:border-white/15 dark:bg-black dark:text-slate-200 dark:hover:border-amber-500/40"
             >
-              Visual audit
+              Artwork queue
             </Link>
             <Link
               href="/production/job-cards"
-              className="rounded-lg border border-white/15 bg-black px-2.5 py-1 text-xs text-slate-200 hover:border-amber-500/40"
+              className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1 text-xs text-[#1A1A1B] hover:border-amber-500/50 dark:border-white/15 dark:bg-black dark:text-slate-200 dark:hover:border-amber-500/40"
             >
               Job cards
             </Link>
@@ -973,7 +1010,7 @@ export default function PlanningPage() {
                 downloadPlanningAuditCsv(rows)
                 toast.success('Audit CSV exported')
               }}
-              className={`inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-black px-2.5 py-1 text-xs text-slate-200 hover:border-amber-500/40 ${mono}`}
+              className={`inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1 text-xs text-[#1A1A1B] hover:border-amber-500/50 dark:border-white/15 dark:bg-black dark:text-slate-200 dark:hover:border-amber-500/40 ${mono}`}
             >
               <Download className="h-3.5 w-3.5 text-amber-500/90" aria-hidden />
               Audit export
@@ -981,28 +1018,28 @@ export default function PlanningPage() {
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3 rounded-lg border border-slate-800 bg-[#000000] px-3 py-2.5">
+        <div className="grid gap-3 sm:grid-cols-3 rounded-lg border border-[#E2E8F0] bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-[#000000]">
           <div>
             <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
               Total volume in queue
             </p>
-            <p className={`text-xl font-semibold text-amber-300/95 ${mono}`}>
+            <p className={`text-xl font-semibold text-amber-800 dark:text-amber-300/95 ${mono}`}>
               {totalQty.toLocaleString('en-IN')}
             </p>
             <p className="text-[9px] text-slate-600">Σ qty · all lines in view</p>
           </div>
-          <div className="sm:border-l sm:border-slate-800 sm:pl-3">
+          <div className="sm:border-l sm:border-[#E2E8F0] dark:sm:border-slate-800 sm:pl-3">
             <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>Top blocker</p>
-            <p className={`text-sm font-medium text-rose-200/95 ${mono} leading-snug`}>
+            <p className={`text-sm font-medium text-rose-800 dark:text-rose-200/95 ${mono} leading-snug`}>
               {topBlockerTile.headline}
             </p>
             <p className="text-[9px] text-slate-600 mt-0.5">{topBlockerTile.sub}</p>
           </div>
-          <div className="sm:border-l sm:border-slate-800 sm:pl-3">
+          <div className="sm:border-l sm:border-[#E2E8F0] dark:sm:border-slate-800 sm:pl-3">
             <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
               Ready to schedule
             </p>
-            <p className={`text-xl font-semibold text-emerald-400 ${mono}`}>{readyToScheduleCount}</p>
+            <p className={`text-xl font-semibold text-emerald-700 dark:text-emerald-400 ${mono}`}>{readyToScheduleCount}</p>
             <p className="text-[9px] text-slate-600">5-point interlock + plates · not closed</p>
           </div>
         </div>
@@ -1043,10 +1080,19 @@ export default function PlanningPage() {
         </div>
 
         <div className="flex flex-wrap gap-3 text-sm items-end">
+          {selectionOnlyView ? (
+            <button
+              type="button"
+              onClick={() => setSelectionOnlyView(false)}
+              className="text-xs font-medium text-amber-700 underline underline-offset-2 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-300"
+            >
+              Show all lines
+            </button>
+          ) : null}
           <select
             value={planningStatus}
             onChange={(e) => setPlanningStatus(e.target.value)}
-            className={`rounded border border-white/15 bg-black px-2 py-1.5 text-slate-200 text-xs ${mono}`}
+            className={`rounded border border-[#E2E8F0] bg-white px-2 py-1.5 text-[#1A1A1B] text-xs dark:border-white/15 dark:bg-black dark:text-slate-200 ${mono}`}
           >
             <option value="">All planning statuses</option>
             {PLANNING_STATUSES.map((s) => (
@@ -1086,7 +1132,7 @@ export default function PlanningPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-[#000000] p-3">
+        <div className="rounded-lg border border-[#E2E8F0] bg-white p-3 dark:border-white/10 dark:bg-[#000000]">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
             Intelligent bottleneck strip
           </p>
@@ -1106,13 +1152,13 @@ export default function PlanningPage() {
               </div>
             </div>
 
-            <div className="hidden sm:block w-px bg-white/10 self-stretch min-h-[4rem]" aria-hidden />
+            <div className="hidden sm:block w-px bg-[#E2E8F0] dark:bg-white/10 self-stretch min-h-[4rem]" aria-hidden />
 
             <div className="min-w-[12rem] flex-1">
               <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
                 Primary blocker
               </p>
-              <p className={`mt-1 text-sm text-rose-200/95 ${mono}`}>
+              <p className={`mt-1 text-sm text-rose-800 dark:text-rose-200/95 ${mono}`}>
                 {primaryBottleneckInsight.label
                   ? `${primaryBottleneckInsight.pct}% · ${primaryBottleneckInsight.label}`
                   : '—'}
@@ -1122,7 +1168,7 @@ export default function PlanningPage() {
               </p>
             </div>
 
-            <div className="hidden sm:block w-px bg-white/10 self-stretch min-h-[4rem]" aria-hidden />
+            <div className="hidden sm:block w-px bg-[#E2E8F0] dark:bg-white/10 self-stretch min-h-[4rem]" aria-hidden />
 
             <div className="min-w-[14rem] flex-[1.25]">
               <p className={`text-[10px] uppercase tracking-wide text-slate-500 mb-1.5 ${mono}`}>
@@ -1134,7 +1180,7 @@ export default function PlanningPage() {
                   return (
                     <div
                       key={m.id}
-                      className="min-w-[6.5rem] flex-1 rounded border border-white/10 px-2 py-1 bg-zinc-950/60"
+                      className="min-w-[6.5rem] flex-1 rounded border border-[#E2E8F0] px-2 py-1 bg-white dark:border-white/10 dark:bg-zinc-950/60"
                       title={`Scheduled: ${(scheduledHoursByMachine[m.id] ?? 0).toFixed(1)} h / 168 h`}
                     >
                       <div className={`text-[9px] text-amber-400/90 ${mono}`}>{m.machineCode}</div>
@@ -1256,7 +1302,7 @@ export default function PlanningPage() {
           ) : null}
         </div>
 
-        <div className="rounded-lg border border-slate-800 bg-[#000000] p-3">
+        <div className="rounded-lg border border-[#E2E8F0] bg-white p-3 dark:border-slate-800 dark:bg-[#000000]">
           <ProductionScheduleBoard
             machines={machines}
             lines={scheduleBoardLines}
@@ -1267,29 +1313,29 @@ export default function PlanningPage() {
           />
         </div>
 
-        <div className="overflow-x-auto rounded-lg border border-slate-800 bg-[#000000]">
-          <div className="border-b border-slate-800 px-2 py-1.5">
+        <div className="overflow-x-auto rounded-lg border border-[#E2E8F0] bg-white dark:border-slate-800 dark:bg-[#000000]">
+          <div className="border-b border-[#E2E8F0] dark:border-slate-800 px-2 py-1.5">
             <p className={`text-[10px] font-semibold uppercase tracking-wide text-slate-500 ${mono}`}>
               Readiness ledger
             </p>
             <p className="text-[9px] text-slate-600">Mandatory 5-point interlock · AW · PA · DI · EB · SC</p>
           </div>
-          <table className="w-full min-w-[1100px] border-collapse text-left text-[11px]">
-            <thead className="border-b border-slate-800 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+          <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
+            <thead className="border-b border-[#E2E8F0] dark:border-slate-800 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
               <tr className={`${mono}`}>
-                <th className="w-6 px-0 py-1.5 text-center">Sel</th>
-                <th className="w-7 px-1 py-1.5">Pri</th>
-                <th className="w-[6.5rem] px-1 py-1.5">PO #</th>
-                <th className="min-w-[7.5rem] px-1 py-1.5">Client</th>
-                <th className="min-w-[9rem] px-1 py-1.5">Product</th>
-                <th className="w-[4.5rem] px-1 py-1.5">UPS</th>
-                <th className="min-w-[7rem] px-1 py-1.5">Designer</th>
-                <th className="w-[9rem] px-1 py-1.5">Readiness</th>
-                <th className="min-w-[12rem] px-1 py-1.5 text-right">Action</th>
+                <th className="w-6 px-2 py-3 text-center align-middle">Sel</th>
+                <th className="w-7 px-2 py-3 align-middle">Pri</th>
+                <th className="w-[6.5rem] px-2 py-3 align-middle">PO #</th>
+                <th className="min-w-[7.5rem] max-w-[11rem] px-2 py-3 align-middle">Client</th>
+                <th className="min-w-[9rem] max-w-[16rem] px-2 py-3 align-middle">Product</th>
+                <th className="w-[4.5rem] px-2 py-3 align-middle">UPS</th>
+                <th className="min-w-[7rem] px-2 py-3 align-middle">Designer</th>
+                <th className="w-[9rem] px-2 py-3 align-middle">Readiness</th>
+                <th className="min-w-[12rem] px-2 py-3 text-right align-middle">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
-              {groupSortedPlanningRows.map((r) => {
+            <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5">
+              {displayPlanningRows.map((r) => {
                 const spec = r.specOverrides || {}
                 const ledger = r.planningLedger
                 const mat = ledger?.materialGate
@@ -1324,11 +1370,12 @@ export default function PlanningPage() {
                 return (
                   <Fragment key={r.id}>
                     <tr
-                      className={`transition-colors hover:bg-white/[0.03] ${
+                      className={`cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.03] ${
                         pri ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
                       } ${r.directorHold ? 'opacity-45' : ''}`}
+                      onClick={() => setPlanningDrawerLineId(r.id)}
                     >
-                      <td className="px-0 py-1 align-middle text-center">
+                      <td className="px-2 py-3 align-middle text-center" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           className="h-3.5 w-3.5 accent-amber-500"
@@ -1344,7 +1391,7 @@ export default function PlanningPage() {
                           aria-label="Select for mix-set"
                         />
                       </td>
-                      <td className="px-1 py-1 align-middle">
+                      <td className="px-2 py-3 align-middle">
                         {pri ? (
                           <Star
                             className={`h-3.5 w-3.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
@@ -1355,42 +1402,44 @@ export default function PlanningPage() {
                         )}
                       </td>
                       <td
-                        className={`px-1 py-1 align-middle ${mono} ${
-                          pri ? 'text-amber-300' : 'text-amber-200/90'
+                        className={`px-2 py-3 align-middle max-w-[7rem] ${mono} ${
+                          pri ? 'text-amber-700 dark:text-amber-300' : 'text-amber-800 dark:text-amber-200/90'
                         }`}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <Link
                           href={`/orders/purchase-orders/${r.po.id}`}
-                          className={`hover:underline block text-[10px] leading-tight ${pri ? 'text-amber-300' : ''}`}
+                          className={`font-id-mono hover:underline block text-xs leading-tight truncate ${pri ? 'text-amber-700 dark:text-amber-300' : ''}`}
                         >
                           {r.po.poNumber}
                         </Link>
-                        <div className={`text-[10px] tabular-nums ${pri ? 'text-amber-200/95' : 'text-slate-400'}`}>
+                        <div className={`text-xs tabular-nums truncate ${pri ? 'text-amber-800 dark:text-amber-200/95' : 'text-slate-500'}`}>
                           {r.quantity.toLocaleString('en-IN')}
                         </div>
                       </td>
-                      <td className="px-1 py-1 align-middle leading-tight">
-                        <div className="text-slate-400 truncate max-w-[11rem] text-[10px]">{r.po.customer.name}</div>
+                      <td className="px-2 py-3 align-middle leading-tight max-w-[11rem]">
+                        <div className="text-slate-600 dark:text-slate-400 truncate text-sm">{r.po.customer.name}</div>
                       </td>
-                      <td className="px-1 py-1 align-middle leading-tight">
+                      <td className="px-2 py-3 align-middle leading-tight max-w-[16rem]">
                         {r.cartonId ? (
                           <Link
                             href={`/product/${r.cartonId}`}
-                            className={`text-slate-100 hover:text-amber-300 truncate block max-w-[14rem] text-[10px] ${mono}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`text-[#1A1A1B] dark:text-slate-100 hover:text-amber-700 dark:hover:text-amber-300 truncate block text-sm ${mono}`}
                           >
                             {r.cartonName}
                           </Link>
                         ) : (
-                          <span className={`text-slate-200 truncate block max-w-[14rem] text-[10px] ${mono}`}>
+                          <span className={`text-[#1A1A1B] dark:text-slate-200 truncate block text-sm ${mono}`}>
                             {r.cartonName}
                           </span>
                         )}
                       </td>
-                      <td className="px-1 py-1 align-middle">
+                      <td className="px-2 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="number"
                           min={1}
-                          className={`w-full max-w-[4rem] h-7 rounded border border-white/15 bg-black px-1 text-[10px] text-slate-200 ${mono}`}
+                          className={`w-full max-w-[4rem] h-7 rounded border border-[#E2E8F0] bg-white px-1 text-xs text-[#1A1A1B] dark:border-white/15 dark:bg-black dark:text-slate-200 ${mono}`}
                           value={planCore.ups ?? r.materialQueue?.ups ?? ''}
                           placeholder="UPS"
                           onChange={(e) => {
@@ -1427,7 +1476,7 @@ export default function PlanningPage() {
                           Y:{planCore.productionYieldPct != null ? `${planCore.productionYieldPct}%` : '—'}
                         </div>
                       </td>
-                      <td className="px-1 py-1 align-middle">
+                      <td className="px-2 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
                         <select
                           value={planCore.designerKey ?? ''}
                           onChange={(e) => {
@@ -1443,7 +1492,7 @@ export default function PlanningPage() {
                               },
                             })
                           }}
-                          className={`w-full max-w-[9rem] h-7 rounded border border-white/15 bg-black px-1 text-[9px] text-slate-200 ${mono}`}
+                          className={`w-full max-w-[9rem] h-7 rounded border border-[#E2E8F0] bg-white px-1 text-xs text-[#1A1A1B] dark:border-white/15 dark:bg-black dark:text-slate-200 ${mono}`}
                         >
                           <option value="">— Designer —</option>
                           <option value="avneet_singh">Avneet Singh</option>
@@ -1455,19 +1504,19 @@ export default function PlanningPage() {
                           </span>
                         ) : null}
                       </td>
-                      <td className="px-1 py-1 align-middle">
+                      <td className="px-2 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
                         <div className="flex flex-wrap items-center gap-1">
                           <ReadinessFiveBar segments={five.segments} />
                           <button
                             type="button"
                             onClick={() => setPlanningDrawerLineId(r.id)}
-                            className={`shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase text-amber-200 hover:bg-amber-500/20 ${mono}`}
+                            className={`shrink-0 rounded border border-amber-500/50 bg-amber-50 px-1.5 py-0.5 text-[8px] font-semibold uppercase text-amber-900 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/20 ${mono}`}
                           >
                             Radar
                           </button>
                         </div>
                       </td>
-                      <td className="px-1 py-1 align-middle text-right">
+                      <td className="px-2 py-3 align-middle text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="inline-flex flex-col items-end gap-1 max-w-[14rem] ml-auto">
                           <div className="w-full text-left">
                             <span className={`text-[8px] uppercase tracking-wide text-slate-500 ${mono}`}>
@@ -1751,15 +1800,48 @@ export default function PlanningPage() {
           </table>
         </div>
 
-        <footer className={`border-t border-slate-800 pt-3 text-center text-[10px] text-slate-500 ${mono}`}>
-          Planning Decision Active - Zero-Error Handshake to AW Queue Enabled.
+        {planningSelection.size >= 2 ? (
+          <div className="fixed bottom-6 right-6 z-[80] flex flex-col items-end gap-2 pointer-events-none">
+            <button
+              type="button"
+              onClick={() => linkAsMixSet()}
+              className="pointer-events-auto shadow-xl rounded-full border border-sky-600 bg-sky-600 px-5 py-3 text-sm font-semibold text-white hover:bg-sky-700 dark:border-sky-500 dark:bg-sky-600"
+            >
+              Group as Mix-Set
+            </button>
+          </div>
+        ) : null}
+
+        <footer className={`border-t border-[#E2E8F0] dark:border-slate-800 pt-3 text-center text-[10px] text-slate-500 ${mono}`}>
+          Decision Logic Verified - Readability Optimized for Melbourne Oversight.
           {integrityFooter ? <span className="block mt-1 text-slate-600">{integrityFooter}</span> : null}
         </footer>
 
         <PlanningReadinessDrawer
           open={planningDrawerLineId != null}
-          line={planningDrawerLine}
+          line={
+            planningDrawerLine
+              ? {
+                  ...planningDrawerLine,
+                  po: {
+                    poNumber: planningDrawerLine.po.poNumber,
+                    customer: { name: planningDrawerLine.po.customer.name },
+                  },
+                }
+              : null
+          }
           onClose={() => setPlanningDrawerLineId(null)}
+          onDesignerKeyChange={(lineId, key) => {
+            const li = rows.find((x) => x.id === lineId)
+            const spec = (li?.specOverrides || {}) as Record<string, unknown>
+            const prev = readPlanningCore(spec)
+            updateSpec(lineId, {
+              planningCore: {
+                ...prev,
+                designerKey: key || undefined,
+              },
+            })
+          }}
         />
       </div>
     </div>

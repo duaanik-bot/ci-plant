@@ -165,13 +165,7 @@ export async function PUT(
       },
     })
 
-    // When confirming a PO, push all pending line items into the artwork queue
-    if (data.status === 'confirmed' && existing.status !== 'confirmed') {
-      await tx.poLineItem.updateMany({
-        where: { poId: id, planningStatus: 'pending' },
-        data: { planningStatus: 'planned' },
-      })
-    }
+    // Planning-first: keep line planningStatus as `pending` until Planning Decision Layer saves (no auto-jump to AW).
 
     if (data.lineItems) {
       const existingLines = existing.lineItems

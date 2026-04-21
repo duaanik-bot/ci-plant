@@ -101,7 +101,7 @@ function NavItem({
   const router = useRouter()
   const className = isActive
     ? 'flex items-center gap-2 px-2 py-1.5 rounded-md bg-blue-600 text-white'
-    : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-slate-300 hover:bg-slate-700 hover:text-white'
+    : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-slate-700 hover:bg-slate-200 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white'
   if (external) {
     return (
       <a
@@ -172,14 +172,10 @@ export function SidebarNav({
       links: [
         { href: '/rfq', label: 'RFQ Pipeline', icon: FileText },
         { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart },
+        { href: '/orders/planning?view=pending', label: 'Planning', icon: CalendarCheck },
         { href: '/orders/procurement', label: 'Material Readiness Hub', icon: PackageCheck },
+        { href: '/orders/designing', label: 'Artwork Queue', icon: Image },
       ],
-    },
-    {
-      key: 'design',
-      title: '🎨 ARTWORK QUEUE',
-      borderColor: 'border-l-amber-500',
-      links: [{ href: '/orders/designing', label: 'Artwork Queue', icon: Image }],
     },
     {
       key: 'tools',
@@ -199,7 +195,7 @@ export function SidebarNav({
       title: '📅 PLANNING',
       borderColor: 'border-l-orange-500',
       links: [
-        { href: '/orders/planning', label: 'Planning Queue', icon: CalendarCheck },
+        { href: '/orders/planning', label: 'Planning queue (all)', icon: CalendarCheck },
         { href: '/production/job-cards', label: 'Job Cards', icon: FileStack },
         { href: '/production/stages', label: 'Production Planning', icon: Cpu },
       ],
@@ -283,8 +279,9 @@ export function SidebarNav({
   ]
 
   const isActive = (href: string) => {
-    if (href === '/') return pathname === '/'
-    return pathname === href || pathname.startsWith(href + '/')
+    const pathOnly = href.split('?')[0] || href
+    if (pathOnly === '/') return pathname === '/'
+    return pathname === pathOnly || pathname.startsWith(pathOnly + '/')
   }
 
   return (
@@ -300,7 +297,7 @@ export function SidebarNav({
             <button
               type="button"
               onClick={() => toggle(section.key)}
-              className="w-full flex items-center justify-between text-left uppercase text-xs tracking-wider text-slate-400 hover:text-slate-200 py-1.5 px-1 rounded"
+              className="w-full flex items-center justify-between text-left uppercase text-xs tracking-wider text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 py-1.5 px-1 rounded"
             >
               <span>{section.title}</span>
               {isOpen ? (
@@ -329,13 +326,13 @@ export function SidebarNav({
           </div>
         )
       })}
-      <div className="mt-auto pt-4 border-t border-slate-800 px-2">
-        <p className="font-medium text-slate-200 text-xs truncate">
+      <div className="mt-auto pt-4 border-t border-[#E2E8F0] dark:border-slate-800 px-2">
+        <p className="font-medium text-slate-800 dark:text-slate-200 text-xs truncate">
           {userName ?? 'User'} <span className="text-slate-500">· {userRole ?? '—'}</span>
         </p>
         <Link
           href="/api/auth/signout"
-          className="inline-block mt-1.5 text-xs text-slate-400 hover:text-amber-400"
+          className="inline-block mt-1.5 text-xs text-slate-600 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-400"
         >
           Logout
         </Link>

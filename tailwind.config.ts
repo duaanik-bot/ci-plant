@@ -10,6 +10,7 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
+        sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         'po-dashboard': ['var(--font-po-predictive)', 'ui-monospace', 'monospace'],
         'director-cc': ['var(--font-director-cc)', 'ui-monospace', 'monospace'],
         'designing-queue': ['var(--font-designing-queue)', 'ui-monospace', 'monospace'],

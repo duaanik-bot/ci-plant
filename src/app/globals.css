@@ -11,9 +11,10 @@
  */
 
 @layer base {
+  /* Pharma-white light: #FFFFFF bg, #1A1A1B text, #E2E8F0 borders */
   :root {
     --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --foreground: 0 0% 10%;
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
     --primary: 222.2 47.4% 11.2%;
@@ -26,7 +27,7 @@
     --accent-foreground: 222.2 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
+    --border: 214 32% 91%;
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
     --radius: 0.5rem;
@@ -58,8 +59,16 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background text-foreground antialiased text-sm;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
+}
+
+/* Technical IDs — JetBrains Mono bold (dashboard loads variable on nested layout) */
+.font-id-mono {
+  font-family: var(--font-designing-queue), ui-monospace, monospace;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Die Hub — custody floor tool actively issued to press */

@@ -4,4 +4,4 @@ export const INDUSTRIAL_PRIORITY_STAR_ICON_CLASS =
 
 /** Row/card wash + 4px left accent in #f59e0b (inset) + amber-900/20 glow. */
 export const INDUSTRIAL_PRIORITY_ROW_CLASS =
-  'bg-amber-900/20 shadow-[inset_4px_0_0_0_#f59e0b]'
+  'bg-amber-100/90 dark:bg-amber-900/20 shadow-[inset_4px_0_0_0_#f59e0b]'
