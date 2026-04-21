@@ -71,6 +71,30 @@ const config: Config = {
         },
         /** Plate Hub — process magenta (matches industry CMYK “M” on dark UI) */
         plateMagenta: '#FF00FF',
+        /** Precision Pharma — enterprise light theme (see globals.css) */
+        pharma: {
+          app: 'var(--pharma-bg-app)',
+          surface: 'var(--pharma-bg-surface)',
+          hover: 'var(--pharma-bg-hover)',
+          primary: 'var(--pharma-text-primary)',
+          secondary: 'var(--pharma-text-secondary)',
+          tertiary: 'var(--pharma-text-tertiary)',
+          action: 'var(--pharma-action-primary)',
+          'action-hover': 'var(--pharma-action-hover)',
+          border: 'var(--pharma-border)',
+          ready: {
+            bg: 'var(--pharma-ready-bg)',
+            fg: 'var(--pharma-ready-fg)',
+          },
+          blocked: {
+            bg: 'var(--pharma-blocked-bg)',
+            fg: 'var(--pharma-blocked-fg)',
+          },
+          pending: {
+            bg: 'var(--pharma-pending-bg)',
+            fg: 'var(--pharma-pending-fg)',
+          },
+        },
       },
     },
   },

@@ -6,10 +6,11 @@ import { toast } from 'sonner'
 import {
   COATING_TYPES,
   EMBOSSING_TYPES,
+  FOIL_TYPES,
   PAPER_TYPES,
   BOARD_GRADES,
-  FOIL_TYPES,
 } from '@/lib/constants'
+import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import {
   mapApiRowToPoCarton,
@@ -186,13 +187,13 @@ function deriveCartonDecorations(carton: CartonOption): Pick<Line, 'coatingType'
         embossingEnabled?: boolean
         spotUvEnabled?: boolean
       }
-      if (!coatingType && parsed.spotUvEnabled) coatingType = 'Full UV'
+      if (!coatingType && parsed.spotUvEnabled) coatingType = 'Full UV Coating'
       if (!embossingLeafing) {
-        if (parsed.embossingEnabled && parsed.leafingEnabled) embossingLeafing = 'Embossing + Leafing'
-        else if (parsed.embossingEnabled) embossingLeafing = 'Embossing'
-        else if (parsed.leafingEnabled) embossingLeafing = 'Leafing'
+        if (parsed.embossingEnabled && parsed.leafingEnabled) embossingLeafing = 'Gold Foil Stamping'
+        else if (parsed.embossingEnabled) embossingLeafing = 'Blind Embossing'
+        else if (parsed.leafingEnabled) embossingLeafing = 'Gold Foil Stamping'
       }
-      if (!foilType && parsed.leafingEnabled) foilType = 'Hot Gold'
+      if (!foilType && parsed.leafingEnabled) foilType = 'Gold Foil Stamping'
     } catch {}
   }
 
@@ -1528,12 +1529,15 @@ export default function NewPurchaseOrderPage() {
                     </td>
                     <td className={`${lineCellPad} text-white ${poMono}`}>{amount.toFixed(2)}</td>
                     <td className={lineCellPad}>
-                      <select value={ln.boardGrade} onChange={(e) => updateLine(idx, { boardGrade: e.target.value })} className={`${inputCls} min-w-0`}>
-                        <option value="">—</option>
-                        {BOARD_GRADES.map((b) => (
-                          <option key={b} value={b}>{b}</option>
-                        ))}
-                      </select>
+                      <PackagingEnumCombobox
+                        aria-label="Board grade"
+                        options={BOARD_GRADES}
+                        value={ln.boardGrade || null}
+                        onChange={(v) => updateLine(idx, { boardGrade: v ?? '' })}
+                        controlClassName="border-slate-700 bg-slate-900/80"
+                        inputClassName="text-[10px] text-slate-100"
+                        className="min-w-[7rem] max-w-[10rem]"
+                      />
                     </td>
                     <td className={lineCellPad}>
                       <input
@@ -1549,18 +1553,37 @@ export default function NewPurchaseOrderPage() {
                       />
                     </td>
                     <td className={lineCellPad}>
-                      <select value={ln.paperType} onChange={(e) => updateLine(idx, { paperType: e.target.value })} className={`${inputCls} min-w-0`}>
-                        <option value="">—</option>
-                        {PAPER_TYPES.map((p) => (
-                          <option key={p} value={p}>{p}</option>
-                        ))}
-                      </select>
+                      <PackagingEnumCombobox
+                        aria-label="Paper / board type"
+                        options={PAPER_TYPES}
+                        value={ln.paperType || null}
+                        onChange={(v) => updateLine(idx, { paperType: v ?? '' })}
+                        controlClassName="border-slate-700 bg-slate-900/80"
+                        inputClassName="text-[9px] text-slate-100"
+                        className="min-w-[7rem] max-w-[10rem]"
+                      />
                     </td>
                     <td className={lineCellPad}>
-                      <input type="text" value={ln.coatingType} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
+                      <PackagingEnumCombobox
+                        aria-label="Coating"
+                        options={COATING_TYPES}
+                        value={ln.coatingType || null}
+                        onChange={(v) => updateLine(idx, { coatingType: v ?? '' })}
+                        controlClassName="border-slate-700 bg-slate-900/80"
+                        inputClassName="text-[9px] text-slate-100"
+                        className="min-w-[6rem] max-w-[10rem]"
+                      />
                     </td>
                     <td className={lineCellPad}>
-                      <input type="text" value={ln.embossingLeafing} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
+                      <PackagingEnumCombobox
+                        aria-label="Embossing and leafing"
+                        options={EMBOSSING_TYPES}
+                        value={ln.embossingLeafing || null}
+                        onChange={(v) => updateLine(idx, { embossingLeafing: v ?? '' })}
+                        controlClassName="border-slate-700 bg-slate-900/80"
+                        inputClassName="text-[9px] text-slate-100"
+                        className="min-w-[6rem] max-w-[10rem]"
+                      />
                     </td>
                     <td className={lineCellPad}>
                       <input type="text" value={ln.foilType} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
@@ -1827,10 +1850,14 @@ export default function NewPurchaseOrderPage() {
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">Board grade</label>
-            <select value={qcCarton.boardGrade} onChange={(e) => setQcCarton((prev) => ({ ...prev, boardGrade: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white">
-              <option value="">—</option>
-              {BOARD_GRADES.map((b) => <option key={b} value={b}>{b}</option>)}
-            </select>
+            <PackagingEnumCombobox
+              aria-label="Board grade"
+              options={BOARD_GRADES}
+              value={qcCarton.boardGrade || null}
+              onChange={(v) => setQcCarton((prev) => ({ ...prev, boardGrade: v ?? '' }))}
+              controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+              inputClassName="text-white placeholder:text-slate-500"
+            />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -1839,26 +1866,46 @@ export default function NewPurchaseOrderPage() {
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">Paper</label>
-              <select value={qcCarton.paperType} onChange={(e) => setQcCarton((prev) => ({ ...prev, paperType: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white">
-                <option value="">—</option>
-                {PAPER_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
+              <PackagingEnumCombobox
+                aria-label="Paper / board"
+                options={PAPER_TYPES}
+                value={qcCarton.paperType || null}
+                onChange={(v) => setQcCarton((prev) => ({ ...prev, paperType: v ?? '' }))}
+                controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+                inputClassName="text-white placeholder:text-slate-500"
+              />
             </div>
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">Coating / Emboss / Foil</label>
-            <select value={qcCarton.coatingType} onChange={(e) => setQcCarton((prev) => ({ ...prev, coatingType: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white mb-1">
-              <option value="">—</option>
-              {COATING_TYPES.filter((c) => c !== 'None').map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <select value={qcCarton.embossingLeafing} onChange={(e) => setQcCarton((prev) => ({ ...prev, embossingLeafing: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white mb-1">
-              <option value="">—</option>
-              {EMBOSSING_TYPES.filter((x) => x !== 'None').map((x) => <option key={x} value={x}>{x}</option>)}
-            </select>
-            <select value={qcCarton.foilType} onChange={(e) => setQcCarton((prev) => ({ ...prev, foilType: e.target.value }))} className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-white">
-              <option value="">—</option>
-              {FOIL_TYPES.filter((f) => f !== 'None').map((f) => <option key={f} value={f}>{f}</option>)}
-            </select>
+            <div className="mb-1">
+              <PackagingEnumCombobox
+                aria-label="Coating"
+                options={COATING_TYPES}
+                value={qcCarton.coatingType || null}
+                onChange={(v) => setQcCarton((prev) => ({ ...prev, coatingType: v ?? '' }))}
+                controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+                inputClassName="text-white placeholder:text-slate-500"
+              />
+            </div>
+            <div className="mb-1">
+              <PackagingEnumCombobox
+                aria-label="Embossing"
+                options={EMBOSSING_TYPES}
+                value={qcCarton.embossingLeafing || null}
+                onChange={(v) => setQcCarton((prev) => ({ ...prev, embossingLeafing: v ?? '' }))}
+                controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+                inputClassName="text-white placeholder:text-slate-500"
+              />
+            </div>
+            <PackagingEnumCombobox
+              aria-label="Foil"
+              options={FOIL_TYPES}
+              value={qcCarton.foilType || null}
+              onChange={(v) => setQcCarton((prev) => ({ ...prev, foilType: v ?? '' }))}
+              controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+              inputClassName="text-white placeholder:text-slate-500"
+            />
           </div>
           <div className="flex justify-end pt-2">
             <button type="submit" disabled={qcCartonSaving} className="ci-btn-save-industrial px-5 py-2">Save Carton</button>

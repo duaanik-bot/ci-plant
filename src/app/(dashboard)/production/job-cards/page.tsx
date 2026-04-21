@@ -290,7 +290,7 @@ export default function JobCardsPage() {
             href="/orders/planning"
             className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs hover:bg-slate-900"
           >
-            Planning queue
+            Planning
           </Link>
           <a
             href="/api/job-cards/reconciliation-export"

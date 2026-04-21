@@ -46,7 +46,7 @@ const defaultOpen: Record<string, boolean> = {
   orders: true,
   design: true,
   tools: true,
-  planning: true,
+  execution: true,
   production: true,
   inventory: true,
   stores: true,
@@ -62,7 +62,11 @@ function loadStored(): Record<string, boolean> {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return { ...defaultOpen }
     const parsed = JSON.parse(raw) as Record<string, boolean>
-    return { ...defaultOpen, ...parsed }
+    const merged = { ...defaultOpen, ...parsed }
+    if (parsed.planning !== undefined && parsed.execution === undefined) {
+      merged.execution = parsed.planning
+    }
+    return merged
   } catch {
     return { ...defaultOpen }
   }
@@ -100,8 +104,8 @@ function NavItem({
 }) {
   const router = useRouter()
   const className = isActive
-    ? 'flex items-center gap-2 px-2 py-1.5 rounded-md bg-blue-600 text-white'
-    : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-slate-700 hover:bg-slate-200 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white'
+    ? 'flex items-center gap-2 px-2 py-1.5 rounded-md bg-[#1D4ED8] text-white shadow-sm'
+    : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-pharma-secondary hover:bg-pharma-hover hover:text-pharma-primary dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white'
   if (external) {
     return (
       <a
@@ -168,11 +172,11 @@ export function SidebarNav({
     {
       key: 'orders',
       title: '📋 ORDERS',
-      borderColor: 'border-l-cyan-500',
+      borderColor: 'border-l-blue-500',
       links: [
         { href: '/rfq', label: 'RFQ Pipeline', icon: FileText },
         { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart },
-        { href: '/orders/planning?view=pending', label: 'Planning', icon: CalendarCheck },
+        { href: '/orders/planning', label: 'Planning', icon: CalendarCheck },
         { href: '/orders/procurement', label: 'Material Readiness Hub', icon: PackageCheck },
         { href: '/orders/designing', label: 'Artwork Queue', icon: Image },
       ],
@@ -191,11 +195,10 @@ export function SidebarNav({
       ],
     },
     {
-      key: 'planning',
-      title: '📅 PLANNING',
+      key: 'execution',
+      title: '🏭 PRODUCTION EXECUTION',
       borderColor: 'border-l-orange-500',
       links: [
-        { href: '/orders/planning', label: 'Planning queue (all)', icon: CalendarCheck },
         { href: '/production/job-cards', label: 'Job Cards', icon: FileStack },
         { href: '/production/stages', label: 'Production Planning', icon: Cpu },
       ],
@@ -225,7 +228,7 @@ export function SidebarNav({
     {
       key: 'stores',
       title: '🏪 STORES',
-      borderColor: 'border-l-orange-500',
+      borderColor: 'border-l-amber-500',
       links: [
         { href: '/stores/issue', label: 'Issue Sheets', icon: PackageCheck },
         { href: '/stores/approve-excess', label: 'Approve Excess', icon: CheckSquare },

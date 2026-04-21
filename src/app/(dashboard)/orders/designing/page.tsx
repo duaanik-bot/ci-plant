@@ -14,6 +14,7 @@ import {
   Pencil,
   Search,
   Star,
+  User,
   X,
 } from 'lucide-react'
 import { parseDesignerCommand } from '@/lib/designer-command'
@@ -100,6 +101,18 @@ type Row = {
 
 type Customer = { id: string; name: string; logoUrl?: string | null }
 type User = { id: string; name: string }
+
+/** AW queue designer column filter — value is user id, or sentinel keys. */
+type DesignerFilterValue = 'all' | 'unassigned' | string
+
+const DESIGNER_OPTION_AVNEET = 'Avneet Singh'
+const DESIGNER_OPTION_SHAMSHER = 'Shamsher Inder'
+
+function findUserIdByName(users: User[], displayName: string): string | null {
+  const t = displayName.trim().toLowerCase()
+  const u = users.find((x) => x.name.trim().toLowerCase() === t)
+  return u?.id ?? null
+}
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const PREPRESS_AUDIT_LEAD = DEFAULT_PREPRESS_AUDIT_LEAD
@@ -410,6 +423,7 @@ export default function DesigningQueuePage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [priorityBusyPoId, setPriorityBusyPoId] = useState<string | null>(null)
   const [myJobsOnly, setMyJobsOnly] = useState(false)
+  const [designerFilter, setDesignerFilter] = useState<DesignerFilterValue>('all')
 
   const load = useCallback(async () => {
     try {
@@ -457,15 +471,26 @@ export default function DesigningQueuePage() {
 
   const userById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
 
+  const avneetId = useMemo(() => findUserIdByName(users, DESIGNER_OPTION_AVNEET), [users])
+  const shamsherId = useMemo(() => findUserIdByName(users, DESIGNER_OPTION_SHAMSHER), [users])
+
   const filteredRows = useMemo(() => {
+    let list = rows
     const q = paletteQuery.trim().toLowerCase()
-    if (q.length < 2) return rows
-    return rows.filter(
-      (r) =>
-        r.cartonName.toLowerCase().includes(q) ||
-        r.po.poNumber.toLowerCase().includes(q),
-    )
-  }, [rows, paletteQuery])
+    if (q.length >= 2) {
+      list = list.filter(
+        (r) =>
+          r.cartonName.toLowerCase().includes(q) ||
+          r.po.poNumber.toLowerCase().includes(q),
+      )
+    }
+    if (designerFilter === 'unassigned') {
+      list = list.filter((r) => !String(r.specOverrides?.assignedDesignerId ?? '').trim())
+    } else if (designerFilter !== 'all') {
+      list = list.filter((r) => r.specOverrides?.assignedDesignerId === designerFilter)
+    }
+    return list
+  }, [rows, paletteQuery, designerFilter])
 
   const cycleSort = useCallback((column: AuditSortKey) => {
     setSortKey((prev) => {
@@ -668,11 +693,37 @@ export default function DesigningQueuePage() {
           </div>
         </div>
 
-        <div className="py-1">
-          <NeonCommandFilterTrigger
-            paletteQuery={paletteQuery}
-            onClearQuery={clearPaletteQuery}
-          />
+        <div className="py-1 flex flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-2">
+          <div className="min-w-0 flex-1">
+            <NeonCommandFilterTrigger
+              paletteQuery={paletteQuery}
+              onClearQuery={clearPaletteQuery}
+            />
+          </div>
+          <div className="relative flex shrink-0 items-center self-stretch sm:self-auto">
+            <User
+              className="pointer-events-none absolute left-2.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
+              aria-hidden
+            />
+            <ChevronDown
+              className="pointer-events-none absolute right-2.5 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-slate-500"
+              aria-hidden
+            />
+            <select
+              value={designerFilter}
+              onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
+              aria-label="Filter by designer"
+              title="Filter by designer — All Designers, Unassigned, or pick a designer"
+              className={`h-full min-h-[42px] w-full min-w-[12rem] appearance-none rounded-xl border border-[#E2E8F0] bg-[#FFFFFF] py-2 pl-8 pr-9 text-sm font-medium text-[#0F172A] shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-500/30 sm:min-w-[13.5rem] sm:min-h-0 ${
+                designerFilter !== 'all' ? 'bg-blue-50 hover:bg-slate-50' : 'hover:bg-slate-50'
+              }`}
+            >
+              <option value="all">Filter by Designer…</option>
+              <option value="unassigned">Unassigned</option>
+              {avneetId ? <option value={avneetId}>{DESIGNER_OPTION_AVNEET}</option> : null}
+              {shamsherId ? <option value={shamsherId}>{DESIGNER_OPTION_SHAMSHER}</option> : null}
+            </select>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-end justify-between gap-2">

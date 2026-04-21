@@ -7,10 +7,11 @@ import { toast } from 'sonner'
 import { cityFromAddress } from '@/lib/customer-address'
 import type { PastingStyle } from '@prisma/client'
 import { PASTING_STYLE_ORDER, pastingStyleLabel } from '@/lib/pasting-style'
+import { MASTER_BOARD_GRADES, MASTER_COATINGS_AND_VARNISHES } from '@/lib/master-enums'
 
 const PRINTING_TYPES = ['Offset', 'Metallic']
-const BOARD_GRADES = ['FBB', 'SAFFIRE', 'WB DUplex', 'GB Duples', 'CFBB', 'Artcard', 'Maplitho']
-const COATING_SPECS = ['Aq. Varnish (Window)', 'Dripp Off (Window)', 'UV (Window)']
+const BOARD_GRADES = [...MASTER_BOARD_GRADES]
+const COATING_SPECS = [...MASTER_COATINGS_AND_VARNISHES]
 
 type Customer = { id: string; name: string; address?: string | null; city?: string | null }
 

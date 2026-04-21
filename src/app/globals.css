@@ -11,10 +11,27 @@
  */
 
 @layer base {
-  /* Pharma-white light: #FFFFFF bg, #1A1A1B text, #E2E8F0 borders */
+  /* Precision Pharma — Slate & semantic (no pure #000 / #FFF page canvas) */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 10%;
+    --pharma-bg-app: #f8fafc;
+    --pharma-bg-surface: #ffffff;
+    --pharma-bg-hover: #f1f5f9;
+    --pharma-text-primary: #0f172a;
+    --pharma-text-secondary: #475569;
+    --pharma-text-tertiary: #94a3b8;
+    --pharma-action-primary: #1d4ed8;
+    --pharma-action-hover: #1e40af;
+    --pharma-border: #e2e8f0;
+    --pharma-ready-bg: #dcfce7;
+    --pharma-ready-fg: #15803d;
+    --pharma-blocked-bg: #fee2e2;
+    --pharma-blocked-fg: #b91c1c;
+    --pharma-pending-bg: #fef3c7;
+    --pharma-pending-fg: #b45309;
+    --pharma-star: #f59e0b;
+
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
     --primary: 222.2 47.4% 11.2%;
@@ -59,16 +76,48 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground antialiased text-sm;
+    @apply bg-background text-foreground antialiased text-sm leading-normal;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    line-height: 1.5;
   }
 }
 
-/* Technical IDs — JetBrains Mono bold (dashboard loads variable on nested layout) */
+/* Technical IDs — JetBrains Mono, tabular (PO, Set, qty, dates) */
 .font-id-mono {
   font-family: var(--font-designing-queue), ui-monospace, monospace;
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  /** 5-point readiness — tactile badges (light mode primary) */
+  .pharma-readiness-badge {
+    @apply inline-flex min-w-[32px] h-6 shrink-0 cursor-help items-center justify-center rounded-md border text-[11px] font-bold leading-none font-designing-queue;
+  }
+  .pharma-readiness-badge--ready {
+    background-color: var(--pharma-ready-bg);
+    color: var(--pharma-ready-fg);
+    border-color: var(--pharma-ready-fg);
+  }
+  .pharma-readiness-badge--neutral {
+    @apply border-slate-200 bg-slate-50 text-slate-500;
+  }
+  .pharma-readiness-badge--blocked {
+    background-color: var(--pharma-blocked-bg);
+    color: var(--pharma-blocked-fg);
+    border-color: var(--pharma-blocked-fg);
+    animation: pharma-blocked-ring 2s ease-in-out infinite;
+  }
+}
+
+@keyframes pharma-blocked-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.2);
+  }
 }
 
 /* Die Hub — custody floor tool actively issued to press */

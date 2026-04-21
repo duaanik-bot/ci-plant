@@ -73,6 +73,15 @@ export async function GET(req: NextRequest) {
             laminateType: true,
             blankLength: true,
             blankWidth: true,
+            artworkCode: true,
+          },
+        },
+        dieMaster: {
+          select: {
+            id: true,
+            dyeNumber: true,
+            ups: true,
+            sheetSize: true,
           },
         },
       },

@@ -12,6 +12,7 @@ export const dynamic = 'force-dynamic'
 const updateSchema = z.object({
   setNumber: z.string().optional().nullable(),
   artworkCode: z.string().optional().nullable(),
+  remarks: z.string().optional().nullable(),
   planningStatus: z.string().optional(),
   specOverrides: z.any().optional(),
   /** When planning facts are locked, authorised Planning users must set this to change UPS / set / gang / designer. */
@@ -111,6 +112,7 @@ export async function PATCH(
     data: {
       ...(data.setNumber !== undefined ? { setNumber: data.setNumber || null } : {}),
       ...(data.artworkCode !== undefined ? { artworkCode: data.artworkCode || null } : {}),
+      ...(data.remarks !== undefined ? { remarks: data.remarks || null } : {}),
       ...(data.planningStatus !== undefined ? { planningStatus: data.planningStatus } : {}),
       ...(data.specOverrides !== undefined ? { specOverrides: mergedSpec as object } : {}),
       ...(data.dieMasterId !== undefined

@@ -1,51 +1,35 @@
-export const PAPER_TYPES = [
-  'COLOUR WHITE',
-  'COLOUR YELLOW',
-  'COLOUR GB',
-  'COLOUR WB',
-  'COLOUR ART CARD',
-  'COLOUR CROMO',
-  'COLOUR METPET',
-  'DARBI WB',
-  'DARBI WHITE',
-  'DARBI YELLOW',
-  'DARBI GB',
-  'DARBI ART CARD',
-  'DARBI CROMO',
-  'DARBI GUMSHEET',
-  'FBB COATED',
-  'FBB PLAIN',
-  'CUP STOCK',
-  'WB PLAIN',
-  'GB PLAIN',
-]
+import {
+  DYE_TYPE_NEW,
+  DYE_TYPES_WITH_NEW,
+  MASTER_BOARD_GRADES,
+  MASTER_CARTON_STRUCTURAL_STYLES,
+  MASTER_COATINGS_AND_VARNISHES,
+  MASTER_EMBOSSING_AND_LEAFING,
+  MASTER_FOIL_STAMPS,
+} from '@/lib/master-enums'
 
-export const COATING_TYPES = [
-  'None',
-  'Aqueous Varnish',
-  'Full UV',
-  'Drip off',
-  'Drip off + UV',
-  'Chemical Coating',
-]
+export type { MasterBoardGrade, MasterCoating, MasterEmbossing, MasterCartonStyle } from '@/lib/master-enums'
 
-export const EMBOSSING_TYPES = [
-  'None',
-  'Embossing',
-  'Leafing',
-  'Embossing + Leafing',
-]
+/** @deprecated Import from `@/lib/master-enums` — folding carton board grades (aligned with inventory / gang-print). */
+export const PAPER_TYPES = [...MASTER_BOARD_GRADES]
 
-export const DYE_TYPES = [
-  'BSO',
-  'lockbottom',
-  '4/lockbottom',
-  '3/lockbottom',
-  '2/lockbottom',
-  'crashlock',
-  'straight',
-  'NEW',
-]
+/** @deprecated Import from `@/lib/master-enums` — same canonical set as `PAPER_TYPES`. */
+export const BOARD_GRADES = [...MASTER_BOARD_GRADES]
+
+export const COATING_TYPES = [...MASTER_COATINGS_AND_VARNISHES]
+
+export const EMBOSSING_TYPES = [...MASTER_EMBOSSING_AND_LEAFING]
+
+/** Die / structural style + `NEW` for tooling workflow. */
+export const DYE_TYPES = [...DYE_TYPES_WITH_NEW]
+
+export {
+  DYE_TYPE_NEW,
+  MASTER_BOARD_GRADES,
+  MASTER_CARTON_STRUCTURAL_STYLES,
+  MASTER_COATINGS_AND_VARNISHES,
+  MASTER_EMBOSSING_AND_LEAFING,
+}
 
 export const INK_COLORS = ['CMYK', 'CMYKP', 'CMYKB', 'PANTONE', 'Color', 'Black only']
 
@@ -60,18 +44,15 @@ export const PRINTING_TYPES = [
 /** @deprecated Prefer Product Master `pastingStyle` (Lock Bottom, BSO, Special). */
 export const PASTING_TYPES = ['Lock Bottom', 'BSO', 'Special']
 
-export const DYE_CONDITIONS = ['Old', 'New']
-
-export const BOARD_GRADES = ['SBS', 'FBB', 'Duplex', 'Art Card', 'Kraft', 'Metpet', 'Cup Stock']
-
-/** @deprecated Align with `PastingStyle` on Product Master. */
+/** @deprecated Use `MASTER_CARTON_STRUCTURAL_STYLES` for new work; kept for legacy labels. */
 export const CARTON_CONSTRUCTIONS = ['Lock Bottom', 'BSO', 'Special']
 
 export const GLUE_TYPES = ['Hot Melt', 'Cold Glue', 'PVA', 'EVA', 'None']
 
 export const LAMINATE_TYPES = ['BOPP Gloss', 'BOPP Matte', 'BOPP Soft Touch', 'PET', 'Nylon', 'None']
 
-export const FOIL_TYPES = ['Hot Gold', 'Hot Silver', 'Cold Gold', 'Cold Silver', 'Holographic', 'None']
+/** Narrow foil picks — prefer `MASTER_EMBOSSING_AND_LEAFING` on PO lines when consolidating. */
+export const FOIL_TYPES = [...MASTER_FOIL_STAMPS]
 
 export const DRUG_SCHEDULES = [
   'Schedule H',
@@ -136,4 +117,3 @@ export const GSM_CALIPER_MAP: Record<number, number> = {
   380: 420,
   400: 450,
 }
-

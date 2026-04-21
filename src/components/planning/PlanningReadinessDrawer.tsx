@@ -1,6 +1,6 @@
 'use client'
 
-import { X } from 'lucide-react'
+import { Info, X } from 'lucide-react'
 import {
   computeFivePointReadiness,
   computeToolingInterlock,
@@ -8,10 +8,15 @@ import {
   type MaterialGateStatus,
 } from '@/lib/planning-interlock'
 import {
+  computeSheetUtilization,
   PLANNING_DESIGNERS,
   readPlanningCore,
   type PlanningDesignerKey,
 } from '@/lib/planning-decision-spec'
+import {
+  computeMakeReadySheetsBreakdown,
+  hasSpecialCoatingForPlanning,
+} from '@/lib/planning-predictive'
 import type { ReadinessFiveSegment } from '@/lib/planning-interlock'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
@@ -23,22 +28,48 @@ function FiveStrip({ segments }: { segments: ReadinessFiveSegment[] }) {
         const green = s.state === 'ready'
         const grey = s.state === 'neutral'
         const blocked = s.state === 'blocked'
+        const stateClass = green
+          ? 'pharma-readiness-badge--ready'
+          : grey
+            ? 'pharma-readiness-badge--neutral'
+            : 'pharma-readiness-badge--blocked'
         return (
-          <span
-            key={s.key}
-            title={s.title}
-            className={`inline-flex h-7 min-w-[1.5rem] items-center justify-center rounded border text-[9px] font-bold leading-none ${mono} ${
-              green
-                ? 'border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:border-emerald-500/45 dark:bg-emerald-500/12 dark:text-emerald-300'
-                : grey
-                  ? 'border-[#E2E8F0] bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-500'
-                  : 'border-rose-400 bg-rose-50 text-rose-900 shadow-sm dark:border-rose-500 dark:bg-rose-500/10 dark:text-rose-100'
-            } ${blocked ? 'ring-1 ring-rose-400/40 dark:ring-rose-500/35' : ''}`}
-          >
+          <span key={s.key} title={s.title} className={`pharma-readiness-badge ${stateClass}`}>
             {s.abbr}
           </span>
         )
       })}
+    </div>
+  )
+}
+
+/** Upper semi-circle gauge for sheet utilization (0–100%). */
+function SemiGaugeUtilization({ pct }: { pct: number }) {
+  const p = Math.min(100, Math.max(0, Math.round(pct * 10) / 10))
+  const r = 18
+  const arcLen = Math.PI * r
+  const dash = (p / 100) * arcLen
+  const stroke =
+    p >= 85 ? 'stroke-emerald-500' : p >= 60 ? 'stroke-amber-500' : 'stroke-rose-500'
+  return (
+    <div className="flex flex-col items-center gap-1" aria-hidden>
+      <svg viewBox="0 0 48 28" className="h-16 w-28">
+        <path
+          d="M 6 24 A 18 18 0 0 1 42 24"
+          fill="none"
+          className="stroke-zinc-200 dark:stroke-zinc-800"
+          strokeWidth="4"
+        />
+        <path
+          d="M 6 24 A 18 18 0 0 1 42 24"
+          fill="none"
+          className={stroke}
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${arcLen}`}
+        />
+      </svg>
+      <span className={`${mono} text-[11px] font-semibold text-[#1A1A1B] dark:text-slate-200`}>{p}%</span>
     </div>
   )
 }
@@ -109,6 +140,8 @@ type DrawerLine = {
   id: string
   cartonName: string
   quantity: number
+  coatingType?: string | null
+  otherCoating?: string | null
   embossingLeafing: string | null
   shadeCardId?: string | null
   shadeCard?: {
@@ -126,8 +159,21 @@ type DrawerLine = {
   }
   planningLedger?: {
     materialGate: Partial<MaterialGate> | MaterialGate
+    numberOfColours?: number | null
   } | null
-  materialQueue?: { totalSheets: number } | null
+  materialQueue?: {
+    totalSheets: number
+    ups?: number
+    sheetLengthMm?: unknown
+    sheetWidthMm?: unknown
+  } | null
+  carton?: {
+    blankLength?: unknown
+    blankWidth?: unknown
+    laminateType?: string | null
+    coatingType?: string | null
+    numberOfColours?: number | null
+  } | null
   po?: { poNumber: string; customer: { name: string } }
 }
 
@@ -198,10 +244,41 @@ export function PlanningReadinessDrawer({
   const diTone = diePct >= 100 ? 'emerald' : diePct >= 45 ? 'amber' : 'rose'
   const rmTone = rmPct >= 100 ? 'emerald' : rmPct >= 55 ? 'amber' : 'rose'
 
+  const specColours = typeof spec.numberOfColours === 'number' ? spec.numberOfColours : null
+  const nColours = specColours ?? line.planningLedger?.numberOfColours ?? line.carton?.numberOfColours ?? 4
+  const coat = line.coatingType ?? line.carton?.coatingType
+  const oth = line.otherCoating ?? line.carton?.laminateType
+  const makeReady = computeMakeReadySheetsBreakdown({
+    numberOfColours: nColours,
+    hasSpecialCoating: hasSpecialCoatingForPlanning(coat, oth),
+  })
+  const bl = Number(line.carton?.blankLength ?? 0)
+  const bw = Number(line.carton?.blankWidth ?? 0)
+  const sl = Number(line.materialQueue?.sheetLengthMm ?? 0)
+  const sw = Number(line.materialQueue?.sheetWidthMm ?? 0)
+  const upsDraw = pc.ups ?? line.materialQueue?.ups ?? 1
+  const util =
+    bl > 0 && bw > 0 && sl > 0 && sw > 0
+      ? computeSheetUtilization({
+          blankLengthMm: bl,
+          blankWidthMm: bw,
+          sheetLengthMm: sl,
+          sheetWidthMm: sw,
+          ups: upsDraw,
+        })
+      : null
+
   return (
     <div className="fixed inset-0 z-[90] flex justify-end">
-      <button type="button" className="absolute inset-0 bg-black/75" aria-label="Close" onClick={onClose} />
-      <aside className="relative h-full w-full max-w-md border-l border-[#E2E8F0] bg-white shadow-2xl flex flex-col dark:border-slate-800 dark:bg-[#000000]">
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-900/20 backdrop-blur-[2px]"
+        aria-label="Close"
+        onClick={onClose}
+      />
+      <aside
+        className="relative h-full w-full max-w-md border-l border-pharma-border bg-pharma-surface flex flex-col dark:border-slate-700 dark:bg-slate-900 shadow-[-4px_0_24px_rgba(0,0,0,0.05)]"
+      >
         <div className="flex items-start justify-between gap-2 border-b border-[#E2E8F0] dark:border-slate-800 px-4 py-3">
           <div className="min-w-0">
             <p className="font-id-mono text-xs text-amber-700 dark:text-amber-400 truncate">
@@ -278,6 +355,40 @@ export function PlanningReadinessDrawer({
           </div>
 
           <div>
+            <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>Material Efficiency</p>
+            <div className="mt-2 flex flex-col gap-3 rounded-lg border border-[#E2E8F0] bg-white/80 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+              {util && util.yieldPct > 0 ? (
+                <div className="flex flex-col items-center">
+                  <SemiGaugeUtilization pct={util.yieldPct} />
+                  <p
+                    className={`text-[10px] text-slate-600 dark:text-slate-400 mt-1 text-center leading-snug ${mono}`}
+                  >
+                    Utilization: {Math.round(util.yieldPct)}% | Off-cut Waste: {Math.round(100 - util.yieldPct)}%
+                  </p>
+                </div>
+              ) : (
+                <p className={`text-[10px] text-slate-500 ${mono}`}>
+                  Enter blank size, parent sheet, and UPS on the row to show sheet utilization.
+                </p>
+              )}
+              <div className="flex items-start justify-between gap-2 border-t border-[#E2E8F0] pt-2 dark:border-slate-800">
+                <p className={`text-[11px] text-slate-700 dark:text-slate-300 leading-snug ${mono}`}>
+                  Calculated Make-Ready Sheets:{' '}
+                  <span className="font-semibold text-amber-800 dark:text-amber-200/90">{makeReady.totalSheets}</span>
+                </p>
+                <button
+                  type="button"
+                  className="inline-flex shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                  title={makeReady.detail}
+                  aria-label={`Make-ready breakdown: ${makeReady.detail}`}
+                >
+                  <Info className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div>
             <p className={`text-[10px] uppercase tracking-wide text-slate-500 mb-2 ${mono}`}>
               Hub sync (live)
             </p>
@@ -285,7 +396,7 @@ export function PlanningReadinessDrawer({
               <RingPct label="AW" pct={awPct} tone={awTone} />
               <RingPct label="Plate" pct={platePct} tone={plTone} />
               <RingPct label="Die" pct={diePct} tone={diTone} />
-              <RingPct label="RM" pct={rmPct} tone={rmTone} />
+              <RingPct label="Paper" pct={rmPct} tone={rmTone} />
             </div>
             <p className="text-[9px] text-slate-600 mt-2 leading-snug">
               Five-point strip: {five.allGreen && platesStatus === 'available' ? 'All green' : 'Blocked'}{' '}
