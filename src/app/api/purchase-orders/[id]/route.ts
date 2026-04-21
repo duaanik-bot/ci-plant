@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { purchaseOrderSchema } from '@/lib/validations'
 import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
 import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
+import { isPlanningFactsLocked, mergeSpecRespectingPlanningLock } from '@/lib/planning-facts-lock'
 
 export const dynamic = 'force-dynamic'
 
@@ -195,7 +196,18 @@ export async function PUT(
             : prev
               ? (prev.specOverrides as Record<string, unknown> | null)
               : null
-        const specOverrides = withDefaultPrePressAuditLead(rawSpec ?? undefined) as object
+        const mergedForLock =
+          prev
+            ? mergeSpecRespectingPlanningLock(
+                prev.specOverrides as Record<string, unknown> | null,
+                rawSpec ?? {},
+              )
+            : rawSpec ?? {}
+        const specOverrides = withDefaultPrePressAuditLead(mergedForLock) as object
+
+        const locked = prev ? isPlanningFactsLocked(prev.specOverrides as Record<string, unknown> | null) : false
+        const setNumberForRow =
+          locked ? (prev?.setNumber ?? null) : li.setNumber || null
 
         const row = {
           poId: id,
@@ -214,7 +226,7 @@ export async function PUT(
           paperType: li.paperType || null,
           dyeId: li.dyeId !== undefined ? li.dyeId : prev?.dyeId ?? null,
           remarks: li.remarks || null,
-          setNumber: li.setNumber || null,
+          setNumber: setNumberForRow,
           planningStatus: li.planningStatus ?? prev?.planningStatus ?? 'pending',
           specOverrides,
           dieMasterId:

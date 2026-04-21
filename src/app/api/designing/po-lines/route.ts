@@ -2,15 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { readOrchestration } from '@/lib/orchestration-spec'
+import { PLANNING_DESIGNERS, readPlanningCore } from '@/lib/planning-decision-spec'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const { error } = await requireAuth()
+  const { error, user } = await requireAuth()
   if (error) return error
 
   const { searchParams } = new URL(req.url)
   const customerId = searchParams.get('customerId')
+  const myJobs = searchParams.get('myJobs') === '1'
 
   const list = await db.poLineItem.findMany({
     where: {
@@ -131,6 +133,23 @@ export async function GET(req: NextRequest) {
       }
     })
   )
+
+  if (myJobs && user?.name?.trim()) {
+    const uname = user.name.trim().toLowerCase()
+    const filtered = mapped.filter((li) => {
+      const spec = (li.specOverrides as Record<string, unknown> | null) ?? {}
+      const disp =
+        typeof spec.planningDesignerDisplayName === 'string'
+          ? spec.planningDesignerDisplayName.trim().toLowerCase()
+          : ''
+      const key = readPlanningCore(spec).designerKey
+      const fromKey = key ? PLANNING_DESIGNERS[key].toLowerCase() : ''
+      if (disp && uname === disp) return true
+      if (fromKey && uname === fromKey) return true
+      return false
+    })
+    return NextResponse.json(filtered)
+  }
 
   return NextResponse.json(mapped)
 }

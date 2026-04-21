@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client'
+import { addMonths, differenceInDays } from 'date-fns'
 import { isEmbossingRequired } from '@/lib/emboss-conditions'
 
 export type InterlockKey = 'pl' | 'di' | 'eb' | 'sc'
@@ -225,7 +225,7 @@ export function computeFivePointReadiness(args: {
     paTitle = 'Paper / board — MRP not linked'
   } else if (mg.netAvailable >= mg.requiredSheets) {
     paState = 'ready'
-    paTitle = `Paper OK · Net ${mg.netAvailable} ≥ Req ${mg.requiredSheets}`
+    paTitle = `Stock available · Net ${mg.netAvailable} ≥ Req ${mg.requiredSheets}`
   } else if (mg.status === 'ordered') {
     paState = 'blocked'
     paTitle = `On order — Net ${mg.netAvailable} < Req ${mg.requiredSheets}`
@@ -255,13 +255,18 @@ export function computeFivePointReadiness(args: {
     const ageMonths = monthsBetweenStart(ref, new Date())
     if (!inStock) {
       scState = 'blocked'
-      scTitle = `Shade card · ${args.shadeCard.custodyStatus}`
+      scTitle = `Shade card not in stock · ${args.shadeCard.custodyStatus}`
     } else if (ageMonths >= 12) {
       scState = 'blocked'
-      scTitle = `Shade card aged ${ageMonths} mo (max 12)`
+      const expiry = addMonths(ref, 12)
+      const daysPast = Math.max(0, differenceInDays(new Date(), expiry))
+      scTitle =
+        daysPast > 0
+          ? `Shade card expired ${daysPast} day(s) past 12‑month validity`
+          : `Shade card aged ${ageMonths} mo (max 12)`
     } else {
       scState = 'ready'
-      scTitle = 'Shade card in stock · < 12 mo'
+      scTitle = 'Shade card in stock · age < 12 mo'
     }
   }
 
@@ -284,14 +289,20 @@ export function computeFivePointReadiness(args: {
       key: 'di',
       abbr: 'DI',
       state: diOk ? 'ready' : 'blocked',
-      title: diOk ? 'Die ready (hub)' : 'Die not ready',
+      title: diOk
+        ? 'Die asset ready (hub)'
+        : `Die asset not ready — status: ${args.dieStatus}`,
       blockerName: 'Die',
     },
     {
       key: 'eb',
       abbr: 'EB',
       state: !embossReq ? 'neutral' : ebOk ? 'ready' : 'blocked',
-      title: !embossReq ? 'Emboss N/A' : ebOk ? 'Emboss block ready' : 'Emboss block not ready',
+      title: !embossReq
+        ? 'Emboss N/A'
+        : ebOk
+          ? 'Emboss block ready'
+          : `Emboss block not ready — status: ${args.embossStatus}`,
       blockerName: 'Emboss block',
     },
     {

@@ -9,6 +9,22 @@ import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { isEmbossingRequired } from '@/lib/emboss-conditions'
 import { mergeOrchestrationIntoSpec, PLANNING_FLOW } from '@/lib/orchestration-spec'
+import {
+  computeSheetUtilization,
+  formatSheetSizeMm,
+  generateMasterSetId,
+  PLANNING_DESIGNERS,
+  readPlanningCore,
+  suggestNextAutoSetNumber,
+  type PlanningCore,
+  type PlanningDesignerKey,
+  type PlanningSetIdMode,
+} from '@/lib/planning-decision-spec'
+import { PlanningReadinessDrawer } from '@/components/planning/PlanningReadinessDrawer'
+import {
+  PlanningDecisionLayerToolbar,
+  type PlanningGroupBy,
+} from '@/components/planning/PlanningDecisionLayerToolbar'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
 import {
   INDUSTRIAL_PRIORITY_ROW_CLASS,
@@ -28,7 +44,8 @@ import {
   firstFivePointBlockerName,
   type ReadinessFiveSegment,
 } from '@/lib/planning-interlock'
-import { PlanningGanttBoard } from '@/components/planning/PlanningGanttBoard'
+import { ProductionScheduleBoard } from '@/components/planning/ProductionScheduleBoard'
+import { parseCellKey, type ScheduleHandshake } from '@/lib/production-schedule-spec'
 
 type PlanningSpec = {
   machineId?: string
@@ -41,6 +58,11 @@ type PlanningSpec = {
   numberOfColours?: number
   planningGanttIndex?: number
   planningProjectedFinishAt?: string | null
+  prodScheduleSlot?: { machineId: string; shift: 1 | 2 | 3; order: number }
+  scheduleHandshake?: ScheduleHandshake
+  planningCore?: PlanningCore
+  /** Denormalized for AW filters */
+  planningDesignerDisplayName?: string
 }
 
 type InterlockSegment = {
@@ -106,6 +128,9 @@ type Line = {
     issuedStockDisplay?: string | null
     grainFitStatus?: string
     inventoryLocationPointer?: string | null
+    sheetsIssued?: number
+    totalSheets?: number
+    stages?: { stageName: string; counter: number | null }[]
     allocatedPaperWarehouse?: { lotNumber: string | null } | null
   } | null
   readiness?: {
@@ -117,7 +142,15 @@ type Line = {
   directorPriority?: boolean
   directorHold?: boolean
   planningLedger?: PlanningLedger
-  materialQueue?: { totalSheets: number } | null
+  materialQueue?: {
+    totalSheets: number
+    ups?: number
+    boardType?: string
+    gsm?: number
+    sheetLengthMm?: unknown
+    sheetWidthMm?: unknown
+  } | null
+  materialProcurementStatus?: string
   shadeCardId?: string | null
   shadeCard?: {
     custodyStatus: string
@@ -201,21 +234,22 @@ function readinessFiveForLine(r: Line): { segments: ReadinessFiveSegment[]; allG
 
 function ReadinessFiveBar({ segments }: { segments: ReadinessFiveSegment[] }) {
   return (
-    <div className="flex items-center gap-0.5" aria-label="Readiness interlock">
+    <div className="flex items-center gap-0.5" aria-label="Readiness interlock AW · PA · DI · EB · SC">
       {segments.map((s) => {
         const green = s.state === 'ready'
         const grey = s.state === 'neutral'
+        const blocked = s.state === 'blocked'
         return (
           <span
             key={s.key}
             title={s.title}
-            className={`inline-flex h-6 w-[1.35rem] shrink-0 items-center justify-center rounded text-[8px] font-bold leading-none ${mono} ${
+            className={`inline-flex h-6 w-[1.35rem] shrink-0 cursor-help items-center justify-center rounded text-[8px] font-bold leading-none ${mono} ${
               green
                 ? 'border border-emerald-500/45 bg-emerald-500/12 text-emerald-300'
                 : grey
                   ? 'border border-white/10 bg-zinc-900 text-zinc-500'
                   : 'border border-rose-500 bg-rose-500/10 text-rose-100 shadow-[0_0_0_1px_rgba(244,63,94,0.55),0_0_10px_rgba(244,63,94,0.25)]'
-            }`}
+            } ${blocked ? 'ring-1 ring-rose-500/35' : ''}`}
           >
             {s.abbr}
           </span>
@@ -360,22 +394,6 @@ function buildLaneMapFromRows(rows: Line[]): Record<string, string[]> {
   return out
 }
 
-function reconcileLaneMap(prev: Record<string, string[]>, rows: Line[]): Record<string, string[]> {
-  const next = buildLaneMapFromRows(rows)
-  const out: Record<string, string[]> = { ...next }
-  for (const mid of Object.keys(next)) {
-    const old = prev[mid]
-    if (!old?.length) continue
-    const allowed = new Set(next[mid])
-    const seq = old.filter((id) => allowed.has(id))
-    for (const id of next[mid]) {
-      if (!seq.includes(id)) seq.push(id)
-    }
-    out[mid] = seq
-  }
-  return out
-}
-
 function materialBadgeClass(g: MaterialGate): string {
   switch (g.status) {
     case 'available':
@@ -407,9 +425,13 @@ export default function PlanningPage() {
   const [queueTab, setQueueTab] = useState<'all' | 'ready' | 'awaiting_tools' | 'awaiting_artwork'>('all')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [integrityFooter, setIntegrityFooter] = useState<string | null>(null)
-  const [laneMap, setLaneMap] = useState<Record<string, string[]>>({})
   const [selectedBlocker, setSelectedBlocker] = useState<BlockerCategory | null>(null)
   const [bottleneckBreakdownOpen, setBottleneckBreakdownOpen] = useState(false)
+  const [planningSelection, setPlanningSelection] = useState<Set<string>>(new Set())
+  const [planningGroupBy, setPlanningGroupBy] = useState<PlanningGroupBy>('none')
+  const [planningSetIdMode, setPlanningSetIdMode] = useState<PlanningSetIdMode>('auto')
+  const [planningDrawerLineId, setPlanningDrawerLineId] = useState<string | null>(null)
+  const [savingPlanningHandoff, setSavingPlanningHandoff] = useState(false)
 
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'planning-customer',
@@ -483,18 +505,19 @@ export default function PlanningPage() {
     return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
   }, [])
 
-  const laneSyncSignature = useMemo(
+  const laneMap = useMemo(() => buildLaneMapFromRows(rows), [rows])
+
+  const scheduleSyncSignature = useMemo(
     () =>
       rows
-        .map((r) => `${r.id}:${r.specOverrides?.machineId ?? ''}:${r.planningStatus}`)
+        .map((r) => {
+          const s = r.specOverrides || {}
+          return `${r.id}:${JSON.stringify(s.prodScheduleSlot ?? null)}:${JSON.stringify(s.scheduleHandshake ?? null)}`
+        })
         .sort()
         .join('|'),
     [rows],
   )
-
-  useEffect(() => {
-    setLaneMap((prev) => reconcileLaneMap(prev, rows))
-  }, [laneSyncSignature, rows])
 
   const scheduledHoursByMachine = useMemo(() => {
     const out: Record<string, number> = {}
@@ -535,6 +558,23 @@ export default function PlanningPage() {
     }
     return o
   }, [machines, scheduledHoursByMachine])
+
+  const readyToScheduleCount = useMemo(
+    () =>
+      rows.filter((r) => r.planningStatus !== 'closed' && readinessFiveForLine(r).allGreen).length,
+    [rows],
+  )
+
+  const topBlockerTile = useMemo(() => {
+    const b = blockerData[0]
+    if (!b || b.count === 0) {
+      return { headline: 'No dominant bottleneck', sub: 'Queue clear' }
+    }
+    return {
+      headline: `${b.label} delaying ${b.count} jobs`,
+      sub: `${b.count} line(s) waiting on ${b.label.toLowerCase()}`,
+    }
+  }, [blockerData])
 
   const primaryBottleneckInsight = useMemo(() => {
     if (rows.length === 0) {
@@ -579,26 +619,80 @@ export default function PlanningPage() {
     toast.success(`Smart assign → ${best.machineCode}`)
   }
 
-  const persistGanttLanes = useCallback(
-    (
-      batch: {
-        machineId: string
-        orderedLineIds: string[]
-        projectedFinishes: Record<string, string>
-      }[],
-    ) => {
-      void fetch('/api/planning/po-lines/gantt-sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lanes: batch }),
-      })
-        .then(async (res) => {
-          if (!res.ok) throw new Error('Gantt sync failed')
-          toast.success('Timeline saved')
+  const scheduleReady = useCallback((l: Line) => {
+    if (l.planningStatus === 'closed') return false
+    return readinessFiveForLine(l).allGreen
+  }, [])
+
+  const persistSchedule = useCallback(
+    async (containers: { sidebar: string[]; cells: Record<string, string[]> }) => {
+      const touched = new Set<string>()
+      containers.sidebar.forEach((id) => touched.add(id))
+      for (const ids of Object.values(containers.cells)) {
+        for (const id of ids) touched.add(id)
+      }
+      for (const id of Array.from(touched)) {
+        const li = rows.find((r) => r.id === id)
+        if (!li) continue
+        const inSidebar = containers.sidebar.includes(id)
+        const spec = { ...(li.specOverrides || {}) } as Record<string, unknown>
+        if (inSidebar) {
+          delete spec.prodScheduleSlot
+        } else {
+          let placement: { machineId: string; shift: 1 | 2 | 3; order: number } | null = null
+          for (const [cid, ids] of Object.entries(containers.cells)) {
+            const idx = ids.indexOf(id)
+            if (idx >= 0) {
+              const p = parseCellKey(cid)
+              if (p) placement = { machineId: p.machineId, shift: p.shift, order: idx }
+              break
+            }
+          }
+          if (placement) {
+            spec.machineId = placement.machineId
+            spec.shift = String(placement.shift)
+            spec.prodScheduleSlot = {
+              machineId: placement.machineId,
+              shift: placement.shift,
+              order: placement.order,
+            }
+          }
+        }
+        const res = await fetch(`/api/planning/po-lines/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ specOverrides: spec }),
         })
-        .catch(() => toast.error('Could not save Gantt order'))
+        if (!res.ok) {
+          toast.error('Could not save schedule')
+          await fetchRows()
+          return
+        }
+      }
+      toast.success('Schedule saved')
+      await fetchRows()
     },
-    [],
+    [rows, fetchRows],
+  )
+
+  const persistHandshake = useCallback(
+    async (lineId: string, handshake: ScheduleHandshake) => {
+      const li = rows.find((r) => r.id === lineId)
+      if (!li) return
+      const spec = { ...(li.specOverrides || {}), scheduleHandshake: handshake }
+      const res = await fetch(`/api/planning/po-lines/${lineId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ specOverrides: spec }),
+      })
+      if (!res.ok) {
+        toast.error('Handshake save failed')
+        return
+      }
+      toast.success('Operator handshake saved')
+      await fetchRows()
+    },
+    [rows, fetchRows],
   )
 
   const updateRow = (id: string, patch: Partial<Line>) => {
@@ -617,6 +711,90 @@ export default function PlanningPage() {
       ),
     )
   }
+
+  const linkAsMixSet = useCallback(() => {
+    if (planningSelection.size < 2) return
+    const master = generateMasterSetId()
+    const ids = Array.from(planningSelection)
+    for (const id of ids) {
+      const li = rows.find((r) => r.id === id)
+      if (!li) continue
+      const prev = readPlanningCore(li.specOverrides as Record<string, unknown>)
+      updateSpec(id, {
+        planningCore: {
+          ...prev,
+          masterSetId: master,
+          mixSetMemberIds: ids,
+          layoutType: 'gang',
+        },
+      })
+    }
+    toast.success('Mix-set linked — one Master Set ID; complete UPS & designer, then Save planning')
+  }, [planningSelection, rows])
+
+  const savePlanningHandoff = useCallback(async () => {
+    const candidates = rows.filter((r) => {
+      if (r.planningStatus === 'closed') return false
+      const c = readPlanningCore(r.specOverrides as Record<string, unknown>)
+      return !!(c.designerKey && c.ups != null && c.ups >= 1)
+    })
+    if (candidates.length === 0) {
+      toast.error('Set designer and UPS (≥1) on each line before save')
+      return
+    }
+    setSavingPlanningHandoff(true)
+    try {
+      const assignedNums: (string | null | undefined)[] = rows.map((r) => r.setNumber)
+      for (const r of candidates) {
+        const spec = { ...(r.specOverrides || {}) } as Record<string, unknown>
+        const pc = readPlanningCore(spec)
+        const designerName = pc.designerKey ? PLANNING_DESIGNERS[pc.designerKey] : ''
+        let resolved = pc.resolvedSetNumber?.trim()
+        if (planningSetIdMode === 'manual' && !resolved) {
+          toast.error('Manual Set ID: enter Set # (expanded row) for each line')
+          setSavingPlanningHandoff(false)
+          return
+        }
+        if (!resolved) {
+          resolved = suggestNextAutoSetNumber(assignedNums)
+          assignedNums.push(resolved)
+        }
+        const merged = mergeOrchestrationIntoSpec(spec, {
+          awQueueHandoffAt: new Date().toISOString(),
+          planningFlowStatus: PLANNING_FLOW.in_progress,
+        })
+        const nextSpec: Record<string, unknown> = {
+          ...merged,
+          planningCore: {
+            ...pc,
+            savedAt: new Date().toISOString(),
+            resolvedSetNumber: resolved,
+            setIdMode: planningSetIdMode,
+          },
+          planningDesignerDisplayName: designerName,
+        }
+        const res = await fetch(`/api/planning/po-lines/${r.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            setNumber: resolved,
+            planningStatus: 'planned',
+            specOverrides: nextSpec,
+            planningDecisionRevision: true,
+          }),
+        })
+        if (!res.ok) {
+          toast.error('Save planning failed')
+          await fetchRows()
+          return
+        }
+      }
+      toast.success('Planning saved — AW Queue handoff enabled')
+      await fetchRows()
+    } finally {
+      setSavingPlanningHandoff(false)
+    }
+  }, [rows, planningSetIdMode, fetchRows])
 
   const save = async (id: string) => {
     const li = rows.find((x) => x.id === id)
@@ -640,7 +818,7 @@ export default function PlanningPage() {
       const res = await fetch(`/api/planning/po-lines/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, planningDecisionRevision: true }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Save failed')
@@ -731,6 +909,28 @@ export default function PlanningPage() {
     return list
   }, [tabFilteredRows])
 
+  const groupSortedPlanningRows = useMemo(() => {
+    const list = [...sortedPlanningRows]
+    if (planningGroupBy === 'cartonSize') {
+      list.sort((a, b) => String(a.cartonSize ?? '').localeCompare(String(b.cartonSize ?? '')))
+    } else if (planningGroupBy === 'gsm') {
+      list.sort((a, b) => (a.gsm ?? 0) - (b.gsm ?? 0))
+    } else if (planningGroupBy === 'coating') {
+      list.sort((a, b) => String(a.coatingType ?? '').localeCompare(String(b.coatingType ?? '')))
+    }
+    return list
+  }, [sortedPlanningRows, planningGroupBy])
+
+  const scheduleBoardLines = useMemo(
+    () => rows.filter((r) => r.planningStatus !== 'closed'),
+    [rows],
+  )
+
+  const planningDrawerLine = useMemo(
+    () => (planningDrawerLineId ? rows.find((r) => r.id === planningDrawerLineId) ?? null : null),
+    [rows, planningDrawerLineId],
+  )
+
   if (loading) {
     return (
       <div className={`min-h-[30vh] p-4 text-slate-500 ${mono}`}>Loading planning queue…</div>
@@ -780,6 +980,43 @@ export default function PlanningPage() {
             </button>
           </div>
         </div>
+
+        <div className="grid gap-3 sm:grid-cols-3 rounded-lg border border-slate-800 bg-[#000000] px-3 py-2.5">
+          <div>
+            <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
+              Total volume in queue
+            </p>
+            <p className={`text-xl font-semibold text-amber-300/95 ${mono}`}>
+              {totalQty.toLocaleString('en-IN')}
+            </p>
+            <p className="text-[9px] text-slate-600">Σ qty · all lines in view</p>
+          </div>
+          <div className="sm:border-l sm:border-slate-800 sm:pl-3">
+            <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>Top blocker</p>
+            <p className={`text-sm font-medium text-rose-200/95 ${mono} leading-snug`}>
+              {topBlockerTile.headline}
+            </p>
+            <p className="text-[9px] text-slate-600 mt-0.5">{topBlockerTile.sub}</p>
+          </div>
+          <div className="sm:border-l sm:border-slate-800 sm:pl-3">
+            <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
+              Ready to schedule
+            </p>
+            <p className={`text-xl font-semibold text-emerald-400 ${mono}`}>{readyToScheduleCount}</p>
+            <p className="text-[9px] text-slate-600">5-point interlock + plates · not closed</p>
+          </div>
+        </div>
+
+        <PlanningDecisionLayerToolbar
+          selectionCount={planningSelection.size}
+          onLinkAsMixSet={linkAsMixSet}
+          onSavePlanning={() => void savePlanningHandoff()}
+          groupBy={planningGroupBy}
+          onGroupByChange={setPlanningGroupBy}
+          setIdMode={planningSetIdMode}
+          onSetIdModeChange={setPlanningSetIdMode}
+          saving={savingPlanningHandoff}
+        />
 
         <div className="flex flex-wrap gap-2">
           {(
@@ -1019,33 +1256,40 @@ export default function PlanningPage() {
           ) : null}
         </div>
 
-        <div className="rounded-lg border border-amber-500/20 bg-black p-3">
-          <PlanningGanttBoard
+        <div className="rounded-lg border border-slate-800 bg-[#000000] p-3">
+          <ProductionScheduleBoard
             machines={machines}
-            lines={rows.filter((r) => r.planningStatus !== 'closed')}
-            laneOrderByMachine={laneMap}
-            onLaneOrderChange={(machineId, orderedIds) => {
-              setLaneMap((prev) => ({ ...prev, [machineId]: orderedIds }))
-            }}
-            onPersistFinishes={persistGanttLanes}
+            lines={scheduleBoardLines}
+            readyPredicate={scheduleReady}
+            syncSignature={scheduleSyncSignature}
+            onPersistSchedule={persistSchedule}
+            onPersistHandshake={persistHandshake}
           />
         </div>
 
-        <div className="overflow-x-auto rounded-lg border border-white/10 bg-[#000000]">
-          <table className="w-full min-w-[1040px] border-collapse text-left text-[11px]">
-            <thead className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <div className="overflow-x-auto rounded-lg border border-slate-800 bg-[#000000]">
+          <div className="border-b border-slate-800 px-2 py-1.5">
+            <p className={`text-[10px] font-semibold uppercase tracking-wide text-slate-500 ${mono}`}>
+              Readiness ledger
+            </p>
+            <p className="text-[9px] text-slate-600">Mandatory 5-point interlock · AW · PA · DI · EB · SC</p>
+          </div>
+          <table className="w-full min-w-[1100px] border-collapse text-left text-[11px]">
+            <thead className="border-b border-slate-800 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
               <tr className={`${mono}`}>
-                <th className="w-8 px-1 py-1">Pri</th>
-                <th className="min-w-[10rem] px-1 py-1">Client · Product</th>
-                <th className="w-[7.5rem] px-1 py-1">PO · Qty</th>
-                <th className="w-[7.5rem] px-1 py-1">Interlock</th>
-                <th className="min-w-[8rem] px-1 py-1">Machine</th>
-                <th className="w-[8.5rem] px-1 py-1">Planned · Est.</th>
-                <th className="min-w-[10rem] px-1 py-1">Actions</th>
+                <th className="w-6 px-0 py-1.5 text-center">Sel</th>
+                <th className="w-7 px-1 py-1.5">Pri</th>
+                <th className="w-[6.5rem] px-1 py-1.5">PO #</th>
+                <th className="min-w-[7.5rem] px-1 py-1.5">Client</th>
+                <th className="min-w-[9rem] px-1 py-1.5">Product</th>
+                <th className="w-[4.5rem] px-1 py-1.5">UPS</th>
+                <th className="min-w-[7rem] px-1 py-1.5">Designer</th>
+                <th className="w-[9rem] px-1 py-1.5">Readiness</th>
+                <th className="min-w-[12rem] px-1 py-1.5 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {sortedPlanningRows.map((r) => {
+              {groupSortedPlanningRows.map((r) => {
                 const spec = r.specOverrides || {}
                 const ledger = r.planningLedger
                 const mat = ledger?.materialGate
@@ -1072,15 +1316,35 @@ export default function PlanningPage() {
                 const five = readinessFiveForLine(r)
                 const platesSt = String(spec.platesStatus ?? r.readiness?.platesStatus ?? 'new_required')
                 const blockerName = firstFivePointBlockerName(five.segments, platesSt)
+                const canAssignMachine = five.allGreen
+                const assignBlockReason =
+                  firstFivePointBlockerName(five.segments, platesSt) ?? 'Complete 5-point readiness interlock'
+                const planCore = readPlanningCore(spec as Record<string, unknown>)
 
                 return (
                   <Fragment key={r.id}>
                     <tr
-                      className={`h-10 max-h-10 transition-colors hover:bg-white/[0.03] ${
+                      className={`transition-colors hover:bg-white/[0.03] ${
                         pri ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
                       } ${r.directorHold ? 'opacity-45' : ''}`}
                     >
-                      <td className="px-1 py-0 align-middle">
+                      <td className="px-0 py-1 align-middle text-center">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-amber-500"
+                          checked={planningSelection.has(r.id)}
+                          onChange={() => {
+                            setPlanningSelection((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(r.id)) next.delete(r.id)
+                              else next.add(r.id)
+                              return next
+                            })
+                          }}
+                          aria-label="Select for mix-set"
+                        />
+                      </td>
+                      <td className="px-1 py-1 align-middle">
                         {pri ? (
                           <Star
                             className={`h-3.5 w-3.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
@@ -1090,163 +1354,239 @@ export default function PlanningPage() {
                           <span className="inline-block w-3.5" />
                         )}
                       </td>
-                      <td className="px-1 py-0 align-middle leading-tight">
-                        <div className="text-slate-400 truncate max-w-[14rem]">{r.po.customer.name}</div>
+                      <td
+                        className={`px-1 py-1 align-middle ${mono} ${
+                          pri ? 'text-amber-300' : 'text-amber-200/90'
+                        }`}
+                      >
+                        <Link
+                          href={`/orders/purchase-orders/${r.po.id}`}
+                          className={`hover:underline block text-[10px] leading-tight ${pri ? 'text-amber-300' : ''}`}
+                        >
+                          {r.po.poNumber}
+                        </Link>
+                        <div className={`text-[10px] tabular-nums ${pri ? 'text-amber-200/95' : 'text-slate-400'}`}>
+                          {r.quantity.toLocaleString('en-IN')}
+                        </div>
+                      </td>
+                      <td className="px-1 py-1 align-middle leading-tight">
+                        <div className="text-slate-400 truncate max-w-[11rem] text-[10px]">{r.po.customer.name}</div>
+                      </td>
+                      <td className="px-1 py-1 align-middle leading-tight">
                         {r.cartonId ? (
                           <Link
                             href={`/product/${r.cartonId}`}
-                            className={`text-slate-100 hover:text-amber-300 truncate block max-w-[14rem] ${mono}`}
+                            className={`text-slate-100 hover:text-amber-300 truncate block max-w-[14rem] text-[10px] ${mono}`}
                           >
                             {r.cartonName}
                           </Link>
                         ) : (
-                          <span className={`text-slate-200 truncate block max-w-[14rem] ${mono}`}>
+                          <span className={`text-slate-200 truncate block max-w-[14rem] text-[10px] ${mono}`}>
                             {r.cartonName}
                           </span>
                         )}
                       </td>
-                      <td
-                        className={`px-1 py-0 align-middle ${mono} ${
-                          pri ? 'text-amber-300' : 'text-amber-200/90'
-                        }`}
-                      >
-                        <div className="leading-tight tabular-nums">
-                          <Link
-                            href={`/orders/purchase-orders/${r.po.id}`}
-                            className={`hover:underline text-[10px] ${pri ? 'text-amber-300' : ''}`}
-                          >
-                            {r.po.poNumber}
-                          </Link>
-                          <div className={pri ? 'text-amber-200/95' : 'text-slate-300'}>
-                            {r.quantity.toLocaleString('en-IN')}
-                          </div>
+                      <td className="px-1 py-1 align-middle">
+                        <input
+                          type="number"
+                          min={1}
+                          className={`w-full max-w-[4rem] h-7 rounded border border-white/15 bg-black px-1 text-[10px] text-slate-200 ${mono}`}
+                          value={planCore.ups ?? r.materialQueue?.ups ?? ''}
+                          placeholder="UPS"
+                          onChange={(e) => {
+                            const ups = Math.max(1, parseInt(e.target.value, 10) || 1)
+                            const prev = readPlanningCore(spec as Record<string, unknown>)
+                            const sl = Number(r.materialQueue?.sheetLengthMm ?? 0)
+                            const sw = Number(r.materialQueue?.sheetWidthMm ?? 0)
+                            const bl = Number(r.carton?.blankLength ?? r.dimLengthMm ?? 0)
+                            const bw = Number(r.carton?.blankWidth ?? r.dimWidthMm ?? 0)
+                            const sheetL = sl > 0 ? sl : 1020
+                            const sheetW = sw > 0 ? sw : 720
+                            const { yieldPct } =
+                              bl > 0 && bw > 0
+                                ? computeSheetUtilization({
+                                    blankLengthMm: bl,
+                                    blankWidthMm: bw,
+                                    sheetLengthMm: sheetL,
+                                    sheetWidthMm: sheetW,
+                                    ups,
+                                  })
+                                : { yieldPct: 0 }
+                            updateSpec(r.id, {
+                              planningCore: {
+                                ...prev,
+                                ups,
+                                actualSheetSizeLabel:
+                                  sl > 0 && sw > 0 ? formatSheetSizeMm(sl, sw) : undefined,
+                                productionYieldPct: yieldPct,
+                              },
+                            })
+                          }}
+                        />
+                        <div className={`text-[8px] text-slate-600 mt-0.5 ${mono}`}>
+                          Y:{planCore.productionYieldPct != null ? `${planCore.productionYieldPct}%` : '—'}
                         </div>
                       </td>
-                      <td className="px-1 py-0 align-middle">
-                        <ReadinessFiveBar segments={five.segments} />
-                      </td>
-                      <td className="px-1 py-0 align-middle">
+                      <td className="px-1 py-1 align-middle">
                         <select
-                          value={spec.machineId ?? ''}
-                          onChange={(e) =>
+                          value={planCore.designerKey ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            const prev = readPlanningCore(spec as Record<string, unknown>)
                             updateSpec(r.id, {
-                              machineId: e.target.value || undefined,
+                              planningCore: {
+                                ...prev,
+                                designerKey:
+                                  v === 'avneet_singh' || v === 'shamsher_inder'
+                                    ? v
+                                    : undefined,
+                              },
                             })
-                          }
-                          className={`max-w-[9.5rem] h-7 rounded border border-white/15 bg-black px-1 text-[10px] text-slate-200 ${mono}`}
+                          }}
+                          className={`w-full max-w-[9rem] h-7 rounded border border-white/15 bg-black px-1 text-[9px] text-slate-200 ${mono}`}
                         >
-                          <option value="">Unassigned</option>
-                          {machines.map((m) => (
-                            <option
-                              key={m.id}
-                              value={m.id}
-                              className={
-                                highlightSmartOption && smartBest && m.id === smartBest.id
-                                  ? 'bg-emerald-500/10 font-medium'
-                                  : undefined
-                              }
-                            >
-                              {m.machineCode}
-                              {highlightSmartOption && smartBest && m.id === smartBest.id ? ' · Smart match' : ''}
-                            </option>
-                          ))}
+                          <option value="">— Designer —</option>
+                          <option value="avneet_singh">Avneet Singh</option>
+                          <option value="shamsher_inder">Shamsher Inder</option>
                         </select>
-                        <div className="flex flex-col gap-0.5 mt-0.5">
-                          {highlightSmartOption && smartBest ? (
+                        {planCore.layoutType === 'gang' ? (
+                          <span className="mt-0.5 inline-block rounded border border-sky-500/40 bg-sky-500/10 px-1 text-[8px] text-sky-300">
+                            Gang
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-1 py-1 align-middle">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <ReadinessFiveBar segments={five.segments} />
+                          <button
+                            type="button"
+                            onClick={() => setPlanningDrawerLineId(r.id)}
+                            className={`shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase text-amber-200 hover:bg-amber-500/20 ${mono}`}
+                          >
+                            Radar
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-1 py-1 align-middle text-right">
+                        <div className="inline-flex flex-col items-end gap-1 max-w-[14rem] ml-auto">
+                          <div className="w-full text-left">
+                            <span className={`text-[8px] uppercase tracking-wide text-slate-500 ${mono}`}>
+                              Assign to machine
+                            </span>
+                            <select
+                              value={spec.machineId ?? ''}
+                              disabled={!canAssignMachine || !!r.directorHold}
+                              title={
+                                canAssignMachine && !r.directorHold
+                                  ? 'Select press'
+                                  : r.directorHold
+                                    ? 'Director hold'
+                                    : assignBlockReason
+                              }
+                              onChange={(e) =>
+                                updateSpec(r.id, {
+                                  machineId: e.target.value || undefined,
+                                })
+                              }
+                              className={`mt-0.5 max-w-[11rem] h-7 w-full rounded border border-white/15 bg-black px-1 text-[10px] text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 ${mono}`}
+                            >
+                              <option value="">Unassigned</option>
+                              {machines.map((m) => (
+                                <option
+                                  key={m.id}
+                                  value={m.id}
+                                  className={
+                                    highlightSmartOption && smartBest && m.id === smartBest.id
+                                      ? 'bg-emerald-500/10 font-medium'
+                                      : undefined
+                                  }
+                                >
+                                  {m.machineCode}
+                                  {highlightSmartOption && smartBest && m.id === smartBest.id
+                                    ? ' · Smart match'
+                                    : ''}
+                                </option>
+                              ))}
+                            </select>
+                            {highlightSmartOption && smartBest && canAssignMachine ? (
+                              <button
+                                type="button"
+                                title="Apply smart match (colours + sheet size + load)"
+                                onClick={() => updateSpec(r.id, { machineId: smartBest.id })}
+                                className={`mt-0.5 block text-left text-[9px] text-emerald-400/90 hover:text-emerald-300 ${mono}`}
+                              >
+                                Apply {smartBest.machineCode}
+                              </button>
+                            ) : null}
+                            {canAssignMachine ? (
+                              <button
+                                type="button"
+                                title="Re-score all presses (colours, bed, load)"
+                                onClick={() => applySmartMachine(r)}
+                                className={`mt-0.5 block text-left text-[9px] text-sky-400/90 hover:text-sky-300 ${mono}`}
+                              >
+                                Smart balance
+                              </button>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-center justify-end gap-1">
                             <button
                               type="button"
-                              title="Apply smart match (colours + sheet size + load)"
-                              onClick={() => updateSpec(r.id, { machineId: smartBest.id })}
-                              className={`text-left text-[9px] text-emerald-400/90 hover:text-emerald-300 ${mono}`}
+                              onClick={() => void save(r.id)}
+                              disabled={savingId === r.id}
+                              className="rounded border border-amber-700/50 px-2 py-0.5 text-[10px] text-amber-200/90 hover:bg-amber-500/10 disabled:opacity-40"
                             >
-                              Apply {smartBest.machineCode}
+                              {savingId === r.id ? 'Saving…' : 'Save'}
                             </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            title="Re-score all presses (colours, bed, load)"
-                            onClick={() => applySmartMachine(r)}
-                            className={`text-left text-[9px] text-sky-400/90 hover:text-sky-300 ${mono}`}
-                          >
-                            Smart balance
-                          </button>
-                        </div>
-                      </td>
-                      <td className={`px-1 py-0 align-middle ${mono} text-[10px] text-slate-300`}>
-                        <input
-                          type="date"
-                          value={spec.plannedDate ?? ''}
-                          onChange={(e) =>
-                            updateSpec(r.id, {
-                              plannedDate: e.target.value || undefined,
-                            })
-                          }
-                          className={`h-7 w-[7.5rem] rounded border border-white/15 bg-black px-1 text-[10px] text-slate-200 tabular-nums [color-scheme:dark] ${mono}`}
-                        />
-                        <div className={`text-slate-500 mt-0.5 ${mono}`}>
-                          {ledger?.estimatedDurationHours != null
-                            ? formatDurationHMM(ledger.estimatedDurationHours)
-                            : '—'}
-                        </div>
-                      </td>
-                      <td className="px-1 py-0 align-middle">
-                        <div className="flex flex-wrap items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => void save(r.id)}
-                            disabled={savingId === r.id}
-                            className="rounded border border-amber-700/50 px-2 py-0.5 text-[10px] text-amber-200/90 hover:bg-amber-500/10 disabled:opacity-40"
-                          >
-                            {savingId === r.id ? 'Saving…' : 'Save'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setExpandedId(expanded ? null : r.id)}
-                            className={`inline-flex items-center rounded border border-white/15 p-0.5 text-slate-400 hover:border-amber-500/40 ${mono}`}
-                            title={expanded ? 'Collapse spec' : 'Expand spec'}
-                            aria-expanded={expanded}
-                          >
-                            {expanded ? (
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronRight className="h-3.5 w-3.5" />
-                            )}
-                          </button>
-                          {r.jobCard?.id ? (
-                            <Link
-                              href={`/production/job-cards/${r.jobCard.id}`}
-                              className={`text-[10px] text-sky-400 hover:underline ${mono}`}
+                            <button
+                              type="button"
+                              onClick={() => setExpandedId(expanded ? null : r.id)}
+                              className={`inline-flex items-center rounded border border-white/15 p-0.5 text-slate-400 hover:border-amber-500/40 ${mono}`}
+                              title={expanded ? 'Collapse spec' : 'Expand spec'}
+                              aria-expanded={expanded}
                             >
-                              JC#{r.jobCard.jobCardNumber}
-                            </Link>
-                          ) : null}
-                          <button
-                            type="button"
-                            disabled={!genOk || generatingId === r.id}
-                            onClick={() => void generateJobCard(r)}
-                            className={`rounded border px-2 py-0.5 text-[10px] font-semibold transition-colors ${
-                              genOk
-                                ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
-                                : 'border-white/15 border-dashed bg-transparent text-slate-500 cursor-not-allowed opacity-45 shadow-none'
-                            } disabled:opacity-35`}
-                            title={
-                              genOk
-                                ? 'Generate job card — locks die / emboss / shade to this JC in hubs'
-                                : blockerName
-                                  ? `Blocked: Missing ${blockerName}`
-                                  : !String(spec.machineId ?? '').trim()
-                                    ? 'Blocked: Missing Machine'
-                                    : 'Complete planning interlock'
-                            }
-                          >
-                            {generatingId === r.id ? '…' : 'Generate Job Card'}
-                          </button>
+                              {expanded ? (
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                            {r.jobCard?.id ? (
+                              <Link
+                                href={`/production/job-cards/${r.jobCard.id}`}
+                                className={`text-[10px] text-sky-400 hover:underline ${mono}`}
+                              >
+                                JC#{r.jobCard.jobCardNumber}
+                              </Link>
+                            ) : null}
+                            <button
+                              type="button"
+                              disabled={!genOk || generatingId === r.id}
+                              onClick={() => void generateJobCard(r)}
+                              className={`rounded border px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                                genOk
+                                  ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
+                                  : 'border-white/15 border-dashed bg-transparent text-slate-500 cursor-not-allowed opacity-45 shadow-none'
+                              } disabled:opacity-35`}
+                              title={
+                                genOk
+                                  ? 'Generate job card — locks die / emboss / shade to this JC in hubs'
+                                  : blockerName
+                                    ? `Blocked: Missing ${blockerName}`
+                                    : !String(spec.machineId ?? '').trim()
+                                      ? 'Blocked: Missing Machine'
+                                      : 'Complete planning interlock'
+                              }
+                            >
+                              {generatingId === r.id ? '…' : 'Generate Job Card'}
+                            </button>
+                          </div>
                         </div>
                       </td>
                     </tr>
                     {expanded ? (
                       <tr key={`${r.id}-spec`} className="bg-black/80">
-                        <td colSpan={7} className="px-3 py-2 border-t border-white/5">
+                        <td colSpan={9} className="px-3 py-2 border-t border-slate-800">
                           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-[11px]">
                             <label className="space-y-0.5">
                               <span className="text-slate-500">Set #</span>
@@ -1274,6 +1614,29 @@ export default function PlanningPage() {
                                   </option>
                                 ))}
                               </select>
+                            </label>
+                            <label className="space-y-0.5">
+                              <span className="text-slate-500">Planned date</span>
+                              <input
+                                type="date"
+                                value={spec.plannedDate ?? ''}
+                                onChange={(e) =>
+                                  updateSpec(r.id, {
+                                    plannedDate: e.target.value || undefined,
+                                  })
+                                }
+                                className={`w-full h-8 rounded border border-white/15 bg-black px-2 text-slate-200 tabular-nums [color-scheme:dark] ${mono}`}
+                              />
+                            </label>
+                            <label className="space-y-0.5">
+                              <span className="text-slate-500">Est. run</span>
+                              <div
+                                className={`flex h-8 items-center rounded border border-white/10 bg-zinc-950/60 px-2 text-slate-300 ${mono}`}
+                              >
+                                {ledger?.estimatedDurationHours != null
+                                  ? formatDurationHMM(ledger.estimatedDurationHours)
+                                  : '—'}
+                              </div>
                             </label>
                             <label className="space-y-0.5">
                               <span className="text-slate-500">Plates</span>
@@ -1379,7 +1742,7 @@ export default function PlanningPage() {
               })}
               {tabFilteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">
                     No items in planning queue.
                   </td>
                 </tr>
@@ -1388,9 +1751,16 @@ export default function PlanningPage() {
           </table>
         </div>
 
-        <footer className={`border-t border-white/10 pt-3 text-center text-[10px] text-slate-500 ${mono}`}>
-          {integrityFooter ?? 'Planning Integrity Verified - Zero-Error Flow Enabled.'}
+        <footer className={`border-t border-slate-800 pt-3 text-center text-[10px] text-slate-500 ${mono}`}>
+          Planning Decision Active - Zero-Error Handshake to AW Queue Enabled.
+          {integrityFooter ? <span className="block mt-1 text-slate-600">{integrityFooter}</span> : null}
         </footer>
+
+        <PlanningReadinessDrawer
+          open={planningDrawerLineId != null}
+          line={planningDrawerLine}
+          onClose={() => setPlanningDrawerLineId(null)}
+        />
       </div>
     </div>
   )

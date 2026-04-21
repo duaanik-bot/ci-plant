@@ -59,6 +59,9 @@ export async function GET(req: NextRequest) {
             boardType: true,
             gsm: true,
             orderQty: true,
+            ups: true,
+            sheetLengthMm: true,
+            sheetWidthMm: true,
           },
         },
         carton: {
@@ -110,6 +113,12 @@ export async function GET(req: NextRequest) {
               issuedStockDisplay: true,
               grainFitStatus: true,
               inventoryLocationPointer: true,
+              sheetsIssued: true,
+              totalSheets: true,
+              stages: {
+                select: { stageName: true, counter: true },
+                orderBy: { stageName: 'asc' },
+              },
               allocatedPaperWarehouse: { select: { lotNumber: true } },
             },
           })

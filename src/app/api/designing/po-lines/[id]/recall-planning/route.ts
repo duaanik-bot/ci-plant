@@ -3,6 +3,15 @@ import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { PLANNING_FLOW, readOrchestration } from '@/lib/orchestration-spec'
 
+/** Clears orchestration handoff timestamps so AW queue can re-sync after facts are cleared. */
+function stripPlanningHandoffOrch(spec: Record<string, unknown>) {
+  const prev = readOrchestration(spec)
+  const next = { ...prev, planningFlowStatus: PLANNING_FLOW.idle }
+  delete next.planningForwardedAt
+  delete next.awQueueHandoffAt
+  return next
+}
+
 export const dynamic = 'force-dynamic'
 
 /** POST — Pull line back from planning if execution has not started (no machine allocation). */
@@ -34,10 +43,9 @@ export async function POST(
   }
 
   const base = { ...spec }
-  const orch = readOrchestration(base)
-  const nextOrch = { ...orch, planningFlowStatus: PLANNING_FLOW.idle }
-  delete nextOrch.planningForwardedAt
-  base.orchestration = nextOrch
+  delete base.planningCore
+  delete base.planningDesignerDisplayName
+  base.orchestration = stripPlanningHandoffOrch(base)
 
   const backStatus = line.jobCardNumber != null ? 'job_card_created' : 'design_ready'
 

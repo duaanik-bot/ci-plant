@@ -18,6 +18,12 @@ import {
 } from 'lucide-react'
 import { parseDesignerCommand } from '@/lib/designer-command'
 import {
+  AW_PO_STATUS,
+  batchProgressSegments,
+  readAwPoStatus,
+  totalContractBatches,
+} from '@/lib/aw-queue-spec'
+import {
   useCommandPalette,
   CommandPaletteTriggerIcon,
 } from '@/components/command-palette/CommandPalette'
@@ -30,6 +36,7 @@ import {
   broadcastIndustrialPriorityChange,
   INDUSTRIAL_PRIORITY_EVENT,
 } from '@/lib/industrial-priority-sync'
+import { readPlanningCore } from '@/lib/planning-decision-spec'
 
 type SpecOverrides = {
   assignedDesignerId?: string
@@ -402,13 +409,17 @@ export default function DesigningQueuePage() {
   const [sortKey, setSortKey] = useState<AuditSortKey | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [priorityBusyPoId, setPriorityBusyPoId] = useState<string | null>(null)
+  const [myJobsOnly, setMyJobsOnly] = useState(false)
 
   const load = useCallback(async () => {
     try {
+      const qs = new URLSearchParams()
+      if (customerId) qs.set('customerId', customerId)
+      if (myJobsOnly) qs.set('myJobs', '1')
       const [custRes, usersRes, linesRes] = await Promise.all([
         fetch('/api/masters/customers'),
         fetch('/api/users'),
-        fetch(`/api/designing/po-lines?${customerId ? `customerId=${customerId}` : ''}`),
+        fetch(`/api/designing/po-lines?${qs.toString()}`),
       ])
       const custJson = await custRes.json()
       const usersJson = await usersRes.json()
@@ -421,7 +432,7 @@ export default function DesigningQueuePage() {
     } finally {
       setLoading(false)
     }
-  }, [customerId])
+  }, [customerId, myJobsOnly])
 
   useEffect(() => {
     setLoading(true)
@@ -643,13 +654,17 @@ export default function DesigningQueuePage() {
               Customer PO ✓
             </span>
             <span>→</span>
-            <span className="rounded border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-amber-200/95">
-              Visual audit
+            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-amber-200/95">
+              Planning decision
+            </span>
+            <span>→</span>
+            <span className="rounded border border-sky-500/35 bg-sky-500/10 px-1.5 py-0.5 text-sky-200/95">
+              AW queue
             </span>
             <span>→</span>
             <span className="rounded border border-white/10 px-1.5 py-0.5 text-slate-400">Plate Hub</span>
             <span>→</span>
-            <span className="rounded border border-white/10 px-1.5 py-0.5 text-slate-400">Planning</span>
+            <span className="rounded border border-white/10 px-1.5 py-0.5 text-slate-400">Downstream</span>
           </div>
         </div>
 
@@ -684,7 +699,7 @@ export default function DesigningQueuePage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-xs">
+        <div className="flex flex-wrap gap-2 text-xs items-center">
           <select
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
@@ -697,6 +712,18 @@ export default function DesigningQueuePage() {
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            onClick={() => setMyJobsOnly((o) => !o)}
+            className={`rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${mono} ${
+              myJobsOnly
+                ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
+                : 'border-white/15 bg-black text-slate-400 hover:border-white/25'
+            }`}
+            title="Show only lines allocated to you in Planning"
+          >
+            My jobs
+          </button>
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-white/10 bg-[#000000]">
@@ -751,9 +778,16 @@ export default function DesigningQueuePage() {
                 const finalized = !!r.readiness.prePressFinalized
                 const planningForwarded = !!r.readiness.planningForwarded
                 const spec = (r.specOverrides || {}) as Record<string, unknown>
+                const awPo = readAwPoStatus(spec)
+                const rowClosed = awPo === AW_PO_STATUS.CLOSED
+                const batchSeg = batchProgressSegments(spec)
                 const machineAllocated = !!String(spec.machineId || '').trim()
                 const canFinalizeRow =
-                  approvalsDone && !finalized && !!(r.setNumber || '').trim() && !!(r.artworkCode || '').trim()
+                  approvalsDone &&
+                  !finalized &&
+                  !!(r.setNumber || '').trim() &&
+                  !!(r.artworkCode || '').trim() &&
+                  !rowClosed
                 const canRecallPlanning =
                   planningForwarded &&
                   !machineAllocated &&
@@ -769,7 +803,7 @@ export default function DesigningQueuePage() {
                     key={r.id}
                     className={`transition-colors hover:bg-white/[0.03] ${
                       priRow ? INDUSTRIAL_PRIORITY_ROW_CLASS : 'border-l-2 border-transparent hover:border-amber-500'
-                    } ${r.directorHold ? 'opacity-45' : ''}`}
+                    } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''}`}
                   >
                     <td className="px-1 py-0.5 align-middle">
                       <ArtworkPreviewCell
@@ -807,6 +841,25 @@ export default function DesigningQueuePage() {
                           </button>
                           <span className="break-all min-w-0">{r.po.poNumber}</span>
                         </div>
+                        {totalContractBatches(spec) > 0 ? (
+                          <div
+                            className="mt-0.5 flex h-1 w-full max-w-[6rem] overflow-hidden rounded-full bg-slate-800 ring-1 ring-slate-700/80"
+                            title="Batch progress"
+                          >
+                            <div
+                              className="h-full bg-emerald-600/90"
+                              style={{ width: `${Math.round(batchSeg.shippedPct * 100)}%` }}
+                            />
+                            <div
+                              className="h-full bg-amber-500/90"
+                              style={{ width: `${Math.round(batchSeg.inProductionPct * 100)}%` }}
+                            />
+                            <div
+                              className="h-full bg-slate-600"
+                              style={{ width: `${Math.round(batchSeg.remainingPct * 100)}%` }}
+                            />
+                          </div>
+                        ) : null}
                         {r.directorPriority ? (
                           <span className="w-fit rounded bg-amber-500/15 px-1 text-[8px] font-bold uppercase text-amber-300 ring-1 ring-amber-500/30">
                             Priority
@@ -827,7 +880,18 @@ export default function DesigningQueuePage() {
                       </div>
                     </td>
                     <td className="px-1 py-0.5 align-middle text-slate-100 leading-snug break-words">
-                      {r.cartonName}
+                      <div className="flex flex-col gap-0.5">
+                        <span>{r.cartonName}</span>
+                        {readPlanningCore(spec).layoutType === 'gang' ? (
+                          <span className="w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-sky-300">
+                            Gang print
+                          </span>
+                        ) : readPlanningCore(spec).savedAt ? (
+                          <span className="w-fit rounded border border-slate-600 px-1 py-0.5 text-[8px] text-slate-500">
+                            Single product
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className={`px-1 py-0.5 align-middle text-right ${mono} text-slate-200`}>
                       {r.quantity}
@@ -870,7 +934,7 @@ export default function DesigningQueuePage() {
                         {approvalsDone && !planningForwarded && (
                           <button
                             type="button"
-                            disabled={forwardingId === r.id}
+                            disabled={forwardingId === r.id || rowClosed}
                             onClick={() => void forwardPlanning(r)}
                             className="rounded border border-white/20 bg-transparent px-2 py-0.5 text-[10px] font-medium text-slate-100 hover:border-violet-400/50 hover:bg-violet-500/10 disabled:opacity-40"
                           >
@@ -880,7 +944,7 @@ export default function DesigningQueuePage() {
                         {canFinalizeRow && (
                           <button
                             type="button"
-                            disabled={finalizingId === r.id}
+                            disabled={finalizingId === r.id || rowClosed}
                             onClick={() => void finalizeFromList(r)}
                             className="rounded border border-emerald-500/40 bg-transparent px-2 py-0.5 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40"
                           >

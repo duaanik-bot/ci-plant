@@ -4,6 +4,8 @@ export type LineOrchestration = {
   plateFlowStatus?: string
   planningFlowStatus?: string
   planningForwardedAt?: string
+  /** Set when Planning Decision Layer saves handoff to AW Queue (chronology core). */
+  awQueueHandoffAt?: string
 }
 
 export const PLATE_FLOW = {

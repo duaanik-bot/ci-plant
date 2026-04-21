@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
+import {
+  assertPlanningFactsUnchanged,
+  userCanRevisePlanningDecision,
+} from '@/lib/planning-facts-lock'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,6 +14,8 @@ const updateSchema = z.object({
   artworkCode: z.string().optional().nullable(),
   planningStatus: z.string().optional(),
   specOverrides: z.any().optional(),
+  /** When planning facts are locked, authorised Planning users must set this to change UPS / set / gang / designer. */
+  planningDecisionRevision: z.boolean().optional(),
   dieMasterId: z.string().uuid().optional().nullable(),
   toolingLocked: z.boolean().optional(),
   lineDieType: z.string().optional().nullable(),
@@ -60,13 +66,53 @@ export async function PATCH(
 
   const data = parsed.data
 
+  const existingSpec = (existing.specOverrides as Record<string, unknown> | null) || {}
+  const mergedSpec =
+    data.specOverrides !== undefined
+      ? { ...existingSpec, ...(data.specOverrides as Record<string, unknown>) }
+      : existingSpec
+  const mergedSetNumber =
+    data.setNumber !== undefined ? data.setNumber : (existing.setNumber ?? null)
+
+  const touchedKeys =
+    data.specOverrides !== undefined && typeof data.specOverrides === 'object'
+      ? new Set(Object.keys(data.specOverrides as object))
+      : undefined
+
+  const viol = assertPlanningFactsUnchanged({
+    existingSpec,
+    mergedSpec,
+    existingSetNumber: existing.setNumber,
+    mergedSetNumber,
+    touchedSpecKeys: touchedKeys,
+  })
+
+  if (viol.ok === false) {
+    if (data.planningDecisionRevision && userCanRevisePlanningDecision(user!)) {
+      // allow mutation
+    } else if (data.planningDecisionRevision && !userCanRevisePlanningDecision(user!)) {
+      return NextResponse.json(
+        {
+          error: 'Forbidden — planning revision requires md / operations_head / production_manager (or full production permission).',
+          field: 'planningDecisionRevision',
+        },
+        { status: 403 },
+      )
+    } else {
+      return NextResponse.json(
+        { error: viol.message, field: viol.field },
+        { status: 403 },
+      )
+    }
+  }
+
   const updated = await db.poLineItem.update({
     where: { id },
     data: {
       ...(data.setNumber !== undefined ? { setNumber: data.setNumber || null } : {}),
       ...(data.artworkCode !== undefined ? { artworkCode: data.artworkCode || null } : {}),
       ...(data.planningStatus !== undefined ? { planningStatus: data.planningStatus } : {}),
-      ...(data.specOverrides !== undefined ? { specOverrides: data.specOverrides as any } : {}),
+      ...(data.specOverrides !== undefined ? { specOverrides: mergedSpec as object } : {}),
       ...(data.dieMasterId !== undefined
         ? { dieMasterId: data.dieMasterId || null }
         : {}),

@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { AlertTriangle, Check, Link as LinkedIcon, Search, Star } from 'lucide-react'
-import { AnimatePresence, motion } from 'framer-motion'
+import * as Dialog from '@radix-ui/react-dialog'
+import clsx from 'clsx'
 import {
   computeTotalPlates,
   defaultDesignerCommand,
@@ -32,6 +33,14 @@ import {
   SmartMatchDieModal,
   type SmartMatchDieRow,
 } from '@/components/designing/SmartMatchDieModal'
+import {
+  AwQueueDirectorStrip,
+  PlateHubReadinessSparkline,
+  type AwRibbonStep,
+} from '@/components/designing/AwQueueDirectorStrip'
+import { readOrchestration } from '@/lib/orchestration-spec'
+import { AW_PO_STATUS, readAwPoStatus } from '@/lib/aw-queue-spec'
+import { AwQueueCommandPanel } from '@/components/designing/AwQueueCommandPanel'
 
 type SpecOverrides = {
   assignedDesignerId?: string
@@ -181,8 +190,16 @@ type User = { id: string; name: string }
 
 const techMono = 'font-designing-queue tabular-nums tracking-tight'
 
+function normalizeSheetSizeKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/×/g, 'x')
+    .replace(/\*/g, '')
+}
+
 const manualInputClass =
-  'mt-1 w-full px-2 py-1.5 rounded bg-[#000000] text-white text-sm border border-white/20 focus:border-amber-500/80 focus:outline-none focus:ring-1 focus:ring-amber-500/40 placeholder:text-slate-600'
+  'mt-1 w-full px-2 py-1.5 rounded bg-[#000000] text-white text-sm border border-slate-800 focus:border-amber-500/80 focus:outline-none focus:ring-1 focus:ring-amber-500/40 placeholder:text-slate-600'
 
 const monoInputClass = `${manualInputClass} ${techMono}`
 
@@ -581,6 +598,17 @@ export default function DesigningDetailPage() {
   const [batchDetailsInput, setBatchDetailsInput] = useState('')
   const [batchSizeInput, setBatchSizeInput] = useState('')
   const [batchQtyInput, setBatchQtyInput] = useState('')
+  /** When false, spec + tooling inputs are read-only (director lock). Default unlocked. */
+  const [editSpecsEnabled, setEditSpecsEnabled] = useState(true)
+  const [masterSpecSheet, setMasterSpecSheet] = useState<string | null>(null)
+  const [lastUsedFromHistory, setLastUsedFromHistory] = useState<{
+    aw: string
+    sheet: string
+    ups: string
+    setNumber?: string
+  } | null>(null)
+  const [batchDrawerOpen, setBatchDrawerOpen] = useState(false)
+  const [recallBusy, setRecallBusy] = useState(false)
 
   smartInputsRef.current.aw = artworkCodeInput
   smartInputsRef.current.sheet = actualSheetSizeInput
@@ -692,6 +720,8 @@ export default function DesigningDetailPage() {
             error?: string
           }
           if (!r.ok) throw new Error(j.error || 'Product master match failed')
+
+          setMasterSpecSheet(j.actualSheetSize?.trim() ? j.actualSheetSize.trim() : null)
 
           const cur = smartInputsRef.current
           const last = lastSmartAppliedRef.current
@@ -1215,12 +1245,14 @@ export default function DesigningDetailPage() {
         setSetLookupState('idle')
         setHistoryDesignerCommand(null)
         setHistoryNoMatch(false)
+        setLastUsedFromHistory(null)
         return
       }
       if (!repeatMode) {
         setSetLookupState('idle')
         setHistoryNoMatch(false)
         setHistoryDesignerCommand(null)
+        setLastUsedFromHistory(null)
         return
       }
       const cid = data?.line?.cartonId?.trim()
@@ -1243,6 +1275,7 @@ export default function DesigningDetailPage() {
         if (r.status === 404) {
           setHistoryNoMatch(true)
           setHistoryDesignerCommand(null)
+          setLastUsedFromHistory(null)
           setSetLookupState('empty')
           return
         }
@@ -1268,6 +1301,13 @@ export default function DesigningDetailPage() {
         if (upsN != null && Number.isFinite(upsN) && upsN > 0) {
           setNumberOfUpsInput(String(upsN))
         }
+        setLastUsedFromHistory({
+          aw: aw.trim(),
+          sheet: sheet || '',
+          ups:
+            upsN != null && Number.isFinite(upsN) && upsN > 0 ? String(Math.floor(upsN)) : '',
+          setNumber: sn || '',
+        })
         setHistoryDesignerCommand(json.previousDesignerCommand ?? null)
         setDesignerCommand((prev) =>
           mergeDesignerCommandFromHistory(prev, json.previousDesignerCommand ?? null),
@@ -1283,6 +1323,10 @@ export default function DesigningDetailPage() {
   useEffect(() => {
     setArtworkRepeatJob(false)
   }, [artworkCodeInput])
+
+  useEffect(() => {
+    if (jobType !== 'repeat') setLastUsedFromHistory(null)
+  }, [jobType])
 
   const persistArtworkIdIfNew = useCallback(
     async (artworkId: string) => {
@@ -1542,6 +1586,28 @@ export default function DesigningDetailPage() {
   }
 
   const line = data?.line ?? null
+
+  const recallDieFromHub = async () => {
+    if (!line) return
+    if (
+      !window.confirm(
+        'Recall die from hub? This clears triage reservation and the die hub dispatch stamp.',
+      )
+    )
+      return
+    try {
+      await persistSmartHandshake({ dieReserved: false })
+      setDieReserveSent(false)
+      const nextCmd = { ...designerCommand }
+      nextCmd.dieLastIntent = null
+      delete nextCmd.dieLastIntentAt
+      await persistDesignerCommand(nextCmd, { skipLoading: true })
+      toast.success('Die hub recall — handshake cleared')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Recall failed')
+    }
+  }
+
   const links = data?.links ?? {
     po: '/orders/purchase-orders',
     planning: '/orders/planning',
@@ -1619,45 +1685,26 @@ export default function DesigningDetailPage() {
     await submitPlateHubFinalize(true)
   }
 
-  const [undoing, setUndoing] = useState(false)
-
-  const handleUndoFinalize = async () => {
+  const handleRecallJob = async () => {
     if (!line) return
-    if (!window.confirm('Undo finalization? This will cancel the plate requirement and allow re-submission.')) return
-    setUndoing(true)
+    setRecallBusy(true)
     try {
-      const res = await fetch('/api/plate-hub/undo', {
+      const res = await fetch(`/api/designing/po-lines/${line.id}/recall-job`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ poLineId: line.id }),
       })
-      const json = (await res.json()) as { error?: string; ok?: boolean }
-      if (!res.ok) throw new Error(json.error || 'Undo failed')
+      const json = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(json.error || 'Recall failed')
       setPlateHubSent(false)
-      // Clear the finalize stamp in local state
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              line: {
-                ...prev.line,
-                specOverrides: prev.line.specOverrides
-                  ? {
-                      ...prev.line.specOverrides,
-                      prePressSentToPlateHubAt: undefined,
-                      lastPlateRequirementCode: undefined,
-                      plateHubPayload: undefined,
-                    }
-                  : null,
-              },
-            }
-          : null,
-      )
-      toast.success('Finalization reversed — job is back in designing')
+      setDieReserveSent(false)
+      setEmbossReserveSent(false)
+      await reloadLine()
+      toast.success('Job recalled — Plate Hub send reversed and hub links reset to draft')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Undo failed')
+      toast.error(e instanceof Error ? e.message : 'Recall failed')
     } finally {
-      setUndoing(false)
+      setRecallBusy(false)
     }
   }
 
@@ -1728,15 +1775,95 @@ export default function DesigningDetailPage() {
     designerCommand.embossLastIntent === 'emboss_hub' ||
     designerCommand.embossLastIntent === 'store_retrieval'
 
+  const orch = useMemo(
+    () => readOrchestration((data?.line?.specOverrides || {}) as Record<string, unknown>),
+    [data?.line?.specOverrides],
+  )
+
+  const sheetMasterMismatch = useMemo(() => {
+    if (jobType !== 'repeat' || !masterSpecSheet?.trim()) return false
+    const a = normalizeSheetSizeKey(actualSheetSizeInput.trim())
+    const b = normalizeSheetSizeKey(masterSpecSheet.trim())
+    return !!a && !!b && a !== b
+  }, [jobType, masterSpecSheet, actualSheetSizeInput])
+
+  const ribbonSteps = useMemo((): AwRibbonStep[] => {
+    const ln = data?.line
+    if (!ln) return []
+    const artworkDone = customerApproval && qaTextApproval
+    const needEmb = isEmbossingRequired(ln.embossingLeafing)
+    const dieHubDone =
+      !!designerCommand.dieSource &&
+      (!!dieDispatchedToHub || !!dieReserveSent) &&
+      (!needEmb || (!!designerCommand.embossSource && (!!embossDispatchedToHub || !!embossReserveSent)))
+    const planningDone =
+      !!orch.planningForwardedAt ||
+      orch.planningFlowStatus === 'forwarded' ||
+      orch.planningFlowStatus === 'in_progress'
+    const labels = ['Artwork', 'Die Hub', 'Plate Hub', 'Planning'] as const
+    const doneFlags = [artworkDone, dieHubDone, plateHubSent, planningDone]
+    const allDone = doneFlags.every(Boolean)
+    const firstIncomplete = doneFlags.findIndex((d) => !d)
+    return labels.map((label, i) => ({
+      id: `ribbon-${i}`,
+      label,
+      status: allDone
+        ? 'done'
+        : doneFlags[i]
+          ? 'done'
+          : firstIncomplete === i
+            ? 'current'
+            : 'pending',
+    }))
+  }, [
+    data?.line,
+    customerApproval,
+    qaTextApproval,
+    designerCommand.dieSource,
+    designerCommand.embossSource,
+    dieDispatchedToHub,
+    dieReserveSent,
+    embossDispatchedToHub,
+    embossReserveSent,
+    plateHubSent,
+    orch,
+  ])
+
+  const plateHubLiveLabel = useMemo(() => {
+    const s = (orch.plateFlowStatus || 'idle').toLowerCase()
+    if (s === 'burning_complete' || s === 'ready_inventory') return 'Plate burnt / ready'
+    if (s === 'ctp_queue') return 'CTP'
+    if (s === 'triage') return 'Plate triage'
+    if (s === 'vendor_queue') return 'Vendor plates'
+    return s.replace(/_/g, ' ')
+  }, [orch.plateFlowStatus])
+
+  const dieHubHandshakeLabel = useMemo(() => {
+    const ln = data?.line
+    if (!designerCommand.dieSource || !ln) return null
+    const orphanOld =
+      designerCommand.dieSource === 'old' &&
+      !ln.dieMasterId?.trim() &&
+      !ln.dieMaster &&
+      !ln.carton?.dieMaster
+    if (orphanOld) return 'Conflict'
+    if (dieDispatchedToHub) return 'Ready'
+    if (dieReserveSent) return 'Die reserved'
+    return null
+  }, [data?.line, designerCommand.dieSource, dieDispatchedToHub, dieReserveSent])
+
   if (!data || !line) return <div className="p-4 text-slate-400">Loading...</div>
 
   const showNewProductSetHint =
     historyNoMatch && !setNumberInput.trim() && !!artworkCodeInput.trim()
   const showRepeatJobBadge = setLookupState === 'matched' || artworkRepeatJob
+  const awPoClosed =
+    readAwPoStatus((line.specOverrides || {}) as Record<string, unknown>) === AW_PO_STATUS.CLOSED
+  const specLocked = !editSpecsEnabled || awPoClosed
 
   return (
     <div className="flex flex-col min-h-[calc(100dvh-0px)] bg-[#000000] text-slate-200">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#000000] backdrop-blur-sm px-3 py-2">
+      <header className="sticky top-0 z-30 border-b border-slate-800 bg-[#000000] backdrop-blur-sm px-3 py-2">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-4 max-w-7xl mx-auto w-full">
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-2 min-w-0">
@@ -1791,8 +1918,8 @@ export default function DesigningDetailPage() {
                 <select
                   value={designerId}
                   onChange={(e) => saveDesigner(e.target.value || undefined)}
-                  disabled={savingDesigner}
-                  className="px-2 py-1 rounded bg-[#000000] border border-white/20 text-white text-xs min-w-[140px] max-w-[200px]"
+                  disabled={savingDesigner || specLocked}
+                  className="px-2 py-1 rounded bg-[#000000] border border-slate-800 text-white text-xs min-w-[140px] max-w-[200px]"
                   title="Assigned designer"
                 >
                   <option value="">Designer…</option>
@@ -1813,7 +1940,7 @@ export default function DesigningDetailPage() {
                       setCustomerApproval(v)
                       void persistApprovals({ customer: v, qa: qaTextApproval })
                     }}
-                    disabled={savingSpecs}
+                    disabled={savingSpecs || specLocked}
                   />
                   Customer OK
                 </label>
@@ -1827,7 +1954,7 @@ export default function DesigningDetailPage() {
                       setQaTextApproval(v)
                       void persistApprovals({ customer: customerApproval, qa: v })
                     }}
-                    disabled={savingSpecs}
+                    disabled={savingSpecs || specLocked}
                   />
                   QA OK
                 </label>
@@ -1852,7 +1979,7 @@ export default function DesigningDetailPage() {
               </Link>
               <button
                 type="button"
-                disabled={savingSpecs}
+                disabled={savingSpecs || specLocked}
                 onClick={() => void saveAllSpecs()}
                 className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-medium"
               >
@@ -1860,7 +1987,7 @@ export default function DesigningDetailPage() {
               </button>
               <button
                 type="button"
-                disabled={!canFinalize || finalizing || plateHubSent}
+                disabled={!canFinalize || finalizing || plateHubSent || specLocked}
                 title={
                   plateHubSent
                     ? 'Already routed to Plate Hub'
@@ -1881,24 +2008,39 @@ export default function DesigningDetailPage() {
               >
                 {plateHubSent ? 'Sent' : finalizing ? 'Sending…' : 'Finalize job'}
               </button>
-              {plateHubSent && (
-                <button
-                  type="button"
-                  disabled={undoing}
-                  onClick={() => void handleUndoFinalize()}
-                  className="px-2.5 py-1.5 rounded-lg border border-rose-600/70 bg-rose-900/30 hover:bg-rose-900/50 disabled:opacity-50 text-rose-200 text-sm font-medium"
-                  title="Reverse finalization and cancel the plate requirement"
-                >
-                  {undoing ? 'Undoing…' : 'Undo finalize'}
-                </button>
-              )}
             </div>
           </div>
         </div>
       </header>
 
+      <AwQueueDirectorStrip
+        editSpecsEnabled={editSpecsEnabled}
+        onEditSpecsChange={setEditSpecsEnabled}
+        showRecallJob={plateHubSent}
+        recallBusy={recallBusy}
+        onConfirmRecall={() => void handleRecallJob()}
+        ribbonSteps={ribbonSteps}
+      />
+
+      <AwQueueCommandPanel
+        poLineId={poLineId}
+        spec={(line.specOverrides || {}) as Record<string, unknown>}
+        jobType={jobType}
+        jobCardId={data.jobCard?.id ?? null}
+        customerName={line.po.customer.name}
+        productName={line.cartonName}
+        poNumber={line.po.poNumber}
+        planningStatus={line.planningStatus}
+        onReload={() => void reloadLine()}
+      />
+
       <div className="flex-1 p-3 max-w-7xl mx-auto w-full space-y-1 pb-6 bg-[#000000]">
-          <section className="rounded-xl bg-[#000000] border border-white/10 p-3 pb-2">
+          <section
+            className={clsx(
+              'rounded-xl bg-[#000000] border p-3 pb-2',
+              plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-slate-800',
+            )}
+          >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 items-start">
               <h2 className="text-sm font-semibold text-slate-200">
                 Section 1 — Identification &amp; spec
@@ -1908,6 +2050,7 @@ export default function DesigningDetailPage() {
                 <div className="inline-flex rounded-lg border border-white/15 overflow-hidden">
                   <button
                     type="button"
+                    disabled={specLocked}
                     onClick={() => void persistJobType('new')}
                     className={`px-3 py-1.5 text-xs font-medium ${
                       jobType === 'new'
@@ -1919,6 +2062,7 @@ export default function DesigningDetailPage() {
                   </button>
                   <button
                     type="button"
+                    disabled={specLocked}
                     onClick={() => void persistJobType('repeat')}
                     className={`px-3 py-1.5 text-xs font-medium border-l border-white/15 ${
                       jobType === 'repeat'
@@ -1971,6 +2115,7 @@ export default function DesigningDetailPage() {
               <div className="inline-flex rounded-lg border border-white/15 overflow-hidden">
                 <button
                   type="button"
+                  disabled={specLocked}
                   onClick={() => void persistPreBatchPrinted(true)}
                   className={`px-3 py-1.5 text-xs font-medium ${
                     preBatchPrinted
@@ -1982,6 +2127,7 @@ export default function DesigningDetailPage() {
                 </button>
                 <button
                   type="button"
+                  disabled={specLocked}
                   onClick={() => void persistPreBatchPrinted(false)}
                   className={`px-3 py-1.5 text-xs font-medium border-l border-white/15 ${
                     !preBatchPrinted
@@ -1992,128 +2138,156 @@ export default function DesigningDetailPage() {
                   No
                 </button>
               </div>
-            </div>
-            <AnimatePresence initial={false}>
               {preBatchPrinted ? (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
-                  className="overflow-hidden mb-3"
-                >
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-white/10">
-                    <label className="block text-xs text-slate-400">
-                      Batch details / format{' '}
-                      <span className="text-slate-600 font-mono text-[10px]">batch_details_format</span>
-                      <input
-                        type="text"
-                        value={batchDetailsInput}
-                        onChange={(e) => setBatchDetailsInput(e.target.value)}
-                        className={manualInputClass}
-                        placeholder="e.g. code position, ink, verification"
-                        autoComplete="off"
-                      />
-                    </label>
-                    <label className="block text-xs text-slate-400">
-                      Batch block size{' '}
-                      <span className="text-slate-600 font-mono text-[10px]">batch_block_size</span>
-                      <input
-                        type="text"
-                        value={batchSizeInput}
-                        onChange={(e) => setBatchSizeInput(e.target.value)}
-                        className={manualInputClass}
-                        placeholder="e.g. area / format"
-                        autoComplete="off"
-                      />
-                    </label>
-                    <label className="block text-xs text-slate-400">
-                      Batch total qty{' '}
-                      <span className="text-slate-600 font-mono text-[10px]">batch_total_qty</span>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={batchQtyInput}
-                        onChange={(e) => setBatchQtyInput(e.target.value.replace(/\D/g, ''))}
-                        className={monoInputClass}
-                        placeholder="e.g. 5000"
-                        autoComplete="off"
-                      />
-                    </label>
-                  </div>
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-              <div className="space-y-3 min-w-0">
-                <label className="block text-xs text-slate-400">
-                  Set # <span className="text-red-400">*</span>
-                  {setLookupState === 'loading' ? (
-                    <span className="ml-2 text-slate-500 normal-case">Looking up…</span>
-                  ) : null}
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    required
-                    value={setNumberInput}
-                    onChange={(e) => setSetNumberInput(e.target.value.replace(/\D/g, ''))}
-                    className={`${monoInputClass} ${
-                      showNewProductSetHint
-                        ? 'border-amber-500/90 ring-1 ring-amber-600/35'
-                        : ''
-                    }`}
-                    placeholder="e.g. 1"
-                    aria-invalid={showNewProductSetHint}
-                  />
-                  {showNewProductSetHint ? (
-                    <p className="mt-1 text-[11px] text-amber-400/90">
-                      New product — enter a set # (no plate history for this carton / artwork).
-                    </p>
-                  ) : null}
-                </label>
-                <label className="block text-xs text-slate-400">
-                  <span className="flex items-center gap-1">
-                    AW code <span className="text-red-400">*</span>
-                    {smartLinked.awCode ? (
-                      <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
-                    ) : null}
-                  </span>
-                  <input
-                    type="text"
-                    value={artworkCodeInput}
-                    onChange={(e) => {
-                      if (smartLinked.awCode) logSmartMatchManualOverride(['awCode'])
-                      setArtworkCodeInput(e.target.value)
-                      setSmartLinked((p) => ({ ...p, awCode: false }))
-                    }}
-                    onBlur={() => void onArtworkCodeBlur()}
-                    className={`${manualInputClass} ${techMono} ${
-                      smartLinked.awCode ? 'border border-amber-400' : ''
-                    }`}
-                    placeholder="Manual artwork / revision code"
-                  />
-                  {artworkCodeInput.trim() ? (
-                    <p
-                      className={`mt-1 text-[10px] ${effectiveArtworkId ? 'text-emerald-500/80' : section1ManualHubOk ? 'text-amber-500/85' : 'text-rose-400/85'}`}
+                <Dialog.Root open={batchDrawerOpen} onOpenChange={setBatchDrawerOpen}>
+                  <Dialog.Trigger asChild>
+                    <button
+                      type="button"
+                      disabled={specLocked}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-900 disabled:opacity-50"
                     >
-                      {effectiveArtworkId
-                        ? 'Artwork linked for die / emboss / send-all dispatch.'
-                        : section1ManualHubOk
-                          ? 'No artwork row — manual specs can be used for Die / Emboss Hub triage.'
-                          : 'No artwork record for this AW + customer (match filename in job artworks).'}
-                    </p>
+                      Batch details…
+                    </button>
+                  </Dialog.Trigger>
+                  <Dialog.Portal>
+                    <Dialog.Overlay className="fixed inset-0 z-[90] bg-black/60 data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0" />
+                    <Dialog.Content
+                      className={clsx(
+                        'fixed z-[91] inset-y-0 right-0 flex w-[min(100vw-1rem,22rem)] flex-col border-l border-slate-800 bg-[#000000] p-4 shadow-2xl',
+                        'data-[state=open]:animate-in data-[state=closed]:animate-out slide-in-from-right duration-200',
+                      )}
+                    >
+                      <Dialog.Title className="text-sm font-semibold text-slate-100">
+                        Pharma pre-batch
+                      </Dialog.Title>
+                      <Dialog.Description className="mt-1 text-[11px] text-slate-500">
+                        Batch coding fields (compact drawer).
+                      </Dialog.Description>
+                      <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
+                        <label className="block text-xs text-slate-400">
+                          Batch details / format{' '}
+                          <span className="text-slate-600 font-mono text-[10px]">batch_details_format</span>
+                          <input
+                            type="text"
+                            value={batchDetailsInput}
+                            onChange={(e) => setBatchDetailsInput(e.target.value)}
+                            disabled={specLocked}
+                            className={manualInputClass}
+                            placeholder="e.g. code position, ink, verification"
+                            autoComplete="off"
+                          />
+                        </label>
+                        <label className="block text-xs text-slate-400">
+                          Batch block size{' '}
+                          <span className="text-slate-600 font-mono text-[10px]">batch_block_size</span>
+                          <input
+                            type="text"
+                            value={batchSizeInput}
+                            onChange={(e) => setBatchSizeInput(e.target.value)}
+                            disabled={specLocked}
+                            className={manualInputClass}
+                            placeholder="e.g. area / format"
+                            autoComplete="off"
+                          />
+                        </label>
+                        <label className="block text-xs text-slate-400">
+                          Batch total qty{' '}
+                          <span className="text-slate-600 font-mono text-[10px]">batch_total_qty</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={batchQtyInput}
+                            onChange={(e) => setBatchQtyInput(e.target.value.replace(/\D/g, ''))}
+                            disabled={specLocked}
+                            className={monoInputClass}
+                            placeholder="e.g. 5000"
+                            autoComplete="off"
+                          />
+                        </label>
+                      </div>
+                      <Dialog.Close asChild>
+                        <button
+                          type="button"
+                          className="mt-6 w-full rounded-md border border-slate-700 py-2 text-xs text-slate-300 hover:bg-slate-900"
+                        >
+                          Close
+                        </button>
+                      </Dialog.Close>
+                    </Dialog.Content>
+                  </Dialog.Portal>
+                </Dialog.Root>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2 items-start">
+              <label className="block text-xs text-slate-400 min-w-0">
+                Set # <span className="text-red-400">*</span>
+                {setLookupState === 'loading' ? (
+                  <span className="ml-2 text-slate-500 normal-case">Looking up…</span>
+                ) : null}
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  required
+                  value={setNumberInput}
+                  onChange={(e) => setSetNumberInput(e.target.value.replace(/\D/g, ''))}
+                  disabled={specLocked}
+                  className={`${monoInputClass} ${
+                    showNewProductSetHint
+                      ? 'border-amber-500/90 ring-1 ring-amber-600/35'
+                      : ''
+                  }`}
+                  placeholder="e.g. 1"
+                  aria-invalid={showNewProductSetHint}
+                />
+                {jobType === 'repeat' && lastUsedFromHistory?.setNumber ? (
+                  <p className="mt-0.5 text-[10px] text-slate-700/90 font-designing-queue">Last used: {lastUsedFromHistory.setNumber}</p>
+                ) : null}
+                {showNewProductSetHint ? (
+                  <p className="mt-1 text-[11px] text-amber-400/90">
+                    New product — enter a set # (no plate history for this carton / artwork).
+                  </p>
+                ) : null}
+              </label>
+              <label className="block text-xs text-slate-400 min-w-0">
+                <span className="flex items-center gap-1">
+                  AW code <span className="text-red-400">*</span>
+                  {smartLinked.awCode ? (
+                    <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
                   ) : null}
-                </label>
-              </div>
-              <div className="space-y-3 min-w-0">
-                <label className="block text-xs text-slate-400">
-                  <span className="flex items-center gap-1">
-                    Actual sheet size
-                    {smartLinked.actualSheetSize ? (
-                      <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
-                    ) : null}
-                  </span>
+                </span>
+                <input
+                  type="text"
+                  value={artworkCodeInput}
+                  onChange={(e) => {
+                    if (smartLinked.awCode) logSmartMatchManualOverride(['awCode'])
+                    setArtworkCodeInput(e.target.value)
+                    setSmartLinked((p) => ({ ...p, awCode: false }))
+                  }}
+                  onBlur={() => void onArtworkCodeBlur()}
+                  disabled={specLocked}
+                  className={`${manualInputClass} ${techMono} ${
+                    smartLinked.awCode ? 'border border-amber-400' : ''
+                  }`}
+                  placeholder="Manual artwork / revision code"
+                />
+                {jobType === 'repeat' && lastUsedFromHistory?.aw ? (
+                  <p className="mt-0.5 text-[10px] text-slate-700/80 font-designing-queue">Last used: {lastUsedFromHistory.aw}</p>
+                ) : null}
+              </label>
+              <label className="block text-xs text-slate-400 min-w-0">
+                <span className="flex items-center gap-1">
+                  Actual sheet size
+                  {smartLinked.actualSheetSize ? (
+                    <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
+                  ) : null}
+                </span>
+                <div
+                  className={clsx(
+                    'rounded',
+                    sheetMasterMismatch && 'animate-pulse bg-amber-950/40 ring-1 ring-amber-600/50',
+                  )}
+                >
                   <input
                     type="text"
                     value={actualSheetSizeInput}
@@ -2122,49 +2296,75 @@ export default function DesigningDetailPage() {
                       setActualSheetSizeInput(e.target.value)
                       setSmartLinked((p) => ({ ...p, actualSheetSize: false }))
                     }}
+                    disabled={specLocked}
                     className={`${monoInputClass} ${
                       smartLinked.actualSheetSize ? 'border border-amber-400' : ''
                     }`}
                     placeholder="e.g. 25 x 36"
                     autoComplete="off"
                   />
-                </label>
-                <label className="block text-xs text-slate-400">
-                  <span className="flex items-center gap-1">
-                    Number of UPS
-                    {smartLinked.numberOfUps ? (
-                      <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
-                    ) : null}
-                  </span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={numberOfUpsInput}
-                    onChange={(e) => {
-                      if (smartLinked.numberOfUps) logSmartMatchManualOverride(['numberOfUps'])
-                      setNumberOfUpsInput(e.target.value.replace(/\D/g, ''))
-                      setSmartLinked((p) => ({ ...p, numberOfUps: false }))
-                    }}
-                    className={`${monoInputClass} ${
-                      smartLinked.numberOfUps ? 'border border-amber-400' : ''
-                    }`}
-                    placeholder="e.g. 4"
-                    autoComplete="off"
-                  />
-                </label>
-              </div>
-              <div className="flex flex-col gap-2 justify-start md:pt-5">
-                <button
-                  type="button"
-                  disabled={savingSetAw}
-                  onClick={() => void saveSetAndAwCode()}
-                  className="w-full sm:w-auto px-3 py-1.5 rounded-lg border border-amber-700/80 bg-amber-900/30 text-amber-100 text-xs font-medium hover:bg-amber-900/45 disabled:opacity-50"
-                >
-                  {savingSetAw ? 'Saving…' : 'Save set & AW code'}
-                </button>
-              </div>
+                </div>
+                {jobType === 'repeat' && lastUsedFromHistory?.sheet ? (
+                  <p className="mt-0.5 text-[10px] text-slate-700 font-designing-queue">
+                    Last used: {lastUsedFromHistory.sheet}
+                  </p>
+                ) : null}
+                {sheetMasterMismatch ? (
+                  <p className="mt-0.5 text-[10px] text-amber-500/90">Differs from product master sheet.</p>
+                ) : null}
+              </label>
+              <label className="block text-xs text-slate-400 min-w-0">
+                <span className="flex items-center gap-1">
+                  Number of UPS
+                  {smartLinked.numberOfUps ? (
+                    <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
+                  ) : null}
+                </span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={numberOfUpsInput}
+                  onChange={(e) => {
+                    if (smartLinked.numberOfUps) logSmartMatchManualOverride(['numberOfUps'])
+                    setNumberOfUpsInput(e.target.value.replace(/\D/g, ''))
+                    setSmartLinked((p) => ({ ...p, numberOfUps: false }))
+                  }}
+                  disabled={specLocked}
+                  className={`${monoInputClass} ${
+                    smartLinked.numberOfUps ? 'border border-amber-400' : ''
+                  }`}
+                  placeholder="e.g. 4"
+                  autoComplete="off"
+                />
+                {jobType === 'repeat' && lastUsedFromHistory?.ups ? (
+                  <p className="mt-0.5 text-[10px] text-slate-700 font-designing-queue">
+                    Last used: {lastUsedFromHistory.ups}
+                  </p>
+                ) : null}
+              </label>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm border-t border-white/10 pt-3">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={savingSetAw || specLocked}
+                onClick={() => void saveSetAndAwCode()}
+                className="px-3 py-1.5 rounded-lg border border-amber-700/80 bg-amber-900/30 text-amber-100 text-xs font-medium hover:bg-amber-900/45 disabled:opacity-50"
+              >
+                {savingSetAw ? 'Saving…' : 'Save set & AW code'}
+              </button>
+              {artworkCodeInput.trim() ? (
+                <p
+                  className={`text-[10px] ${effectiveArtworkId ? 'text-emerald-500/80' : section1ManualHubOk ? 'text-amber-500/85' : 'text-rose-400/85'}`}
+                >
+                  {effectiveArtworkId
+                    ? 'Artwork linked for die / emboss / send-all dispatch.'
+                    : section1ManualHubOk
+                      ? 'No artwork row — manual specs can be used for Die / Emboss Hub triage.'
+                      : 'No artwork record for this AW + customer (match filename in job artworks).'}
+                </p>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm border-t border-slate-800 pt-3">
               <CartonDimensionsRow
                 carton={line.carton}
                 overrideLwh={smartCartonLwh}
@@ -2172,8 +2372,9 @@ export default function DesigningDetailPage() {
                 right={
                   <button
                     type="button"
+                    disabled={specLocked}
                     onClick={() => void openSmartMatch()}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-sky-500/55 bg-sky-950/35 text-sky-100 text-[10px] font-semibold hover:bg-sky-950/60 shrink-0"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-sky-500/55 bg-sky-950/35 text-sky-100 text-[10px] font-semibold hover:bg-sky-950/60 shrink-0 disabled:opacity-40"
                     title="Match dies within ±1 mm on L×W×H"
                   >
                     <Search className="h-3 w-3 shrink-0" aria-hidden />
@@ -2213,11 +2414,12 @@ export default function DesigningDetailPage() {
                 title="Reserved area for batch / coding print (typically L × W in mm from carton master or PO spec)."
               />
             </div>
-            <label className="block text-xs text-slate-400 mt-3 pt-3 border-t border-white/10 w-full max-w-full">
+            <label className="block text-xs text-slate-400 mt-3 pt-3 border-t border-slate-800 w-full max-w-full">
               Pre-press remarks
               <textarea
                 value={prePressRemarksInput}
                 onChange={(e) => setPrePressRemarksInput(e.target.value)}
+                disabled={specLocked}
                 rows={2}
                 className={`${manualInputClass} w-full max-w-full resize-y min-h-[2.75rem]`}
                 placeholder="Notes for plate hub, CTP, or layout…"
@@ -2225,21 +2427,37 @@ export default function DesigningDetailPage() {
             </label>
           </section>
 
-        <section className="rounded-xl bg-[#000000] border border-white/10 p-3 space-y-2">
-          <h2 className="text-sm font-semibold text-slate-200 border-b border-white/10 pb-2">
+        <section
+          className={clsx(
+            'rounded-xl bg-[#000000] border p-3 space-y-2',
+            plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-slate-800',
+          )}
+        >
+          <h2 className="text-sm font-semibold text-slate-200 border-b border-slate-800 pb-2">
             Section 2 — Tooling (die · emboss · plate requirement)
           </h2>
 
           <div className="grid md:grid-cols-2 gap-3">
-            <div className="space-y-3 rounded-lg border border-white/10 bg-[#000000] p-3">
+            <div className="space-y-3 rounded-lg border border-slate-800 bg-[#000000] p-3">
               <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
                 Die inventory
               </h3>
+              {designerCommand.dieSource ? (
+                <p className="text-[10px] text-slate-500 leading-snug">
+                  <span className="font-semibold text-slate-400">Live handshake</span>
+                  {' · '}
+                  Hub status:{' '}
+                  <span className="text-amber-200/90 font-designing-queue">
+                    {dieHubHandshakeLabel ?? 'Standing by'}
+                  </span>
+                </p>
+              ) : null}
               <ToolSourceRow
                 label="Source"
                 value={designerCommand.dieSource}
                 historyValue={historyDesignerCommand?.dieSource ?? null}
                 onChange={(v) => setDesignerCommand((p) => ({ ...p, dieSource: v }))}
+                disabled={specLocked}
               />
               {line.dieMaster && designerCommand.dieSource === 'old' ? (
                 <div className="rounded-md border border-amber-400/55 bg-amber-950/20 px-2.5 py-2 space-y-2">
@@ -2257,20 +2475,30 @@ export default function DesigningDetailPage() {
                   ) : (
                     <button
                       type="button"
-                      disabled={reserveDieBusy}
+                      disabled={reserveDieBusy || specLocked}
                       onClick={() => void pushDieReserveForJob()}
                       className="px-2.5 py-1.5 rounded-md border border-sky-500/60 bg-sky-950/40 hover:bg-sky-950/65 disabled:opacity-50 text-sky-100 text-xs font-medium"
                     >
                       {reserveDieBusy ? 'Updating…' : 'Push to Triage'}
                     </button>
                   )}
+                  {(dieReserveSent || dieDispatchedToHub) && line.dieMaster ? (
+                    <button
+                      type="button"
+                      disabled={specLocked}
+                      onClick={() => void recallDieFromHub()}
+                      className="w-full px-2 py-1.5 rounded-md border border-amber-600/70 bg-amber-950/30 text-amber-100 text-[11px] font-semibold hover:bg-amber-950/50 disabled:opacity-50"
+                    >
+                      Recall from Hub
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
               {designerCommand.dieSource ? (
                 <div className="flex flex-wrap gap-2 justify-start items-center">
                   <button
                     type="button"
-                    disabled={savingDesignerCommand || designerCommand.dieSource === 'old'}
+                    disabled={savingDesignerCommand || designerCommand.dieSource === 'old' || specLocked}
                     onClick={() => void dieSendToVendor()}
                     className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                   >
@@ -2289,7 +2517,7 @@ export default function DesigningDetailPage() {
                   ) : (
                     <button
                       type="button"
-                      disabled={savingDesignerCommand}
+                      disabled={savingDesignerCommand || specLocked}
                       title={
                         !diePushGateReady
                           ? 'Requires actual sheet size, integer UPS ≥ 1, and L×W×H dimensions (e.g. 100×50×30). Click to validate.'
@@ -2308,7 +2536,7 @@ export default function DesigningDetailPage() {
             </div>
 
             {embossRequired ? (
-              <div className="space-y-3 rounded-lg border border-white/10 bg-[#000000] p-3">
+              <div className="space-y-3 rounded-lg border border-slate-800 bg-[#000000] p-3">
                 <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
                   Emboss blocks
                 </h3>
@@ -2317,6 +2545,7 @@ export default function DesigningDetailPage() {
                   value={designerCommand.embossSource}
                   historyValue={historyDesignerCommand?.embossSource ?? null}
                   onChange={(v) => setDesignerCommand((p) => ({ ...p, embossSource: v }))}
+                  disabled={specLocked}
                 />
                 {line.carton?.embossBlock && designerCommand.embossSource === 'old' ? (
                   <div className="rounded-md border border-amber-400/55 bg-amber-950/20 px-2.5 py-2 space-y-2">
@@ -2335,7 +2564,7 @@ export default function DesigningDetailPage() {
                     ) : (
                       <button
                         type="button"
-                        disabled={reserveEmbossBusy}
+                        disabled={reserveEmbossBusy || specLocked}
                         onClick={() => void pushEmbossReserveForJob()}
                         className="px-2.5 py-1.5 rounded-md border border-sky-500/60 bg-sky-950/40 hover:bg-sky-950/65 disabled:opacity-50 text-sky-100 text-xs font-medium"
                       >
@@ -2354,7 +2583,7 @@ export default function DesigningDetailPage() {
                   <div className="flex flex-wrap gap-2 justify-start items-center">
                     <button
                       type="button"
-                      disabled={savingDesignerCommand || designerCommand.embossSource === 'old'}
+                      disabled={savingDesignerCommand || designerCommand.embossSource === 'old' || specLocked}
                       onClick={() => void embossSendToVendor()}
                       className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
@@ -2373,7 +2602,7 @@ export default function DesigningDetailPage() {
                     ) : (
                       <button
                         type="button"
-                        disabled={savingDesignerCommand}
+                        disabled={savingDesignerCommand || specLocked}
                         title={
                           !embossPushGateReady
                             ? 'Requires actual sheet size and L×W×H dimensions on the line. Click to validate.'
@@ -2391,14 +2620,14 @@ export default function DesigningDetailPage() {
                 )}
               </div>
             ) : (
-              <div className="rounded-lg border border-white/10 bg-[#000000] p-3 text-[11px] text-slate-500">
+              <div className="rounded-lg border border-slate-800 bg-[#000000] p-3 text-[11px] text-slate-500">
                 Emboss tooling not required for this carton (no embossing on spec).
               </div>
             )}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-white/10 bg-[#000000] p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2 mb-2">
+          <div className="space-y-3 rounded-lg border border-slate-800 bg-[#000000] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
               <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
                 Plate hub — requirement
               </h3>
@@ -2415,7 +2644,7 @@ export default function DesigningDetailPage() {
                 </span>
                 <button
                   type="button"
-                  disabled={!canFinalize || finalizing || plateHubSent}
+                  disabled={!canFinalize || finalizing || plateHubSent || specLocked}
                   title={
                     plateHubSent
                       ? 'Already routed to Plate Hub'
@@ -2432,13 +2661,28 @@ export default function DesigningDetailPage() {
                 >
                   {plateHubSent ? 'Sent' : finalizing ? 'Sending…' : 'Push to Plate Hub'}
                 </button>
+                {plateHubSent ? (
+                  <span
+                    className="text-[10px] text-emerald-400/90 font-designing-queue max-w-[8rem] truncate"
+                    title="Plate hub orchestration"
+                  >
+                    {plateHubLiveLabel}
+                  </span>
+                ) : null}
               </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500 mb-1">
+              <span className="shrink-0 font-semibold text-slate-500">Plate readiness</span>
+              <PlateHubReadinessSparkline plateFlowStatus={orch.plateFlowStatus} />
+              <span className="text-slate-600 hidden sm:inline">·</span>
+              <span className="text-slate-600">CTP pipeline position (orchestration)</span>
             </div>
             <div className="flex flex-wrap items-end gap-4">
               <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
                 <input
                   type="checkbox"
                   className="rounded border-slate-600"
+                  disabled={specLocked}
                   checked={designerCommand.plateRequirement.pantoneEnabled}
                   onChange={(e) =>
                     setDesignerCommand((p) => ({
@@ -2459,6 +2703,7 @@ export default function DesigningDetailPage() {
                   <input
                     type="number"
                     min={0}
+                    disabled={specLocked}
                     value={designerCommand.plateRequirement.numberOfPantones || ''}
                     onChange={(e) => {
                       const v = e.target.value === '' ? 0 : Number(e.target.value)
@@ -2492,6 +2737,7 @@ export default function DesigningDetailPage() {
                   <input
                     type="checkbox"
                     className="rounded border-white/30 bg-black/40"
+                    disabled={specLocked}
                     checked={designerCommand.plateRequirement[key]}
                     onChange={(e) =>
                       setDesignerCommand((p) => ({
@@ -2528,6 +2774,7 @@ export default function DesigningDetailPage() {
                         plateRequirement: { ...p.plateRequirement, [key]: e.target.value },
                       }))
                     }
+                    disabled={specLocked}
                     className={manualInputClass}
                     placeholder="e.g. 185 C"
                     style={
@@ -2558,6 +2805,7 @@ export default function DesigningDetailPage() {
                     plateRequirement: { ...p.plateRequirement, specialColourNote: e.target.value },
                   }))
                 }
+                disabled={specLocked}
                 className={manualInputClass}
                 placeholder="e.g. metallic gold, custom match to sample"
               />
@@ -2567,6 +2815,7 @@ export default function DesigningDetailPage() {
                 <input
                   type="checkbox"
                   className="rounded border-slate-600"
+                  disabled={specLocked}
                   checked={designerCommand.plateRequirement.dripOffPlate}
                   onChange={(e) =>
                     setDesignerCommand((p) => ({
@@ -2584,6 +2833,7 @@ export default function DesigningDetailPage() {
                 <input
                   type="checkbox"
                   className="rounded border-slate-600"
+                  disabled={specLocked}
                   checked={designerCommand.plateRequirement.spotUvPlate}
                   onChange={(e) =>
                     setDesignerCommand((p) => ({
@@ -2607,6 +2857,7 @@ export default function DesigningDetailPage() {
               <label className="text-[11px] text-slate-400 shrink-0">Set type</label>
               <select
                 value={designerCommand.setType}
+                disabled={specLocked}
                 onChange={(e) =>
                   setDesignerCommand((p) => ({
                     ...p,
@@ -2628,7 +2879,7 @@ export default function DesigningDetailPage() {
           </div>
         </section>
 
-        <section className="rounded-xl bg-[#000000] border border-white/10 px-3 py-2">
+        <section className="rounded-xl bg-[#000000] border border-slate-800 px-3 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-[11px] font-semibold text-slate-200 shrink-0">Post-press routing</span>
             <div className="flex flex-wrap gap-1.5 text-xs">
@@ -2651,7 +2902,7 @@ export default function DesigningDetailPage() {
           onSelect={(row) => void linkDieFromSmartMatch(row)}
         />
 
-        <p className="text-center text-[10px] text-slate-500 pt-3 mt-1 border-t border-white/10 font-designing-queue tracking-tight">
+        <p className="text-center text-[10px] text-slate-500 pt-3 mt-1 border-t border-slate-800 font-designing-queue tracking-tight">
           Smart Match Active - Verification against Master Rev. 2026.
         </p>
       </div>
@@ -2664,11 +2915,13 @@ function ToolSourceRow({
   value,
   historyValue,
   onChange,
+  disabled,
 }: {
   label: string
   value: 'new' | 'old' | null
   historyValue: 'new' | 'old' | null
   onChange: (v: 'new' | 'old') => void
+  disabled?: boolean
 }) {
   return (
     <div>
@@ -2678,12 +2931,13 @@ function ToolSourceRow({
           <button
             key={k}
             type="button"
+            disabled={disabled}
             onClick={() => onChange(k)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
               value === k
                 ? 'bg-amber-600/90 border-amber-500 text-white'
                 : 'bg-slate-800 border-slate-600 text-slate-300'
-            }`}
+            } disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             {k === 'new' ? 'New' : 'Old'}
             {historyValue === k ? (
