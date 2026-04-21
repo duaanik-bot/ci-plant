@@ -596,12 +596,6 @@ export default function PlanningPage() {
     [rows, planningDrawerLineId],
   )
 
-  if (loading) {
-    return (
-      <div className={`min-h-[30vh] p-4 text-slate-500 ${mono}`}>Loading planning…</div>
-    )
-  }
-
   const selectedForMix = useMemo(() => {
     const sel = Array.from(planningSelection)
       .map((id) => rows.find((r) => r.id === id))
@@ -614,6 +608,12 @@ export default function PlanningPage() {
         : null
     return { conflict }
   }, [planningSelection, rows])
+
+  if (loading) {
+    return (
+      <div className={`min-h-[30vh] p-4 text-slate-500 ${mono}`}>Loading planning…</div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
