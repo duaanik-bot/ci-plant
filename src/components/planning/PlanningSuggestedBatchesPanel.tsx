@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Check, Pencil, X, Sparkles } from 'lucide-react'
+import { useMemo } from 'react'
+import { Check, Pencil, Sparkles, X } from 'lucide-react'
 import {
   type SuggestableLine,
   type SuggestedBatch,
@@ -11,22 +11,20 @@ import {
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 
 const labelClass: Record<SuggestedBatch['label'], string> = {
-  High: 'text-emerald-300 ring-emerald-500/40 bg-emerald-500/10',
-  Medium: 'text-amber-200 ring-amber-500/35 bg-amber-500/10',
-  Low: 'text-rose-200 ring-rose-500/30 bg-rose-500/10',
+  High: 'text-emerald-300 ring-emerald-500/50 bg-emerald-500/15',
+  Medium: 'text-amber-200 ring-amber-500/40 bg-amber-500/10',
+  Low: 'text-rose-200 ring-rose-500/40 bg-rose-500/10',
 }
 
 type Props = {
   lines: SuggestableLine[]
-  /** dismissed suggestion ids (persist in parent) */
   dismissedIds: Set<string>
   onDismiss: (id: string) => void
   onAccept: (lineIds: string[]) => void
   onModify: (lineIds: string[]) => void
 }
 
-export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onDismiss, onAccept, onModify }: Props) {
-  const [expandId, setExpandId] = useState<string | null>(null)
+export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onAccept, onModify, onDismiss }: Props) {
   const suggestions = useMemo(() => {
     const raw = suggestBatches(lines)
     return raw.filter((s) => !dismissedIds.has(s.id))
@@ -34,102 +32,86 @@ export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onDismiss, 
 
   if (suggestions.length === 0) {
     return (
-      <div className="rounded-lg border border-slate-600/50 bg-slate-900/20 px-3 py-2 text-[12px] text-slate-500">
-        <span className="font-semibold text-slate-400">Suggested batches</span> — no compatible multi-job groups
-        right now. Add rows with the same board, GSM, and coating, or check hold / closed lines.
+      <div className="rounded-lg border border-slate-700/60 bg-slate-900/30 px-3 py-2 text-center text-[12px] text-slate-500">
+        No batch suggestions for the current view.
       </div>
     )
   }
 
   return (
-    <div className="rounded-lg border border-cyan-500/25 bg-cyan-950/10 px-2 py-2">
-      <div className="mb-1.5 flex items-center gap-1.5">
-        <Sparkles className="h-3.5 w-3.5 text-cyan-400" aria-hidden />
-        <h2 className="text-xs font-bold uppercase tracking-wider text-cyan-400">Suggested batches</h2>
-        <span className={`text-[11px] text-slate-500 ${mono}`}>({suggestions.length})</span>
+    <div>
+      <div className="mb-2 flex items-center gap-2 text-slate-300">
+        <Sparkles className="h-4 w-4 text-cyan-400" aria-hidden />
+        <h2 className="text-[12px] font-semibold tracking-tight text-cyan-400/95">Suggested batches</h2>
+        <span className={`text-[11px] text-slate-500 ${mono}`}>{suggestions.length}</span>
       </div>
-      <p className="mb-2 text-[10px] leading-snug text-slate-500">
-        Grouped by board, GSM, coating, and print bucket; sorted by size; packed until sheet/efficiency limits.
-        Scores: size 40% · waste 30% · urgency 20% · tooling 10%.
-      </p>
-      <ul className="max-h-72 space-y-2 overflow-y-auto pr-0.5">
-        {suggestions.map((b) => {
-          const open = expandId === b.id
-          return (
-            <li
-              key={b.id}
-              className="rounded-md border border-slate-600/50 bg-[#0f1729] p-2 text-[12px] text-slate-200"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-[11px] font-mono text-slate-500" title={b.groupKey}>
-                    {b.lineIds.length} jobs · Sum qty{' '}
-                    <span className="text-amber-200/95">{b.totalQty.toLocaleString('en-IN')}</span>
-                    {' · '}
-                    ~sheets {b.estimatedSheets.toLocaleString('en-IN')}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap gap-2">
+        {suggestions.map((b) => (
+          <article
+            key={b.id}
+            className="flex w-full min-w-[16rem] max-w-sm flex-1 flex-col rounded-xl border border-cyan-500/20 bg-gradient-to-b from-cyan-950/25 to-slate-900/50 p-3 shadow-sm sm:min-w-[18rem]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className={`text-[11px] text-slate-500 ${mono}`}>
+                  {b.lineIds.length} jobs · Qty {b.totalQty.toLocaleString('en-IN')} · ~sheets {b.estimatedSheets.toLocaleString('en-IN')}
+                </p>
+                <p className="mt-1 text-[20px] font-bold tabular-nums leading-none text-amber-200/95">{b.score}</p>
+                <p className="text-[10px] font-medium text-slate-500">efficiency score</p>
+                <div className="mt-1.5">
                   <span
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ring-1 ${labelClass[b.label]}`}
+                    className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-bold ring-1 ${labelClass[b.label]}`}
                   >
-                    {b.label} · {b.score}
+                    {b.label}
                   </span>
-                  <button
-                    type="button"
-                    className="text-[10px] text-sky-400/90 underline-offset-1 hover:underline"
-                    onClick={() => setExpandId(open ? null : b.id)}
-                  >
-                    {open ? 'Hide' : 'Details'}
-                  </button>
                 </div>
               </div>
-              {open ? (
-                <div className="mt-2 space-y-1 border-t border-slate-700/60 pt-2 text-[11px] text-slate-400">
-                  <p>
-                    Avg yield {b.meanYieldPct}% · Est. waste ~{b.estWastagePct}% · sub: SF {b.subscores.sizeFit} / W{' '}
-                    {b.subscores.waste} / U {b.subscores.urgency} / T {b.subscores.tooling}
-                  </p>
-                  <ul className="list-inside list-disc text-slate-300">
-                    {b.lineSummaries.map((l) => (
-                      <li key={l.id}>
-                        <span className="font-mono text-amber-200/80">{l.poNumber}</span> — {l.cartonLabel.slice(0, 48)}
-                        {l.cartonLabel.length > 48 ? '…' : ''} · {l.qty} · {l.yieldPct}%
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => onAccept(b.lineIds)}
-                  className="inline-flex items-center gap-0.5 rounded bg-emerald-800/80 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700/90"
-                >
-                  <Check className="h-3 w-3" aria-hidden />
-                  Accept (link mix-set)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onModify(b.lineIds)}
-                  className="inline-flex items-center gap-0.5 rounded border border-slate-500/60 bg-slate-800/50 px-2 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-800"
-                >
-                  <Pencil className="h-3 w-3" aria-hidden />
-                  Select for edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDismiss(b.id)}
-                  className="inline-flex items-center gap-0.5 rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800/60"
-                >
-                  <X className="h-3 w-3" aria-hidden />
-                  Reject
-                </button>
-              </div>
-            </li>
-          )
-        })}
-      </ul>
+              <button
+                type="button"
+                onClick={() => onDismiss(b.id)}
+                className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+                title="Dismiss"
+                aria-label="Dismiss suggestion"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <ul className="mt-3 max-h-28 space-y-1 overflow-y-auto border-t border-slate-700/50 pt-2 text-[11px] text-slate-300">
+              {b.lineSummaries.map((l) => (
+                <li key={l.id} className="flex justify-between gap-2">
+                  <span className="min-w-0 truncate" title={l.cartonLabel}>
+                    <span className="font-mono text-amber-200/80">{l.poNumber}</span> — {l.cartonLabel}
+                  </span>
+                  <span className={`shrink-0 text-slate-500 ${mono}`}>
+                    {l.qty} · {l.yieldPct}%
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-[9px] text-slate-600">
+              Yield {b.meanYieldPct}% · est. waste ~{b.estWastagePct}%
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onAccept(b.lineIds)}
+                className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-700/90 px-3 py-2 text-[12px] font-semibold text-white hover:bg-emerald-600"
+              >
+                <Check className="h-3.5 w-3.5" aria-hidden />
+                Accept
+              </button>
+              <button
+                type="button"
+                onClick={() => onModify(b.lineIds)}
+                className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-slate-500/50 bg-slate-800/60 px-3 py-2 text-[12px] font-medium text-slate-100 hover:bg-slate-800"
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden />
+                Modify
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   )
 }

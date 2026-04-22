@@ -18,7 +18,13 @@ import {
   type PlanningDesignerKey,
   type PlanningSetIdMode,
 } from '@/lib/planning-decision-spec'
-import { PlanningDecisionGrid, type PlanningGridLine } from '@/components/planning/PlanningDecisionGrid'
+import {
+  PlanningDecisionGrid,
+  boardLabel,
+  type PlanningGridLine,
+  type PlanningLineFieldPatch,
+} from '@/components/planning/PlanningDecisionGrid'
+import { PlanningBatchBuilderPanel } from '@/components/planning/PlanningBatchBuilderPanel'
 import { PlanningJobDetailDrawer } from '@/components/planning/PlanningJobDetailDrawer'
 import { PlanningSuggestedBatchesPanel } from '@/components/planning/PlanningSuggestedBatchesPanel'
 import { PlanningPoSummaryDrawer } from '@/components/planning/PlanningPoSummaryDrawer'
@@ -368,6 +374,11 @@ export default function PlanningPage() {
     if (q.get('view') === 'pending') setLedgerView('pending')
   }, [])
 
+  /** Batch builder (2+ checkboxes) supersedes row detail — one primary slide-over at a time. */
+  useEffect(() => {
+    if (planningSelection.size >= 2) setPlanningDrawerLineId(null)
+  }, [planningSelection.size])
+
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'planning-customer',
     search: async (query: string) => {
@@ -696,41 +707,70 @@ export default function PlanningPage() {
     }
   }, [rows, planningSetIdMode, fetchRows])
 
-  const save = async (id: string, opts?: { remarks?: string | null }) => {
-    const li = rows.find((x) => x.id === id)
-    if (!li) return
-    setSavingId(id)
-    try {
-      const rawSpec = {
-        ...(li.specOverrides && typeof li.specOverrides === 'object' ? li.specOverrides : {}),
-      } as Record<string, unknown>
-      let specOverrides: Record<string, unknown> = rawSpec
-      if (String(rawSpec.machineId || '').trim()) {
-        specOverrides = mergeOrchestrationIntoSpec(rawSpec, {
-          planningFlowStatus: PLANNING_FLOW.in_progress,
+  const savePlanningLine = useCallback(
+    async (
+      id: string,
+      patch: PlanningLineFieldPatch = {},
+      specSnapshot?: Record<string, unknown> | null,
+    ): Promise<boolean> => {
+      const li = rows.find((x) => x.id === id)
+      if (!li) return false
+      setSavingId(id)
+      try {
+        const raw =
+          specSnapshot ??
+          (li.specOverrides && typeof li.specOverrides === 'object'
+            ? (li.specOverrides as Record<string, unknown>)
+            : ({} as Record<string, unknown>))
+        let specOverrides: Record<string, unknown> = { ...raw }
+        if (String(specOverrides.machineId || '').trim()) {
+          specOverrides = mergeOrchestrationIntoSpec(specOverrides, {
+            planningFlowStatus: PLANNING_FLOW.in_progress,
+          })
+        }
+        const body: Record<string, unknown> = {
+          setNumber: li.setNumber,
+          planningStatus: li.planningStatus,
+          remarks: patch.remarks !== undefined ? patch.remarks : li.remarks,
+          specOverrides,
+          planningDecisionRevision: true,
+        }
+        if (patch.cartonName !== undefined) body.cartonName = patch.cartonName
+        if (patch.cartonSize !== undefined) body.cartonSize = patch.cartonSize
+        if (patch.quantity !== undefined) body.quantity = patch.quantity
+        if (patch.rate !== undefined) body.rate = patch.rate
+        if (patch.gsm !== undefined) body.gsm = patch.gsm
+        if (patch.paperType !== undefined) body.paperType = patch.paperType
+        if (patch.coatingType !== undefined) body.coatingType = patch.coatingType
+        if (patch.otherCoating !== undefined) body.otherCoating = patch.otherCoating
+        if (patch.embossingLeafing !== undefined) body.embossingLeafing = patch.embossingLeafing
+        const res = await fetch(`/api/planning/po-lines/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
         })
+        const json = await res.json()
+        if (!res.ok) {
+          toast.error((json as { error?: string }).error || 'Save failed')
+          return false
+        }
+        await fetchRows()
+        return true
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to save')
+        return false
+      } finally {
+        setSavingId(null)
       }
-      const remarks = opts != null && opts.remarks !== undefined ? opts.remarks : li.remarks
-      const body: Record<string, unknown> = {
-        setNumber: li.setNumber,
-        planningStatus: li.planningStatus,
-        remarks,
-        specOverrides,
-      }
-      const res = await fetch(`/api/planning/po-lines/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, planningDecisionRevision: true }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Save failed')
-      toast.success('Planning updated')
-      await fetchRows()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to save')
-    } finally {
-      setSavingId(null)
-    }
+    },
+    [rows, fetchRows],
+  )
+
+  const save = async (id: string, opts?: { remarks?: string | null }) => {
+    const patch: PlanningLineFieldPatch = {}
+    if (opts && opts.remarks !== undefined) patch.remarks = opts.remarks
+    const ok = await savePlanningLine(id, patch)
+    if (ok) toast.success('Planning updated')
   }
 
   const totalQty = useMemo(
@@ -787,40 +827,19 @@ export default function PlanningPage() {
     [fetchRows],
   )
 
-  const handleRemoveLine = useCallback(
-    async (r: Line) => {
-      if (!window.confirm(`Remove PO line ${r.po.poNumber} · ${r.cartonName.slice(0, 40)} from active planning?`)) return
-      try {
-        const res = await fetch(`/api/planning/po-lines/${r.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ planningStatus: 'closed', planningDecisionRevision: true }),
-        })
-        const j = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error((j as { error?: string }).error || 'Remove failed')
-        toast.success('Line closed in planning')
-        setPlanningSelection((prev) => {
-          const next = new Set(prev)
-          next.delete(r.id)
-          return next
-        })
-        await fetchRows()
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Remove failed')
-      }
-    },
-    [fetchRows],
-  )
-
   const planningDrawerLine = useMemo(
     () => (planningDrawerLineId ? rows.find((r) => r.id === planningDrawerLineId) ?? null : null),
     [rows, planningDrawerLineId],
   )
 
-  const selectedForMix = useMemo(() => {
-    const sel = Array.from(planningSelection)
+  const selectedGridLines = useMemo((): PlanningGridLine[] => {
+    return Array.from(planningSelection)
       .map((id) => rows.find((r) => r.id === id))
-      .filter((r): r is Line => !!r)
+      .filter((r): r is Line => !!r) as PlanningGridLine[]
+  }, [planningSelection, rows])
+
+  const selectedForMix = useMemo(() => {
+    const sel = selectedGridLines
     const coatings = new Set(
       sel.map((r) =>
         String(r.coatingType ?? r.carton?.coatingType ?? '')
@@ -834,7 +853,29 @@ export default function PlanningPage() {
         ? 'Mix-Set Conflict: Specs do not match.'
         : null
     return { conflict }
-  }, [planningSelection, rows])
+  }, [selectedGridLines])
+
+  const selectionBoardSizeCompat = useMemo(() => {
+    const sel = selectedGridLines
+    if (sel.length < 2) return true
+    const boards = new Set(sel.map((r) => boardLabel(r).toLowerCase().trim()))
+    const sizes = new Set(sel.map((r) => String(r.cartonSize ?? '').trim().toLowerCase() || '—'))
+    return boards.size <= 1 && sizes.size <= 1
+  }, [selectedGridLines])
+
+  const createBatchDisabled =
+    selectedGridLines.length < 2 ||
+    !selectionBoardSizeCompat ||
+    !!selectedForMix.conflict ||
+    !!mixConflictMessage
+
+  const createBatchTitle = useMemo(() => {
+    if (selectedGridLines.length < 2) return 'Select at least two lines'
+    if (!selectionBoardSizeCompat) return 'Board and carton size must match across selected lines'
+    if (selectedForMix.conflict) return selectedForMix.conflict
+    if (mixConflictMessage) return mixConflictMessage
+    return undefined
+  }, [selectedGridLines.length, selectionBoardSizeCompat, selectedForMix.conflict, mixConflictMessage])
 
   if (loading) {
     return (
@@ -1037,9 +1078,12 @@ export default function PlanningPage() {
             }}
             onModify={(lineIds) => {
               setPlanningSelection(new Set(lineIds))
-              toast.info(`${lineIds.length} line(s) selected — adjust in the grid, then use Link as mix set or save per row.`, {
-                duration: 5000,
-              })
+              toast.info(
+                lineIds.length >= 2
+                  ? 'Batch builder opened — review compatibility, then create batch or clear selection.'
+                  : 'Select a second line to open the Batch builder drawer.',
+                { duration: 5000 },
+              )
             }}
           />
           <PlanningBatchDecisionPanel
@@ -1093,43 +1137,59 @@ export default function PlanningPage() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden px-2 pb-1 pt-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ErrorBoundary moduleName="Planning Grid">
-            <PlanningDecisionGrid
-              rows={rows as PlanningGridLine[]}
-              ledgerView={ledgerView}
-              planningSelection={planningSelection}
-              setPlanningSelection={setPlanningSelection}
-              onRowBackgroundClick={(id) => setPlanningDrawerLineId(id)}
-              updateSpec={(id, patch) => updateSpec(id, patch as Partial<PlanningSpec>)}
-              updateRow={updateRow}
-              onRemoveLine={handleRemoveLine}
-              onRecallLine={recallLine}
-              onSaveRow={save}
-              mixConflictMessage={mixConflictMessage ?? selectedForMix.conflict}
-              onLinkAsMixSet={linkAsMixSet}
-              onPONumberClick={(poId) => setPoSummaryDrawerId(poId)}
-              onCartonClick={(line) => setProductDrawerLine(line)}
-            />
-          </ErrorBoundary>
-        </div>
-        {planningDrawerLineId != null && planningDrawerLine ? (
-          <PlanningJobDetailDrawer
-            line={planningDrawerLine}
-            open
-            onClose={() => setPlanningDrawerLineId(null)}
-            onSave={save}
-            updateRow={updateRow}
+      <div className="min-h-0 flex-1 overflow-hidden px-2 pb-1 pt-1">
+        <ErrorBoundary moduleName="Planning Grid">
+          <PlanningDecisionGrid
+            rows={rows as PlanningGridLine[]}
+            ledgerView={ledgerView}
+            planningSelection={planningSelection}
             setPlanningSelection={setPlanningSelection}
+            onRowBackgroundClick={(id) => {
+              setPlanningSelection(new Set())
+              setPlanningDrawerLineId(id)
+            }}
+            updateRow={updateRow}
+            onRecallLine={recallLine}
+            onSaveLine={savePlanningLine}
+            mixConflictMessage={mixConflictMessage ?? selectedForMix.conflict}
           />
-        ) : null}
+        </ErrorBoundary>
       </div>
 
         <footer className={`shrink-0 border-t border-[#334155] py-2 text-center text-[13px] text-slate-500 ${mono}`}>
           Enterprise Intelligence Active - Decisions Synchronized with April 20th Global Theme.
         </footer>
 
+        <PlanningJobDetailDrawer
+          line={planningDrawerLine}
+          open={planningDrawerLineId != null && planningSelection.size < 2}
+          onClose={() => setPlanningDrawerLineId(null)}
+          onSave={save}
+          onSaveLine={savePlanningLine}
+          updateRow={updateRow}
+          setPlanningSelection={setPlanningSelection}
+          onViewProductDetail={
+            planningDrawerLine?.cartonId
+              ? () => setProductDrawerLine(planningDrawerLine as PlanningGridLine)
+              : undefined
+          }
+        />
+        <PlanningBatchBuilderPanel
+          isOpen={planningSelection.size >= 2}
+          onClose={() => setPlanningSelection(new Set())}
+          lines={selectedGridLines}
+          onCreateBatch={linkAsMixSet}
+          onRemoveFromSelection={(lineId) =>
+            setPlanningSelection((prev) => {
+              const next = new Set(prev)
+              next.delete(lineId)
+              return next
+            })
+          }
+          onClearSelection={() => setPlanningSelection(new Set())}
+          createDisabled={createBatchDisabled}
+          createTitle={createBatchTitle}
+        />
         <PlanningPoSummaryDrawer
           open={poSummaryDrawerId != null}
           poId={poSummaryDrawerId}

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
@@ -24,6 +25,16 @@ const updateSchema = z.object({
   dimWidthMm: z.coerce.number().optional().nullable(),
   dimHeightMm: z.coerce.number().optional().nullable(),
   directorHold: z.boolean().optional(),
+  /** Line fields — allowed from Planning while PO is locked to PO screen edits. */
+  cartonName: z.string().min(1).optional(),
+  cartonSize: z.string().optional().nullable(),
+  quantity: z.coerce.number().int().positive().optional(),
+  rate: z.coerce.number().nonnegative().optional().nullable(),
+  coatingType: z.string().optional().nullable(),
+  otherCoating: z.string().optional().nullable(),
+  embossingLeafing: z.string().optional().nullable(),
+  paperType: z.string().optional().nullable(),
+  gsm: z.coerce.number().int().optional().nullable(),
 })
 
 export async function GET(
@@ -125,6 +136,17 @@ export async function PATCH(
       ...(data.dimWidthMm !== undefined ? { dimWidthMm: data.dimWidthMm } : {}),
       ...(data.dimHeightMm !== undefined ? { dimHeightMm: data.dimHeightMm } : {}),
       ...(data.directorHold !== undefined ? { directorHold: data.directorHold } : {}),
+      ...(data.cartonName !== undefined ? { cartonName: data.cartonName.trim() } : {}),
+      ...(data.cartonSize !== undefined ? { cartonSize: data.cartonSize || null } : {}),
+      ...(data.quantity !== undefined ? { quantity: data.quantity } : {}),
+      ...(data.rate !== undefined
+        ? { rate: data.rate != null ? new Prisma.Decimal(data.rate) : null }
+        : {}),
+      ...(data.coatingType !== undefined ? { coatingType: data.coatingType || null } : {}),
+      ...(data.otherCoating !== undefined ? { otherCoating: data.otherCoating || null } : {}),
+      ...(data.embossingLeafing !== undefined ? { embossingLeafing: data.embossingLeafing || null } : {}),
+      ...(data.paperType !== undefined ? { paperType: data.paperType || null } : {}),
+      ...(data.gsm !== undefined ? { gsm: data.gsm } : {}),
     },
   })
 

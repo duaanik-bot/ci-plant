@@ -1,106 +1,50 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { X, Layers, Link2, PauseCircle, Star } from 'lucide-react'
+import { Layers, PauseCircle, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
 import { INDUSTRIAL_PRIORITY_STAR_ICON_CLASS } from '@/lib/industrial-priority-ui'
-import { PlanningGridLine } from '@/components/planning/PlanningDecisionGrid'
-
-export type InterlockSegLite = { key: string; label: string; ok: boolean; na?: boolean; hint?: string }
-
-/** Wider than `PlanningGridLine` to accept full planning queue rows (e.g. PO `status` on `po`). */
-export type LineLike = PlanningGridLine & {
-  planningLedger?: {
-    toolingInterlock: { segments: InterlockSegLite[]; allReady: boolean }
-  } | null
-  directorPriority?: boolean
-  directorHold?: boolean
-  materialQueue?: { boardType?: string | null } | null
-  jobCard?: { plateSetId: string | null } | null
-  readiness?: { platesStatus?: string; dieStatus?: string } | null
-}
+import {
+  MASTER_BOARD_GRADES,
+  MASTER_COATINGS_AND_VARNISHES,
+  MASTER_EMBOSSING_AND_LEAFING,
+} from '@/lib/master-enums'
+import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
+import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
+import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 
 type Props = {
-  /** Full row from planning queue; often includes extra fields on `po` and `specOverrides` vs `PlanningGridLine` only. */
-  line: (LineLike & Record<string, unknown>) | null
+  line: (PlanningGridLine & { directorPriority?: boolean; directorHold?: boolean; materialQueue?: { boardType?: string | null } | null }) | null
   open: boolean
   onClose: () => void
   onSave: (lineId: string, opts?: { remarks?: string | null }) => Promise<void>
+  onSaveLine: (
+    lineId: string,
+    patch: PlanningLineFieldPatch,
+    specSnapshot?: Record<string, unknown> | null,
+  ) => Promise<boolean>
   updateRow: (id: string, patch: Record<string, unknown>) => void
   setPlanningSelection: React.Dispatch<React.SetStateAction<Set<string>>>
+  /** When linked carton exists, opens product detail (e.g. from planning page). */
+  onViewProductDetail?: () => void
 }
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 
-function segmentClass(ok: boolean, na?: boolean) {
-  if (na) return 'bg-slate-700/50 text-slate-400 border-slate-600'
-  if (ok) return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-  return 'bg-amber-500/10 text-amber-200 border-amber-500/35'
+function specFoil(line: PlanningGridLine): string {
+  const s = (line.specOverrides || {}) as Record<string, unknown>
+  const f = s.foilType
+  return typeof f === 'string' && f.trim() ? f.trim() : ''
 }
 
-function stripFromSpec(spec: Record<string, unknown> | null | undefined, key: string) {
-  if (!spec || typeof spec !== 'object') return '—'
-  const v = spec[key as keyof typeof spec]
-  return typeof v === 'string' && v.trim() ? v : '—'
-}
-
-const SEG_LABEL: Record<string, string> = {
-  pl: 'Plates',
-  di: 'Die',
-  eb: 'Emboss / block',
-  sc: 'Shade / card',
-}
-
-function InterlockList({ line }: { line: LineLike }) {
-  const segs = line.planningLedger?.toolingInterlock?.segments
-  if (segs?.length) {
-    return (
-      <ul className="space-y-2">
-        {segs.map((seg) => (
-          <li
-            key={seg.key}
-            className={`flex items-start justify-between gap-2 rounded-lg border px-2.5 py-2 text-[12px] ${segmentClass(seg.ok, seg.na)}`}
-          >
-            <span className="font-medium text-slate-200">{SEG_LABEL[seg.key] ?? (seg as InterlockSegLite).label}</span>
-            <span className="min-w-0 text-right text-[11px] text-slate-300">
-              {seg.hint || (seg.ok ? 'OK' : 'Review')}
-            </span>
-          </li>
-        ))}
-      </ul>
-    )
-  }
-  const spec = (line.specOverrides || {}) as Record<string, unknown>
-  const r = line.readiness
-  return (
-    <ul className="space-y-2 text-[12px]">
-      <li
-        className={`flex justify-between rounded-lg border px-2.5 py-2 ${segmentClass(
-          (r?.platesStatus || spec.platesStatus || 'new_required') === 'available',
-        )}`}
-      >
-        <span className="text-slate-200">Plates</span>
-        <span className="text-[11px]">{(r?.platesStatus || spec.platesStatus || '—') as string}</span>
-      </li>
-      <li
-        className={`flex justify-between rounded-lg border px-2.5 py-2 ${segmentClass(
-          (r?.dieStatus || spec.dieStatus || '') === 'good' || (r?.dieStatus || spec.dieStatus || '') === 'ok',
-        )}`}
-      >
-        <span className="text-slate-200">Die</span>
-        <span className="text-[11px]">{String(r?.dieStatus || spec.dieStatus || '—')}</span>
-      </li>
-      <li
-        className={`flex justify-between rounded-lg border px-2.5 py-2 ${segmentClass(
-          String(spec.embossStatus || '') === 'ready' || String(spec.embossStatus || '') === 'na',
-        )}`}
-      >
-        <span className="text-slate-200">Emboss</span>
-        <span className="text-[11px]">{String(spec.embossStatus || '—')}</span>
-      </li>
-    </ul>
-  )
+function specPasting(line: PlanningGridLine): string {
+  const s = (line.specOverrides || {}) as Record<string, unknown>
+  const t = s.pastingType
+  if (typeof t === 'string' && t.trim()) return t.trim()
+  const st = s.pastingStyle
+  if (typeof st === 'string' && st.trim()) return st.trim()
+  return ''
 }
 
 export function PlanningJobDetailDrawer({
@@ -108,14 +52,17 @@ export function PlanningJobDetailDrawer({
   open,
   onClose,
   onSave,
+  onSaveLine,
   updateRow,
   setPlanningSelection,
+  onViewProductDetail,
 }: Props) {
   const [remarksDraft, setRemarksDraft] = useState('')
   const [splitOpen, setSplitOpen] = useState(false)
   const [splitA, setSplitA] = useState<number | ''>('')
   const [saving, setSaving] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
+  const [saveMasterBusy, setSaveMasterBusy] = useState(false)
 
   useEffect(() => {
     if (!line) {
@@ -126,15 +73,6 @@ export function PlanningJobDetailDrawer({
     setSplitOpen(false)
     setSplitA('')
   }, [line?.id, line?.remarks])
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
 
   const handleSave = useCallback(async () => {
     if (!line) return
@@ -158,9 +96,7 @@ export function PlanningJobDetailDrawer({
       next.add(line.id)
       return next
     })
-    toast.info('Line added to selection. Pick another row if you need a mix-set, then use Link as mix set in the toolbar.', {
-      duration: 4000,
-    })
+    toast.info('Line added to selection. Select one more line to open the Batch builder drawer.', { duration: 4000 })
   }, [line, setPlanningSelection])
 
   const handlePriority = useCallback(async () => {
@@ -206,255 +142,427 @@ export function PlanningJobDetailDrawer({
     }
   }, [line, updateRow])
 
+  const saveToProductMaster = useCallback(async () => {
+    if (!line?.cartonId) {
+      toast.error('No product (carton) linked to this line')
+      return
+    }
+    setSaveMasterBusy(true)
+    try {
+      const spec = (line.specOverrides || {}) as Record<string, unknown>
+      const res = await fetch(`/api/masters/cartons/${line.cartonId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boardGrade: typeof spec.boardGrade === 'string' ? spec.boardGrade : undefined,
+          gsm: line.gsm ?? line.carton?.gsm ?? undefined,
+          paperType: line.paperType ?? line.carton?.paperType,
+          coatingType: line.coatingType ?? line.carton?.coatingType,
+          laminateType: line.otherCoating ?? line.carton?.laminateType,
+          embossingLeafing: line.embossingLeafing,
+          pastingType: specPasting(line) || undefined,
+        }),
+      })
+      const j = (await res.json().catch(() => ({}))) as { error?: string }
+      if (res.status === 403) {
+        toast.error('Requires Operations Head or MD to update the product master')
+        return
+      }
+      if (!res.ok) throw new Error(j.error || 'Could not update master')
+      toast.success('Product master updated')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setSaveMasterBusy(false)
+    }
+  }, [line])
+
   if (!line || !open) return null
 
   const spec = (line.specOverrides || {}) as Record<string, unknown>
-  const board = line.materialQueue?.boardType?.trim() || '—'
-  const size = line.cartonSize || '—'
-  const gsm = line.gsm ?? line.carton?.gsm ?? '—'
-  const paper = line.paperType || line.carton?.paperType || '—'
-  const pastingRaw = stripFromSpec(spec, 'pastingType')
-  const pasting = pastingRaw !== '—' ? pastingRaw : stripFromSpec(spec, 'pastingStyle')
-  const foil = stripFromSpec(spec, 'foilType')
+  const boardInput = String(spec.boardGrade || line.materialQueue?.boardType || '').trim()
+  const amount = (line.quantity || 0) * (line.rate != null ? Number(line.rate) : 0)
 
   const totalQty = line.quantity
   const splitB = typeof splitA === 'number' && splitA > 0 && splitA < totalQty ? totalQty - splitA : null
 
-  return (
-    <aside
-      className="flex h-full min-h-0 w-[min(38vw,32rem)] shrink-0 flex-col border-l border-slate-600/80 bg-[#0b1222] shadow-[-8px_0_24px_rgba(0,0,0,0.25)] transition-[box-shadow,transform] duration-200 ease-out"
-      aria-label="Job detail"
-    >
-      <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-700/90 bg-[#0c1424] px-3 py-2.5">
-        <div className="min-w-0">
-          <h2 className="truncate text-[15px] font-semibold text-amber-300/95" title={line.cartonName}>
-            {line.cartonName}
-          </h2>
-          <p className={`mt-0.5 text-[12px] text-slate-400 ${mono}`}>
-            {line.po.poNumber} · {line.planningStatus}
-          </p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {line.po.isPriority ? (
-              <span
-                className={`inline-flex items-center gap-0.5 rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200 ring-1 ring-amber-500/35 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
-              >
-                <Star className="h-3 w-3 fill-amber-400/90" aria-hidden />
-                PO
-              </span>
-            ) : null}
-            {line.directorPriority ? (
-              <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-bold text-violet-200 ring-1 ring-violet-500/35">
-                Line priority
-              </span>
-            ) : null}
-            {line.directorHold ? (
-              <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-100 ring-1 ring-amber-500/30">
-                On hold
-              </span>
-            ) : null}
-            {line.planningLedger?.toolingInterlock?.allReady ? (
-              <span className="text-[10px] font-medium text-emerald-400/90">Tooling interlock OK</span>
-            ) : (
-              <span className="text-[10px] font-medium text-amber-400/90">Tooling: review</span>
-            )}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
+  const fieldInput =
+    'mt-0.5 w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground'
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3">
-        <section className="space-y-2">
-          <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Quantity</h3>
-          <input
-            type="number"
-            readOnly
-            value={totalQty}
-            className="w-full cursor-not-allowed rounded-md border border-slate-600/80 bg-slate-900/50 px-2 py-1.5 text-[13px] text-slate-200"
-            title="Quantity comes from the PO line."
-          />
-          <p className="text-[10px] text-slate-500">Update on the purchase order; refresh planning to see changes.</p>
-          <div className="pt-0.5">
+  return (
+    <SlideOverPanel
+      isOpen={open}
+      onClose={onClose}
+      title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
+      widthClass="max-w-lg"
+      backdropClassName="bg-background/60"
+      panelClassName="border-l border-border bg-card text-card-foreground shadow-2xl"
+      footer={
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-lg border border-input bg-background py-2 text-xs font-medium text-foreground hover:bg-accent/10"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleSave}
+            className="flex-1 rounded-lg bg-amber-600 py-2 text-xs font-bold text-white shadow hover:bg-amber-500 disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-4 text-sm text-foreground" aria-label="Job detail">
+        <p className="text-xs text-slate-500">
+          {line.po.poNumber} · {line.planningStatus} · {line.po.customer.name}
+        </p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {line.po.isPriority ? (
+            <span
+              className={`inline-flex items-center gap-0.5 rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200 ring-1 ring-amber-500/35 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
+            >
+              <Star className="h-3 w-3 fill-amber-400/90" aria-hidden />
+              PO
+            </span>
+          ) : null}
+          {line.directorPriority ? (
+            <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-bold text-violet-200 ring-1 ring-violet-500/35">
+              Line priority
+            </span>
+          ) : null}
+          {line.directorHold ? (
+            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-100 ring-1 ring-amber-500/30">
+              On hold
+            </span>
+          ) : null}
+          {line.cartonId && onViewProductDetail ? (
             <button
               type="button"
-              onClick={() => setSplitOpen((o) => !o)}
-              className="text-[12px] font-medium text-sky-400/90 underline-offset-2 hover:underline"
+              onClick={onViewProductDetail}
+              className="text-[10px] font-medium text-amber-400/90 underline-offset-2 hover:underline"
             >
-              {splitOpen ? 'Hide split' : 'Split (planner intent)'}
+              Product sheet
             </button>
-            {splitOpen ? (
-              <div className="mt-2 space-y-2 rounded-lg border border-slate-600/60 bg-slate-900/30 p-2">
-                <p className="text-[10px] leading-snug text-slate-500">
-                  Enter units for a notional &quot;first job&quot; — remainder becomes the second. This does not create
-                  extra rows in the database; use it to align with Accounts on the PO.
-                </p>
-                <label className="block text-[10px] text-slate-500">First job qty</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={Math.max(0, totalQty - 1)}
-                  value={splitA === '' ? '' : splitA}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    if (v === '') {
-                      setSplitA('')
-                      return
-                    }
-                    const n = parseInt(v, 10)
-                    if (Number.isFinite(n)) setSplitA(n)
-                  }}
-                  className="w-full rounded border border-slate-600 bg-slate-800/80 px-2 py-1 text-[13px] text-slate-100"
-                />
-                {splitB != null ? (
-                  <p className={`text-[12px] text-slate-300 ${mono}`}>
-                    Second notional job: <span className="text-amber-200">{splitB}</span>
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (splitB == null || typeof splitA !== 'number') {
-                      toast.error('Enter a valid split (1 … total − 1).')
-                      return
-                    }
-                    toast.success(
-                      `Split intent: ${splitA} + ${splitB} = ${totalQty}. Follow up in Accounts to duplicate the PO line if a second job is required.`,
-                    )
-                    setSplitOpen(false)
-                    setSplitA('')
-                  }}
-                  className="w-full rounded-md border border-slate-500/50 bg-slate-800/80 py-1.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-700/80"
-                >
-                  Confirm split intent
-                </button>
-              </div>
-            ) : null}
+          ) : null}
+        </div>
+
+        <div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Line</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-slate-500">Size</div>
+              <input
+                className={fieldInput + ' ' + mono}
+                value={line.cartonSize ?? ''}
+                onChange={(e) => updateRow(line.id, { cartonSize: e.target.value || null })}
+                onBlur={(e) => void onSaveLine(line.id, { cartonSize: e.target.value.trim() || null })}
+              />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">Qty</div>
+              <input
+                type="number"
+                min={1}
+                className={fieldInput + ' tabular-nums text-amber-200/90 ' + mono}
+                value={line.quantity}
+                onChange={(e) => {
+                  const n = Math.max(1, parseInt(e.target.value, 10) || 1)
+                  updateRow(line.id, { quantity: n })
+                }}
+                onBlur={() => void onSaveLine(line.id, { quantity: line.quantity })}
+              />
+            </div>
           </div>
-        </section>
+        </div>
 
-        <section className="mt-5 space-y-2">
-          <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Specifications</h3>
-          <dl className="space-y-1.5 text-[12px] text-slate-200">
-            <div className="flex justify-between gap-2">
-              <dt className="text-slate-500">Board</dt>
-              <dd className="min-w-0 text-right text-slate-200">{board}</dd>
+        <div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Material</div>
+          <div className="space-y-2">
+            <label className="block text-xs text-slate-500">
+              Board
+              <input
+                className={fieldInput}
+                value={boardInput}
+                placeholder="e.g. kraft, virgin"
+                onChange={(e) => {
+                  const v = e.target.value
+                  const next = { ...spec, boardGrade: v || null } as Record<string, unknown>
+                  updateRow(line.id, { specOverrides: next })
+                }}
+                onBlur={(e) => {
+                  const v = e.target.value.trim()
+                  const next = { ...spec, boardGrade: v || null } as Record<string, unknown>
+                  void onSaveLine(line.id, {}, next)
+                }}
+              />
+            </label>
+            <div>
+              <p className="text-xs text-slate-500">GSM</p>
+              <input
+                type="number"
+                className={fieldInput + ' ' + mono}
+                value={line.gsm ?? line.carton?.gsm ?? ''}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10)
+                  updateRow(line.id, { gsm: Number.isFinite(n) ? n : null })
+                }}
+                onBlur={(e) => {
+                  const n = parseInt(e.target.value, 10)
+                  const g = Number.isFinite(n) ? n : null
+                  void onSaveLine(line.id, { gsm: g })
+                }}
+              />
             </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-slate-500">Size</dt>
-              <dd className={`min-w-0 text-right text-slate-200 ${mono}`}>{size}</dd>
+            <div onClick={(e) => e.stopPropagation()}>
+              <p className="text-xs text-slate-500">Paper</p>
+              <PackagingEnumCombobox
+                aria-label="Paper"
+                options={MASTER_BOARD_GRADES}
+                value={line.paperType ?? line.carton?.paperType ?? null}
+                onChange={(v) => {
+                  updateRow(line.id, { paperType: v })
+                  void onSaveLine(line.id, { paperType: v })
+                }}
+                className="w-full"
+              />
             </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-slate-500">GSM</dt>
-              <dd className={`min-w-0 text-right text-slate-200 ${mono}`}>{gsm}</dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-slate-500">Paper</dt>
-              <dd className="min-w-0 text-right text-slate-200">{paper}</dd>
-            </div>
-          </dl>
-        </section>
+          </div>
+        </div>
 
-        <section className="mt-5 space-y-2">
-          <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Printing &amp; finishing</h3>
-          <dl className="space-y-1.5 text-[12px] text-slate-200">
-            <div className="flex justify-between gap-2">
-              <dt className="text-slate-500">Coating</dt>
-              <dd className="min-w-0 text-right text-slate-200">{line.coatingType || '—'}</dd>
+        <div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Printing</div>
+          <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <p className="text-xs text-slate-500">Coating</p>
+              <PackagingEnumCombobox
+                aria-label="Coating"
+                options={MASTER_COATINGS_AND_VARNISHES}
+                value={line.coatingType ?? line.carton?.coatingType ?? null}
+                onChange={(v) => {
+                  updateRow(line.id, { coatingType: v })
+                  void onSaveLine(line.id, { coatingType: v })
+                }}
+                className="w-full"
+              />
             </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-slate-500">Emboss</dt>
-              <dd className="min-w-0 text-right text-slate-200">{line.embossingLeafing || '—'}</dd>
+            <div>
+              <p className="text-xs text-slate-500">Emboss / leafing</p>
+              <PackagingEnumCombobox
+                aria-label="Embossing"
+                options={MASTER_EMBOSSING_AND_LEAFING}
+                value={line.embossingLeafing}
+                onChange={(v) => {
+                  updateRow(line.id, { embossingLeafing: v })
+                  void onSaveLine(line.id, { embossingLeafing: v })
+                }}
+                className="w-full"
+              />
             </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-slate-500">Foil</dt>
-              <dd className="min-w-0 text-right text-slate-200">{foil}</dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-slate-500">Pasting</dt>
-              <dd className="min-w-0 text-right text-slate-200">{pasting}</dd>
-            </div>
-          </dl>
-        </section>
+            <label className="block text-xs text-slate-500">
+              Foil (if applicable)
+              <input
+                className={fieldInput}
+                value={specFoil(line)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  const next = { ...spec, foilType: v || null } as Record<string, unknown>
+                  updateRow(line.id, { specOverrides: next })
+                }}
+                onBlur={(e) => {
+                  const v = e.target.value.trim()
+                  const next = { ...spec, foilType: v || null } as Record<string, unknown>
+                  void onSaveLine(line.id, {}, next)
+                }}
+              />
+            </label>
+          </div>
+        </div>
 
-        <section className="mt-5 space-y-2">
-          <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Tooling status</h3>
-          <InterlockList line={line} />
-        </section>
-
-        <section className="mt-5 space-y-2">
-          <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Actions</h3>
-          <div className="flex flex-col gap-1.5">
+        <div>
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Actions</div>
+          <div className="flex flex-col gap-2">
             <button
               type="button"
               disabled={actionBusy}
               onClick={handleAddToBatch}
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-500/50 bg-slate-800/60 py-2 text-[12px] font-medium text-slate-100 hover:bg-slate-700/60 disabled:opacity-50"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-slate-800/90 bg-background py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent/10 disabled:opacity-50"
             >
               <Layers className="h-3.5 w-3.5" aria-hidden />
               Add to batch
             </button>
-            <p className="text-[10px] leading-snug text-slate-500">
-              <Link2 className="mb-0.5 mr-0.5 inline h-3 w-3 align-middle opacity-60" aria-hidden />
-              For mix-sets, add two or more lines to the selection, then use <strong>Link as mix set</strong> in the
-              toolbar above the grid.
-            </p>
             <button
               type="button"
               disabled={actionBusy}
               onClick={handleHold}
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-500/35 bg-amber-950/25 py-2 text-[12px] font-medium text-amber-100 hover:bg-amber-900/30 disabled:opacity-50"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-950/20 py-2 text-xs font-medium text-amber-100 hover:bg-amber-950/35 disabled:opacity-50"
             >
               <PauseCircle className="h-3.5 w-3.5" aria-hidden />
-              {line.directorHold ? 'Release hold' : 'Hold job'}
+              {line.directorHold ? 'Release hold' : 'Hold'}
             </button>
             <button
               type="button"
               disabled={actionBusy}
               onClick={handlePriority}
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-violet-500/35 bg-violet-950/20 py-2 text-[12px] font-medium text-violet-100 hover:bg-violet-900/25 disabled:opacity-50"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-violet-500/30 bg-violet-950/20 py-2 text-xs font-medium text-violet-100 hover:bg-violet-950/35 disabled:opacity-50"
             >
               <Star className="h-3.5 w-3.5" aria-hidden />
-              {line.directorPriority ? 'Clear line priority' : 'Mark as priority (line)'}
+              {line.directorPriority ? 'Clear priority' : 'Priority'}
             </button>
           </div>
-        </section>
+        </div>
 
-        <section className="mt-5 space-y-1.5">
-          <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Line remarks</h3>
-          <textarea
-            value={remarksDraft}
-            onChange={(e) => setRemarksDraft(e.target.value)}
-            rows={3}
-            className="w-full rounded-md border border-slate-600/80 bg-slate-900/50 px-2 py-1.5 text-[12px] text-slate-200 placeholder:text-slate-600"
-            placeholder="Internal planning notes (saved with Save changes)"
-          />
-        </section>
-      </div>
+        <details className="group rounded-md border border-slate-800/90 bg-background/60">
+          <summary className="cursor-pointer list-none px-2 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            <span className="group-open:hidden">More — rate, laminate, pasting, split, remarks</span>
+            <span className="hidden group-open:inline">Hide details</span>
+          </summary>
+          <div className="space-y-3 border-t border-slate-800/90 px-2 pb-3 pt-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <div className="text-xs text-slate-500">Rate</div>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  className={fieldInput + ' ' + mono}
+                  value={line.rate != null ? String(line.rate) : ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    if (v === '') {
+                      updateRow(line.id, { rate: null })
+                      return
+                    }
+                    const n = parseFloat(v)
+                    if (Number.isFinite(n)) updateRow(line.id, { rate: n })
+                  }}
+                  onBlur={() => void onSaveLine(line.id, { rate: line.rate ?? null })}
+                />
+              </div>
+              <p className={`self-end text-xs text-slate-400 ${mono}`}>
+                Amount: ₹{amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div onClick={(e) => e.stopPropagation()}>
+              <p className="text-xs text-slate-500">Secondary / laminate</p>
+              <PackagingEnumCombobox
+                aria-label="Laminate"
+                options={MASTER_COATINGS_AND_VARNISHES}
+                value={line.otherCoating ?? line.carton?.laminateType ?? null}
+                onChange={(v) => {
+                  updateRow(line.id, { otherCoating: v })
+                  void onSaveLine(line.id, { otherCoating: v })
+                }}
+                className="w-full"
+              />
+            </div>
+            <label className="block text-xs text-slate-500">
+              Pasting
+              <input
+                className={fieldInput}
+                value={specPasting(line)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  const next = { ...spec, pastingType: v || null } as Record<string, unknown>
+                  updateRow(line.id, { specOverrides: next })
+                }}
+                onBlur={(e) => {
+                  const v = e.target.value.trim()
+                  const next = { ...spec, pastingType: v || null } as Record<string, unknown>
+                  void onSaveLine(line.id, {}, next)
+                }}
+              />
+            </label>
 
-      <div className="flex shrink-0 gap-2 border-t border-slate-700/90 bg-[#0c1424] px-3 py-2.5">
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex-1 rounded-lg border border-slate-500/50 py-2 text-[12px] font-medium text-slate-300 hover:bg-slate-800/80"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={handleSave}
-          className="flex-1 rounded-lg bg-amber-600 py-2 text-[12px] font-bold text-white shadow hover:bg-amber-500 disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save changes'}
-        </button>
+            {line.cartonId ? (
+              <div>
+                <button
+                  type="button"
+                  disabled={saveMasterBusy}
+                  onClick={() => void saveToProductMaster()}
+                  className="w-full rounded-lg border border-sky-500/35 bg-sky-950/25 py-2 text-xs font-medium text-sky-100 hover:bg-sky-950/40 disabled:opacity-50"
+                >
+                  {saveMasterBusy ? 'Saving to master…' : 'Save to product master'}
+                </button>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Pushes the values to the linked carton (permission may be required).
+                </p>
+              </div>
+            ) : null}
+
+            <div>
+              <button
+                type="button"
+                onClick={() => setSplitOpen((o) => !o)}
+                className="text-xs font-medium text-amber-400/90 underline-offset-2 hover:underline"
+              >
+                {splitOpen ? 'Hide' : 'Split (intent)'}
+              </button>
+              {splitOpen ? (
+                <div className="mt-2 space-y-2 rounded-md border border-slate-800/90 bg-background p-2">
+                  <p className="text-[10px] leading-snug text-slate-500">
+                    Notional split. For real extra jobs, work with Accounts on the PO.
+                  </p>
+                  <label className="block text-[10px] text-slate-500">First job qty</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={Math.max(0, totalQty - 1)}
+                    value={splitA === '' ? '' : splitA}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v === '') {
+                        setSplitA('')
+                        return
+                      }
+                      const n = parseInt(v, 10)
+                      if (Number.isFinite(n)) setSplitA(n)
+                    }}
+                    className="w-full rounded border border-input bg-background px-2 py-1 text-xs"
+                  />
+                  {splitB != null ? (
+                    <p className={`text-xs text-slate-300 ${mono}`}>
+                      Second: <span className="text-amber-200/90">{splitB}</span>
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (splitB == null || typeof splitA !== 'number') {
+                        toast.error('Enter a valid split (1 … total − 1).')
+                        return
+                      }
+                      toast.success(
+                        `Intent: ${splitA} + ${splitB} = ${totalQty}. Follow up in Accounts to adjust the PO if needed.`,
+                      )
+                      setSplitOpen(false)
+                      setSplitA('')
+                    }}
+                    className="w-full rounded-md border border-slate-800 py-1.5 text-[10px] font-semibold text-foreground hover:bg-accent/10"
+                  >
+                    Confirm split intent
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div>
+              <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Remarks</p>
+              <textarea
+                value={remarksDraft}
+                onChange={(e) => setRemarksDraft(e.target.value)}
+                rows={3}
+                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                placeholder="Internal notes"
+              />
+            </div>
+          </div>
+        </details>
       </div>
-    </aside>
+    </SlideOverPanel>
   )
 }
-
