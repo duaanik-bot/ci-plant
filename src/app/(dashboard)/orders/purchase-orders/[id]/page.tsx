@@ -4,14 +4,6 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import {
-  BOARD_GRADES,
-  PAPER_TYPES,
-  COATING_TYPES,
-  EMBOSSING_TYPES,
-  FOIL_TYPES,
-} from '@/lib/constants'
-import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
@@ -20,18 +12,14 @@ import {
   usePoRecentCartons,
   type PoCartonCatalogItem,
 } from '@/lib/po-carton-autocomplete'
-import {
-  Copy,
-  FileText,
-  FlipHorizontal2,
-  Layers,
-  Sparkles,
-  Star,
-  Sun,
-  Trash2,
-  type LucideIcon,
-} from 'lucide-react'
-import { paperSupplyIconMeta } from '@/lib/po-paper-supply-ui'
+import { Copy, Star, Trash2 } from 'lucide-react'
+import { PastingStyle } from '@prisma/client'
+import { updateProductMasterStyle } from '@/lib/update-product-master-style'
+import { PoNewLineItemDrawer } from '@/components/po/PoNewLineItemDrawer'
+import { PoQuickCreateCartonForm } from '@/components/po/PoQuickCreateCartonForm'
+import { Button } from '@/components/design-system/Button'
+import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
+import { cn } from '@/lib/cn'
 import { parseDeliveryYmdFromRemarks } from '@/lib/po-delivery-parse'
 import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
 import { ProductionReadinessBar } from '@/components/orders/ProductionReadinessBar'
@@ -49,9 +37,11 @@ type Customer = {
 
 type CartonOption = PoCartonCatalogItem
 
+const PO_FORM_TOOLING_AUDIT_ACTOR = 'Anik Dua'
+
 type Line = {
   id?: string
-  dieMasterId?: string
+  dieMasterId: string
   materialProcurementStatus?: string
   directorPriority?: boolean
   cartonId: string
@@ -70,6 +60,12 @@ type Line = {
   boardGrade: string
   foilType: string
   remarks: string
+  pastingStyle: string
+  masterPastingStyleMissing: boolean
+  ghostFromMaster: { size: boolean; gsm: boolean; pasting: boolean; rate: boolean }
+  toolingDieType: string
+  toolingDims: string
+  toolingUnlinked: boolean
 }
 
 type CartonLookupFieldProps = {
@@ -103,6 +99,12 @@ const defaultLine = (): Line => ({
   boardGrade: '',
   foilType: '',
   remarks: '',
+  pastingStyle: '',
+  masterPastingStyleMissing: false,
+  ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
+  toolingDieType: '',
+  toolingDims: '',
+  toolingUnlinked: false,
 })
 
 function resetAutofillFields(line: Line, cartonName: string): Line {
@@ -125,6 +127,12 @@ function resetAutofillFields(line: Line, cartonName: string): Line {
     paperType: '',
     boardGrade: '',
     foilType: '',
+    pastingStyle: '',
+    masterPastingStyleMissing: false,
+    ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
+    toolingDieType: '',
+    toolingDims: '',
+    toolingUnlinked: false,
   }
 }
 
@@ -159,39 +167,9 @@ function deriveCartonDecorations(carton: CartonOption): Pick<Line, 'coatingType'
   return { coatingType, embossingLeafing, foilType }
 }
 
-function IconSpecSelect({
-  icon: Icon,
-  label,
-  value,
-  options,
-  onChange,
-  mono,
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  options: readonly string[]
-  onChange: (v: string) => void
-  mono?: boolean
-}) {
-  return (
-    <div className="relative flex min-w-[6.5rem] max-w-[9rem] flex-col items-stretch gap-0.5" title={label}>
-      <Icon
-        className="h-3 w-3 shrink-0 self-center text-ds-ink-faint opacity-70 transition-colors group-hover:text-[#f97316]"
-        strokeWidth={2}
-        aria-hidden
-      />
-      <PackagingEnumCombobox
-        aria-label={label}
-        options={options}
-        value={value || null}
-        onChange={(v) => onChange(v ?? '')}
-        controlClassName="border-ds-line/50 bg-ds-card/90 hover:bg-ds-card focus-within:ring-blue-500/30"
-        inputClassName={`text-[9px] leading-tight text-ds-ink placeholder:text-ds-ink-faint ${mono ? 'po-mono-metric' : ''}`}
-        className="w-full"
-      />
-    </div>
-  )
+function poPastingStyleFromMaster(c: CartonOption): PastingStyle {
+  if (c.pastingStyle === PastingStyle.BSO) return PastingStyle.BSO
+  return PastingStyle.LOCK_BOTTOM
 }
 
 function CartonLookupField({
@@ -304,7 +282,10 @@ export default function EditPurchaseOrderPage() {
   const [saving, setSaving] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [activeCartonLineIndex, setActiveCartonLineIndex] = useState<number | null>(null)
-  const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null)
+  const [detailLineIdx, setDetailLineIdx] = useState<number | null>(null)
+  const [kbRowIndex, setKbRowIndex] = useState(0)
+  const [masterPastePopoverLine, setMasterPastePopoverLine] = useState<number | null>(null)
+  const [masterPasteSavingLine, setMasterPasteSavingLine] = useState<number | null>(null)
 
   const [qcCartonOpen, setQcCartonOpen] = useState(false)
   const [qcCarton, setQcCarton] = useState({
@@ -395,7 +376,14 @@ export default function EditPurchaseOrderPage() {
         setDeliveryRequiredBy(drb)
         // Map lineItems from API to Line type
         const mapped: Line[] = (data.lineItems || []).map((li: any) => {
-          const specOverrides = li.specOverrides && typeof li.specOverrides === 'object' ? li.specOverrides : {}
+          const specOverrides = li.specOverrides && typeof li.specOverrides === 'object' ? li.specOverrides : ({} as Record<string, unknown>)
+          const specPaste = specOverrides.pastingStyle as PastingStyle | string | undefined
+          let pastingStyle = ''
+          if (specPaste === PastingStyle.BSO) pastingStyle = 'BSO'
+          else if (specPaste === PastingStyle.LOCK_BOTTOM) pastingStyle = 'LOCK_BOTTOM'
+          const sizeForLine = String(li.cartonSize || '')
+            .trim()
+            .replace(/x/gi, '×')
           return {
             id: li.id,
             dieMasterId: li.dieMasterId || '',
@@ -414,9 +402,15 @@ export default function EditPurchaseOrderPage() {
             coatingType: li.coatingType || '',
             embossingLeafing: li.embossingLeafing || '',
             paperType: li.paperType || '',
-            boardGrade: specOverrides.boardGrade || li.boardGrade || '',
-            foilType: specOverrides.foilType || li.foilType || '',
+            boardGrade: (specOverrides.boardGrade as string) || li.boardGrade || '',
+            foilType: (specOverrides.foilType as string) || li.foilType || '',
             remarks: li.remarks || '',
+            pastingStyle,
+            masterPastingStyleMissing: false,
+            ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
+            toolingDieType: li.lineDieType || '',
+            toolingDims: sizeForLine,
+            toolingUnlinked: false,
           }
         })
         setLines(mapped.length > 0 ? mapped : [defaultLine()])
@@ -464,6 +458,10 @@ export default function EditPurchaseOrderPage() {
 
   const applyCartonToLine = useCallback((idx: number, c: CartonOption) => {
     const decorations = deriveCartonDecorations(c)
+    const raw = (c.toolingDimsLabel || c.cartonSize || '').trim()
+    const sizeForLine = raw.replace(/x/gi, '×')
+    const autoPaste = poPastingStyleFromMaster(c)
+    const masterPasteMissing = Boolean(c.id) && c.pastingStyle == null
     setLines((prev) =>
       prev.map((ln, i) =>
         i === idx
@@ -471,7 +469,7 @@ export default function EditPurchaseOrderPage() {
               ...ln,
               cartonId: c.id,
               cartonName: c.cartonName,
-              cartonSize: c.cartonSize || '',
+              cartonSize: sizeForLine,
               artworkCode: c.artworkCode || '',
               backPrint: c.backPrint || 'No',
               rate: c.rate != null ? String(c.rate) : '',
@@ -482,19 +480,94 @@ export default function EditPurchaseOrderPage() {
               paperType: c.paperType || '',
               boardGrade: c.boardGrade || '',
               foilType: decorations.foilType,
+              dieMasterId: c.dieMasterId || c.dyeId || ln.dieMasterId,
+              toolingDieType: c.masterDieType || '',
+              toolingDims: sizeForLine,
+              toolingUnlinked: !!c.toolingUnlinked,
+              pastingStyle: autoPaste === PastingStyle.BSO ? 'BSO' : 'LOCK_BOTTOM',
+              masterPastingStyleMissing: masterPasteMissing,
+              ghostFromMaster: {
+                size: true,
+                gsm: true,
+                pasting: !masterPasteMissing,
+                rate: c.rate != null,
+              },
             }
           : ln
       )
     )
-    setFieldErrors((prev) => { const next = { ...prev }; delete next.lines; return next })
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      delete next.lines
+      return next
+    })
   }, [])
 
   const updateLine = (idx: number, patch: Partial<Line>) => {
     setLines((prev) => prev.map((ln, i) => (i === idx ? { ...ln, ...patch } : ln)))
   }
 
-  const addLine = () => setLines((prev) => [...prev, defaultLine()])
-  const removeLine = (idx: number) => setLines((prev) => prev.filter((_, i) => i !== idx))
+  const saveProductMasterPasting = async (
+    lineIndex: number,
+    cartonId: string,
+    style: PastingStyle,
+    opts?: { quiet?: boolean },
+  ) => {
+    if (!cartonId) return
+    setMasterPasteSavingLine(lineIndex)
+    try {
+      const result = await updateProductMasterStyle(cartonId, style, {
+        actorLabel: PO_FORM_TOOLING_AUDIT_ACTOR,
+      })
+      if (result.ok === false) throw new Error(result.error)
+      const s = style === PastingStyle.BSO ? 'BSO' : 'LOCK_BOTTOM'
+      setLines((prev) =>
+        prev.map((ln, i) =>
+          i === lineIndex
+            ? {
+                ...ln,
+                pastingStyle: s,
+                masterPastingStyleMissing: false,
+                ghostFromMaster: { ...ln.ghostFromMaster, pasting: false },
+              }
+            : ln
+        )
+      )
+      setCustomerCartons((prev) =>
+        prev.map((c) => (c.id === cartonId ? { ...c, pastingStyle: style } : c))
+      )
+      setMasterPastePopoverLine(null)
+      if (!opts?.quiet) toast.success('Product Master updated successfully.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed')
+      if (opts?.quiet) throw e
+    } finally {
+      setMasterPasteSavingLine(null)
+    }
+  }
+
+  const addLine = () =>
+    setLines((prev) => {
+      const next = [...prev, defaultLine()]
+      setKbRowIndex(next.length - 1)
+      return next
+    })
+
+  const removeLine = (idx: number) => {
+    setMasterPastePopoverLine((openIdx) => {
+      if (openIdx === idx) return null
+      if (openIdx != null && openIdx > idx) return openIdx - 1
+      return openIdx
+    })
+    setDetailLineIdx((open) => {
+      if (open === null) return null
+      if (open === idx) return null
+      if (open > idx) return open - 1
+      return open
+    })
+    setLines((prev) => prev.filter((_, i) => i !== idx))
+  }
+
   const duplicateLine = (idx: number) => {
     setLines((prev) => {
       const ln = prev[idx]
@@ -502,6 +575,15 @@ export default function EditPurchaseOrderPage() {
       const copy = structuredClone(ln) as Line
       copy.id = undefined
       return [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)]
+    })
+    setMasterPastePopoverLine((open) => {
+      if (open === null) return null
+      return open > idx ? open + 1 : open
+    })
+    setDetailLineIdx((open) => {
+      if (open === null) return null
+      if (open > idx) return open + 1
+      return open
     })
   }
 
@@ -623,6 +705,9 @@ export default function EditPurchaseOrderPage() {
               wastagePct: Number(l.wastagePct) || 10,
               boardGrade: l.boardGrade.trim() || undefined,
               foilType: l.foilType.trim() || undefined,
+              ...(l.pastingStyle === 'BSO' || l.pastingStyle === 'LOCK_BOTTOM'
+                ? { pastingStyle: l.pastingStyle === 'BSO' ? PastingStyle.BSO : PastingStyle.LOCK_BOTTOM }
+                : {}),
             },
           })),
         }),
@@ -761,12 +846,17 @@ export default function EditPurchaseOrderPage() {
     }
   }
 
-  const inputBase =
-    'w-full px-1.5 py-0.5 rounded-md bg-[#111827]/90 border border-ds-line/40 text-[11px] text-ds-ink placeholder:text-ds-ink-faint focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/45'
-  const inputCls = inputBase
-  const lineCellPad = 'px-1 py-0.5'
+  const inputCls =
+    'ds-input w-full min-w-0 [color-scheme:dark] border-ds-line/80 bg-ds-elevated/80 text-[15px] text-ds-ink placeholder:text-ds-ink-faint'
+  const inputClsGhost =
+    'ds-input w-full min-w-0 [color-scheme:dark] !border-ds-line/50 !bg-ds-elevated/50 !text-ds-ink-muted placeholder:text-ds-ink-faint'
+  const inputErr = 'ring-1 ring-ds-error/40 !border-ds-error/60'
+  const lineCellPad = `${dataTable.td.base} align-middle min-h-[52px]`
   const poMono = 'po-mono-metric'
-  const rowStripe = (i: number) => (i % 2 === 0 ? 'bg-[#161B26]' : 'bg-[#111827]')
+  const tableInputPrimary = 'text-[15px] font-semibold text-ds-ink tabular-nums'
+  const tableInputSecondary = 'text-[12px] font-medium text-ds-ink-muted'
+  const thPrimary = 'text-left text-[12px] font-semibold tracking-tight text-ds-ink'
+  const thSecondary = 'text-left text-[12px] font-medium uppercase tracking-wider text-ds-ink-muted'
 
   if (loading) {
     return (
@@ -949,280 +1039,241 @@ export default function EditPurchaseOrderPage() {
         loading={productionKitLoading}
       />
 
-      {/* Zero-scroll line grid */}
+      {/* Line items — same summary table + drawer as Create PO */}
       <fieldset disabled={poSentToPlanning} className="min-w-0 border-0 p-0">
-      <div className="rounded-xl border border-border/40 bg-card/20 p-2 text-[11px] backdrop-blur-sm sm:p-3">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-ds-ink-muted">Line items</h2>
-          <button
-            type="button"
-            onClick={addLine}
-            className="rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground/80 hover:border-blue-500/40 hover:text-foreground"
-          >
-            + Add line
-          </button>
-        </div>
-        {fieldErrors.lines ? <p className="mb-2 text-xs text-red-400">{fieldErrors.lines}</p> : null}
-        <div className="max-h-[min(calc(100vh-14rem),760px)] overflow-x-hidden overflow-y-auto rounded-lg border border-ds-line/50">
-          <table className="w-full table-fixed border-collapse text-left">
-            <thead className="sticky top-0 z-20 border-b border-ds-line/40 bg-[#111827]/95 text-[10px] font-semibold uppercase tracking-wide text-ds-ink-faint backdrop-blur-md">
-              <tr>
-                <th className={`${lineCellPad} w-10 text-center`} title="Priority & row tools" aria-label="Row tools">
-                  {/* 40px tool column */}
-                </th>
-                <th className={`${lineCellPad} min-w-[200px] w-[22%]`}>Carton</th>
-                <th className={`${lineCellPad} w-[100px] ${poMono}`}>Size</th>
-                <th className={`${lineCellPad} w-20 ${poMono}`}>Qty</th>
-                <th className={lineCellPad}>AW</th>
-                <th className={`${lineCellPad} w-11`}>W%</th>
-                <th className={lineCellPad}>Brd</th>
-                <th className={`${lineCellPad} w-12`}>GSM</th>
-                <th className={`${lineCellPad} w-[4.5rem]`}>Paper</th>
-                <th className={`${lineCellPad} w-[168px]`}>₹ Fin</th>
-                <th className={`${lineCellPad} w-12 text-center`} title="Back print">
-                  <FlipHorizontal2 className="mx-auto h-3 w-3 opacity-60" aria-hidden />
-                </th>
-                <th className={`${lineCellPad} w-12 text-center`} title="Coating">
-                  <Layers className="mx-auto h-3 w-3 opacity-60" aria-hidden />
-                </th>
-                <th className={`${lineCellPad} w-12 text-center`} title="Emboss / leaf">
-                  <Sparkles className="mx-auto h-3 w-3 opacity-60" aria-hidden />
-                </th>
-                <th className={`${lineCellPad} w-12 text-center`} title="Foil">
-                  <Sun className="mx-auto h-3 w-3 opacity-60" aria-hidden />
-                </th>
-                <th className={`${lineCellPad} min-w-0`}>Rm</th>
-                <th className={`${lineCellPad} w-7 text-center`} title="Material supply">
-                  M
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((ln, idx) => {
-                const { beforeGst } = lineAmount(
-                  Number(ln.rate) || 0,
-                  Number(ln.quantity) || 0,
-                  Number(ln.gstPct) || 0,
-                )
-                const paperMeta = paperSupplyIconMeta(ln.materialProcurementStatus)
-                const focused = focusedRowIndex === idx
-                return (
-                  <tr
-                    key={ln.id ?? idx}
-                    onFocusCapture={() => setFocusedRowIndex(idx)}
-                    className={`group border-b border-ds-line/40 ${rowStripe(idx)} ${
-                      focused ? 'border-l-2 border-l-[#f59e0b]' : 'border-l-2 border-l-transparent'
-                    }`}
-                  >
-                    <td className={`${lineCellPad} w-10 align-middle`}>
-                      <div className="flex w-10 flex-col items-center gap-0.5 opacity-20 transition-[opacity,color] duration-150 group-hover:opacity-100 group-hover:text-[#f97316]">
-                        <button
-                          type="button"
-                          title={ln.directorPriority ? 'Clear director priority' : 'Director priority'}
-                          onClick={() => updateLine(idx, { directorPriority: !ln.directorPriority })}
-                          className={`rounded p-0.5 transition-colors ${
-                            ln.directorPriority
-                              ? 'text-[#f59e0b] group-hover:text-[#f97316]'
-                              : 'text-ds-ink-faint group-hover:text-[#f97316]'
-                          }`}
-                        >
-                          <Star
-                            className={`h-3.5 w-3.5 ${ln.directorPriority ? 'fill-[#f59e0b]' : ''}`}
-                            strokeWidth={2}
-                          />
-                        </button>
-                        <button
-                          type="button"
-                          title="Duplicate line"
-                          onClick={() => duplicateLine(idx)}
-                          className="rounded p-0.5 text-ds-ink-faint transition-colors group-hover:text-[#f97316]"
-                        >
-                          <Copy className="h-3.5 w-3.5" strokeWidth={2} />
-                        </button>
-                        <button
-                          type="button"
-                          title={lines.length > 1 ? 'Remove line' : 'At least one line required'}
-                          disabled={lines.length <= 1}
-                          onClick={() => lines.length > 1 && removeLine(idx)}
-                          className="rounded p-0.5 text-ds-ink-faint transition-colors group-hover:text-[#f97316] disabled:cursor-not-allowed disabled:opacity-25 disabled:group-hover:text-ds-ink-faint"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-                        </button>
-                      </div>
-                    </td>
-                    <td className={`${lineCellPad} min-w-[200px] align-top`}>
-                      <CartonLookupField
-                        line={ln}
-                        customerId={customerId}
-                        customerCatalog={customerCartons}
-                        catalogLoading={customerCartonsLoading}
-                        error={!ln.cartonName && fieldErrors.lines ? 'Carton name is required' : undefined}
-                        onLineChange={(patch) => updateLine(idx, patch)}
-                        onSelect={(carton) => applyCartonToLine(idx, carton)}
-                        onCreate={(suggestedName) => {
-                          setActiveCartonLineIndex(idx)
-                          setQcCarton((prev) => ({ ...prev, cartonName: suggestedName }))
-                          setQcCartonOpen(true)
+        <div className="space-y-3 rounded-ds-lg border border-ds-line/80 bg-ds-card/30 p-4 text-sm shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-[16px] font-semibold tracking-tight text-ds-ink md:text-[18px]">Line items</h2>
+            <Button type="button" variant="secondary" className="text-xs" onClick={addLine}>
+              + Add line
+            </Button>
+          </div>
+          {fieldErrors.lines ? <p className="text-xs text-ds-error">{fieldErrors.lines}</p> : null}
+
+          <DataTableFrame className="max-h-[min(calc(100vh-18rem),640px)] min-h-[240px] border-ds-line/60 bg-ds-elevated/20">
+            <div className={dataTable.wrap}>
+              <table className={dataTable.table}>
+                <thead className={dataTable.thead}>
+                  <tr>
+                    <th
+                      className={`${dataTable.th} w-[40%] sticky left-0 z-40 min-h-[48px] border-r border-ds-line/50 bg-ds-elevated/95 shadow-[2px_0_8px_rgba(0,0,0,0.2)] pr-2 text-left text-[12px] font-semibold text-ds-ink`}
+                    >
+                      Carton
+                    </th>
+                    <th className={`${lineCellPad} ${thSecondary} w-[11%] ${poMono}`}>Size</th>
+                    <th className={`${lineCellPad} ${thPrimary} w-[9%] text-center ${poMono}`}>Qty *</th>
+                    <th className={`${lineCellPad} ${thPrimary} w-[18%] text-right ${poMono}`}>Rate</th>
+                    <th className={`${lineCellPad} ${thPrimary} w-[16%] text-right ${poMono}`}>Amount</th>
+                    <th
+                      className={`${lineCellPad} w-[6%] text-right text-[12px] font-normal text-ds-ink-faint`}
+                      aria-label="Row actions"
+                    />
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((ln, idx) => {
+                    const rate = Number(ln.rate) || 0
+                    const qty = Number(ln.quantity) || 0
+                    const gstPct = Number(ln.gstPct) || 0
+                    const { beforeGst } = lineAmount(rate, qty, gstPct)
+                    const amount = beforeGst
+                    const rowStripe = idx % 2 === 0 ? 'bg-ds-main/40' : 'bg-ds-elevated/25'
+                    const stickBg = rowStripe
+                    return (
+                      <tr
+                        key={ln.id ?? idx}
+                        onMouseEnter={() => setKbRowIndex(idx)}
+                        onClick={(e) => {
+                          if (poSentToPlanning) return
+                          if ((e.target as HTMLElement).closest('input, select, button, a, [data-line-stop]')) return
+                          setKbRowIndex(idx)
+                          setDetailLineIdx(idx)
                         }}
-                      />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input
-                        type="text"
-                        value={ln.cartonSize}
-                        onChange={(e) => updateLine(idx, { cartonSize: e.target.value })}
-                        className={`${inputCls} ${poMono} w-full max-w-[100px]`}
-                        placeholder="L×W×H"
-                      />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input
-                        type="number"
-                        min={1}
-                        value={ln.quantity}
-                        onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                        className={`w-full max-w-[80px] ${inputCls} ${poMono}`}
-                      />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input
-                        type="text"
-                        value={ln.artworkCode}
-                        onChange={(e) => updateLine(idx, { artworkCode: e.target.value })}
-                        className={`w-full min-w-0 ${inputCls} font-mono text-[10px]`}
-                      />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.5}
-                        value={ln.wastagePct}
-                        onChange={(e) => updateLine(idx, { wastagePct: e.target.value })}
-                        className={`w-full max-w-[2.75rem] ${inputCls} ${poMono}`}
-                      />
-                    </td>
-                    <td className={lineCellPad}>
-                      <PackagingEnumCombobox
-                        aria-label="Board grade"
-                        options={BOARD_GRADES}
-                        value={ln.boardGrade || null}
-                        onChange={(v) => updateLine(idx, { boardGrade: v ?? '' })}
-                        controlClassName="border-ds-line/50 bg-ds-card/80"
-                        inputClassName="text-[10px] text-ds-ink"
-                        className="min-w-[6rem] max-w-[10rem]"
-                      />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input
-                        type="number"
-                        value={ln.gsm}
-                        onChange={(e) => updateLine(idx, { gsm: e.target.value })}
-                        className={`w-full min-w-0 ${inputCls} ${poMono} text-[10px]`}
-                      />
-                    </td>
-                    <td className={lineCellPad}>
-                      <PackagingEnumCombobox
-                        aria-label="Paper / board type"
-                        options={PAPER_TYPES}
-                        value={ln.paperType || null}
-                        onChange={(v) => updateLine(idx, { paperType: v ?? '' })}
-                        controlClassName="border-ds-line/50 bg-ds-card/80"
-                        inputClassName="text-[9px] text-ds-ink"
-                        className="min-w-[6rem] max-w-[10rem]"
-                      />
-                    </td>
-                    <td className={lineCellPad}>
-                      <div className="rounded-md bg-ds-elevated/95 px-1.5 py-1 ring-1 ring-ds-line/50">
-                        <div className="flex items-center justify-between gap-1 text-[9px] text-ds-ink-faint">
-                          <span>Rate</span>
+                        className={cn(
+                          'group min-h-[52px] border-b border-ds-line/30',
+                          dataTable.tr.body,
+                          dataTable.tr.hover,
+                          rowStripe,
+                          !poSentToPlanning && 'cursor-pointer',
+                          detailLineIdx === null && kbRowIndex === idx
+                            ? 'ring-1 ring-ds-brand/35 ring-inset'
+                            : '',
+                          detailLineIdx === idx && 'bg-ds-brand/8 ring-1 ring-inset ring-ds-brand/30',
+                        )}
+                        title={
+                          poSentToPlanning
+                            ? undefined
+                            : 'Click row for material, printing, and costing'
+                        }
+                      >
+                        <td
+                          className={cn(
+                            lineCellPad,
+                            'align-top',
+                            stickBg,
+                            'sticky left-0 z-20 max-w-0 border-r border-ds-line/50 shadow-[2px_0_8px_rgba(0,0,0,0.12)] transition-colors group-hover:bg-ds-elevated/20',
+                          )}
+                        >
+                          <div data-line-stop className="min-w-0" onClick={(e) => e.stopPropagation()}>
+                            <CartonLookupField
+                              line={ln}
+                              customerId={customerId}
+                              customerCatalog={customerCartons}
+                              catalogLoading={customerCartonsLoading}
+                              error={!ln.cartonName && fieldErrors.lines ? 'Carton name is required' : undefined}
+                              onLineChange={(patch) => updateLine(idx, patch)}
+                              onSelect={(carton) => applyCartonToLine(idx, carton)}
+                              onCreate={(suggestedName) => {
+                                setActiveCartonLineIndex(idx)
+                                setQcCarton((prev) => ({ ...prev, cartonName: suggestedName.trim() }))
+                                setQcCartonOpen(true)
+                                setLines((prev) => {
+                                  const cur = prev[idx]
+                                  if (!cur) return prev
+                                  const next = [...prev]
+                                  next[idx] = resetAutofillFields(cur, suggestedName)
+                                  return next
+                                })
+                              }}
+                            />
+                          </div>
+                        </td>
+                        <td
+                          className={cn(
+                            lineCellPad,
+                            ln.ghostFromMaster.size ? 'po-master-field-pulse' : '',
+                            'align-top',
+                          )}
+                        >
+                          <div data-line-stop onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={ln.cartonSize}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                updateLine(idx, {
+                                  cartonSize: v,
+                                  toolingDims: v,
+                                  ghostFromMaster: { ...ln.ghostFromMaster, size: false },
+                                })
+                              }}
+                              className={cn(
+                                'w-full min-w-0 max-w-full truncate',
+                                ln.ghostFromMaster.size ? inputClsGhost : inputCls,
+                                tableInputSecondary,
+                                poMono,
+                              )}
+                              title={ln.cartonSize}
+                              placeholder="L×W×H"
+                            />
+                          </div>
+                        </td>
+                        <td
+                          className={cn(lineCellPad, 'text-center align-top')}
+                          data-line-stop
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="number"
+                            min={1}
+                            value={ln.quantity}
+                            onChange={(e) => updateLine(idx, { quantity: e.target.value })}
+                            className={cn(
+                              'inline-block w-16 min-w-0 text-center',
+                              inputCls,
+                              tableInputPrimary,
+                              poMono,
+                            )}
+                          />
+                        </td>
+                        <td
+                          className={cn(lineCellPad, 'text-right align-top')}
+                          data-line-stop
+                          onClick={(e) => e.stopPropagation()}
+                          title={
+                            ln.ghostFromMaster.rate
+                              ? 'From Product Master — edit in line details to override'
+                              : 'Rate per unit (ex-GST)'
+                          }
+                        >
                           <input
                             type="number"
                             min={0}
                             step={0.01}
                             value={ln.rate}
-                            onChange={(e) => updateLine(idx, { rate: e.target.value })}
-                            className={`w-16 border-0 bg-transparent p-0 text-right ${poMono} text-[10px] font-semibold text-ds-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/60`}
+                            onChange={(e) =>
+                              updateLine(idx, {
+                                rate: e.target.value,
+                                ghostFromMaster: { ...ln.ghostFromMaster, rate: false },
+                              })
+                            }
+                            className={cn(
+                              'inline-block w-full min-w-0 max-w-[6.5rem] text-right',
+                              ln.ghostFromMaster.rate ? inputClsGhost : inputCls,
+                              tableInputPrimary,
+                              poMono,
+                            )}
                           />
-                        </div>
-                        <div className="mt-0.5 flex items-center justify-between gap-1 text-[9px] text-ds-ink-faint">
-                          <span>GST%</span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={28}
-                            value={ln.gstPct}
-                            onChange={(e) => updateLine(idx, { gstPct: e.target.value })}
-                            className={`w-10 border-0 bg-transparent p-0 text-right ${poMono} text-[10px] text-ds-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/60`}
-                          />
-                        </div>
-                        <div
-                          className={`mt-0.5 border-t border-ds-line/50 pt-0.5 text-right text-[10px] font-semibold text-foreground ${poMono}`}
+                        </td>
+                        <td
+                          className={cn(
+                            lineCellPad,
+                            'text-right align-top',
+                            dataTable.td.moneyTotal,
+                            poMono,
+                          )}
                         >
-                          {beforeGst.toFixed(2)}
-                        </div>
-                      </div>
-                    </td>
-                    <td className={`${lineCellPad} align-middle`}>
-                      <IconSpecSelect
-                        icon={FlipHorizontal2}
-                        label="Back print"
-                        value={ln.backPrint}
-                        options={['No', 'Yes']}
-                        onChange={(v) => updateLine(idx, { backPrint: v })}
-                      />
-                    </td>
-                    <td className={`${lineCellPad} align-middle`}>
-                      <IconSpecSelect
-                        icon={Layers}
-                        label="Coating"
-                        value={ln.coatingType}
-                        options={COATING_TYPES}
-                        onChange={(v) => updateLine(idx, { coatingType: v })}
-                      />
-                    </td>
-                    <td className={`${lineCellPad} align-middle`}>
-                      <IconSpecSelect
-                        icon={Sparkles}
-                        label="Emboss / leaf"
-                        value={ln.embossingLeafing}
-                        options={EMBOSSING_TYPES}
-                        onChange={(v) => updateLine(idx, { embossingLeafing: v })}
-                      />
-                    </td>
-                    <td className={`${lineCellPad} align-middle`}>
-                      <IconSpecSelect
-                        icon={Sun}
-                        label="Foil"
-                        value={ln.foilType}
-                        options={FOIL_TYPES}
-                        onChange={(v) => updateLine(idx, { foilType: v })}
-                      />
-                    </td>
-                    <td className={lineCellPad}>
-                      <input
-                        type="text"
-                        value={ln.remarks}
-                        onChange={(e) => updateLine(idx, { remarks: e.target.value })}
-                        className={`w-full min-w-0 ${inputCls}`}
-                      />
-                    </td>
-                    <td className={`${lineCellPad} align-middle text-center`}>
-                      <span title={paperMeta.title} className="inline-flex justify-center">
-                        <FileText
-                          className={`h-3.5 w-3.5 ${paperMeta.iconClassName}`}
-                          strokeWidth={2}
-                          aria-hidden
-                        />
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                          {amount.toFixed(2)}
+                        </td>
+                        <td
+                          className={cn(lineCellPad, 'text-right align-middle')}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="inline-flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                            <button
+                              type="button"
+                              title={ln.directorPriority ? 'Clear director priority' : 'Director priority'}
+                              onClick={() => updateLine(idx, { directorPriority: !ln.directorPriority })}
+                              className={cn(
+                                'rounded-ds-sm p-1.5 transition-colors',
+                                ln.directorPriority
+                                  ? 'text-ds-warning hover:bg-ds-elevated'
+                                  : 'text-ds-ink-muted hover:bg-ds-elevated hover:text-ds-ink',
+                              )}
+                            >
+                              <Star
+                                className={cn('h-3.5 w-3.5', ln.directorPriority && 'fill-ds-warning text-ds-warning')}
+                                strokeWidth={2}
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              title="Duplicate"
+                              onClick={() => duplicateLine(idx)}
+                              className="rounded-ds-sm p-1.5 text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-brand"
+                            >
+                              <Copy className="h-3.5 w-3.5" strokeWidth={2} />
+                            </button>
+                            {lines.length > 1 ? (
+                              <button
+                                type="button"
+                                title="Remove"
+                                onClick={() => removeLine(idx)}
+                                className="rounded-ds-sm p-1.5 text-ds-error/80 transition hover:bg-ds-error/10"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </DataTableFrame>
         </div>
-      </div>
       </fieldset>
 
       <div
@@ -1311,117 +1362,31 @@ export default function EditPurchaseOrderPage() {
       </div>
 
       {/* Quick Create Carton panel */}
+      <PoNewLineItemDrawer
+        isOpen={!poSentToPlanning && detailLineIdx != null}
+        onClose={() => setDetailLineIdx(null)}
+        lineIndex={detailLineIdx ?? 0}
+        line={!poSentToPlanning && detailLineIdx != null ? (lines[detailLineIdx] ?? null) : null}
+        updateLine={updateLine}
+        fieldErrors={fieldErrors}
+        inputCls={inputCls}
+        inputClsGhost={inputClsGhost}
+        inputErr={inputErr}
+        poMono={poMono}
+        masterPasteSavingLine={masterPasteSavingLine}
+        masterPastePopoverLine={masterPastePopoverLine}
+        setMasterPastePopoverLine={setMasterPastePopoverLine}
+        onSavePastingToMaster={(i, cid, s) => void saveProductMasterPasting(i, cid, s)}
+      />
+
       <SlideOverPanel title="Quick Create Carton" isOpen={qcCartonOpen} onClose={() => { setQcCartonOpen(false); setActiveCartonLineIndex(null) }}>
-        <form onSubmit={submitQuickCreateCarton} className="space-y-3 text-sm">
-          <div>
-            <label className="block text-xs text-ds-ink-muted mb-1">Carton name<span className="text-red-400">*</span></label>
-            <input
-              type="text"
-              value={qcCarton.cartonName}
-              onChange={(e) => setQcCarton((prev) => ({ ...prev, cartonName: e.target.value }))}
-              className={`w-full px-3 py-2 rounded bg-card border ${qcCartonErrors.cartonName ? 'border-red-500' : 'border-border'} text-foreground`}
-            />
-            {qcCartonErrors.cartonName && <p className="text-xs text-red-400 mt-1">{qcCartonErrors.cartonName}</p>}
-          </div>
-          <div>
-            <label className="block text-xs text-ds-ink-muted mb-1">Artwork Code (AW)</label>
-            <input
-              type="text"
-              value={qcCarton.artworkCode}
-              onChange={(e) => setQcCarton((prev) => ({ ...prev, artworkCode: e.target.value.toUpperCase() }))}
-              className="w-full px-3 py-2 rounded bg-card border border-border text-foreground font-mono"
-              placeholder="e.g. AW-12345"
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">L</label>
-              <input type="number" step={0.01} value={qcCarton.sizeL} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeL: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
-            </div>
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">W</label>
-              <input type="number" step={0.01} value={qcCarton.sizeW} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeW: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
-            </div>
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">H</label>
-              <input type="number" step={0.01} value={qcCarton.sizeH} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeH: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">Rate</label>
-              <input type="number" step={0.01} value={qcCarton.rate} onChange={(e) => setQcCarton((prev) => ({ ...prev, rate: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
-            </div>
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">GST%</label>
-              <input type="number" min={0} max={28} value={qcCarton.gstPct} onChange={(e) => setQcCarton((prev) => ({ ...prev, gstPct: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-ds-ink-muted mb-1">Board grade</label>
-            <PackagingEnumCombobox
-              aria-label="Board grade"
-              options={BOARD_GRADES}
-              value={qcCarton.boardGrade || null}
-              onChange={(v) => setQcCarton((prev) => ({ ...prev, boardGrade: v ?? '' }))}
-              controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-              inputClassName="text-foreground placeholder:text-muted-foreground"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">GSM</label>
-              <input type="number" value={qcCarton.gsm} onChange={(e) => setQcCarton((prev) => ({ ...prev, gsm: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
-            </div>
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">Paper</label>
-              <PackagingEnumCombobox
-                aria-label="Paper / board"
-                options={PAPER_TYPES}
-                value={qcCarton.paperType || null}
-                onChange={(v) => setQcCarton((prev) => ({ ...prev, paperType: v ?? '' }))}
-                controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-                inputClassName="text-foreground placeholder:text-muted-foreground"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-ds-ink-muted mb-1">Coating / Emboss / Foil</label>
-            <div className="mb-1">
-              <PackagingEnumCombobox
-                aria-label="Coating"
-                options={COATING_TYPES}
-                value={qcCarton.coatingType || null}
-                onChange={(v) => setQcCarton((prev) => ({ ...prev, coatingType: v ?? '' }))}
-                controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-                inputClassName="text-foreground placeholder:text-muted-foreground"
-              />
-            </div>
-            <div className="mb-1">
-              <PackagingEnumCombobox
-                aria-label="Embossing"
-                options={EMBOSSING_TYPES}
-                value={qcCarton.embossingLeafing || null}
-                onChange={(v) => setQcCarton((prev) => ({ ...prev, embossingLeafing: v ?? '' }))}
-                controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-                inputClassName="text-foreground placeholder:text-muted-foreground"
-              />
-            </div>
-            <PackagingEnumCombobox
-              aria-label="Foil"
-              options={FOIL_TYPES}
-              value={qcCarton.foilType || null}
-              onChange={(v) => setQcCarton((prev) => ({ ...prev, foilType: v ?? '' }))}
-              controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-              inputClassName="text-foreground placeholder:text-muted-foreground"
-            />
-          </div>
-          <div className="flex justify-end pt-2">
-            <button type="submit" disabled={qcCartonSaving} className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground text-sm font-medium">
-              {qcCartonSaving ? 'Saving…' : 'Save Carton'}
-            </button>
-          </div>
-        </form>
+        <PoQuickCreateCartonForm
+          values={qcCarton}
+          setValues={setQcCarton}
+          errors={qcCartonErrors}
+          saving={qcCartonSaving}
+          onSubmit={submitQuickCreateCarton}
+        />
       </SlideOverPanel>
     </form>
   )

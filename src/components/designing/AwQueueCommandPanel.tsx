@@ -1,9 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
 import { ChevronDown, Package } from 'lucide-react'
 import clsx from 'clsx'
+import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { toast } from 'sonner'
 import {
   AW_PO_STATUS,
@@ -336,60 +336,57 @@ export function AwQueueCommandPanel({
                 {busy === 'partial' ? 'Logging…' : 'Log partial push'}
               </button>
             ) : null}
-            <Dialog.Root open={ledgerOpen} onOpenChange={setLedgerOpen}>
-              <Dialog.Trigger asChild>
+            <button
+              type="button"
+              onClick={() => setLedgerOpen(true)}
+              className="inline-flex w-full items-center justify-center gap-1 rounded border border-ds-line/50 py-1 text-[10px] text-ds-ink-muted hover:bg-ds-card"
+            >
+              Push history ({ledger.length})
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            <SlideOverPanel
+              title="Push ledger"
+              isOpen={ledgerOpen}
+              onClose={() => setLedgerOpen(false)}
+              zIndexClass="z-[95]"
+              backdropClassName="bg-ds-main/50 backdrop-blur-[1.5px]"
+              panelClassName="border-l border-ds-line/50 bg-ds-card text-ds-ink shadow-2xl"
+              footer={
                 <button
                   type="button"
-                  className="inline-flex w-full items-center justify-center gap-1 rounded border border-ds-line/50 py-1 text-[10px] text-ds-ink-muted hover:bg-ds-card"
+                  className="w-full rounded-ds-sm border border-ds-line/50 py-2 text-[11px] text-ds-ink-muted transition hover:bg-ds-elevated"
+                  onClick={() => setLedgerOpen(false)}
                 >
-                  Push history ({ledger.length})
-                  <ChevronDown className="h-3 w-3" />
+                  Close
                 </button>
-              </Dialog.Trigger>
-              <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 z-[95] bg-background/70" />
-                <Dialog.Content className="fixed left-1/2 top-1/2 z-[96] max-h-[min(70vh,28rem)] w-[min(96vw,24rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border border-ds-line/50 bg-[#0a0a0a] p-0 shadow-xl">
-                  <div className="border-b border-ds-line/40 px-3 py-2">
-                    <Dialog.Title className="text-sm font-semibold text-ds-ink">Push ledger</Dialog.Title>
-                    <Dialog.Description className="text-[11px] text-ds-ink-faint">
-                      Timestamp · batches · job card · operator
-                    </Dialog.Description>
-                  </div>
-                  <ul className="max-h-[50vh] overflow-auto divide-y divide-ds-line/30 text-[10px]">
-                    {ledger.length === 0 ? (
-                      <li className="px-3 py-4 text-ds-ink-faint">No entries yet.</li>
-                    ) : (
-                      [...ledger]
-                        .slice()
-                        .reverse()
-                        .map((e, i) => (
-                          <li key={`${e.at}-${i}`} className="px-3 py-2 space-y-0.5">
-                            <div className={`text-ds-ink-muted ${mono}`}>{e.at}</div>
-                            <div className="text-ds-ink-muted">
-                              <span className="text-ds-warning">{e.batchCount}</span> batches
-                              {e.jobCardNumber != null ? (
-                                <span>
-                                  {' '}
-                                  · JC #{e.jobCardNumber}
-                                </span>
-                              ) : null}
-                              {e.operatorName ? <span> · {e.operatorName}</span> : null}
-                            </div>
-                          </li>
-                        ))
-                    )}
-                  </ul>
-                  <Dialog.Close asChild>
-                    <button
-                      type="button"
-                      className="w-full border-t border-ds-line/40 py-2 text-[11px] text-ds-ink-muted hover:bg-ds-card"
-                    >
-                      Close
-                    </button>
-                  </Dialog.Close>
-                </Dialog.Content>
-              </Dialog.Portal>
-            </Dialog.Root>
+              }
+            >
+              <p className="text-[11px] text-ds-ink-faint">Timestamp · batches · job card · operator</p>
+              <ul className="mt-2 max-h-[50vh] overflow-auto divide-y divide-ds-line/30 text-[10px] sm:max-h-[min(60vh,28rem)]">
+                {ledger.length === 0 ? (
+                  <li className="py-4 text-ds-ink-faint">No entries yet.</li>
+                ) : (
+                  [...ledger]
+                    .slice()
+                    .reverse()
+                    .map((e, i) => (
+                      <li key={`${e.at}-${i}`} className="py-2 space-y-0.5">
+                        <div className={`text-ds-ink-muted ${mono}`}>{e.at}</div>
+                        <div className="text-ds-ink-muted">
+                          <span className="text-ds-warning">{e.batchCount}</span> batches
+                          {e.jobCardNumber != null ? (
+                            <span>
+                              {' '}
+                              · JC #{e.jobCardNumber}
+                            </span>
+                          ) : null}
+                          {e.operatorName ? <span> · {e.operatorName}</span> : null}
+                        </div>
+                      </li>
+                    ))
+                )}
+              </ul>
+            </SlideOverPanel>
           </div>
 
           <div className="rounded-lg border border-ds-line/40 bg-background p-2 space-y-2">

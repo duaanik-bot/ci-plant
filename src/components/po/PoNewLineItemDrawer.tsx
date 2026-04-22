@@ -189,7 +189,6 @@ export function PoNewLineItemDrawer({
       title={line ? `Line ${lineIndex + 1} — ${line.cartonName.trim() || 'New line'}` : 'Line item'}
       isOpen={isOpen}
       onClose={onClose}
-      widthClass="w-[min(40vw,32rem)] max-w-full"
       footer={
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>
@@ -201,7 +200,7 @@ export function PoNewLineItemDrawer({
       <div
         ref={panelRootRef}
         onKeyDown={onPanelKeyDown}
-        className="space-y-4 text-sm"
+        className="space-y-6 text-sm"
         data-po-line-drawer
         role="dialog"
         aria-modal="true"
@@ -211,13 +210,7 @@ export function PoNewLineItemDrawer({
           <p className="text-sm text-ds-ink-faint">No line selected.</p>
         ) : (
           <>
-            <p className="text-[10px] leading-relaxed text-ds-ink-faint">
-              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Tab</kbd> fields ·{' '}
-              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Enter</kbd> next ·{' '}
-              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Ctrl</kbd>+
-              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Enter</kbd> done ·{' '}
-              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Ctrl</kbd>+→ section
-            </p>
+            <p className="text-[10px] text-ds-ink-faint">Tab / Enter between fields · Ctrl+Enter to finish</p>
 
             <CardSection id="po-sec-material" title="Material">
               <div>
@@ -334,7 +327,7 @@ export function PoNewLineItemDrawer({
               </div>
             </CardSection>
 
-            <CardSection id="po-sec-cost" title="Costing" className="space-y-4">
+            <CardSection id="po-sec-cost" title="Costing" className="space-y-6">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className={labelKey}>Quantity</label>

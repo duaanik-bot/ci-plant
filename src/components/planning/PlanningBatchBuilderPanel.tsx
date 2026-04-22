@@ -66,9 +66,8 @@ export function PlanningBatchBuilderPanel({
       isOpen={isOpen}
       onClose={onClose}
       title="Batch builder"
-      widthClass="max-w-lg"
-      backdropClassName="bg-background/60"
-      panelClassName="border-l border-border bg-card text-card-foreground shadow-2xl"
+      backdropClassName="bg-ds-main/50 backdrop-blur-[1.5px]"
+      panelClassName="border-l border-ds-line/80 bg-ds-card text-ds-ink shadow-2xl"
       zIndexClass="z-[60]"
       footer={
         <div className="space-y-2">

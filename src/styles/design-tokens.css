@@ -20,4 +20,10 @@
   --ds-radius-sm: 6px;
   --ds-radius-md: 10px;
   --ds-radius-lg: 12px;
+  /* Depth (mirrors tailwind `shadow-ds-depth`) */
+  --ds-shadow-elevated: 0 10px 30px rgba(0, 0, 0, 0.25);
+  /* Subtle top wash on main canvas */
+  --ds-gradient-app-top: linear-gradient(180deg, rgba(19, 26, 43, 0.55) 0%, rgba(10, 15, 28, 0) 38%),
+    radial-gradient(ellipse 100% 50% at 50% 0%, rgba(99, 102, 241, 0.06), transparent 55%);
+  --ds-gradient-drawer: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0) 40%);
 }

@@ -6,16 +6,20 @@
 
 @layer components {
   .ds-focus {
-    @apply transition duration-200 ease-out;
+    @apply transition-[border-color,box-shadow,transform] duration-150 ease-out;
   }
   .ds-focus:focus-visible {
     @apply border-ds-brand/80 outline-none ring-2 ring-ds-brand/20;
   }
   .ds-input {
-    @apply ds-focus w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/60 px-3 py-2.5 text-[15px] text-ds-ink shadow-sm placeholder:text-ds-ink-faint;
+    @apply w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/60 px-3 py-2.5 text-[15px] text-ds-ink shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out placeholder:text-ds-ink-faint;
+  }
+  /** Tabular numerals for amounts and counts (line totals use .ds-typo-total for green). */
+  .ds-input-num {
+    @apply tabular-nums tracking-tight text-ds-ink;
   }
   .ds-input:focus {
-    @apply border-ds-brand/60 ring-1 ring-ds-brand/15;
+    @apply border-ds-brand/50 shadow-ds-focus outline-none ring-0;
   }
   .ds-typo-label {
     @apply text-[12px] font-medium leading-snug text-ds-ink-muted;
@@ -87,7 +91,9 @@
     @apply border-ds-line/20;
   }
   body {
-    @apply bg-ds-main text-ds-ink antialiased;
+    @apply min-h-screen text-ds-ink antialiased;
+    background-color: var(--ds-bg-main);
+    background-image: var(--ds-gradient-app-top);
   }
 }
 

@@ -4,14 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import {
-  COATING_TYPES,
-  EMBOSSING_TYPES,
-  FOIL_TYPES,
-  PAPER_TYPES,
-  BOARD_GRADES,
-} from '@/lib/constants'
-import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import {
   mapApiRowToPoCarton,
@@ -23,7 +15,7 @@ import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { parseCartonSizeToDims } from '@/lib/die-hub-dimensions'
 import { PastingStyle } from '@prisma/client'
 import { PoNewLineItemDrawer } from '@/components/po/PoNewLineItemDrawer'
-import { PoLinePastingStyleCell } from '@/components/po/PoLinePastingStyleCell'
+import { PoQuickCreateCartonForm } from '@/components/po/PoQuickCreateCartonForm'
 import { DeliveryDateInput } from '@/components/po/DeliveryDateInput'
 import { updateProductMasterStyle } from '@/lib/update-product-master-style'
 import { cn } from '@/lib/cn'
@@ -442,17 +434,6 @@ export default function NewPurchaseOrderPage() {
   const [qcCartonErrors, setQcCartonErrors] = useState<Record<string, string>>({})
   const [qcCartonSaving, setQcCartonSaving] = useState(false)
 
-  /** Inline row quick-create (Size / GSM / Pasting) when master search has no hit. */
-  const [inlineCartonLineIndex, setInlineCartonLineIndex] = useState<number | null>(null)
-  const [inlineCartonForm, setInlineCartonForm] = useState({
-    sizeL: '',
-    sizeW: '',
-    sizeH: '',
-    gsm: '',
-    pastingStyle: PastingStyle.LOCK_BOTTOM as PastingStyle,
-  })
-  const [inlineCartonSaving, setInlineCartonSaving] = useState(false)
-
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [customerCartons, setCustomerCartons] = useState<CartonOption[]>([])
   const [customerCartonsLoading, setCustomerCartonsLoading] = useState(false)
@@ -548,7 +529,6 @@ export default function NewPurchaseOrderPage() {
     if (!customerId) {
       setCustomerCartons([])
       setCustomerCartonsLoading(false)
-      setInlineCartonLineIndex(null)
       return
     }
     let cancelled = false
@@ -630,7 +610,6 @@ export default function NewPurchaseOrderPage() {
     })
     if (switchingCustomer && lines.some(hasLineInput)) {
       setLines([defaultLine()])
-      setInlineCartonLineIndex(null)
       toast.info('Line items were reset for the newly selected customer.')
     }
   }
@@ -732,11 +711,6 @@ export default function NewPurchaseOrderPage() {
   }
 
   const removeLine = (idx: number) => {
-    setInlineCartonLineIndex((openIdx) => {
-      if (openIdx === idx) return null
-      if (openIdx != null && openIdx > idx) return openIdx - 1
-      return openIdx
-    })
     setMasterPastePopoverLine((openIdx) => {
       if (openIdx === idx) return null
       if (openIdx != null && openIdx > idx) return openIdx - 1
@@ -771,10 +745,6 @@ export default function NewPurchaseOrderPage() {
         ghostFromMaster: { ...ln.ghostFromMaster },
       }
       return [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)]
-    })
-    setInlineCartonLineIndex((open) => {
-      if (open === null) return null
-      return open > idx ? open + 1 : open
     })
     setMasterPastePopoverLine((open) => {
       if (open === null) return null
@@ -1076,86 +1046,6 @@ export default function NewPurchaseOrderPage() {
     }
   }
 
-  const submitInlineCreateCarton = async (lineIndex: number) => {
-    if (!customerId) {
-      toast.error('Select a customer first')
-      return
-    }
-    const line = lines[lineIndex]
-    if (!line?.cartonName.trim()) {
-      toast.error('Enter a carton name first')
-      return
-    }
-    const l = Number(inlineCartonForm.sizeL)
-    const w = Number(inlineCartonForm.sizeW)
-    const h = Number(inlineCartonForm.sizeH)
-    const gsm = Number(inlineCartonForm.gsm)
-    if (!Number.isFinite(l) || l <= 0 || !Number.isFinite(w) || w <= 0 || !Number.isFinite(h) || h <= 0) {
-      toast.error('Enter valid length, width, and height (mm).')
-      return
-    }
-    if (!Number.isFinite(gsm) || gsm < 150 || gsm > 600) {
-      toast.error('GSM must be between 150 and 600.')
-      return
-    }
-    if (
-      inlineCartonForm.pastingStyle !== PastingStyle.LOCK_BOTTOM &&
-      inlineCartonForm.pastingStyle !== PastingStyle.BSO
-    ) {
-      toast.error('Select Lock Bottom or BSO.')
-      return
-    }
-    setInlineCartonSaving(true)
-    try {
-      const body: Record<string, unknown> = {
-        cartonName: line.cartonName.trim(),
-        customerId,
-        gsm: Math.round(gsm),
-        finishedLength: l,
-        finishedWidth: w,
-        finishedHeight: h,
-        pastingStyle: inlineCartonForm.pastingStyle,
-        gstPct: 5,
-      }
-      const res = await fetch('/api/masters/cartons', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        toast.error(data?.error ?? 'Failed to create product')
-        return
-      }
-      const created = data as CartonOption & {
-        finishedLength?: number
-        finishedWidth?: number
-        finishedHeight?: number
-        pastingStyle?: PastingStyle | null
-        specialInstructions?: string | null
-      }
-      const formatted = poCartonOptionFromMasterCreateResponse(created, {})
-      applyCartonToLine(lineIndex, formatted)
-      setInlineCartonLineIndex(null)
-      setInlineCartonForm({
-        sizeL: '',
-        sizeW: '',
-        sizeH: '',
-        gsm: '',
-        pastingStyle: PastingStyle.LOCK_BOTTOM,
-      })
-      setCustomerCartons((prev) => {
-        if (prev.some((p) => p.id === formatted.id)) return prev
-        return [...prev, formatted].sort((a, b) => a.cartonName.localeCompare(b.cartonName))
-      })
-      toast.success('Product master created and line updated.')
-    } catch {
-      toast.error('Failed to create product')
-    } finally {
-      setInlineCartonSaving(false)
-    }
-  }
-
   const inputCls =
     'ds-input w-full min-w-0 [color-scheme:dark] border-ds-line/80 bg-ds-elevated/80 text-[15px] text-ds-ink placeholder:text-ds-ink-faint'
   const inputClsGhost =
@@ -1428,14 +1318,9 @@ export default function NewPurchaseOrderPage() {
                           onLineChange={(patch) => updateLine(idx, patch)}
                           onSelect={(carton) => applyCartonToLine(idx, carton)}
                           onCreate={(suggestedName) => {
-                            setInlineCartonLineIndex(idx)
-                            setInlineCartonForm({
-                              sizeL: '',
-                              sizeW: '',
-                              sizeH: '',
-                              gsm: '',
-                              pastingStyle: PastingStyle.LOCK_BOTTOM,
-                            })
+                            setActiveCartonLineIndex(idx)
+                            setQcCarton((prev) => ({ ...prev, cartonName: suggestedName.trim() }))
+                            setQcCartonOpen(true)
                             setLines((prev) => {
                               const cur = prev[idx]
                               if (!cur) return prev
@@ -1445,120 +1330,6 @@ export default function NewPurchaseOrderPage() {
                             })
                           }}
                         />
-                        {inlineCartonLineIndex === idx ? (
-                          <div className="mt-2 space-y-2 rounded-ds-md border border-ds-line/80 bg-ds-elevated/50 p-3 text-[10px]">
-                            <div className="font-semibold text-ds-ink">New product · save to master</div>
-                            <div className="grid grid-cols-3 gap-1.5">
-                              <div>
-                                <span className="text-ds-ink-faint">L</span>
-                                <input
-                                  type="number"
-                                  step={0.01}
-                                  value={inlineCartonForm.sizeL}
-                                  onChange={(e) => setInlineCartonForm((p) => ({ ...p, sizeL: e.target.value }))}
-                                  className={inputCls}
-                                  placeholder="mm"
-                                />
-                              </div>
-                              <div>
-                                <span className="text-ds-ink-faint">W</span>
-                                <input
-                                  type="number"
-                                  step={0.01}
-                                  value={inlineCartonForm.sizeW}
-                                  onChange={(e) => setInlineCartonForm((p) => ({ ...p, sizeW: e.target.value }))}
-                                  className={inputCls}
-                                  placeholder="mm"
-                                />
-                              </div>
-                              <div>
-                                <span className="text-ds-ink-faint">H</span>
-                                <input
-                                  type="number"
-                                  step={0.01}
-                                  value={inlineCartonForm.sizeH}
-                                  onChange={(e) => setInlineCartonForm((p) => ({ ...p, sizeH: e.target.value }))}
-                                  className={inputCls}
-                                  placeholder="mm"
-                                />
-                              </div>
-                            </div>
-                            <div>
-                              <span className="text-ds-ink-faint">GSM</span>
-                              <input
-                                type="number"
-                                value={inlineCartonForm.gsm}
-                                onChange={(e) => setInlineCartonForm((p) => ({ ...p, gsm: e.target.value }))}
-                                className={inputCls}
-                              />
-                            </div>
-                            <div>
-                              <span className="text-ds-ink-faint">Pasting</span>
-                              <select
-                                value={inlineCartonForm.pastingStyle}
-                                onChange={(e) =>
-                                  setInlineCartonForm((p) => ({
-                                    ...p,
-                                    pastingStyle: e.target.value as PastingStyle,
-                                  }))
-                                }
-                                className={inputCls}
-                              >
-                                <option value={PastingStyle.LOCK_BOTTOM}>Lock Bottom</option>
-                                <option value={PastingStyle.BSO}>BSO</option>
-                              </select>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                type="button"
-                                disabled={inlineCartonSaving}
-                                onClick={() => void submitInlineCreateCarton(idx)}
-                                className="px-2 py-1 text-[10px]"
-                              >
-                                {inlineCartonSaving ? 'Saving…' : 'Save to master & apply'}
-                              </Button>
-                              <button
-                                type="button"
-                                disabled={inlineCartonSaving}
-                                onClick={() => {
-                                  setInlineCartonLineIndex(null)
-                                  setActiveCartonLineIndex(idx)
-                                  setQcCarton((p) => ({ ...p, cartonName: ln.cartonName.trim() }))
-                                  setQcCartonOpen(true)
-                                }}
-                                className="text-ds-ink-muted underline transition hover:text-ds-ink"
-                              >
-                                Full form
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
-                        <div
-                          className="mt-3 max-w-md border-t border-ds-line/30 pt-2 data-skip-po-enter-chain"
-                          data-line-stop
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <PoLinePastingStyleCell
-                            lineIndex={idx}
-                            cartonId={ln.cartonId}
-                            pastingStyle={ln.pastingStyle}
-                            masterPastingStyleMissing={ln.masterPastingStyleMissing}
-                            ghostFromMaster={ln.ghostFromMaster.pasting}
-                            pasteErr={fieldErrors[`line${idx}_pasting`]}
-                            inputCls={`w-full min-w-0 text-xs font-normal text-ds-ink-muted ${inputCls}`}
-                            inputErr={inputErr}
-                            savingToMaster={masterPasteSavingLine === idx}
-                            popoverOpenForLine={masterPastePopoverLine}
-                            setPopoverOpenForLine={setMasterPastePopoverLine}
-                            onPastingSelectChange={(value) =>
-                              updateLine(idx, {
-                                pastingStyle: value,
-                                ghostFromMaster: { ...ln.ghostFromMaster, pasting: false },
-                              })
-                            }
-                            onSaveToMaster={(style) => void saveProductMasterPasting(idx, ln.cartonId, style)}
-                          />
-                        </div>
                       </div>
                     </td>
                     <td
@@ -1617,10 +1388,7 @@ export default function NewPurchaseOrderPage() {
                         } ${tableInputPrimary} ${poMono}`}
                       />
                     </td>
-                    <td
-                      className={`${lineCellPad} text-right align-top ${dataTable.td.money} ${poMono} text-base font-semibold`}
-                      title={Number.isFinite(qty) && Number.isFinite(rate) ? `Qty × rate (ex-GST) before tax` : ''}
-                    >
+                    <td className={`${lineCellPad} text-right align-top ${dataTable.td.moneyTotal} ${poMono}`}>
                       {amount.toFixed(2)}
                     </td>
                     <td
@@ -1741,114 +1509,13 @@ export default function NewPurchaseOrderPage() {
       </SlideOverPanel>
 
       <SlideOverPanel title="Quick Create Carton" isOpen={qcCartonOpen} onClose={() => { setQcCartonOpen(false); setActiveCartonLineIndex(null) }}>
-        <form onSubmit={submitQuickCreateCarton} className="space-y-3 text-sm">
-          <div>
-            <label className="block text-xs text-ds-ink-muted mb-1">Carton name<span className="text-red-400">*</span></label>
-            <input
-              type="text"
-              value={qcCarton.cartonName}
-              onChange={(e) => setQcCarton((prev) => ({ ...prev, cartonName: e.target.value }))}
-              className={`w-full px-3 py-2 rounded bg-ds-elevated border ${qcCartonErrors.cartonName ? 'border-red-500' : 'border-ds-line/60'} text-foreground`}
-            />
-            {qcCartonErrors.cartonName && <p className="text-xs text-red-400 mt-1">{qcCartonErrors.cartonName}</p>}
-          </div>
-          <div>
-            <label className="block text-xs text-ds-ink-muted mb-1">Artwork Code (AW)</label>
-            <input
-              type="text"
-              value={qcCarton.artworkCode}
-              onChange={(e) => setQcCarton((prev) => ({ ...prev, artworkCode: e.target.value.toUpperCase() }))}
-              className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground font-mono"
-              placeholder="e.g. AW-12345"
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">L</label>
-              <input type="number" step={0.01} value={qcCarton.sizeL} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeL: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground" />
-            </div>
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">W</label>
-              <input type="number" step={0.01} value={qcCarton.sizeW} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeW: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground" />
-            </div>
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">H</label>
-              <input type="number" step={0.01} value={qcCarton.sizeH} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeH: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">Rate</label>
-              <input type="number" step={0.01} value={qcCarton.rate} onChange={(e) => setQcCarton((prev) => ({ ...prev, rate: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground" />
-            </div>
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">GST%</label>
-              <input type="number" min={0} max={28} value={qcCarton.gstPct} onChange={(e) => setQcCarton((prev) => ({ ...prev, gstPct: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-ds-ink-muted mb-1">Board grade</label>
-            <PackagingEnumCombobox
-              aria-label="Board grade"
-              options={BOARD_GRADES}
-              value={qcCarton.boardGrade || null}
-              onChange={(v) => setQcCarton((prev) => ({ ...prev, boardGrade: v ?? '' }))}
-              controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-              inputClassName="text-foreground placeholder:text-ds-ink-faint"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">GSM</label>
-              <input type="number" value={qcCarton.gsm} onChange={(e) => setQcCarton((prev) => ({ ...prev, gsm: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground" />
-            </div>
-            <div>
-              <label className="block text-xs text-ds-ink-muted mb-1">Paper</label>
-              <PackagingEnumCombobox
-                aria-label="Paper / board"
-                options={PAPER_TYPES}
-                value={qcCarton.paperType || null}
-                onChange={(v) => setQcCarton((prev) => ({ ...prev, paperType: v ?? '' }))}
-                controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-                inputClassName="text-foreground placeholder:text-ds-ink-faint"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-ds-ink-muted mb-1">Coating / Emboss / Foil</label>
-            <div className="mb-1">
-              <PackagingEnumCombobox
-                aria-label="Coating"
-                options={COATING_TYPES}
-                value={qcCarton.coatingType || null}
-                onChange={(v) => setQcCarton((prev) => ({ ...prev, coatingType: v ?? '' }))}
-                controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-                inputClassName="text-foreground placeholder:text-ds-ink-faint"
-              />
-            </div>
-            <div className="mb-1">
-              <PackagingEnumCombobox
-                aria-label="Embossing"
-                options={EMBOSSING_TYPES}
-                value={qcCarton.embossingLeafing || null}
-                onChange={(v) => setQcCarton((prev) => ({ ...prev, embossingLeafing: v ?? '' }))}
-                controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-                inputClassName="text-foreground placeholder:text-ds-ink-faint"
-              />
-            </div>
-            <PackagingEnumCombobox
-              aria-label="Foil"
-              options={FOIL_TYPES}
-              value={qcCarton.foilType || null}
-              onChange={(v) => setQcCarton((prev) => ({ ...prev, foilType: v ?? '' }))}
-              controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
-              inputClassName="text-foreground placeholder:text-ds-ink-faint"
-            />
-          </div>
-          <div className="flex justify-end pt-2">
-            <button type="submit" disabled={qcCartonSaving} className="ci-btn-save-industrial px-5 py-2">Save Carton</button>
-          </div>
-        </form>
+        <PoQuickCreateCartonForm
+          values={qcCarton}
+          setValues={setQcCarton}
+          errors={qcCartonErrors}
+          saving={qcCartonSaving}
+          onSubmit={submitQuickCreateCarton}
+        />
       </SlideOverPanel>
     </form>
   )

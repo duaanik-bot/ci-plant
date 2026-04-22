@@ -17,7 +17,11 @@ export const enterpriseTbodyClass =
 
 /** Body row — hover scan line */
 export const enterpriseTrClass =
-  'transition-colors duration-200 hover:bg-neutral-50 dark:hover:bg-ds-elevated/25'
+  'transition-[background-color,box-shadow] duration-150 ease-out hover:bg-neutral-50 dark:hover:bg-ds-elevated/30'
+
+/** Selected / active row — left brand rail (use on `<tr>`) */
+export const enterpriseTrSelectedClass =
+  'dark:bg-ds-elevated/35 dark:shadow-[inset_3px_0_0_0_#6366F1] dark:ring-1 dark:ring-inset dark:ring-ds-brand/15'
 
 /** Header cell */
 export const enterpriseThClass =

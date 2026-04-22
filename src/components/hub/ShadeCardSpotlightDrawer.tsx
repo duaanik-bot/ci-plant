@@ -336,7 +336,7 @@ export function ShadeCardSpotlightDrawer({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[70] bg-background/60 backdrop-blur-[2px]" />
         <Dialog.Content
-          className={`fixed z-[70] right-0 top-0 flex h-full w-full max-w-lg flex-col border-l border-ds-line/40 bg-background shadow-2xl outline-none ${mono}`}
+          className={`fixed z-[70] right-0 top-0 flex h-full w-full min-w-0 max-w-full flex-col border-l border-ds-line/40 bg-background shadow-2xl outline-none animate-slide-over-enter sm:max-w-[min(40vw,36rem)] sm:w-[40vw] ${mono}`}
         >
           <Dialog.Title className="sr-only">
             {row ? `Product DNA — ${productTitle}` : 'Shade card'}

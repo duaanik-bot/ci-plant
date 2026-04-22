@@ -23,6 +23,14 @@ const config: Config = {
         'ds-md': '10px',
         'ds-lg': '12px',
       },
+      boxShadow: {
+        /** Premium depth — cards, shells, table wraps */
+        'ds-depth': '0 10px 30px rgba(0,0,0,0.25)',
+        'ds-depth-sm': '0 4px 16px rgba(0,0,0,0.2)',
+        'ds-drawer': '0 10px 30px rgba(0,0,0,0.25)',
+        'ds-drawer-foot': '0 -8px 28px rgba(0,0,0,0.22)',
+        'ds-focus': '0 0 0 3px rgba(99, 102, 241, 0.18)',
+      },
       keyframes: {
         'po-age-alert': {
           '0%, 100%': { opacity: '1' },
@@ -36,11 +44,17 @@ const config: Config = {
           from: { transform: 'translateX(100%)' },
           to: { transform: 'translateX(0)' },
         },
+        /** App-standard right rail (180–220ms, ease-out) */
+        'ds-drawer-slide': {
+          from: { transform: 'translateX(100%)' },
+          to: { transform: 'translateX(0)' },
+        },
       },
       animation: {
         'po-age-alert': 'po-age-alert 2.2s ease-in-out infinite',
         'industrial-age-pulse': 'industrial-age-pulse 2.2s ease-in-out infinite',
         'slide-over-enter': 'slide-over-enter 200ms ease-in-out both',
+        'ds-drawer-slide': 'ds-drawer-slide 200ms ease-out both',
       },
       colors: {
         border: 'hsl(var(--border))',

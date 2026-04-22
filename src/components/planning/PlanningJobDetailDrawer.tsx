@@ -12,7 +12,7 @@ import {
 } from '@/lib/master-enums'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
-import { Drawer } from '@/components/design-system/Drawer'
+import { StandardDrawer } from '@/components/design-system/StandardDrawer'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -194,57 +194,59 @@ export function PlanningJobDetailDrawer({
   const comboInput = 'text-sm text-ds-ink'
 
   return (
-    <Drawer
+    <StandardDrawer
       isOpen={open}
       onClose={onClose}
       title={<span className="truncate text-ds-ink" title={line.cartonName}>{line.cartonName}</span>}
-      widthClass="w-[min(40vw,32rem)] max-w-full"
-      footer={
-        <div className="flex w-full gap-2">
-          <Button type="button" variant="secondary" className="min-h-[40px] flex-1" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="button" className="min-h-[40px] flex-1" disabled={saving} onClick={handleSave}>
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
+      metadata={
+        <div className="space-y-2">
+          <p className="text-[12px] text-ds-ink-faint">
+            {line.po.poNumber} · {line.planningStatus} · {line.po.customer.name}
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {line.po.isPriority ? (
+              <Badge
+                tone="warning"
+                className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
+              >
+                <Star className="h-3 w-3 fill-current" aria-hidden />
+                PO
+              </Badge>
+            ) : null}
+            {line.directorPriority ? (
+              <Badge tone="brand" className="text-[10px]">
+                Line priority
+              </Badge>
+            ) : null}
+            {line.directorHold ? (
+              <Badge tone="warning" className="text-[10px]">
+                On hold
+              </Badge>
+            ) : null}
+            {line.cartonId && onViewProductDetail ? (
+              <button
+                type="button"
+                onClick={onViewProductDetail}
+                className="text-[10px] font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
+              >
+                Product sheet
+              </button>
+            ) : null}
+          </div>
         </div>
       }
+      secondaryAction={{ label: 'Cancel', onClick: onClose }}
+      primaryAction={{
+        label: 'Save',
+        loadingLabel: 'Saving…',
+        onClick: () => {
+          void handleSave()
+        },
+        disabled: saving,
+        loading: saving,
+      }}
     >
-      <div className="space-y-6 text-sm text-ds-ink" aria-label="Job detail">
-        <p className="text-[11px] text-ds-ink-faint">
-          {line.po.poNumber} · {line.planningStatus} · {line.po.customer.name}
-        </p>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {line.po.isPriority ? (
-            <Badge
-              tone="warning"
-              className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
-            >
-              <Star className="h-3 w-3 fill-current" aria-hidden />
-              PO
-            </Badge>
-          ) : null}
-          {line.directorPriority ? (
-            <Badge tone="brand" className="text-[10px]">
-              Line priority
-            </Badge>
-          ) : null}
-          {line.directorHold ? (
-            <Badge tone="warning" className="text-[10px]">
-              On hold
-            </Badge>
-          ) : null}
-          {line.cartonId && onViewProductDetail ? (
-            <button
-              type="button"
-              onClick={onViewProductDetail}
-              className="text-[10px] font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
-            >
-              Product sheet
-            </button>
-          ) : null}
-        </div>
-
+      <div className="space-y-5 text-sm text-ds-ink" aria-label="Job detail">
         <CardSection title="Material" id="plan-drawer-material">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -407,7 +409,7 @@ export function PlanningJobDetailDrawer({
           </div>
         </CardSection>
 
-        <CardSection title="Costing" id="plan-drawer-costing" className="border-ds-brand/20 bg-ds-elevated/50">
+        <CardSection title="Costing" id="plan-drawer-costing" className="border-ds-success/25 bg-ds-elevated/40">
           <div className="space-y-4">
             <div>
               <p className="ds-typo-label">Rate (per unit, ex-GST)</p>
@@ -429,9 +431,9 @@ export function PlanningJobDetailDrawer({
                 onBlur={() => void onSaveLine(line.id, { rate: line.rate ?? null })}
               />
             </div>
-            <div className="rounded-ds-md border border-ds-line/60 bg-ds-main/40 p-4">
+            <div className="rounded-ds-md border border-ds-success/30 bg-ds-success/5 p-4 md:p-5">
               <p className="text-[12px] font-medium text-ds-ink-muted">Line amount (ex-GST)</p>
-              <p className="ds-typo-total mt-2">
+              <p className="mt-2 text-2xl font-bold leading-tight text-ds-success tabular-nums md:text-[26px]">
                 ₹ {amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
@@ -530,6 +532,6 @@ export function PlanningJobDetailDrawer({
           </Button>
         </div>
       </div>
-    </Drawer>
+    </StandardDrawer>
   )
 }

@@ -14,7 +14,7 @@ const cellBase = `align-middle border-b border-ds-line/30 ${dataTable.td.base}`
 const filterGhost = dataTable.filter.input
 
 const inp =
-  'h-9 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[14px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-200 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:ring-2 focus:ring-ds-brand/20'
+  'h-9 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[14px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
 
 function rowClickTargetOk(target: EventTarget | null): boolean {
   if (!target || !(target instanceof HTMLElement)) return true

@@ -1,9 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
-import { AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
+import { AlertTriangle } from 'lucide-react'
+import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 
 export type AwRibbonStep = { id: string; label: string; status: 'done' | 'current' | 'pending' }
 
@@ -40,47 +40,40 @@ export function AwQueueDirectorStrip({
             Edit specs
           </label>
           {showRecallJob ? (
-            <Dialog.Root open={recallOpen} onOpenChange={setRecallOpen}>
-              <Dialog.Trigger asChild>
-                <button
-                  type="button"
-                  className="rounded-md bg-ds-warning hover:bg-ds-warning px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
-                  disabled={recallBusy}
-                >
-                  {recallBusy ? 'Recalling…' : 'Recall job'}
-                </button>
-              </Dialog.Trigger>
-              <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 z-[100] bg-background/70 data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0" />
-                <Dialog.Content
-                  className={clsx(
-                    'fixed left-1/2 top-1/2 z-[101] w-[min(100vw-1.5rem,24rem)] -translate-x-1/2 -translate-y-1/2',
-                    'rounded-lg border border-ds-line/50 bg-[#0a0a0a] p-4 shadow-xl',
-                    'data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0 zoom-in-95',
-                  )}
-                >
-                  <Dialog.Title className="text-sm font-semibold text-ds-ink flex items-center gap-2">
+            <>
+              <button
+                type="button"
+                className="rounded-md bg-ds-warning hover:bg-ds-warning px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
+                disabled={recallBusy}
+                onClick={() => setRecallOpen(true)}
+              >
+                {recallBusy ? 'Recalling…' : 'Recall job'}
+              </button>
+              <SlideOverPanel
+                title={
+                  <span className="inline-flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-ds-warning shrink-0" aria-hidden />
                     Recall job from hubs?
-                  </Dialog.Title>
-                  <Dialog.Description className="mt-2 text-xs text-ds-ink-muted leading-relaxed">
-                    This reverses Plate Hub finalization, cancels the plate requirement, and resets hub
-                    handshakes and dispatch stamps to draft. Use only when you must pull the job back for
-                    edits.
-                  </Dialog.Description>
-                  <div className="mt-4 flex justify-end gap-2">
-                    <Dialog.Close asChild>
-                      <button
-                        type="button"
-                        className="rounded-md border border-ds-line/60 px-3 py-1.5 text-xs text-ds-ink hover:bg-ds-elevated"
-                      >
-                        Cancel
-                      </button>
-                    </Dialog.Close>
+                  </span>
+                }
+                isOpen={recallOpen}
+                onClose={() => setRecallOpen(false)}
+                zIndexClass="z-[100]"
+                backdropClassName="bg-ds-main/50 backdrop-blur-[1.5px]"
+                panelClassName="border-l border-ds-line/50 bg-ds-card text-ds-ink shadow-2xl"
+                footer={
+                  <div className="flex w-full justify-end gap-2">
+                    <button
+                      type="button"
+                      className="rounded-ds-sm border border-ds-line/60 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-elevated"
+                      onClick={() => setRecallOpen(false)}
+                    >
+                      Cancel
+                    </button>
                     <button
                       type="button"
                       disabled={recallBusy}
-                      className="rounded-md bg-ds-warning hover:bg-ds-warning px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                      className="rounded-ds-sm bg-ds-warning px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:opacity-95 disabled:opacity-50"
                       onClick={() => {
                         void (async () => {
                           await onConfirmRecall()
@@ -91,9 +84,15 @@ export function AwQueueDirectorStrip({
                       Confirm recall
                     </button>
                   </div>
-                </Dialog.Content>
-              </Dialog.Portal>
-            </Dialog.Root>
+                }
+              >
+                <p className="text-xs text-ds-ink-muted leading-relaxed">
+                  This reverses Plate Hub finalization, cancels the plate requirement, and resets hub
+                  handshakes and dispatch stamps to draft. Use only when you must pull the job back for
+                  edits.
+                </p>
+              </SlideOverPanel>
+            </>
           ) : null}
         </div>
 
