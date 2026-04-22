@@ -27,19 +27,18 @@ export function PlanningDecisionLayerToolbar({
   onSetIdModeChange: (m: PlanningSetIdMode) => void
   saving?: boolean
 }) {
-  const panel =
-    'rounded-lg border border-pharma-border bg-pharma-surface p-4 space-y-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/40'
+  const panel = 'rounded-lg border border-slate-700 bg-slate-900/70 p-4 space-y-3 shadow-sm'
 
-  const selectCls = `h-8 min-w-[10rem] rounded border border-pharma-border bg-pharma-surface px-2 text-[13px] text-pharma-primary dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 ${mono}`
+  const selectCls = `h-8 min-w-[10rem] rounded border border-slate-700 bg-slate-950 px-2 text-[13px] text-slate-100 ${mono}`
 
   return (
     <div className={panel}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className={`text-[12px] font-medium uppercase tracking-wider text-pharma-secondary ${mono}`}>
+          <p className={`text-[12px] font-medium uppercase tracking-wider text-slate-500 ${mono}`}>
             Planning decision layer
           </p>
-          <p className="text-[13px] text-pharma-secondary mt-0.5 leading-normal">
+          <p className="text-[13px] text-slate-400 mt-0.5 leading-normal">
             PO intake → decisions here → immutable handoff to AW Queue on save.
           </p>
         </div>
@@ -47,7 +46,7 @@ export function PlanningDecisionLayerToolbar({
           type="button"
           disabled={saving}
           onClick={onSavePlanning}
-          className={`inline-flex items-center gap-1.5 rounded-lg border border-pharma-ready-fg/25 bg-pharma-ready-bg px-3 py-2 text-[13px] font-semibold text-pharma-ready-fg hover:opacity-90 disabled:opacity-40 ${mono}`}
+          className={`inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-3 py-2 text-[13px] font-semibold text-emerald-300 hover:opacity-90 disabled:opacity-40 ${mono}`}
         >
           <Save className="h-3.5 w-3.5" aria-hidden />
           {saving ? 'Saving…' : 'Save planning'}
@@ -56,7 +55,7 @@ export function PlanningDecisionLayerToolbar({
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="space-y-0.5">
-          <span className={`text-[12px] font-medium uppercase tracking-wider text-pharma-secondary ${mono}`}>Spec sort / group</span>
+          <span className={`text-[12px] font-medium uppercase tracking-wider text-slate-500 ${mono}`}>Spec sort / group</span>
           <select
             value={groupBy}
             onChange={(e) => onGroupByChange(e.target.value as PlanningGroupBy)}
@@ -70,14 +69,14 @@ export function PlanningDecisionLayerToolbar({
           </select>
         </label>
 
-        <div className="flex rounded-md border border-pharma-border overflow-hidden dark:border-slate-700">
+        <div className="flex rounded-md border border-slate-700 overflow-hidden">
           <button
             type="button"
             onClick={() => onSetIdModeChange('auto')}
             className={`px-2.5 py-1.5 text-[12px] font-medium ${mono} ${
               setIdMode === 'auto'
-                ? 'bg-pharma-pending-bg text-pharma-pending-fg'
-                : 'bg-pharma-surface text-pharma-secondary hover:bg-pharma-hover dark:bg-slate-900 dark:hover:bg-slate-800'
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'bg-slate-950 text-slate-400 hover:bg-slate-800'
             }`}
           >
             Set ID · Auto
@@ -85,10 +84,10 @@ export function PlanningDecisionLayerToolbar({
           <button
             type="button"
             onClick={() => onSetIdModeChange('manual')}
-            className={`px-2.5 py-1.5 text-[12px] font-medium border-l border-pharma-border dark:border-slate-700 ${mono} ${
+            className={`px-2.5 py-1.5 text-[12px] font-medium border-l border-slate-700 ${mono} ${
               setIdMode === 'manual'
-                ? 'bg-pharma-pending-bg text-pharma-pending-fg'
-                : 'bg-pharma-surface text-pharma-secondary hover:bg-pharma-hover dark:bg-slate-900 dark:hover:bg-slate-800'
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'bg-slate-950 text-slate-400 hover:bg-slate-800'
             }`}
           >
             Set ID · Manual
@@ -101,7 +100,7 @@ export function PlanningDecisionLayerToolbar({
             disabled={selectionCount < 2}
             onClick={onLinkAsMixSet}
             title="Link selected lines as one gang / mix-set"
-            className={`inline-flex items-center gap-1 rounded-md border border-pharma-border bg-pharma-app px-2.5 py-1.5 text-[12px] font-medium text-pharma-action hover:bg-pharma-hover disabled:opacity-35 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-900 dark:text-blue-400 dark:hover:bg-slate-800 ${mono}`}
+            className={`inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[12px] font-medium text-blue-300 hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed ${mono}`}
           >
             <Link2 className="h-3.5 w-3.5" aria-hidden />
             Link as mix-set ({selectionCount})

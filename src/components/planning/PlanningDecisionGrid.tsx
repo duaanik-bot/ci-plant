@@ -25,11 +25,11 @@ import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 
 const cellBase =
-  'px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 whitespace-nowrap overflow-hidden text-ellipsis max-w-[14rem]'
+  'h-12 max-h-12 px-3 py-0 align-middle text-[12px] font-medium text-slate-200 border-b border-slate-800 whitespace-nowrap overflow-hidden text-ellipsis max-w-[14rem]'
 const monoStrong =
-  'font-designing-queue font-semibold tabular-nums text-slate-900 dark:text-slate-100'
+  'font-designing-queue text-[12px] font-semibold tabular-nums text-amber-300'
 const theadBtn =
-  'inline-flex items-center gap-0.5 text-left text-xs font-medium uppercase tracking-wider text-slate-600 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400'
+  'inline-flex items-center gap-0.5 text-left text-[10px] font-medium uppercase tracking-wider text-slate-500 hover:text-amber-300'
 
 type DieMaster = { id: string; dyeNumber: number; ups: number; sheetSize: string }
 
@@ -197,6 +197,23 @@ function numberOfColoursFor(r: PlanningGridLine): number {
   return n ?? r.planningLedger?.numberOfColours ?? r.carton?.numberOfColours ?? 4
 }
 
+function TruncatedWithTooltip({
+  value,
+  className = '',
+}: {
+  value: string
+  className?: string
+}) {
+  return (
+    <div className={`group relative min-w-0 ${className}`}>
+      <span className="block truncate">{value}</span>
+      <div className="pointer-events-none absolute left-0 top-[calc(100%+4px)] z-20 hidden max-w-[24rem] rounded border border-slate-700 bg-black px-2 py-1 text-xs text-slate-100 shadow-lg group-hover:block">
+        {value}
+      </div>
+    </div>
+  )
+}
+
 export function PlanningDecisionGrid({
   rows,
   ledgerView,
@@ -209,6 +226,7 @@ export function PlanningDecisionGrid({
   onRecallLine,
   onSaveRow,
   mixConflictMessage,
+  onLinkAsMixSet,
 }: {
   rows: PlanningGridLine[]
   ledgerView: 'pending' | 'processed'
@@ -221,6 +239,7 @@ export function PlanningDecisionGrid({
   onRecallLine: (lineId: string) => Promise<void>
   onSaveRow?: (lineId: string) => Promise<void>
   mixConflictMessage: string | null
+  onLinkAsMixSet: () => void
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('poDate')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -452,7 +471,7 @@ export function PlanningDecisionGrid({
   const isProcessedRow = (r: PlanningGridLine) => r.planningStatus !== 'pending'
 
   return (
-    <div className="rounded-lg border border-border bg-card shadow-sm overflow-hidden pb-8">
+    <div className="overflow-hidden rounded-lg border border-slate-700 bg-black/35 pb-8 shadow-[0_8px_30px_rgba(0,0,0,0.22)]">
       {mixConflictMessage || coatingConflict || gsmConflict ? (
         <div
           className={`px-3 py-2 text-sm ${flash ? 'bg-red-100 text-red-800 animate-pulse' : 'bg-red-50 text-red-700'}`}
@@ -469,7 +488,7 @@ export function PlanningDecisionGrid({
       <EnterpriseTableShell>
         <table className="w-full min-w-[2200px] border-collapse text-left text-sm">
           <thead>
-            <tr className="bg-slate-100 border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-800">
+            <tr className="bg-slate-900/80 border-b border-slate-800">
               <th
                 colSpan={12}
                 className="px-2 py-2 text-[11px] font-semibold text-slate-600 uppercase tracking-wide"
@@ -489,16 +508,16 @@ export function PlanningDecisionGrid({
                     }`}
                     title="When on, the PO priority star runs a what-if only and does not change priority"
                   >
-                    <span className="pointer-events-none block h-5 w-5 rounded-full bg-card shadow" />
+                    <span className="pointer-events-none block h-5 w-5 rounded-full bg-slate-100 shadow" />
                   </button>
                 </div>
               </th>
             </tr>
-            <tr className="bg-slate-50 border-b border-slate-200 text-sm dark:bg-slate-900/60 dark:border-slate-800">
+            <tr className="border-b border-slate-800 bg-black/40 text-sm">
               <th className="px-2 py-2 w-10" />
               <th className="px-2 py-2 min-w-[7rem]">
                 <input
-                  className="w-full h-8 rounded border border-[#E2E8F0] px-1 text-[12px]"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
                   placeholder="PO #"
                   value={fPo}
                   onChange={(e) => setFPo(e.target.value)}
@@ -507,7 +526,7 @@ export function PlanningDecisionGrid({
               <th className="px-2 py-2 min-w-[6rem]" />
               <th className="px-2 py-2 min-w-[8rem]">
                 <select
-                  className="w-full h-8 rounded border border-border bg-card text-[12px] text-card-foreground"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
                   value={fClient}
                   onChange={(e) => setFClient(e.target.value)}
                 >
@@ -521,7 +540,7 @@ export function PlanningDecisionGrid({
               </th>
               <th className="px-2 py-2 min-w-[10rem]">
                 <input
-                  className="w-full h-8 rounded border border-[#E2E8F0] px-1 text-[12px]"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
                   placeholder="Carton name"
                   value={fCarton}
                   onChange={(e) => setFCarton(e.target.value)}
@@ -530,7 +549,7 @@ export function PlanningDecisionGrid({
               <th className="px-2 py-2" />
               <th className="px-2 py-2 min-w-[6rem]">
                 <input
-                  className="w-full h-8 rounded border border-[#E2E8F0] px-1 text-[12px]"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
                   placeholder="Size"
                   value={fSize}
                   onChange={(e) => setFSize(e.target.value)}
@@ -538,7 +557,7 @@ export function PlanningDecisionGrid({
               </th>
               <th className="px-2 py-2 min-w-[5rem]">
                 <input
-                  className="w-full h-8 rounded border border-[#E2E8F0] px-1 text-[12px]"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
                   placeholder="Qty"
                   value={fQty}
                   onChange={(e) => setFQty(e.target.value)}
@@ -548,7 +567,7 @@ export function PlanningDecisionGrid({
               <th className="px-2 py-2" />
               <th className="px-2 py-2 min-w-[7rem]">
                 <select
-                  className="w-full h-8 rounded border border-border bg-card text-[12px]"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
                   value={fCoating}
                   onChange={(e) => setFCoating(e.target.value)}
                 >
@@ -562,7 +581,7 @@ export function PlanningDecisionGrid({
               </th>
               <th className="px-2 py-2 min-w-[7rem]">
                 <select
-                  className="w-full h-8 rounded border border-border bg-card text-[12px]"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
                   value={fOtherCoating}
                   onChange={(e) => setFOtherCoating(e.target.value)}
                 >
@@ -576,7 +595,7 @@ export function PlanningDecisionGrid({
               </th>
               <th className="px-2 py-2 min-w-[7rem]">
                 <select
-                  className="w-full h-8 rounded border border-border bg-card text-[12px]"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
                   value={fEmboss}
                   onChange={(e) => setFEmboss(e.target.value)}
                 >
@@ -590,7 +609,7 @@ export function PlanningDecisionGrid({
               </th>
               <th className="px-2 py-2 min-w-[7rem]">
                 <select
-                  className="w-full h-8 rounded border border-border bg-card text-[12px]"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
                   value={fPaper}
                   onChange={(e) => setFPaper(e.target.value)}
                 >
@@ -604,7 +623,7 @@ export function PlanningDecisionGrid({
               </th>
               <th className="px-2 py-2 min-w-[4rem]">
                 <input
-                  className="w-full h-8 rounded border border-[#E2E8F0] px-1 text-[12px]"
+                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
                   placeholder="GSM"
                   value={fGsm}
                   onChange={(e) => setFGsm(e.target.value)}
@@ -614,91 +633,91 @@ export function PlanningDecisionGrid({
               <th className="px-2 py-2" />
               <th className="px-2 py-2" />
             </tr>
-            <tr className="border-b border-slate-200 bg-card dark:border-slate-800">
+            <tr className="border-b border-slate-800 bg-slate-950">
               <th className={`${cellBase} w-10 bg-[#F8FAFC]`}>
                 <span className="text-[11px] font-medium text-slate-600">Si</span>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60 min-w-[7rem]`}>
+              <th className={`${cellBase} bg-slate-950 min-w-[7rem]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('poNumber')}>
                   PO No. {sortKey === 'poNumber' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60 min-w-[6rem]`}>
+              <th className={`${cellBase} bg-slate-950 min-w-[6rem]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('poDate')}>
                   PO Date {sortKey === 'poDate' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('client')}>
                   Client {sortKey === 'client' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60 min-w-[10rem]`}>
+              <th className={`${cellBase} bg-slate-950 min-w-[10rem]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('cartonName')}>
                   Carton {sortKey === 'cartonName' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('artworkCode')}>
                   AW Code {sortKey === 'artworkCode' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('cartonSize')}>
                   Carton Size {sortKey === 'cartonSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('qty')}>
                   Qty {sortKey === 'qty' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('dyeUps')}>
                   Dye/UPS {sortKey === 'dyeUps' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('sheetSize')}>
                   Sheet Size {sortKey === 'sheetSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('coating')}>
                   Coating {sortKey === 'coating' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('otherCoating')}>
                   Oth coat {sortKey === 'otherCoating' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('emboss')}>
                   Emb/Leaf {sortKey === 'emboss' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('paper')}>
                   Paper {sortKey === 'paper' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('gsm')}>
                   GSM {sortKey === 'gsm' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('ups')}>
                   UPS {sortKey === 'ups' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 dark:bg-slate-900/60`}>
+              <th className={`${cellBase} bg-slate-950`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('remarks')}>
                   Remarks {sortKey === 'remarks' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-50 text-right dark:bg-slate-900/60`}>Action</th>
+              <th className={`${cellBase} bg-slate-950 text-right`}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -709,8 +728,7 @@ export function PlanningDecisionGrid({
               const otherCoat = r.otherCoating ?? r.carton?.laminateType ?? '—'
               const coating = r.coatingType ?? r.carton?.coatingType ?? '—'
               const processed = isProcessedRow(r)
-              const stripe =
-                idx % 2 === 0 ? 'bg-card' : 'bg-muted/40 dark:bg-slate-900/70'
+              const stripe = idx % 2 === 0 ? 'bg-[#0B0F1A]' : 'bg-[#161B26]'
               const bpiRow = computeBatchProfitabilityIndex({
                 quantity: r.quantity,
                 ratePerUnitInr: r.rate,
@@ -722,7 +740,7 @@ export function PlanningDecisionGrid({
               return (
                 <Fragment key={r.id}>
                   <tr
-                    className={`${stripe} transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50`}
+                    className={`${stripe} h-12 max-h-12 transition-colors hover:brightness-110`}
                     onClick={(e) => {
                       const t = e.target as HTMLElement
                       if (t.closest('input,select,button,a,[data-po-priority-star]')) return
@@ -734,7 +752,7 @@ export function PlanningDecisionGrid({
                         <button
                           type="button"
                           title="Recall from AW queue"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-amber-600 text-amber-600 hover:bg-amber-50"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-amber-500 text-amber-300 hover:bg-amber-500/10"
                           onClick={() => void onRecallLine(r.id)}
                         >
                           <RotateCcw className="h-4 w-4" aria-hidden />
@@ -776,7 +794,7 @@ export function PlanningDecisionGrid({
                               ? 'Clear PO priority'
                               : 'Mark PO priority'
                           }
-                          className="inline-flex shrink-0 rounded p-0.5 text-slate-400 hover:bg-amber-50 hover:text-amber-600 disabled:opacity-40"
+                          className="inline-flex shrink-0 rounded p-0.5 text-slate-500 hover:bg-slate-800 hover:text-amber-400 disabled:opacity-40"
                           onClick={(e) => void handlePoPriorityStar(r, e)}
                         >
                           <Star
@@ -788,7 +806,7 @@ export function PlanningDecisionGrid({
                         </button>
                         <Link
                           href={`/orders/purchase-orders/${r.po.id}`}
-                          className={`${monoStrong} min-w-0 truncate text-[#1D4ED8] hover:underline`}
+                          className={`${monoStrong} min-w-0 truncate text-amber-300 hover:underline`}
                           onClick={(e) => e.stopPropagation()}
                         >
                           {r.po.poNumber}
@@ -798,20 +816,20 @@ export function PlanningDecisionGrid({
                     <td className={`${cellBase} ${monoStrong}`} title={r.po.poDate}>
                       {r.po.poDate?.slice(0, 10) ?? '—'}
                     </td>
-                    <td className={cellBase} title={r.po.customer.name}>
-                      {r.po.customer.name}
+                    <td className={`${cellBase} overflow-visible`}>
+                      <TruncatedWithTooltip value={r.po?.customer?.name ?? '—'} />
                     </td>
-                    <td className={cellBase} title={r.cartonName}>
+                    <td className={`${cellBase} overflow-visible`}>
                       {r.cartonId ? (
                         <Link
                           href={`/product/${r.cartonId}`}
-                          className="text-[#1D4ED8] hover:underline font-medium"
+                          className="text-amber-300 hover:underline font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {r.cartonName}
+                          <TruncatedWithTooltip value={r.cartonName ?? '—'} />
                         </Link>
                       ) : (
-                        r.cartonName
+                        <TruncatedWithTooltip value={r.cartonName ?? '—'} />
                       )}
                     </td>
                     <td className={`${cellBase} ${monoStrong}`} title={aw}>
@@ -934,7 +952,7 @@ export function PlanningDecisionGrid({
                         type="number"
                         min={1}
                         disabled={processed}
-                        className="h-8 min-w-[80px] w-[4.5rem] rounded border border-slate-200 px-2 text-sm text-slate-900 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        className="h-8 min-w-[80px] w-[4.5rem] rounded border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100 disabled:opacity-50"
                         value={planCore.ups ?? r.materialQueue?.ups ?? ''}
                         onChange={(e) => {
                           const ups = Math.max(1, parseInt(e.target.value, 10) || 1)
@@ -972,7 +990,7 @@ export function PlanningDecisionGrid({
                       <input
                         type="text"
                         disabled={processed}
-                        className="h-8 w-full min-w-[80px] max-w-[12rem] rounded border border-slate-200 px-2 text-sm text-slate-900 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        className="h-8 w-full min-w-[80px] max-w-[12rem] rounded border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100 disabled:opacity-50"
                         value={r.remarks ?? ''}
                         onChange={(e) => updateRow(r.id, { remarks: e.target.value || null })}
                         onBlur={() => void onSaveRow?.(r.id)}
@@ -999,39 +1017,47 @@ export function PlanningDecisionGrid({
         <p className="px-4 py-6 text-center text-slate-500 text-sm">No lines in this view.</p>
       ) : null}
 
-      {planningSelection.size >= 2 ? (
-        <div className="fixed bottom-6 left-1/2 z-[75] -translate-x-1/2 pointer-events-none flex flex-col items-center gap-2">
-          <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-full border border-border bg-card px-4 py-2 shadow-lg">
+      {planningSelection.size >= 1 ? (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-[75] flex -translate-x-1/2 flex-col items-center gap-2">
+          <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-4 py-2 shadow-lg">
+            <button
+              type="button"
+              onClick={onLinkAsMixSet}
+              disabled={planningSelection.size < 2}
+              className="rounded-full border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Group as Mix-Set
+            </button>
             <button
               type="button"
               onClick={() => setBulkOpen(true)}
-              className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+              className="rounded-full bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500"
             >
-              Apply UPS &amp; Designer to selected
+              Bulk Apply UPS
             </button>
           </div>
         </div>
       ) : null}
 
       {bulkOpen ? (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-900/30 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-slate-900">Bulk apply</h3>
+        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-slate-100">Bulk apply</h3>
             <p className="text-xs text-slate-500 mt-1">Applies to {selectedLines.length} selected row(s).</p>
-            <label className="mt-3 block text-xs font-medium text-slate-600">
+            <label className="mt-3 block text-xs font-medium text-slate-400">
               UPS
               <input
                 type="number"
                 min={1}
-                className="mt-1 w-full h-9 rounded border border-border bg-card px-2"
+                className="mt-1 w-full h-9 rounded border border-slate-700 bg-slate-950 px-2 text-slate-100"
                 value={bulkUps}
                 onChange={(e) => setBulkUps(e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value, 10) || 1))}
               />
             </label>
-            <label className="mt-3 block text-xs font-medium text-slate-600">
+            <label className="mt-3 block text-xs font-medium text-slate-400">
               Designer
               <select
-                className="mt-1 w-full h-9 rounded border border-border bg-card px-2"
+                className="mt-1 w-full h-9 rounded border border-slate-700 bg-slate-950 px-2 text-slate-100"
                 value={bulkDesigner}
                 onChange={(e) => setBulkDesigner(e.target.value as PlanningDesignerKey | '')}
               >
@@ -1041,12 +1067,12 @@ export function PlanningDecisionGrid({
               </select>
             </label>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="rounded-lg px-3 py-1.5 text-sm text-slate-600" onClick={() => setBulkOpen(false)}>
+              <button type="button" className="rounded-lg px-3 py-1.5 text-sm text-slate-300" onClick={() => setBulkOpen(false)}>
                 Cancel
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground"
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-500"
                 onClick={applyBulk}
               >
                 Apply

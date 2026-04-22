@@ -13,13 +13,13 @@ export function ThemeToggle() {
   const activeResolved = mounted ? (resolvedTheme ?? 'light') : 'light'
 
   const btn =
-    'rounded-md border border-border bg-card px-2 py-1 text-xs font-medium text-card-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+    'rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800 hover:text-white'
 
-  const activeCls = 'ring-2 ring-ring/70 ring-offset-2 ring-offset-background'
+  const activeCls = 'ring-2 ring-blue-600/90 ring-offset-2 ring-offset-slate-950'
 
   return (
     <div
-      className="inline-flex items-center gap-1 rounded-lg border border-border bg-background/90 p-0.5"
+      className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-950/80 p-0.5"
       role="group"
       aria-label="Theme"
     >

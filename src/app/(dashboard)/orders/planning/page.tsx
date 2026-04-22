@@ -20,6 +20,7 @@ import {
 } from '@/lib/planning-decision-spec'
 import { PlanningDecisionGrid } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningReadinessDrawer } from '@/components/planning/PlanningReadinessDrawer'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import {
   PlanningDecisionLayerToolbar,
   type PlanningGroupBy,
@@ -616,31 +617,31 @@ export default function PlanningPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+    <div className="min-h-screen bg-slate-900 pb-24 text-slate-100">
       <div className="mx-auto max-w-[1920px] space-y-4 px-4 py-4">
-        <div className="sticky top-0 z-30 -mx-4 border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
+        <div className="sticky top-0 z-30 -mx-4 border-b border-slate-800 bg-slate-950/90 px-4 py-3 backdrop-blur-sm">
           <div className="flex flex-wrap items-center gap-3 justify-between">
             <div>
-              <h1 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-50">
+              <h1 className="text-base font-semibold tracking-tight text-amber-400">
                 Planning
               </h1>
-              <p className={`text-sm text-slate-600 dark:text-slate-400 ${mono}`}>
+              <p className={`text-sm text-slate-400 ${mono}`}>
                 {rows.length} line(s) · Σ qty{' '}
-                <span className="font-semibold text-slate-900 dark:text-slate-100">{totalQty.toLocaleString('en-IN')}</span>
+                <span className="font-semibold text-amber-300">{totalQty.toLocaleString('en-IN')}</span>
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2 flex-1 min-w-[min(100%,16rem)]">
-              <span className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
                 View
               </span>
-              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800">
+              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
                 <button
                   type="button"
                   onClick={() => setLedgerView('pending')}
                   className={`rounded-md px-4 py-1.5 text-sm font-medium ${
                     ledgerView === 'pending'
-                      ? 'bg-card text-blue-600 shadow-sm dark:text-blue-400'
-                      : 'text-slate-600 dark:text-slate-400'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-400'
                   }`}
                 >
                   Pending
@@ -650,8 +651,8 @@ export default function PlanningPage() {
                   onClick={() => setLedgerView('processed')}
                   className={`rounded-md px-4 py-1.5 text-sm font-medium ${
                     ledgerView === 'processed'
-                      ? 'bg-card text-blue-600 shadow-sm dark:text-blue-400'
-                      : 'text-slate-600 dark:text-slate-400'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-400'
                   }`}
                 >
                   Processed
@@ -668,25 +669,25 @@ export default function PlanningPage() {
                   !!selectedForMix.conflict ||
                   !!mixConflictMessage
                 }
-                className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-md transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {makeProcessingBusy ? 'Processing…' : 'Make processing'}
               </button>
               <Link
                 href="/hub/dies"
-                className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+                className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-500"
               >
                 Update Dye Details
               </Link>
               <Link
                 href="/orders/purchase-orders"
-                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70"
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 shadow-sm hover:bg-slate-800"
               >
                 Customer POs
               </Link>
               <Link
                 href="/orders/designing"
-                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70"
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 shadow-sm hover:bg-slate-800"
               >
                 Artwork queue
               </Link>
@@ -696,7 +697,7 @@ export default function PlanningPage() {
                   downloadPlanningAuditCsv(rows)
                   toast.success('Audit CSV exported')
                 }}
-                className={`inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70 ${mono}`}
+                className={`inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 shadow-sm hover:bg-slate-800 ${mono}`}
               >
                 <Download className="h-3.5 w-3.5 text-slate-500" aria-hidden />
                 Audit export
@@ -705,29 +706,29 @@ export default function PlanningPage() {
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3 rounded-lg border border-pharma-border bg-pharma-surface px-4 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/40">
+        <div className="grid gap-3 sm:grid-cols-3 rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-4 shadow-sm">
           <div>
-            <p className={`text-[12px] uppercase tracking-wider font-medium text-pharma-secondary ${mono}`}>
+            <p className={`text-[12px] uppercase tracking-wider font-medium text-slate-500 ${mono}`}>
               Total volume in queue
             </p>
-            <p className={`text-xl font-semibold text-pharma-primary ${mono} mt-1`}>
+            <p className={`text-xl font-semibold text-amber-300 ${mono} mt-1`}>
               {totalQty.toLocaleString('en-IN')}
             </p>
-            <p className="text-[13px] text-pharma-secondary mt-0.5">Σ qty · all lines in view</p>
+            <p className="text-[13px] text-slate-500 mt-0.5">Σ qty · all lines in view</p>
           </div>
-          <div className="sm:border-l sm:border-pharma-border dark:sm:border-slate-700 sm:pl-4">
-            <p className={`text-[12px] uppercase tracking-wider font-medium text-pharma-secondary ${mono}`}>Top blocker</p>
-            <p className={`text-sm font-medium text-pharma-blocked-fg ${mono} leading-snug mt-1`}>
+          <div className="sm:border-l sm:border-slate-700 sm:pl-4">
+            <p className={`text-[12px] uppercase tracking-wider font-medium text-slate-500 ${mono}`}>Top blocker</p>
+            <p className={`text-sm font-medium text-rose-400 ${mono} leading-snug mt-1`}>
               {topBlockerTile.headline}
             </p>
-            <p className="text-[13px] text-pharma-secondary mt-0.5">{topBlockerTile.sub}</p>
+            <p className="text-[13px] text-slate-500 mt-0.5">{topBlockerTile.sub}</p>
           </div>
-          <div className="sm:border-l sm:border-pharma-border dark:sm:border-slate-700 sm:pl-4">
-            <p className={`text-[12px] uppercase tracking-wider font-medium text-pharma-secondary ${mono}`}>
+          <div className="sm:border-l sm:border-slate-700 sm:pl-4">
+            <p className={`text-[12px] uppercase tracking-wider font-medium text-slate-500 ${mono}`}>
               Ready to schedule
             </p>
-            <p className={`text-xl font-semibold text-pharma-ready-fg ${mono} mt-1`}>{readyToScheduleCount}</p>
-            <p className="text-[13px] text-pharma-secondary">5-point interlock + plates · not closed</p>
+            <p className={`text-xl font-semibold text-emerald-400 ${mono} mt-1`}>{readyToScheduleCount}</p>
+            <p className="text-[13px] text-slate-500">5-point interlock + plates · not closed</p>
           </div>
         </div>
 
@@ -766,7 +767,7 @@ export default function PlanningPage() {
               <button
                 type="button"
                 onClick={() => applyCustomer(null)}
-                className="mt-1 text-[10px] text-slate-500 hover:text-slate-700"
+                className="mt-1 text-[10px] text-slate-500 hover:text-slate-300"
               >
                 Clear customer
               </button>
@@ -774,34 +775,25 @@ export default function PlanningPage() {
           </div>
         </div>
 
-        <PlanningDecisionGrid
-          rows={rows}
-          ledgerView={ledgerView}
-          planningSelection={planningSelection}
-          setPlanningSelection={setPlanningSelection}
-          onRowBackgroundClick={(id) => setPlanningDrawerLineId(id)}
-          updateSpec={(id, patch) => updateSpec(id, patch as Partial<PlanningSpec>)}
-          updateRow={updateRow}
-          onRemoveLine={handleRemoveLine}
-          onRecallLine={recallLine}
-          onSaveRow={save}
-          mixConflictMessage={mixConflictMessage ?? selectedForMix.conflict}
-        />
+        <ErrorBoundary moduleName="Planning Grid">
+          <PlanningDecisionGrid
+            rows={rows}
+            ledgerView={ledgerView}
+            planningSelection={planningSelection}
+            setPlanningSelection={setPlanningSelection}
+            onRowBackgroundClick={(id) => setPlanningDrawerLineId(id)}
+            updateSpec={(id, patch) => updateSpec(id, patch as Partial<PlanningSpec>)}
+            updateRow={updateRow}
+            onRemoveLine={handleRemoveLine}
+            onRecallLine={recallLine}
+            onSaveRow={save}
+            mixConflictMessage={mixConflictMessage ?? selectedForMix.conflict}
+            onLinkAsMixSet={linkAsMixSet}
+          />
+        </ErrorBoundary>
 
-        {planningSelection.size >= 2 ? (
-          <div className="fixed bottom-6 right-6 z-[80] flex flex-col items-end gap-2 pointer-events-none">
-            <button
-              type="button"
-              onClick={() => linkAsMixSet()}
-              className="pointer-events-auto rounded-full border border-pharma-border bg-pharma-action px-5 py-3 text-sm font-semibold text-foreground shadow-lg shadow-blue-900/10 transition-colors hover:bg-pharma-action-hover"
-            >
-              Group as Mix-Set
-            </button>
-          </div>
-        ) : null}
-
-        <footer className={`border-t border-[#E2E8F0] pt-4 text-center text-[13px] text-slate-600 ${mono}`}>
-          Planning Ledger Active - Master Data Synced - Zero-Error Handshakes Enabled.
+        <footer className={`border-t border-slate-800 pt-4 text-center text-[13px] text-slate-400 ${mono}`}>
+          Visual Legacy Restored to 20-April State. Logic & Chronology Preserved.
         </footer>
 
         <PlanningReadinessDrawer
@@ -812,6 +804,7 @@ export default function PlanningPage() {
                   ...planningDrawerLine,
                   po: {
                     poNumber: planningDrawerLine.po.poNumber,
+                    poDate: planningDrawerLine.po.poDate,
                     customer: { name: planningDrawerLine.po.customer.name },
                   },
                 }

@@ -104,8 +104,8 @@ function NavItem({
 }) {
   const router = useRouter()
   const className = isActive
-    ? 'flex items-center gap-2 px-2 py-1.5 rounded-md bg-primary text-primary-foreground shadow-sm'
-    : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-pharma-secondary hover:bg-pharma-hover hover:text-pharma-primary dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-foreground'
+    ? 'flex items-center gap-2 px-2 py-1.5 rounded-md bg-blue-600 text-white'
+    : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-slate-300 hover:bg-slate-700 hover:text-white'
   if (external) {
     return (
       <a
@@ -300,7 +300,7 @@ export function SidebarNav({
             <button
               type="button"
               onClick={() => toggle(section.key)}
-              className="w-full flex items-center justify-between text-left uppercase text-xs tracking-wider text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 py-1.5 px-1 rounded"
+            className="w-full flex items-center justify-between text-left uppercase text-xs tracking-wider text-slate-400 hover:text-slate-200 py-1.5 px-1 rounded"
             >
               <span>{section.title}</span>
               {isOpen ? (
@@ -329,13 +329,13 @@ export function SidebarNav({
           </div>
         )
       })}
-      <div className="mt-auto pt-4 border-t border-[#E2E8F0] dark:border-slate-800 px-2">
-        <p className="font-medium text-slate-800 dark:text-slate-200 text-xs truncate">
+      <div className="mt-auto pt-4 border-t border-slate-800 px-2">
+        <p className="font-medium text-slate-200 text-xs truncate">
           {userName ?? 'User'} <span className="text-slate-500">· {userRole ?? '—'}</span>
         </p>
         <Link
           href="/api/auth/signout"
-          className="inline-block mt-1.5 text-xs text-slate-600 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-400"
+          className="inline-block mt-1.5 text-xs text-slate-400 hover:text-amber-400"
         >
           Logout
         </Link>

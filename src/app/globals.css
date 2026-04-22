@@ -11,30 +11,12 @@
  */
 
 @layer base {
-  /* Precision Pharma — Slate & semantic (no pure #000 / #FFF page canvas) */
   :root {
-    --pharma-bg-app: #f8fafc;
-    --pharma-bg-surface: #ffffff;
-    --pharma-bg-hover: #f1f5f9;
-    --pharma-text-primary: #0f172a;
-    --pharma-text-secondary: #475569;
-    --pharma-text-tertiary: #94a3b8;
-    --pharma-action-primary: #1d4ed8;
-    --pharma-action-hover: #1e40af;
-    --pharma-border: #e2e8f0;
-    --pharma-ready-bg: #dcfce7;
-    --pharma-ready-fg: #15803d;
-    --pharma-blocked-bg: #fee2e2;
-    --pharma-blocked-fg: #b91c1c;
-    --pharma-pending-bg: #fef3c7;
-    --pharma-pending-fg: #b45309;
-    --pharma-star: #f59e0b;
-
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
+    --primary: 222.2 47.4% 11.2%;
     --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
@@ -44,9 +26,9 @@
     --accent-foreground: 222.2 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214 32% 91%;
+    --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
+    --ring: 222.2 84% 4.9%;
     --radius: 0.5rem;
   }
 
@@ -55,7 +37,7 @@
     --foreground: 210 40% 98%;
     --card: 222.2 84% 4.9%;
     --card-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
+    --primary: 210 40% 98%;
     --primary-foreground: 222.2 47.4% 11.2%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
@@ -67,7 +49,7 @@
     --destructive-foreground: 210 40% 98%;
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
-    --ring: 217.2 91.2% 59.8%;
+    --ring: 212.7 26.8% 83.9%;
   }
 }
 
@@ -76,54 +58,96 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground antialiased text-sm leading-normal;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-    line-height: 1.5;
-  }
-  ::selection {
-    @apply bg-primary/20 text-foreground;
-  }
-  :where(button, [role='button'], a, input, select, textarea, [tabindex]):focus-visible {
-    @apply outline-none ring-2 ring-ring/40 ring-offset-2 ring-offset-background;
-    box-shadow: 0 0 0 1px hsl(var(--ring) / 0.12), 0 0 20px hsl(var(--ring) / 0.18);
+    @apply bg-background text-foreground antialiased;
   }
 }
 
-/* Technical IDs — JetBrains Mono, tabular (PO, Set, qty, dates) */
-.font-id-mono {
-  font-family: var(--font-designing-queue), ui-monospace, monospace;
-  font-weight: 600;
+/* Die Hub — custody floor tool actively issued to press */
+@keyframes hub-tool-in-use-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 14px 3px rgba(59, 130, 246, 0.25);
+  }
+}
+
+.hub-tool-in-use-pulse {
+  animation: hub-tool-in-use-pulse 2.2s ease-in-out infinite;
+}
+
+/* PO line — one-shot glow when Size / Pasting are first filled from Master */
+@keyframes po-master-field-pulse {
+  0% {
+    box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.55), 0 0 12px rgba(16, 185, 129, 0.2);
+    background-color: rgba(16, 185, 129, 0.1);
+  }
+  100% {
+    box-shadow: inset 0 0 0 0 rgba(16, 185, 129, 0), 0 0 0 rgba(16, 185, 129, 0);
+    background-color: transparent;
+  }
+}
+
+.po-master-field-pulse {
+  animation: po-master-field-pulse 0.5s ease-out 1;
+}
+
+/* PO line — one-shot row tint when hub tooling status finishes syncing for that row */
+@keyframes po-tooling-row-sync-pulse {
+  0% {
+    box-shadow: inset 3px 0 0 0 rgba(59, 130, 246, 0.65);
+    background-color: rgba(59, 130, 246, 0.08);
+  }
+  100% {
+    box-shadow: inset 3px 0 0 0 rgba(59, 130, 246, 0);
+    background-color: transparent;
+  }
+}
+
+.po-tooling-row-sync-pulse {
+  animation: po-tooling-row-sync-pulse 0.65s ease-out 1;
+}
+
+/* Tabular metrics — JetBrains Mono if available */
+.po-mono-metric {
+  font-family:
+    ui-monospace, 'JetBrains Mono', 'SFMono-Regular', 'Menlo', Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+@layer utilities {
+  @keyframes yield-wastage-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      filter: drop-shadow(0 0 4px rgba(244, 63, 94, 0.4));
+    }
+    50% {
+      opacity: 0.88;
+      filter: drop-shadow(0 0 12px rgba(244, 63, 94, 0.75));
+    }
+  }
+  .animate-yield-wastage-pulse {
+    animation: yield-wastage-pulse 2s ease-in-out infinite;
+  }
 }
 
 @layer components {
-  /** 5-point readiness — tactile badges (light mode primary) */
-  .pharma-readiness-badge {
-    @apply inline-flex min-w-[32px] h-6 shrink-0 cursor-help items-center justify-center rounded-md border text-[11px] font-bold leading-none font-designing-queue;
+  .ci-hub-modal-panel {
+    @apply w-full max-w-md rounded-lg border border-zinc-700/90 bg-zinc-950/95 p-3.5 space-y-2.5 shadow-2xl backdrop-blur-md max-h-[90vh] overflow-y-auto;
   }
-  .pharma-readiness-badge--ready {
-    background-color: var(--pharma-ready-bg);
-    color: var(--pharma-ready-fg);
-    border-color: var(--pharma-ready-fg);
+  .ci-hub-modal-title {
+    @apply text-[11px] font-bold uppercase tracking-widest text-zinc-100 border-b border-zinc-800/90 pb-2 -mt-0.5;
   }
-  .pharma-readiness-badge--neutral {
-    @apply border-slate-200 bg-slate-50 text-slate-500;
+  .ci-btn-save-industrial {
+    @apply px-3 py-2 rounded-md bg-gradient-to-b from-amber-500 to-orange-600 text-white text-sm font-semibold shadow-sm disabled:opacity-50 hover:from-amber-400 hover:to-orange-500 border border-orange-800/40;
   }
-  .pharma-readiness-badge--blocked {
-    background-color: var(--pharma-blocked-bg);
-    color: var(--pharma-blocked-fg);
-    border-color: var(--pharma-blocked-fg);
-    animation: pharma-blocked-ring 2s ease-in-out infinite;
-  }
-}
-
-@keyframes pharma-blocked-ring {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.25);
-  }
-  50% {
-    box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.2);
+  /** Procurement workbench — golden-orange primary actions */
+  .ci-btn-procurement {
+    @apply px-3 py-2 rounded-md bg-gradient-to-b from-amber-400 via-orange-500 to-orange-600 text-white text-sm font-semibold shadow-md disabled:opacity-50 hover:from-amber-300 hover:via-orange-400 hover:to-orange-500 border border-amber-700/50;
   }
 }
 

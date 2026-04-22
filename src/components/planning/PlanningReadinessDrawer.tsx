@@ -29,12 +29,16 @@ function FiveStrip({ segments }: { segments: ReadinessFiveSegment[] }) {
         const grey = s.state === 'neutral'
         const blocked = s.state === 'blocked'
         const stateClass = green
-          ? 'pharma-readiness-badge--ready'
+          ? 'border-emerald-500/70 bg-emerald-500/20 text-emerald-300'
           : grey
-            ? 'pharma-readiness-badge--neutral'
-            : 'pharma-readiness-badge--blocked'
+            ? 'border-slate-600 bg-slate-800 text-slate-300'
+            : 'border-rose-500/70 bg-rose-500/20 text-rose-300'
         return (
-          <span key={s.key} title={s.title} className={`pharma-readiness-badge ${stateClass}`}>
+          <span
+            key={s.key}
+            title={s.title}
+            className={`inline-flex h-6 min-w-[32px] items-center justify-center rounded-md border text-[11px] font-bold leading-none font-designing-queue ${stateClass}`}
+          >
             {s.abbr}
           </span>
         )
@@ -69,7 +73,7 @@ function SemiGaugeUtilization({ pct }: { pct: number }) {
           strokeDasharray={`${dash} ${arcLen}`}
         />
       </svg>
-      <span className={`${mono} text-[11px] font-semibold text-[#1A1A1B] dark:text-slate-200`}>{p}%</span>
+      <span className={`${mono} text-[11px] font-semibold text-slate-200`}>{p}%</span>
     </div>
   )
 }
@@ -112,12 +116,12 @@ function RingPct({
           />
         </svg>
         <div
-          className={`pointer-events-none absolute inset-0 flex items-center justify-center ${mono} text-[10px] font-semibold text-[#1A1A1B] dark:text-slate-200`}
+          className={`pointer-events-none absolute inset-0 flex items-center justify-center ${mono} text-[10px] font-semibold text-slate-200`}
         >
           {p}%
         </div>
       </div>
-      <span className="text-[8px] uppercase tracking-wide text-slate-600 dark:text-slate-500 text-center leading-tight">
+      <span className="text-[8px] uppercase tracking-wide text-slate-500 text-center leading-tight">
         {label}
       </span>
     </div>
@@ -139,6 +143,7 @@ function normalizeMaterialGate(raw: Partial<MaterialGate> | undefined): Material
 type DrawerLine = {
   id: string
   cartonName: string
+  artworkCode?: string | null
   quantity: number
   coatingType?: string | null
   otherCoating?: string | null
@@ -174,7 +179,7 @@ type DrawerLine = {
     coatingType?: string | null
     numberOfColours?: number | null
   } | null
-  po?: { poNumber: string; customer: { name: string } }
+  po?: { poNumber: string; poDate?: string; customer: { name: string } }
 }
 
 function shadeForInterlock(r: DrawerLine) {
@@ -233,16 +238,10 @@ export function PlanningReadinessDrawer({
   })
 
   const awPct = artworkLocks >= 2 ? 100 : (artworkLocks / 2) * 100
-  const platePct =
-    platesStatus === 'available' ? 100 : platesStatus === 'partial' ? 50 : 0
+  const platePct = platesStatus === 'available' ? 100 : platesStatus === 'partial' ? 50 : 0
   const diePct = dieStatus === 'good' ? 100 : dieStatus === 'attention' ? 45 : 0
   const rmPct =
     mg.status === 'available' ? 100 : mg.status === 'ordered' ? 55 : mg.status === 'shortage' ? 0 : 25
-
-  const awTone = awPct >= 100 ? 'emerald' : awPct >= 50 ? 'amber' : 'rose'
-  const plTone = platePct >= 100 ? 'emerald' : platePct >= 50 ? 'amber' : 'rose'
-  const diTone = diePct >= 100 ? 'emerald' : diePct >= 45 ? 'amber' : 'rose'
-  const rmTone = rmPct >= 100 ? 'emerald' : rmPct >= 55 ? 'amber' : 'rose'
 
   const specColours = typeof spec.numberOfColours === 'number' ? spec.numberOfColours : null
   const nColours = specColours ?? line.planningLedger?.numberOfColours ?? line.carton?.numberOfColours ?? 4
@@ -267,24 +266,28 @@ export function PlanningReadinessDrawer({
           ups: upsDraw,
         })
       : null
+  const materialUtilPct = util?.yieldPct ?? 0
+  const productionReadinessPct = Math.round((awPct + platePct + diePct + rmPct) / 4)
+  const materialTone = materialUtilPct >= 85 ? 'emerald' : materialUtilPct >= 60 ? 'amber' : 'rose'
+  const readinessTone = productionReadinessPct >= 85 ? 'emerald' : productionReadinessPct >= 60 ? 'amber' : 'rose'
 
   return (
     <div className="fixed inset-0 z-[90] flex justify-end">
       <button
         type="button"
-        className="absolute inset-0 bg-slate-900/20 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-black/55 backdrop-blur-[1px]"
         aria-label="Close"
         onClick={onClose}
       />
       <aside
-        className="relative h-full w-full max-w-md border-l border-pharma-border bg-pharma-surface flex flex-col dark:border-slate-700 dark:bg-slate-900 shadow-[-4px_0_24px_rgba(0,0,0,0.05)]"
+        className="relative flex h-full w-full max-w-[450px] flex-col border-l border-slate-700 bg-slate-950 shadow-[-10px_0_30px_rgba(0,0,0,0.35)]"
       >
-        <div className="flex items-start justify-between gap-2 border-b border-[#E2E8F0] dark:border-slate-800 px-4 py-3">
+        <div className="flex items-start justify-between gap-2 border-b border-slate-800 bg-black/40 px-4 py-3">
           <div className="min-w-0">
-            <p className="font-id-mono text-xs text-amber-700 dark:text-amber-400 truncate">
+            <p className="font-id-mono text-xs text-amber-400 truncate">
               PO {line.po?.poNumber ?? '—'}
             </p>
-            <h2 className="text-sm font-semibold text-[#1A1A1B] dark:text-slate-100 truncate pr-2">{line.cartonName}</h2>
+            <h2 className="text-sm font-semibold text-slate-100 truncate pr-2">{line.cartonName}</h2>
             <p className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[18rem]">
               {line.po?.customer?.name ?? '—'}
             </p>
@@ -292,14 +295,30 @@ export function PlanningReadinessDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
             aria-label="Close drawer"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="px-4 py-3 space-y-4 overflow-y-auto flex-1">
+        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
+          <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+            <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>I. Product DNA</p>
+            <div className="mt-2 space-y-1 text-[13px] text-slate-200">
+              <p className="truncate">
+                <span className="font-medium text-slate-500">Carton:</span> {line.cartonName ?? '—'}
+              </p>
+              <p>
+                <span className="font-medium text-slate-500">PO Date:</span> {line.po?.poDate ?? '—'}
+              </p>
+              <p className={`${mono}`}>
+                <span className="font-medium text-slate-500 font-sans">Artwork:</span>{' '}
+                {line.artworkCode?.trim() || String(spec.artworkCode ?? '—')}
+              </p>
+            </div>
+          </div>
+
           <div>
             <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>Readiness ledger</p>
             <div className="mt-2">
@@ -317,7 +336,7 @@ export function PlanningReadinessDrawer({
                   v === 'avneet_singh' || v === 'shamsher_inder' ? (v as PlanningDesignerKey) : ''
                 onDesignerKeyChange?.(line.id, key)
               }}
-              className={`mt-1 w-full h-9 rounded border border-border bg-card px-2 text-xs text-foreground dark:border-border/40 dark:bg-card dark:text-slate-200 ${mono}`}
+              className={`mt-1 w-full h-9 rounded border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 ${mono}`}
             >
               <option value="">— Designer —</option>
               {(Object.entries(PLANNING_DESIGNERS) as [PlanningDesignerKey, string][]).map(([k, label]) => (
@@ -330,24 +349,24 @@ export function PlanningReadinessDrawer({
 
           <div>
             <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>Summary</p>
-            <ul className={`mt-1 space-y-1 text-[11px] text-slate-700 dark:text-slate-300 ${mono}`}>
+            <ul className={`mt-1 space-y-1 text-[11px] text-slate-300 ${mono}`}>
               <li>
-                Qty: <span className="font-medium text-amber-800 dark:text-amber-200/90">{line.quantity.toLocaleString('en-IN')}</span>
+                Qty: <span className="font-medium text-amber-300">{line.quantity.toLocaleString('en-IN')}</span>
               </li>
               <li>
                 Planning UPS:{' '}
-                <span className="font-medium text-amber-800 dark:text-amber-200/90">{pc.ups != null ? pc.ups : '—'}</span>
+                <span className="font-medium text-amber-300">{pc.ups != null ? pc.ups : '—'}</span>
               </li>
               <li>
                 Sheet / yield:{' '}
-                <span className="text-slate-800 dark:text-slate-200">
+                <span className="text-slate-200">
                   {pc.actualSheetSizeLabel ?? '—'} ·{' '}
                   {pc.productionYieldPct != null ? `${pc.productionYieldPct}%` : '—'}
                 </span>
               </li>
               <li>
                 Mix-set:{' '}
-                <span className="text-slate-800 dark:text-slate-200">
+                <span className="text-slate-200">
                   {pc.layoutType === 'gang' ? `Gang · ${pc.masterSetId ?? '—'}` : 'Single product'}
                 </span>
               </li>
@@ -356,12 +375,12 @@ export function PlanningReadinessDrawer({
 
           <div>
             <p className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>Material Efficiency</p>
-            <div className="mt-2 flex flex-col gap-3 rounded-lg border border-border bg-card/80 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+            <div className="mt-2 flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-3">
               {util && util.yieldPct > 0 ? (
                 <div className="flex flex-col items-center">
                   <SemiGaugeUtilization pct={util.yieldPct} />
                   <p
-                    className={`text-[10px] text-slate-600 dark:text-slate-400 mt-1 text-center leading-snug ${mono}`}
+                    className={`text-[10px] text-slate-400 mt-1 text-center leading-snug ${mono}`}
                   >
                     Utilization: {Math.round(util.yieldPct)}% | Off-cut Waste: {Math.round(100 - util.yieldPct)}%
                   </p>
@@ -371,14 +390,14 @@ export function PlanningReadinessDrawer({
                   Enter blank size, parent sheet, and UPS on the row to show sheet utilization.
                 </p>
               )}
-              <div className="flex items-start justify-between gap-2 border-t border-[#E2E8F0] pt-2 dark:border-slate-800">
-                <p className={`text-[11px] text-slate-700 dark:text-slate-300 leading-snug ${mono}`}>
+              <div className="flex items-start justify-between gap-2 border-t border-slate-800 pt-2">
+                <p className={`text-[11px] text-slate-300 leading-snug ${mono}`}>
                   Calculated Make-Ready Sheets:{' '}
-                  <span className="font-semibold text-amber-800 dark:text-amber-200/90">{makeReady.totalSheets}</span>
+                  <span className="font-semibold text-amber-300">{makeReady.totalSheets}</span>
                 </p>
                 <button
                   type="button"
-                  className="inline-flex shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                  className="inline-flex shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
                   title={makeReady.detail}
                   aria-label={`Make-ready breakdown: ${makeReady.detail}`}
                 >
@@ -388,19 +407,17 @@ export function PlanningReadinessDrawer({
             </div>
           </div>
 
-          <div>
-            <p className={`text-[10px] uppercase tracking-wide text-slate-500 mb-2 ${mono}`}>
-              Hub sync (live)
+          <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+            <p className={`mb-2 text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
+              II. Efficiency Gauges
             </p>
-            <div className="flex flex-wrap justify-between gap-3">
-              <RingPct label="AW" pct={awPct} tone={awTone} />
-              <RingPct label="Plate" pct={platePct} tone={plTone} />
-              <RingPct label="Die" pct={diePct} tone={diTone} />
-              <RingPct label="Paper" pct={rmPct} tone={rmTone} />
+            <div className="flex items-start justify-between gap-3">
+              <RingPct label="Material Utilization" pct={materialUtilPct} tone={materialTone} />
+              <RingPct label="Production Readiness" pct={productionReadinessPct} tone={readinessTone} />
             </div>
-            <p className="text-[9px] text-slate-600 mt-2 leading-snug">
-              Five-point strip: {five.allGreen && platesStatus === 'available' ? 'All green' : 'Blocked'}{' '}
-              · Tooling: {ti.allReady ? 'OK' : 'Pending'}
+            <p className="mt-2 text-[9px] leading-snug text-slate-400">
+              Five-point strip: {five.allGreen && platesStatus === 'available' ? 'All green' : 'Blocked'} · Tooling:{' '}
+              {ti.allReady ? 'OK' : 'Pending'}
             </p>
           </div>
         </div>
