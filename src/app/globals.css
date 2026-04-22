@@ -1,8 +1,8 @@
+@import '../styles/design-tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import '../styles/design-tokens.css';
 
 /*
  * Plate Hub — printing-industry channel colours (active swatches use Tailwind in components):
@@ -35,32 +35,32 @@
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --background: 222 47% 8%;
+    --foreground: 210 20% 93%;
+    --card: 217 33% 17%;
+    --card-foreground: 210 20% 93%;
+    --primary: 239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 32% 14%;
+    --secondary-foreground: 210 20% 93%;
+    --muted: 220 25% 16%;
+    --muted-foreground: 215 16% 65%;
+    --accent: 220 32% 18%;
+    --accent-foreground: 210 20% 93%;
+    --destructive: 0 62% 45%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --border: 220 22% 16%;
+    --input: 220 22% 16%;
+    --ring: 239 84% 67%;
   }
 }
 
 @layer base {
   * {
-    @apply border-border;
+    @apply border-ds-line/20;
   }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-ds-main text-ds-ink antialiased;
   }
 }
 
@@ -68,10 +68,10 @@
 @keyframes hub-tool-in-use-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.35);
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.28);
   }
   50% {
-    box-shadow: 0 0 14px 3px rgba(59, 130, 246, 0.25);
+    box-shadow: 0 0 14px 3px rgba(99, 102, 241, 0.2);
   }
 }
 
@@ -82,11 +82,11 @@
 /* PO line — one-shot glow when Size / Pasting are first filled from Master */
 @keyframes po-master-field-pulse {
   0% {
-    box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.55), 0 0 12px rgba(16, 185, 129, 0.2);
-    background-color: rgba(16, 185, 129, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(63, 207, 142, 0.45), 0 0 12px rgba(63, 207, 142, 0.15);
+    background-color: rgba(63, 207, 142, 0.08);
   }
   100% {
-    box-shadow: inset 0 0 0 0 rgba(16, 185, 129, 0), 0 0 0 rgba(16, 185, 129, 0);
+    box-shadow: inset 0 0 0 0 rgba(63, 207, 142, 0), 0 0 0 rgba(63, 207, 142, 0);
     background-color: transparent;
   }
 }
@@ -98,11 +98,11 @@
 /* PO line — one-shot row tint when hub tooling status finishes syncing for that row */
 @keyframes po-tooling-row-sync-pulse {
   0% {
-    box-shadow: inset 3px 0 0 0 rgba(59, 130, 246, 0.65);
-    background-color: rgba(59, 130, 246, 0.08);
+    box-shadow: inset 3px 0 0 0 rgba(99, 102, 241, 0.55);
+    background-color: rgba(99, 102, 241, 0.07);
   }
   100% {
-    box-shadow: inset 3px 0 0 0 rgba(59, 130, 246, 0);
+    box-shadow: inset 3px 0 0 0 rgba(99, 102, 241, 0);
     background-color: transparent;
   }
 }
@@ -139,16 +139,15 @@
 
 @layer components {
   .ci-hub-modal-panel {
-    @apply w-full max-w-md rounded-lg border border-zinc-700/90 bg-zinc-950/95 p-3.5 space-y-2.5 shadow-2xl backdrop-blur-md max-h-[90vh] overflow-y-auto;
+    @apply w-full max-w-md max-h-[90vh] overflow-y-auto space-y-2.5 rounded-ds-md border border-ds-line/50 bg-ds-card/95 p-3.5 shadow-2xl backdrop-blur-md;
   }
   .ci-hub-modal-title {
-    @apply text-[11px] font-bold uppercase tracking-widest text-zinc-100 border-b border-zinc-800/90 pb-2 -mt-0.5;
+    @apply -mt-0.5 border-b border-ds-line/50 pb-2 text-[11px] font-bold uppercase tracking-widest text-ds-ink;
   }
   .ci-btn-save-industrial {
-    @apply px-3 py-2 rounded-md bg-gradient-to-b from-amber-500 to-orange-600 text-white text-sm font-semibold shadow-sm disabled:opacity-50 hover:from-amber-400 hover:to-orange-500 border border-orange-800/40;
+    @apply rounded-ds-sm border border-ds-brand/30 bg-ds-brand px-3 py-2 text-sm font-semibold text-white shadow-sm transition duration-200 hover:border-ds-brand-hover hover:bg-ds-brand-hover disabled:opacity-50;
   }
-  /** Procurement workbench — golden-orange primary actions */
   .ci-btn-procurement {
-    @apply px-3 py-2 rounded-md bg-gradient-to-b from-amber-400 via-orange-500 to-orange-600 text-white text-sm font-semibold shadow-md disabled:opacity-50 hover:from-amber-300 hover:via-orange-400 hover:to-orange-500 border border-amber-700/50;
+    @apply rounded-ds-sm border border-ds-brand/25 bg-ds-brand px-3 py-2 text-sm font-semibold text-white shadow-md transition duration-200 hover:border-ds-brand/40 hover:bg-ds-brand-hover disabled:opacity-50;
   }
 }
