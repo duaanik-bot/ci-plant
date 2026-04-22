@@ -1,13 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useRef } from 'react'
-import Link from 'next/link'
 import { PastingStyle } from '@prisma/client'
 import { COATING_TYPES, EMBOSSING_TYPES, FOIL_TYPES, PAPER_TYPES, BOARD_GRADES } from '@/lib/constants'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PoLinePastingStyleCell } from '@/components/po/PoLinePastingStyleCell'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
-import type { PoToolingSignal } from '@/lib/po-tooling-signal'
 
 type Line = {
   cartonId: string
@@ -32,10 +30,8 @@ type Line = {
   toolingUnlinked: boolean
   pastingStyle: string
   masterPastingStyleMissing: boolean
-  ghostFromMaster: { size: boolean; gsm: boolean; pasting: boolean }
+  ghostFromMaster: { size: boolean; gsm: boolean; pasting: boolean; rate: boolean }
 }
-
-type ToolingMeta = { signal: PoToolingSignal; tooltip: string } | undefined
 
 type PoNewLineItemDrawerProps = {
   isOpen: boolean
@@ -53,11 +49,9 @@ type PoNewLineItemDrawerProps = {
   masterPastePopoverLine: number | null
   setMasterPastePopoverLine: (n: number | null) => void
   onSavePastingToMaster: (lineIndex: number, cartonId: string, style: PastingStyle) => void
-  toolingMeta: ToolingMeta
-  toolingLoading: boolean
 }
 
-const SECTION_IDS = ['po-sec-material', 'po-sec-print', 'po-sec-tool', 'po-sec-cost'] as const
+const SECTION_IDS = ['po-sec-material', 'po-sec-print', 'po-sec-cost'] as const
 
 function computeLineMoney(quantity: string, rate: string, gstPct: string) {
   const q = Math.max(0, Number(quantity) || 0)
@@ -79,58 +73,11 @@ function computeChargeableQty(quantity: string, wastagePct: string) {
   return q * (1 + w / 100)
 }
 
-function dieStatusForTooling(
-  line: Line,
-  toolingMeta: ToolingMeta,
-  toolingLoading: boolean,
-): { label: string; detail: string } {
-  if (toolingLoading) {
-    return { label: 'Checking…', detail: 'Resolving against die / tooling' }
-  }
-  if (!line.cartonId) {
-    return { label: '—', detail: 'Select a product to evaluate tooling' }
-  }
-  if (line.toolingUnlinked) {
-    return {
-      label: 'Missing (no Die Master)',
-      detail: 'Link a die in Product Master before production handoff.',
-    }
-  }
-  const sig = toolingMeta?.signal
-  if (sig === 'green') {
-    return { label: 'Ready', detail: toolingMeta?.tooltip ?? 'Tooling preflight looks good for this line.' }
-  }
-  if (sig === 'yellow') {
-    return { label: 'Review', detail: toolingMeta?.tooltip ?? 'Confirm in die or plate workflow.' }
-  }
-  return { label: 'Blocked', detail: toolingMeta?.tooltip ?? 'Resolve in Die Hub or Product Master first.' }
-}
-
 function sectionTitle(text: string) {
   return (
     <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-800 pb-2">
       {text}
     </h3>
-  )
-}
-
-function toolRow(emoji: string, label: string, status: 'ok' | 'warn' | 'bad', sub: string) {
-  return (
-    <div className="flex gap-2 py-1.5 border-b border-slate-800/60 last:border-0">
-      <span className="text-base leading-tight" aria-hidden>
-        {emoji}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-slate-200">{label}</p>
-        <p
-          className={`text-[10px] leading-relaxed ${
-            status === 'ok' ? 'text-emerald-400/90' : status === 'warn' ? 'text-amber-400/90' : 'text-rose-400/90'
-          }`}
-        >
-          {sub}
-        </p>
-      </div>
-    </div>
   )
 }
 
@@ -150,8 +97,6 @@ export function PoNewLineItemDrawer({
   masterPastePopoverLine,
   setMasterPastePopoverLine,
   onSavePastingToMaster,
-  toolingMeta,
-  toolingLoading,
 }: PoNewLineItemDrawerProps) {
   const panelRootRef = useRef<HTMLDivElement | null>(null)
 
@@ -240,35 +185,6 @@ export function PoNewLineItemDrawer({
     : { exGst: 0, gstAmt: 0, lineTotal: 0 }
   const chQty = line ? computeChargeableQty(line.quantity, line.wastagePct) : 0
 
-  const die = line ? dieStatusForTooling(line, toolingMeta, toolingLoading) : { label: '', detail: '' }
-  const dieEmoji =
-    !line || !line.cartonId
-      ? '⚪'
-      : toolingLoading
-        ? '⚪'
-        : line.toolingUnlinked
-          ? '🔴'
-          : toolingMeta?.signal === 'green'
-            ? '🟢'
-            : toolingMeta?.signal === 'yellow'
-              ? '🟡'
-              : '🔴'
-  const plateEmoji: 'ok' | 'warn' | 'bad' =
-    !line || !line.cartonId ? 'bad' : toolingMeta?.signal === 'green' && !line.toolingUnlinked ? 'ok' : 'warn'
-  const plateSub =
-    line && line.cartonId
-      ? 'Follow Designing / CTP; link product in Plate Hub when artwork is final.'
-      : 'Select a line product first.'
-
-  const embossEmoji: 'ok' | 'warn' | 'bad' = line?.embossingLeafing
-    ? line.embossingLeafing === 'No embossing' || line.embossingLeafing === 'None' || !line.embossingLeafing
-      ? 'ok'
-      : 'warn'
-    : 'ok'
-  const embossSub = line?.embossingLeafing
-    ? line.embossingLeafing
-    : 'Set emboss/foil in Printing above if required.'
-
   return (
     <SlideOverPanel
       title={line ? `Line ${lineIndex + 1} — ${line.cartonName.trim() || 'New line'}` : 'Line item'}
@@ -299,7 +215,7 @@ export function PoNewLineItemDrawer({
               <kbd className="rounded border border-slate-600 px-1">Ctrl</kbd>+→ section
             </p>
 
-            <section id="po-sec-material" className="space-y-2.5">
+            <section id="po-sec-material" className="space-y-3">
               {sectionTitle('Material')}
               <div>
                 <label className="mb-1 block text-xs text-slate-400">Board</label>
@@ -347,7 +263,7 @@ export function PoNewLineItemDrawer({
               </div>
             </section>
 
-            <section id="po-sec-print" className="space-y-2.5">
+            <section id="po-sec-print" className="space-y-3">
               {sectionTitle('Printing')}
               <div>
                 <label className="mb-1 block text-xs text-slate-400">Coating</label>
@@ -416,36 +332,7 @@ export function PoNewLineItemDrawer({
               </div>
             </section>
 
-            <section id="po-sec-tool" className="space-y-0 rounded-lg border border-slate-800 bg-slate-900/50 p-2">
-              {sectionTitle('Tooling')}
-              {toolRow(dieEmoji, 'Die / master', !line || !line.cartonId || toolingLoading ? 'bad' : line.toolingUnlinked || toolingMeta?.signal === 'red' ? 'bad' : toolingMeta?.signal === 'yellow' ? 'warn' : 'ok', die.detail || die.label || '—')}
-              {toolRow(plateEmoji === 'ok' ? '🟢' : plateEmoji === 'warn' ? '🟡' : '🔴', 'Plate mapping', plateEmoji, plateSub)}
-              {toolRow(embossEmoji === 'ok' ? '🟢' : embossEmoji === 'warn' ? '🟡' : '🔴', 'Emboss / block', embossEmoji, embossSub)}
-              {line.dieMasterId ? (
-                <p className="pt-1 text-[10px] text-slate-500">
-                  Die link: <span className="font-mono text-slate-400">{line.dieMasterId}</span>
-                </p>
-              ) : null}
-              <p className="pt-1 text-[10px] text-slate-500">
-                <Link href="/orders/designing" className="text-amber-400/90 hover:underline">
-                  Plate Hub
-                </Link>
-                {line.cartonId ? (
-                  <>
-                    {' · '}
-                    <Link href={`/masters/cartons/${line.cartonId}`} className="text-amber-400/90 hover:underline">
-                      Product
-                    </Link>
-                  </>
-                ) : null}
-                {' · '}
-                <Link href="/masters/dies" className="text-amber-400/90 hover:underline">
-                  Dies
-                </Link>
-              </p>
-            </section>
-
-            <section id="po-sec-cost" className="space-y-2.5">
+            <section id="po-sec-cost" className="space-y-3">
               {sectionTitle('Costing')}
               <div>
                 <label className="mb-1 block text-xs text-slate-400">Quantity</label>
@@ -464,8 +351,16 @@ export function PoNewLineItemDrawer({
                   min={0}
                   step={0.01}
                   value={line.rate}
-                  onChange={(e) => updateLine(lineIndex, { rate: e.target.value })}
-                  className={`w-full ${inputCls} ${poMono} ${fieldErrors[`line${lineIndex}_rate`] ? inputErr : ''}`}
+                  onChange={(e) =>
+                    updateLine(lineIndex, {
+                      rate: e.target.value,
+                      ghostFromMaster: { ...line.ghostFromMaster, rate: false },
+                    })
+                  }
+                  className={`w-full ${
+                    line.ghostFromMaster.rate ? inputClsGhost : inputCls
+                  } ${poMono} ${fieldErrors[`line${lineIndex}_rate`] ? inputErr : ''}`}
+                  title={line.ghostFromMaster.rate ? 'From Product Master — edit to override' : undefined}
                 />
               </div>
               <div>

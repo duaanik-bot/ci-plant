@@ -23,11 +23,11 @@ import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { parseCartonSizeToDims } from '@/lib/die-hub-dimensions'
 import { PastingStyle } from '@prisma/client'
 import { PoNewLineItemDrawer } from '@/components/po/PoNewLineItemDrawer'
+import { PoLinePastingStyleCell } from '@/components/po/PoLinePastingStyleCell'
 import { DeliveryDateInput } from '@/components/po/DeliveryDateInput'
 import { updateProductMasterStyle } from '@/lib/update-product-master-style'
 import { computeSuggestedDelivery } from '@/lib/po-delivery-schedule'
 import type { PoToolingSignal } from '@/lib/po-tooling-signal'
-import { pastingStyleLabel, PO_MANUAL_PASTING_VALUES } from '@/lib/pasting-style'
 import { Copy, Star, Trash2 } from 'lucide-react'
 
 type Customer = {
@@ -76,7 +76,7 @@ type Line = {
   /** Visual audit: Product Master has no canonical pastingStyle (null). */
   masterPastingStyleMissing: boolean
   /** Last applied from Product Master — dimmed until user edits that field. */
-  ghostFromMaster: { size: boolean; gsm: boolean; pasting: boolean }
+  ghostFromMaster: { size: boolean; gsm: boolean; pasting: boolean; rate: boolean }
   /** Board/paper procurement; live after PO save. */
   materialProcurementStatus?: string
 }
@@ -116,7 +116,7 @@ const defaultLine = (): Line => ({
   toolingUnlinked: false,
   pastingStyle: '',
   masterPastingStyleMissing: false,
-  ghostFromMaster: { size: false, gsm: false, pasting: false },
+  ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
   materialProcurementStatus: 'not_calculated',
 })
 
@@ -157,7 +157,7 @@ function resetAutofillFields(line: Line, cartonName: string): Line {
     toolingUnlinked: false,
     pastingStyle: '',
     masterPastingStyleMissing: false,
-    ghostFromMaster: { size: false, gsm: false, pasting: false },
+    ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
     materialProcurementStatus: 'not_calculated',
   }
 }
@@ -660,6 +660,7 @@ export default function NewPurchaseOrderPage() {
         size: true,
         gsm: true,
         pasting: !masterPasteMissing,
+        rate: c.rate != null,
       },
     })
     setMasterPulseLine(idx)
@@ -1361,15 +1362,15 @@ export default function NewPurchaseOrderPage() {
             <thead className="sticky top-0 z-30 bg-slate-800/95 text-slate-300 shadow-[inset_0_-1px_0_0_rgb(51_65_85)]">
               <tr>
                 <th
-                  className={`${lineCellPad} w-[32%] text-left text-[11px] font-semibold sticky left-0 z-40 border-r border-slate-800/90 bg-slate-800/95 shadow-[2px_0_6px_rgba(0,0,0,0.25)]`}
+                  className={`${lineCellPad} w-[36%] text-left text-[11px] font-semibold sticky left-0 z-40 border-r border-slate-800/90 bg-slate-800/95 shadow-[2px_0_6px_rgba(0,0,0,0.25)]`}
                 >
                   Carton
                 </th>
                 <th className={`${lineCellPad} w-[10%] text-left text-[11px] font-semibold ${poMono}`}>Size</th>
                 <th className={`${lineCellPad} w-[8%] text-center text-[11px] font-semibold ${poMono}`}>Qty *</th>
                 <th className={`${lineCellPad} w-[14%] text-left text-[11px] font-semibold`}>Pasting</th>
-                <th className={`${lineCellPad} w-[20%] text-left text-[11px] font-semibold`}>Die status</th>
-                <th className={`${lineCellPad} w-[10%] text-right text-[11px] font-semibold ${poMono}`}>Amount</th>
+                <th className={`${lineCellPad} w-[14%] text-right text-[11px] font-semibold ${poMono}`}>Rate</th>
+                <th className={`${lineCellPad} w-[12%] text-right text-[11px] font-semibold ${poMono}`}>Amount</th>
                 <th className={`${lineCellPad} w-[6%] text-right text-[11px] font-normal text-slate-500`} aria-label="Row actions" />
               </tr>
             </thead>
@@ -1380,49 +1381,22 @@ export default function NewPurchaseOrderPage() {
                 const gstPct = Number(ln.gstPct) || 0
                 const { beforeGst } = lineAmount(rate, qty, gstPct)
                 const amount = beforeGst
-                const dieProblem = !!ln.cartonId && (ln.toolingUnlinked || !ln.toolingDieType.trim())
                 const tMeta = lineToolingByIdx[idx]
-                const toolingDotLoading = tMeta === undefined
                 const tSig = tMeta?.signal ?? 'red'
                 const rowStripe = idx % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/50'
                 const stickBg = idx % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/50'
                 let health: 'ok' | 'sync' | 'block' = 'ok'
                 if (ln.masterPastingStyleMissing) health = 'sync'
-                if (tSig === 'red' || dieProblem) health = 'block'
+                if (tSig === 'red') health = 'block'
                 if (tSig === 'yellow' && health === 'ok') health = 'sync'
                 const rowRing =
                   health === 'block'
                     ? 'ring-1 ring-rose-500/35 ring-inset'
                     : health === 'sync'
                       ? 'ring-1 ring-amber-500/30 ring-inset'
-                      : tSig === 'green' && !dieProblem
+                      : tSig === 'green'
                         ? 'ring-1 ring-emerald-500/20 ring-inset'
                         : ''
-                const dieTitle = dieProblem
-                  ? (ln.toolingUnlinked
-                      ? 'No Die Master linked in Product Master — open row for details.'
-                      : 'Die not resolved from master — open line details.')
-                  : (tMeta?.tooltip ?? (ln.toolingDieType || '—'))
-                const dieLineLabel = !ln.cartonId
-                  ? '—'
-                  : toolingDotLoading
-                    ? '…'
-                    : dieProblem
-                      ? 'Missing'
-                      : tSig === 'green'
-                        ? 'OK'
-                        : tSig === 'yellow'
-                          ? 'Review'
-                          : 'Block'
-                const dieDotClass = toolingDotLoading
-                  ? 'bg-slate-500 animate-pulse'
-                  : dieProblem
-                    ? 'bg-amber-500'
-                    : tSig === 'green'
-                      ? 'bg-emerald-500'
-                      : tSig === 'yellow'
-                        ? 'bg-amber-500'
-                        : 'bg-rose-500'
                 return (
                   <tr
                     key={idx}
@@ -1432,7 +1406,7 @@ export default function NewPurchaseOrderPage() {
                       setKbRowIndex(idx)
                       setDetailLineIdx(idx)
                     }}
-                    title="Click or Enter — line details, tooling, costing (Tab in drawer for fields)"
+                    title="Click or Enter — line details & costing (Tab in drawer for fields)"
                     className={`group min-h-[56px] cursor-pointer border-b border-slate-800/80 transition-colors ${rowStripe} ${
                       toolingRowPulse === idx ? 'po-tooling-row-sync-pulse' : ''
                     } ${rowRing} ${
@@ -1592,45 +1566,54 @@ export default function NewPurchaseOrderPage() {
                       />
                     </td>
                     <td className={`${lineCellPad} align-top`} data-line-stop onClick={(e) => e.stopPropagation()}>
-                      {!ln.cartonId ? (
-                        <select
-                          value={ln.pastingStyle}
-                          onChange={(e) =>
+                      <div className="data-skip-po-enter-chain max-w-full">
+                        <PoLinePastingStyleCell
+                          lineIndex={idx}
+                          cartonId={ln.cartonId}
+                          pastingStyle={ln.pastingStyle}
+                          masterPastingStyleMissing={ln.masterPastingStyleMissing}
+                          ghostFromMaster={ln.ghostFromMaster.pasting}
+                          pasteErr={fieldErrors[`line${idx}_pasting`]}
+                          inputCls={`w-full min-w-0 text-[10px] ${inputCls}`}
+                          inputErr={inputErr}
+                          savingToMaster={masterPasteSavingLine === idx}
+                          popoverOpenForLine={masterPastePopoverLine}
+                          setPopoverOpenForLine={setMasterPastePopoverLine}
+                          onPastingSelectChange={(value) =>
                             updateLine(idx, {
-                              pastingStyle: e.target.value,
+                              pastingStyle: value,
                               ghostFromMaster: { ...ln.ghostFromMaster, pasting: false },
                             })
                           }
-                          className={`w-full max-w-full text-[10px] ${inputCls}`}
-                        >
-                          <option value="">—</option>
-                          {PO_MANUAL_PASTING_VALUES.map((v) => (
-                            <option key={v} value={v === PastingStyle.BSO ? 'BSO' : 'LOCK_BOTTOM'}>
-                              {pastingStyleLabel(v)}
-                            </option>
-                          ))}
-                        </select>
-                      ) : ln.masterPastingStyleMissing ? (
-                        <span className="text-[10px] text-amber-400" title="Use line details to save pasting to master">
-                          Sync
-                        </span>
-                      ) : (
-                        <Link
-                          href={`/masters/cartons/${ln.cartonId}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="line-clamp-2 break-words text-[10px] text-indigo-300 hover:underline"
-                        >
-                          {pastingStyleLabel(
-                            (ln.pastingStyle === 'BSO' ? PastingStyle.BSO : PastingStyle.LOCK_BOTTOM) as PastingStyle,
-                          )}
-                        </Link>
-                      )}
-                    </td>
-                    <td className={`${lineCellPad} align-top`} title={dieTitle}>
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dieDotClass}`} aria-hidden />
-                        <span className="truncate text-[10px] text-slate-200">{dieLineLabel}</span>
+                          onSaveToMaster={(style) => void saveProductMasterPasting(idx, ln.cartonId, style)}
+                        />
                       </div>
+                    </td>
+                    <td
+                      className={`${lineCellPad} text-right align-top`}
+                      data-line-stop
+                      onClick={(e) => e.stopPropagation()}
+                      title={
+                        ln.ghostFromMaster.rate
+                          ? 'From Product Master — edit to override'
+                          : 'Rate per unit (ex-GST)'
+                      }
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={ln.rate}
+                        onChange={(e) =>
+                          updateLine(idx, {
+                            rate: e.target.value,
+                            ghostFromMaster: { ...ln.ghostFromMaster, rate: false },
+                          })
+                        }
+                        className={`inline-block w-full min-w-0 max-w-[6.5rem] text-right text-[10px] ${
+                          ln.ghostFromMaster.rate ? inputClsGhost : inputCls
+                        } ${poMono}`}
+                      />
                     </td>
                     <td
                       className={`${lineCellPad} text-right align-top ${poMono} text-slate-200`}
@@ -1720,8 +1703,6 @@ export default function NewPurchaseOrderPage() {
         masterPastePopoverLine={masterPastePopoverLine}
         setMasterPastePopoverLine={setMasterPastePopoverLine}
         onSavePastingToMaster={(i, id, s) => void saveProductMasterPasting(i, id, s)}
-        toolingMeta={detailLineIdx != null ? lineToolingByIdx[detailLineIdx] : undefined}
-        toolingLoading={detailLineIdx != null && lineToolingByIdx[detailLineIdx] === undefined}
       />
 
       <SlideOverPanel title="Quick Create Customer" isOpen={qcCustomerOpen} onClose={() => setQcCustomerOpen(false)}>
