@@ -8,6 +8,8 @@ type AutoPopulateConfig<T> = {
   getId: (item: T) => string
   getLabel: (item: T) => string
   minQueryLength?: number
+  /** Debounce for search; default 300. */
+  debounceMs?: number
 }
 
 type AutoPopulateState<T> = {
@@ -22,7 +24,7 @@ type AutoPopulateState<T> = {
 const LAST_USED_LIMIT = 5
 
 export function useAutoPopulate<T>(config: AutoPopulateConfig<T>): AutoPopulateState<T> {
-  const { storageKey, search, getId, getLabel, minQueryLength = 1 } = config
+  const { storageKey, search, getId, getLabel, minQueryLength = 1, debounceMs = 300 } = config
 
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -74,12 +76,12 @@ export function useAutoPopulate<T>(config: AutoPopulateConfig<T>): AutoPopulateS
       } finally {
         if (!cancelled) setLoading(false)
       }
-    }, 300)
+    }, debounceMs)
     return () => {
       cancelled = true
       clearTimeout(handle)
     }
-  }, [minQueryLength, query])
+  }, [minQueryLength, query, debounceMs])
 
   const select = (item: T) => {
     setOptions([])

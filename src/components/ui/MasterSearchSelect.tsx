@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 type SearchSelectItem = {
   id: string
@@ -36,6 +36,8 @@ type MasterSearchSelectProps<T extends SearchSelectItem> = {
   containerClassName?: string
   inputClassName?: string
   dropdownClassName?: string
+  /** Sticky area under the option list, e.g. “+ New …” that keeps the user on the current screen. */
+  dropdownFooter?: ReactNode
 }
 
 export function MasterSearchSelect<T extends SearchSelectItem>({
@@ -66,6 +68,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
   containerClassName,
   inputClassName,
   dropdownClassName,
+  dropdownFooter,
 }: MasterSearchSelectProps<T>) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [open, setOpen] = useState(false)
@@ -281,6 +284,14 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                   ) : null}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+          {dropdownFooter ? (
+            <div
+              className="border-t border-slate-800"
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              {dropdownFooter}
             </div>
           ) : null}
         </div>

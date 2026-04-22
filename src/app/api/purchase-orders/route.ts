@@ -63,6 +63,8 @@ const createSchema = purchaseOrderSchema.omit({
   poNumber: z.string().min(1).max(100).optional(),
   remarks: z.string().optional(),
   status: z.string().optional(),
+  /** Pins PO to the top in Planning and Plate hubs when true. */
+  isPriority: z.boolean().optional(),
   /** ISO date YYYY-MM-DD — stored on header for MRP / vendor scheduling */
   deliveryRequiredBy: z.string().optional().nullable(),
   lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
@@ -245,6 +247,7 @@ export async function POST(req: NextRequest) {
             : null,
           remarks: data.remarks || null,
           status: data.status || 'draft',
+          isPriority: data.isPriority === true,
           createdBy: user!.id,
         },
       })

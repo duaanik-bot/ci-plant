@@ -26,7 +26,7 @@ import { DeliveryDateInput } from '@/components/po/DeliveryDateInput'
 import { updateProductMasterStyle } from '@/lib/update-product-master-style'
 import { computeSuggestedDelivery } from '@/lib/po-delivery-schedule'
 import type { PoToolingSignal } from '@/lib/po-tooling-signal'
-import { Copy, FileText, Trash2 } from 'lucide-react'
+import { Copy, FileText, Pencil, Star, Trash2 } from 'lucide-react'
 import { paperSupplyIconMeta } from '@/lib/po-paper-supply-ui'
 
 type Customer = {
@@ -377,7 +377,7 @@ function CartonLookupField({
           const suggestedName = trimmedQuery
           if (suggestedName) onCreate(suggestedName)
         }}
-        inputClassName="min-w-[260px] px-2 py-1 text-xs"
+        inputClassName="min-w-[260px] px-2 py-1 text-xs whitespace-normal"
         dropdownClassName="min-w-[320px]"
       />
       {!line.cartonId && line.cartonName.trim() ? (
@@ -392,6 +392,8 @@ export default function NewPurchaseOrderPage() {
   const [customerId, setCustomerId] = useState('')
   const [poDate, setPoDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [customPoNumber, setCustomPoNumber] = useState('')
+  /** Writes `PurchaseOrder.isPriority` for Planning and Plate/CTP queue ordering. */
+  const [isPriority, setIsPriority] = useState(false)
   const [deliveryRequiredBy, setDeliveryRequiredBy] = useState('')
   /** User edited delivery date manually — stop overwriting with auto-suggest until reset. */
   const [deliveryByCustom, setDeliveryByCustom] = useState(false)
@@ -459,6 +461,7 @@ export default function NewPurchaseOrderPage() {
   const toolingPulseAfterFetchIdx = useRef<number | null>(null)
   const [poBulkMissingMode, setPoBulkMissingMode] = useState(false)
   const [bulkPastingBusy, setBulkPastingBusy] = useState(false)
+  const [lineSpecDrawerIdx, setLineSpecDrawerIdx] = useState<number | null>(null)
 
   const toolingPayloadKey = useMemo(
     () =>
@@ -594,6 +597,8 @@ export default function NewPurchaseOrderPage() {
 
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'po-customer',
+    debounceMs: 150,
+    minQueryLength: 2,
     search: async (query: string) => {
       const res = await fetch(`/api/customers?q=${encodeURIComponent(query)}`)
       return (await res.json()) as Customer[]
@@ -739,6 +744,12 @@ export default function NewPurchaseOrderPage() {
       if (openIdx != null && openIdx > idx) return openIdx - 1
       return openIdx
     })
+    setLineSpecDrawerIdx((open) => {
+      if (open === null) return null
+      if (open === idx) return null
+      if (open > idx) return open - 1
+      return open
+    })
     setMasterPulseLine((p) => {
       if (p === idx) return null
       if (p != null && p > idx) return p - 1
@@ -770,6 +781,11 @@ export default function NewPurchaseOrderPage() {
     setMasterPastePopoverLine((open) => {
       if (open === null) return null
       return open > idx ? open + 1 : open
+    })
+    setLineSpecDrawerIdx((open) => {
+      if (open === null) return null
+      if (open > idx) return open + 1
+      return open
     })
   }
 
@@ -847,6 +863,7 @@ export default function NewPurchaseOrderPage() {
         body: JSON.stringify({
           customerId,
           poDate,
+          isPriority,
           ...(customPoNumber.trim() ? { poNumber: customPoNumber.trim() } : {}),
           remarks: combinedRemarks || undefined,
           deliveryRequiredBy: deliveryRequiredBy.trim() || null,
@@ -1092,8 +1109,7 @@ export default function NewPurchaseOrderPage() {
   const inputCls = `${inputBase} text-foreground`
   const inputClsGhost = `${inputBase} text-slate-400`
   const inputErr = 'border-red-500'
-  /** High density: ~10–12 rows visible on 14″ class displays */
-  const lineCellPad = 'px-[0.35rem] py-[2px]'
+  const lineCellPad = 'px-4 py-2'
   const poMono = 'po-mono-metric'
 
   return (
@@ -1102,7 +1118,7 @@ export default function NewPurchaseOrderPage() {
 
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm space-y-3">
         {/* Row 1: Customer (wide) + PO date + Delivery by */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-1">
             <MasterSearchSelect
               label="Customer"
@@ -1119,10 +1135,10 @@ export default function NewPurchaseOrderPage() {
               onSelect={applyCustomer}
               getOptionLabel={(c) => c.name}
               getOptionMeta={(c) =>
-                [c.contactName, c.contactPhone].filter(Boolean).join(' · ')
+                [c.gstNumber ? `Code: ${c.gstNumber}` : null, c.contactName, c.contactPhone].filter(Boolean).join(' · ')
               }
               error={fieldErrors.customerId}
-              placeholder="Type to search customers..."
+              placeholder="Type to search (name, GST, or contact)…"
               emptyMessage="No customer found in master."
               recentLabel="Recent customers"
               loadingMessage="Searching customers..."
@@ -1139,10 +1155,22 @@ export default function NewPurchaseOrderPage() {
                 }))
                 setQcCustomerOpen(true)
               }}
+              dropdownFooter={
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQcCustomer((prev) => ({
+                      ...prev,
+                      name: customerSearch.query.trim() || prev.name,
+                    }))
+                    setQcCustomerOpen(true)
+                  }}
+                  className="w-full px-3 py-2.5 text-left text-xs font-medium text-amber-400 hover:bg-slate-800/90"
+                >
+                  + New Customer
+                </button>
+              }
             />
-            <button type="button" onClick={() => setQcCustomerOpen(true)} className="mt-1 text-xs text-amber-400 hover:underline">
-              Create New Customer
-            </button>
             {selectedCustomer ? (
               <p className="mt-1 text-[11px] text-slate-500">
                 {[selectedCustomer.contactName, selectedCustomer.contactPhone].filter(Boolean).join(' · ')}
@@ -1171,27 +1199,43 @@ export default function NewPurchaseOrderPage() {
             }}
           />
         </div>
-        {/* Row 2: Custom PO# + Payment terms */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
             <label className="block text-slate-400 mb-1">Custom PO number <span className="text-slate-500">(optional)</span></label>
-            <input
-              type="text"
-              value={customPoNumber}
-              onChange={(e) => {
-                setCustomPoNumber(e.target.value)
-                setFieldErrors((prev) => {
-                  const next = { ...prev }
-                  delete next.poNumber
-                  return next
-                })
-              }}
-              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${fieldErrors.poNumber ? 'border-red-500' : 'border-slate-600'}`}
-              placeholder="Leave blank to auto-generate"
-            />
+            <div className="flex items-stretch gap-2">
+              <input
+                type="text"
+                value={customPoNumber}
+                onChange={(e) => {
+                  setCustomPoNumber(e.target.value)
+                  setFieldErrors((prev) => {
+                    const next = { ...prev }
+                    delete next.poNumber
+                    return next
+                  })
+                }}
+                className={`min-w-0 flex-1 px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${fieldErrors.poNumber ? 'border-red-500' : 'border-slate-600'}`}
+                placeholder="Leave blank to auto-generate"
+              />
+              <button
+                type="button"
+                onClick={() => setIsPriority((p) => !p)}
+                title={isPriority ? 'High priority (Planning / CTP)' : 'Mark high priority'}
+                aria-pressed={isPriority}
+                aria-label={isPriority ? 'PO is high priority' : 'Mark PO as high priority for Planning and CTP'}
+                className="shrink-0 flex items-center justify-center w-10 rounded-lg border border-slate-600 bg-slate-800/80 hover:bg-slate-800"
+              >
+                <Star
+                  className={`h-5 w-5 ${isPriority ? 'fill-amber-400 text-amber-400' : 'text-slate-500'}`}
+                  strokeWidth={1.5}
+                  aria-hidden
+                />
+              </button>
+            </div>
             {fieldErrors.poNumber ? (
               <p className="mt-1 text-xs text-red-400">{fieldErrors.poNumber}</p>
             ) : null}
+            <p className="mt-1 text-[10px] text-slate-600">When starred, this PO is treated as high priority in Planning and CTP.</p>
           </div>
           <div>
             <label className="block text-slate-400 mb-1">Payment terms</label>
@@ -1203,9 +1247,10 @@ export default function NewPurchaseOrderPage() {
               placeholder="e.g. 30 days"
             />
           </div>
+          <div className="hidden md:block" aria-hidden />
         </div>
         {/* Row 3: Remarks + PO value */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
           <div className="md:col-span-2">
             <label className="block text-slate-400 mb-1">Remarks</label>
             <input
@@ -1230,27 +1275,26 @@ export default function NewPurchaseOrderPage() {
         </div>
         {fieldErrors.lines && <p className="text-red-400 text-xs">{fieldErrors.lines}</p>}
         <div className="overflow-x-auto overflow-y-auto min-h-[320px] max-h-[min(calc(100vh-15rem),720px)] rounded-md border border-slate-800/90">
-          <table className="w-full text-left min-w-[1900px] border-collapse">
+          <table className="w-full text-left min-w-0 table-auto border-collapse">
             <thead className="sticky top-0 z-30 backdrop-blur-md bg-slate-800/90 text-slate-300 shadow-[inset_0_-1px_0_0_rgb(51_65_85)] supports-[backdrop-filter]:bg-slate-800/75">
               <tr>
-                <th className={`${lineCellPad} text-left font-semibold w-[35%] min-w-[14rem]`}>Carton name</th>
-                <th className={`${lineCellPad} text-left font-semibold ${poMono} w-[9%] min-w-[4.5rem]`}>Size</th>
-                <th className={`${lineCellPad} text-left font-semibold w-[8%] min-w-[5rem]`}>Pasting</th>
-                <th className={`${lineCellPad} text-left font-semibold w-[8%] min-w-[5rem]`}>Die Type</th>
-                <th className={`${lineCellPad} text-left font-semibold ${poMono}`}>Qty*</th>
+                <th className={`${lineCellPad} text-left font-semibold min-w-[12rem] max-w-md`}>Carton name</th>
+                <th className={`${lineCellPad} text-left font-semibold ${poMono} min-w-[4.5rem]`}>Size</th>
+                <th className={`${lineCellPad} text-left font-semibold min-w-[5rem]`}>Pasting</th>
+                <th className={`${lineCellPad} text-left font-semibold min-w-[5.5rem]`}>Die Type</th>
+                <th className={`${lineCellPad} text-center font-semibold ${poMono} min-w-[3.5rem]`}>Qty*</th>
                 <th className={`${lineCellPad} text-left font-semibold`}>Artwork</th>
                 <th className={`${lineCellPad} text-left font-semibold`}>Back</th>
                 <th className={`${lineCellPad} text-left font-semibold`}>Wastage%</th>
-                <th className={`${lineCellPad} text-left font-semibold w-[13%] min-w-[5rem]`}>Rate</th>
-                <th className={`${lineCellPad} text-left font-semibold w-[7%] min-w-[3.25rem]`}>GST%</th>
-                <th className={`${lineCellPad} text-left font-semibold ${poMono} w-[12%] min-w-[5.5rem]`}>Amount</th>
+                <th className={`${lineCellPad} text-center font-semibold min-w-[5rem] ${poMono}`}>Rate</th>
+                <th className={`${lineCellPad} text-center font-semibold min-w-[3.25rem] ${poMono}`}>GST%</th>
+                <th className={`${lineCellPad} text-center font-semibold ${poMono} min-w-[5.5rem]`}>Amount</th>
                 <th className={lineCellPad}>Board</th>
                 <th className={lineCellPad}>GSM</th>
                 <th className={lineCellPad}>Paper</th>
                 <th className={lineCellPad}>Coating</th>
                 <th className={lineCellPad}>Emboss</th>
                 <th className={lineCellPad}>Foil</th>
-                <th className={lineCellPad}>Remarks</th>
                 <th className={lineCellPad} aria-label="Row actions" />
               </tr>
             </thead>
@@ -1261,7 +1305,8 @@ export default function NewPurchaseOrderPage() {
                 const gstPct = Number(ln.gstPct) || 0
                 const { beforeGst } = lineAmount(rate, qty, gstPct)
                 const amount = beforeGst
-                const dieTypeMissing = !!ln.cartonId && !ln.toolingDieType.trim()
+                const dieAmberNoMaster =
+                  !!ln.cartonId && (ln.toolingUnlinked || !ln.toolingDieType.trim())
                 const pasteErr = fieldErrors[`line${idx}_pasting`]
                 const tMeta = lineToolingByIdx[idx]
                 const toolingDotLoading = tMeta === undefined
@@ -1279,13 +1324,13 @@ export default function NewPurchaseOrderPage() {
                 return (
                   <tr
                     key={idx}
-                    className={`group border-b border-slate-800/80 transition-colors ${
+                    className={`group min-h-[64px] border-b border-slate-800/80 transition-colors ${
                       idx % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/40'
                     } ${ln.cartonId ? 'border-l-2 border-l-emerald-500' : 'border-l-2 border-l-transparent'} ${
                       toolingRowPulse === idx ? 'po-tooling-row-sync-pulse' : ''
                     } ${toolingBulkRed ? 'shadow-[inset_0_0_0_2px_rgba(244,63,94,0.5)]' : ''}`}
                   >
-                    <td className={`${lineCellPad} align-top`}>
+                    <td className={`${lineCellPad} align-top whitespace-normal`}>
                       <div className="flex items-start gap-2 min-w-0">
                         <div className="mt-2 flex shrink-0 items-center gap-1">
                           <span
@@ -1473,11 +1518,11 @@ export default function NewPurchaseOrderPage() {
                         onSaveToMaster={(style) => void saveProductMasterPasting(idx, ln.cartonId, style)}
                       />
                     </td>
-                    <td className={`${lineCellPad} align-top min-w-0 max-w-[11rem]`}>
+                    <td className={`${lineCellPad} align-top min-w-0 max-w-[14rem]`}>
                       <div
                         className={`rounded px-[0.425rem] py-[3.4px] text-[11px] min-h-[1.5rem] flex flex-col justify-center ${
-                          dieTypeMissing
-                            ? 'bg-red-950/50 border border-red-600/70 text-red-100'
+                          dieAmberNoMaster
+                            ? 'bg-amber-950/30 border-2 border-amber-500 text-amber-100'
                             : 'bg-slate-900/90 border border-slate-600/80 text-slate-200'
                         }`}
                       >
@@ -1489,17 +1534,21 @@ export default function NewPurchaseOrderPage() {
                           <span className="text-slate-600">—</span>
                         )}
                       </div>
-                      {dieTypeMissing ? (
-                        <p className="text-[10px] text-red-400 mt-0.5 leading-tight">Define Die Type in Master.</p>
+                      {dieAmberNoMaster ? (
+                        <p className="text-[10px] text-amber-400/90 mt-0.5 leading-tight">
+                          {ln.toolingUnlinked
+                            ? 'No Die Master linked in Product Master — link a die or override below.'
+                            : 'Die type not resolved from master — check Product Master or override for this PO.'}
+                        </p>
                       ) : null}
                     </td>
-                    <td className={lineCellPad}>
+                    <td className={`${lineCellPad} text-center`}>
                       <input
                         type="number"
                         min={1}
                         value={ln.quantity}
                         onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                        className={`w-[4.25rem] ${inputCls} ${poMono} ${fieldErrors[`line${idx}_rate`] ? inputErr : ''}`}
+                        className={`inline-block w-[4.25rem] text-center ${inputCls} ${poMono}`}
                       />
                     </td>
                     <td className={lineCellPad}>
@@ -1514,20 +1563,27 @@ export default function NewPurchaseOrderPage() {
                     <td className={lineCellPad}>
                       <input type="number" min={0} step={0.5} value={ln.wastagePct} onChange={(e) => updateLine(idx, { wastagePct: e.target.value })} className={`w-[4.25rem] ${inputCls}`} />
                     </td>
-                    <td className={lineCellPad}>
+                    <td className={`${lineCellPad} text-center`}>
                       <input
                         type="number"
                         min={0}
                         step={0.01}
                         value={ln.rate}
                         onChange={(e) => updateLine(idx, { rate: e.target.value })}
-                        className={`w-full min-w-0 ${inputCls} ${fieldErrors[`line${idx}_rate`] ? inputErr : ''}`}
+                        className={`inline-block w-full min-w-0 max-w-[6.5rem] text-center ${inputCls} ${poMono} ${fieldErrors[`line${idx}_rate`] ? inputErr : ''}`}
                       />
                     </td>
-                    <td className={lineCellPad}>
-                      <input type="number" min={0} max={28} value={ln.gstPct} onChange={(e) => updateLine(idx, { gstPct: e.target.value })} className={`w-full min-w-0 ${inputCls}`} />
+                    <td className={`${lineCellPad} text-center`}>
+                      <input
+                        type="number"
+                        min={0}
+                        max={28}
+                        value={ln.gstPct}
+                        onChange={(e) => updateLine(idx, { gstPct: e.target.value })}
+                        className={`inline-block w-full min-w-0 max-w-[3.5rem] text-center ${inputCls} ${poMono}`}
+                      />
                     </td>
-                    <td className={`${lineCellPad} text-foreground ${poMono}`}>{amount.toFixed(2)}</td>
+                    <td className={`${lineCellPad} text-center text-foreground ${poMono}`}>{amount.toFixed(2)}</td>
                     <td className={lineCellPad}>
                       <PackagingEnumCombobox
                         aria-label="Board grade"
@@ -1588,11 +1644,16 @@ export default function NewPurchaseOrderPage() {
                     <td className={lineCellPad}>
                       <input type="text" value={ln.foilType} readOnly className={`w-full min-w-0 max-w-[5.5rem] ${inputCls} text-slate-400`} placeholder="—" />
                     </td>
-                    <td className={lineCellPad}>
-                      <input type="text" value={ln.remarks} onChange={(e) => updateLine(idx, { remarks: e.target.value })} className={`w-full min-w-0 max-w-[7rem] ${inputCls}`} />
-                    </td>
                     <td className={`${lineCellPad} align-middle`}>
                       <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                        <button
+                          type="button"
+                          title="Advanced line specs (remarks, ink, shipping)"
+                          onClick={() => setLineSpecDrawerIdx(idx)}
+                          className="rounded p-1 text-slate-400 hover:bg-slate-700/80 hover:text-amber-300"
+                        >
+                          <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
+                        </button>
                         <button
                           type="button"
                           title="Duplicate line"
@@ -1768,6 +1829,31 @@ export default function NewPurchaseOrderPage() {
           </div>
         </div>
       </div>
+
+      <SlideOverPanel
+        title="Advanced line specs"
+        isOpen={lineSpecDrawerIdx != null}
+        onClose={() => setLineSpecDrawerIdx(null)}
+      >
+        {lineSpecDrawerIdx != null && lines[lineSpecDrawerIdx] ? (
+          <div className="space-y-3 text-sm">
+            <p className="text-xs text-slate-500">
+              Line {(lineSpecDrawerIdx ?? 0) + 1} — technical notes, ink shades, and shipping or handling
+              details. Saved on the line item; main grid stays compact.
+            </p>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Line remarks and technical specs</label>
+              <textarea
+                rows={8}
+                value={lines[lineSpecDrawerIdx]!.remarks}
+                onChange={(e) => updateLine(lineSpecDrawerIdx!, { remarks: e.target.value })}
+                className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground text-sm"
+                placeholder="E.g. Pantone 485 C for logo, batch coding position, special ship-to instructions…"
+              />
+            </div>
+          </div>
+        ) : null}
+      </SlideOverPanel>
 
       <SlideOverPanel title="Quick Create Customer" isOpen={qcCustomerOpen} onClose={() => setQcCustomerOpen(false)}>
         <form onSubmit={submitQuickCreateCustomer} className="space-y-3 text-sm">
