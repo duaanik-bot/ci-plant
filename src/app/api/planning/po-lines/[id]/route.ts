@@ -23,6 +23,7 @@ const updateSchema = z.object({
   dimLengthMm: z.coerce.number().optional().nullable(),
   dimWidthMm: z.coerce.number().optional().nullable(),
   dimHeightMm: z.coerce.number().optional().nullable(),
+  directorHold: z.boolean().optional(),
 })
 
 export async function GET(
@@ -123,6 +124,7 @@ export async function PATCH(
       ...(data.dimLengthMm !== undefined ? { dimLengthMm: data.dimLengthMm } : {}),
       ...(data.dimWidthMm !== undefined ? { dimWidthMm: data.dimWidthMm } : {}),
       ...(data.dimHeightMm !== undefined ? { dimHeightMm: data.dimHeightMm } : {}),
+      ...(data.directorHold !== undefined ? { directorHold: data.directorHold } : {}),
     },
   })
 

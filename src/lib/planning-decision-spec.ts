@@ -13,6 +13,14 @@ export type PlanningSetIdMode = 'auto' | 'manual'
 
 export type PlanningLayoutType = 'single' | 'gang'
 
+/** Mix-set / line batch workflow in Planning (decision only; no change to sheet math). */
+export type PlanningBatchStatus =
+  | 'draft'
+  | 'ready'
+  | 'hold'
+  | 'approved_for_artwork'
+  | 'released_to_production'
+
 export type PlanningCore = {
   /** ISO timestamp — once set, AW Queue treats UPS / set / designer as authoritative unless recalled */
   savedAt?: string | null
@@ -30,6 +38,12 @@ export type PlanningCore = {
   /** Resolved set # written to line.setNumber on save when auto */
   resolvedSetNumber?: string | null
   layoutType?: PlanningLayoutType | null
+  /** Batch decision engine — kept in planningCore, excluded from planning facts lock snapshot. */
+  batchStatus?: PlanningBatchStatus | null
+  batchHoldReason?: string | null
+  /** When `batchStatus` is `hold`, status to restore on Resume. */
+  batchStatusBeforeHold?: PlanningBatchStatus | null
+  batchDecisionUpdatedAt?: string | null
 }
 
 export function readPlanningCore(spec: Record<string, unknown> | null | undefined): PlanningCore {
@@ -37,6 +51,28 @@ export function readPlanningCore(spec: Record<string, unknown> | null | undefine
   if (!raw || typeof raw !== 'object') return {}
   const o = raw as Record<string, unknown>
   const designerKey = o.designerKey
+  const batchStatusRaw = o.batchStatus
+  const batchStatus: PlanningBatchStatus | null | undefined =
+    batchStatusRaw === 'draft' ||
+    batchStatusRaw === 'ready' ||
+    batchStatusRaw === 'hold' ||
+    batchStatusRaw === 'approved_for_artwork' ||
+    batchStatusRaw === 'released_to_production'
+      ? batchStatusRaw
+      : batchStatusRaw === null
+        ? null
+        : undefined
+  const batchStatusBeforeRaw = o.batchStatusBeforeHold
+  const batchStatusBeforeHold: PlanningBatchStatus | null | undefined =
+    batchStatusBeforeRaw === 'draft' ||
+    batchStatusBeforeRaw === 'ready' ||
+    batchStatusBeforeRaw === 'hold' ||
+    batchStatusBeforeRaw === 'approved_for_artwork' ||
+    batchStatusBeforeRaw === 'released_to_production'
+      ? batchStatusBeforeRaw
+      : batchStatusBeforeRaw === null
+        ? null
+        : undefined
   return {
     savedAt: typeof o.savedAt === 'string' ? o.savedAt : o.savedAt === null ? null : undefined,
     designerKey:
@@ -56,6 +92,16 @@ export function readPlanningCore(spec: Record<string, unknown> | null | undefine
     setIdMode: o.setIdMode === 'auto' || o.setIdMode === 'manual' ? o.setIdMode : null,
     resolvedSetNumber: typeof o.resolvedSetNumber === 'string' ? o.resolvedSetNumber : null,
     layoutType: o.layoutType === 'single' || o.layoutType === 'gang' ? o.layoutType : null,
+    batchStatus,
+    batchHoldReason:
+      typeof o.batchHoldReason === 'string'
+        ? o.batchHoldReason
+        : o.batchHoldReason === null
+          ? null
+          : undefined,
+    batchStatusBeforeHold,
+    batchDecisionUpdatedAt:
+      typeof o.batchDecisionUpdatedAt === 'string' ? o.batchDecisionUpdatedAt : undefined,
   }
 }
 

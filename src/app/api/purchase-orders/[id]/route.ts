@@ -131,6 +131,44 @@ export async function PUT(
 
   const data = parsed.data
 
+  /** After "Release to Planning", only safe fields can change (read-only PO + lines). */
+  if (existing.status === 'sent_to_planning') {
+    if (data.lineItems !== undefined) {
+      return NextResponse.json(
+        {
+          error:
+            'This PO was sent to Planning and is locked. Lines cannot be edited here. Contact Planning for changes.',
+          code: 'PO_LOCKED',
+        },
+        { status: 409 },
+      )
+    }
+    const attempted = Object.entries(data).filter(([, v]) => v !== undefined).map(([k]) => k)
+    const allowed = new Set([
+      'remarks',
+      'isPriority',
+      'deliveryRequiredBy',
+      'status',
+      'industrialVerification',
+    ])
+    const blocked = attempted.filter((k) => !allowed.has(k))
+    if (blocked.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Cannot change ${blocked.join(', ')} after release to Planning.`,
+          code: 'PO_LOCKED',
+        },
+        { status: 409 },
+      )
+    }
+    if (data.status != null && data.status !== 'closed' && data.status !== 'sent_to_planning') {
+      return NextResponse.json(
+        { error: 'Only close (status closed) is allowed after release, for this PO.', code: 'PO_LOCKED' },
+        { status: 409 },
+      )
+    }
+  }
+
   // If poNumber is being changed, check it's not already taken by another PO
   if (data.poNumber && data.poNumber !== existing.poNumber) {
     const conflict = await db.purchaseOrder.findUnique({
@@ -294,8 +332,17 @@ export async function DELETE(
   const { id } = await context.params
 
   try {
-    const existing = await db.purchaseOrder.findUnique({ where: { id }, select: { id: true, poNumber: true } })
+    const existing = await db.purchaseOrder.findUnique({
+      where: { id },
+      select: { id: true, poNumber: true, status: true },
+    })
     if (!existing) return NextResponse.json({ error: 'PO not found' }, { status: 404 })
+    if (existing.status === 'sent_to_planning') {
+      return NextResponse.json(
+        { error: 'Cannot delete a PO that was sent to Planning. Close it instead.', code: 'PO_LOCKED' },
+        { status: 409 },
+      )
+    }
 
     await db.$transaction(async (tx) => {
       await tx.poLineItem.deleteMany({ where: { poId: id } })

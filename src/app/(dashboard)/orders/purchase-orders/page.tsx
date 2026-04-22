@@ -159,6 +159,18 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
       className: 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30',
     }
   }
+  if (po.status === 'sent_to_planning') {
+    return {
+      label: 'In Planning',
+      className: 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-500/40',
+    }
+  }
+  if (po.status === 'approved') {
+    return {
+      label: 'Approved',
+      className: 'bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/35',
+    }
+  }
   if (po.status === 'confirmed') {
     const inProd = po.lineItems.some((li) => li.planningStatus === 'in_production')
     if (inProd) {
@@ -739,6 +751,8 @@ export default function PurchaseOrdersPage() {
           <option value="">All statuses</option>
           <option value="draft">Draft</option>
           <option value="confirmed">Confirmed</option>
+          <option value="approved">Approved</option>
+          <option value="sent_to_planning">In Planning</option>
           <option value="closed">Closed</option>
         </select>
         <select
@@ -1031,6 +1045,8 @@ export default function PurchaseOrdersPage() {
               >
                 <option value="draft">draft</option>
                 <option value="confirmed">confirmed</option>
+                <option value="approved">approved</option>
+                <option value="sent_to_planning">sent to planning</option>
                 <option value="closed">closed</option>
               </select>
             </div>

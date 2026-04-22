@@ -16,6 +16,11 @@ import {
   type PlanningDesignerKey,
 } from '@/lib/planning-decision-spec'
 import {
+  BATCH_STATUS_BADGE_CLASS,
+  BATCH_STATUS_LABEL,
+  effectiveBatchStatus,
+} from '@/lib/planning-batch-decision'
+import {
   MASTER_BOARD_GRADES,
   MASTER_COATINGS_AND_VARNISHES,
   MASTER_EMBOSSING_AND_LEAFING,
@@ -600,6 +605,14 @@ export function PlanningDecisionGrid({
                   UPS {sortKey === 'ups' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
+              <th
+                className={`${cellBase} w-[7.5rem] min-w-0 bg-[#1E293B]`}
+                title="Batch decision status (use Batch decisions panel to change)"
+              >
+                <span className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Batch
+                </span>
+              </th>
               <th className={`${cellBase} min-w-0 bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('remarks')}>
                   Rem {sortKey === 'remarks' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
@@ -738,6 +751,7 @@ export function PlanningDecisionGrid({
                 />
               </th>
               <th className="w-[60px] px-0 py-1 align-bottom" />
+              <th className="w-[7.5rem] min-w-0 px-0 py-1 align-bottom" />
               <th className="min-w-0 px-1 py-1 align-bottom">
                 <input
                   className={filterGhost}
@@ -1034,6 +1048,19 @@ export function PlanningDecisionGrid({
                         }}
                         onBlur={() => void onSaveRow?.(r.id)}
                       />
+                    </td>
+                    <td
+                      className={`${cellBase} w-[7.5rem] min-w-0 max-w-[8.5rem]`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span
+                        className={`inline-flex max-w-full rounded border px-1.5 py-0.5 text-[9px] font-bold leading-tight ${
+                          BATCH_STATUS_BADGE_CLASS[effectiveBatchStatus(planCore)]
+                        }`}
+                        title="Batch status (use Batch decisions panel to change)" 
+                      >
+                        {BATCH_STATUS_LABEL[effectiveBatchStatus(planCore)]}
+                      </span>
                     </td>
                     <td className={cellBase} onClick={(e) => e.stopPropagation()}>
                       <input

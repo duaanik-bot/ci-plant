@@ -19,7 +19,8 @@ import {
   type PlanningSetIdMode,
 } from '@/lib/planning-decision-spec'
 import { PlanningDecisionGrid, type PlanningGridLine } from '@/components/planning/PlanningDecisionGrid'
-import { PlanningReadinessDrawer } from '@/components/planning/PlanningReadinessDrawer'
+import { PlanningJobDetailDrawer } from '@/components/planning/PlanningJobDetailDrawer'
+import { PlanningSuggestedBatchesPanel } from '@/components/planning/PlanningSuggestedBatchesPanel'
 import { PlanningPoSummaryDrawer } from '@/components/planning/PlanningPoSummaryDrawer'
 import { PlanningProductDetailDrawer } from '@/components/planning/PlanningProductDetailDrawer'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -37,6 +38,17 @@ import {
   type ReadinessFiveSegment,
 } from '@/lib/planning-interlock'
 import { type ScheduleHandshake } from '@/lib/production-schedule-spec'
+import {
+  applyBatchDecisionAction,
+  isBatchExcludedFromForwardSteps,
+  projectPlanningBatchFields,
+  type PlanningBatchDecisionAction,
+} from '@/lib/planning-batch-decision'
+import type { SuggestableLine } from '@/lib/planning-batch-suggestions'
+import {
+  PlanningBatchDecisionPanel,
+  type PlanningBatchPanelLine,
+} from '@/components/planning/PlanningBatchDecisionPanel'
 
 type PlanningSpec = {
   machineId?: string
@@ -160,6 +172,7 @@ type Line = {
     coatingType?: string | null
     paperType?: string | null
     gsm?: number | null
+    numberOfColours?: number | null
   } | null
   dieMaster?: { id: string; dyeNumber: number; ups: number; sheetSize: string } | null
   createdAt?: string
@@ -168,6 +181,48 @@ type Line = {
 type Customer = { id: string; name: string; contactName?: string | null }
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
+
+function lineToSuggestable(r: Line): SuggestableLine {
+  return {
+    id: r.id,
+    cartonName: r.cartonName,
+    quantity: r.quantity,
+    coatingType: r.coatingType,
+    otherCoating: r.otherCoating,
+    paperType: r.paperType,
+    gsm: r.gsm,
+    planningStatus: r.planningStatus,
+    specOverrides: (r.specOverrides as Record<string, unknown> | null) ?? null,
+    materialQueue: r.materialQueue ?? null,
+    carton: r.carton
+      ? {
+          blankLength: r.carton.blankLength,
+          blankWidth: r.carton.blankWidth,
+          gsm: r.carton.gsm,
+          coatingType: r.carton.coatingType,
+          laminateType: r.carton.laminateType,
+          paperType: r.carton.paperType,
+          numberOfColours: r.carton.numberOfColours ?? undefined,
+        }
+      : null,
+    dimLengthMm: r.dimLengthMm,
+    dimWidthMm: r.dimWidthMm,
+    po: {
+      poNumber: r.po.poNumber,
+      poDate: r.po.poDate,
+      isPriority: r.po.isPriority,
+      status: r.po.status,
+    },
+    directorHold: r.directorHold,
+    planningLedger: r.planningLedger
+      ? {
+          toolingInterlock: {
+            allReady: r.planningLedger.toolingInterlock?.allReady ?? false,
+          },
+        }
+      : null,
+  }
+}
 
 function shadeCardForInterlock(r: Line): {
   custodyStatus: string
@@ -304,6 +359,8 @@ export default function PlanningPage() {
   const [poSummaryDrawerId, setPoSummaryDrawerId] = useState<string | null>(null)
   const [productDrawerLine, setProductDrawerLine] = useState<PlanningGridLine | null>(null)
   const [savingPlanningHandoff, setSavingPlanningHandoff] = useState(false)
+  const [batchActionBusy, setBatchActionBusy] = useState(false)
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -391,6 +448,64 @@ export default function PlanningPage() {
     }
   }, [blockerData])
 
+  const incomingFromPo = useMemo(
+    () =>
+      rows.filter((r) => {
+        const spec = (r.specOverrides || {}) as Record<string, unknown>
+        if (!spec.releasedToPlanningAt) return false
+        if (r.planningStatus !== 'pending') return false
+        if (String(r.po.status).toLowerCase() !== 'sent_to_planning') return false
+        if (spec.planningIncomingDecision) return false
+        return true
+      }),
+    [rows],
+  )
+
+  const [incomingBusy, setIncomingBusy] = useState<string | null>(null)
+
+  const applyIncomingDecision = useCallback(
+    async (lineId: string, action: 'approve' | 'hold' | 'artwork') => {
+      const li = rows.find((r) => r.id === lineId)
+      if (!li) return
+      setIncomingBusy(lineId)
+      try {
+        const spec = {
+          ...(li.specOverrides && typeof li.specOverrides === 'object' ? li.specOverrides : {}),
+        } as Record<string, unknown>
+        const now = new Date().toISOString()
+        spec.planningIncomingDecision =
+          action === 'approve' ? 'approved_production' : action === 'hold' ? 'on_hold' : 'send_artwork'
+        spec.planningIncomingDecidedAt = now
+        if (action === 'artwork') spec.planningHandoffTarget = 'artwork'
+        const body: Record<string, unknown> = {
+          specOverrides: spec,
+          planningDecisionRevision: true,
+        }
+        if (action === 'hold') body.directorHold = true
+        if (action === 'approve' || action === 'artwork') body.directorHold = false
+        const res = await fetch(`/api/planning/po-lines/${lineId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        if (!res.ok) throw new Error(j.error || 'Update failed')
+        if (action === 'approve') toast.success('Approved — line stays in your queue for full planning work')
+        else if (action === 'hold') toast.success('Line placed on hold')
+        else {
+          toast.success('Marked for Artwork — Designing queue opened in a new tab')
+          window.open('/orders/designing', '_blank', 'noopener,noreferrer')
+        }
+        await fetchRows()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed')
+      } finally {
+        setIncomingBusy(null)
+      }
+    },
+    [rows, fetchRows],
+  )
+
   const updateRow = (id: string, patch: Partial<Line>) => {
     setRows((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
   }
@@ -408,25 +523,107 @@ export default function PlanningPage() {
     )
   }
 
+  const linkLineIdsAsMixSet = useCallback(
+    (ids: string[]) => {
+      if (ids.length < 2) {
+        toast.error('Select at least two lines for a mix-set')
+        return
+      }
+      const master = generateMasterSetId()
+      for (const id of ids) {
+        const li = rows.find((r) => r.id === id)
+        if (!li) continue
+        const prev = readPlanningCore(li.specOverrides as Record<string, unknown>)
+        updateSpec(id, {
+          planningCore: {
+            ...prev,
+            masterSetId: master,
+            mixSetMemberIds: ids,
+            layoutType: 'gang',
+            batchStatus: 'draft',
+            batchHoldReason: null,
+            batchStatusBeforeHold: null,
+          },
+        })
+      }
+      setPlanningSelection(new Set(ids))
+      toast.success('Mix-set linked — one Master Set ID; complete UPS & designer, then Save planning')
+    },
+    [rows, updateSpec],
+  )
+
   const linkAsMixSet = useCallback(() => {
     if (planningSelection.size < 2) return
-    const master = generateMasterSetId()
-    const ids = Array.from(planningSelection)
-    for (const id of ids) {
-      const li = rows.find((r) => r.id === id)
-      if (!li) continue
-      const prev = readPlanningCore(li.specOverrides as Record<string, unknown>)
-      updateSpec(id, {
-        planningCore: {
-          ...prev,
-          masterSetId: master,
-          mixSetMemberIds: ids,
-          layoutType: 'gang',
-        },
-      })
-    }
-    toast.success('Mix-set linked — one Master Set ID; complete UPS & designer, then Save planning')
-  }, [planningSelection, rows])
+    linkLineIdsAsMixSet(Array.from(planningSelection))
+  }, [planningSelection, linkLineIdsAsMixSet])
+
+  const suggestableLines = useMemo((): SuggestableLine[] => {
+    const view = rows.filter((r) => {
+      const pending = r.planningStatus === 'pending'
+      return ledgerView === 'pending' ? pending : !pending
+    })
+    return view.map(lineToSuggestable)
+  }, [rows, ledgerView])
+
+  const batchPanelLines = useMemo((): PlanningBatchPanelLine[] => {
+    return rows.map((r) => ({
+      id: r.id,
+      poNumber: r.po.poNumber,
+      cartonName: r.cartonName,
+      quantity: r.quantity,
+      specOverrides: (r.specOverrides as Record<string, unknown> | null) ?? null,
+    }))
+  }, [rows])
+
+  const applyBatchDecision = useCallback(
+    async (lineIds: string[], action: PlanningBatchDecisionAction, holdReason?: string) => {
+      if (lineIds.length === 0) return
+      setBatchActionBusy(true)
+      try {
+        const first = rows.find((r) => r.id === lineIds[0])
+        if (!first) {
+          toast.error('Line not found')
+          return
+        }
+        const base = readPlanningCore(first.specOverrides as Record<string, unknown>)
+        const result = applyBatchDecisionAction(base, action, { holdReason })
+        if (!result) {
+          toast.error('This action is not available for the current batch status')
+          return
+        }
+        const batchSlice = projectPlanningBatchFields(result)
+        for (const id of lineIds) {
+          const li = rows.find((r) => r.id === id)
+          if (!li) continue
+          const spec = (li.specOverrides && typeof li.specOverrides === 'object' ? li.specOverrides : {}) as Record<
+            string,
+            unknown
+          >
+          const p = readPlanningCore(spec)
+          const planningCore = { ...p, ...batchSlice }
+          const res = await fetch(`/api/planning/po-lines/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              specOverrides: { ...spec, planningCore },
+              planningDecisionRevision: true,
+            }),
+          })
+          if (!res.ok) {
+            const j = (await res.json().catch(() => ({}))) as { error?: string }
+            throw new Error(j.error || 'Update failed')
+          }
+        }
+        toast.success('Batch updated')
+        await fetchRows()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Update failed')
+      } finally {
+        setBatchActionBusy(false)
+      }
+    },
+    [rows, fetchRows],
+  )
 
   const savePlanningHandoff = useCallback(async () => {
     const candidates = rows.filter((r) => {
@@ -436,6 +633,13 @@ export default function PlanningPage() {
     })
     if (candidates.length === 0) {
       toast.error('Set designer and UPS (≥1) on each line before save')
+      return
+    }
+    const held = candidates.filter((r) =>
+      isBatchExcludedFromForwardSteps(readPlanningCore(r.specOverrides as Record<string, unknown>)),
+    )
+    if (held.length > 0) {
+      toast.error('A batch is on hold — resume the batch or exclude those lines before saving handoff')
       return
     }
     setSavingPlanningHandoff(true)
@@ -492,7 +696,7 @@ export default function PlanningPage() {
     }
   }, [rows, planningSetIdMode, fetchRows])
 
-  const save = async (id: string) => {
+  const save = async (id: string, opts?: { remarks?: string | null }) => {
     const li = rows.find((x) => x.id === id)
     if (!li) return
     setSavingId(id)
@@ -506,10 +710,11 @@ export default function PlanningPage() {
           planningFlowStatus: PLANNING_FLOW.in_progress,
         })
       }
+      const remarks = opts != null && opts.remarks !== undefined ? opts.remarks : li.remarks
       const body: Record<string, unknown> = {
         setNumber: li.setNumber,
         planningStatus: li.planningStatus,
-        remarks: li.remarks,
+        remarks,
         specOverrides,
       }
       const res = await fetch(`/api/planning/po-lines/${id}`, {
@@ -536,6 +741,15 @@ export default function PlanningPage() {
   const handleMakeProcessing = useCallback(async () => {
     const ids = Array.from(planningSelection)
     if (ids.length === 0) return
+    const blocked = ids.filter((id) => {
+      const r = rows.find((x) => x.id === id)
+      if (!r) return false
+      return isBatchExcludedFromForwardSteps(readPlanningCore(r.specOverrides as Record<string, unknown>))
+    })
+    if (blocked.length > 0) {
+      toast.error('A selected line is in a batch on hold — clear hold first')
+      return
+    }
     setMixConflictMessage(null)
     setMakeProcessingBusy(true)
     try {
@@ -556,7 +770,7 @@ export default function PlanningPage() {
     } finally {
       setMakeProcessingBusy(false)
     }
-  }, [planningSelection, fetchRows])
+  }, [planningSelection, rows, fetchRows])
 
   const recallLine = useCallback(
     async (lineId: string) => {
@@ -722,6 +936,119 @@ export default function PlanningPage() {
           </div>
         </div>
 
+        {incomingFromPo.length > 0 ? (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-950/15 px-2 py-2">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-amber-400">Incoming from PO</h2>
+            <p className="mb-2 text-[11px] text-slate-500">
+              Newly released customer POs—confirm tooling path before deep planning.
+            </p>
+            <div className="max-h-56 overflow-auto">
+              <table className="w-full border-collapse text-left text-[12px]">
+                <thead>
+                  <tr className="border-b border-slate-600 text-[10px] uppercase text-slate-500">
+                    <th className="py-1 pr-2">PO</th>
+                    <th className="py-1 pr-2">Item</th>
+                    <th className="py-1 pr-2">Qty</th>
+                    <th className="py-1 pr-2">Tooling</th>
+                    <th className="py-1 pr-2">Gate</th>
+                    <th className="py-1">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {incomingFromPo.map((r) => {
+                    const five = readinessFiveForLine(r)
+                    const busy = incomingBusy === r.id
+                    const tReady = r.planningLedger?.toolingInterlock?.allReady
+                    return (
+                      <tr key={r.id} className="border-b border-slate-800/90">
+                        <td className="py-1.5 pr-2">
+                          <button
+                            type="button"
+                            onClick={() => setPoSummaryDrawerId(r.po.id)}
+                            className={`text-left font-mono text-amber-200/95 underline-offset-2 hover:underline ${mono}`}
+                          >
+                            {r.po.poNumber}
+                          </button>
+                        </td>
+                        <td className="max-w-[8rem] truncate py-1.5 pr-2" title={r.cartonName}>
+                          {r.cartonName}
+                        </td>
+                        <td className="py-1.5 pr-2 tabular-nums text-slate-200">{r.quantity}</td>
+                        <td className="py-1.5 pr-2 text-[11px] text-slate-400">
+                          {tReady ? 'Interlock OK' : 'Review'}
+                        </td>
+                        <td className="py-1.5 pr-2 text-[11px]">
+                          {five.allGreen ? (
+                            <span className="text-emerald-400">Ready</span>
+                          ) : (
+                            <span className="text-amber-300">Pending</span>
+                          )}
+                        </td>
+                        <td className="py-1.5">
+                          <div className="flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void applyIncomingDecision(r.id, 'approve')}
+                              className="rounded bg-emerald-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void applyIncomingDecision(r.id, 'hold')}
+                              className="rounded bg-amber-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              Hold
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void applyIncomingDecision(r.id, 'artwork')}
+                              className="rounded bg-sky-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              Artwork
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="px-0 py-1 space-y-2">
+          <PlanningSuggestedBatchesPanel
+            lines={suggestableLines}
+            dismissedIds={dismissedSuggestionIds}
+            onDismiss={(id) =>
+              setDismissedSuggestionIds((prev) => {
+                const n = new Set(prev)
+                n.add(id)
+                return n
+              })
+            }
+            onAccept={(lineIds) => {
+              linkLineIdsAsMixSet(lineIds)
+            }}
+            onModify={(lineIds) => {
+              setPlanningSelection(new Set(lineIds))
+              toast.info(`${lineIds.length} line(s) selected — adjust in the grid, then use Link as mix set or save per row.`, {
+                duration: 5000,
+              })
+            }}
+          />
+          <PlanningBatchDecisionPanel
+            lines={batchPanelLines}
+            onApply={(lineIds, action, holdReason) => applyBatchDecision(lineIds, action, holdReason)}
+            busy={batchActionBusy}
+          />
+        </div>
+
         <PlanningDecisionLayerToolbar
           selectionCount={planningSelection.size}
           onLinkAsMixSet={linkAsMixSet}
@@ -766,58 +1093,42 @@ export default function PlanningPage() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-1 pt-1">
-        <ErrorBoundary moduleName="Planning Grid">
-          <PlanningDecisionGrid
-            rows={rows as PlanningGridLine[]}
-            ledgerView={ledgerView}
-            planningSelection={planningSelection}
-            setPlanningSelection={setPlanningSelection}
-            onRowBackgroundClick={(id) => setPlanningDrawerLineId(id)}
-            updateSpec={(id, patch) => updateSpec(id, patch as Partial<PlanningSpec>)}
+      <div className="flex min-h-0 flex-1 overflow-hidden px-2 pb-1 pt-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <ErrorBoundary moduleName="Planning Grid">
+            <PlanningDecisionGrid
+              rows={rows as PlanningGridLine[]}
+              ledgerView={ledgerView}
+              planningSelection={planningSelection}
+              setPlanningSelection={setPlanningSelection}
+              onRowBackgroundClick={(id) => setPlanningDrawerLineId(id)}
+              updateSpec={(id, patch) => updateSpec(id, patch as Partial<PlanningSpec>)}
+              updateRow={updateRow}
+              onRemoveLine={handleRemoveLine}
+              onRecallLine={recallLine}
+              onSaveRow={save}
+              mixConflictMessage={mixConflictMessage ?? selectedForMix.conflict}
+              onLinkAsMixSet={linkAsMixSet}
+              onPONumberClick={(poId) => setPoSummaryDrawerId(poId)}
+              onCartonClick={(line) => setProductDrawerLine(line)}
+            />
+          </ErrorBoundary>
+        </div>
+        {planningDrawerLineId != null && planningDrawerLine ? (
+          <PlanningJobDetailDrawer
+            line={planningDrawerLine}
+            open
+            onClose={() => setPlanningDrawerLineId(null)}
+            onSave={save}
             updateRow={updateRow}
-            onRemoveLine={handleRemoveLine}
-            onRecallLine={recallLine}
-            onSaveRow={save}
-            mixConflictMessage={mixConflictMessage ?? selectedForMix.conflict}
-            onLinkAsMixSet={linkAsMixSet}
-            onPONumberClick={(poId) => setPoSummaryDrawerId(poId)}
-            onCartonClick={(line) => setProductDrawerLine(line)}
+            setPlanningSelection={setPlanningSelection}
           />
-        </ErrorBoundary>
+        ) : null}
       </div>
 
         <footer className={`shrink-0 border-t border-[#334155] py-2 text-center text-[13px] text-slate-500 ${mono}`}>
           Enterprise Intelligence Active - Decisions Synchronized with April 20th Global Theme.
         </footer>
-
-        <PlanningReadinessDrawer
-          open={planningDrawerLineId != null}
-          line={
-            planningDrawerLine
-              ? {
-                  ...planningDrawerLine,
-                  po: {
-                    poNumber: planningDrawerLine.po.poNumber,
-                    poDate: planningDrawerLine.po.poDate,
-                    customer: { name: planningDrawerLine.po.customer.name },
-                  },
-                }
-              : null
-          }
-          onClose={() => setPlanningDrawerLineId(null)}
-          onDesignerKeyChange={(lineId, key) => {
-            const li = rows.find((x) => x.id === lineId)
-            const spec = (li?.specOverrides || {}) as Record<string, unknown>
-            const prev = readPlanningCore(spec)
-            updateSpec(lineId, {
-              planningCore: {
-                ...prev,
-                designerKey: key || undefined,
-              },
-            })
-          }}
-        />
 
         <PlanningPoSummaryDrawer
           open={poSummaryDrawerId != null}

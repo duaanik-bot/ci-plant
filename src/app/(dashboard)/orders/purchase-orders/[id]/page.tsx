@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -331,6 +332,8 @@ export default function EditPurchaseOrderPage() {
     anyRose: boolean
   } | null>(null)
   const [productionKitLoading, setProductionKitLoading] = useState(true)
+  const [releasingToPlanning, setReleasingToPlanning] = useState(false)
+  const [toolingGapAck, setToolingGapAck] = useState(false)
 
   useEffect(() => {
     if (!customerId) {
@@ -503,6 +506,28 @@ export default function EditPurchaseOrderPage() {
   }
 
   const validLines = lines.filter((l) => l.cartonName.trim() && l.quantity.trim() && Number(l.quantity) > 0)
+  const allLinesProductLinked = validLines.length > 0 && validLines.every((l) => String(l.cartonId ?? '').trim())
+  const poSentToPlanning = status === 'sent_to_planning'
+  const releaseStatusOk = status === 'confirmed' || status === 'approved'
+  const canReleaseToPlanning = useMemo(() => {
+    if (poSentToPlanning || !releaseStatusOk) return false
+    if (!customerId || !poDate.trim() || !deliveryRequiredBy.trim()) return false
+    if (validLines.length === 0 || !allLinesProductLinked) return false
+    if (productionKitLoading || !productionKit) return false
+    if (!productionKit.allOk && !toolingGapAck) return false
+    return true
+  }, [
+    poSentToPlanning,
+    releaseStatusOk,
+    customerId,
+    poDate,
+    deliveryRequiredBy,
+    validLines.length,
+    allLinesProductLinked,
+    productionKitLoading,
+    productionKit,
+    toolingGapAck,
+  ])
   const subtotal = validLines.reduce((sum, l) => {
     const { beforeGst } = lineAmount(Number(l.rate) || 0, Number(l.quantity) || 0, Number(l.gstPct) || 0)
     return sum + beforeGst
@@ -530,6 +555,32 @@ export default function EditPurchaseOrderPage() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+    if (poSentToPlanning) {
+      setSaving(true)
+      try {
+        const res = await fetch(`/api/purchase-orders/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            remarks: remarks || undefined,
+            deliveryRequiredBy: deliveryRequiredBy.trim() || null,
+          }),
+        })
+        const json: Record<string, unknown> = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error((json.error as string) || 'Failed to save')
+        toast.success('Notes saved')
+        broadcastIndustrialPriorityChange({
+          source: 'line_director_priority',
+          at: new Date().toISOString(),
+        })
+        router.push('/orders/purchase-orders')
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to save')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
     const err: Record<string, string> = {}
     if (!customerId) err.customerId = 'Select a customer'
     if (validLines.length === 0) err.lines = 'Add at least one line with carton name and quantity'
@@ -594,6 +645,45 @@ export default function EditPurchaseOrderPage() {
       toast.error(e instanceof Error ? e.message : 'Failed to save')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function releaseToPlanning() {
+    if (!canReleaseToPlanning || releasingToPlanning) return
+    setReleasingToPlanning(true)
+    try {
+      const res = await fetch(`/api/purchase-orders/${id}/release-to-planning`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          acknowledgeToolingGaps: toolingGapAck,
+        }),
+      })
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string
+        code?: string
+        productionKit?: { allOk: boolean }
+      }
+      if (res.status === 409 && json.code === 'TOOLING' && !toolingGapAck) {
+        toast.error(json.error || 'Review tooling, or confirm override below')
+        return
+      }
+      if (!res.ok) {
+        throw new Error(json.error || 'Release failed')
+      }
+      setStatus('sent_to_planning')
+      setToolingGapAck(false)
+      toast.success('Moved to Planning')
+      void fetch(`/api/purchase-orders/${id}/production-kit`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d && !d.error) setProductionKit(d)
+        })
+        .catch(() => {})
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Release failed')
+    } finally {
+      setReleasingToPlanning(false)
     }
   }
 
@@ -697,6 +787,7 @@ export default function EditPurchaseOrderPage() {
             <input
               type="text"
               value={poNumber}
+              readOnly={poSentToPlanning}
               onChange={(e) => {
                 setPoNumber(e.target.value)
                 setFieldErrors((prev) => {
@@ -705,26 +796,74 @@ export default function EditPurchaseOrderPage() {
                   return next
                 })
               }}
-              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-amber-400 focus:border-blue-500 focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-red-500/60' : ''}`}
+              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-amber-400 focus:border-blue-500 focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-red-500/60' : ''} ${poSentToPlanning ? 'cursor-not-allowed opacity-80' : ''}`}
             />
             {fieldErrors.poNumber ? (
               <span className="mt-0.5 block text-xs text-red-400">{fieldErrors.poNumber}</span>
             ) : null}
           </div>
-          <div className="shrink-0">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</div>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="mt-1 rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
-            >
-              <option value="draft">Draft</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="closed">Closed</option>
-            </select>
+          <div className="flex shrink-0 max-w-md flex-col items-stretch gap-2 sm:items-end">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-400 sm:text-right">Status</div>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                disabled={poSentToPlanning}
+                className="mt-1 w-full min-w-[10rem] rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 sm:text-right enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
+              >
+                <option value="draft">Draft</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="approved">Approved</option>
+                <option value="closed">Closed</option>
+                {poSentToPlanning && <option value="sent_to_planning">Sent to Planning</option>}
+              </select>
+            </div>
+            {!poSentToPlanning ? (
+              <div className="flex w-full min-w-0 flex-col items-stretch gap-1.5 sm:max-w-xs sm:items-end">
+                {!releaseStatusOk ? (
+                  <p className="text-right text-[10px] text-amber-500/90 sm:max-w-[16rem]">
+                    Set status to Confirmed or Approved to release to Planning.
+                  </p>
+                ) : null}
+                {releaseStatusOk && !productionKitLoading && productionKit && !productionKit.allOk ? (
+                  <label className="flex cursor-pointer items-center justify-end gap-2 text-[10px] text-amber-200/90">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 rounded border-slate-500"
+                      checked={toolingGapAck}
+                      onChange={(e) => setToolingGapAck(e.target.checked)}
+                    />
+                    Acknowledge tooling / shade gaps — release anyway
+                  </label>
+                ) : null}
+                {releaseStatusOk && validLines.length > 0 && !allLinesProductLinked ? (
+                  <p className="text-right text-[10px] text-amber-500/90">Link every line to a master product to release.</p>
+                ) : null}
+                {releaseStatusOk && (!deliveryRequiredBy.trim() || !poDate.trim()) ? (
+                  <p className="text-right text-[10px] text-amber-500/90">PO date and delivery date are required.</p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={releaseToPlanning}
+                  disabled={!canReleaseToPlanning || releasingToPlanning}
+                  className="w-full rounded-lg bg-amber-600 px-3 py-2 text-xs font-bold text-white shadow transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                >
+                  {releasingToPlanning ? 'Releasing…' : 'Release to Planning'}
+                </button>
+              </div>
+            ) : (
+              <p className="text-right text-[10px] leading-snug text-emerald-400/90">
+                In Planning — lines are read-only.{' '}
+                <Link href="/orders/planning" className="font-semibold text-amber-300 underline underline-offset-2">
+                  Open queue
+                </Link>
+                .
+              </p>
+            )}
           </div>
         </div>
 
+        <fieldset disabled={poSentToPlanning} className="min-w-0 space-y-3 border-0 p-0">
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="min-w-0">
             <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Customer</div>
@@ -790,15 +929,16 @@ export default function EditPurchaseOrderPage() {
               placeholder="e.g. 30 days"
             />
           </div>
-          <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Remarks</div>
+        </div>
+        </fieldset>
+        <div className="mt-3">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Remarks (editable after release)</div>
             <input
               type="text"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
             />
-          </div>
         </div>
       </div>
 
@@ -810,6 +950,7 @@ export default function EditPurchaseOrderPage() {
       />
 
       {/* Zero-scroll line grid */}
+      <fieldset disabled={poSentToPlanning} className="min-w-0 border-0 p-0">
       <div className="rounded-xl border border-border/40 bg-card/20 p-2 text-[11px] backdrop-blur-sm sm:p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Line items</h2>
@@ -1082,6 +1223,7 @@ export default function EditPurchaseOrderPage() {
           </table>
         </div>
       </div>
+      </fieldset>
 
       <div
         className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/40 bg-background/85 shadow-[0_-8px_32px_rgba(0,0,0,0.55)] backdrop-blur-md"
@@ -1161,7 +1303,7 @@ export default function EditPurchaseOrderPage() {
                 disabled={saving}
                 className="ci-btn-save-industrial rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
               >
-                {saving ? 'Saving…' : 'Save changes'}
+                {saving ? 'Saving…' : poSentToPlanning ? 'Save notes & exit' : 'Save changes'}
               </button>
             </div>
           </div>
