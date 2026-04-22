@@ -1,0 +1,53 @@
+/**
+ * COLOUR IMPRESSIONS SaaS — design tokens (maps to Tailwind `ds` palette).
+ * Spacing: use Tailwind 1=4, 2=8, 3=12, 4=16, 6=24, 8=32 only.
+ * Radius: rounded-ds-sm (6px), rounded-ds-md (10px), rounded-ds-lg (12px)
+ */
+:root {
+  --ds-bg-main: #0b1220;
+  --ds-bg-card: #111827;
+  --ds-bg-elevated: #121a2a;
+  --ds-border-subtle: #1f2937;
+  --ds-border-strong: #374151;
+  --ds-text-primary: #e5e7eb;
+  --ds-text-secondary: #9ca3af;
+  --ds-text-muted: #6b7280;
+  --ds-accent: #3b82f6;
+  --ds-accent-hover: #2563eb;
+  --ds-success: #22c55e;
+  --ds-warning: #f59e0b;
+  --ds-error: #ef4444;
+  --ds-radius-sm: 6px;
+  --ds-radius-md: 10px;
+  --ds-radius-lg: 12px;
+}
+
+/* Focus ring for inputs / interactive (soft glow) */
+@layer components {
+  .ds-focus {
+    @apply transition duration-200 ease-out;
+  }
+  .ds-focus:focus-visible {
+    @apply border-ds-brand outline-none ring-2 ring-ds-brand/25;
+  }
+  .ds-input {
+    @apply ds-focus w-full rounded-ds-sm border border-ds-line/80 bg-ds-elevated/80 px-3 py-2.5 text-[15px] text-ds-ink shadow-sm placeholder:text-ds-ink-faint;
+  }
+  .ds-input:focus {
+    @apply border-ds-brand ring-2 ring-ds-brand/20;
+  }
+
+  /** Figma / spec: typography roles */
+  .ds-typo-label {
+    @apply text-[12px] font-medium leading-snug text-ds-ink-muted;
+  }
+  .ds-typo-input {
+    @apply text-[15px] leading-normal text-ds-ink;
+  }
+  .ds-typo-heading {
+    @apply text-base font-semibold leading-tight text-ds-ink md:text-[18px];
+  }
+  .ds-typo-total {
+    @apply text-[20px] font-bold leading-tight text-ds-success tabular-nums md:text-[22px];
+  }
+}

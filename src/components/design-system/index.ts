@@ -1,0 +1,12 @@
+/** Figma / product-spec mirror — colors, spacing, radii. */
+export { dsColors, dsRadius, dsSpacing, dsTypography } from '@/lib/design-system/tokens'
+export { AppLayout } from './AppLayout'
+export { Button } from './Button'
+export { InputField } from './InputField'
+export { SelectDropdown } from './SelectDropdown'
+export { CardSection } from './CardSection'
+export { SummaryBlock } from './SummaryBlock'
+export { Badge } from './Badge'
+export { PageHeader } from './PageHeader'
+export { dataTable, DataTableFrame } from './DataTable'
+export { Drawer } from './Drawer'

@@ -25,9 +25,9 @@ export function SlideOverPanel({
   isOpen,
   onClose,
   children,
-  widthClass = 'max-w-xl',
-  backdropClassName = 'bg-background/60',
-  panelClassName = 'border-l border-border bg-card text-card-foreground shadow-xl',
+  widthClass = 'w-[min(40vw,32rem)] max-w-full',
+  backdropClassName = 'bg-[#0B1220]/70 backdrop-blur-[2px]',
+  panelClassName = 'border-l border-ds-line bg-ds-card text-ds-ink shadow-2xl',
   footer,
   zIndexClass = 'z-[60]',
   animateEnter = true,
@@ -56,19 +56,23 @@ export function SlideOverPanel({
           animateEnter ? 'animate-slide-over-enter' : ''
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="min-w-0 text-sm font-semibold text-card-foreground">{title}</h2>
+        <div className="flex shrink-0 items-center justify-between border-b border-ds-line/80 bg-ds-elevated/60 px-4 py-3 shadow-sm">
+          <h2 className="ds-typo-heading min-w-0 pr-2">{title}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            className="shrink-0 rounded-ds-sm px-2 py-1 text-sm text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-ink"
             aria-label="Close"
           >
             ✕
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3">{children}</div>
-        {footer ? <div className="shrink-0 border-t border-border bg-card px-4 py-3">{footer}</div> : null}
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">{children}</div>
+        {footer ? (
+          <div className="shrink-0 border-t border-ds-line/80 bg-ds-elevated/50 px-4 py-3 shadow-[0_-4px_24px_rgba(0,0,0,0.12)]">
+            {footer}
+          </div>
+        ) : null}
       </div>
     </div>
   )

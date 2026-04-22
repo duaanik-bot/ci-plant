@@ -25,6 +25,7 @@ import {
   type PlanningLineFieldPatch,
 } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningBatchBuilderPanel } from '@/components/planning/PlanningBatchBuilderPanel'
+import { Button } from '@/components/design-system/Button'
 import { PlanningJobDetailDrawer } from '@/components/planning/PlanningJobDetailDrawer'
 import { PlanningSuggestedBatchesPanel } from '@/components/planning/PlanningSuggestedBatchesPanel'
 import { PlanningPoSummaryDrawer } from '@/components/planning/PlanningPoSummaryDrawer'
@@ -879,29 +880,29 @@ export default function PlanningPage() {
 
   if (loading) {
     return (
-      <div className={`min-h-[30vh] p-4 text-slate-500 ${mono}`}>Loading planning…</div>
+      <div className={`min-h-[30vh] p-4 text-ds-ink-muted ${mono}`}>Loading planning…</div>
     )
   }
 
   return (
-    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#0F172A] text-slate-100">
-      <div className="shrink-0 space-y-2 border-b border-[#334155] bg-[#0F172A] px-3 py-2">
+    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-ds-main text-ds-ink">
+      <div className="shrink-0 space-y-2 border-b border-ds-line/60 bg-ds-main px-3 py-2">
         <div className="flex flex-wrap items-end gap-3 justify-between">
           <div>
-            <h1 className="text-[15px] font-semibold tracking-tight text-amber-400">Planning</h1>
-            <p className={`text-[13px] font-medium text-slate-400 ${mono}`}>
+            <h1 className="text-[16px] font-semibold tracking-tight text-ds-ink md:text-[18px]">Planning</h1>
+            <p className={`text-[13px] font-medium text-ds-ink-muted ${mono}`}>
               {rows.length} line(s) · Σ qty{' '}
-              <span className="text-[#FBBF24]">{totalQty.toLocaleString('en-IN')}</span>
+              <span className="font-semibold text-ds-success tabular-nums">{totalQty.toLocaleString('en-IN')}</span>
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wider text-slate-500">View</span>
-            <div className="inline-flex rounded-lg border border-[#334155] bg-[#1E293B] p-0.5">
+            <span className="text-xs font-medium uppercase tracking-wider text-ds-ink-faint">View</span>
+            <div className="inline-flex rounded-ds-md border border-ds-line/80 bg-ds-elevated/50 p-0.5">
               <button
                 type="button"
                 onClick={() => setLedgerView('pending')}
-                className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${
-                  ledgerView === 'pending' ? 'bg-[#2563EB] text-white' : 'text-slate-400'
+                className={`rounded-ds-sm px-3 py-1.5 text-[13px] font-medium transition duration-200 ${
+                  ledgerView === 'pending' ? 'bg-ds-brand text-white shadow-sm' : 'text-ds-ink-muted hover:text-ds-ink'
                 }`}
               >
                 Pending
@@ -909,8 +910,8 @@ export default function PlanningPage() {
               <button
                 type="button"
                 onClick={() => setLedgerView('processed')}
-                className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${
-                  ledgerView === 'processed' ? 'bg-[#2563EB] text-white' : 'text-slate-400'
+                className={`rounded-ds-sm px-3 py-1.5 text-[13px] font-medium transition duration-200 ${
+                  ledgerView === 'processed' ? 'bg-ds-brand text-white shadow-sm' : 'text-ds-ink-muted hover:text-ds-ink'
                 }`}
               >
                 Processed
@@ -918,7 +919,7 @@ export default function PlanningPage() {
             </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => void handleMakeProcessing()}
               disabled={
@@ -927,25 +928,25 @@ export default function PlanningPage() {
                 !!selectedForMix.conflict ||
                 !!mixConflictMessage
               }
-              className="rounded-lg bg-amber-600 px-4 py-2 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
+              className="px-3 py-2 text-[13px]"
             >
               {makeProcessingBusy ? 'Processing…' : 'Make processing'}
-            </button>
+            </Button>
             <Link
               href="/hub/dies"
-              className="rounded-lg bg-amber-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-amber-500"
+              className="inline-flex items-center justify-center gap-2 rounded-ds-sm border border-ds-line bg-ds-elevated/80 px-3 py-2 text-[13px] font-medium text-ds-ink shadow-sm transition duration-200 hover:bg-ds-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-brand/25"
             >
               Dyes
             </Link>
             <Link
               href="/orders/purchase-orders"
-              className="rounded-lg border border-[#334155] bg-[#1E293B] px-2 py-1.5 text-xs text-slate-200"
+              className="rounded-ds-sm border border-ds-line/80 bg-ds-elevated/60 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated"
             >
               POs
             </Link>
             <Link
               href="/orders/designing"
-              className="rounded-lg border border-[#334155] bg-[#1E293B] px-2 py-1.5 text-xs text-slate-200"
+              className="rounded-ds-sm border border-ds-line/80 bg-ds-elevated/60 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated"
             >
               AW queue
             </Link>
@@ -955,44 +956,41 @@ export default function PlanningPage() {
                 downloadPlanningAuditCsv(rows)
                 toast.success('Audit CSV exported')
               }}
-              className={`inline-flex items-center gap-1.5 rounded-lg border border-[#334155] bg-[#1E293B] px-2 py-1.5 text-xs text-slate-200 ${mono}`}
+              className={`inline-flex items-center gap-1.5 rounded-ds-sm border border-ds-line/80 bg-ds-elevated/50 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated ${mono}`}
             >
-              <Download className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+              <Download className="h-3.5 w-3.5 text-ds-ink-faint" aria-hidden />
               Audit
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4 text-[13px]">
-          <div className="rounded border border-[#334155] bg-[#1E293B] px-2 py-1.5">
-            <p className={`text-[10px] uppercase tracking-wider text-slate-500 ${mono}`}>Queue Σ qty</p>
-            <p className={`text-lg font-semibold text-[#FBBF24] ${mono}`}>{totalQty.toLocaleString('en-IN')}</p>
+        <div className="grid grid-cols-1 gap-2 text-[13px] sm:grid-cols-3 sm:gap-4">
+          <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
+            <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Queue Σ qty</p>
+            <p className={`text-lg font-semibold text-ds-ink ${mono}`}>{totalQty.toLocaleString('en-IN')}</p>
           </div>
-          <div className="rounded border border-[#334155] bg-[#1E293B] px-2 py-1.5">
-            <p className={`text-[10px] uppercase tracking-wider text-slate-500 ${mono}`}>Top blocker</p>
-            <p className={`line-clamp-2 text-slate-200 ${mono}`}>{topBlockerTile.headline}</p>
+          <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
+            <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Top blocker</p>
+            <p className={`line-clamp-2 text-ds-ink-muted ${mono}`}>{topBlockerTile.headline}</p>
           </div>
-          <div className="rounded border border-[#334155] bg-[#1E293B] px-2 py-1.5">
-            <p className={`text-[10px] uppercase tracking-wider text-slate-500 ${mono}`}>Ready to schedule</p>
-            <p className={`text-lg font-semibold text-[#34D399] ${mono}`}>{readyToScheduleCount}</p>
+          <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
+            <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Ready to schedule</p>
+            <p className={`text-lg font-semibold text-ds-success ${mono}`}>{readyToScheduleCount}</p>
           </div>
         </div>
 
         {incomingFromPo.length > 0 ? (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-950/15 px-2 py-2">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-amber-400">Incoming from PO</h2>
-            <p className="mb-2 text-[11px] text-slate-500">
-              Newly released customer POs—confirm tooling path before deep planning.
-            </p>
-            <div className="max-h-56 overflow-auto">
-              <table className="w-full border-collapse text-left text-[12px]">
+          <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/20 px-3 py-2">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-ds-ink-muted">Incoming from PO</h2>
+            <div className="max-h-56 overflow-x-hidden overflow-y-auto">
+              <table className="w-full table-fixed border-collapse text-left text-[12px]">
                 <thead>
-                  <tr className="border-b border-slate-600 text-[10px] uppercase text-slate-500">
-                    <th className="py-1 pr-2">PO</th>
-                    <th className="py-1 pr-2">Item</th>
-                    <th className="py-1 pr-2">Qty</th>
-                    <th className="py-1 pr-2">Tooling</th>
-                    <th className="py-1 pr-2">Gate</th>
-                    <th className="py-1">Actions</th>
+                  <tr className="border-b border-ds-line/50 text-[10px] uppercase text-ds-ink-faint">
+                    <th className="py-2 pr-2">PO</th>
+                    <th className="py-2 pr-2">Item</th>
+                    <th className="py-2 pr-2">Qty</th>
+                    <th className="py-2 pr-2">Tooling</th>
+                    <th className="py-2 pr-2">Gate</th>
+                    <th className="py-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1001,56 +999,58 @@ export default function PlanningPage() {
                     const busy = incomingBusy === r.id
                     const tReady = r.planningLedger?.toolingInterlock?.allReady
                     return (
-                      <tr key={r.id} className="border-b border-slate-800/90">
+                      <tr key={r.id} className="border-b border-ds-line/30">
                         <td className="py-1.5 pr-2">
                           <button
                             type="button"
                             onClick={() => setPoSummaryDrawerId(r.po.id)}
-                            className={`text-left font-mono text-amber-200/95 underline-offset-2 hover:underline ${mono}`}
+                            className={`text-left font-mono text-ds-brand underline-offset-2 transition hover:underline ${mono}`}
                           >
                             {r.po.poNumber}
                           </button>
                         </td>
-                        <td className="max-w-[8rem] truncate py-1.5 pr-2" title={r.cartonName}>
+                        <td className="max-w-[8rem] truncate py-1.5 pr-2 text-ds-ink" title={r.cartonName}>
                           {r.cartonName}
                         </td>
-                        <td className="py-1.5 pr-2 tabular-nums text-slate-200">{r.quantity}</td>
-                        <td className="py-1.5 pr-2 text-[11px] text-slate-400">
+                        <td className="py-1.5 pr-2 font-medium tabular-nums text-ds-ink">{r.quantity}</td>
+                        <td className="py-1.5 pr-2 text-[11px] text-ds-ink-muted">
                           {tReady ? 'Interlock OK' : 'Review'}
                         </td>
                         <td className="py-1.5 pr-2 text-[11px]">
                           {five.allGreen ? (
-                            <span className="text-emerald-400">Ready</span>
+                            <span className="text-ds-success">Ready</span>
                           ) : (
-                            <span className="text-amber-300">Pending</span>
+                            <span className="text-ds-warning">Pending</span>
                           )}
                         </td>
                         <td className="py-1.5">
                           <div className="flex flex-wrap gap-1">
-                            <button
+                            <Button
                               type="button"
                               disabled={busy}
                               onClick={() => void applyIncomingDecision(r.id, 'approve')}
-                              className="rounded bg-emerald-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="h-7 px-2 py-0 text-[11px]"
                             >
                               Approve
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
+                              variant="secondary"
                               disabled={busy}
                               onClick={() => void applyIncomingDecision(r.id, 'hold')}
-                              className="rounded bg-amber-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="h-7 px-2 py-0 text-[11px]"
                             >
                               Hold
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
+                              variant="secondary"
                               disabled={busy}
                               onClick={() => void applyIncomingDecision(r.id, 'artwork')}
-                              className="rounded bg-sky-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="h-7 px-2 py-0 text-[11px]"
                             >
                               Artwork
-                            </button>
+                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -1128,7 +1128,7 @@ export default function PlanningPage() {
               <button
                 type="button"
                 onClick={() => applyCustomer(null)}
-                className="mt-1 text-[10px] text-slate-500 hover:text-slate-300"
+                className="mt-1 text-[10px] text-ds-ink-faint transition hover:text-ds-ink"
               >
                 Clear customer
               </button>
@@ -1145,7 +1145,6 @@ export default function PlanningPage() {
             planningSelection={planningSelection}
             setPlanningSelection={setPlanningSelection}
             onRowBackgroundClick={(id) => {
-              setPlanningSelection(new Set())
               setPlanningDrawerLineId(id)
             }}
             updateRow={updateRow}
@@ -1156,8 +1155,10 @@ export default function PlanningPage() {
         </ErrorBoundary>
       </div>
 
-        <footer className={`shrink-0 border-t border-[#334155] py-2 text-center text-[13px] text-slate-500 ${mono}`}>
-          Enterprise Intelligence Active - Decisions Synchronized with April 20th Global Theme.
+        <footer
+          className={`shrink-0 border-t border-ds-line/50 py-3 text-center text-[11px] text-ds-ink-faint ${mono}`}
+        >
+          Planning workspace
         </footer>
 
         <PlanningJobDetailDrawer

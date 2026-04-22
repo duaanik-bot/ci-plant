@@ -19,6 +19,9 @@ const config: Config = {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
+        'ds-sm': '6px',
+        'ds-md': '10px',
+        'ds-lg': '12px',
       },
       keyframes: {
         'po-age-alert': {
@@ -71,6 +74,22 @@ const config: Config = {
         },
         /** Plate Hub — process magenta (matches industry CMYK “M” on dark UI) */
         plateMagenta: '#FF00FF',
+        /** COLOUR IMPRESSIONS SaaS — bg-ds-*, text-ds-ink*, border-ds-line* */
+        ds: {
+          main: '#0B1220',
+          card: '#111827',
+          elevated: '#121A2A',
+          line: '#1F2937',
+          lineStrong: '#374151',
+          ink: '#E5E7EB',
+          'ink-muted': '#9CA3AF',
+          'ink-faint': '#6B7280',
+          brand: '#3B82F6',
+          'brand-hover': '#2563EB',
+          success: '#22C55E',
+          warning: '#F59E0B',
+          error: '#EF4444',
+        },
         /** Precision Pharma — enterprise light theme (see globals.css) */
         pharma: {
           app: 'var(--pharma-bg-app)',

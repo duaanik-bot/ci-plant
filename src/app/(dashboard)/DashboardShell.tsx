@@ -13,6 +13,7 @@ import {
 import { SidebarNav } from './SidebarNav'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { AppLayout } from '@/components/design-system/AppLayout'
 
 export function DashboardShell({
   children,
@@ -39,23 +40,23 @@ export function DashboardShell({
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-slate-900 text-slate-400 flex items-center justify-center text-sm">
+      <AppLayout className="flex items-center justify-center text-sm text-ds-ink-muted">
         Loading workspace...
-      </div>
+      </AppLayout>
     )
   }
 
   if (status === 'unauthenticated') {
     return (
-      <div className="min-h-screen bg-slate-900 text-slate-400 flex items-center justify-center text-sm">
+      <AppLayout className="flex items-center justify-center text-sm text-ds-ink-muted">
         Redirecting to login...
-      </div>
+      </AppLayout>
     )
   }
 
   return (
     <CommandPaletteProvider>
-    <div className="min-h-screen bg-slate-900 text-white flex">
+    <AppLayout className="flex">
       {/* Backdrop when mobile menu open */}
       {mobileMenuOpen && (
         <button
@@ -69,24 +70,24 @@ export function DashboardShell({
       {/* Sidebar: on mobile fixed overlay when open; on desktop always visible */}
       <aside
         className={`
-          flex flex-col w-64 border-r border-slate-800 bg-slate-950/60 shrink-0
+          flex flex-col w-64 border-r border-ds-line bg-ds-elevated/50 shrink-0
           fixed md:relative inset-y-0 left-0 z-50 md:z-auto
           ${mobileMenuOpen ? 'flex' : 'hidden md:flex'}
         `}
       >
-        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-2 shrink-0 flex-wrap">
+        <div className="px-4 py-3 border-b border-ds-line flex items-center justify-between gap-2 shrink-0 flex-wrap">
           <Link href="/dashboard" className="flex flex-col min-w-0" onClick={() => setMobileMenuOpen(false)}>
-            <span className="text-sm font-semibold tracking-wide text-amber-400">
+            <span className="text-sm font-semibold tracking-wide text-ds-ink">
               COLOUR IMPRESSIONS
             </span>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-ds-ink-faint">
               Production Planning System
             </span>
           </Link>
           {hideGlobalCommandBar ? <ThemeToggle /> : null}
           <button
             type="button"
-            className="md:hidden p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white"
+            className="md:hidden p-2 rounded-ds-sm text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-ink"
             onClick={() => setMobileMenuOpen(false)}
             aria-label="Close menu"
           >
@@ -105,42 +106,42 @@ export function DashboardShell({
       <div className="flex-1 flex flex-col min-w-0">
         {/* Desktop: global command bar */}
         {!hideGlobalCommandBar ? (
-          <header className="relative hidden md:flex border-b border-slate-800/90 px-4 py-2.5 shrink-0 items-center justify-center gap-4 bg-slate-950/40 backdrop-blur-sm">
+          <header className="relative hidden md:flex border-b border-ds-line/80 px-4 py-2.5 shrink-0 items-center justify-center gap-4 bg-ds-elevated/30 backdrop-blur-sm">
             <CommandPaletteTrigger />
             <div className="absolute right-4 flex items-center gap-3">
               <ThemeToggle />
-              <span className="text-xs text-slate-500 truncate max-w-[200px]">
+              <span className="text-xs text-ds-ink-faint truncate max-w-[200px]">
                 {userName ? `${userName} · ${userRole ?? '—'}` : null}
               </span>
             </div>
           </header>
         ) : null}
         {/* Mobile header */}
-        <header className="md:hidden border-b border-slate-800 px-2 py-2 flex items-center justify-between shrink-0 gap-1">
-          <Link href="/dashboard" className="font-semibold text-amber-400 text-sm pl-2">
+        <header className="md:hidden border-b border-ds-line px-2 py-2 flex items-center justify-between shrink-0 gap-1">
+          <Link href="/dashboard" className="text-sm pl-2 font-semibold text-ds-ink">
             Colour Impressions
           </Link>
           <div className="flex items-center gap-1">
             <ThemeToggle />
             {hideGlobalCommandBar ? null : <CommandPaletteTriggerIcon />}
-            <span className="text-[10px] text-slate-500 truncate max-w-[88px]">
+            <span className="text-[10px] text-ds-ink-faint truncate max-w-[88px]">
               {userName ?? ''}
             </span>
             <button
               type="button"
               onClick={() => setMobileMenuOpen((o) => !o)}
-              className="p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white"
+              className="p-2 rounded-ds-sm text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-ink"
               aria-label="Toggle menu"
             >
               <Menu className="h-5 w-5" />
             </button>
           </div>
         </header>
-        <main className="min-h-screen bg-slate-900 flex-1">
+        <main className="min-h-screen min-w-0 flex-1 bg-ds-main">
           <ErrorBoundary moduleName="Page">{children}</ErrorBoundary>
         </main>
       </div>
-    </div>
+    </AppLayout>
     </CommandPaletteProvider>
   )
 }

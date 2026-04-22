@@ -26,9 +26,14 @@ import { PoNewLineItemDrawer } from '@/components/po/PoNewLineItemDrawer'
 import { PoLinePastingStyleCell } from '@/components/po/PoLinePastingStyleCell'
 import { DeliveryDateInput } from '@/components/po/DeliveryDateInput'
 import { updateProductMasterStyle } from '@/lib/update-product-master-style'
+import { cn } from '@/lib/cn'
 import { computeSuggestedDelivery } from '@/lib/po-delivery-schedule'
 import type { PoToolingSignal } from '@/lib/po-tooling-signal'
 import { Copy, Star, Trash2 } from 'lucide-react'
+import { PageHeader } from '@/components/design-system/PageHeader'
+import { Button } from '@/components/design-system/Button'
+import { Badge } from '@/components/design-system/Badge'
+import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 
 type Customer = {
   id: string
@@ -378,7 +383,7 @@ function CartonLookupField({
           const suggestedName = trimmedQuery
           if (suggestedName) onCreate(suggestedName)
         }}
-        inputClassName="min-w-[260px] px-2 py-1 text-xs whitespace-normal"
+        inputClassName="min-w-0 w-full max-w-full rounded-lg border border-slate-600/35 bg-slate-900/40 px-2.5 py-2 text-sm font-medium text-slate-100 shadow-sm transition placeholder:text-slate-500 focus:border-amber-500/40 focus:outline-none focus:ring-2 focus:ring-amber-500/20 whitespace-normal"
         dropdownClassName="min-w-[320px]"
       />
       {!line.cartonId && line.cartonName.trim() ? (
@@ -1151,43 +1156,45 @@ export default function NewPurchaseOrderPage() {
     }
   }
 
-  const inputBase =
-    'w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 text-xs placeholder:text-slate-500'
-  const inputCls = `${inputBase} text-foreground`
-  const inputClsGhost = `${inputBase} text-slate-400`
-  const inputErr = 'border-red-500'
-  const lineCellPad = 'px-4 py-2'
+  const inputCls =
+    'ds-input w-full min-w-0 [color-scheme:dark] border-ds-line/80 bg-ds-elevated/80 text-[15px] text-ds-ink placeholder:text-ds-ink-faint'
+  const inputClsGhost =
+    'ds-input w-full min-w-0 [color-scheme:dark] !border-ds-line/50 !bg-ds-elevated/50 !text-ds-ink-muted placeholder:text-ds-ink-faint'
+  const inputErr = 'ring-1 ring-ds-error/40 !border-ds-error/60'
+  const lineCellPad = `${dataTable.td.base} align-middle min-h-[52px]`
   const poMono = 'po-mono-metric'
+  const tableInputPrimary = 'text-[15px] font-semibold text-ds-ink tabular-nums'
+  const tableInputSecondary = 'text-[12px] font-medium text-ds-ink-muted'
+  const thPrimary = 'text-left text-[12px] font-semibold tracking-tight text-ds-ink'
+  const thSecondary = 'text-left text-[12px] font-medium uppercase tracking-wider text-ds-ink-muted'
 
   return (
     <form
       id="form-new-po"
       onSubmit={handleSubmit}
-      className="p-4 max-w-[1600px] mx-auto space-y-4 pb-32"
+      className="mx-auto max-w-[1600px] space-y-4 p-4 pb-32"
     >
-      <div className="sticky top-0 z-40 -mx-4 mb-1 border-b border-slate-800/90 bg-slate-950/95 px-4 py-2.5 backdrop-blur-md">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3">
-          <h1 className="text-lg font-bold text-amber-400">New Purchase Order</h1>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-md border border-slate-600 bg-slate-800/80 px-2.5 py-1 text-xs font-medium text-slate-300">
-              Draft
-            </span>
-            <button
-              type="button"
-              onClick={() => router.push('/orders/purchase-orders')}
-              className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
-            >
-              Back
-            </button>
-            <button type="submit" disabled={saving} className="ci-btn-save-industrial px-4 py-2 text-sm">
-              {saving ? 'Saving…' : 'Save PO'}
-            </button>
-          </div>
-        </div>
+      <div className="sticky top-0 z-40 -mx-4 border-b border-ds-line/80 bg-ds-main/90 px-4 py-3 backdrop-blur-md">
+        <PageHeader
+          className="border-0 pb-0"
+          title="New purchase order"
+          description="Supplier, dates, and line items. Full specs open in the line drawer."
+          actions={
+            <>
+              <Badge tone="neutral">Draft</Badge>
+              <Button type="button" variant="secondary" onClick={() => router.push('/orders/purchase-orders')}>
+                Back
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Saving…' : 'Save PO'}
+              </Button>
+            </>
+          }
+        />
       </div>
 
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm space-y-3">
-        <p className="text-[10px] uppercase tracking-wider text-slate-500">Transaction / header</p>
+      <div className="space-y-4 rounded-ds-lg border border-ds-line/80 bg-ds-card/40 p-4 text-sm shadow-sm transition-colors">
+        <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">Header</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-1">
             <MasterSearchSelect
@@ -1244,32 +1251,32 @@ export default function NewPurchaseOrderPage() {
               }
             />
             {selectedCustomer ? (
-              <p className="mt-1 text-[11px] text-slate-500">
+              <p className="mt-1 text-[11px] text-ds-ink-faint">
                 {[selectedCustomer.contactName, selectedCustomer.contactPhone].filter(Boolean).join(' · ')}
               </p>
             ) : null}
           </div>
           <div>
-            <label className="block text-slate-400 mb-1">PO number</label>
-            <p className="px-2 py-1.5 text-sm text-slate-200">
-              {customPoNumber.trim() || <span className="text-slate-500">Auto on save (CI-PO-YYYY-####)</span>}
+            <label className="ds-typo-label mb-1 block">PO number</label>
+            <p className="rounded-ds-sm border border-ds-line/60 bg-ds-elevated/50 px-3 py-2.5 text-sm text-ds-ink">
+              {customPoNumber.trim() || <span className="text-ds-ink-faint">Auto on save (CI-PO-YYYY-####)</span>}
             </p>
-            <p className="text-[10px] text-slate-600">Optional number below overrides auto-sequence</p>
+            <p className="text-[10px] text-ds-ink-faint">Optional number below overrides auto-sequence</p>
           </div>
           <div>
-            <label className="block text-slate-400 mb-1">PO date *</label>
+            <label className="ds-typo-label mb-1 block">PO date *</label>
             <input
               type="date"
               value={poDate}
               onChange={(e) => setPoDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+              className="ds-input w-full rounded-ds-sm [color-scheme:dark]"
             />
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
-            <label className="block text-slate-400 mb-1">
-              Custom PO number <span className="text-slate-500">(optional)</span>
+            <label className="mb-1 block text-ds-ink-muted">
+              Custom PO number <span className="text-ds-ink-faint">(optional)</span>
             </label>
             <div className="flex items-stretch gap-2">
               <input
@@ -1283,7 +1290,10 @@ export default function NewPurchaseOrderPage() {
                     return next
                   })
                 }}
-                className={`min-w-0 flex-1 px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${fieldErrors.poNumber ? 'border-red-500' : 'border-slate-600'}`}
+                className={cn(
+                  'ds-input min-w-0 flex-1 rounded-ds-sm [color-scheme:dark]',
+                  fieldErrors.poNumber ? inputErr : '',
+                )}
                 placeholder="Override auto number"
               />
               <button
@@ -1294,16 +1304,16 @@ export default function NewPurchaseOrderPage() {
                 aria-label={
                   isPriority ? 'PO is high priority' : 'Mark PO as high priority for Planning and CTP'
                 }
-                className="shrink-0 flex items-center justify-center w-10 rounded-lg border border-slate-600 bg-slate-800/80 hover:bg-slate-800"
+                className="flex h-auto w-10 shrink-0 items-center justify-center rounded-ds-sm border border-ds-line bg-ds-elevated/80 transition hover:bg-ds-elevated"
               >
                 <Star
-                  className={`h-5 w-5 ${isPriority ? 'fill-amber-400 text-amber-400' : 'text-slate-500'}`}
+                  className={`h-5 w-5 ${isPriority ? 'fill-ds-warning text-ds-warning' : 'text-ds-ink-faint'}`}
                   strokeWidth={1.5}
                   aria-hidden
                 />
               </button>
             </div>
-            {fieldErrors.poNumber ? <p className="mt-1 text-xs text-red-400">{fieldErrors.poNumber}</p> : null}
+            {fieldErrors.poNumber ? <p className="mt-1 text-xs text-ds-error">{fieldErrors.poNumber}</p> : null}
           </div>
           <DeliveryDateInput
             value={deliveryRequiredBy}
@@ -1318,60 +1328,56 @@ export default function NewPurchaseOrderPage() {
             }}
           />
           <div>
-            <label className="block text-slate-400 mb-1">Payment terms</label>
+            <label className="mb-1 block text-ds-ink-muted">Payment terms</label>
             <input
               type="text"
               value={paymentTerms}
               onChange={(e) => setPaymentTerms(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+              className="ds-input w-full rounded-ds-sm [color-scheme:dark]"
               placeholder="e.g. 30 days"
             />
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+        <div className="grid grid-cols-1 items-end gap-6 md:grid-cols-3">
           <div className="md:col-span-2">
-            <label className="block text-slate-400 mb-1">Remarks</label>
+            <label className="mb-1 block text-ds-ink-muted">Remarks</label>
             <input
               type="text"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+              className="ds-input w-full rounded-ds-sm [color-scheme:dark]"
             />
           </div>
-          <div className="text-slate-500 text-xs pb-2 leading-snug">
-            Keys: arrows + Enter (row) · Esc (close) · Alt+N / D / Delete · Ctrl+S save · Full line details in drawer.
+          <div className="pb-2 text-xs leading-snug text-ds-ink-faint">
+            Arrows + Enter (row) · Esc · Alt+N / D / Delete · Ctrl+S · line drawer for full detail.
           </div>
         </div>
       </div>
 
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs space-y-3">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-slate-200 font-semibold text-sm">Line items (master → detail)</h2>
-          <button
-            type="button"
-            onClick={addLine}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-foreground text-xs"
-          >
+      <div className="space-y-3 rounded-ds-lg border border-ds-line/80 bg-ds-card/30 p-4 text-sm shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-[16px] font-semibold tracking-tight text-ds-ink md:text-[18px]">Line items</h2>
+          <Button type="button" variant="secondary" className="text-xs" onClick={addLine}>
             + Add line
-          </button>
+          </Button>
         </div>
-        {fieldErrors.lines && <p className="text-red-400 text-xs">{fieldErrors.lines}</p>}
+        {fieldErrors.lines && <p className="text-xs text-ds-error">{fieldErrors.lines}</p>}
 
-        <div className="min-h-[240px] max-h-[min(calc(100vh-18rem),640px)] overflow-y-auto rounded-md border border-slate-800/90">
-          <table className="w-full table-fixed border-collapse text-left">
-            <thead className="sticky top-0 z-30 bg-slate-800/95 text-slate-300 shadow-[inset_0_-1px_0_0_rgb(51_65_85)]">
+        <DataTableFrame className="max-h-[min(calc(100vh-18rem),640px)] min-h-[240px] border-ds-line/60 bg-ds-elevated/20">
+          <div className={dataTable.wrap}>
+            <table className={dataTable.table}>
+            <thead className={dataTable.thead}>
               <tr>
                 <th
-                  className={`${lineCellPad} w-[36%] text-left text-[11px] font-semibold sticky left-0 z-40 border-r border-slate-800/90 bg-slate-800/95 shadow-[2px_0_6px_rgba(0,0,0,0.25)]`}
+                  className={`${dataTable.th} w-[40%] sticky left-0 z-40 min-h-[48px] border-r border-ds-line/50 bg-ds-elevated/95 shadow-[2px_0_8px_rgba(0,0,0,0.2)] pr-2 text-left text-[12px] font-semibold text-ds-ink`}
                 >
                   Carton
                 </th>
-                <th className={`${lineCellPad} w-[10%] text-left text-[11px] font-semibold ${poMono}`}>Size</th>
-                <th className={`${lineCellPad} w-[8%] text-center text-[11px] font-semibold ${poMono}`}>Qty *</th>
-                <th className={`${lineCellPad} w-[14%] text-left text-[11px] font-semibold`}>Pasting</th>
-                <th className={`${lineCellPad} w-[14%] text-right text-[11px] font-semibold ${poMono}`}>Rate</th>
-                <th className={`${lineCellPad} w-[12%] text-right text-[11px] font-semibold ${poMono}`}>Amount</th>
-                <th className={`${lineCellPad} w-[6%] text-right text-[11px] font-normal text-slate-500`} aria-label="Row actions" />
+                <th className={`${lineCellPad} ${thSecondary} w-[11%] ${poMono}`}>Size</th>
+                <th className={`${lineCellPad} ${thPrimary} w-[9%] text-center ${poMono}`}>Qty *</th>
+                <th className={`${lineCellPad} ${thPrimary} w-[18%] text-right ${poMono}`}>Rate</th>
+                <th className={`${lineCellPad} ${thPrimary} w-[16%] text-right ${poMono}`}>Amount</th>
+                <th className={`${lineCellPad} w-[6%] text-right text-[12px] font-normal text-ds-ink-faint`} aria-label="Row actions" />
               </tr>
             </thead>
             <tbody>
@@ -1383,20 +1389,10 @@ export default function NewPurchaseOrderPage() {
                 const amount = beforeGst
                 const tMeta = lineToolingByIdx[idx]
                 const tSig = tMeta?.signal ?? 'red'
-                const rowStripe = idx % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/50'
-                const stickBg = idx % 2 === 0 ? 'bg-slate-900' : 'bg-slate-800/50'
-                let health: 'ok' | 'sync' | 'block' = 'ok'
-                if (ln.masterPastingStyleMissing) health = 'sync'
-                if (tSig === 'red') health = 'block'
-                if (tSig === 'yellow' && health === 'ok') health = 'sync'
+                const rowStripe = idx % 2 === 0 ? 'bg-ds-main/40' : 'bg-ds-elevated/25'
+                const stickBg = rowStripe
                 const rowRing =
-                  health === 'block'
-                    ? 'ring-1 ring-rose-500/35 ring-inset'
-                    : health === 'sync'
-                      ? 'ring-1 ring-amber-500/30 ring-inset'
-                      : tSig === 'green'
-                        ? 'ring-1 ring-emerald-500/20 ring-inset'
-                        : ''
+                  tSig === 'red' ? 'ring-1 ring-ds-error/30 ring-inset' : ''
                 return (
                   <tr
                     key={idx}
@@ -1407,16 +1403,20 @@ export default function NewPurchaseOrderPage() {
                       setDetailLineIdx(idx)
                     }}
                     title="Click or Enter — line details & costing (Tab in drawer for fields)"
-                    className={`group min-h-[56px] cursor-pointer border-b border-slate-800/80 transition-colors ${rowStripe} ${
+                    className={`group min-h-[52px] cursor-pointer border-b border-ds-line/30 ${dataTable.tr.body} ${dataTable.tr.hover} ${rowStripe} ${
                       toolingRowPulse === idx ? 'po-tooling-row-sync-pulse' : ''
                     } ${rowRing} ${
                       detailLineIdx === null && kbRowIndex === idx
-                        ? 'ring-1 ring-amber-400/45 ring-inset'
+                        ? 'ring-1 ring-ds-brand/35 ring-inset'
+                        : ''
+                    } ${
+                      detailLineIdx === idx
+                        ? 'bg-ds-brand/8 ring-1 ring-inset ring-ds-brand/30'
                         : ''
                     }`}
                   >
                     <td
-                      className={`${lineCellPad} align-top ${stickBg} sticky left-0 z-20 max-w-0 border-r border-slate-800/80 shadow-[2px_0_6px_rgba(0,0,0,0.2)]`}
+                      className={`${lineCellPad} align-top ${stickBg} sticky left-0 z-20 max-w-0 border-r border-ds-line/50 shadow-[2px_0_8px_rgba(0,0,0,0.12)] transition-colors group-hover:bg-ds-elevated/20`}
                     >
                       <div data-line-stop className="min-w-0" onClick={(e) => e.stopPropagation()}>
                         <CartonLookupField
@@ -1446,11 +1446,11 @@ export default function NewPurchaseOrderPage() {
                           }}
                         />
                         {inlineCartonLineIndex === idx ? (
-                          <div className="mt-2 rounded-md border border-amber-700/60 bg-slate-950/90 p-2 space-y-2 text-[10px]">
-                            <div className="font-semibold text-amber-400">New product — save to master</div>
+                          <div className="mt-2 space-y-2 rounded-ds-md border border-ds-line/80 bg-ds-elevated/50 p-3 text-[10px]">
+                            <div className="font-semibold text-ds-ink">New product · save to master</div>
                             <div className="grid grid-cols-3 gap-1.5">
                               <div>
-                                <span className="text-slate-500">L</span>
+                                <span className="text-ds-ink-faint">L</span>
                                 <input
                                   type="number"
                                   step={0.01}
@@ -1461,7 +1461,7 @@ export default function NewPurchaseOrderPage() {
                                 />
                               </div>
                               <div>
-                                <span className="text-slate-500">W</span>
+                                <span className="text-ds-ink-faint">W</span>
                                 <input
                                   type="number"
                                   step={0.01}
@@ -1472,7 +1472,7 @@ export default function NewPurchaseOrderPage() {
                                 />
                               </div>
                               <div>
-                                <span className="text-slate-500">H</span>
+                                <span className="text-ds-ink-faint">H</span>
                                 <input
                                   type="number"
                                   step={0.01}
@@ -1484,7 +1484,7 @@ export default function NewPurchaseOrderPage() {
                               </div>
                             </div>
                             <div>
-                              <span className="text-slate-500">GSM</span>
+                              <span className="text-ds-ink-faint">GSM</span>
                               <input
                                 type="number"
                                 value={inlineCartonForm.gsm}
@@ -1493,7 +1493,7 @@ export default function NewPurchaseOrderPage() {
                               />
                             </div>
                             <div>
-                              <span className="text-slate-500">Pasting</span>
+                              <span className="text-ds-ink-faint">Pasting</span>
                               <select
                                 value={inlineCartonForm.pastingStyle}
                                 onChange={(e) =>
@@ -1509,14 +1509,14 @@ export default function NewPurchaseOrderPage() {
                               </select>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              <button
+                              <Button
                                 type="button"
                                 disabled={inlineCartonSaving}
                                 onClick={() => void submitInlineCreateCarton(idx)}
-                                className="ci-btn-save-industrial px-2 py-1 text-[10px] disabled:opacity-50"
+                                className="px-2 py-1 text-[10px]"
                               >
                                 {inlineCartonSaving ? 'Saving…' : 'Save to master & apply'}
-                              </button>
+                              </Button>
                               <button
                                 type="button"
                                 disabled={inlineCartonSaving}
@@ -1526,13 +1526,39 @@ export default function NewPurchaseOrderPage() {
                                   setQcCarton((p) => ({ ...p, cartonName: ln.cartonName.trim() }))
                                   setQcCartonOpen(true)
                                 }}
-                                className="text-slate-500 underline"
+                                className="text-ds-ink-muted underline transition hover:text-ds-ink"
                               >
                                 Full form
                               </button>
                             </div>
                           </div>
                         ) : null}
+                        <div
+                          className="mt-3 max-w-md border-t border-ds-line/30 pt-2 data-skip-po-enter-chain"
+                          data-line-stop
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <PoLinePastingStyleCell
+                            lineIndex={idx}
+                            cartonId={ln.cartonId}
+                            pastingStyle={ln.pastingStyle}
+                            masterPastingStyleMissing={ln.masterPastingStyleMissing}
+                            ghostFromMaster={ln.ghostFromMaster.pasting}
+                            pasteErr={fieldErrors[`line${idx}_pasting`]}
+                            inputCls={`w-full min-w-0 text-xs font-normal text-ds-ink-muted ${inputCls}`}
+                            inputErr={inputErr}
+                            savingToMaster={masterPasteSavingLine === idx}
+                            popoverOpenForLine={masterPastePopoverLine}
+                            setPopoverOpenForLine={setMasterPastePopoverLine}
+                            onPastingSelectChange={(value) =>
+                              updateLine(idx, {
+                                pastingStyle: value,
+                                ghostFromMaster: { ...ln.ghostFromMaster, pasting: false },
+                              })
+                            }
+                            onSaveToMaster={(style) => void saveProductMasterPasting(idx, ln.cartonId, style)}
+                          />
+                        </div>
                       </div>
                     </td>
                     <td
@@ -1550,7 +1576,7 @@ export default function NewPurchaseOrderPage() {
                               ghostFromMaster: { ...ln.ghostFromMaster, size: false },
                             })
                           }}
-                          className={`w-full min-w-0 max-w-full truncate ${ln.ghostFromMaster.size ? inputClsGhost : inputCls} ${poMono}`}
+                          className={`w-full min-w-0 max-w-full truncate ${ln.ghostFromMaster.size ? inputClsGhost : inputCls} ${tableInputSecondary} ${poMono}`}
                           title={ln.cartonSize}
                           placeholder="L×W×H"
                         />
@@ -1562,32 +1588,8 @@ export default function NewPurchaseOrderPage() {
                         min={1}
                         value={ln.quantity}
                         onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                        className={`inline-block w-14 text-center ${inputCls} ${poMono}`}
+                        className={`inline-block w-16 min-w-0 text-center ${inputCls} ${tableInputPrimary} ${poMono}`}
                       />
-                    </td>
-                    <td className={`${lineCellPad} align-top`} data-line-stop onClick={(e) => e.stopPropagation()}>
-                      <div className="data-skip-po-enter-chain max-w-full">
-                        <PoLinePastingStyleCell
-                          lineIndex={idx}
-                          cartonId={ln.cartonId}
-                          pastingStyle={ln.pastingStyle}
-                          masterPastingStyleMissing={ln.masterPastingStyleMissing}
-                          ghostFromMaster={ln.ghostFromMaster.pasting}
-                          pasteErr={fieldErrors[`line${idx}_pasting`]}
-                          inputCls={`w-full min-w-0 text-[10px] ${inputCls}`}
-                          inputErr={inputErr}
-                          savingToMaster={masterPasteSavingLine === idx}
-                          popoverOpenForLine={masterPastePopoverLine}
-                          setPopoverOpenForLine={setMasterPastePopoverLine}
-                          onPastingSelectChange={(value) =>
-                            updateLine(idx, {
-                              pastingStyle: value,
-                              ghostFromMaster: { ...ln.ghostFromMaster, pasting: false },
-                            })
-                          }
-                          onSaveToMaster={(style) => void saveProductMasterPasting(idx, ln.cartonId, style)}
-                        />
-                      </div>
                     </td>
                     <td
                       className={`${lineCellPad} text-right align-top`}
@@ -1610,13 +1612,13 @@ export default function NewPurchaseOrderPage() {
                             ghostFromMaster: { ...ln.ghostFromMaster, rate: false },
                           })
                         }
-                        className={`inline-block w-full min-w-0 max-w-[6.5rem] text-right text-[10px] ${
+                        className={`inline-block w-full min-w-0 max-w-[6.5rem] text-right ${
                           ln.ghostFromMaster.rate ? inputClsGhost : inputCls
-                        } ${poMono}`}
+                        } ${tableInputPrimary} ${poMono}`}
                       />
                     </td>
                     <td
-                      className={`${lineCellPad} text-right align-top ${poMono} text-slate-200`}
+                      className={`${lineCellPad} text-right align-top ${dataTable.td.money} ${poMono} text-base font-semibold`}
                       title={Number.isFinite(qty) && Number.isFinite(rate) ? `Qty × rate (ex-GST) before tax` : ''}
                     >
                       {amount.toFixed(2)}
@@ -1630,7 +1632,7 @@ export default function NewPurchaseOrderPage() {
                           type="button"
                           title="Duplicate"
                           onClick={() => duplicateLine(idx)}
-                          className="rounded p-1 text-slate-400 hover:bg-slate-700/80 hover:text-amber-300"
+                          className="rounded-ds-sm p-1.5 text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-brand"
                         >
                           <Copy className="h-3.5 w-3.5" strokeWidth={2} />
                         </button>
@@ -1639,7 +1641,7 @@ export default function NewPurchaseOrderPage() {
                             type="button"
                             title="Remove"
                             onClick={() => removeLine(idx)}
-                            className="rounded p-1 text-red-400/80 hover:bg-red-950/50"
+                            className="rounded-ds-sm p-1.5 text-ds-error/80 transition hover:bg-ds-error/10"
                           >
                             <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
                           </button>
@@ -1651,35 +1653,36 @@ export default function NewPurchaseOrderPage() {
               })}
             </tbody>
           </table>
-        </div>
+          </div>
+        </DataTableFrame>
       </div>
 
       <div
-        className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700/50 bg-slate-950/90 backdrop-blur-md supports-[backdrop-filter]:bg-slate-950/75"
+        className="fixed bottom-0 left-0 right-0 z-40 border-t border-ds-line/80 bg-ds-card/90 backdrop-blur-md supports-[backdrop-filter]:bg-ds-card/80"
         aria-live="polite"
         aria-label="Purchase order financial summary"
       >
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-[11px] sm:text-xs">
-          <span className="font-semibold uppercase tracking-wider text-slate-500">Live summary</span>
-          <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1 text-slate-400">
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3 text-[11px] sm:text-xs">
+          <span className="ds-typo-label font-semibold uppercase tracking-wider">Summary</span>
+          <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1 text-ds-ink-muted">
             <span>
-              Total qty <span className={`${poMono} text-foreground`}>{totalQty}</span>
+              Total qty <span className={cn(poMono, 'text-ds-ink')}>{totalQty}</span>
             </span>
             <span>
               Subtotal{' '}
-              <span className={`${poMono} text-foreground`}>
+              <span className={cn(poMono, 'text-ds-ink')}>
                 ₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>
             <span>
               GST{' '}
-              <span className={`${poMono} text-foreground`}>
+              <span className={cn(poMono, 'text-ds-ink')}>
                 ₹ {totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>
-            <span className="text-slate-300">
+            <span className="text-ds-ink">
               Grand total{' '}
-              <span className={`${poMono} text-base font-semibold text-amber-200`}>
+              <span className={cn(poMono, 'ds-typo-total !text-ds-success')}>
                 ₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>
@@ -1694,7 +1697,6 @@ export default function NewPurchaseOrderPage() {
         line={detailLineIdx != null ? (lines[detailLineIdx] ?? null) : null}
         updateLine={updateLine}
         fieldErrors={fieldErrors}
-        inputBase={inputBase}
         inputCls={inputCls}
         inputClsGhost={inputClsGhost}
         inputErr={inputErr}

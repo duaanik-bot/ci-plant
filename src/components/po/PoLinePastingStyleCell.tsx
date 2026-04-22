@@ -82,35 +82,34 @@ export function PoLinePastingStyleCell({
       pastingStyle === 'BSO' ? PastingStyle.BSO : PastingStyle.LOCK_BOTTOM
     return (
       <div ref={wrapRef} className="group/pasteWarn relative min-w-[9rem]">
-        <p className="text-[9px] font-bold uppercase tracking-wider text-red-400 mb-1">SYNC REQUIRED</p>
+        <p className="mb-1 text-[10px] text-ds-ink-faint">Choose a style, then use Save to master.</p>
         <div
           id={`paste-warn-${lineIndex}`}
-          className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[16rem] rounded-md border border-red-800 bg-red-600 px-2.5 py-2 text-[10px] font-semibold leading-snug text-foreground shadow-xl group-hover/pasteWarn:block"
+          className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[14rem] rounded-ds-sm border border-ds-line bg-ds-card px-2.5 py-2 text-[10px] font-medium leading-snug text-ds-ink-muted shadow-xl group-hover/pasteWarn:block"
           role="tooltip"
         >
-          Critical: Product Master has no Pasting Style. Choose Lock Bottom or BSO and sync to master before
-          production handoff.
+          Lock Bottom or BSO, then save to product master. Edits here still apply to this PO.
         </div>
         <button
           type="button"
           disabled={savingToMaster}
           onClick={() => setPopoverOpenForLine(open ? null : lineIndex)}
-          className={`w-full flex items-center justify-between gap-1 rounded-md border-2 border-dashed border-red-500 bg-red-950/35 px-2 py-1 text-left ${pasteErr ? inputErr : ''} disabled:opacity-50`}
+          className={`flex w-full items-center justify-between gap-1 rounded-ds-sm border border-ds-warning/35 bg-ds-warning/5 px-2 py-1.5 text-left transition duration-200 hover:border-ds-warning/50 hover:bg-ds-warning/10 ${pasteErr ? inputErr : ''} disabled:opacity-50`}
           aria-expanded={open}
           aria-describedby={`paste-warn-${lineIndex}`}
         >
-          <span className="text-[10px] font-semibold text-red-100 leading-tight">
+          <span className="text-[12px] font-medium leading-tight text-ds-ink">
             {pastingStyleLabel(displayStyle)}
           </span>
-          <span className="text-[10px] text-red-200/90 shrink-0" aria-hidden>
+          <span className="shrink-0 text-[10px] text-ds-ink-faint" aria-hidden>
             {open ? '▴' : '▾'}
           </span>
         </button>
         {open ? (
           <select
-            aria-label="Save pasting style to Product Master"
+            aria-label="Save pasting style to product master"
             disabled={savingToMaster}
-            className={`mt-1 w-full ${inputCls} border-red-700/60 bg-red-950/30 text-red-50`}
+            className={`mt-1 w-full ${inputCls} border-ds-line bg-ds-elevated/80 text-ds-ink`}
             value=""
             onChange={(e) => {
               const v = e.target.value
@@ -119,12 +118,12 @@ export function PoLinePastingStyleCell({
               e.target.value = ''
             }}
           >
-            <option value="">Lock Bottom or BSO — save to master…</option>
+            <option value="">Save to master…</option>
             <option value={PastingStyle.LOCK_BOTTOM}>{pastingStyleLabel(PastingStyle.LOCK_BOTTOM)}</option>
             <option value={PastingStyle.BSO}>{pastingStyleLabel(PastingStyle.BSO)}</option>
           </select>
         ) : null}
-        {pasteErr ? <p className="text-[10px] text-red-400 mt-0.5">{pasteErr}</p> : null}
+        {pasteErr ? <p className="text-[10px] text-ds-error mt-0.5">{pasteErr}</p> : null}
       </div>
     )
   }

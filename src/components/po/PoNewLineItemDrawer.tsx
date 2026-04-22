@@ -5,7 +5,10 @@ import { PastingStyle } from '@prisma/client'
 import { COATING_TYPES, EMBOSSING_TYPES, FOIL_TYPES, PAPER_TYPES, BOARD_GRADES } from '@/lib/constants'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PoLinePastingStyleCell } from '@/components/po/PoLinePastingStyleCell'
-import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
+import { CardSection } from '@/components/design-system/CardSection'
+import { SummaryBlock } from '@/components/design-system/SummaryBlock'
+import { Drawer } from '@/components/design-system/Drawer'
+import { Button } from '@/components/design-system/Button'
 
 type Line = {
   cartonId: string
@@ -40,7 +43,6 @@ type PoNewLineItemDrawerProps = {
   line: Line | null
   updateLine: (idx: number, patch: Partial<Line>) => void
   fieldErrors: Record<string, string>
-  inputBase: string
   inputCls: string
   inputClsGhost: string
   inputErr: string
@@ -73,13 +75,11 @@ function computeChargeableQty(quantity: string, wastagePct: string) {
   return q * (1 + w / 100)
 }
 
-function sectionTitle(text: string) {
-  return (
-    <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-800 pb-2">
-      {text}
-    </h3>
-  )
-}
+const labelSec = 'mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-ds-ink-faint'
+const labelKey = 'mb-1.5 block text-sm font-medium text-ds-ink'
+
+const comboboxControl = 'border-ds-line/80 bg-ds-elevated/50'
+const comboboxInput = 'text-sm text-ds-ink'
 
 export function PoNewLineItemDrawer({
   isOpen,
@@ -88,7 +88,6 @@ export function PoNewLineItemDrawer({
   line,
   updateLine,
   fieldErrors,
-  inputBase,
   inputCls,
   inputClsGhost,
   inputErr,
@@ -186,53 +185,57 @@ export function PoNewLineItemDrawer({
   const chQty = line ? computeChargeableQty(line.quantity, line.wastagePct) : 0
 
   return (
-    <SlideOverPanel
+    <Drawer
       title={line ? `Line ${lineIndex + 1} — ${line.cartonName.trim() || 'New line'}` : 'Line item'}
       isOpen={isOpen}
       onClose={onClose}
-      widthClass="max-w-md w-full"
-      backdropClassName="bg-background/60"
-      panelClassName="border-l border-slate-700 bg-slate-950 text-foreground shadow-xl"
+      widthClass="w-[min(40vw,32rem)] max-w-full"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      }
     >
       <div
         ref={panelRootRef}
         onKeyDown={onPanelKeyDown}
-        className="space-y-6 text-sm"
+        className="space-y-4 text-sm"
         data-po-line-drawer
         role="dialog"
         aria-modal="true"
         aria-label="Line item details"
       >
         {line == null ? (
-          <p className="text-sm text-slate-500">No line selected.</p>
+          <p className="text-sm text-ds-ink-faint">No line selected.</p>
         ) : (
           <>
-            <p className="text-[10px] text-slate-500">
-              <kbd className="rounded border border-slate-600 px-1">Tab</kbd> fields ·{' '}
-              <kbd className="rounded border border-slate-600 px-1">Enter</kbd> next ·{' '}
-              <kbd className="rounded border border-slate-600 px-1">Ctrl</kbd>+
-              <kbd className="rounded border border-slate-600 px-1">Enter</kbd> done ·{' '}
-              <kbd className="rounded border border-slate-600 px-1">Ctrl</kbd>+→ section
+            <p className="text-[10px] leading-relaxed text-ds-ink-faint">
+              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Tab</kbd> fields ·{' '}
+              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Enter</kbd> next ·{' '}
+              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Ctrl</kbd>+
+              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Enter</kbd> done ·{' '}
+              <kbd className="rounded-ds-sm border border-ds-line bg-ds-elevated/50 px-1 py-0.5">Ctrl</kbd>+→ section
             </p>
 
-            <section id="po-sec-material" className="space-y-3">
-              {sectionTitle('Material')}
+            <CardSection id="po-sec-material" title="Material">
               <div>
-                <label className="mb-1 block text-xs text-slate-400">Board</label>
+                <label className={labelSec}>Board</label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Board grade"
                     options={BOARD_GRADES}
                     value={line.boardGrade || null}
                     onChange={(v) => updateLine(lineIndex, { boardGrade: v ?? '' })}
-                    controlClassName="border-slate-700 bg-slate-900/80"
-                    inputClassName="text-xs text-slate-100"
+                    controlClassName={comboboxControl}
+                    inputClassName={comboboxInput}
                     className="w-full"
                   />
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">GSM</label>
+                <label className={labelSec}>GSM</label>
                 <input
                   type="number"
                   value={line.gsm}
@@ -242,73 +245,72 @@ export function PoNewLineItemDrawer({
                       ghostFromMaster: { ...line.ghostFromMaster, gsm: false },
                     })
                   }
-                  className={`w-full ${inputBase} text-foreground border ${
+                  className={`w-full ${
                     line.ghostFromMaster.gsm ? inputClsGhost : inputCls
                   } ${poMono}`}
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">Paper</label>
+                <label className={labelSec}>Paper</label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Paper / board type"
                     options={PAPER_TYPES}
                     value={line.paperType || null}
                     onChange={(v) => updateLine(lineIndex, { paperType: v ?? '' })}
-                    controlClassName="border-slate-700 bg-slate-900/80"
-                    inputClassName="text-xs text-slate-100"
+                    controlClassName={comboboxControl}
+                    inputClassName={comboboxInput}
                     className="w-full"
                   />
                 </div>
               </div>
-            </section>
+            </CardSection>
 
-            <section id="po-sec-print" className="space-y-3">
-              {sectionTitle('Printing')}
+            <CardSection id="po-sec-print" title="Printing">
               <div>
-                <label className="mb-1 block text-xs text-slate-400">Coating</label>
+                <label className={labelSec}>Coating</label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Coating"
                     options={COATING_TYPES}
                     value={line.coatingType || null}
                     onChange={(v) => updateLine(lineIndex, { coatingType: v ?? '' })}
-                    controlClassName="border-slate-700 bg-slate-900/80"
-                    inputClassName="text-xs text-slate-100"
+                    controlClassName={comboboxControl}
+                    inputClassName={comboboxInput}
                     className="w-full"
                   />
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">Emboss / leafing</label>
+                <label className={labelSec}>Emboss / leafing</label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Embossing and leafing"
                     options={EMBOSSING_TYPES}
                     value={line.embossingLeafing || null}
                     onChange={(v) => updateLine(lineIndex, { embossingLeafing: v ?? '' })}
-                    controlClassName="border-slate-700 bg-slate-900/80"
-                    inputClassName="text-xs text-slate-100"
+                    controlClassName={comboboxControl}
+                    inputClassName={comboboxInput}
                     className="w-full"
                   />
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">Foil</label>
+                <label className={labelSec}>Foil</label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Foil"
                     options={FOIL_TYPES}
                     value={line.foilType || null}
                     onChange={(v) => updateLine(lineIndex, { foilType: v ?? '' })}
-                    controlClassName="border-slate-700 bg-slate-900/80"
-                    inputClassName="text-xs text-slate-100"
+                    controlClassName={comboboxControl}
+                    inputClassName={comboboxInput}
                     className="w-full"
                   />
                 </div>
               </div>
-              <div data-skip-po-enter-chain className="space-y-1">
-                <label className="mb-1 block text-xs text-slate-400">Pasting</label>
+              <div data-skip-po-enter-chain className="space-y-1.5">
+                <label className={labelSec}>Pasting</label>
                 <PoLinePastingStyleCell
                   lineIndex={lineIndex}
                   cartonId={line.cartonId}
@@ -330,117 +332,134 @@ export function PoNewLineItemDrawer({
                   onSaveToMaster={(style) => onSavePastingToMaster(lineIndex, line.cartonId, style)}
                 />
               </div>
-            </section>
+            </CardSection>
 
-            <section id="po-sec-cost" className="space-y-3">
-              {sectionTitle('Costing')}
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Quantity</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={line.quantity}
-                  onChange={(e) => updateLine(lineIndex, { quantity: e.target.value })}
-                  className={`w-full ${inputCls} ${poMono}`}
-                />
+            <CardSection id="po-sec-cost" title="Costing" className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={labelKey}>Quantity</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={line.quantity}
+                    onChange={(e) => updateLine(lineIndex, { quantity: e.target.value })}
+                    className={`w-full !text-base !font-semibold tabular-nums !text-ds-ink ${inputCls} ${poMono}`}
+                  />
+                </div>
+                <div>
+                  <label className={labelKey}>
+                    Rate <span className="text-[11px] font-normal text-ds-ink-faint">(per unit, ex-GST)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={line.rate}
+                    onChange={(e) =>
+                      updateLine(lineIndex, {
+                        rate: e.target.value,
+                        ghostFromMaster: { ...line.ghostFromMaster, rate: false },
+                      })
+                    }
+                    className={`w-full !text-base !font-semibold tabular-nums ${
+                      line.ghostFromMaster.rate ? `${inputClsGhost} !text-ds-ink-muted` : `${inputCls} !text-ds-ink`
+                    } ${poMono} ${fieldErrors[`line${lineIndex}_rate`] ? inputErr : ''}`}
+                    title={line.ghostFromMaster.rate ? 'From Product Master — edit to override' : undefined}
+                  />
+                </div>
               </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Rate (per unit, ex-GST)</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={line.rate}
-                  onChange={(e) =>
-                    updateLine(lineIndex, {
-                      rate: e.target.value,
-                      ghostFromMaster: { ...line.ghostFromMaster, rate: false },
-                    })
-                  }
-                  className={`w-full ${
-                    line.ghostFromMaster.rate ? inputClsGhost : inputCls
-                  } ${poMono} ${fieldErrors[`line${lineIndex}_rate`] ? inputErr : ''}`}
-                  title={line.ghostFromMaster.rate ? 'From Product Master — edit to override' : undefined}
-                />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={labelSec}>Wastage %</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={line.wastagePct}
+                    onChange={(e) => updateLine(lineIndex, { wastagePct: e.target.value })}
+                    className={`w-full text-sm text-ds-ink-muted ${inputCls} ${poMono}`}
+                  />
+                  {chQty > 0 && (Number(line.wastagePct) || 0) > 0 ? (
+                    <p className="mt-1.5 text-[10px] text-ds-ink-faint">
+                      Chargeable qty (incl. waste):{' '}
+                      <span className={`${poMono} text-ds-ink-muted`}>
+                        {chQty.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                      </span>
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <label className={labelSec}>GST %</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={28}
+                    value={line.gstPct}
+                    onChange={(e) => updateLine(lineIndex, { gstPct: e.target.value })}
+                    className={`w-full text-sm text-ds-ink-muted ${inputCls} ${poMono}`}
+                  />
+                  <p className="mt-1.5 text-[10px] text-ds-ink-faint">On line value (ex-GST) unless changed.</p>
+                </div>
               </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Wastage %</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={line.wastagePct}
-                  onChange={(e) => updateLine(lineIndex, { wastagePct: e.target.value })}
-                  className={`w-full ${inputCls} ${poMono}`}
+
+              <div
+                className={`space-y-1 rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-4 ${poMono}`}
+              >
+                <SummaryBlock
+                  label="Line amount (ex-GST)"
+                  value={`₹ ${money.exGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
                 />
-                {chQty > 0 && (Number(line.wastagePct) || 0) > 0 ? (
-                  <p className="mt-1 text-[10px] text-slate-500">
-                    Chargeable qty (incl. waste):{' '}
-                    <span className={`${poMono} text-slate-300`}>
-                      {chQty.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                <SummaryBlock
+                  className="!border-t-0 !pt-0"
+                  label="GST"
+                  value={`₹ ${money.gstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                />
+                <div className="border-t border-ds-line/60 pt-3">
+                  <div className="flex flex-col gap-0.5 sm:flex-row sm:items-end sm:justify-between">
+                    <span className="text-[13px] font-medium text-ds-ink-muted">Line total (incl. GST)</span>
+                    <span className="text-[22px] font-bold tabular-nums tracking-tight text-ds-success">
+                      ₹ {money.lineTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </span>
-                  </p>
-                ) : null}
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">GST %</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={28}
-                  value={line.gstPct}
-                  onChange={(e) => updateLine(lineIndex, { gstPct: e.target.value })}
-                  className={`w-full ${inputCls} ${poMono}`}
-                />
-                <p className="mt-0.5 text-[10px] text-slate-600">Applies to line value (ex-GST) unless you change it.</p>
-              </div>
-              <div className={`space-y-1.5 border border-slate-800/80 bg-slate-900/50 p-2.5 ${poMono} text-xs`}>
-                <div className="flex justify-between text-slate-400">
-                  <span>Line amount (ex-GST)</span>
-                  <span className="text-slate-200">₹ {money.exGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>GST</span>
-                  <span className="text-slate-200">₹ {money.gstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between border-t border-slate-800 pt-1.5 font-medium text-amber-200/95">
-                  <span>Line total (incl. GST)</span>
-                  <span>₹ {money.lineTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  </div>
                 </div>
               </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Back print</label>
-                <select
-                  value={line.backPrint}
-                  onChange={(e) => updateLine(lineIndex, { backPrint: e.target.value })}
-                  className={`w-full ${inputCls}`}
-                >
-                  <option value="No">No</option>
-                  <option value="Yes">Yes</option>
-                </select>
+
+              <div className="space-y-3 border-t border-ds-line/50 pt-4">
+                <p className={labelSec}>Additional (optional)</p>
+                <div>
+                  <label className={labelSec}>Back print</label>
+                  <select
+                    value={line.backPrint}
+                    onChange={(e) => updateLine(lineIndex, { backPrint: e.target.value })}
+                    className={`w-full text-sm text-ds-ink-muted ${inputCls}`}
+                  >
+                    <option value="No">No</option>
+                    <option value="Yes">Yes</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelSec}>Artwork code</label>
+                  <input
+                    type="text"
+                    value={line.artworkCode}
+                    onChange={(e) => updateLine(lineIndex, { artworkCode: e.target.value })}
+                    className={`w-full font-mono text-xs text-ds-ink-muted ${inputCls}`}
+                  />
+                </div>
+                <div>
+                  <label className={labelSec}>Line remarks</label>
+                  <textarea
+                    rows={3}
+                    value={line.remarks}
+                    onChange={(e) => updateLine(lineIndex, { remarks: e.target.value })}
+                    className={`w-full min-h-[5rem] resize-y text-sm text-ds-ink ${inputCls}`}
+                  />
+                </div>
               </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Artwork code</label>
-                <input
-                  type="text"
-                  value={line.artworkCode}
-                  onChange={(e) => updateLine(lineIndex, { artworkCode: e.target.value })}
-                  className={`w-full ${inputCls} font-mono text-xs`}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Line remarks</label>
-                <textarea
-                  rows={4}
-                  value={line.remarks}
-                  onChange={(e) => updateLine(lineIndex, { remarks: e.target.value })}
-                  className="w-full rounded border border-slate-600 bg-slate-800 px-3 py-2 text-foreground text-sm"
-                />
-              </div>
-            </section>
+            </CardSection>
           </>
         )}
       </div>
-    </SlideOverPanel>
+    </Drawer>
   )
 }
