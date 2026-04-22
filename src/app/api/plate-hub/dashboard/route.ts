@@ -21,6 +21,26 @@ import { extractPoLineIdFromCartonLabel } from '@/lib/plate-requirement-po-link'
 
 export const dynamic = 'force-dynamic'
 
+const MAX_ORDER = Number.MAX_SAFE_INTEGER
+
+function sortCtpQueueRows<T extends { hubOrderCtp: number | null; createdAt: Date }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const oa = a.hubOrderCtp ?? MAX_ORDER
+    const ob = b.hubOrderCtp ?? MAX_ORDER
+    if (oa !== ob) return oa - ob
+    return a.createdAt.getTime() - b.createdAt.getTime()
+  })
+}
+
+function sortVendorQueueRows<T extends { hubOrderVendor: number | null; createdAt: Date }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const oa = a.hubOrderVendor ?? MAX_ORDER
+    const ob = b.hubOrderVendor ?? MAX_ORDER
+    if (oa !== ob) return oa - ob
+    return a.createdAt.getTime() - b.createdAt.getTime()
+  })
+}
+
 function channelNamesFromActiveJson(activeJson: unknown[]): string[] {
   return activeJson
     .map((item) => {
@@ -225,37 +245,41 @@ export async function GET() {
     ] = await Promise.all([
       db.plateRequirement.findMany({
         where: {
+          hubSoftDeletedAt: null,
           triageChannel: null,
           status: { in: ['pending', 'ctp_notified', 'plates_ready'] },
         },
         orderBy: { createdAt: 'asc' },
       }),
       db.plateRequirement.findMany({
-        where: { status: 'ctp_internal_queue', triageChannel: 'inhouse_ctp' },
+        where: { hubSoftDeletedAt: null, status: 'ctp_internal_queue', triageChannel: 'inhouse_ctp' },
         orderBy: { createdAt: 'asc' },
       }),
       db.plateRequirement.findMany({
         where: {
+          hubSoftDeletedAt: null,
           triageChannel: 'outside_vendor',
           status: 'awaiting_vendor_delivery',
         },
         orderBy: { createdAt: 'asc' },
       }),
       db.plateStore.findMany({
-        where: { status: { in: ['ready', 'returned', 'in_stock'] } },
+        where: { hubSoftDeletedAt: null, status: { in: ['ready', 'returned', 'in_stock'] } },
         orderBy: { updatedAt: 'desc' },
         include: { customer: { select: { id: true, name: true } } },
       }),
       db.plateRequirement.findMany({
-        where: { status: 'READY_ON_FLOOR' },
+        where: { hubSoftDeletedAt: null, status: 'READY_ON_FLOOR' },
         orderBy: { updatedAt: 'desc' },
       }),
       db.plateStore.findMany({
-        where: { status: 'READY_ON_FLOOR' },
+        where: { hubSoftDeletedAt: null, status: 'READY_ON_FLOOR' },
         orderBy: { updatedAt: 'desc' },
         include: { customer: { select: { id: true, name: true } } },
       }),
     ])
+    const ctpRowsOrdered = sortCtpQueueRows(ctpRows)
+    const vendorRowsOrdered = sortVendorQueueRows(vendorRows)
 
     const custodyJobCardIds = [
       ...stagingReqRows.map((r) => r.jobCardId).filter(Boolean),
@@ -287,7 +311,7 @@ export async function GET() {
     )
     const ctpVendorLineIds = Array.from(
       new Set(
-        [...ctpRows, ...vendorRows]
+        [...ctpRowsOrdered, ...vendorRowsOrdered]
           .map((r) => r.poLineId?.trim())
           .filter((id): id is string => Boolean(id)),
       ),
@@ -404,7 +428,7 @@ export async function GET() {
       }
     })
 
-    const ctpQueue = ctpRows.map((r) => {
+    const ctpQueue = ctpRowsOrdered.map((r) => {
       const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
       const lid = r.poLineId?.trim()
       const intel = lid ? lineIntelByLineId.get(lid) : undefined
@@ -430,10 +454,13 @@ export async function GET() {
         purchaseOrderId: intel?.purchaseOrderId ?? null,
         shopfloorInactiveCanonicalKeys: shopfloorInactiveCanonicalKeysFromJson(r.coloursNeeded),
         shopfloorActiveColourCount: countActiveShopfloorColours(r.coloursNeeded),
+        hubOrderCtp: r.hubOrderCtp ?? null,
+        lastReorderedBy: r.lastReorderedBy?.trim() ?? null,
+        lastReorderedAt: r.lastReorderedAt?.toISOString() ?? null,
       }
     })
 
-    const vendorQueue = vendorRows.map((r) => {
+    const vendorQueue = vendorRowsOrdered.map((r) => {
       const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
       const lid = r.poLineId?.trim()
       const intel = lid ? lineIntelByLineId.get(lid) : undefined
@@ -459,6 +486,9 @@ export async function GET() {
         purchaseOrderId: intel?.purchaseOrderId ?? null,
         shopfloorInactiveCanonicalKeys: shopfloorInactiveCanonicalKeysFromJson(r.coloursNeeded),
         shopfloorActiveColourCount: countActiveShopfloorColours(r.coloursNeeded),
+        hubOrderVendor: r.hubOrderVendor ?? null,
+        lastReorderedBy: r.lastReorderedBy?.trim() ?? null,
+        lastReorderedAt: r.lastReorderedAt?.toISOString() ?? null,
       }
     })
 

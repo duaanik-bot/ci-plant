@@ -23,7 +23,7 @@ export async function queryShadeCardHubRows(searchQuery: string): Promise<ShadeC
   const [priorityLines, cards] = await Promise.all([
     loadPriorityPoLineContext(db),
     db.shadeCard.findMany({
-      where: { isActive: true },
+      where: { isActive: true, hubSoftDeletedAt: null },
       include: {
         customer: { select: { id: true, name: true } },
         product: {
@@ -112,6 +112,12 @@ export async function queryShadeCardHubRows(searchQuery: string): Promise<ShadeC
         remarksEditedAt: c.remarksEditedAt?.toISOString() ?? null,
         remarksEditedByName: c.remarksEditedByName,
         updatedAt: c.updatedAt.toISOString(),
+        hubOrderInStock: c.hubOrderInStock ?? null,
+        hubOrderOnFloor: c.hubOrderOnFloor ?? null,
+        hubOrderReverify: c.hubOrderReverify ?? null,
+        hubOrderExpired: c.hubOrderExpired ?? null,
+        lastReorderedBy: c.lastReorderedBy?.trim() ?? null,
+        lastReorderedAt: c.lastReorderedAt?.toISOString() ?? null,
       } satisfies ShadeCardSpotlightRow
     })
     .filter((r): r is NonNullable<typeof r> => r != null)

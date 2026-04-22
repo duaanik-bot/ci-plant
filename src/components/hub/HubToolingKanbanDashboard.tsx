@@ -44,7 +44,12 @@ import {
   INDUSTRIAL_PRIORITY_ROW_CLASS,
   INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
 } from '@/lib/industrial-priority-ui'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Star } from 'lucide-react'
+import { HubCardDeleteAction } from '@/components/hub/HubCardDeleteAction'
+import { HubPriorityController, HubPriorityRankBadge } from '@/components/hub/HubPriorityController'
+import { HubPriorityReorderAuditFooter } from '@/components/hub/HubPriorityReorderAuditFooter'
+import type { HubPriorityDomain } from '@/lib/hub-priority-domain'
 import { EmbossHubSpotlightDrawer } from '@/components/hub/EmbossHubSpotlightDrawer'
 
 /** JetBrains-style mono for codes & numerics (emboss hub signature). */
@@ -224,6 +229,12 @@ type DieRow = {
   linkedCustomerNames?: string[]
   /** PO starred or director line priority. */
   industrialPriority?: boolean
+  hubOrderTriage?: number | null
+  hubOrderPrep?: number | null
+  hubOrderInventory?: number | null
+  hubOrderCustody?: number | null
+  lastReorderedBy?: string | null
+  lastReorderedAt?: string | null
 }
 
 type EmbossRow = {
@@ -261,29 +272,40 @@ type EmbossRow = {
   linkedCustomerNames?: string[]
   industrialPriority?: boolean
   ledgerRank?: number
+  hubOrderTriage?: number | null
+  hubOrderPrep?: number | null
+  hubOrderInventory?: number | null
+  hubOrderCustody?: number | null
+  lastReorderedBy?: string | null
+  lastReorderedAt?: string | null
 }
 
 type ToolRow = DieRow | EmbossRow
 
-/** Starred PO / director line — surface first on the board. */
-function sortIndustrialPriorityFirst(rows: ToolRow[]): ToolRow[] {
-  return [...rows].sort((a, b) => {
-    const pa = a.industrialPriority === true ? 1 : 0
-    const pb = b.industrialPriority === true ? 1 : 0
-    if (pa !== pb) return pb - pa
-    if (a.kind === 'die' && b.kind === 'die')
-      return (a.ledgerRank ?? 0) - (b.ledgerRank ?? 0)
-    if (a.kind === 'emboss' && b.kind === 'emboss') {
-      const na = (a.productName ?? a.title ?? '').localeCompare(b.productName ?? b.title ?? '', undefined, {
-        sensitivity: 'base',
-      })
-      if (na !== 0) return na
-      return (a.ledgerRank ?? 0) - (b.ledgerRank ?? 0)
-    }
-    if (a.kind === 'die' && b.kind === 'emboss') return -1
-    if (a.kind === 'emboss' && b.kind === 'die') return 1
-    return a.displayCode.localeCompare(b.displayCode)
-  })
+function toolColumnState(
+  full: ToolRow[] | undefined,
+  id: string,
+): { rank: number; isFirst: boolean; isLast: boolean } {
+  const col = full ?? []
+  const idx = col.findIndex((r) => r.id === id)
+  if (idx < 0) return { rank: 0, isFirst: true, isLast: true }
+  return { rank: idx + 1, isFirst: idx === 0, isLast: idx === col.length - 1 }
+}
+
+function hubDomainForTool(
+  tool: 'dies' | 'blocks',
+  zone: 'triage' | 'prep' | 'inventory' | 'custody',
+): HubPriorityDomain {
+  if (tool === 'dies') {
+    if (zone === 'triage') return 'die_triage'
+    if (zone === 'prep') return 'die_prep'
+    if (zone === 'inventory') return 'die_inventory'
+    return 'die_custody'
+  }
+  if (zone === 'triage') return 'emboss_triage'
+  if (zone === 'prep') return 'emboss_prep'
+  if (zone === 'inventory') return 'emboss_inventory'
+  return 'emboss_custody'
 }
 
 type DashboardPayload = {
@@ -438,6 +460,21 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const [meType, setMeType] = useState('Blind Emboss')
   const [meMaterial, setMeMaterial] = useState('Magnesium')
   const [meSize, setMeSize] = useState('')
+
+  const removeToolingRow = useCallback((id: string) => {
+    setData((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        triage: prev.triage.filter((r) => r.id !== id),
+        prep: prev.prep.filter((r) => r.id !== id),
+        inventory: prev.inventory.filter((r) => r.id !== id),
+        custody: prev.custody.filter((r) => r.id !== id),
+        ledgerRows: prev.ledgerRows.filter((r) => r.id !== id),
+      }
+    })
+    toast.success('Record removed from hub view')
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -627,31 +664,19 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   )
 
   const triageF = useMemo(
-    () =>
-      sortIndustrialPriorityFirst(
-        applyDieHubPastingBoard(filterRows(data?.triage ?? [], triageSearch)),
-      ),
+    () => applyDieHubPastingBoard(filterRows(data?.triage ?? [], triageSearch)),
     [data?.triage, triageSearch, applyDieHubPastingBoard],
   )
   const prepF = useMemo(
-    () =>
-      sortIndustrialPriorityFirst(
-        applyDieHubPastingBoard(filterRows(data?.prep ?? [], prepSearch)),
-      ),
+    () => applyDieHubPastingBoard(filterRows(data?.prep ?? [], prepSearch)),
     [data?.prep, prepSearch, applyDieHubPastingBoard],
   )
   const invF = useMemo(
-    () =>
-      sortIndustrialPriorityFirst(
-        applyDieHubPastingBoard(filterRows(data?.inventory ?? [], invSearch)),
-      ),
+    () => applyDieHubPastingBoard(filterRows(data?.inventory ?? [], invSearch)),
     [data?.inventory, invSearch, applyDieHubPastingBoard],
   )
   const custF = useMemo(
-    () =>
-      sortIndustrialPriorityFirst(
-        applyDieHubPastingBoard(filterRows(data?.custody ?? [], custSearch)),
-      ),
+    () => applyDieHubPastingBoard(filterRows(data?.custody ?? [], custSearch)),
     [data?.custody, custSearch, applyDieHubPastingBoard],
   )
 
@@ -1263,16 +1288,29 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       const hasTypeMismatch = mismatch.length > 0
       const hasSimilar = !hasTypeMismatch && r.similarMatches.length > 0
       const dimTitle = r.dimensionsLwh || r.dimensionsLabel
+      const fullCol =
+        zone === 'triage'
+          ? (data?.triage ?? [])
+          : zone === 'prep'
+            ? (data?.prep ?? [])
+            : zone === 'inventory'
+              ? (data?.inventory ?? [])
+              : (data?.custody ?? [])
+      const pri = toolColumnState(fullCol, r.id)
+      const priDomain = hubDomainForTool(mode, zone)
       return (
-        <li key={`${r.kind}-${r.id}`} data-hub-die-id={r.id} className={liClass}>
+        <motion.li
+          key={`${r.kind}-${r.id}`}
+          data-hub-die-id={r.id}
+          layout
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, scale: 0.98 }}
+          transition={{ duration: 0.2 }}
+          className={liClass}
+        >
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              <span
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-[10px] font-mono font-bold text-zinc-500"
-                title="Row #"
-              >
-                #{r.ledgerRank}
-              </span>
               <span className="font-mono text-[10px] text-amber-300/90 truncate">{r.displayCode}</span>
               {r.industrialPriority ? (
                 <Star
@@ -1281,7 +1319,14 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 />
               ) : null}
             </div>
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
+              <HubCardDeleteAction
+                asset="die"
+                recordId={r.id}
+                disabled={saving}
+                triggerClassName="relative shrink-0"
+                onDeleted={() => removeToolingRow(r.id)}
+              />
               <button
                 type="button"
                 disabled={saving}
@@ -1321,6 +1366,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   Similar
                 </button>
               ) : null}
+              <HubPriorityRankBadge rank={pri.rank} />
             </div>
           </div>
           <p className="text-[11px] text-zinc-500 truncate mt-1" title={r.title}>
@@ -1495,23 +1541,50 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <HubCustodyReady at={r.lastStatusUpdatedAt} />
             </div>
           ) : null}
-        </li>
+          <HubPriorityReorderAuditFooter
+            lastReorderedBy={r.lastReorderedBy}
+            lastReorderedAt={r.lastReorderedAt}
+          />
+          <div className="mt-1.5 flex justify-end">
+            <HubPriorityController
+              domain={priDomain}
+              entityId={r.id}
+              isFirst={pri.isFirst}
+              isLast={pri.isLast}
+              disabled={saving}
+              onSuccess={() => void load()}
+            />
+          </div>
+        </motion.li>
       )
     }
 
     const prodTitle = (r.productName ?? r.title ?? '').trim() || r.displayCode
     const verDisp = (r.versionDisplay ?? '—').trim()
+    const fullColEmb =
+      zone === 'triage'
+        ? (data?.triage ?? [])
+        : zone === 'prep'
+          ? (data?.prep ?? [])
+          : zone === 'inventory'
+            ? (data?.inventory ?? [])
+            : (data?.custody ?? [])
+    const priEmb = toolColumnState(fullColEmb, r.id)
+    const priDomainEmb = hubDomainForTool(mode, zone)
 
     return (
-      <li key={`${r.kind}-${r.id}`} data-hub-emboss-id={r.id} className={liClass}>
+      <motion.li
+        key={`${r.kind}-${r.id}`}
+        data-hub-emboss-id={r.id}
+        layout
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0, scale: 0.98 }}
+        transition={{ duration: 0.2 }}
+        className={liClass}
+      >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-            <span
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-[10px] font-bold text-zinc-500 ${HUB_EMB_MONO}`}
-              title="Row #"
-            >
-              #{r.ledgerRank ?? '—'}
-            </span>
             {r.industrialPriority ? (
               <Star
                 className={`h-3.5 w-3.5 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
@@ -1524,15 +1597,25 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </span>
             ) : null}
           </div>
-          <button
-            type="button"
-            disabled={saving}
-            title="Undo last hub action"
-            className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-amber-200/90 border border-amber-700/60 rounded px-1.5 py-0.5 hover:bg-amber-950/50 disabled:opacity-50 whitespace-nowrap"
-            onClick={() => setReverseRowId(r.id)}
-          >
-            ↺ Reverse
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <HubCardDeleteAction
+              asset="emboss"
+              recordId={r.id}
+              disabled={saving}
+              triggerClassName="relative shrink-0"
+              onDeleted={() => removeToolingRow(r.id)}
+            />
+            <button
+              type="button"
+              disabled={saving}
+              title="Undo last hub action"
+              className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-amber-200/90 border border-amber-700/60 rounded px-1.5 py-0.5 hover:bg-amber-950/50 disabled:opacity-50 whitespace-nowrap"
+              onClick={() => setReverseRowId(r.id)}
+            >
+              ↺ Reverse
+            </button>
+            <HubPriorityRankBadge rank={priEmb.rank} />
+          </div>
         </div>
         <div className="mt-1 min-w-0 space-y-0.5">
           {r.linkedProductId ? (
@@ -1709,7 +1792,21 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <HubCustodyReady at={r.lastStatusUpdatedAt} />
           </div>
         ) : null}
-      </li>
+        <HubPriorityReorderAuditFooter
+          lastReorderedBy={r.lastReorderedBy}
+          lastReorderedAt={r.lastReorderedAt}
+        />
+        <div className="mt-1.5 flex justify-end">
+          <HubPriorityController
+            domain={priDomainEmb}
+            entityId={r.id}
+            isFirst={priEmb.isFirst}
+            isLast={priEmb.isLast}
+            disabled={saving}
+            onSuccess={() => void load()}
+          />
+        </div>
+      </motion.li>
     )
   }
 
@@ -1942,13 +2039,28 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 {triageF.length === 0 ? (
                   <li className="text-zinc-500 text-sm">No jobs awaiting triage.</li>
                 ) : (
-                  triageF.map((r) =>
+                  <AnimatePresence initial={false}>
+                  {triageF.map((r) =>
                     mode === 'dies' && r.kind === 'die' ? (
                       <DieTriageCard
                         key={`${r.kind}-${r.id}`}
                         r={r}
                         saving={saving}
                         specs={renderSpecs(r, 'triage')}
+                        hubColumnPriority={
+                          mode === 'dies'
+                            ? (() => {
+                                const p = toolColumnState(data?.triage ?? [], r.id)
+                                return {
+                                  domain: 'die_triage' as const,
+                                  rank: p.rank,
+                                  isFirst: p.isFirst,
+                                  isLast: p.isLast,
+                                  onSuccess: () => void load(),
+                                }
+                              })()
+                            : undefined
+                        }
                         onOpenAudit={() =>
                           setToolingAudit({
                             tool: 'die',
@@ -1972,6 +2084,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                           void submitTriageHold(r.id, placeOnHold, reason)
                         }
                         onReverse={() => setReverseRowId(r.id)}
+                        onDeleted={() => removeToolingRow(r.id)}
                         onSimilarClick={() => {
                           const mm = r.typeMismatchMatches ?? []
                           if (mm.length) {
@@ -1993,7 +2106,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                     ) : (
                       renderCard(r, 'triage')
                     ),
-                  )
+                  )}
+                  </AnimatePresence>
                 )}
               </ul>
             </section>
@@ -2040,7 +2154,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   {prepF.length === 0 ? (
                     <li className="text-zinc-500 text-sm">Empty.</li>
                   ) : (
-                    prepF.map((r) => renderCard(r, 'prep'))
+                    <AnimatePresence initial={false}>
+                      {prepF.map((r) => renderCard(r, 'prep'))}
+                    </AnimatePresence>
                   )}
                 </ul>
               </section>
@@ -2077,7 +2193,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   {invF.length === 0 ? (
                     <li className="text-zinc-500 text-sm">No tools in rack.</li>
                   ) : (
-                    invF.map((r) => renderCard(r, 'inventory'))
+                    <AnimatePresence initial={false}>
+                      {invF.map((r) => renderCard(r, 'inventory'))}
+                    </AnimatePresence>
                   )}
                 </ul>
               </section>
@@ -2104,11 +2222,16 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   {custF.length === 0 ? (
                     <li className="text-zinc-500 text-sm">Nothing in staging.</li>
                   ) : (
-                    custF.map((r) => renderCard(r, 'custody'))
+                    <AnimatePresence initial={false}>
+                      {custF.map((r) => renderCard(r, 'custody'))}
+                    </AnimatePresence>
                   )}
                 </ul>
               </section>
             </div>
+            <p className="mt-4 text-center text-[9px] text-zinc-500 font-[family-name:var(--font-designing-queue)] tracking-tight px-2">
+              Audit Trail Synchronized - Accountability Layer Active.
+            </p>
           </>
         )}
       </div>

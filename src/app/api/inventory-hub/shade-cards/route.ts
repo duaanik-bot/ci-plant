@@ -16,7 +16,7 @@ export async function GET() {
     if (error) return error
 
     const rows = await db.shadeCard.findMany({
-      where: { isActive: true },
+      where: { isActive: true, hubSoftDeletedAt: null },
       orderBy: { createdAt: 'desc' },
       include: {
         customer: { select: { id: true, name: true } },

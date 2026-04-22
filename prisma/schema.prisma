@@ -763,6 +763,15 @@ model Dye {
   hubStatusFlag       String?   @map("hub_status_flag") @db.VarChar(32)
   /// Operator name from Operator Master when Poor was reported (hub-only alert).
   hubPoorReportedBy   String?   @map("hub_poor_reported_by") @db.VarChar(120)
+  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
+  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
+  /// Hub board sequence per column (only the active custody column is maintained).
+  hubOrderTriage      Int?      @map("hub_order_triage")
+  hubOrderPrep        Int?      @map("hub_order_prep")
+  hubOrderInventory   Int?      @map("hub_order_inventory")
+  hubOrderCustody     Int?      @map("hub_order_custody")
+  lastReorderedBy    String?   @map("last_reordered_by") @db.VarChar(120)
+  lastReorderedAt    DateTime? @map("last_reordered_at")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1372,6 +1381,9 @@ model PlateStore {
   lastStatusUpdatedAt DateTime @default(now()) @map("last_status_updated_at")
   /// Per-channel rack usage cycles for star ledger, e.g. `{ "C": 3, "M": 2, "P1": 1 }` (keys match hub shorts).
   cycleData       Json      @default("{}") @map("cycle_data")
+  /// Hub card soft-delete (audit — row retained; hidden from board).
+  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
+  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -1428,6 +1440,15 @@ model PlateRequirement {
   createdBy          String    @map("created_by")
   /// Hub analytics: last time this requirement entered its current column (triage / CTP / vendor / custody).
   lastStatusUpdatedAt DateTime @default(now()) @map("last_status_updated_at")
+  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
+  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
+  /// Sequence within the CTP internal queue (0 = first).
+  hubOrderCtp         Int?      @map("hub_order_ctp")
+  /// Sequence within the outside-vendor queue (0 = first).
+  hubOrderVendor      Int?      @map("hub_order_vendor")
+  /// Hub priority drag: who last changed order in CTP or vendor queue.
+  lastReorderedBy    String?   @map("last_reordered_by") @db.VarChar(120)
+  lastReorderedAt    DateTime? @map("last_reordered_at")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
@@ -1499,6 +1520,14 @@ model EmbossBlock {
   issuedMachineId  String?   @map("issued_machine_id")
   issuedOperator   String?   @map("issued_operator")
   issuedAt         DateTime? @map("issued_at")
+  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
+  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
+  hubOrderTriage      Int?      @map("hub_order_triage")
+  hubOrderPrep        Int?      @map("hub_order_prep")
+  hubOrderInventory   Int?      @map("hub_order_inventory")
+  hubOrderCustody     Int?      @map("hub_order_custody")
+  lastReorderedBy    String?   @map("last_reordered_by") @db.VarChar(120)
+  lastReorderedAt    DateTime? @map("last_reordered_at")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
@@ -1586,6 +1615,15 @@ model ShadeCard {
   inkRecipeNotes    String?   @map("ink_recipe_notes") @db.Text
   /// Append-only spectro verification timestamps [{ scannedAt, deltaE?, note? }].
   spectroScanLog    Json?     @map("spectro_scan_log")
+  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
+  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
+  /// Kanban column-specific sequence (0 = top within that lane).
+  hubOrderInStock     Int?      @map("hub_order_in_stock")
+  hubOrderOnFloor     Int?      @map("hub_order_on_floor")
+  hubOrderReverify    Int?      @map("hub_order_reverify")
+  hubOrderExpired     Int?      @map("hub_order_expired")
+  lastReorderedBy    String?   @map("last_reordered_by") @db.VarChar(120)
+  lastReorderedAt    DateTime? @map("last_reordered_at")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 

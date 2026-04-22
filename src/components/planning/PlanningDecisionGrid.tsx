@@ -1,7 +1,6 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
-import Link from 'next/link'
 import { RotateCcw, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
@@ -22,14 +21,14 @@ import {
   MASTER_EMBOSSING_AND_LEAFING,
 } from '@/lib/master-enums'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
-import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
-
 const cellBase =
-  'h-12 max-h-12 px-3 py-0 align-middle text-[12px] font-medium text-slate-200 border-b border-slate-800 whitespace-nowrap overflow-hidden text-ellipsis max-w-[14rem]'
-const monoStrong =
-  'font-designing-queue text-[12px] font-semibold tabular-nums text-amber-300'
+  'align-middle text-[13px] font-medium text-slate-200 border-b border-[#334155] px-1.5 py-2'
+const cellMono =
+  'font-designing-queue text-[13px] font-semibold tabular-nums text-[#FBBF24]'
 const theadBtn =
-  'inline-flex items-center gap-0.5 text-left text-[10px] font-medium uppercase tracking-wider text-slate-500 hover:text-amber-300'
+  'inline-flex w-full min-w-0 items-center gap-0.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400 hover:text-[#FBBF24]'
+const filterGhost =
+  'w-full min-w-0 bg-transparent text-[13px] font-medium text-slate-200 placeholder:text-slate-500 border-0 border-b border-[#334155] rounded-none px-0 py-1.5 focus:outline-none focus:ring-0 focus:border-b-2 focus:border-[#2563EB]'
 
 type DieMaster = { id: string; dyeNumber: number; ups: number; sheetSize: string }
 
@@ -73,6 +72,8 @@ export type PlanningGridLine = {
     artworkCode?: string | null
     laminateType?: string | null
     coatingType?: string | null
+    paperType?: string | null
+    gsm?: number | null
     numberOfColours?: number | null
   } | null
   dieMaster?: DieMaster | null
@@ -146,9 +147,12 @@ function sortLines(list: PlanningGridLine[], key: SortKey, dir: 'asc' | 'desc'):
       case 'paper':
         cmp = String(a.paperType ?? '').localeCompare(String(b.paperType ?? ''))
         break
-      case 'gsm':
-        cmp = (a.gsm ?? 0) - (b.gsm ?? 0)
+      case 'gsm': {
+        const ga = a.gsm ?? a.carton?.gsm ?? 0
+        const gb = b.gsm ?? b.carton?.gsm ?? 0
+        cmp = ga - gb
         break
+      }
       case 'ups': {
         const ua = readPlanningCore(specOf(a)).ups ?? a.materialQueue?.ups ?? 0
         const ub = readPlanningCore(specOf(b)).ups ?? b.materialQueue?.ups ?? 0
@@ -197,23 +201,6 @@ function numberOfColoursFor(r: PlanningGridLine): number {
   return n ?? r.planningLedger?.numberOfColours ?? r.carton?.numberOfColours ?? 4
 }
 
-function TruncatedWithTooltip({
-  value,
-  className = '',
-}: {
-  value: string
-  className?: string
-}) {
-  return (
-    <div className={`group relative min-w-0 ${className}`}>
-      <span className="block truncate">{value}</span>
-      <div className="pointer-events-none absolute left-0 top-[calc(100%+4px)] z-20 hidden max-w-[24rem] rounded border border-slate-700 bg-black px-2 py-1 text-xs text-slate-100 shadow-lg group-hover:block">
-        {value}
-      </div>
-    </div>
-  )
-}
-
 export function PlanningDecisionGrid({
   rows,
   ledgerView,
@@ -227,6 +214,8 @@ export function PlanningDecisionGrid({
   onSaveRow,
   mixConflictMessage,
   onLinkAsMixSet,
+  onPONumberClick,
+  onCartonClick,
 }: {
   rows: PlanningGridLine[]
   ledgerView: 'pending' | 'processed'
@@ -240,6 +229,8 @@ export function PlanningDecisionGrid({
   onSaveRow?: (lineId: string) => Promise<void>
   mixConflictMessage: string | null
   onLinkAsMixSet: () => void
+  onPONumberClick: (poId: string) => void
+  onCartonClick: (line: PlanningGridLine) => void
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('poDate')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -257,6 +248,11 @@ export function PlanningDecisionGrid({
   const [fSize, setFSize] = useState('')
   const [fQty, setFQty] = useState('')
   const [fGsm, setFGsm] = useState('')
+  const [fDate, setFDate] = useState('')
+  const [fAw, setFAw] = useState('')
+  const [fDye, setFDye] = useState('')
+  const [fSheet, setFSheet] = useState('')
+  const [fRem, setFRem] = useState('')
 
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkUps, setBulkUps] = useState<number | ''>('')
@@ -277,65 +273,52 @@ export function PlanningDecisionGrid({
     })
   }, [rows, ledgerView])
 
-  const uniq = useCallback((vals: (string | null | undefined)[]) => {
-    const s = new Set<string>()
-    for (const v of vals) {
-      const t = String(v ?? '').trim()
-      if (t) s.add(t)
-    }
-    return Array.from(s).sort((a, b) => a.localeCompare(b))
-  }, [])
-
-  const optClients = useMemo(
-    () => uniq(viewRows.map((r) => r.po.customer.name)),
-    [viewRows, uniq],
-  )
-  const optCoating = useMemo(() => {
-    const fromRows = uniq(viewRows.map((r) => r.coatingType))
-    return Array.from(new Set([...MASTER_COATINGS_AND_VARNISHES, ...fromRows])).sort((a, b) =>
-      a.localeCompare(b),
-    )
-  }, [viewRows, uniq])
-  const optOther = useMemo(() => {
-    const fromRows = uniq(viewRows.map((r) => r.otherCoating))
-    return Array.from(new Set([...MASTER_COATINGS_AND_VARNISHES, ...fromRows])).sort((a, b) =>
-      a.localeCompare(b),
-    )
-  }, [viewRows, uniq])
-  const optEmb = useMemo(() => {
-    const fromRows = uniq(viewRows.map((r) => r.embossingLeafing))
-    return Array.from(new Set([...MASTER_EMBOSSING_AND_LEAFING, ...fromRows])).sort((a, b) =>
-      a.localeCompare(b),
-    )
-  }, [viewRows, uniq])
-  const optPaper = useMemo(() => {
-    const fromRows = uniq(viewRows.map((r) => r.paperType))
-    return Array.from(new Set([...MASTER_BOARD_GRADES, ...fromRows])).sort((a, b) => a.localeCompare(b))
-  }, [viewRows, uniq])
-
   const filtered = useMemo(() => {
     const match = (hay: string, needle: string) =>
       !needle.trim() || hay.toLowerCase().includes(needle.trim().toLowerCase())
     return viewRows.filter((r) => {
-      if (fClient && r.po.customer.name !== fClient) return false
-      if (fCoating && String(r.coatingType ?? '') !== fCoating) return false
-      if (fOtherCoating && String(r.otherCoating ?? '') !== fOtherCoating) return false
-      if (fEmboss && String(r.embossingLeafing ?? '') !== fEmboss) return false
-      if (fPaper && String(r.paperType ?? '') !== fPaper) return false
-      if (!match(r.po.poNumber, fPo)) return false
-      if (!match(r.cartonName, fCarton)) return false
+      if (!match(r.po?.customer?.name ?? '', fClient)) return false
+      if (!match(String(r.coatingType ?? ''), fCoating)) return false
+      if (!match(String(r.otherCoating ?? ''), fOtherCoating)) return false
+      if (!match(String(r.embossingLeafing ?? ''), fEmboss)) return false
+      if (!match(String(r.paperType ?? ''), fPaper)) return false
+      if (!match(r.po?.poNumber ?? '', fPo)) return false
+      if (!match(String(r.po?.poDate ?? '').slice(0, 10), fDate)) return false
+      if (!match(r.cartonName ?? '', fCarton)) return false
+      if (!match(String(artworkCodeFor(r)), fAw)) return false
       if (!match(String(r.cartonSize ?? ''), fSize)) return false
+      if (!match(dyeUpsDisplay(r), fDye)) return false
+      if (!match(sheetSizeLabel(r, (r.specOverrides || {}) as Record<string, unknown>), fSheet)) return false
+      if (!match(String(r.remarks ?? ''), fRem)) return false
       if (fQty.trim()) {
         const q = parseInt(fQty, 10)
         if (Number.isFinite(q) && r.quantity !== q) return false
       }
       if (fGsm.trim()) {
         const g = parseInt(fGsm, 10)
-        if (Number.isFinite(g) && (r.gsm ?? -1) !== g) return false
+        const eff = r.gsm ?? r.carton?.gsm ?? null
+        if (Number.isFinite(g) && (eff ?? -1) !== g) return false
       }
       return true
     })
-  }, [viewRows, fClient, fCoating, fOtherCoating, fEmboss, fPaper, fPo, fCarton, fSize, fQty, fGsm])
+  }, [
+    viewRows,
+    fClient,
+    fCoating,
+    fOtherCoating,
+    fEmboss,
+    fPaper,
+    fPo,
+    fDate,
+    fCarton,
+    fAw,
+    fSize,
+    fDye,
+    fSheet,
+    fRem,
+    fQty,
+    fGsm,
+  ])
 
   const sorted = useMemo(() => sortLines(filtered, sortKey, sortDir), [filtered, sortKey, sortDir])
 
@@ -357,13 +340,23 @@ export function PlanningDecisionGrid({
 
   const coatingConflict = useMemo(() => {
     if (selectedLines.length < 2) return false
-    const c = new Set(selectedLines.map((r) => String(r.coatingType ?? '').trim().toLowerCase()))
+    const c = new Set(
+      selectedLines.map((r) =>
+        String(r.coatingType ?? r.carton?.coatingType ?? '')
+          .trim()
+          .toLowerCase(),
+      ),
+    )
     return c.size > 1
   }, [selectedLines])
 
   const gsmConflict = useMemo(() => {
     if (selectedLines.length < 2) return false
-    const g = new Set(selectedLines.map((r) => (r.gsm != null ? String(r.gsm) : '')))
+    const g = new Set(
+      selectedLines.map((r) =>
+        String(r.gsm ?? r.carton?.gsm ?? ''),
+      ),
+    )
     return g.size > 1
   }, [selectedLines])
 
@@ -471,10 +464,12 @@ export function PlanningDecisionGrid({
   const isProcessedRow = (r: PlanningGridLine) => r.planningStatus !== 'pending'
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-700 bg-black/35 pb-8 shadow-[0_8px_30px_rgba(0,0,0,0.22)]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[#334155] bg-[#0F172A] shadow-[0_8px_30px_rgba(0,0,0,0.22)]">
       {mixConflictMessage || coatingConflict || gsmConflict ? (
         <div
-          className={`px-3 py-2 text-sm ${flash ? 'bg-red-100 text-red-800 animate-pulse' : 'bg-red-50 text-red-700'}`}
+          className={`px-3 py-2 text-sm ${
+            flash ? 'bg-rose-900/80 text-rose-100 animate-pulse' : 'bg-rose-950/60 text-rose-200'
+          }`}
         >
           {mixConflictMessage ??
             (coatingConflict && gsmConflict
@@ -485,239 +480,274 @@ export function PlanningDecisionGrid({
         </div>
       ) : null}
 
-      <EnterpriseTableShell>
-        <table className="w-full min-w-[2200px] border-collapse text-left text-sm">
+      <div className="flex shrink-0 items-center justify-end gap-2 border-b border-[#334155] bg-[#0F172A] px-2 py-1.5">
+        <span className="text-[11px] font-medium text-slate-500">Simulate Impact Mode</span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={simulateImpactMode}
+          onClick={() => setSimulateImpactMode((s) => !s)}
+          className={`flex h-6 w-11 shrink-0 items-center rounded-full px-0.5 transition-colors ${
+            simulateImpactMode ? 'justify-end bg-[#2563EB]' : 'justify-start bg-[#1E293B]'
+          }`}
+          title="When on, the PO priority star runs a what-if only and does not change priority"
+        >
+          <span className="pointer-events-none block h-5 w-5 rounded-full bg-white shadow" />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <table className="w-full table-fixed border-collapse text-left">
+          <colgroup>
+            <col className="w-[50px]" />
+            <col className="w-[7%]" />
+            <col className="w-[5%]" />
+            <col className="w-[9%]" />
+            <col className="w-[11%]" />
+            <col className="w-[6%]" />
+            <col className="w-[5%]" />
+            <col className="w-[80px]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[60px]" />
+            <col className="w-[60px]" />
+            <col className="w-[8%]" />
+            <col className="w-[52px]" />
+          </colgroup>
           <thead>
-            <tr className="bg-slate-900/80 border-b border-slate-800">
+            <tr className="border-b border-[#334155] bg-[#1E293B]">
               <th
-                colSpan={12}
-                className="px-2 py-2 text-[11px] font-semibold text-slate-600 uppercase tracking-wide"
+                className={`${cellBase} sticky left-0 z-20 w-[50px] min-w-[50px] max-w-[50px] bg-white text-center text-[#0F172A]`}
               >
-                Filters
+                <span className="text-[11px] font-bold">Si</span>
               </th>
-              <th colSpan={6} className="px-2 py-2 text-right align-middle">
-                <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                  <span className="text-[11px] font-medium text-slate-600">Simulate Impact Mode</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={simulateImpactMode}
-                    onClick={() => setSimulateImpactMode((s) => !s)}
-                    className={`flex h-6 w-11 shrink-0 items-center rounded-full px-0.5 transition-colors ${
-                      simulateImpactMode ? 'justify-end bg-[#1D4ED8]' : 'justify-start bg-slate-200'
-                    }`}
-                    title="When on, the PO priority star runs a what-if only and does not change priority"
-                  >
-                    <span className="pointer-events-none block h-5 w-5 rounded-full bg-slate-100 shadow" />
-                  </button>
-                </div>
-              </th>
-            </tr>
-            <tr className="border-b border-slate-800 bg-black/40 text-sm">
-              <th className="px-2 py-2 w-10" />
-              <th className="px-2 py-2 min-w-[7rem]">
-                <input
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
-                  placeholder="PO #"
-                  value={fPo}
-                  onChange={(e) => setFPo(e.target.value)}
-                />
-              </th>
-              <th className="px-2 py-2 min-w-[6rem]" />
-              <th className="px-2 py-2 min-w-[8rem]">
-                <select
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
-                  value={fClient}
-                  onChange={(e) => setFClient(e.target.value)}
-                >
-                  <option value="">Client</option>
-                  {optClients.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </th>
-              <th className="px-2 py-2 min-w-[10rem]">
-                <input
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
-                  placeholder="Carton name"
-                  value={fCarton}
-                  onChange={(e) => setFCarton(e.target.value)}
-                />
-              </th>
-              <th className="px-2 py-2" />
-              <th className="px-2 py-2 min-w-[6rem]">
-                <input
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
-                  placeholder="Size"
-                  value={fSize}
-                  onChange={(e) => setFSize(e.target.value)}
-                />
-              </th>
-              <th className="px-2 py-2 min-w-[5rem]">
-                <input
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
-                  placeholder="Qty"
-                  value={fQty}
-                  onChange={(e) => setFQty(e.target.value)}
-                />
-              </th>
-              <th className="px-2 py-2" />
-              <th className="px-2 py-2" />
-              <th className="px-2 py-2 min-w-[7rem]">
-                <select
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
-                  value={fCoating}
-                  onChange={(e) => setFCoating(e.target.value)}
-                >
-                  <option value="">Coating</option>
-                  {optCoating.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </th>
-              <th className="px-2 py-2 min-w-[7rem]">
-                <select
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
-                  value={fOtherCoating}
-                  onChange={(e) => setFOtherCoating(e.target.value)}
-                >
-                  <option value="">Oth coat</option>
-                  {optOther.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </th>
-              <th className="px-2 py-2 min-w-[7rem]">
-                <select
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
-                  value={fEmboss}
-                  onChange={(e) => setFEmboss(e.target.value)}
-                >
-                  <option value="">Emb/Leaf</option>
-                  {optEmb.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </th>
-              <th className="px-2 py-2 min-w-[7rem]">
-                <select
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 text-[11px] text-slate-100"
-                  value={fPaper}
-                  onChange={(e) => setFPaper(e.target.value)}
-                >
-                  <option value="">Paper</option>
-                  {optPaper.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </th>
-              <th className="px-2 py-2 min-w-[4rem]">
-                <input
-                  className="h-7 w-full rounded border border-slate-700 bg-slate-950 px-1 text-[11px] text-slate-100"
-                  placeholder="GSM"
-                  value={fGsm}
-                  onChange={(e) => setFGsm(e.target.value)}
-                />
-              </th>
-              <th className="px-2 py-2" />
-              <th className="px-2 py-2" />
-              <th className="px-2 py-2" />
-            </tr>
-            <tr className="border-b border-slate-800 bg-slate-950">
-              <th className={`${cellBase} w-10 bg-[#F8FAFC]`}>
-                <span className="text-[11px] font-medium text-slate-600">Si</span>
-              </th>
-              <th className={`${cellBase} bg-slate-950 min-w-[7rem]`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('poNumber')}>
                   PO No. {sortKey === 'poNumber' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950 min-w-[6rem]`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('poDate')}>
                   PO Date {sortKey === 'poDate' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('client')}>
                   Client {sortKey === 'client' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950 min-w-[10rem]`}>
+              <th className={`${cellBase} min-w-0 bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('cartonName')}>
                   Carton {sortKey === 'cartonName' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('artworkCode')}>
-                  AW Code {sortKey === 'artworkCode' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                  AW {sortKey === 'artworkCode' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('cartonSize')}>
-                  Carton Size {sortKey === 'cartonSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                  Size {sortKey === 'cartonSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} w-[80px] bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('qty')}>
                   Qty {sortKey === 'qty' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('dyeUps')}>
                   Dye/UPS {sortKey === 'dyeUps' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('sheetSize')}>
-                  Sheet Size {sortKey === 'sheetSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                  Sheet {sortKey === 'sheetSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('coating')}>
                   Coating {sortKey === 'coating' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('otherCoating')}>
-                  Oth coat {sortKey === 'otherCoating' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                  Oth {sortKey === 'otherCoating' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('emboss')}>
-                  Emb/Leaf {sortKey === 'emboss' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                  Emb {sortKey === 'emboss' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('paper')}>
                   Paper {sortKey === 'paper' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} w-[60px] bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('gsm')}>
                   GSM {sortKey === 'gsm' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} w-[60px] bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('ups')}>
                   UPS {sortKey === 'ups' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950`}>
+              <th className={`${cellBase} min-w-0 bg-[#1E293B]`}>
                 <button type="button" className={theadBtn} onClick={() => toggleSort('remarks')}>
-                  Remarks {sortKey === 'remarks' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                  Rem {sortKey === 'remarks' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${cellBase} bg-slate-950 text-right`}>Action</th>
+              <th className={`${cellBase} bg-[#1E293B] text-right`}> </th>
+            </tr>
+            <tr className="border-b border-[#334155] bg-[#0F172A] text-[13px]">
+              <th
+                className={`sticky left-0 z-20 w-[50px] bg-white px-0 py-1 align-middle text-[#0F172A] ${cellBase}`}
+              />
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter PO No…"
+                  value={fPo}
+                  onChange={(e) => setFPo(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter PO Date…"
+                  value={fDate}
+                  onChange={(e) => setFDate(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Client…"
+                  value={fClient}
+                  onChange={(e) => setFClient(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="min-w-0 px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Carton…"
+                  value={fCarton}
+                  onChange={(e) => setFCarton(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter AW…"
+                  value={fAw}
+                  onChange={(e) => setFAw(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Size…"
+                  value={fSize}
+                  onChange={(e) => setFSize(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="w-[80px] px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Qty…"
+                  value={fQty}
+                  onChange={(e) => setFQty(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Dye…"
+                  value={fDye}
+                  onChange={(e) => setFDye(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Sheet…"
+                  value={fSheet}
+                  onChange={(e) => setFSheet(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Coating…"
+                  value={fCoating}
+                  onChange={(e) => setFCoating(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Oth…"
+                  value={fOtherCoating}
+                  onChange={(e) => setFOtherCoating(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Emb…"
+                  value={fEmboss}
+                  onChange={(e) => setFEmboss(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Paper…"
+                  value={fPaper}
+                  onChange={(e) => setFPaper(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="w-[60px] px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter GSM…"
+                  value={fGsm}
+                  onChange={(e) => setFGsm(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="w-[60px] px-0 py-1 align-bottom" />
+              <th className="min-w-0 px-1 py-1 align-bottom">
+                <input
+                  className={filterGhost}
+                  placeholder="Filter Rem…"
+                  value={fRem}
+                  onChange={(e) => setFRem(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+              <th className="px-0 py-1" />
             </tr>
           </thead>
           <tbody>
@@ -736,45 +766,54 @@ export function PlanningDecisionGrid({
                 coatingType: r.coatingType ?? r.carton?.coatingType,
                 otherCoating: r.otherCoating ?? r.carton?.laminateType,
               })
+              const coatMaster = Boolean(String(r.carton?.coatingType ?? '').trim())
+              const lamMaster = Boolean(String(r.carton?.laminateType ?? '').trim())
+              const paperMaster = Boolean(String(r.carton?.paperType ?? '').trim())
 
               return (
                 <Fragment key={r.id}>
                   <tr
-                    className={`${stripe} h-12 max-h-12 transition-colors hover:brightness-110`}
+                    className={`${stripe} transition-colors hover:brightness-110`}
                     onClick={(e) => {
                       const t = e.target as HTMLElement
                       if (t.closest('input,select,button,a,[data-po-priority-star]')) return
                       onRowBackgroundClick(r.id)
                     }}
                   >
-                    <td className={`${cellBase} w-10 text-center`} onClick={(e) => e.stopPropagation()}>
-                      {processed ? (
-                        <button
-                          type="button"
-                          title="Recall from AW queue"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-amber-500 text-amber-300 hover:bg-amber-500/10"
-                          onClick={() => void onRecallLine(r.id)}
-                        >
-                          <RotateCcw className="h-4 w-4" aria-hidden />
-                        </button>
-                      ) : (
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 accent-[#1D4ED8]"
-                          checked={planningSelection.has(r.id)}
-                          onChange={() => {
-                            setPlanningSelection((prev) => {
-                              const next = new Set(prev)
-                              if (next.has(r.id)) next.delete(r.id)
-                              else next.add(r.id)
-                              return next
-                            })
-                          }}
-                          aria-label="Select row"
-                        />
-                      )}
+                    <td
+                      className={`sticky left-0 z-10 w-[50px] min-w-[50px] max-w-[50px] border-b border-[#334155] bg-white px-0.5 py-1.5 text-center align-middle text-[#0F172A]`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex flex-col items-center justify-center gap-0.5">
+                        <span className="text-[11px] font-bold leading-none">{idx + 1}</span>
+                        {processed ? (
+                          <button
+                            type="button"
+                            title="Recall from AW queue"
+                            className="inline-flex h-6 w-6 items-center justify-center rounded border border-[#334155] text-[#0F172A] hover:bg-slate-100"
+                            onClick={() => void onRecallLine(r.id)}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                          </button>
+                        ) : (
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 accent-[#2563EB]"
+                            checked={planningSelection.has(r.id)}
+                            onChange={() => {
+                              setPlanningSelection((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(r.id)) next.delete(r.id)
+                                else next.add(r.id)
+                                return next
+                              })
+                            }}
+                            aria-label="Select row"
+                          />
+                        )}
+                      </div>
                     </td>
-                    <td className={cellBase} title={r.po.poNumber}>
+                    <td className={`${cellBase} min-w-0 align-middle`} title={r.po.poNumber}>
                       <div className="flex min-w-0 items-center gap-0.5">
                         <button
                           type="button"
@@ -794,7 +833,7 @@ export function PlanningDecisionGrid({
                               ? 'Clear PO priority'
                               : 'Mark PO priority'
                           }
-                          className="inline-flex shrink-0 rounded p-0.5 text-slate-500 hover:bg-slate-800 hover:text-amber-400 disabled:opacity-40"
+                          className="inline-flex shrink-0 rounded p-0.5 text-slate-500 hover:bg-[#1E293B] hover:text-[#F59E0B] disabled:opacity-40"
                           onClick={(e) => void handlePoPriorityStar(r, e)}
                         >
                           <Star
@@ -804,53 +843,60 @@ export function PlanningDecisionGrid({
                             aria-hidden
                           />
                         </button>
-                        <Link
-                          href={`/orders/purchase-orders/${r.po.id}`}
-                          className={`${monoStrong} min-w-0 truncate text-amber-300 hover:underline`}
-                          onClick={(e) => e.stopPropagation()}
+                        <button
+                          type="button"
+                          className={`${cellMono} min-w-0 truncate text-left text-[#FBBF24] hover:underline`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onPONumberClick(r.po.id)
+                          }}
                         >
-                          {r.po.poNumber}
-                        </Link>
+                          {r.po?.poNumber ?? '—'}
+                        </button>
                       </div>
                     </td>
-                    <td className={`${cellBase} ${monoStrong}`} title={r.po.poDate}>
-                      {r.po.poDate?.slice(0, 10) ?? '—'}
+                    <td className={`${cellBase} ${cellMono} align-middle`} title={r.po.poDate}>
+                      {r.po?.poDate?.slice(0, 10) ?? '—'}
                     </td>
-                    <td className={`${cellBase} overflow-visible`}>
-                      <TruncatedWithTooltip value={r.po?.customer?.name ?? '—'} />
+                    <td
+                      className={`${cellBase} min-w-0 max-w-0 align-middle text-[13px] font-medium leading-snug text-slate-200`}
+                    >
+                      <div className="whitespace-normal break-words">{r.po?.customer?.name ?? '—'}</div>
                     </td>
-                    <td className={`${cellBase} overflow-visible`}>
-                      {r.cartonId ? (
-                        <Link
-                          href={`/product/${r.cartonId}`}
-                          className="text-amber-300 hover:underline font-medium"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <TruncatedWithTooltip value={r.cartonName ?? '—'} />
-                        </Link>
-                      ) : (
-                        <TruncatedWithTooltip value={r.cartonName ?? '—'} />
-                      )}
+                    <td
+                      className={`${cellBase} min-w-0 max-w-0 align-middle text-[13px] font-medium leading-snug text-slate-200`}
+                    >
+                      <button
+                        type="button"
+                        className="w-full text-left text-[#FBBF24] hover:underline"
+                        disabled={!r.cartonId}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (r.cartonId) onCartonClick(r)
+                        }}
+                      >
+                        <span className="whitespace-normal break-words">
+                          {r.cartonName ?? '—'}
+                        </span>
+                      </button>
                     </td>
-                    <td className={`${cellBase} ${monoStrong}`} title={aw}>
+                    <td className={`${cellBase} ${cellMono} align-middle`} title={aw}>
                       {aw}
                     </td>
-                    <td className={cellBase} title={String(r.cartonSize ?? '')}>
+                    <td className={`${cellBase} align-middle`} title={String(r.cartonSize ?? '')}>
                       {r.cartonSize ?? '—'}
                     </td>
-                    <td className={`${cellBase} ${monoStrong}`} title={String(r.quantity)}>
-                      <div className="flex flex-wrap items-center gap-1">
+                    <td className={`${cellBase} w-[80px] ${cellMono} align-middle`} title={String(r.quantity)}>
+                      <div className="flex flex-col items-stretch gap-0.5">
                         <span>{r.quantity.toLocaleString('en-IN')}</span>
                         {bpiRow ? (
                           <span
                             title={bpiRow.tooltip}
-                            className={`inline-flex max-w-full shrink-0 rounded-full px-1.5 py-0 text-[10px] font-semibold leading-tight ${
-                              bpiRow.label === 'optimal'
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-amber-100 text-amber-700'
+                            className={`inline-flex max-w-full shrink-0 rounded px-1 py-0 text-[10px] font-semibold leading-tight ${
+                              bpiRow.label === 'optimal' ? 'text-[#34D399]' : 'text-amber-400'
                             }`}
                           >
-                            {bpiRow.label === 'optimal' ? '[Optimal]' : '[Loss-Leader]'}
+                            {bpiRow.label === 'optimal' ? 'Ready' : 'Watch'}
                           </span>
                         ) : null}
                       </div>
@@ -881,6 +927,7 @@ export function PlanningDecisionGrid({
                             void onSaveRow?.(r.id)
                           }}
                           className="max-w-[11rem]"
+                          disabled={coatMaster}
                         />
                       )}
                     </td>
@@ -901,6 +948,7 @@ export function PlanningDecisionGrid({
                             void onSaveRow?.(r.id)
                           }}
                           className="max-w-[11rem]"
+                          disabled={lamMaster}
                         />
                       )}
                     </td>
@@ -935,17 +983,18 @@ export function PlanningDecisionGrid({
                         <PackagingEnumCombobox
                           aria-label="Paper / board type"
                           options={MASTER_BOARD_GRADES}
-                          value={r.paperType}
+                          value={r.paperType ?? r.carton?.paperType ?? null}
                           onChange={(v) => {
                             updateRow(r.id, { paperType: v })
                             void onSaveRow?.(r.id)
                           }}
                           className="max-w-[11rem]"
+                          disabled={paperMaster}
                         />
                       )}
                     </td>
-                    <td className={cellBase} title={r.gsm != null ? String(r.gsm) : ''}>
-                      {r.gsm ?? '—'}
+                    <td className={`${cellBase} w-[60px] ${cellMono} align-middle`} title={String(r.gsm ?? r.carton?.gsm ?? '')}>
+                      {r.gsm ?? r.carton?.gsm ?? '—'}
                     </td>
                     <td className={cellBase} onClick={(e) => e.stopPropagation()}>
                       <input
@@ -1011,11 +1060,10 @@ export function PlanningDecisionGrid({
             })}
           </tbody>
         </table>
-      </EnterpriseTableShell>
-
-      {sorted.length === 0 ? (
-        <p className="px-4 py-6 text-center text-slate-500 text-sm">No lines in this view.</p>
-      ) : null}
+        {sorted.length === 0 ? (
+          <p className="px-4 py-6 text-center text-slate-500 text-sm">No lines in this view.</p>
+        ) : null}
+      </div>
 
       {planningSelection.size >= 1 ? (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-[75] flex -translate-x-1/2 flex-col items-center gap-2">

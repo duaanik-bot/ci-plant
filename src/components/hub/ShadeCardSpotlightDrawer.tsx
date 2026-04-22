@@ -58,6 +58,12 @@ export type ShadeCardSpotlightRow = {
   remarksEditedAt?: string | null
   remarksEditedByName?: string | null
   updatedAt?: string
+  hubOrderInStock?: number | null
+  hubOrderOnFloor?: number | null
+  hubOrderReverify?: number | null
+  hubOrderExpired?: number | null
+  lastReorderedBy?: string | null
+  lastReorderedAt?: string | null
 }
 
 type UsageEventRow = {

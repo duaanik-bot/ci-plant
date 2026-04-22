@@ -50,6 +50,56 @@ type EmbossTriageCardMeta = {
 
 export const dynamic = 'force-dynamic'
 
+const HUB_MAX_ORDER = Number.MAX_SAFE_INTEGER
+
+type HubZone = 'triage' | 'prep' | 'inventory' | 'custody'
+
+function sortDiesInZone<T extends {
+  dyeNumber: number
+  hubOrderTriage: number | null
+  hubOrderPrep: number | null
+  hubOrderInventory: number | null
+  hubOrderCustody: number | null
+}>(list: T[], zone: HubZone): T[] {
+  const k =
+    zone === 'triage'
+      ? 'hubOrderTriage'
+      : zone === 'prep'
+        ? 'hubOrderPrep'
+        : zone === 'inventory'
+          ? 'hubOrderInventory'
+          : 'hubOrderCustody'
+  return [...list].sort((a, b) => {
+    const oa = a[k] ?? HUB_MAX_ORDER
+    const ob = b[k] ?? HUB_MAX_ORDER
+    if (oa !== ob) return oa - ob
+    return a.dyeNumber - b.dyeNumber
+  })
+}
+
+function sortEmbossInZone<T extends {
+  displayCode: string
+  hubOrderTriage: number | null
+  hubOrderPrep: number | null
+  hubOrderInventory: number | null
+  hubOrderCustody: number | null
+}>(list: T[], zone: HubZone): T[] {
+  const k =
+    zone === 'triage'
+      ? 'hubOrderTriage'
+      : zone === 'prep'
+        ? 'hubOrderPrep'
+        : zone === 'inventory'
+          ? 'hubOrderInventory'
+          : 'hubOrderCustody'
+  return [...list].sort((a, b) => {
+    const oa = a[k] ?? HUB_MAX_ORDER
+    const ob = b[k] ?? HUB_MAX_ORDER
+    if (oa !== ob) return oa - ob
+    return a.displayCode.localeCompare(b.displayCode, undefined, { numeric: true, sensitivity: 'base' })
+  })
+}
+
 export type DieSimilarMatchJson = {
   id: string
   displayCode: string
@@ -124,6 +174,12 @@ function mapDie(d: {
   hubStatusFlag: string | null
   hubPoorReportedBy: string | null
   cartonsWork: { cartonName: string; customer: { name: string } | null }[]
+  hubOrderTriage: number | null
+  hubOrderPrep: number | null
+  hubOrderInventory: number | null
+  hubOrderCustody: number | null
+  lastReorderedBy: string | null
+  lastReorderedAt: Date | null
 }) {
   const physicalPoor =
     d.condition?.trim() === 'Poor' || (d.conditionRating?.trim() ?? '') === 'Poor'
@@ -182,6 +238,12 @@ function mapDie(d: {
     hubPastingNeedsMasterUpdate:
       d.custodyStatus === CUSTODY_HUB_TRIAGE && pastingNeedsMasterReview(d.pastingStyle),
     jobCardHub: null as ReturnType<typeof hubJobCardHubStatus> | null,
+    hubOrderTriage: d.hubOrderTriage ?? null,
+    hubOrderPrep: d.hubOrderPrep ?? null,
+    hubOrderInventory: d.hubOrderInventory ?? null,
+    hubOrderCustody: d.hubOrderCustody ?? null,
+    lastReorderedBy: d.lastReorderedBy?.trim() ?? null,
+    lastReorderedAt: d.lastReorderedAt ? d.lastReorderedAt.toISOString() : null,
   }
 }
 
@@ -218,6 +280,12 @@ function mapEmboss(
     active: boolean
     scrappedAt: Date | null
     cartons: { id: string; cartonName: string; customer: { name: string } | null }[]
+    hubOrderTriage: number | null
+    hubOrderPrep: number | null
+    hubOrderInventory: number | null
+    hubOrderCustody: number | null
+    lastReorderedBy: string | null
+    lastReorderedAt: Date | null
   },
   jobCardHub: ReturnType<typeof hubJobCardHubStatus> | null,
   triageMeta: EmbossTriageCardMeta | null | undefined,
@@ -308,6 +376,12 @@ function mapEmboss(
     linkedCustomerNames,
     industrialPriority,
     ledgerRank: 0,
+    hubOrderTriage: b.hubOrderTriage ?? null,
+    hubOrderPrep: b.hubOrderPrep ?? null,
+    hubOrderInventory: b.hubOrderInventory ?? null,
+    hubOrderCustody: b.hubOrderCustody ?? null,
+    lastReorderedBy: b.lastReorderedBy?.trim() ?? null,
+    lastReorderedAt: b.lastReorderedAt ? b.lastReorderedAt.toISOString() : null,
   }
 }
 
@@ -324,7 +398,7 @@ export async function GET(req: NextRequest) {
 
     if (tool === 'dies') {
       const rows = await db.dye.findMany({
-        where: { active: true },
+        where: { active: true, hubSoftDeletedAt: null },
         orderBy: { dyeNumber: 'asc' },
         include: {
           cartonsWork: {
@@ -396,12 +470,24 @@ export async function GET(req: NextRequest) {
           })),
         }
       })
-      const triage = withSimilar.filter((r) => r.custodyStatus === CUSTODY_HUB_TRIAGE)
-      const prep = withSimilar.filter((r) => r.custodyStatus === CUSTODY_AT_VENDOR)
-      const inventory = withSimilar.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK)
-      const custody = withSimilar.filter(
-        (r) =>
-          r.custodyStatus === CUSTODY_HUB_CUSTODY_READY || r.custodyStatus === CUSTODY_ON_FLOOR,
+      const triage = sortDiesInZone(
+        withSimilar.filter((r) => r.custodyStatus === CUSTODY_HUB_TRIAGE),
+        'triage',
+      )
+      const prep = sortDiesInZone(
+        withSimilar.filter((r) => r.custodyStatus === CUSTODY_AT_VENDOR),
+        'prep',
+      )
+      const inventory = sortDiesInZone(
+        withSimilar.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK),
+        'inventory',
+      )
+      const custody = sortDiesInZone(
+        withSimilar.filter(
+          (r) =>
+            r.custodyStatus === CUSTODY_HUB_CUSTODY_READY || r.custodyStatus === CUSTODY_ON_FLOOR,
+        ),
+        'custody',
       )
       const ledgerRows: ToolingHubLedgerRowJson[] = withSimilar.map((r) => {
         const zoneKey = dieLedgerZoneKeyFromCustody(r.custodyStatus)
@@ -447,7 +533,7 @@ export async function GET(req: NextRequest) {
     const priorityLines = await loadPriorityPoLineContext(db)
 
     const rows = await db.embossBlock.findMany({
-      where: { active: true },
+      where: { active: true, hubSoftDeletedAt: null },
       orderBy: { blockCode: 'asc' },
       include: {
         cartons: {
@@ -542,12 +628,24 @@ export async function GET(req: NextRequest) {
       ledgerRank: embossRankById.get(r.id) ?? 0,
     }))
 
-    const triage = ranked.filter((r) => r.custodyStatus === CUSTODY_HUB_TRIAGE)
-    const prep = ranked.filter((r) => r.custodyStatus === CUSTODY_HUB_ENGRAVING_QUEUE)
-    const inventory = ranked.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK)
-    const custody = ranked.filter(
-      (r) =>
-        r.custodyStatus === CUSTODY_HUB_CUSTODY_READY || r.custodyStatus === CUSTODY_ON_FLOOR,
+    const triage = sortEmbossInZone(
+      ranked.filter((r) => r.custodyStatus === CUSTODY_HUB_TRIAGE),
+      'triage',
+    )
+    const prep = sortEmbossInZone(
+      ranked.filter((r) => r.custodyStatus === CUSTODY_HUB_ENGRAVING_QUEUE),
+      'prep',
+    )
+    const inventory = sortEmbossInZone(
+      ranked.filter((r) => r.custodyStatus === CUSTODY_IN_STOCK),
+      'inventory',
+    )
+    const custody = sortEmbossInZone(
+      ranked.filter(
+        (r) =>
+          r.custodyStatus === CUSTODY_HUB_CUSTODY_READY || r.custodyStatus === CUSTODY_ON_FLOOR,
+      ),
+      'custody',
     )
 
     const ledgerRows: ToolingHubLedgerRowJson[] = ranked.map((r) => {

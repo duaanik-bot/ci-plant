@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { Pencil } from 'lucide-react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { toast } from 'sonner'
+import { HubCardDeleteAction } from '@/components/hub/HubCardDeleteAction'
+import { HubPriorityController, HubPriorityRankBadge } from '@/components/hub/HubPriorityController'
+import { HubPriorityReorderAuditFooter } from '@/components/hub/HubPriorityReorderAuditFooter'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { IndustrialKpiTile } from '@/components/industrial/IndustrialKpiTile'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
@@ -124,6 +128,10 @@ type CtpRow = {
   /** Canonical keys (`plateColourCanonicalKey`) dimmed on shop floor (still in `plateColours`). */
   shopfloorInactiveCanonicalKeys?: string[]
   shopfloorActiveColourCount?: number
+  hubOrderCtp?: number | null
+  hubOrderVendor?: number | null
+  lastReorderedBy?: string | null
+  lastReorderedAt?: string | null
 }
 
 type PlateCard = {
@@ -247,6 +255,16 @@ function PlateHubStageDays({ lastStatusUpdatedAt }: { lastStatusUpdatedAt?: stri
       {days.toFixed(1)}d in stage
     </p>
   )
+}
+
+function plateQueueColumnPos(
+  full: { id: string }[] | undefined,
+  id: string,
+): { rank: number; isFirst: boolean; isLast: boolean } {
+  const col = full ?? []
+  const idx = col.findIndex((r) => r.id === id)
+  if (idx < 0) return { rank: 0, isFirst: true, isLast: true }
+  return { rank: idx + 1, isFirst: idx === 0, isLast: idx === col.length - 1 }
 }
 
 function normHubKey(s: string | null | undefined): string {
@@ -1034,6 +1052,22 @@ export default function HubPlateDashboard() {
       if (!opts?.silent) setLoading(false)
     }
   }, [])
+
+  const removePlateHubEntity = useCallback(
+    (entity: 'requirement' | 'plate', id: string) => {
+      setData((prev) => ({
+        ...prev,
+        triage: prev.triage.filter((r) => r.id !== id),
+        ctpQueue: prev.ctpQueue.filter((r) => r.id !== id),
+        vendorQueue: prev.vendorQueue.filter((r) => r.id !== id),
+        inventory: entity === 'plate' ? prev.inventory.filter((r) => r.id !== id) : prev.inventory,
+        custody: prev.custody.filter((c) => !(c.id === id && c.kind === entity)),
+        ledgerRows: prev.ledgerRows.filter((row) => !(row.id === id && row.entity === entity)),
+      }))
+      toast.success('Record removed from hub view')
+    },
+    [],
+  )
 
   useEffect(() => {
     void load()
@@ -2033,36 +2067,30 @@ export default function HubPlateDashboard() {
 
   const filteredCtp = useMemo(() => {
     const q = ctpSearch.trim().toLowerCase()
-    let list = data.ctpQueue
-    if (q) {
-      list = data.ctpQueue.filter((job) =>
-        hubSearchMatch(q, [
-          job.cartonName,
-          job.artworkCode,
-          job.requirementCode,
-          job.poNumber,
-          ...(job.linkedCustomerNames ?? []),
-        ]),
-      )
-    }
-    return sortPlatePrepRows(list)
+    if (!q) return data.ctpQueue
+    return data.ctpQueue.filter((job) =>
+      hubSearchMatch(q, [
+        job.cartonName,
+        job.artworkCode,
+        job.requirementCode,
+        job.poNumber,
+        ...(job.linkedCustomerNames ?? []),
+      ]),
+    )
   }, [data.ctpQueue, ctpSearch])
 
   const filteredVendor = useMemo(() => {
     const q = vendorSearch.trim().toLowerCase()
-    let list = data.vendorQueue
-    if (q) {
-      list = data.vendorQueue.filter((job) =>
-        hubSearchMatch(q, [
-          job.cartonName,
-          job.artworkCode,
-          job.requirementCode,
-          job.poNumber,
-          ...(job.linkedCustomerNames ?? []),
-        ]),
-      )
-    }
-    return sortPlatePrepRows(list)
+    if (!q) return data.vendorQueue
+    return data.vendorQueue.filter((job) =>
+      hubSearchMatch(q, [
+        job.cartonName,
+        job.artworkCode,
+        job.requirementCode,
+        job.poNumber,
+        ...(job.linkedCustomerNames ?? []),
+      ]),
+    )
   }, [data.vendorQueue, vendorSearch])
 
   const filteredCustody = useMemo(() => {
@@ -2410,13 +2438,26 @@ export default function HubPlateDashboard() {
                 {filteredTriageBoard.length === 0 ? (
                   <p className="text-zinc-500 text-sm">No jobs awaiting triage.</p>
                 ) : (
-                  filteredTriageBoard.map((row) => (
-                    <div
-                      key={row.id}
-                      className={`relative flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 ${
-                        row.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
-                      }`}
-                    >
+                  <AnimatePresence initial={false}>
+                    {filteredTriageBoard.map((row) => (
+                      <motion.div
+                        key={row.id}
+                        layout
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0, scale: 0.98 }}
+                        transition={{ duration: 0.2 }}
+                        className={`relative flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 ${
+                          row.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
+                        }`}
+                      >
+                        <HubCardDeleteAction
+                          asset="plate_requirement"
+                          recordId={row.id}
+                          disabled={saving}
+                          triggerClassName="absolute right-[2.35rem] top-1.5 z-20"
+                          onDeleted={() => removePlateHubEntity('requirement', row.id)}
+                        />
                       <PlateCountBadge
                         count={hubPlateBadgeCount({
                           totalPlates: row.newPlatesNeeded,
@@ -2555,8 +2596,9 @@ export default function HubPlateDashboard() {
                           Recall to Pre-Press
                         </button>
                       </div>
-                    </div>
-                  ))
+                    </motion.div>
+                    ))}
+                  </AnimatePresence>
                 )}
               </div>
             </section>
@@ -2596,13 +2638,28 @@ export default function HubPlateDashboard() {
                   {filteredCtp.length === 0 ? (
                     <li className="text-zinc-500 text-sm">Empty.</li>
                   ) : (
-                    filteredCtp.map((job) => (
-                      <li
+                    <AnimatePresence initial={false}>
+                    {filteredCtp.map((job) => {
+                      const ctpPos = plateQueueColumnPos(data.ctpQueue, job.id)
+                      return (
+                      <motion.li
                         key={job.id}
-                        className={`relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-14 ${
+                        layout
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0, scale: 0.98 }}
+                        transition={{ duration: 0.2 }}
+                        className={`relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-[5.75rem] pb-9 ${
                           job.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
                         }`}
                       >
+                        <HubCardDeleteAction
+                          asset="plate_requirement"
+                          recordId={job.id}
+                          disabled={saving}
+                          triggerClassName="absolute right-[4.35rem] top-[0.4rem] z-20"
+                          onDeleted={() => removePlateHubEntity('requirement', job.id)}
+                        />
                         <ShopfloorPlateAdjustTrigger
                           disabled={saving}
                           onClick={() => setAdjustPlatesJob(job)}
@@ -2617,7 +2674,10 @@ export default function HubPlateDashboard() {
                             })
                           }
                         />
-                        <p className="font-mono text-amber-300 text-xs">{job.requirementCode}</p>
+                        <div className="flex items-center justify-between gap-2 pr-0">
+                          <p className="font-mono text-amber-300 text-xs min-w-0">{job.requirementCode}</p>
+                          <HubPriorityRankBadge rank={ctpPos.rank} />
+                        </div>
                         <PlateHubStageDays lastStatusUpdatedAt={job.lastStatusUpdatedAt} />
                         <div className="flex flex-wrap items-start gap-x-1 gap-y-0.5 min-w-0 w-full pr-8">
                           <HubCartonAuditTitle
@@ -2696,8 +2756,25 @@ export default function HubPlateDashboard() {
                         {job.lastStatusUpdatedAt ? (
                           <HubLastActionFooter at={job.lastStatusUpdatedAt} />
                         ) : null}
-                      </li>
-                    ))
+                        <HubPriorityReorderAuditFooter
+                          lastReorderedBy={job.lastReorderedBy}
+                          lastReorderedAt={job.lastReorderedAt}
+                        />
+                        <div className="absolute bottom-2 right-2 z-10">
+                          <HubPriorityController
+                            domain="plate_ctp"
+                            entityId={job.id}
+                            isFirst={ctpPos.isFirst}
+                            isLast={ctpPos.isLast}
+                            disabled={saving}
+                            onSuccess={() => void load({ silent: true })}
+                          />
+                        </div>
+                      </motion.li>
+                    )
+                  })
+                  }
+                    </AnimatePresence>
                   )}
                 </ul>
               </section>
@@ -2736,13 +2813,28 @@ export default function HubPlateDashboard() {
                   {filteredVendor.length === 0 ? (
                     <li className="text-zinc-500 text-sm">None at vendor.</li>
                   ) : (
-                    filteredVendor.map((job) => (
-                      <li
+                    <AnimatePresence initial={false}>
+                    {filteredVendor.map((job) => {
+                      const vendorPos = plateQueueColumnPos(data.vendorQueue, job.id)
+                      return (
+                      <motion.li
                         key={job.id}
-                        className={`relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-14 ${
+                        layout
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0, scale: 0.98 }}
+                        transition={{ duration: 0.2 }}
+                        className={`relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-[5.75rem] pb-9 ${
                           job.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
                         }`}
                       >
+                        <HubCardDeleteAction
+                          asset="plate_requirement"
+                          recordId={job.id}
+                          disabled={saving}
+                          triggerClassName="absolute right-[4.35rem] top-[0.4rem] z-20"
+                          onDeleted={() => removePlateHubEntity('requirement', job.id)}
+                        />
                         <ShopfloorPlateAdjustTrigger
                           disabled={saving}
                           onClick={() => setAdjustPlatesJob(job)}
@@ -2757,7 +2849,10 @@ export default function HubPlateDashboard() {
                             })
                           }
                         />
-                        <p className="font-mono text-violet-200 text-xs">{job.requirementCode}</p>
+                        <div className="flex items-center justify-between gap-2 pr-0">
+                          <p className="font-mono text-violet-200 text-xs min-w-0">{job.requirementCode}</p>
+                          <HubPriorityRankBadge rank={vendorPos.rank} />
+                        </div>
                         <PlateHubStageDays lastStatusUpdatedAt={job.lastStatusUpdatedAt} />
                         <div className="flex flex-wrap items-start gap-x-1 gap-y-0.5 min-w-0 w-full pr-8">
                           <HubCartonAuditTitle
@@ -2836,8 +2931,25 @@ export default function HubPlateDashboard() {
                         {job.lastStatusUpdatedAt ? (
                           <HubLastActionFooter at={job.lastStatusUpdatedAt} />
                         ) : null}
-                      </li>
-                    ))
+                        <HubPriorityReorderAuditFooter
+                          lastReorderedBy={job.lastReorderedBy}
+                          lastReorderedAt={job.lastReorderedAt}
+                        />
+                        <div className="absolute bottom-2 right-2 z-10">
+                          <HubPriorityController
+                            domain="plate_vendor"
+                            entityId={job.id}
+                            isFirst={vendorPos.isFirst}
+                            isLast={vendorPos.isLast}
+                            disabled={saving}
+                            onSuccess={() => void load({ silent: true })}
+                          />
+                        </div>
+                      </motion.li>
+                    )
+                  })
+                  }
+                    </AnimatePresence>
                   )}
                 </ul>
               </section>
@@ -2875,7 +2987,8 @@ export default function HubPlateDashboard() {
                   {filteredInventory.length === 0 ? (
                     <li className="text-zinc-500 text-sm">No plates in rack.</li>
                   ) : (
-                    filteredInventory.map((p) => {
+                    <AnimatePresence initial={false}>
+                    {filteredInventory.map((p) => {
                       const reqN = p.totalPlates ?? p.numberOfColours ?? 0
                       const actN = p.platesInRackCount ?? 0
                       const short = reqN > 0 && actN < reqN ? reqN - actN : 0
@@ -2887,10 +3000,22 @@ export default function HubPlateDashboard() {
                         .filter(Boolean)
                         .join(' · ')
                       return (
-                        <li
+                        <motion.li
                           key={p.id}
-                          className="relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-10"
+                          layout
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0, scale: 0.98 }}
+                          transition={{ duration: 0.2 }}
+                          className="relative flex flex-col space-y-2 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-12"
                         >
+                          <HubCardDeleteAction
+                            asset="plate_store"
+                            recordId={p.id}
+                            disabled={saving}
+                            triggerClassName="absolute right-[2.35rem] top-[0.4rem] z-20"
+                            onDeleted={() => removePlateHubEntity('plate', p.id)}
+                          />
                           <PlateCountBadge
                             count={hubLivePlateBadgeCount({
                               platesInRackCount: p.platesInRackCount,
@@ -2987,9 +3112,10 @@ export default function HubPlateDashboard() {
                             </button>
                           </div>
                           <HubLastActionFooter at={p.lastStatusUpdatedAt ?? p.createdAt} />
-                        </li>
+                        </motion.li>
                       )
-                    })
+                    })}
+                    </AnimatePresence>
                   )}
                 </ul>
               </section>
@@ -3016,15 +3142,30 @@ export default function HubPlateDashboard() {
                   {filteredCustody.length === 0 ? (
                     <li className="text-zinc-500 text-sm">Nothing in staging.</li>
                   ) : (
-                    filteredCustody.map((c) => (
-                      <li
+                    <AnimatePresence initial={false}>
+                    {filteredCustody.map((c) => (
+                      <motion.li
                         key={`${c.kind}-${c.id}`}
-                        className={`relative flex flex-col space-y-2 rounded-lg bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-10 ${
+                        layout
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0, scale: 0.98 }}
+                        transition={{ duration: 0.2 }}
+                        className={`relative flex flex-col space-y-2 rounded-lg bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 pr-12 ${
                           c.kind === 'plate' && c.jobCardHub?.key === 'printed'
                             ? 'border border-emerald-600/70 shadow-[0_0_14px_rgba(16,185,129,0.12)]'
                             : 'border border-gray-800'
                         }`}
                       >
+                        <HubCardDeleteAction
+                          asset={c.kind === 'plate' ? 'plate_store' : 'plate_requirement'}
+                          recordId={c.id}
+                          disabled={saving}
+                          triggerClassName="absolute right-[2.35rem] top-[0.4rem] z-20"
+                          onDeleted={() =>
+                            removePlateHubEntity(c.kind === 'plate' ? 'plate' : 'requirement', c.id)
+                          }
+                        />
                         <PlateCountBadge
                           count={
                             c.kind === 'plate'
@@ -3160,12 +3301,16 @@ export default function HubPlateDashboard() {
                         {c.lastStatusUpdatedAt ? (
                           <HubLastActionFooter at={c.lastStatusUpdatedAt} />
                         ) : null}
-                      </li>
-                    ))
+                      </motion.li>
+                    ))}
+                    </AnimatePresence>
                   )}
                 </ul>
               </section>
             </div>
+            <p className="mt-4 text-center text-[9px] text-zinc-500 font-[family-name:var(--font-designing-queue)] tracking-tight px-2">
+              Audit Trail Synchronized - Accountability Layer Active.
+            </p>
           </>
         )}
       </div>

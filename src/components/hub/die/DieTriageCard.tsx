@@ -1,6 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
+import { HubCardDeleteAction } from '@/components/hub/HubCardDeleteAction'
+import { HubPriorityController, HubPriorityRankBadge } from '@/components/hub/HubPriorityController'
+import { HubPriorityReorderAuditFooter } from '@/components/hub/HubPriorityReorderAuditFooter'
+import type { HubPriorityDomain } from '@/lib/hub-priority-domain'
 import { hubQueueAgeLabel } from '@/lib/hub-card-time'
 import { safeJsonParse } from '@/lib/safe-json'
 import type { SimilarDieMatch } from '@/components/hub/die/SimilarDiesModal'
@@ -19,6 +24,8 @@ export type DieTriageCardRow = {
   masterType?: string | null
   hubConditionPoor?: boolean
   hubTriageHoldReason?: string | null
+  lastReorderedBy?: string | null
+  lastReorderedAt?: string | null
 }
 
 type RackPickItem = { id: string; displayCode: string; subtitle: string }
@@ -33,7 +40,9 @@ export function DieTriageCard({
   onTriageHold,
   onSimilarClick,
   onReverse,
+  onDeleted,
   specs,
+  hubColumnPriority,
 }: {
   r: DieTriageCardRow
   saving: boolean
@@ -44,7 +53,15 @@ export function DieTriageCard({
   onTriageHold: (placeOnHold: boolean, reason?: string) => void
   onSimilarClick: () => void
   onReverse: () => void
+  onDeleted: () => void
   specs: React.ReactNode
+  hubColumnPriority?: {
+    domain: HubPriorityDomain
+    rank: number
+    isFirst: boolean
+    isLast: boolean
+    onSuccess: () => void
+  }
 }) {
   const mismatch = r.typeMismatchMatches ?? []
   const hasTypeMismatch = mismatch.length > 0
@@ -87,8 +104,13 @@ export function DieTriageCard({
   const triageLocked = saving || onHold
 
   return (
-    <li
+    <motion.li
       data-hub-die-id={r.id}
+      layout
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ duration: 0.2 }}
       className={`rounded-lg border bg-background p-2 overflow-visible ${
         onHold
           ? 'border-yellow-500/70 shadow-[0_0_16px_rgba(234,179,8,0.22)] ring-2 ring-yellow-400/35'
@@ -97,15 +119,16 @@ export function DieTriageCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-[10px] font-mono font-bold text-zinc-500"
-            title="Row #"
-          >
-            #{r.ledgerRank}
-          </span>
           <span className="font-mono text-[10px] text-amber-300/90 truncate">{r.displayCode}</span>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <HubCardDeleteAction
+            asset="die"
+            recordId={r.id}
+            disabled={saving}
+            triggerClassName="relative shrink-0"
+            onDeleted={onDeleted}
+          />
           <button
             type="button"
             disabled={saving}
@@ -132,6 +155,7 @@ export function DieTriageCard({
               Similar
             </button>
           ) : null}
+          {hubColumnPriority ? <HubPriorityRankBadge rank={hubColumnPriority.rank} /> : null}
         </div>
       </div>
       <p className="text-[11px] text-zinc-500 truncate mt-1" title={r.title}>
@@ -254,6 +278,22 @@ export function DieTriageCard({
       <p className="mt-1.5 text-[10px] leading-tight text-zinc-500">
         Time in triage: {hubQueueAgeLabel(r.lastStatusUpdatedAt)}
       </p>
-    </li>
+      <HubPriorityReorderAuditFooter
+        lastReorderedBy={r.lastReorderedBy}
+        lastReorderedAt={r.lastReorderedAt}
+      />
+      {hubColumnPriority ? (
+        <div className="mt-1.5 flex justify-end">
+          <HubPriorityController
+            domain={hubColumnPriority.domain}
+            entityId={r.id}
+            isFirst={hubColumnPriority.isFirst}
+            isLast={hubColumnPriority.isLast}
+            disabled={saving}
+            onSuccess={hubColumnPriority.onSuccess}
+          />
+        </div>
+      ) : null}
+    </motion.li>
   )
 }

@@ -71,6 +71,8 @@ export async function GET(req: NextRequest) {
             embossingLeafing: true,
             coatingType: true,
             laminateType: true,
+            paperType: true,
+            gsm: true,
             blankLength: true,
             blankWidth: true,
             artworkCode: true,

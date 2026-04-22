@@ -40,6 +40,7 @@ export async function GET() {
 
   const plates = await db.plateStore.findMany({
     where: {
+      hubSoftDeletedAt: null,
       status: { in: ['ready', 'returned', 'issued', 'pending'] },
     },
     select: {

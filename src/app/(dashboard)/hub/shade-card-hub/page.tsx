@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, Download, RefreshCw, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
+import { HubCardDeleteAction } from '@/components/hub/HubCardDeleteAction'
 import { ShadeCardKanbanBoard } from '@/components/hub/ShadeCardKanbanBoard'
 import {
   ShadeCardSpotlightDrawer,
@@ -232,18 +233,19 @@ export default function ShadeCardHubPage() {
                 <th className="px-3 h-[40px] align-middle font-sans whitespace-nowrap">Status</th>
                 <th className="px-3 h-[40px] align-middle font-sans min-w-[7rem]">Current Custody</th>
                 <th className="px-3 h-[40px] align-middle font-sans min-w-[8rem]">Remarks</th>
+                <th className="px-2 h-[40px] align-middle w-12 font-sans text-right"> </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-900 bg-background">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-8 text-zinc-500 text-center font-sans">
+                  <td colSpan={7} className="px-3 py-8 text-zinc-500 text-center font-sans">
                     Loading…
                   </td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-8 text-zinc-600 text-center font-sans">
+                  <td colSpan={7} className="px-3 py-8 text-zinc-600 text-center font-sans">
                     {rows.length === 0 ? 'No shade cards match.' : 'No cards in this lane for the current search.'}
                   </td>
                 </tr>
@@ -384,6 +386,24 @@ export default function ShadeCardHubPage() {
                           monoClass={mono}
                         />
                       </td>
+                      <td
+                        className="px-1 align-middle w-12"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex justify-end">
+                          <HubCardDeleteAction
+                            asset="shade_card"
+                            recordId={r.id}
+                            triggerClassName="relative"
+                            onDeleted={() => {
+                              setRows((prev) => prev.filter((x) => x.id !== r.id))
+                              setSpotlight((sp) => (sp?.id === r.id ? null : sp))
+                              void load({ silent: true })
+                            }}
+                          />
+                        </div>
+                      </td>
                     </tr>
                   )
                 })
@@ -424,8 +444,10 @@ export default function ShadeCardHubPage() {
           )}
         </AnimatePresence>
 
-        <p className="text-center text-[10px] text-zinc-600 pt-4 border-t border-zinc-900 font-sans">
-          Custody Handshake Verified - 100% Audit Traceability Active.
+        <p
+          className={`text-center text-[9px] text-zinc-500 pt-4 border-t border-zinc-900 font-[family-name:var(--font-designing-queue)] tracking-tight`}
+        >
+          Audit Trail Synchronized - Accountability Layer Active.
         </p>
       </div>
       <ShadeCardSpotlightDrawer

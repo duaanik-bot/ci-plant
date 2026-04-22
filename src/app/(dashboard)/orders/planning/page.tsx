@@ -18,8 +18,10 @@ import {
   type PlanningDesignerKey,
   type PlanningSetIdMode,
 } from '@/lib/planning-decision-spec'
-import { PlanningDecisionGrid } from '@/components/planning/PlanningDecisionGrid'
+import { PlanningDecisionGrid, type PlanningGridLine } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningReadinessDrawer } from '@/components/planning/PlanningReadinessDrawer'
+import { PlanningPoSummaryDrawer } from '@/components/planning/PlanningPoSummaryDrawer'
+import { PlanningProductDetailDrawer } from '@/components/planning/PlanningProductDetailDrawer'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import {
   PlanningDecisionLayerToolbar,
@@ -156,6 +158,8 @@ type Line = {
     artworkCode?: string | null
     laminateType?: string | null
     coatingType?: string | null
+    paperType?: string | null
+    gsm?: number | null
   } | null
   dieMaster?: { id: string; dyeNumber: number; ups: number; sheetSize: string } | null
   createdAt?: string
@@ -297,6 +301,8 @@ export default function PlanningPage() {
   const [planningGroupBy, setPlanningGroupBy] = useState<PlanningGroupBy>('none')
   const [planningSetIdMode, setPlanningSetIdMode] = useState<PlanningSetIdMode>('auto')
   const [planningDrawerLineId, setPlanningDrawerLineId] = useState<string | null>(null)
+  const [poSummaryDrawerId, setPoSummaryDrawerId] = useState<string | null>(null)
+  const [productDrawerLine, setProductDrawerLine] = useState<PlanningGridLine | null>(null)
   const [savingPlanningHandoff, setSavingPlanningHandoff] = useState(false)
 
   useEffect(() => {
@@ -601,8 +607,14 @@ export default function PlanningPage() {
     const sel = Array.from(planningSelection)
       .map((id) => rows.find((r) => r.id === id))
       .filter((r): r is Line => !!r)
-    const coatings = new Set(sel.map((r) => String(r.coatingType ?? '').trim().toLowerCase()))
-    const gsms = new Set(sel.map((r) => (r.gsm != null ? String(r.gsm) : '')))
+    const coatings = new Set(
+      sel.map((r) =>
+        String(r.coatingType ?? r.carton?.coatingType ?? '')
+          .trim()
+          .toLowerCase(),
+      ),
+    )
+    const gsms = new Set(sel.map((r) => String(r.gsm ?? r.carton?.gsm ?? '')))
     const conflict =
       sel.length >= 2 && (coatings.size > 1 || gsms.size > 1)
         ? 'Mix-Set Conflict: Specs do not match.'
@@ -617,118 +629,96 @@ export default function PlanningPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 pb-24 text-slate-100">
-      <div className="mx-auto max-w-[1920px] space-y-4 px-4 py-4">
-        <div className="sticky top-0 z-30 -mx-4 border-b border-slate-800 bg-slate-950/90 px-4 py-3 backdrop-blur-sm">
-          <div className="flex flex-wrap items-center gap-3 justify-between">
-            <div>
-              <h1 className="text-base font-semibold tracking-tight text-amber-400">
-                Planning
-              </h1>
-              <p className={`text-sm text-slate-400 ${mono}`}>
-                {rows.length} line(s) · Σ qty{' '}
-                <span className="font-semibold text-amber-300">{totalQty.toLocaleString('en-IN')}</span>
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-2 flex-1 min-w-[min(100%,16rem)]">
-              <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
-                View
-              </span>
-              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setLedgerView('pending')}
-                  className={`rounded-md px-4 py-1.5 text-sm font-medium ${
-                    ledgerView === 'pending'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400'
-                  }`}
-                >
-                  Pending
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLedgerView('processed')}
-                  className={`rounded-md px-4 py-1.5 text-sm font-medium ${
-                    ledgerView === 'processed'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400'
-                  }`}
-                >
-                  Processed
-                </button>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
+    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#0F172A] text-slate-100">
+      <div className="shrink-0 space-y-2 border-b border-[#334155] bg-[#0F172A] px-3 py-2">
+        <div className="flex flex-wrap items-end gap-3 justify-between">
+          <div>
+            <h1 className="text-[15px] font-semibold tracking-tight text-amber-400">Planning</h1>
+            <p className={`text-[13px] font-medium text-slate-400 ${mono}`}>
+              {rows.length} line(s) · Σ qty{' '}
+              <span className="text-[#FBBF24]">{totalQty.toLocaleString('en-IN')}</span>
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-500">View</span>
+            <div className="inline-flex rounded-lg border border-[#334155] bg-[#1E293B] p-0.5">
               <button
                 type="button"
-                onClick={() => void handleMakeProcessing()}
-                disabled={
-                  planningSelection.size === 0 ||
-                  makeProcessingBusy ||
-                  !!selectedForMix.conflict ||
-                  !!mixConflictMessage
-                }
-                className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => setLedgerView('pending')}
+                className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${
+                  ledgerView === 'pending' ? 'bg-[#2563EB] text-white' : 'text-slate-400'
+                }`}
               >
-                {makeProcessingBusy ? 'Processing…' : 'Make processing'}
+                Pending
               </button>
-              <Link
-                href="/hub/dies"
-                className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-500"
-              >
-                Update Dye Details
-              </Link>
-              <Link
-                href="/orders/purchase-orders"
-                className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 shadow-sm hover:bg-slate-800"
-              >
-                Customer POs
-              </Link>
-              <Link
-                href="/orders/designing"
-                className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 shadow-sm hover:bg-slate-800"
-              >
-                Artwork queue
-              </Link>
               <button
                 type="button"
-                onClick={() => {
-                  downloadPlanningAuditCsv(rows)
-                  toast.success('Audit CSV exported')
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 shadow-sm hover:bg-slate-800 ${mono}`}
+                onClick={() => setLedgerView('processed')}
+                className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${
+                  ledgerView === 'processed' ? 'bg-[#2563EB] text-white' : 'text-slate-400'
+                }`}
               >
-                <Download className="h-3.5 w-3.5 text-slate-500" aria-hidden />
-                Audit export
+                Processed
               </button>
             </div>
+          </div>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => void handleMakeProcessing()}
+              disabled={
+                planningSelection.size === 0 ||
+                makeProcessingBusy ||
+                !!selectedForMix.conflict ||
+                !!mixConflictMessage
+              }
+              className="rounded-lg bg-amber-600 px-4 py-2 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {makeProcessingBusy ? 'Processing…' : 'Make processing'}
+            </button>
+            <Link
+              href="/hub/dies"
+              className="rounded-lg bg-amber-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-amber-500"
+            >
+              Dyes
+            </Link>
+            <Link
+              href="/orders/purchase-orders"
+              className="rounded-lg border border-[#334155] bg-[#1E293B] px-2 py-1.5 text-xs text-slate-200"
+            >
+              POs
+            </Link>
+            <Link
+              href="/orders/designing"
+              className="rounded-lg border border-[#334155] bg-[#1E293B] px-2 py-1.5 text-xs text-slate-200"
+            >
+              AW queue
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                downloadPlanningAuditCsv(rows)
+                toast.success('Audit CSV exported')
+              }}
+              className={`inline-flex items-center gap-1.5 rounded-lg border border-[#334155] bg-[#1E293B] px-2 py-1.5 text-xs text-slate-200 ${mono}`}
+            >
+              <Download className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+              Audit
+            </button>
           </div>
         </div>
-
-        <div className="grid gap-3 sm:grid-cols-3 rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-4 shadow-sm">
-          <div>
-            <p className={`text-[12px] uppercase tracking-wider font-medium text-slate-500 ${mono}`}>
-              Total volume in queue
-            </p>
-            <p className={`text-xl font-semibold text-amber-300 ${mono} mt-1`}>
-              {totalQty.toLocaleString('en-IN')}
-            </p>
-            <p className="text-[13px] text-slate-500 mt-0.5">Σ qty · all lines in view</p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4 text-[13px]">
+          <div className="rounded border border-[#334155] bg-[#1E293B] px-2 py-1.5">
+            <p className={`text-[10px] uppercase tracking-wider text-slate-500 ${mono}`}>Queue Σ qty</p>
+            <p className={`text-lg font-semibold text-[#FBBF24] ${mono}`}>{totalQty.toLocaleString('en-IN')}</p>
           </div>
-          <div className="sm:border-l sm:border-slate-700 sm:pl-4">
-            <p className={`text-[12px] uppercase tracking-wider font-medium text-slate-500 ${mono}`}>Top blocker</p>
-            <p className={`text-sm font-medium text-rose-400 ${mono} leading-snug mt-1`}>
-              {topBlockerTile.headline}
-            </p>
-            <p className="text-[13px] text-slate-500 mt-0.5">{topBlockerTile.sub}</p>
+          <div className="rounded border border-[#334155] bg-[#1E293B] px-2 py-1.5">
+            <p className={`text-[10px] uppercase tracking-wider text-slate-500 ${mono}`}>Top blocker</p>
+            <p className={`line-clamp-2 text-slate-200 ${mono}`}>{topBlockerTile.headline}</p>
           </div>
-          <div className="sm:border-l sm:border-slate-700 sm:pl-4">
-            <p className={`text-[12px] uppercase tracking-wider font-medium text-slate-500 ${mono}`}>
-              Ready to schedule
-            </p>
-            <p className={`text-xl font-semibold text-emerald-400 ${mono} mt-1`}>{readyToScheduleCount}</p>
-            <p className="text-[13px] text-slate-500">5-point interlock + plates · not closed</p>
+          <div className="rounded border border-[#334155] bg-[#1E293B] px-2 py-1.5">
+            <p className={`text-[10px] uppercase tracking-wider text-slate-500 ${mono}`}>Ready to schedule</p>
+            <p className={`text-lg font-semibold text-[#34D399] ${mono}`}>{readyToScheduleCount}</p>
           </div>
         </div>
 
@@ -774,10 +764,12 @@ export default function PlanningPage() {
             ) : null}
           </div>
         </div>
+      </div>
 
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-1 pt-1">
         <ErrorBoundary moduleName="Planning Grid">
           <PlanningDecisionGrid
-            rows={rows}
+            rows={rows as PlanningGridLine[]}
             ledgerView={ledgerView}
             planningSelection={planningSelection}
             setPlanningSelection={setPlanningSelection}
@@ -789,11 +781,14 @@ export default function PlanningPage() {
             onSaveRow={save}
             mixConflictMessage={mixConflictMessage ?? selectedForMix.conflict}
             onLinkAsMixSet={linkAsMixSet}
+            onPONumberClick={(poId) => setPoSummaryDrawerId(poId)}
+            onCartonClick={(line) => setProductDrawerLine(line)}
           />
         </ErrorBoundary>
+      </div>
 
-        <footer className={`border-t border-slate-800 pt-4 text-center text-[13px] text-slate-400 ${mono}`}>
-          Visual Legacy Restored to 20-April State. Logic & Chronology Preserved.
+        <footer className={`shrink-0 border-t border-[#334155] py-2 text-center text-[13px] text-slate-500 ${mono}`}>
+          Enterprise Intelligence Active - Decisions Synchronized with April 20th Global Theme.
         </footer>
 
         <PlanningReadinessDrawer
@@ -823,7 +818,17 @@ export default function PlanningPage() {
             })
           }}
         />
-      </div>
+
+        <PlanningPoSummaryDrawer
+          open={poSummaryDrawerId != null}
+          poId={poSummaryDrawerId}
+          onClose={() => setPoSummaryDrawerId(null)}
+        />
+        <PlanningProductDetailDrawer
+          open={productDrawerLine?.cartonId != null}
+          cartonId={productDrawerLine?.cartonId ?? null}
+          onClose={() => setProductDrawerLine(null)}
+        />
     </div>
   )
 }

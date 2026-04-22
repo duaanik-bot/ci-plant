@@ -200,7 +200,7 @@ export function SidebarNav({
       borderColor: 'border-l-orange-500',
       links: [
         { href: '/production/job-cards', label: 'Job Cards', icon: FileStack },
-        { href: '/production/stages', label: 'Production Planning', icon: Cpu },
+        { href: '/production/stages', label: 'Production Stages', icon: Cpu },
       ],
     },
     {

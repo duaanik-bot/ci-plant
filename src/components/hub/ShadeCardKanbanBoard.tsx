@@ -12,8 +12,9 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { GripVertical, Star } from 'lucide-react'
+import { HubCardDeleteAction } from '@/components/hub/HubCardDeleteAction'
 import { toast } from 'sonner'
 import { shadeCardAgeTier, type ShadeCardAgeTier } from '@/lib/shade-card-age'
 import {
@@ -28,12 +29,36 @@ import {
   INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
 } from '@/lib/industrial-priority-ui'
 import { SHADE_MASTER_RACK_LOCATION } from '@/lib/inventory-hub-custody'
+import { HubPriorityController, HubPriorityRankBadge } from '@/components/hub/HubPriorityController'
+import { HubPriorityReorderAuditFooter } from '@/components/hub/HubPriorityReorderAuditFooter'
+import type { HubPriorityDomain } from '@/lib/hub-priority-domain'
 import { shadeCardPhysicalLabel } from '@/lib/shade-card-custody-condition'
 import { safeJsonParse, safeJsonParseArray, safeJsonStringify } from '@/lib/safe-json'
 import type { ShadeCardSpotlightRow } from '@/components/hub/ShadeCardSpotlightDrawer'
 
 const DROP_IN_STOCK = 'kanban-drop-in-stock'
 const DROP_ON_FLOOR = 'kanban-drop-on-floor'
+
+const SHADE_HUB_MAX_ORDER = Number.MAX_SAFE_INTEGER
+
+function shadeHubDomain(col: ShadeKanbanColumnId): HubPriorityDomain {
+  if (col === 'in_stock') return 'shade_in_stock'
+  if (col === 'on_floor') return 'shade_on_floor'
+  if (col === 'reverify') return 'shade_reverify'
+  return 'shade_expired'
+}
+
+function shadeOrderValue(row: ShadeCardSpotlightRow, col: ShadeKanbanColumnId): number {
+  const v =
+    col === 'in_stock'
+      ? row.hubOrderInStock
+      : col === 'on_floor'
+        ? row.hubOrderOnFloor
+        : col === 'reverify'
+          ? row.hubOrderReverify
+          : row.hubOrderExpired
+  return v ?? SHADE_HUB_MAX_ORDER
+}
 
 const COLS: { id: ShadeKanbanColumnId; title: string; dropId?: string }[] = [
   { id: 'in_stock', title: 'In-Stock', dropId: DROP_IN_STOCK },
@@ -79,10 +104,12 @@ function KanbanCardInner({
   row,
   monoClass,
   isOverlay,
+  priorityRank,
 }: {
   row: ShadeCardSpotlightRow
   monoClass: string
   isOverlay?: boolean
+  priorityRank?: number
 }) {
   const months = row.currentAgeMonths ?? null
   const tier = shadeCardAgeTier(months)
@@ -110,14 +137,15 @@ function KanbanCardInner({
     >
       <div className="flex items-start justify-between gap-1">
         <p className="text-[11px] font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
-        {row.industrialPriority ? (
-          <Star
-            className={`h-3.5 w-3.5 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
-            aria-label="Priority"
-          />
-        ) : (
-          <span className="w-3.5 shrink-0" />
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {row.industrialPriority ? (
+            <Star
+              className={`h-3.5 w-3.5 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
+              aria-label="Priority"
+            />
+          ) : null}
+          {priorityRank != null && priorityRank > 0 ? <HubPriorityRankBadge rank={priorityRank} /> : null}
+        </div>
       </div>
       <p className="mt-1 text-base font-medium text-foreground leading-snug line-clamp-2 font-sans">{productName}</p>
       <div
@@ -151,14 +179,28 @@ function KanbanCardInner({
   )
 }
 
+function columnPosForShade(full: ShadeCardSpotlightRow[], id: string) {
+  const idx = full.findIndex((r) => r.id === id)
+  if (idx < 0) return { rank: 0, isFirst: true, isLast: true }
+  return { rank: idx + 1, isFirst: idx === 0, isLast: idx === full.length - 1 }
+}
+
 function DraggableKanbanCard({
   row,
   monoClass,
   onOpen,
+  onDeleted,
+  columnId,
+  columnRows,
+  onPriorityRefresh,
 }: {
   row: ShadeCardSpotlightRow
   monoClass: string
   onOpen: () => void
+  onDeleted: () => void
+  columnId: ShadeKanbanColumnId
+  columnRows: ShadeCardSpotlightRow[]
+  onPriorityRefresh: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: row.id,
@@ -167,11 +209,33 @@ function DraggableKanbanCard({
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, opacity: isDragging ? 0.4 : 1 }
     : undefined
+  const pri = columnPosForShade(columnRows, row.id)
+  const priDomain = shadeHubDomain(columnId)
 
   return (
-    <motion.div ref={setNodeRef} style={style} layout className="relative touch-none pl-5">
-      <button type="button" onClick={() => onOpen()} className="w-full text-left rounded-xl">
-        <KanbanCardInner row={row} monoClass={monoClass} />
+    <motion.div
+      ref={setNodeRef}
+      style={style}
+      layout
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ duration: 0.2 }}
+      className="relative touch-none pl-5 pb-9"
+    >
+      <HubCardDeleteAction
+        asset="shade_card"
+        recordId={row.id}
+        triggerClassName="absolute right-2 top-2 z-20"
+        onDeleted={onDeleted}
+        stopPropagationOnTrigger
+      />
+      <button
+        type="button"
+        onClick={() => onOpen()}
+        className="w-full text-left rounded-xl pr-10 pt-0.5"
+      >
+        <KanbanCardInner row={row} monoClass={monoClass} priorityRank={pri.rank} />
       </button>
       <button
         type="button"
@@ -182,6 +246,25 @@ function DraggableKanbanCard({
       >
         <GripVertical className="h-4 w-4 text-zinc-500 shrink-0 mt-1" />
       </button>
+      <div className="w-full pl-5 pr-1 min-w-0">
+        <HubPriorityReorderAuditFooter
+          lastReorderedBy={row.lastReorderedBy}
+          lastReorderedAt={row.lastReorderedAt}
+        />
+      </div>
+      <div
+        className="absolute bottom-0.5 right-0.5 z-20"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <HubPriorityController
+          domain={priDomain}
+          entityId={row.id}
+          isFirst={pri.isFirst}
+          isLast={pri.isLast}
+          onSuccess={onPriorityRefresh}
+        />
+      </div>
     </motion.div>
   )
 }
@@ -303,6 +386,9 @@ export function ShadeCardKanbanBoard({
     }
     for (const k of Object.keys(g) as ShadeKanbanColumnId[]) {
       g[k].sort((a, b) => {
+        const oa = shadeOrderValue(a, k)
+        const ob = shadeOrderValue(b, k)
+        if (oa !== ob) return oa - ob
         if (a.industrialPriority !== b.industrialPriority) return a.industrialPriority ? -1 : 1
         return a.shadeCode.localeCompare(b.shadeCode)
       })
@@ -453,14 +539,20 @@ export function ShadeCardKanbanBoard({
         >
           {COLS.map((col) => (
             <KanbanColumn key={col.id} col={col} monoClass={monoClass} count={grouped[col.id].length}>
-              {grouped[col.id].map((row) => (
-                <DraggableKanbanCard
-                  key={row.id}
-                  row={row}
-                  monoClass={monoClass}
-                  onOpen={() => onCardClick(row)}
-                />
-              ))}
+              <AnimatePresence initial={false} mode="popLayout">
+                {grouped[col.id].map((row) => (
+                  <DraggableKanbanCard
+                    key={row.id}
+                    row={row}
+                    monoClass={monoClass}
+                    onOpen={() => onCardClick(row)}
+                    onDeleted={() => onDataChange()}
+                    columnId={col.id}
+                    columnRows={grouped[col.id]}
+                    onPriorityRefresh={onDataChange}
+                  />
+                ))}
+              </AnimatePresence>
             </KanbanColumn>
           ))}
         </motion.div>
