@@ -54,13 +54,13 @@ function stageAgeHours(iso: string | undefined): number {
 
 function PlateStageDaysCell({ lastStatusUpdatedAt }: { lastStatusUpdatedAt: string | undefined }) {
   const h = stageAgeHours(lastStatusUpdatedAt)
-  if (!lastStatusUpdatedAt || h <= 0) return <span className="text-sm text-slate-500 dark:text-slate-400">—</span>
+  if (!lastStatusUpdatedAt || h <= 0) return <span className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">—</span>
   const days = h / 24
   const critical = h >= 24
   return (
     <span
       className={`font-designing-queue text-sm font-medium tabular-nums ${
-        critical ? 'text-rose-600 animate-industrial-age-pulse dark:text-rose-400' : 'text-slate-600 dark:text-slate-400'
+        critical ? 'text-rose-600 animate-industrial-age-pulse dark:text-rose-400' : 'text-ds-ink-faint dark:text-ds-ink-muted'
       }`}
       title="Days since last status update in this zone"
     >
@@ -127,7 +127,7 @@ export function MasterLedgerTable({
 
   return (
     <EnterpriseTableShell>
-      <table className="min-w-[920px] w-full border-collapse text-left text-sm text-slate-900 dark:text-slate-50">
+      <table className="min-w-[920px] w-full border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
         <thead className={enterpriseTheadClass}>
           <tr>
             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Job ID</th>
@@ -145,7 +145,7 @@ export function MasterLedgerTable({
         <tbody className={enterpriseTbodyClass}>
           {filtered.length === 0 ? (
             <tr>
-              <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
+              <td colSpan={8} className="px-4 py-8 text-center text-sm text-ds-ink-faint dark:text-ds-ink-muted">
                 No rows match the current filters.
               </td>
             </tr>
@@ -164,9 +164,9 @@ export function MasterLedgerTable({
               return (
                 <tr
                   key={`${r.entity}-${r.id}`}
-                  className={`${enterpriseTrClass} border-b border-slate-200 dark:border-slate-800 ${pri}`}
+                  className={`${enterpriseTrClass} border-b border-neutral-200 dark:border-ds-line/40 ${pri}`}
                 >
-                  <td className="px-4 py-3 font-designing-queue text-xs font-medium whitespace-nowrap text-amber-800 dark:text-amber-200/90">
+                  <td className="px-4 py-3 font-designing-queue text-xs font-medium whitespace-nowrap text-ds-warning dark:text-ds-warning">
                     {r.jobId}
                   </td>
                   <td className="px-4 py-3 min-w-0">
@@ -195,11 +195,11 @@ export function MasterLedgerTable({
                         <span className="ml-1 font-bold text-rose-600 dark:text-rose-400">(Remake)</span>
                       ) : null}
                     </button>
-                    <p className="mt-0.5 break-words text-xs font-medium text-slate-600 whitespace-normal dark:text-slate-300">
+                    <p className="mt-0.5 break-words text-xs font-medium text-ds-ink-faint whitespace-normal dark:text-ds-ink-muted">
                       AW: {r.artworkCode?.trim() || '—'}
                       {r.poLineId ? (
                         <>
-                          <span className="text-slate-400"> · </span>
+                          <span className="text-ds-ink-muted"> · </span>
                           PO: {r.poLineId}
                         </>
                       ) : null}
@@ -212,11 +212,11 @@ export function MasterLedgerTable({
                       {r.zoneLabel}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums text-slate-900 whitespace-nowrap dark:text-slate-300">
+                  <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums text-neutral-900 whitespace-nowrap dark:text-ds-ink-muted">
                     {vol}
                   </td>
                   <td className="px-4 py-3">
-                    <p className="mb-1 break-words text-sm text-slate-700 whitespace-normal dark:text-slate-300">
+                    <p className="mb-1 break-words text-sm text-neutral-700 whitespace-normal dark:text-ds-ink-muted">
                       {sizeLine}
                     </p>
                     <PlateHubColourSwatchStrip
@@ -228,10 +228,10 @@ export function MasterLedgerTable({
                   <td className="px-4 py-3 whitespace-nowrap">
                     <PlateStageDaysCell lastStatusUpdatedAt={r.lastStatusUpdatedAt} />
                   </td>
-                  <td className="px-4 py-3 font-designing-queue text-xs tabular-nums text-slate-600 whitespace-nowrap dark:text-slate-400">
+                  <td className="px-4 py-3 font-designing-queue text-xs tabular-nums text-ds-ink-faint whitespace-nowrap dark:text-ds-ink-muted">
                     {timeInZone}
                   </td>
-                  <td className="px-4 py-3 max-w-[240px] break-words text-sm leading-snug text-slate-600 whitespace-normal dark:text-slate-500">
+                  <td className="px-4 py-3 max-w-[240px] break-words text-sm leading-snug text-ds-ink-faint whitespace-normal dark:text-ds-ink-faint">
                     {lastLine}
                   </td>
                 </tr>

@@ -39,7 +39,7 @@ export function ProductionReadinessBar({
 }) {
   if (loading) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-background px-3 py-3 text-[11px] text-zinc-500 animate-pulse">
+      <div className="rounded-xl border border-ds-line/40 bg-background px-3 py-3 text-[11px] text-neutral-500 animate-pulse">
         Loading production readiness…
       </div>
     )
@@ -47,28 +47,28 @@ export function ProductionReadinessBar({
 
   if (lines.length === 0) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-background px-3 py-3 text-[11px] text-zinc-500">
+      <div className="rounded-xl border border-ds-line/40 bg-background px-3 py-3 text-[11px] text-neutral-500">
         Add line items to evaluate production readiness (die, block, shade links).
       </div>
     )
   }
 
   const merged = mergeSegments(lines)
-  const barTone = loading ? 'border-zinc-700' : allOk && !anyRose ? 'border-emerald-500/60' : 'border-rose-500/70'
+  const barTone = loading ? 'border-ds-line/50' : allOk && !anyRose ? 'border-emerald-500/60' : 'border-rose-500/70'
   const fillTone =
-    loading ? 'bg-zinc-800' : allOk && !anyRose ? 'bg-emerald-500' : 'bg-rose-500'
+    loading ? 'bg-ds-elevated' : allOk && !anyRose ? 'bg-emerald-500' : 'bg-rose-500'
 
   return (
-    <div className="rounded-xl border border-zinc-800 bg-background px-3 py-3 text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <div className="rounded-xl border border-ds-line/40 bg-background px-3 py-3 text-ds-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Production readiness</p>
-          <p className="text-[11px] text-zinc-400 mt-0.5">Die · emboss block · shade card (worst line wins)</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Production readiness</p>
+          <p className="text-[11px] text-neutral-500 mt-0.5">Die · emboss block · shade card (worst line wins)</p>
         </div>
         <span
           className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
             loading
-              ? 'bg-zinc-900 text-zinc-500'
+              ? 'bg-ds-card text-neutral-500'
               : allOk && !anyRose
                 ? 'bg-emerald-500/15 text-emerald-400'
                 : 'bg-rose-500/15 text-rose-400'
@@ -78,24 +78,24 @@ export function ProductionReadinessBar({
         </span>
       </div>
 
-      <div className={`mt-3 flex h-2.5 overflow-hidden rounded-full border ${barTone} bg-zinc-950`}>
+      <div className={`mt-3 flex h-2.5 overflow-hidden rounded-full border ${barTone} bg-ds-main`}>
         {merged.map((s) => (
           <div
             key={s.key}
             title={`${s.label}: ${s.detail}${s.technicalId ? ` (${s.technicalId})` : ''}`}
             className={`flex-1 min-w-[4px] border-r border-border/40 last:border-r-0 transition-colors ${
-              s.ok ? fillTone : loading ? 'bg-zinc-800' : 'bg-rose-500'
+              s.ok ? fillTone : loading ? 'bg-ds-elevated' : 'bg-rose-500'
             } ${allOk && !anyRose && !loading ? 'opacity-100' : ''}`}
           />
         ))}
       </div>
 
-      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-zinc-500">
+      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-neutral-500">
         {merged.map((s) => (
           <div key={s.key} className="min-w-0">
-            <div className="font-semibold text-zinc-400">{s.label}</div>
-            <div className={`truncate text-zinc-300 ${techMono}`}>{s.technicalId ?? '—'}</div>
-            <div className="truncate text-zinc-500">{s.ok ? 'Ready' : s.detail}</div>
+            <div className="font-semibold text-neutral-500">{s.label}</div>
+            <div className={`truncate text-neutral-400 ${techMono}`}>{s.technicalId ?? '—'}</div>
+            <div className="truncate text-neutral-500">{s.ok ? 'Ready' : s.detail}</div>
           </div>
         ))}
       </div>

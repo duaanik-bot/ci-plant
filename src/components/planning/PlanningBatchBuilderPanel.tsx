@@ -77,7 +77,7 @@ export function PlanningBatchBuilderPanel({
             onClick={onCreateBatch}
             disabled={createDisabled || lines.length < 2}
             title={createTitle}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-ds-warning px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-warning disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Plus className="h-4 w-4" aria-hidden />
             Create batch
@@ -93,31 +93,31 @@ export function PlanningBatchBuilderPanel({
       }
     >
       <div className="space-y-4 text-sm text-foreground" aria-label="Batch builder">
-        <div className="flex items-center gap-2 text-amber-200/90">
+        <div className="flex items-center gap-2 text-ds-warning">
           <Layers className="h-4 w-4 shrink-0" aria-hidden />
-          <p className={`text-xs text-slate-500 ${mono}`}>
+          <p className={`text-xs text-ds-ink-faint ${mono}`}>
             {lines.length} job(s) selected · total qty {totalQty.toLocaleString('en-IN')}
           </p>
         </div>
 
         <div
-          className={`rounded-md border border-slate-800/90 px-3 py-2 text-xs ${
-            ok ? 'bg-emerald-950/25 text-emerald-200/90' : 'bg-amber-950/20 text-amber-100/95'
+          className={`rounded-md border border-ds-line/40 px-3 py-2 text-xs ${
+            ok ? 'bg-emerald-950/25 text-emerald-200/90' : 'bg-ds-warning/8 text-ds-ink/95'
           }`}
         >
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Compatibility</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">Compatibility</p>
           <p className="mt-0.5">
             Board: {boardOk ? 'Match' : 'Conflict'}{' '}
-            <span className="text-slate-500">({Array.from(boards).join(' · ') || '—'})</span>
+            <span className="text-ds-ink-faint">({Array.from(boards).join(' · ') || '—'})</span>
           </p>
           <p>
             Size: {sizeOk ? 'Match' : 'Conflict'}{' '}
-            <span className="text-slate-500">({Array.from(sizes).join(' · ') || '—'})</span>
+            <span className="text-ds-ink-faint">({Array.from(sizes).join(' · ') || '—'})</span>
           </p>
         </div>
 
         <div>
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Selected jobs</p>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">Selected jobs</p>
           <ul className="max-h-[min(40vh,20rem)] space-y-2 overflow-y-auto overflow-x-hidden pr-0.5">
             {lines.map((r) => {
               const planCore = readPlanningCore((r.specOverrides || {}) as Record<string, unknown>)
@@ -126,13 +126,13 @@ export function PlanningBatchBuilderPanel({
               return (
                 <li
                   key={r.id}
-                  className="group flex items-start justify-between gap-2 rounded-md border border-slate-800/90 bg-background px-2 py-1.5"
+                  className="group flex items-start justify-between gap-2 rounded-md border border-ds-line/40 bg-background px-2 py-1.5"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-medium text-foreground" title={r.cartonName}>
                       {r.cartonName}
                     </p>
-                    <p className={`truncate text-[10px] text-slate-500 ${mono}`}>
+                    <p className={`truncate text-[10px] text-ds-ink-faint ${mono}`}>
                       {r.po.poNumber} · {r.quantity.toLocaleString('en-IN')} · {boardLabel(r)}
                     </p>
                     {hasBatch ? (
@@ -148,7 +148,7 @@ export function PlanningBatchBuilderPanel({
                   <button
                     type="button"
                     onClick={() => onRemoveFromSelection(r.id)}
-                    className="shrink-0 rounded p-0.5 text-slate-500 transition-colors hover:bg-accent/20 hover:text-rose-300"
+                    className="shrink-0 rounded p-0.5 text-ds-ink-faint transition-colors hover:bg-accent/20 hover:text-rose-300"
                     title="Remove from selection"
                     aria-label="Remove from selection"
                   >

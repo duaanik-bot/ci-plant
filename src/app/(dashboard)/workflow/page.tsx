@@ -25,11 +25,11 @@ export default function WorkflowOverviewPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <div className="p-4 text-slate-400">Loading workflow…</div>
+  if (loading) return <div className="p-4 text-ds-ink-muted">Loading workflow…</div>
 
   return (
     <div className="p-4 max-w-6xl mx-auto">
-      <h1 className="text-xl font-bold text-amber-400 mb-4">Workflow — Active Jobs</h1>
+      <h1 className="text-xl font-bold text-ds-warning mb-4">Workflow — Active Jobs</h1>
       <div className="grid md:grid-cols-3 gap-4">
         {jobs.map((job) => {
           const stages = job.workflowStages || []
@@ -46,28 +46,28 @@ export default function WorkflowOverviewPage() {
             <Link
               key={job.id}
               href={`/workflow/${job.id}`}
-              className="rounded-xl border border-slate-700 bg-slate-800/60 p-4 hover:border-amber-500/60"
+              className="rounded-xl border border-ds-line/50 bg-ds-elevated/60 p-4 hover:border-ds-warning/60"
             >
-              <p className="font-mono text-amber-300 text-sm">{job.jobNumber}</p>
-              <p className="text-slate-200 text-sm truncate">{job.productName}</p>
-              <p className="text-slate-500 text-xs">{job.customer?.name}</p>
+              <p className="font-mono text-ds-warning text-sm">{job.jobNumber}</p>
+              <p className="text-ds-ink text-sm truncate">{job.productName}</p>
+              <p className="text-ds-ink-faint text-xs">{job.customer?.name}</p>
               <div className="mt-3">
-                <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                <div className="h-1.5 rounded-full bg-ds-elevated overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-amber-500"
+                    className="h-full rounded-full bg-ds-warning"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <p className="text-xs text-slate-400 mt-1">
+                <p className="text-xs text-ds-ink-muted mt-1">
                   Stage {current?.stageNumber ?? '-'} / {WORKFLOW_STAGE_COUNT} — {current?.stageName ?? 'Not started'}
                 </p>
               </div>
-              <p className="text-xs text-slate-500 mt-1">Days running: {daysRunning}</p>
+              <p className="text-xs text-ds-ink-faint mt-1">Days running: {daysRunning}</p>
             </Link>
           )
         })}
         {jobs.length === 0 && (
-          <p className="text-slate-500 col-span-3">No active jobs with workflow.</p>
+          <p className="text-ds-ink-faint col-span-3">No active jobs with workflow.</p>
         )}
       </div>
     </div>

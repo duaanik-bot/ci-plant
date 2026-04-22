@@ -37,11 +37,11 @@ export function HubPriorityReorderAuditFooter({
   const label = formatDistanceToNow(at, { addSuffix: true })
   return (
     <div
-      className={`border-t border-slate-200/80 dark:border-slate-700/50 pt-1.5 mt-1.5 flex items-center gap-1.5 min-w-0 font-designing-queue text-[10px] leading-tight text-slate-400 dark:text-slate-500 ${className}`.trim()}
+      className={`border-t border-neutral-200/80 dark:border-ds-line/50 pt-1.5 mt-1.5 flex items-center gap-1.5 min-w-0 font-designing-queue text-[10px] leading-tight text-ds-ink-muted dark:text-ds-ink-faint ${className}`.trim()}
       title={`${who} — ${at.toLocaleString()}`}
     >
       <History
-        className="h-2.5 w-2.5 shrink-0 text-slate-400 dark:text-slate-500"
+        className="h-2.5 w-2.5 shrink-0 text-ds-ink-muted dark:text-ds-ink-faint"
         strokeWidth={2}
         aria-hidden
       />

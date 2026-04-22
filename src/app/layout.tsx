@@ -30,7 +30,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} bg-background font-sans text-sm text-foreground antialiased`}
+        className={`${inter.variable} ${jetbrainsMono.variable} bg-ds-main font-sans text-sm text-ds-ink antialiased`}
       >
         <Providers>{children}</Providers>
         <AppToaster />

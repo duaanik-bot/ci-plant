@@ -104,8 +104,8 @@ function NavItem({
 }) {
   const router = useRouter()
   const className = isActive
-    ? 'flex items-center gap-2 px-2 py-1.5 rounded-md bg-blue-600 text-white'
-    : 'flex items-center gap-2 px-2 py-1.5 rounded-md text-slate-300 hover:bg-slate-700 hover:text-white'
+    ? 'flex items-center gap-2 px-2 py-1.5 rounded-ds-sm bg-ds-brand text-white shadow-sm'
+    : 'flex items-center gap-2 px-2 py-1.5 rounded-ds-sm text-ds-ink-muted transition duration-200 hover:bg-ds-elevated/80 hover:text-ds-ink'
   if (external) {
     return (
       <a
@@ -228,7 +228,7 @@ export function SidebarNav({
     {
       key: 'stores',
       title: '🏪 STORES',
-      borderColor: 'border-l-amber-500',
+      borderColor: 'border-l-ds-warning/90',
       links: [
         { href: '/stores/issue', label: 'Issue Sheets', icon: PackageCheck },
         { href: '/stores/approve-excess', label: 'Approve Excess', icon: CheckSquare },
@@ -300,7 +300,7 @@ export function SidebarNav({
             <button
               type="button"
               onClick={() => toggle(section.key)}
-            className="w-full flex items-center justify-between text-left uppercase text-xs tracking-wider text-slate-400 hover:text-slate-200 py-1.5 px-1 rounded"
+            className="w-full flex items-center justify-between rounded-ds-sm px-1 py-1.5 text-left text-xs font-medium uppercase tracking-wider text-ds-ink-faint transition hover:text-ds-ink"
             >
               <span>{section.title}</span>
               {isOpen ? (
@@ -310,7 +310,7 @@ export function SidebarNav({
               )}
             </button>
             {section.subtitle && (
-              <p className="text-[10px] text-slate-500 px-1 mb-1 mt-0">{section.subtitle}</p>
+              <p className="mb-1 mt-0 px-1 text-[10px] text-ds-ink-faint">{section.subtitle}</p>
             )}
             {isOpen && (
               <div className="space-y-0.5">
@@ -329,13 +329,13 @@ export function SidebarNav({
           </div>
         )
       })}
-      <div className="mt-auto pt-4 border-t border-slate-800 px-2">
-        <p className="font-medium text-slate-200 text-xs truncate">
-          {userName ?? 'User'} <span className="text-slate-500">· {userRole ?? '—'}</span>
+      <div className="mt-auto border-t border-ds-line/40 px-2 pt-4">
+        <p className="truncate text-xs font-medium text-ds-ink">
+          {userName ?? 'User'} <span className="text-ds-ink-faint">· {userRole ?? '—'}</span>
         </p>
         <Link
           href="/api/auth/signout"
-          className="inline-block mt-1.5 text-xs text-slate-400 hover:text-amber-400"
+          className="mt-1.5 inline-block text-xs text-ds-ink-muted transition hover:text-ds-brand"
         >
           Logout
         </Link>

@@ -23,14 +23,14 @@ export function DeliveryDateInput({
   autoHint,
   suggestedYmd,
   onUseAutoSuggestion,
-  inputClassName = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground',
+  inputClassName = 'w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground',
 }: DeliveryDateInputProps) {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-1">
-        <label className="block text-slate-400">Delivery required by</label>
+        <label className="block text-ds-ink-muted">Delivery required by</label>
         {showCustomBadge ? (
-          <span className="text-[10px] font-bold uppercase tracking-wide text-amber-300/95 border border-amber-600/70 rounded px-1.5 py-0.5">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-ds-warning/95 border border-ds-warning/50 rounded px-1.5 py-0.5">
             Custom
           </span>
         ) : null}
@@ -45,7 +45,7 @@ export function DeliveryDateInput({
         className={inputClassName}
       />
       {autoHint ? (
-        <p className="mt-1 text-[11px] text-slate-500 leading-snug">{autoHint}</p>
+        <p className="mt-1 text-[11px] text-ds-ink-faint leading-snug">{autoHint}</p>
       ) : null}
       {showCustomBadge && suggestedYmd ? (
         <button

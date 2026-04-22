@@ -11,7 +11,7 @@ export default function HubPlatesShell() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-background text-zinc-400 p-8 text-sm flex items-center justify-center">
+        <div className="min-h-screen bg-background text-neutral-500 p-8 text-sm flex items-center justify-center">
           Loading Plate Hub…
         </div>
       }

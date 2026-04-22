@@ -127,8 +127,8 @@ function ScheduleCell({
   return (
     <div
       ref={setNodeRef}
-      className={`border border-slate-800 bg-background p-1 min-h-[7rem] align-top transition-colors ${
-        isOver ? 'bg-zinc-900/80 ring-1 ring-amber-500/30' : ''
+      className={`border border-ds-line/40 bg-background p-1 min-h-[7rem] align-top transition-colors ${
+        isOver ? 'bg-ds-card/80 ring-1 ring-ds-warning/35' : ''
       }`}
     >
       {children}
@@ -177,8 +177,8 @@ function SortableJobCard({
         gapAlert
           ? 'border-rose-500 shadow-[0_0_0_1px_rgba(244,63,94,0.5)] bg-rose-950/20'
           : pri
-            ? 'border-amber-500 bg-amber-500/10 shadow-[0_0_18px_rgba(245,158,11,0.35)]'
-            : 'border-slate-600 bg-zinc-900/95'
+            ? 'border-ds-warning bg-ds-warning/8 shadow-[0_0_18px_rgba(245,158,11,0.35)]'
+            : 'border-ds-line/60 bg-ds-card/95'
       } ${isDragging ? 'opacity-60 z-50' : ''}`}
       {...attributes}
       {...listeners}
@@ -187,7 +187,7 @@ function SortableJobCard({
         <Link
           href={`/orders/purchase-orders/${line.po.id}`}
           onClick={(e) => e.stopPropagation()}
-          className={`text-[9px] text-amber-300/90 hover:underline truncate ${mono}`}
+          className={`text-[9px] text-ds-warning/90 hover:underline truncate ${mono}`}
         >
           PO {line.po.poNumber}
         </Link>
@@ -198,19 +198,19 @@ function SortableJobCard({
       {line.jobCard ? (
         <div className={`text-[8px] text-sky-400/90 ${mono}`}>JC #{line.jobCard.jobCardNumber}</div>
       ) : null}
-      <p className="text-[9px] text-slate-400 truncate leading-tight mt-0.5" title={line.cartonName}>
+      <p className="text-[9px] text-ds-ink-muted truncate leading-tight mt-0.5" title={line.cartonName}>
         {line.cartonName}
       </p>
-      <p className={`text-[8px] text-slate-500 ${mono}`}>{formatDurationHMM(hours)}</p>
+      <p className={`text-[8px] text-ds-ink-faint ${mono}`}>{formatDurationHMM(hours)}</p>
 
-      <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded-sm bg-slate-800 gap-px" title="Batch segments (PO)">
+      <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded-sm bg-ds-elevated gap-px" title="Batch segments (PO)">
         {segments.map((seg) => {
           const bg =
             seg.status === 'done'
               ? 'bg-emerald-500'
               : seg.status === 'active'
-                ? 'bg-amber-400 animate-pulse'
-                : 'bg-slate-600'
+                ? 'bg-ds-warning/50 animate-pulse'
+                : 'bg-ds-line/30'
           const tip = `${seg.batchId}${
             seg.completedAtMelbourne ? ` · ${seg.completedAtMelbourne} (Melbourne)` : ''
           }`
@@ -410,7 +410,7 @@ export function ProductionScheduleBoard({
   return (
     <>
       <div className="space-y-2">
-        <h2 className={`text-xs font-semibold uppercase tracking-wide text-slate-500 ${mono}`}>
+        <h2 className={`text-xs font-semibold uppercase tracking-wide text-ds-ink-faint ${mono}`}>
           Production schedule · shift grid (Melbourne monitor)
         </h2>
         <DndContext
@@ -420,8 +420,8 @@ export function ProductionScheduleBoard({
           onDragEnd={(e) => void handleDragEnd(e)}
         >
           <div className="flex flex-col lg:flex-row gap-3">
-            <aside className="w-full lg:w-52 shrink-0 rounded border border-slate-800 bg-background p-2">
-              <p className={`text-[10px] font-semibold uppercase text-slate-500 mb-2 ${mono}`}>
+            <aside className="w-full lg:w-52 shrink-0 rounded border border-ds-line/40 bg-background p-2">
+              <p className={`text-[10px] font-semibold uppercase text-ds-ink-faint mb-2 ${mono}`}>
                 Ready sidebar
               </p>
               <ScheduleCell id="sidebar">
@@ -470,11 +470,11 @@ export function ProductionScheduleBoard({
                   gridTemplateColumns: `6.5rem repeat(${SHIFTS.length}, minmax(0, 1fr))`,
                 }}
               >
-                <div className="border border-slate-800 bg-background p-1" />
+                <div className="border border-ds-line/40 bg-background p-1" />
                 {SHIFTS.map((s) => (
                   <div
                     key={s}
-                    className={`border border-slate-800 bg-zinc-950/80 px-1 py-1 text-center ${mono} text-[10px] text-slate-400`}
+                    className={`border border-ds-line/40 bg-ds-main/80 px-1 py-1 text-center ${mono} text-[10px] text-ds-ink-muted`}
                   >
                     Shift {s}
                   </div>
@@ -483,7 +483,7 @@ export function ProductionScheduleBoard({
                 {machines.map((m) => (
                   <Fragment key={m.id}>
                     <div
-                      className={`border border-slate-800 bg-background px-2 py-2 flex items-center ${mono} text-[10px] text-amber-400/95 font-semibold`}
+                      className={`border border-ds-line/40 bg-background px-2 py-2 flex items-center ${mono} text-[10px] text-ds-warning/95 font-semibold`}
                     >
                       {m.machineCode}
                     </div>
@@ -536,10 +536,10 @@ export function ProductionScheduleBoard({
           <DragOverlay>
             {activeLine ? (
               <div
-                className={`rounded border border-amber-500/60 bg-zinc-900 px-2 py-1 shadow-xl max-w-[11rem] ${mono} text-[10px] text-slate-200`}
+                className={`rounded border border-ds-warning/60 bg-ds-card px-2 py-1 shadow-xl max-w-[11rem] ${mono} text-[10px] text-ds-ink`}
               >
                 PO {activeLine.po.poNumber}
-                <div className="text-[9px] text-slate-500 truncate">{activeLine.cartonName}</div>
+                <div className="text-[9px] text-ds-ink-faint truncate">{activeLine.cartonName}</div>
               </div>
             ) : null}
           </DragOverlay>

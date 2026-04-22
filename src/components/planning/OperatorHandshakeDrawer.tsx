@@ -77,21 +77,21 @@ export function OperatorHandshakeDrawer({
         onClick={onClose}
       />
       <aside
-        className="relative h-full w-full max-w-md border-l border-slate-800 bg-[#050505] shadow-2xl flex flex-col"
+        className="relative h-full w-full max-w-md border-l border-ds-line/40 bg-[#050505] shadow-2xl flex flex-col"
         role="dialog"
         aria-labelledby="handshake-title"
       >
-        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
           <div>
-            <h2 id="handshake-title" className="text-sm font-semibold text-amber-400">
+            <h2 id="handshake-title" className="text-sm font-semibold text-ds-warning">
               Operator handshake
             </h2>
-            <p className={`text-[10px] text-slate-500 mt-0.5 ${mono}`}>{title}</p>
+            <p className={`text-[10px] text-ds-ink-faint mt-0.5 ${mono}`}>{title}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-slate-500 hover:text-slate-200"
+            className="rounded p-1 text-ds-ink-faint hover:text-ds-ink"
           >
             <X className="h-4 w-4" />
           </button>
@@ -99,13 +99,13 @@ export function OperatorHandshakeDrawer({
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           <label className="block space-y-1">
-            <span className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
+            <span className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>
               Operator (Staff Hub)
             </span>
             <select
               value={operatorUserId}
               onChange={(e) => setOperatorUserId(e.target.value)}
-              className={`w-full h-9 rounded border border-slate-700 bg-background px-2 text-xs text-slate-200 ${mono}`}
+              className={`w-full h-9 rounded border border-ds-line/50 bg-background px-2 text-xs text-ds-ink ${mono}`}
             >
               <option value="">— Select —</option>
               {users.map((u) => (
@@ -117,7 +117,7 @@ export function OperatorHandshakeDrawer({
           </label>
 
           <label className="block space-y-1">
-            <span className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
+            <span className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>
               Target OEE speed %
             </span>
             <input
@@ -127,45 +127,45 @@ export function OperatorHandshakeDrawer({
               step={0.5}
               value={targetOeePct}
               onChange={(e) => setTargetOeePct(Number(e.target.value))}
-              className={`w-full h-9 rounded border border-slate-700 bg-background px-2 text-xs text-slate-200 ${mono}`}
+              className={`w-full h-9 rounded border border-ds-line/50 bg-background px-2 text-xs text-ds-ink ${mono}`}
             />
-            <p className="text-[10px] text-slate-600">
+            <p className="text-[10px] text-ds-ink-faint">
               Auto-filled from product / press baseline; adjust per run.
             </p>
           </label>
 
           <div className="space-y-2">
-            <span className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
+            <span className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>
               Planned maintenance (window)
             </span>
             <div className="grid grid-cols-2 gap-2">
               <label className="space-y-0.5">
-                <span className="text-[9px] text-slate-600">Start</span>
+                <span className="text-[9px] text-ds-ink-faint">Start</span>
                 <input
                   type="datetime-local"
                   value={pmStart}
                   onChange={(e) => setPmStart(e.target.value)}
-                  className={`w-full h-9 rounded border border-slate-700 bg-background px-1 text-[11px] text-slate-200 ${mono} [color-scheme:dark]`}
+                  className={`w-full h-9 rounded border border-ds-line/50 bg-background px-1 text-[11px] text-ds-ink ${mono} [color-scheme:dark]`}
                 />
               </label>
               <label className="space-y-0.5">
-                <span className="text-[9px] text-slate-600">End</span>
+                <span className="text-[9px] text-ds-ink-faint">End</span>
                 <input
                   type="datetime-local"
                   value={pmEnd}
                   onChange={(e) => setPmEnd(e.target.value)}
-                  className={`w-full h-9 rounded border border-slate-700 bg-background px-1 text-[11px] text-slate-200 ${mono} [color-scheme:dark]`}
+                  className={`w-full h-9 rounded border border-ds-line/50 bg-background px-1 text-[11px] text-ds-ink ${mono} [color-scheme:dark]`}
                 />
               </label>
             </div>
           </div>
         </div>
 
-        <div className="border-t border-slate-800 px-4 py-3 flex gap-2 justify-end">
+        <div className="border-t border-ds-line/40 px-4 py-3 flex gap-2 justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-border/15 px-3 py-1.5 text-xs text-slate-400 hover:border-border/25"
+            className="rounded border border-border/15 px-3 py-1.5 text-xs text-ds-ink-muted hover:border-border/25"
           >
             Cancel
           </button>

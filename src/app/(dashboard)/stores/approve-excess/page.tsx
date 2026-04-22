@@ -28,28 +28,28 @@ export default function ApproveExcessListPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <div className="p-4 text-slate-400">Loading…</div>
+  if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
   return (
     <div className="p-4 max-w-2xl mx-auto">
-      <h1 className="text-xl font-bold text-amber-400 mb-4">Approve Excess Requests</h1>
-      <Link href="/stores/issue" className="text-slate-400 hover:text-foreground text-sm mb-4 inline-block">
+      <h1 className="text-xl font-bold text-ds-warning mb-4">Approve Excess Requests</h1>
+      <Link href="/stores/issue" className="text-ds-ink-muted hover:text-foreground text-sm mb-4 inline-block">
         ← Issue Sheets
       </Link>
 
       {list.length === 0 ? (
-        <p className="text-slate-500">No pending excess requests.</p>
+        <p className="text-ds-ink-faint">No pending excess requests.</p>
       ) : (
         <ul className="space-y-2">
           {list.map((item) => (
             <li key={item.id}>
               <Link
                 href={`/stores/approve-excess/${item.id}`}
-                className="block p-4 rounded-lg bg-slate-800 border border-slate-600 hover:border-amber-500/50"
+                className="block p-4 rounded-lg bg-ds-elevated border border-ds-line/60 hover:border-ds-warning/50"
               >
-                <p className="font-mono text-amber-400">{item.jobNumber}</p>
-                <p className="text-slate-300">{item.productName} · {item.materialCode}</p>
-                <p className="text-slate-500 text-sm">
+                <p className="font-mono text-ds-warning">{item.jobNumber}</p>
+                <p className="text-ds-ink-muted">{item.productName} · {item.materialCode}</p>
+                <p className="text-ds-ink-faint text-sm">
                   Approved: {item.qtyApproved} · Issued: {item.qtyAlreadyIssued} · Requesting: {item.qtyRequested} {item.unit}
                 </p>
               </Link>

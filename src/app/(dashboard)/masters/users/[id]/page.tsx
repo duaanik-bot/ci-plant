@@ -97,42 +97,42 @@ export default function EditUserPage() {
     }
   }
 
-  if (loading) return <div className="text-slate-400">Loading…</div>
+  if (loading) return <div className="text-ds-ink-muted">Loading…</div>
   if (!user) return <div className="text-red-400">User not found</div>
 
   return (
     <div className="max-w-lg">
       <h2 className="text-lg font-semibold text-foreground mb-4">Edit user</h2>
-      <p className="text-slate-400 text-sm mb-2">Email: {user.email} (cannot be changed)</p>
+      <p className="text-ds-ink-muted text-sm mb-2">Email: {user.email} (cannot be changed)</p>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Full name *</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Full name *</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">New PIN (6 digits, leave blank to keep)</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">New PIN (6 digits, leave blank to keep)</label>
           <input
             type="password"
             value={pin}
             onChange={(e) => setPin(e.target.value)}
             maxLength={6}
             placeholder="••••••"
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-              fieldErrors.pin ? 'border-red-500' : 'border-slate-600'
+            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+              fieldErrors.pin ? 'border-red-500' : 'border-ds-line/60'
             }`}
           />
           {fieldErrors.pin && <p className="mt-1 text-sm text-red-400">{fieldErrors.pin}</p>}
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Role *</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Role *</label>
           <select
             value={roleId}
             onChange={(e) => setRoleId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           >
             {roles.map((r) => (
               <option key={r.id} value={r.id}>{r.roleName}</option>
@@ -140,7 +140,7 @@ export default function EditUserPage() {
           </select>
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Machine access</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Machine access</label>
           <div className="flex flex-wrap gap-2">
             {machines.map((m) => (
               <label key={m.id} className="flex items-center gap-1 text-sm">
@@ -148,7 +148,7 @@ export default function EditUserPage() {
                   type="checkbox"
                   checked={machineAccess.includes(m.id)}
                   onChange={() => toggleMachine(m.id)}
-                  className="rounded border-slate-600"
+                  className="rounded border-ds-line/60"
                 />
                 {m.machineCode}
               </label>
@@ -156,11 +156,11 @@ export default function EditUserPage() {
           </div>
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">WhatsApp number</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">WhatsApp number</label>
           <input
             value={whatsappNumber}
             onChange={(e) => setWhatsappNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -169,19 +169,19 @@ export default function EditUserPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-slate-600"
+            className="rounded border-ds-line/60"
           />
-          <label htmlFor="active" className="text-sm text-slate-300">Active</label>
+          <label htmlFor="active" className="text-sm text-ds-ink-muted">Active</label>
         </div>
         <div className="flex gap-2">
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground"
+            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/users" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground">
+          <Link href="/masters/users" className="px-4 py-2 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground">
             Cancel
           </Link>
         </div>

@@ -75,13 +75,13 @@ export default function CartonMasterPage() {
   }, [rows, search])
 
   if (loading) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading cartons…</div>
+    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading cartons…</div>
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">Carton Master</h2>
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Carton Master</h2>
         <Link href="/masters/cartons/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
           Add carton
         </Link>
@@ -98,7 +98,7 @@ export default function CartonMasterPage() {
       </div>
 
       <EnterpriseTableShell>
-        <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-sm text-slate-900 dark:text-slate-50">
+        <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>Carton</th>
@@ -140,7 +140,7 @@ export default function CartonMasterPage() {
         </table>
       </EnterpriseTableShell>
       {filtered.length === 0 && (
-        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No cartons match your search.</p>
+        <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No cartons match your search.</p>
       )}
     </div>
   )

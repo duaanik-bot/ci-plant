@@ -25,6 +25,7 @@ import {
   type PlanningLineFieldPatch,
 } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningBatchBuilderPanel } from '@/components/planning/PlanningBatchBuilderPanel'
+import { ActionBar, PageHeader } from '@/components/design-system'
 import { Button } from '@/components/design-system/Button'
 import { PlanningJobDetailDrawer } from '@/components/planning/PlanningJobDetailDrawer'
 import { PlanningSuggestedBatchesPanel } from '@/components/planning/PlanningSuggestedBatchesPanel'
@@ -887,82 +888,91 @@ export default function PlanningPage() {
   return (
     <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-ds-main text-ds-ink">
       <div className="shrink-0 space-y-2 border-b border-ds-line/60 bg-ds-main px-3 py-2">
-        <div className="flex flex-wrap items-end gap-3 justify-between">
-          <div>
-            <h1 className="text-[16px] font-semibold tracking-tight text-ds-ink md:text-[18px]">Planning</h1>
+        <PageHeader
+          className="!pb-2"
+          title="Planning"
+          description={
             <p className={`text-[13px] font-medium text-ds-ink-muted ${mono}`}>
               {rows.length} line(s) · Σ qty{' '}
-              <span className="font-semibold text-ds-success tabular-nums">{totalQty.toLocaleString('en-IN')}</span>
+              <span className="font-semibold text-ds-success tabular-nums">
+                {totalQty.toLocaleString('en-IN')}
+              </span>
             </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wider text-ds-ink-faint">View</span>
-            <div className="inline-flex rounded-ds-md border border-ds-line/80 bg-ds-elevated/50 p-0.5">
-              <button
-                type="button"
-                onClick={() => setLedgerView('pending')}
-                className={`rounded-ds-sm px-3 py-1.5 text-[13px] font-medium transition duration-200 ${
-                  ledgerView === 'pending' ? 'bg-ds-brand text-white shadow-sm' : 'text-ds-ink-muted hover:text-ds-ink'
-                }`}
-              >
-                Pending
-              </button>
-              <button
-                type="button"
-                onClick={() => setLedgerView('processed')}
-                className={`rounded-ds-sm px-3 py-1.5 text-[13px] font-medium transition duration-200 ${
-                  ledgerView === 'processed' ? 'bg-ds-brand text-white shadow-sm' : 'text-ds-ink-muted hover:text-ds-ink'
-                }`}
-              >
-                Processed
-              </button>
+          }
+          actions={
+            <div className="flex w-full max-w-3xl flex-col gap-2 sm:ml-auto sm:items-end">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium uppercase tracking-wider text-ds-ink-faint">View</span>
+                  <div className="inline-flex rounded-ds-md border border-ds-line/80 bg-ds-elevated/50 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setLedgerView('pending')}
+                      className={`rounded-ds-sm px-3 py-1.5 text-[13px] font-medium transition duration-200 ${
+                        ledgerView === 'pending' ? 'bg-ds-brand text-white shadow-sm' : 'text-ds-ink-muted hover:text-ds-ink'
+                      }`}
+                    >
+                      Pending
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLedgerView('processed')}
+                      className={`rounded-ds-sm px-3 py-1.5 text-[13px] font-medium transition duration-200 ${
+                        ledgerView === 'processed' ? 'bg-ds-brand text-white shadow-sm' : 'text-ds-ink-muted hover:text-ds-ink'
+                      }`}
+                    >
+                      Processed
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  onClick={() => void handleMakeProcessing()}
+                  disabled={
+                    planningSelection.size === 0 ||
+                    makeProcessingBusy ||
+                    !!selectedForMix.conflict ||
+                    !!mixConflictMessage
+                  }
+                  className="px-3 py-2 text-[13px]"
+                >
+                  {makeProcessingBusy ? 'Processing…' : 'Make processing'}
+                </Button>
+                <Link
+                  href="/hub/dies"
+                  className="inline-flex items-center justify-center gap-2 rounded-ds-sm border border-ds-line bg-ds-elevated/80 px-3 py-2 text-[13px] font-medium text-ds-ink shadow-sm transition duration-200 hover:bg-ds-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-brand/25"
+                >
+                  Dyes
+                </Link>
+                <Link
+                  href="/orders/purchase-orders"
+                  className="rounded-ds-sm border border-ds-line/80 bg-ds-elevated/60 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated"
+                >
+                  POs
+                </Link>
+                <Link
+                  href="/orders/designing"
+                  className="rounded-ds-sm border border-ds-line/80 bg-ds-elevated/60 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated"
+                >
+                  AW queue
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    downloadPlanningAuditCsv(rows)
+                    toast.success('Audit CSV exported')
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-ds-sm border border-ds-line/80 bg-ds-elevated/50 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated ${mono}`}
+                >
+                  <Download className="h-3.5 w-3.5 text-ds-ink-faint" aria-hidden />
+                  Audit
+                </button>
+              </div>
             </div>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            <Button
-              type="button"
-              onClick={() => void handleMakeProcessing()}
-              disabled={
-                planningSelection.size === 0 ||
-                makeProcessingBusy ||
-                !!selectedForMix.conflict ||
-                !!mixConflictMessage
-              }
-              className="px-3 py-2 text-[13px]"
-            >
-              {makeProcessingBusy ? 'Processing…' : 'Make processing'}
-            </Button>
-            <Link
-              href="/hub/dies"
-              className="inline-flex items-center justify-center gap-2 rounded-ds-sm border border-ds-line bg-ds-elevated/80 px-3 py-2 text-[13px] font-medium text-ds-ink shadow-sm transition duration-200 hover:bg-ds-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-brand/25"
-            >
-              Dyes
-            </Link>
-            <Link
-              href="/orders/purchase-orders"
-              className="rounded-ds-sm border border-ds-line/80 bg-ds-elevated/60 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated"
-            >
-              POs
-            </Link>
-            <Link
-              href="/orders/designing"
-              className="rounded-ds-sm border border-ds-line/80 bg-ds-elevated/60 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated"
-            >
-              AW queue
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                downloadPlanningAuditCsv(rows)
-                toast.success('Audit CSV exported')
-              }}
-              className={`inline-flex items-center gap-1.5 rounded-ds-sm border border-ds-line/80 bg-ds-elevated/50 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated ${mono}`}
-            >
-              <Download className="h-3.5 w-3.5 text-ds-ink-faint" aria-hidden />
-              Audit
-            </button>
-          </div>
-        </div>
+          }
+        />
         <div className="grid grid-cols-1 gap-2 text-[13px] sm:grid-cols-3 sm:gap-4">
           <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
             <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Queue Σ qty</p>
@@ -1092,50 +1102,55 @@ export default function PlanningPage() {
             busy={batchActionBusy}
           />
         </div>
+      </div>
 
-        <PlanningDecisionLayerToolbar
-          selectionCount={planningSelection.size}
-          onLinkAsMixSet={linkAsMixSet}
-          onSavePlanning={() => void savePlanningHandoff()}
-          groupBy={planningGroupBy}
-          onGroupByChange={setPlanningGroupBy}
-          setIdMode={planningSetIdMode}
-          onSetIdModeChange={setPlanningSetIdMode}
-          saving={savingPlanningHandoff}
-        />
-
-        <div className="flex flex-wrap gap-3 text-sm items-end max-w-xl">
-          <div className="min-w-[240px] flex-1">
-            <MasterSearchSelect
-              label="Customer (API filter)"
-              query={customerSearch.query}
-              onQueryChange={(value) => {
-                customerSearch.setQuery(value)
-                setCustomerId('')
-              }}
-              loading={customerSearch.loading}
-              options={customerSearch.options}
-              lastUsed={customerSearch.lastUsed}
-              onSelect={applyCustomer}
-              getOptionLabel={(c) => c.name}
-              getOptionMeta={(c) => c.contactName ?? ''}
-              placeholder="Filter customer…"
-              recentLabel="Recent customers"
-              loadingMessage="Searching…"
-              emptyMessage="No customer found."
+      <ActionBar className="shrink-0 border-b border-ds-line/50 bg-ds-main/95 px-3 py-2">
+        <div className="flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0 flex-1">
+            <PlanningDecisionLayerToolbar
+              selectionCount={planningSelection.size}
+              onLinkAsMixSet={linkAsMixSet}
+              onSavePlanning={() => void savePlanningHandoff()}
+              groupBy={planningGroupBy}
+              onGroupByChange={setPlanningGroupBy}
+              setIdMode={planningSetIdMode}
+              onSetIdModeChange={setPlanningSetIdMode}
+              saving={savingPlanningHandoff}
             />
-            {customerId ? (
-              <button
-                type="button"
-                onClick={() => applyCustomer(null)}
-                className="mt-1 text-[10px] text-ds-ink-faint transition hover:text-ds-ink"
-              >
-                Clear customer
-              </button>
-            ) : null}
+          </div>
+          <div className="flex w-full min-w-0 max-w-xl flex-1 flex-wrap items-end gap-3 text-sm">
+            <div className="min-w-[240px] flex-1">
+              <MasterSearchSelect
+                label="Customer (API filter)"
+                query={customerSearch.query}
+                onQueryChange={(value) => {
+                  customerSearch.setQuery(value)
+                  setCustomerId('')
+                }}
+                loading={customerSearch.loading}
+                options={customerSearch.options}
+                lastUsed={customerSearch.lastUsed}
+                onSelect={applyCustomer}
+                getOptionLabel={(c) => c.name}
+                getOptionMeta={(c) => c.contactName ?? ''}
+                placeholder="Filter customer…"
+                recentLabel="Recent customers"
+                loadingMessage="Searching…"
+                emptyMessage="No customer found."
+              />
+              {customerId ? (
+                <button
+                  type="button"
+                  onClick={() => applyCustomer(null)}
+                  className="mt-1 text-[10px] text-ds-ink-faint transition hover:text-ds-ink"
+                >
+                  Clear customer
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
+      </ActionBar>
 
       <div className="min-h-0 flex-1 overflow-hidden px-2 pb-1 pt-1">
         <ErrorBoundary moduleName="Planning Grid">

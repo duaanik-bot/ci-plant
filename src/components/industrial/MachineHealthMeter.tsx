@@ -50,7 +50,7 @@ export function MachineHealthMeter({
       </svg>
       <span
         className={`absolute inset-0 flex items-center justify-center text-[10px] ${mono} ${
-          !hasSchedule ? 'text-zinc-600' : low ? 'text-red-300' : healthPct > 80 ? 'text-emerald-400' : 'text-amber-300'
+          !hasSchedule ? 'text-neutral-600' : low ? 'text-red-300' : healthPct > 80 ? 'text-emerald-400' : 'text-ds-warning'
         }`}
       >
         {hasSchedule ? `${Math.round(healthPct)}` : '—'}
@@ -66,7 +66,7 @@ export function MachineHealthMeter({
         type="button"
         onClick={onClick}
         title={title ?? 'Open preventive maintenance'}
-        className={`${wrapCls} rounded-full border border-transparent hover:border-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 p-0.5`}
+        className={`${wrapCls} rounded-full border border-transparent hover:border-ds-line/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ds-warning/35 p-0.5`}
       >
         {inner}
       </button>

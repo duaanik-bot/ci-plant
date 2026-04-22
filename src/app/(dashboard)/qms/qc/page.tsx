@@ -102,26 +102,26 @@ export default function QcRecordsPage() {
   return (
     <div className="p-4 max-w-5xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-amber-400">QC Records</h1>
+        <h1 className="text-xl font-bold text-ds-warning">QC Records</h1>
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
+          className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
         >
           {showForm ? 'Cancel' : 'Add QC record'}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="rounded-xl bg-slate-900 border border-slate-700 p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-slate-200">New QC record</h2>
+        <form onSubmit={handleSubmit} className="rounded-xl bg-ds-card border border-ds-line/50 p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-ds-ink">New QC record</h2>
           <div className="grid md:grid-cols-2 gap-3 text-sm">
             <div>
-              <label className="block text-slate-400 mb-1">Job *</label>
+              <label className="block text-ds-ink-muted mb-1">Job *</label>
               <select
                 value={form.jobId}
                 onChange={(e) => setForm((f) => ({ ...f, jobId: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
               >
                 <option value="">Select job…</option>
                 {jobs.map((j) => (
@@ -132,20 +132,20 @@ export default function QcRecordsPage() {
               </select>
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Check type</label>
+              <label className="block text-ds-ink-muted mb-1">Check type</label>
               <input
                 type="text"
                 value={form.checkType}
                 onChange={(e) => setForm((f) => ({ ...f, checkType: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
               />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Instrument</label>
+              <label className="block text-ds-ink-muted mb-1">Instrument</label>
               <select
                 value={form.instrumentName}
                 onChange={(e) => setForm((f) => ({ ...f, instrumentName: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
               >
                 {QC_INSTRUMENTS.map((inst) => (
                   <option key={inst} value={inst}>
@@ -155,41 +155,41 @@ export default function QcRecordsPage() {
               </select>
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Result *</label>
+              <label className="block text-ds-ink-muted mb-1">Result *</label>
               <select
                 value={form.result}
                 onChange={(e) => setForm((f) => ({ ...f, result: e.target.value as 'PASS' | 'FAIL' }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
               >
                 <option value="PASS">PASS</option>
                 <option value="FAIL">FAIL</option>
               </select>
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Measured value</label>
+              <label className="block text-ds-ink-muted mb-1">Measured value</label>
               <input
                 type="text"
                 value={form.measuredValue}
                 onChange={(e) => setForm((f) => ({ ...f, measuredValue: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
               />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Spec min / max</label>
+              <label className="block text-ds-ink-muted mb-1">Spec min / max</label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   placeholder="Min"
                   value={form.specMin}
                   onChange={(e) => setForm((f) => ({ ...f, specMin: e.target.value }))}
-                  className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+                  className="flex-1 px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
                 <input
                   type="text"
                   placeholder="Max"
                   value={form.specMax}
                   onChange={(e) => setForm((f) => ({ ...f, specMax: e.target.value }))}
-                  className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+                  className="flex-1 px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
             </div>
@@ -199,26 +199,26 @@ export default function QcRecordsPage() {
                 type="checkbox"
                 checked={form.isFirstArticle}
                 onChange={(e) => setForm((f) => ({ ...f, isFirstArticle: e.target.checked }))}
-                className="rounded border-slate-600 bg-slate-800"
+                className="rounded border-ds-line/60 bg-ds-elevated"
               />
-              <label htmlFor="fa" className="text-slate-300 text-sm">
+              <label htmlFor="fa" className="text-ds-ink-muted text-sm">
                 First article
               </label>
             </div>
             <div className="md:col-span-2">
-              <label className="block text-slate-400 mb-1">Notes</label>
+              <label className="block text-ds-ink-muted mb-1">Notes</label>
               <input
                 type="text"
                 value={form.notes}
                 onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
               />
             </div>
           </div>
           <button
             type="submit"
             disabled={saving}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -229,7 +229,7 @@ export default function QcRecordsPage() {
         <select
           value={jobId}
           onChange={(e) => setJobId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
         >
           <option value="">All jobs</option>
           {jobs.map((j) => (
@@ -240,9 +240,9 @@ export default function QcRecordsPage() {
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-700">
+      <div className="overflow-x-auto rounded-lg border border-ds-line/50">
         <table className="w-full text-sm text-left">
-          <thead className="bg-slate-800 text-slate-300">
+          <thead className="bg-ds-elevated text-ds-ink-muted">
             <tr>
               <th className="px-4 py-2">Job</th>
               <th className="px-4 py-2">Check</th>
@@ -254,21 +254,21 @@ export default function QcRecordsPage() {
               <th className="px-4 py-2">Date</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700">
+          <tbody className="divide-y divide-ds-line/40">
             {list.map((r) => (
-              <tr key={r.id} className="hover:bg-slate-800/60">
-                <td className="px-4 py-2 font-mono text-amber-300">{r.job.jobNumber}</td>
-                <td className="px-4 py-2 text-slate-200">{r.checkType}</td>
-                <td className="px-4 py-2 text-slate-300">{r.instrumentName}</td>
-                <td className="px-4 py-2 text-slate-300">{r.measuredValue ?? '—'}</td>
+              <tr key={r.id} className="hover:bg-ds-elevated/60">
+                <td className="px-4 py-2 font-mono text-ds-warning">{r.job.jobNumber}</td>
+                <td className="px-4 py-2 text-ds-ink">{r.checkType}</td>
+                <td className="px-4 py-2 text-ds-ink-muted">{r.instrumentName}</td>
+                <td className="px-4 py-2 text-ds-ink-muted">{r.measuredValue ?? '—'}</td>
                 <td className="px-4 py-2">
                   <span className={r.result === 'PASS' ? 'text-green-400' : 'text-red-400'}>
                     {r.result}
                   </span>
                 </td>
-                <td className="px-4 py-2 text-slate-400">{r.isFirstArticle ? 'Yes' : '—'}</td>
-                <td className="px-4 py-2 text-slate-300">{r.checker.name}</td>
-                <td className="px-4 py-2 text-slate-400">
+                <td className="px-4 py-2 text-ds-ink-muted">{r.isFirstArticle ? 'Yes' : '—'}</td>
+                <td className="px-4 py-2 text-ds-ink-muted">{r.checker.name}</td>
+                <td className="px-4 py-2 text-ds-ink-muted">
                   {new Date(r.checkedAt).toLocaleString()}
                 </td>
               </tr>
@@ -277,7 +277,7 @@ export default function QcRecordsPage() {
         </table>
       </div>
       {list.length === 0 && (
-        <p className="text-slate-500 text-center py-8 text-sm">No QC records found.</p>
+        <p className="text-ds-ink-faint text-center py-8 text-sm">No QC records found.</p>
       )}
     </div>
   )

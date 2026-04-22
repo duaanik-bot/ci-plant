@@ -93,7 +93,7 @@ export default function EditCustomerPage() {
     }
   }
 
-  if (loading) return <div className="text-slate-400">Loading…</div>
+  if (loading) return <div className="text-ds-ink-muted">Loading…</div>
   if (!customer) return <div className="text-red-400">Customer not found</div>
 
   return (
@@ -101,77 +101,77 @@ export default function EditCustomerPage() {
       <h2 className="text-lg font-semibold text-foreground mb-4">Edit customer</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Company name *</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Company name *</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-              fieldErrors.name ? 'border-red-500' : 'border-slate-600'
+            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+              fieldErrors.name ? 'border-red-500' : 'border-ds-line/60'
             }`}
           />
           {fieldErrors.name && <p className="mt-1 text-sm text-red-400">{fieldErrors.name}</p>}
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">GST number</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">GST number</label>
           <input
             value={gstNumber}
             onChange={(e) => setGstNumber(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-              fieldErrors.gstNumber ? 'border-red-500' : 'border-slate-600'
+            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+              fieldErrors.gstNumber ? 'border-red-500' : 'border-ds-line/60'
             }`}
           />
           {fieldErrors.gstNumber && <p className="mt-1 text-sm text-red-400">{fieldErrors.gstNumber}</p>}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Contact person</label>
+            <label className="block text-sm text-ds-ink-muted mb-1">Contact person</label>
             <input
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Phone</label>
+            <label className="block text-sm text-ds-ink-muted mb-1">Phone</label>
             <input
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-                fieldErrors.contactPhone ? 'border-red-500' : 'border-slate-600'
+              className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+                fieldErrors.contactPhone ? 'border-red-500' : 'border-ds-line/60'
               }`}
             />
             {fieldErrors.contactPhone && <p className="mt-1 text-sm text-red-400">{fieldErrors.contactPhone}</p>}
           </div>
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Email</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Email</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-              fieldErrors.email ? 'border-red-500' : 'border-slate-600'
+            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+              fieldErrors.email ? 'border-red-500' : 'border-ds-line/60'
             }`}
           />
           {fieldErrors.email && <p className="mt-1 text-sm text-red-400">{fieldErrors.email}</p>}
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Billing address</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Billing address</label>
           <textarea
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Credit limit</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Credit limit</label>
           <input
             type="number"
             min={0}
             value={creditLimit}
             onChange={(e) => setCreditLimit(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -180,9 +180,9 @@ export default function EditCustomerPage() {
             id="artwork"
             checked={requiresArtworkApproval}
             onChange={(e) => setRequiresArtworkApproval(e.target.checked)}
-            className="rounded border-slate-600"
+            className="rounded border-ds-line/60"
           />
-          <label htmlFor="artwork" className="text-sm text-slate-300">
+          <label htmlFor="artwork" className="text-sm text-ds-ink-muted">
             Requires artwork approval
           </label>
         </div>
@@ -192,9 +192,9 @@ export default function EditCustomerPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-slate-600"
+            className="rounded border-ds-line/60"
           />
-          <label htmlFor="active" className="text-sm text-slate-300">
+          <label htmlFor="active" className="text-sm text-ds-ink-muted">
             Active
           </label>
         </div>
@@ -202,13 +202,13 @@ export default function EditCustomerPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground"
+            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
           <Link
             href="/masters/customers"
-            className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground"
+            className="px-4 py-2 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground"
           >
             Cancel
           </Link>

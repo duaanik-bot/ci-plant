@@ -92,16 +92,16 @@ export function HubCardDeleteAction({
           if (stopPropagationOnTrigger) e.stopPropagation()
           if (!disabled) setOpen((o) => !o)
         }}
-        className="flex h-6 w-6 items-center justify-center rounded-md border border-zinc-600/50 bg-zinc-900/90 text-slate-500 transition-shadow hover:border-rose-500/50 hover:text-rose-500 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex h-6 w-6 items-center justify-center rounded-md border border-ds-line/50 bg-ds-card/90 text-ds-ink-faint transition-shadow hover:border-rose-500/50 hover:text-rose-500 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40"
       >
         <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden />
       </button>
       {open ? (
         <div
           role="dialog"
-          className="absolute right-0 top-[calc(100%+6px)] z-[100] w-[min(16rem,calc(100vw-1.5rem))] rounded-md border border-zinc-700 bg-zinc-950 p-2.5 shadow-xl"
+          className="absolute right-0 top-[calc(100%+6px)] z-[100] w-[min(16rem,calc(100vw-1.5rem))] rounded-md border border-ds-line/50 bg-ds-main p-2.5 shadow-xl"
         >
-          <p className={`text-[11px] font-bold text-zinc-100 ${CONFIRM_MONO}`}>Delete this record?</p>
+          <p className={`text-[11px] font-bold text-ds-ink ${CONFIRM_MONO}`}>Delete this record?</p>
           <div className="mt-2.5 flex justify-end gap-1.5">
             <button
               type="button"
@@ -110,7 +110,7 @@ export function HubCardDeleteAction({
                 e.stopPropagation()
                 setOpen(false)
               }}
-              className="rounded border border-slate-600/80 bg-slate-800/80 px-2.5 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-800"
+              className="rounded border border-ds-line/50 bg-ds-elevated/80 px-2.5 py-1 text-[10px] font-semibold text-ds-ink hover:bg-ds-elevated"
             >
               Cancel
             </button>
@@ -126,7 +126,7 @@ export function HubCardDeleteAction({
               {busy ? '…' : 'Delete'}
             </button>
           </div>
-          <p className={`mt-2 border-t border-zinc-800 pt-1.5 text-[8px] leading-tight text-zinc-500 ${CONFIRM_MONO}`}>
+          <p className={`mt-2 border-t border-ds-line/40 pt-1.5 text-[8px] leading-tight text-neutral-500 ${CONFIRM_MONO}`}>
             Hub Integrity Managed - Individual Card Triggers Active.
           </p>
         </div>

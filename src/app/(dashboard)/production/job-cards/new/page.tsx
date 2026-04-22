@@ -117,13 +117,13 @@ export default function NewJobCardPage() {
     }
   }
 
-  if (loading) return <div className="p-4 text-slate-400">Loading…</div>
+  if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
   return (
     <form onSubmit={handleSubmit} className="p-4 max-w-4xl mx-auto space-y-4">
-      <h1 className="text-xl font-bold text-amber-400">New Job Card (from Customer PO)</h1>
+      <h1 className="text-xl font-bold text-ds-warning">New Job Card (from Customer PO)</h1>
 
-      <div className="grid md:grid-cols-2 gap-4 bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm">
+      <div className="grid md:grid-cols-2 gap-4 bg-ds-card border border-ds-line/50 rounded-lg p-4 text-sm">
         <div>
           <MasterSearchSelect
             label="Purchase order"
@@ -146,15 +146,15 @@ export default function NewJobCardPage() {
             emptyMessage="No purchase order found."
           />
           {selectedPo && (
-            <p className="text-xs text-slate-500 mt-1">Selected: {selectedPo.poNumber}</p>
+            <p className="text-xs text-ds-ink-faint mt-1">Selected: {selectedPo.poNumber}</p>
           )}
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">PO line item*</label>
+          <label className="block text-ds-ink-muted mb-1">PO line item*</label>
           <select
             value={lineId}
             onChange={(e) => setLineId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
             disabled={!selectedPo}
           >
             <option value="">Select line…</option>
@@ -165,51 +165,51 @@ export default function NewJobCardPage() {
             ))}
           </select>
           {!!selectedPo && availableLines.length === 0 && (
-            <p className="text-xs text-slate-500 mt-1">All lines already have job cards.</p>
+            <p className="text-xs text-ds-ink-faint mt-1">All lines already have job cards.</p>
           )}
         </div>
 
         <div>
-          <label className="block text-slate-400 mb-1">Required sheets*</label>
+          <label className="block text-ds-ink-muted mb-1">Required sheets*</label>
           <input
             type="number"
             min={1}
             value={requiredSheets}
             onChange={(e) => setRequiredSheets(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
           {selectedLine && (
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-ds-ink-faint mt-1">
               Selected: {selectedLine.cartonName} (PO qty {selectedLine.quantity})
             </p>
           )}
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Wastage sheets</label>
+          <label className="block text-ds-ink-muted mb-1">Wastage sheets</label>
           <input
             type="number"
             min={0}
             value={wastageSheets}
             onChange={(e) => setWastageSheets(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Assigned operator</label>
+          <label className="block text-ds-ink-muted mb-1">Assigned operator</label>
           <input
             type="text"
             value={assignedOperator}
             onChange={(e) => setAssignedOperator(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Batch number</label>
+          <label className="block text-ds-ink-muted mb-1">Batch number</label>
           <input
             type="text"
             value={batchNumber}
             onChange={(e) => setBatchNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
       </div>
@@ -218,14 +218,14 @@ export default function NewJobCardPage() {
         <button
           type="button"
           onClick={() => router.push('/production/job-cards')}
-          className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
+          className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={saving}
-          className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
+          className="px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
         >
           {saving ? 'Saving…' : 'Create job card'}
         </button>

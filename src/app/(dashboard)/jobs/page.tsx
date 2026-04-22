@@ -44,19 +44,19 @@ export default function JobsPage() {
   }, [statusFilter, customerFilter])
 
   if (loading) {
-    return <div className="p-4 text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+    return <div className="p-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
   }
 
   const statusBadge = (status: string) => {
     const colours: Record<string, string> = {
-      pending_artwork: 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-200',
+      pending_artwork: 'bg-ds-warning/8 text-ds-warning dark:bg-ds-warning/12 dark:text-ds-warning',
       artwork_approved: 'bg-blue-100 text-blue-900 dark:bg-blue-900/50 dark:text-blue-200',
       in_production: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-200',
-      closed: 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300',
+      closed: 'bg-neutral-200 text-neutral-800 dark:bg-ds-elevated dark:text-ds-ink-muted',
       dispatched: 'bg-purple-100 text-purple-900 dark:bg-purple-900/50 dark:text-purple-200',
     }
     return (
-      <span className={`rounded px-2 py-0.5 text-xs font-medium ${colours[status] ?? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300'}`}>
+      <span className={`rounded px-2 py-0.5 text-xs font-medium ${colours[status] ?? 'bg-neutral-200 text-neutral-800 dark:bg-ds-elevated dark:text-ds-ink-muted'}`}>
         {status.replace(/_/g, ' ')}
       </span>
     )
@@ -68,7 +68,7 @@ export default function JobsPage() {
   return (
     <div className="mx-auto max-w-6xl p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-slate-900 dark:text-slate-50">Jobs</h1>
+        <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Jobs</h1>
         <Link href="/jobs/new" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
           New job
         </Link>
@@ -115,7 +115,7 @@ export default function JobsPage() {
               const daysLeft = Number.isNaN(due.getTime()) ? '—' : differenceInDays(due, new Date())
               return (
                 <tr key={job.id} className={enterpriseTrClass}>
-                  <td className={`${enterpriseTdMonoClass} text-amber-800 dark:text-amber-400`}>{job?.jobNumber ?? '—'}</td>
+                  <td className={`${enterpriseTdMonoClass} text-ds-warning dark:text-ds-warning`}>{job?.jobNumber ?? '—'}</td>
                   <td className={enterpriseTdClass}>{job?.customer?.name ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{job?.productName ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{job?.qtyOrdered ?? '—'}</td>
@@ -136,7 +136,7 @@ export default function JobsPage() {
                       href={`/api/jobs/${job?.id ?? ''}/card-pdf`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-slate-600 hover:underline dark:text-slate-400"
+                      className="text-ds-ink-faint hover:underline dark:text-ds-ink-muted"
                     >
                       PDF
                     </a>
@@ -147,7 +147,7 @@ export default function JobsPage() {
           </tbody>
         </table>
       </EnterpriseTableShell>
-      {jobs.length === 0 && <p className="py-8 text-center text-sm text-slate-600 dark:text-slate-400">No jobs found.</p>}
+      {jobs.length === 0 && <p className="py-8 text-center text-sm text-ds-ink-faint dark:text-ds-ink-muted">No jobs found.</p>}
     </div>
   )
 }

@@ -87,29 +87,29 @@ export function DieTakeFromStockModal({
       >
         <div className="shrink-0">
           <h3 className="ci-hub-modal-title">Take from stock</h3>
-          <p className="text-slate-400 text-[11px] leading-snug mt-2">
+          <p className="text-ds-ink-muted text-[11px] leading-snug mt-2">
             Matching dies share the same L×W×H as triage job{' '}
-            <span className="text-amber-200/90 font-mono">{triageCode || '…'}</span>. Pull one into
-            custody floor (<span className="text-amber-200/90">Source: Rack</span>). The triage
+            <span className="text-ds-warning font-mono">{triageCode || '…'}</span>. Pull one into
+            custody floor (<span className="text-ds-warning">Source: Rack</span>). The triage
             placeholder will be archived.
           </p>
         </div>
 
         {loading ? (
-          <p className="text-sm text-zinc-500 shrink-0">Loading rack matches…</p>
+          <p className="text-sm text-neutral-500 shrink-0">Loading rack matches…</p>
         ) : error ? (
           <p className="text-sm text-rose-400 shrink-0">{error}</p>
         ) : hint && candidates.length === 0 ? (
-          <p className="text-sm text-amber-200/90 shrink-0">{hint}</p>
+          <p className="text-sm text-ds-warning shrink-0">{hint}</p>
         ) : candidates.length === 0 ? (
           <p className="text-sm text-rose-400 shrink-0">
             No dies in live inventory with identical L×W×H.
           </p>
         ) : (
-          <div className="overflow-auto rounded-lg border border-zinc-800 min-h-0">
+          <div className="overflow-auto rounded-lg border border-ds-line/40 min-h-0">
             <table className="w-full text-[11px] border-collapse">
-              <thead className="sticky top-0 bg-zinc-950 z-[1]">
-                <tr className="text-left text-zinc-500 border-b border-zinc-800">
+              <thead className="sticky top-0 bg-ds-main z-[1]">
+                <tr className="text-left text-neutral-500 border-b border-ds-line/40">
                   <th className="py-1.5 px-2 w-10 font-semibold uppercase tracking-wide">Sel</th>
                   <th className="py-1.5 px-2 font-semibold uppercase tracking-wide">Serial</th>
                   <th className="py-1.5 px-2 font-semibold uppercase tracking-wide">Pasting</th>
@@ -122,25 +122,25 @@ export function DieTakeFromStockModal({
               </thead>
               <tbody>
                 {candidates.map((c) => (
-                  <tr key={c.id} className="border-b border-zinc-800/80 align-top">
+                  <tr key={c.id} className="border-b border-ds-line/50 align-top">
                     <td className="py-1.5 px-2">
                       <input
                         type="radio"
                         name="die-stock-pick"
-                        className="border-zinc-600"
+                        className="border-ds-line/50"
                         checked={selectedId === c.id}
                         onChange={() => setSelectedId(c.id)}
                       />
                     </td>
-                    <td className="py-1.5 px-2 text-amber-200/90 font-mono font-semibold whitespace-nowrap">
+                    <td className="py-1.5 px-2 text-ds-warning font-mono font-semibold whitespace-nowrap">
                       {c.serialLabel}
                     </td>
-                    <td className="py-1.5 px-2 text-zinc-300">{pastingStyleLabel(c.pastingStyle)}</td>
-                    <td className="py-1.5 px-2 text-zinc-300 capitalize">{c.dieMake}</td>
-                    <td className="py-1.5 px-2 text-zinc-300 whitespace-nowrap">
+                    <td className="py-1.5 px-2 text-neutral-400">{pastingStyleLabel(c.pastingStyle)}</td>
+                    <td className="py-1.5 px-2 text-neutral-400 capitalize">{c.dieMake}</td>
+                    <td className="py-1.5 px-2 text-neutral-400 whitespace-nowrap">
                       {c.location?.trim() || '—'}
                     </td>
-                    <td className="py-1.5 px-2 text-right text-zinc-400 tabular-nums">
+                    <td className="py-1.5 px-2 text-right text-neutral-500 tabular-nums">
                       Imp {c.impressionCount} · Cycles {c.reuseCount}
                     </td>
                   </tr>
@@ -153,7 +153,7 @@ export function DieTakeFromStockModal({
         <div className="flex justify-end gap-2 pt-1 shrink-0">
           <button
             type="button"
-            className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+            className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
             onClick={onClose}
             disabled={saving}
           >

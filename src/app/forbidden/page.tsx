@@ -2,10 +2,10 @@ import Link from 'next/link'
 
 export default function ForbiddenPage() {
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4">
-      <div className="w-full max-w-lg rounded-xl border border-slate-800 bg-slate-900/70 p-8 space-y-4">
+    <main className="min-h-screen bg-ds-main text-ds-ink flex items-center justify-center px-4">
+      <div className="w-full max-w-lg rounded-xl border border-ds-line/40 bg-ds-card/70 p-8 space-y-4">
         <h1 className="text-2xl font-semibold">Access denied</h1>
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-ds-ink-muted">
           Your account is authenticated, but you do not have permission to access this area.
         </p>
         <div className="flex items-center gap-2">
@@ -17,7 +17,7 @@ export default function ForbiddenPage() {
           </Link>
           <Link
             href="/api/auth/signout"
-            className="rounded-md border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+            className="rounded-md border border-ds-line/50 px-4 py-2 text-sm text-ds-ink hover:bg-ds-elevated"
           >
             Sign out
           </Link>

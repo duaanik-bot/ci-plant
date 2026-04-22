@@ -71,13 +71,13 @@ export default function DieVendorOrdersPage() {
   }
 
   const selectCls =
-    'min-h-[32px] min-w-[80px] rounded border border-slate-200 bg-card px-1 py-0.5 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100'
+    'min-h-[32px] min-w-[80px] rounded border border-neutral-200 bg-card px-1 py-0.5 text-xs text-neutral-900 dark:border-ds-line/50 dark:bg-ds-card dark:text-ds-ink'
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
-      <h1 className="text-base font-semibold text-slate-900 dark:text-slate-50">Vendor Orders</h1>
+      <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Vendor Orders</h1>
       <EnterpriseTableShell>
-        <table className="w-full min-w-[960px] border-collapse text-left text-sm text-slate-900 dark:text-slate-50">
+        <table className="w-full min-w-[960px] border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>Order</th>
@@ -95,7 +95,7 @@ export default function DieVendorOrdersPage() {
           <tbody className={enterpriseTbodyClass}>
             {withOverdue.map((o) => (
               <tr key={o.id} className={enterpriseTrClass}>
-                <td className={`${enterpriseTdMonoClass} text-amber-700 dark:text-amber-300`}>{o?.orderCode ?? '—'}</td>
+                <td className={`${enterpriseTdMonoClass} text-ds-warning dark:text-ds-warning`}>{o?.orderCode ?? '—'}</td>
                 <td className={enterpriseTdMonoClass}>
                   {o?.orderedAt ? new Date(o.orderedAt).toLocaleDateString('en-IN') : '—'}
                 </td>

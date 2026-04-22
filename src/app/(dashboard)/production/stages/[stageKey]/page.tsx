@@ -128,7 +128,7 @@ type FactoryPmKpis = {
 
 function oeeBandClass(oee: number): string {
   if (oee >= 85) return 'text-emerald-500'
-  if (oee >= 60) return 'text-amber-500'
+  if (oee >= 60) return 'text-ds-warning'
   return 'text-rose-500'
 }
 
@@ -243,7 +243,7 @@ export default function ProductionStagePage() {
   if (loading) {
     return (
       <IndustrialModuleShell title="Production stage" subtitle="Loading…">
-        <p className="text-slate-500 text-sm">Loading…</p>
+        <p className="text-ds-ink-faint text-sm">Loading…</p>
       </IndustrialModuleShell>
     )
   }
@@ -251,8 +251,8 @@ export default function ProductionStagePage() {
   if (!stageMeta && !data) {
     return (
       <IndustrialModuleShell title="Production stage" subtitle="">
-        <p className="text-slate-400 text-sm">Unknown stage.</p>
-        <Link href="/production/stages" className="text-amber-400 hover:underline mt-2 inline-block text-sm">
+        <p className="text-ds-ink-muted text-sm">Unknown stage.</p>
+        <Link href="/production/stages" className="text-ds-warning hover:underline mt-2 inline-block text-sm">
           ← All stages
         </Link>
       </IndustrialModuleShell>
@@ -349,7 +349,7 @@ export default function ProductionStagePage() {
     const active = sortBy === columnKey
     return (
       <th
-        className="px-4 py-2 cursor-pointer select-none hover:bg-slate-800/50 text-left"
+        className="px-4 py-2 cursor-pointer select-none hover:bg-ds-elevated/50 text-left"
         onClick={() => toggleSort(columnKey)}
       >
         <span className="flex items-center gap-1">
@@ -391,7 +391,7 @@ export default function ProductionStagePage() {
                   ? 'text-rose-300'
                   : stageKpis.pri > 0
                     ? 'text-orange-400'
-                    : 'text-slate-100'
+                    : 'text-ds-ink'
               }
               shellClassName={stageKpis.pri > 0 ? 'ring-1 ring-orange-500/30' : ''}
             />
@@ -403,7 +403,7 @@ export default function ProductionStagePage() {
                 hubOee?.plantOee != null ? (
                   <span className={mono}>{hubOee.plantOee}%</span>
                 ) : (
-                  <span className="text-slate-500">N/A</span>
+                  <span className="text-ds-ink-faint">N/A</span>
                 )
               }
               valueClassName={`${mono} text-emerald-400`}
@@ -422,7 +422,7 @@ export default function ProductionStagePage() {
               label="Unplanned stops"
               value={<span className={mono}>{hubOee?.unplannedStops ?? '—'}</span>}
               hint="Excludes changeover/setup (7d)"
-              valueClassName={`${mono} text-amber-400`}
+              valueClassName={`${mono} text-ds-warning`}
             />
           </div>
           <div className="col-span-2 grid grid-cols-1 gap-2 sm:grid-cols-3 md:col-span-2 lg:col-span-4 xl:col-span-6 2xl:col-span-6">
@@ -432,7 +432,7 @@ export default function ProductionStagePage() {
                 factoryPm?.factoryHealthAvg != null ? (
                   <span className={mono}>{factoryPm.factoryHealthAvg}%</span>
                 ) : (
-                  <span className="text-slate-500">N/A</span>
+                  <span className="text-ds-ink-faint">N/A</span>
                 )
               }
               valueClassName={`${mono} text-emerald-400`}
@@ -449,9 +449,9 @@ export default function ProductionStagePage() {
             <IndustrialKpiTile
               label="Scheduled PM (h, week)"
               value={<span className={mono}>{factoryPm?.scheduledPmHoursThisWeek ?? '—'}</span>}
-              valueClassName={`${mono} text-amber-300`}
+              valueClassName={`${mono} text-ds-warning`}
               hint="Planned downtime windows overlapping this week"
-              shellClassName="ring-1 ring-amber-500/15"
+              shellClassName="ring-1 ring-ds-warning/35"
             />
           </div>
         </>
@@ -460,13 +460,13 @@ export default function ProductionStagePage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/production/stages"
-          className="text-sm text-slate-400 hover:text-foreground"
+          className="text-sm text-ds-ink-muted hover:text-foreground"
         >
           ← All stages
         </Link>
         <Link
           href="/production/job-cards"
-          className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm hover:bg-slate-900"
+          className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-card"
         >
           Job Cards
         </Link>
@@ -489,7 +489,7 @@ export default function ProductionStagePage() {
 
       <div className={industrialTableClassName()}>
         <table className="w-full text-sm text-left border-collapse">
-          <thead className="bg-slate-950/90 text-slate-400 border-b border-slate-800">
+          <thead className="bg-ds-main/90 text-ds-ink-muted border-b border-ds-line/40">
             <tr>
               <SortHeader columnKey="jobCardNumber">JC#</SortHeader>
               <SortHeader columnKey="customer">Customer</SortHeader>
@@ -507,7 +507,7 @@ export default function ProductionStagePage() {
               <th className="px-4 py-2">Action</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody className="divide-y divide-ds-line/30">
             {list.map((row) => {
               const { stageRecord, jobCard, idleHours } = row
               const pri =
@@ -516,10 +516,10 @@ export default function ProductionStagePage() {
               return (
                 <tr
                   key={stageRecord.id}
-                  className={`hover:bg-slate-900/50 cursor-pointer ${pri} ${lock ? 'ring-1 ring-rose-500/40' : ''}`}
+                  className={`hover:bg-ds-card/50 cursor-pointer ${pri} ${lock ? 'ring-1 ring-rose-500/40' : ''}`}
                   onClick={() => setSpotlight(row)}
                 >
-                  <td className="px-4 py-2 font-mono text-amber-300">
+                  <td className="px-4 py-2 font-mono text-ds-warning">
                     <div className="flex items-center gap-1">
                       {jobCard.industrialPriority ? (
                         <Star
@@ -530,14 +530,14 @@ export default function ProductionStagePage() {
                       <span>{jobCard.jobCardNumber}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-2 text-slate-200">{jobCard.customer.name}</td>
-                  <td className="px-4 py-2 text-slate-300 max-w-[200px] truncate" title={jobCard.productName ?? ''}>
+                  <td className="px-4 py-2 text-ds-ink">{jobCard.customer.name}</td>
+                  <td className="px-4 py-2 text-ds-ink-muted max-w-[200px] truncate" title={jobCard.productName ?? ''}>
                     {jobCard.productName ?? '—'}
                   </td>
-                  <td className="px-4 py-2 text-slate-300">
+                  <td className="px-4 py-2 text-ds-ink-muted">
                     {jobCard.setNumber ?? '—'} / {jobCard.batchNumber ?? '—'}
                   </td>
-                  <td className="px-4 py-2 text-slate-300">
+                  <td className="px-4 py-2 text-ds-ink-muted">
                     {jobCard.requiredSheets} / {jobCard.totalSheets}
                   </td>
                   <td className="px-4 py-2">
@@ -556,7 +556,7 @@ export default function ProductionStagePage() {
                         <span>{jobCard.yield.yieldPercent}%</span>
                       </div>
                     ) : (
-                      <span className="text-slate-600 text-xs">—</span>
+                      <span className="text-ds-ink-faint text-xs">—</span>
                     )}
                   </td>
                   <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
@@ -570,7 +570,7 @@ export default function ProductionStagePage() {
                     ) : jobCard.machine ? (
                       <MachineHealthMeter healthPct={0} hasSchedule={false} />
                     ) : (
-                      <span className="text-slate-600 text-xs">—</span>
+                      <span className="text-ds-ink-faint text-xs">—</span>
                     )}
                   </td>
                   <td className={`px-4 py-2 ${mono} text-sm`}>
@@ -585,12 +585,12 @@ export default function ProductionStagePage() {
                         {jobCard.oee.oee}%
                       </span>
                     ) : (
-                      <span className="text-slate-600 text-xs">—</span>
+                      <span className="text-ds-ink-faint text-xs">—</span>
                     )}
                   </td>
                   <td
                     className={`px-4 py-2 ${mono} text-xs ${
-                      lock ? 'text-rose-400 animate-pulse' : 'text-slate-300'
+                      lock ? 'text-rose-400 animate-pulse' : 'text-ds-ink-muted'
                     }`}
                   >
                     {jobCard.oee != null && jobCard.oee.ratedSpeedPph > 0 ? (
@@ -608,7 +608,7 @@ export default function ProductionStagePage() {
                           ? 'bg-green-900/40 text-green-300 border-green-600'
                           : stageRecord.status === 'in_progress'
                             ? 'bg-blue-900/40 text-blue-300 border-blue-600'
-                            : 'bg-slate-800 text-slate-400 border-slate-600'
+                            : 'bg-ds-elevated text-ds-ink-muted border-ds-line/60'
                       }`}
                     >
                       {stageRecord.status}
@@ -616,7 +616,7 @@ export default function ProductionStagePage() {
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">
                     {stageRecord.status === 'completed' ? (
-                      <span className="text-slate-500 text-xs">—</span>
+                      <span className="text-ds-ink-faint text-xs">—</span>
                     ) : (
                       <AgeTickerCell
                         referenceIso={stageRecord.createdAt}
@@ -625,7 +625,7 @@ export default function ProductionStagePage() {
                       />
                     )}
                   </td>
-                  <td className="px-4 py-2 text-slate-300">
+                  <td className="px-4 py-2 text-ds-ink-muted">
                     {jobCard.shiftOperator ? (
                       <button
                         type="button"
@@ -638,10 +638,10 @@ export default function ProductionStagePage() {
                         {jobCard.shiftOperator.name}
                       </button>
                     ) : (
-                      <span className="text-slate-500">{stageRecord.operator ?? '—'}</span>
+                      <span className="text-ds-ink-faint">{stageRecord.operator ?? '—'}</span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-slate-400 text-xs">
+                  <td className="px-4 py-2 text-ds-ink-muted text-xs">
                     {stageRecord.completedAt
                       ? new Date(stageRecord.completedAt).toLocaleString()
                       : '—'}
@@ -649,7 +649,7 @@ export default function ProductionStagePage() {
                   <td className="px-4 py-2">
                     <Link
                       href={`/production/job-cards/${jobCard.id}`}
-                      className="text-amber-400 hover:underline"
+                      className="text-ds-warning hover:underline"
                       onClick={(e) => e.stopPropagation()}
                     >
                       Open JC
@@ -663,31 +663,31 @@ export default function ProductionStagePage() {
       </div>
 
       {stageKey === 'dye_cutting' && list.some((x) => x.stageRecord.status === 'completed') ? (
-        <div className="rounded-xl border border-amber-700 bg-amber-950/30 p-4">
-          <p className="text-amber-200 font-medium">⚠ DIE RETURN REQUIRED</p>
-          <p className="text-xs text-amber-300 mt-1">
+        <div className="rounded-xl border border-ds-warning/50 bg-ds-warning/10 p-4">
+          <p className="text-ds-warning font-medium">⚠ DIE RETURN REQUIRED</p>
+          <p className="text-xs text-ds-warning mt-1">
             Die Cutting completed jobs should return dies immediately with run impressions and condition.
           </p>
-          <p className="text-xs text-slate-300 mt-2">
+          <p className="text-xs text-ds-ink-muted mt-2">
             Open the job card, use the Die panel, then click <span className="font-semibold">Confirm Return</span>.
           </p>
         </div>
       ) : null}
 
       {stageKey === 'embossing' && list.some((x) => x.stageRecord.status === 'completed') ? (
-        <div className="rounded-xl border border-amber-700 bg-amber-950/30 p-4">
-          <p className="text-amber-200 font-medium">⚠ EMBOSS BLOCK RETURN REQUIRED</p>
-          <p className="text-xs text-amber-300 mt-1">
+        <div className="rounded-xl border border-ds-warning/50 bg-ds-warning/10 p-4">
+          <p className="text-ds-warning font-medium">⚠ EMBOSS BLOCK RETURN REQUIRED</p>
+          <p className="text-xs text-ds-warning mt-1">
             Embossing completed jobs should return blocks immediately with impressions and condition.
           </p>
-          <p className="text-xs text-slate-300 mt-2">
+          <p className="text-xs text-ds-ink-muted mt-2">
             Open the job card and complete block return from the Emboss Block panel.
           </p>
         </div>
       ) : null}
 
       {list.length === 0 && (
-        <p className="text-slate-500 text-center py-8 text-sm">
+        <p className="text-ds-ink-faint text-center py-8 text-sm">
           No job cards at this stage. Create job cards and advance them from the Job Card detail.
         </p>
       )}
@@ -704,7 +704,7 @@ export default function ProductionStagePage() {
       widthClass="max-w-md"
     >
       {spotlight ? (
-        <div className="space-y-4 text-sm text-slate-300">
+        <div className="space-y-4 text-sm text-ds-ink-muted">
           {spotlight.jobCard.oee ? (
             <>
               <p className={`${mono} text-2xl ${oeeBandClass(spotlight.jobCard.oee.oee)}`}>
@@ -712,25 +712,25 @@ export default function ProductionStagePage() {
               </p>
               <div className={`grid grid-cols-3 gap-2 text-xs ${mono}`}>
                 <div>
-                  <div className="text-slate-500">A</div>
-                  <div className="text-slate-200">{spotlight.jobCard.oee.availability}%</div>
+                  <div className="text-ds-ink-faint">A</div>
+                  <div className="text-ds-ink">{spotlight.jobCard.oee.availability}%</div>
                 </div>
                 <div>
-                  <div className="text-slate-500">P</div>
-                  <div className="text-slate-200">{spotlight.jobCard.oee.performance}%</div>
+                  <div className="text-ds-ink-faint">P</div>
+                  <div className="text-ds-ink">{spotlight.jobCard.oee.performance}%</div>
                 </div>
                 <div>
-                  <div className="text-slate-500">Q</div>
-                  <div className="text-slate-200">{spotlight.jobCard.oee.quality}%</div>
+                  <div className="text-ds-ink-faint">Q</div>
+                  <div className="text-ds-ink">{spotlight.jobCard.oee.quality}%</div>
                 </div>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">
+                <p className="text-[10px] uppercase tracking-wider text-ds-ink-faint mb-1">
                   Live speedometer (sheets/h)
                 </p>
-                <div className="h-3 w-full rounded-full bg-zinc-900 border border-zinc-800 overflow-hidden">
+                <div className="h-3 w-full rounded-full bg-ds-card border border-ds-line/40 overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-orange-600 to-amber-400 transition-all duration-500"
+                    className="h-full bg-gradient-to-r from-ds-warning to-ds-warning transition-all duration-500"
                     style={{
                       width: `${Math.min(
                         100,
@@ -741,14 +741,14 @@ export default function ProductionStagePage() {
                     }}
                   />
                 </div>
-                <p className={`mt-1 ${mono} text-slate-200`}>
+                <p className={`mt-1 ${mono} text-ds-ink`}>
                   {spotlight.jobCard.oee.currentSpeedPph} / {Math.round(spotlight.jobCard.oee.ratedSpeedPph)} sh/h
-                  <span className="text-slate-500 ml-2">limit</span>
+                  <span className="text-ds-ink-faint ml-2">limit</span>
                 </p>
               </div>
               {spotlight.jobCard.machine ? (
                 <div className="flex flex-wrap items-center gap-3">
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-ds-ink-faint">
                     Press {spotlight.jobCard.machine.machineCode} · {spotlight.jobCard.machine.name}
                   </p>
                   {spotlight.jobCard.machinePm?.hasSchedule ? (
@@ -766,7 +766,7 @@ export default function ProductionStagePage() {
               ) : null}
             </>
           ) : (
-            <p className="text-slate-500 text-sm">No live OEE for this row (start stage to see metrics).</p>
+            <p className="text-ds-ink-faint text-sm">No live OEE for this row (start stage to see metrics).</p>
           )}
           {spotlight.jobCard.incentiveLedger?.incentiveEligible ? (
             <div className="flex items-start gap-3 rounded-lg border border-emerald-500/50 bg-emerald-950/25 px-3 py-3">
@@ -775,7 +775,7 @@ export default function ProductionStagePage() {
                 <p className="text-emerald-400 text-xs font-semibold uppercase tracking-wide">
                   Incentive earned
                 </p>
-                <p className={`text-xs text-slate-400 ${mono}`}>
+                <p className={`text-xs text-ds-ink-muted ${mono}`}>
                   Ledger yield {spotlight.jobCard.incentiveLedger.yieldPercent ?? '—'}% · OEE{' '}
                   {spotlight.jobCard.incentiveLedger.oeePct}%
                 </p>

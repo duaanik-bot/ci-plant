@@ -38,14 +38,14 @@ export default function MastersInstrumentsPage() {
   }, [])
 
   if (loading) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
   }
 
   return (
     <div>
-      <h2 className="mb-4 text-base font-semibold text-slate-900 dark:text-slate-50">QC Instrument Master</h2>
+      <h2 className="mb-4 text-base font-semibold text-neutral-900 dark:text-ds-ink">QC Instrument Master</h2>
       <EnterpriseTableShell>
-        <table className="w-full border-collapse text-left text-sm text-slate-900 dark:text-slate-50">
+        <table className="w-full border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>Name</th>
@@ -84,7 +84,7 @@ export default function MastersInstrumentsPage() {
                       View
                     </a>
                   ) : (
-                    <span className="text-slate-500">—</span>
+                    <span className="text-ds-ink-faint">—</span>
                   )}
                 </td>
                 <td className={enterpriseTdClass}>
@@ -97,7 +97,7 @@ export default function MastersInstrumentsPage() {
           </tbody>
         </table>
       </EnterpriseTableShell>
-      {list.length === 0 && <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No instruments. Run seed.</p>}
+      {list.length === 0 && <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No instruments. Run seed.</p>}
     </div>
   )
 }

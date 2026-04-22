@@ -41,7 +41,7 @@ export function OperatorMasterCombobox({
 
   return (
     <div className="space-y-1">
-      <span className="block text-sm text-zinc-300">{label}</span>
+      <span className="block text-sm text-neutral-400">{label}</span>
       <div className="relative">
         <input
           id={domId}
@@ -60,16 +60,16 @@ export function OperatorMasterCombobox({
             window.setTimeout(() => setOpen(false), 120)
           }}
           placeholder="Search operator…"
-          className="w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground placeholder:text-zinc-500"
+          className="w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground placeholder:text-neutral-500"
           autoComplete="off"
         />
         {open && !disabled && filtered.length > 0 ? (
-          <ul className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-600 bg-zinc-950 shadow-lg text-sm">
+          <ul className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-ds-line/50 bg-ds-main shadow-lg text-sm">
             {filtered.map((o) => (
               <li key={o.id}>
                 <button
                   type="button"
-                  className="w-full text-left px-3 py-2 hover:bg-zinc-900 border-b border-zinc-800 last:border-0"
+                  className="w-full text-left px-3 py-2 hover:bg-ds-card border-b border-ds-line/40 last:border-0"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     onChange(o.id)
@@ -77,9 +77,9 @@ export function OperatorMasterCombobox({
                     setOpen(false)
                   }}
                 >
-                  <span className="text-zinc-100">{o.name}</span>
+                  <span className="text-ds-ink">{o.name}</span>
                   {o.department ? (
-                    <span className="block text-[10px] text-zinc-500">{o.department}</span>
+                    <span className="block text-[10px] text-neutral-500">{o.department}</span>
                   ) : null}
                 </button>
               </li>

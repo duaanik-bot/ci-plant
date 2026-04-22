@@ -53,13 +53,13 @@ export default function DyeMasterPage() {
   }, [rows, search])
 
   if (loading) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading dyes…</div>
+    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading dyes…</div>
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">Dye Master</h2>
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Dye Master</h2>
         <Link href="/masters/dyes/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
           Add dye
         </Link>
@@ -109,7 +109,7 @@ export default function DyeMasterPage() {
           </tbody>
         </table>
       </EnterpriseTableShell>
-      {filtered.length === 0 && <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No dyes found.</p>}
+      {filtered.length === 0 && <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No dyes found.</p>}
     </div>
   )
 }

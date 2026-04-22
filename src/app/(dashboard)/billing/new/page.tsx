@@ -109,9 +109,9 @@ export default function NewBillPage() {
 
   return (
     <form onSubmit={handleSubmit} className="p-4 max-w-4xl mx-auto space-y-4">
-      <h1 className="text-xl font-bold text-amber-400">New Bill</h1>
+      <h1 className="text-xl font-bold text-ds-warning">New Bill</h1>
 
-      <div className="grid md:grid-cols-2 gap-4 rounded-xl bg-slate-900 border border-slate-700 p-4 text-sm">
+      <div className="grid md:grid-cols-2 gap-4 rounded-xl bg-ds-card border border-ds-line/50 p-4 text-sm">
         <div>
           <MasterSearchSelect
             label="Customer"
@@ -134,20 +134,20 @@ export default function NewBillPage() {
           />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Bill date</label>
+          <label className="block text-ds-ink-muted mb-1">Bill date</label>
           <input
             type="date"
             value={billDate}
             onChange={(e) => setBillDate(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
       </div>
 
-      <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
+      <div className="rounded-xl bg-ds-card border border-ds-line/50 p-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-slate-200">Line items</h2>
-          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg bg-slate-800 text-foreground text-xs">
+          <h2 className="text-sm font-semibold text-ds-ink">Line items</h2>
+          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg bg-ds-elevated text-foreground text-xs">
             + Add line
           </button>
         </div>
@@ -160,7 +160,7 @@ export default function NewBillPage() {
                   placeholder="Description"
                   value={l.description}
                   onChange={(e) => updateLine(idx, { description: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div className="col-span-1">
@@ -169,7 +169,7 @@ export default function NewBillPage() {
                   placeholder="Qty"
                   value={l.quantity}
                   onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div className="col-span-2">
@@ -178,7 +178,7 @@ export default function NewBillPage() {
                   placeholder="Rate"
                   value={l.rate}
                   onChange={(e) => updateLine(idx, { rate: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div className="col-span-1">
@@ -187,14 +187,14 @@ export default function NewBillPage() {
                   placeholder="GST%"
                   value={l.gstPct}
                   onChange={(e) => updateLine(idx, { gstPct: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div className="col-span-3">
                 <select
                   value={l.jobCardId}
                   onChange={(e) => updateLine(idx, { jobCardId: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 >
                   <option value="">No job card</option>
                   {filteredJcs.map((jc) => (
@@ -220,14 +220,14 @@ export default function NewBillPage() {
         <button
           type="button"
           onClick={() => router.push('/billing')}
-          className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
+          className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={saving}
-          className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
+          className="px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
         >
           {saving ? 'Saving…' : 'Create bill'}
         </button>

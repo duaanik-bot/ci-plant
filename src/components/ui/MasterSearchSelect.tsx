@@ -128,7 +128,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
   return (
     <div ref={containerRef} className={`relative ${containerClassName ?? ''}`}>
       {!hideLabel ? (
-        <label className="block text-xs text-slate-400 mb-1">
+        <label className="block text-xs text-ds-ink-muted mb-1">
           {label}
           {required ? <span className="text-red-400">*</span> : null}
         </label>
@@ -167,29 +167,29 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
         placeholder={placeholder}
         disabled={disabled}
         autoComplete="off"
-        className={`w-full px-3 py-2 rounded bg-slate-800 border ${
-          error ? 'border-red-500' : 'border-slate-600'
+        className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
+          error ? 'border-red-500' : 'border-ds-line/60'
         } text-foreground disabled:opacity-60 disabled:cursor-not-allowed ${inputClassName ?? ''}`}
       />
       {error ? <p className="text-xs text-red-400 mt-1">{error}</p> : null}
 
       {showDropdown ? (
-        <div className={`absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-2xl ${dropdownClassName ?? ''}`}>
+        <div className={`absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-ds-line/50 bg-ds-card shadow-2xl ${dropdownClassName ?? ''}`}>
           {showIdlePanel ? (
             <div className="max-h-64 overflow-y-auto py-1">
               {browseLoading ? (
-                <div className="px-3 py-2 text-xs text-slate-400">{browseLoadingMessage}</div>
+                <div className="px-3 py-2 text-xs text-ds-ink-muted">{browseLoadingMessage}</div>
               ) : null}
               {!browseLoading &&
               browseEmptyMessage &&
               lastUsed.length === 0 &&
               browseDeduped.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-slate-500">{browseEmptyMessage}</div>
+                <div className="px-3 py-2 text-xs text-ds-ink-faint">{browseEmptyMessage}</div>
               ) : null}
 
               {lastUsed.length > 0 ? (
                 <>
-                  <div className="border-b border-slate-800 px-3 py-2 text-[11px] uppercase tracking-wide text-slate-500">
+                  <div className="border-b border-ds-line/40 px-3 py-2 text-[11px] uppercase tracking-wide text-ds-ink-faint">
                     {recentLabel}
                   </div>
                   {lastUsed.map((item) => (
@@ -199,12 +199,12 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                       onMouseDown={(e) => e.preventDefault()}
                       onMouseEnter={() => setActiveById(item.id)}
                       onClick={() => commitSelection(item)}
-                      className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800 ${
-                        visibleItems[activeIndex]?.id === item.id ? 'bg-slate-800' : ''
+                      className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm text-ds-ink hover:bg-ds-elevated ${
+                        visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
                       }`}
                     >
                       <span>{getOptionLabel(item)}</span>
-                      <span className="text-[11px] text-slate-500">Recent</span>
+                      <span className="text-[11px] text-ds-ink-faint">Recent</span>
                     </button>
                   ))}
                 </>
@@ -213,8 +213,8 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
               {browseDeduped.length > 0 ? (
                 <>
                   <div
-                    className={`px-3 py-2 text-[11px] uppercase tracking-wide text-slate-500 ${
-                      lastUsed.length > 0 ? 'border-t border-slate-800' : 'border-b border-slate-800'
+                    className={`px-3 py-2 text-[11px] uppercase tracking-wide text-ds-ink-faint ${
+                      lastUsed.length > 0 ? 'border-t border-ds-line/40' : 'border-b border-ds-line/40'
                     }`}
                   >
                     {browseOptionsLabel}
@@ -228,12 +228,12 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                         onMouseDown={(e) => e.preventDefault()}
                         onMouseEnter={() => setActiveById(item.id)}
                         onClick={() => commitSelection(item)}
-                        className={`w-full px-3 py-2 text-left hover:bg-slate-800 ${
-                          visibleItems[activeIndex]?.id === item.id ? 'bg-slate-800' : ''
+                        className={`w-full px-3 py-2 text-left hover:bg-ds-elevated ${
+                          visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
                         }`}
                       >
-                        <div className="text-sm text-slate-100">{getOptionLabel(item)}</div>
-                        {meta ? <div className="text-xs text-slate-500">{meta}</div> : null}
+                        <div className="text-sm text-ds-ink">{getOptionLabel(item)}</div>
+                        {meta ? <div className="text-xs text-ds-ink-faint">{meta}</div> : null}
                       </button>
                     )
                   })}
@@ -245,7 +245,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
           {showSearchPanel ? (
             <div className="max-h-64 overflow-y-auto py-1">
               {loading ? (
-                <div className="px-3 py-2 text-xs text-slate-400">{loadingMessage}</div>
+                <div className="px-3 py-2 text-xs text-ds-ink-muted">{loadingMessage}</div>
               ) : null}
               {!loading &&
                 options.map((item) => {
@@ -257,18 +257,18 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                       onMouseDown={(e) => e.preventDefault()}
                       onMouseEnter={() => setActiveById(item.id)}
                       onClick={() => commitSelection(item)}
-                      className={`w-full px-3 py-2 text-left hover:bg-slate-800 ${
-                        visibleItems[activeIndex]?.id === item.id ? 'bg-slate-800' : ''
+                      className={`w-full px-3 py-2 text-left hover:bg-ds-elevated ${
+                        visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
                       }`}
                     >
-                      <div className="text-sm text-slate-100">{getOptionLabel(item)}</div>
-                      {meta ? <div className="text-xs text-slate-500">{meta}</div> : null}
+                      <div className="text-sm text-ds-ink">{getOptionLabel(item)}</div>
+                      {meta ? <div className="text-xs text-ds-ink-faint">{meta}</div> : null}
                     </button>
                   )
                 })}
               {showEmpty ? (
                 <div className="px-3 py-2">
-                  <div className="text-xs text-slate-500">{emptyMessage}</div>
+                  <div className="text-xs text-ds-ink-faint">{emptyMessage}</div>
                   {emptyActionLabel && onEmptyAction ? (
                     <button
                       type="button"
@@ -277,7 +277,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                         onEmptyAction()
                         setOpen(false)
                       }}
-                      className="mt-2 text-xs font-medium text-amber-400 hover:text-amber-300"
+                      className="mt-2 text-xs font-medium text-ds-warning hover:text-ds-warning"
                     >
                       {emptyActionLabel}
                     </button>
@@ -288,7 +288,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
           ) : null}
           {dropdownFooter ? (
             <div
-              className="border-t border-slate-800"
+              className="border-t border-ds-line/40"
               onMouseDown={(e) => e.preventDefault()}
             >
               {dropdownFooter}

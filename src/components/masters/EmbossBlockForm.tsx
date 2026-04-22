@@ -163,15 +163,15 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground text-sm'
+  const cls = 'w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground text-sm'
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
       {mode === 'ADD' && <h2 className="text-lg font-semibold text-foreground">Add Emboss Block</h2>}
 
-      <div className="grid md:grid-cols-2 gap-4 bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm">
+      <div className="grid md:grid-cols-2 gap-4 bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm">
         <div>
-          <label className="block text-slate-400 mb-1">Block code *</label>
+          <label className="block text-ds-ink-muted mb-1">Block code *</label>
           <input
             type="text"
             value={f.blockCode}
@@ -182,7 +182,7 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
           />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Manufacture date {mode === 'ADD' ? '*' : ''}</label>
+          <label className="block text-ds-ink-muted mb-1">Manufacture date {mode === 'ADD' ? '*' : ''}</label>
           <input
             type="date"
             value={f.manufactureDate}
@@ -192,23 +192,23 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
           />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Carton name</label>
+          <label className="block text-ds-ink-muted mb-1">Carton name</label>
           <input type="text" value={f.cartonName} onChange={(e) => patch('cartonName', e.target.value)} className={cls} />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Block type *</label>
+          <label className="block text-ds-ink-muted mb-1">Block type *</label>
           <select value={f.blockType} onChange={(e) => patch('blockType', e.target.value)} className={cls}>
             {BLOCK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Material</label>
+          <label className="block text-ds-ink-muted mb-1">Material</label>
           <select value={f.blockMaterial} onChange={(e) => patch('blockMaterial', e.target.value)} className={cls}>
             {BLOCK_MATERIALS.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Hub material type (Brass / Mg / Cu)</label>
+          <label className="block text-ds-ink-muted mb-1">Hub material type (Brass / Mg / Cu)</label>
           <select value={f.hubMaterialType} onChange={(e) => patch('hubMaterialType', e.target.value)} className={cls}>
             {HUB_MATERIAL_TYPES.map((m, i) => (
               <option key={i} value={m}>{m ? m : '— Same as material —'}</option>
@@ -216,19 +216,19 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
           </select>
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Block size</label>
+          <label className="block text-ds-ink-muted mb-1">Block size</label>
           <input type="text" value={f.blockSize} onChange={(e) => patch('blockSize', e.target.value)} className={cls} placeholder="e.g. 24x18" />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Relief depth (mm)</label>
+          <label className="block text-ds-ink-muted mb-1">Relief depth (mm)</label>
           <input type="number" step="0.1" value={f.embossDepth} onChange={(e) => patch('embossDepth', e.target.value)} className={cls} />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Storage location</label>
+          <label className="block text-ds-ink-muted mb-1">Storage location</label>
           <input type="text" value={f.storageLocation} onChange={(e) => patch('storageLocation', e.target.value)} className={cls} />
         </div>
         <div className="md:col-span-2">
-          <label className="block text-slate-400 mb-1">Linked die (production kit)</label>
+          <label className="block text-ds-ink-muted mb-1">Linked die (production kit)</label>
           <select value={f.linkedDieId} onChange={(e) => patch('linkedDieId', e.target.value)} className={cls}>
             <option value="">None</option>
             {dies.map((d) => (
@@ -239,7 +239,7 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
           </select>
         </div>
         <div className="md:col-span-2">
-          <label className="block text-slate-400 mb-1">Artwork reference (approved PDF URL)</label>
+          <label className="block text-ds-ink-muted mb-1">Artwork reference (approved PDF URL)</label>
           <input
             type="url"
             value={f.artworkRefLink}
@@ -249,14 +249,14 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
           />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Target max impressions</label>
+          <label className="block text-ds-ink-muted mb-1">Target max impressions</label>
           <input type="number" min={1} value={f.maxImpressions} onChange={(e) => patch('maxImpressions', e.target.value)} className={cls} />
           {initialData?.defaultMaxImpressions && mode === 'EDIT' && (
-            <p className="text-[10px] text-slate-500 mt-0.5">Default for {f.blockMaterial}: {initialData.defaultMaxImpressions.toLocaleString()}</p>
+            <p className="text-[10px] text-ds-ink-faint mt-0.5">Default for {f.blockMaterial}: {initialData.defaultMaxImpressions.toLocaleString()}</p>
           )}
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Condition</label>
+          <label className="block text-ds-ink-muted mb-1">Condition</label>
           {mode === 'EDIT' ? (
             <select value={f.condition} onChange={(e) => patch('condition', e.target.value)} className={cls}>
               {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -268,7 +268,7 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
 
         {mode === 'ADD' && (
           <div className="md:col-span-2">
-            <label className="block text-slate-400 mb-1">Replaces block (if replacement)</label>
+            <label className="block text-ds-ink-muted mb-1">Replaces block (if replacement)</label>
             <select value={f.replacesBlockId} onChange={(e) => patch('replacesBlockId', e.target.value)} className={cls}>
               <option value="">None (new block)</option>
               {existingBlocks.map((b) => <option key={b.id} value={b.id}>{b.blockCode}</option>)}
@@ -278,8 +278,8 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
 
         {mode === 'EDIT' && (
           <div className="flex items-center gap-2">
-            <input type="checkbox" id="eb-active" checked={f.active} onChange={(e) => patch('active', e.target.checked)} className="rounded border-slate-600" />
-            <label htmlFor="eb-active" className="text-slate-300">Active</label>
+            <input type="checkbox" id="eb-active" checked={f.active} onChange={(e) => patch('active', e.target.checked)} className="rounded border-ds-line/60" />
+            <label htmlFor="eb-active" className="text-ds-ink-muted">Active</label>
           </div>
         )}
       </div>
@@ -289,8 +289,8 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
       )}
 
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={() => router.push('/masters/emboss-blocks')} className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm">Cancel</button>
-        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium">
+        <button type="button" onClick={() => router.push('/masters/emboss-blocks')} className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
+        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium">
           {saving ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
         </button>
       </div>

@@ -23,13 +23,13 @@ export const BATCH_STATUS_LABEL: Record<PlanningBatchStatus, string> = {
   released_to_production: 'Released to Production',
 }
 
-/** Tailwind classes for compact badges (dark planning theme). */
+/** Tailwind classes for compact badges (ds tokens). */
 export const BATCH_STATUS_BADGE_CLASS: Record<PlanningBatchStatus, string> = {
-  draft: 'bg-slate-600/90 text-white border-slate-500',
-  ready: 'bg-sky-700/95 text-white border-sky-500',
-  hold: 'bg-rose-900/90 text-rose-100 border-rose-600',
-  approved_for_artwork: 'bg-violet-800/95 text-violet-50 border-violet-500',
-  released_to_production: 'bg-emerald-800/95 text-emerald-50 border-emerald-600',
+  draft: 'bg-ds-elevated text-ds-ink border-ds-line/50',
+  ready: 'bg-ds-brand/20 text-ds-ink border-ds-brand/40',
+  hold: 'bg-ds-error/15 text-ds-ink border-ds-error/30',
+  approved_for_artwork: 'bg-violet-500/20 text-violet-200 border-violet-500/35',
+  released_to_production: 'bg-ds-success/15 text-ds-ink border-ds-success/30',
 }
 
 export function effectiveBatchStatus(core: PlanningCore): PlanningBatchStatus {

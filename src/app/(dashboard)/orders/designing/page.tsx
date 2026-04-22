@@ -129,7 +129,7 @@ function daysInQueue(createdAtIso: string): number {
 
 function ageClass(days: number): string {
   if (days <= 3) return 'text-emerald-400'
-  if (days <= 7) return 'text-amber-400'
+  if (days <= 7) return 'text-ds-warning'
   return 'text-rose-400 animate-po-age-alert'
 }
 
@@ -158,7 +158,7 @@ function pipelineBadge(phase: Row['readiness']['pipelinePhase']) {
     default:
       return {
         label: 'Drafting',
-        className: `${base} bg-slate-600/25 text-slate-200 ring-slate-600/40`,
+        className: `${base} bg-ds-elevated/30 text-ds-ink ring-ds-line/40`,
         pulse: false,
       }
   }
@@ -194,7 +194,7 @@ function CustomerAvatar({
         alt=""
         width={24}
         height={24}
-        className="h-6 w-6 shrink-0 rounded-full object-cover ring-1 ring-slate-600"
+        className="h-6 w-6 shrink-0 rounded-full object-cover ring-1 ring-ds-line/50"
         loading="lazy"
         onError={() => setBroken(true)}
       />
@@ -232,19 +232,19 @@ function NeonCommandFilterTrigger({
       <button
         type="button"
         onClick={() => open()}
-        className="group min-w-0 flex-1 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-left text-sm text-card-foreground shadow-sm ring-1 ring-ring/30 transition hover:border-slate-300 dark:border-amber-500/40 dark:shadow-[0_0_20px_rgba(245,158,11,0.08)] dark:hover:border-amber-400/70"
+        className="group min-w-0 flex-1 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-left text-sm text-card-foreground shadow-sm ring-1 ring-ring/30 transition hover:border-neutral-300 dark:border-ds-warning/40 dark:shadow-[0_0_20px_rgba(245,158,11,0.08)] dark:hover:border-ds-warning/60/70"
         aria-label="Open command palette"
       >
-        <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-amber-400" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-center text-slate-600 group-hover:text-slate-800 sm:text-left dark:text-slate-400 dark:group-hover:text-slate-200">
+        <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-ds-warning" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-center text-ds-ink-faint group-hover:text-neutral-800 sm:text-left dark:text-ds-ink-muted dark:group-hover:text-ds-ink">
           {paletteQuery.trim().length >= 2 ? (
             <>
               <span className="text-emerald-600 dark:text-emerald-400/90">Filtering queue:</span>{' '}
-              <span className="text-slate-900 dark:text-slate-100">{paletteQuery.trim()}</span>
+              <span className="text-neutral-900 dark:text-ds-ink">{paletteQuery.trim()}</span>
             </>
           ) : (
             <>
-              Search carton or PO # <span className="text-blue-600 dark:text-amber-500/90">({kbd})</span>
+              Search carton or PO # <span className="text-blue-600 dark:text-ds-warning/90">({kbd})</span>
             </>
           )}
         </span>
@@ -253,7 +253,7 @@ function NeonCommandFilterTrigger({
         <button
           type="button"
           onClick={() => onClearQuery()}
-          className="shrink-0 self-center rounded-xl border border-border bg-card px-2.5 py-2 text-slate-500 hover:border-slate-300 hover:text-slate-800 dark:border-border/15 dark:hover:border-amber-500/40 dark:hover:text-amber-300"
+          className="shrink-0 self-center rounded-xl border border-border bg-card px-2.5 py-2 text-ds-ink-faint hover:border-neutral-300 hover:text-neutral-800 dark:border-border/15 dark:hover:border-ds-warning/40 dark:hover:text-ds-warning"
           title="Clear filter"
           aria-label="Clear filter"
         >
@@ -277,12 +277,12 @@ function ArtworkPreviewCell({
   const [peek, setPeek] = useState(false)
 
   const thumbClass =
-    'h-12 w-12 shrink-0 overflow-hidden rounded-[4px] border border-slate-700 bg-background'
+    'h-12 w-12 shrink-0 overflow-hidden rounded-[4px] border border-ds-line/50 bg-background'
 
   if (!url || broken) {
     return (
       <div
-        className={`flex ${thumbClass} items-center justify-center text-slate-600`}
+        className={`flex ${thumbClass} items-center justify-center text-ds-ink-faint`}
         title="No preview"
       >
         <ImageOff className="h-4 w-4" aria-hidden />
@@ -293,7 +293,7 @@ function ArtworkPreviewCell({
     <>
       <button
         type="button"
-        className={`group relative ${thumbClass} focus:outline-none focus:ring-2 focus:ring-amber-500/50`}
+        className={`group relative ${thumbClass} focus:outline-none focus:ring-2 focus:ring-ds-warning/35`}
         title="Hover for magnified preview · click for full screen"
         onMouseEnter={() => setPeek(true)}
         onMouseLeave={() => setPeek(false)}
@@ -322,7 +322,7 @@ function ArtworkPreviewCell({
               className="pointer-events-none fixed inset-0 z-[85] flex items-center justify-center bg-background/35 backdrop-blur-[2px]"
               aria-hidden
             >
-              <div className="h-[144px] w-[144px] overflow-hidden rounded-[4px] border border-slate-700 shadow-2xl ring-1 ring-ring/50">
+              <div className="h-[144px] w-[144px] overflow-hidden rounded-[4px] border border-ds-line/50 shadow-2xl ring-1 ring-ring/50">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={url} alt="" className="h-full w-full object-cover" />
               </div>
@@ -361,16 +361,16 @@ function SortHeader({
       <button
         type="button"
         onClick={() => onSort(column)}
-        className={`inline-flex items-center gap-0.5 ${mono} text-xs font-medium uppercase tracking-wider text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200`}
+        className={`inline-flex items-center gap-0.5 ${mono} text-xs font-medium uppercase tracking-wider text-ds-ink-faint hover:text-neutral-700 dark:text-ds-ink-muted dark:hover:text-ds-ink`}
       >
         {label}
         <span className="inline-flex flex-col -space-y-1.5" aria-hidden>
           <ChevronUp
-            className={`h-3 w-3 shrink-0 ${active && dir === 'asc' ? 'text-blue-600 dark:text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
+            className={`h-3 w-3 shrink-0 ${active && dir === 'asc' ? 'text-blue-600 dark:text-ds-warning' : 'text-ds-ink-faint dark:text-ds-ink-faint'}`}
             strokeWidth={2}
           />
           <ChevronDown
-            className={`h-3 w-3 shrink-0 ${active && dir === 'desc' ? 'text-blue-600 dark:text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
+            className={`h-3 w-3 shrink-0 ${active && dir === 'desc' ? 'text-blue-600 dark:text-ds-warning' : 'text-ds-ink-faint dark:text-ds-ink-faint'}`}
             strokeWidth={2}
           />
         </span>
@@ -391,7 +391,7 @@ function LightboxModal({ src, alt, onClose }: { src: string | null; alt: string;
     >
       <button
         type="button"
-        className="absolute right-3 top-3 rounded-lg border border-border bg-card p-2 text-slate-400 hover:text-foreground"
+        className="absolute right-3 top-3 rounded-lg border border-border bg-card p-2 text-ds-ink-muted hover:text-foreground"
         onClick={onClose}
         aria-label="Close preview"
       >
@@ -662,25 +662,25 @@ export default function DesigningQueuePage() {
 
   if (loading) {
     return (
-      <div className={`min-h-[40vh] p-4 text-sm text-slate-600 dark:text-slate-400 ${mono}`}>Loading…</div>
+      <div className={`min-h-[40vh] p-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted ${mono}`}>Loading…</div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+    <div className="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 text-card-foreground md:hidden">
-        <span className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50">Artwork queue</span>
+        <span className="truncate text-sm font-semibold text-neutral-900 dark:text-ds-ink">Artwork queue</span>
         <CommandPaletteTriggerIcon />
       </div>
 
       <div className="mx-auto max-w-[1600px] space-y-3 px-2 py-3 pb-10 sm:px-3">
         <div className="rounded-lg border border-border bg-card px-2 py-1.5 sm:px-3">
-          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-ds-ink-faint dark:text-ds-ink-muted">
             <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-300/90">
               Customer PO ✓
             </span>
             <span>→</span>
-            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-amber-200/95">
+            <span className="rounded border border-ds-warning/40 bg-ds-warning/8 px-1.5 py-0.5 text-ds-warning">
               Planning decision
             </span>
             <span>→</span>
@@ -688,9 +688,9 @@ export default function DesigningQueuePage() {
               AW queue
             </span>
             <span>→</span>
-            <span className="rounded border border-border px-1.5 py-0.5 text-slate-400">Plate Hub</span>
+            <span className="rounded border border-border px-1.5 py-0.5 text-ds-ink-muted">Plate Hub</span>
             <span>→</span>
-            <span className="rounded border border-border px-1.5 py-0.5 text-slate-400">Downstream</span>
+            <span className="rounded border border-border px-1.5 py-0.5 text-ds-ink-muted">Downstream</span>
           </div>
         </div>
 
@@ -703,11 +703,11 @@ export default function DesigningQueuePage() {
           </div>
           <div className="relative flex shrink-0 items-center self-stretch sm:self-auto">
             <User
-              className="pointer-events-none absolute left-2.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
+              className="pointer-events-none absolute left-2.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2 text-ds-ink-faint"
               aria-hidden
             />
             <ChevronDown
-              className="pointer-events-none absolute right-2.5 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-slate-500"
+              className="pointer-events-none absolute right-2.5 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-ds-ink-faint"
               aria-hidden
             />
             <select
@@ -729,22 +729,22 @@ export default function DesigningQueuePage() {
 
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h1 className="text-base font-semibold text-slate-900 dark:text-slate-50">Visual audit station</h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              Pre-press audit · <span className="text-slate-500 dark:text-slate-500">{PREPRESS_AUDIT_LEAD}</span> · Ready:{' '}
-              <span className="font-semibold text-slate-900 dark:text-amber-300">{readyCount}</span> / {rows.length}
+            <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Visual audit station</h1>
+            <p className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">
+              Pre-press audit · <span className="text-ds-ink-faint dark:text-ds-ink-faint">{PREPRESS_AUDIT_LEAD}</span> · Ready:{' '}
+              <span className="font-semibold text-neutral-900 dark:text-ds-warning">{readyCount}</span> / {rows.length}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
               href="/orders/purchase-orders"
-              className="rounded-lg border border-border bg-card px-2.5 py-1 text-sm text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-amber-500/40"
+              className="rounded-lg border border-border bg-card px-2.5 py-1 text-sm text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-ds-warning/40"
             >
               POs
             </Link>
             <Link
               href="/hub/plates"
-              className="rounded-lg border border-border bg-card px-2.5 py-1 text-sm text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-amber-500/40"
+              className="rounded-lg border border-border bg-card px-2.5 py-1 text-sm text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-ds-warning/40"
             >
               Plate Hub
             </Link>
@@ -770,7 +770,7 @@ export default function DesigningQueuePage() {
             className={`rounded border px-2.5 py-1.5 text-sm font-medium transition-colors ${mono} ${
               myJobsOnly
                 ? 'border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200'
-                : 'border-border bg-card text-slate-600 hover:border-slate-300 dark:text-slate-400 dark:hover:border-slate-600'
+                : 'border-border bg-card text-ds-ink-faint hover:border-neutral-300 dark:text-ds-ink-muted dark:hover:border-ds-line/60'
             }`}
             title="Show only lines allocated to you in Planning"
           >
@@ -780,7 +780,7 @@ export default function DesigningQueuePage() {
 
         <EnterpriseTableShell>
           <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-sm">
-            <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
                 <th className="w-[52px] px-4 py-3">Preview</th>
                 <SortHeader
@@ -822,7 +822,7 @@ export default function DesigningQueuePage() {
                 <th className="min-w-[11rem] px-4 py-3">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 bg-card dark:divide-slate-800">
+            <tbody className="divide-y divide-neutral-200 bg-card dark:divide-ds-line/30">
               {sortedRows.map((r) => {
                 const designerId = r.specOverrides?.assignedDesignerId
                 const designerName = designerId ? (userById[designerId]?.name ?? '—') : '—'
@@ -855,8 +855,8 @@ export default function DesigningQueuePage() {
                     key={r.id}
                     className={`transition-colors ${
                       priRow
-                        ? `${INDUSTRIAL_PRIORITY_ROW_CLASS} hover:bg-amber-50/90 dark:hover:bg-amber-900/25`
-                        : 'border-l-2 border-transparent hover:border-amber-500 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                        ? `${INDUSTRIAL_PRIORITY_ROW_CLASS} hover:bg-ds-warning/5 dark:hover:bg-ds-warning/12`
+                        : 'border-l-2 border-transparent hover:border-ds-warning hover:bg-neutral-50 dark:hover:bg-ds-elevated/50'
                     } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''}`}
                   >
                     <td className="px-4 py-3 align-middle">
@@ -869,7 +869,7 @@ export default function DesigningQueuePage() {
                       />
                     </td>
                     <td
-                      className={`px-4 py-3 align-middle text-sm font-medium ${mono} whitespace-nowrap text-slate-900 dark:text-amber-200/95`}
+                      className={`px-4 py-3 align-middle text-sm font-medium ${mono} whitespace-nowrap text-neutral-900 dark:text-ds-warning`}
                     >
                       <div className="flex flex-col gap-0.5 leading-tight">
                         <div className="flex min-w-0 items-start gap-0.5">
@@ -884,13 +884,13 @@ export default function DesigningQueuePage() {
                             }
                             disabled={priorityBusyPoId === r.po.id}
                             onClick={(e) => void togglePoPriority(r, e)}
-                            className="mt-0.5 shrink-0 rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-amber-600 disabled:opacity-40 dark:hover:bg-card/5 dark:hover:text-amber-400"
+                            className="mt-0.5 shrink-0 rounded p-0.5 text-ds-ink-faint hover:bg-neutral-100 hover:text-ds-warning disabled:opacity-40 dark:hover:bg-card/5 dark:hover:text-ds-warning"
                           >
                             <Star
                               className={`h-3.5 w-3.5 ${
                                 r.po.isPriority === true
                                   ? INDUSTRIAL_PRIORITY_STAR_ICON_CLASS
-                                  : 'text-slate-500'
+                                  : 'text-ds-ink-faint'
                               }`}
                               strokeWidth={2}
                             />
@@ -899,7 +899,7 @@ export default function DesigningQueuePage() {
                         </div>
                         {totalContractBatches(spec) > 0 ? (
                           <div
-                            className="mt-0.5 flex h-1 w-full max-w-[6rem] overflow-hidden rounded-full bg-slate-800 ring-1 ring-slate-700/80"
+                            className="mt-0.5 flex h-1 w-full max-w-[6rem] overflow-hidden rounded-full bg-ds-elevated ring-1 ring-ds-line/50"
                             title="Batch progress"
                           >
                             <div
@@ -907,28 +907,28 @@ export default function DesigningQueuePage() {
                               style={{ width: `${Math.round(batchSeg.shippedPct * 100)}%` }}
                             />
                             <div
-                              className="h-full bg-amber-500/90"
+                              className="h-full bg-ds-warning/90"
                               style={{ width: `${Math.round(batchSeg.inProductionPct * 100)}%` }}
                             />
                             <div
-                              className="h-full bg-slate-600"
+                              className="h-full bg-ds-line/30"
                               style={{ width: `${Math.round(batchSeg.remainingPct * 100)}%` }}
                             />
                           </div>
                         ) : null}
                         {r.directorPriority ? (
-                          <span className="w-fit rounded bg-amber-500/15 px-1 text-xs font-bold uppercase text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300">
+                          <span className="w-fit rounded bg-ds-warning/15 px-1 text-xs font-bold uppercase text-ds-warning ring-1 ring-ds-warning/35 dark:text-ds-warning">
                             Priority
                           </span>
                         ) : null}
                         {r.directorHold ? (
-                          <span className="w-fit rounded bg-slate-600/30 px-1 text-xs text-slate-500 dark:text-slate-400">
+                          <span className="w-fit rounded bg-ds-elevated/30 px-1 text-xs text-ds-ink-faint dark:text-ds-ink-muted">
                             Hold
                           </span>
                         ) : null}
                       </div>
                     </td>
-                    <td className="px-4 py-3 align-middle text-sm font-medium leading-tight text-slate-700 break-words dark:text-slate-300">
+                    <td className="px-4 py-3 align-middle text-sm font-medium leading-tight text-neutral-700 break-words dark:text-ds-ink-muted">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <CustomerAvatar
                           name={r.po?.customer?.name ?? '—'}
@@ -937,7 +937,7 @@ export default function DesigningQueuePage() {
                         <span className="min-w-0 overflow-hidden text-ellipsis">{r.po?.customer?.name ?? '—'}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 align-middle text-sm font-medium leading-snug text-slate-900 break-words dark:text-slate-100">
+                    <td className="px-4 py-3 align-middle text-sm font-medium leading-snug text-neutral-900 break-words dark:text-ds-ink">
                       <div className="flex min-w-0 flex-col gap-0.5">
                         <span className="min-w-0">{r.cartonName ?? '—'}</span>
                         {readPlanningCore(spec).layoutType === 'gang' ? (
@@ -945,23 +945,23 @@ export default function DesigningQueuePage() {
                             Gang print
                           </span>
                         ) : readPlanningCore(spec).savedAt ? (
-                          <span className="w-fit rounded border border-slate-300 px-1 py-0.5 text-xs text-slate-600 dark:border-slate-600 dark:text-slate-500">
+                          <span className="w-fit rounded border border-neutral-300 px-1 py-0.5 text-xs text-ds-ink-faint dark:border-ds-line/60 dark:text-ds-ink-faint">
                             Single product
                           </span>
                         ) : null}
                       </div>
                     </td>
                     <td
-                      className={`px-4 py-3 align-middle text-right text-sm font-medium ${mono} whitespace-nowrap text-slate-900 dark:text-slate-200`}
+                      className={`px-4 py-3 align-middle text-right text-sm font-medium ${mono} whitespace-nowrap text-neutral-900 dark:text-ds-ink`}
                     >
                       {r.quantity}
                     </td>
                     <td
-                      className={`px-4 py-3 align-middle text-sm font-medium ${mono} whitespace-nowrap overflow-hidden text-ellipsis text-slate-900 dark:text-slate-300`}
+                      className={`px-4 py-3 align-middle text-sm font-medium ${mono} whitespace-nowrap overflow-hidden text-ellipsis text-neutral-900 dark:text-ds-ink-muted`}
                     >
                       {r.setNumber ?? '—'}
                     </td>
-                    <td className="px-4 py-3 align-middle text-xs leading-tight text-slate-600 dark:text-slate-400">
+                    <td className="px-4 py-3 align-middle text-xs leading-tight text-ds-ink-faint dark:text-ds-ink-muted">
                       {designerName}
                     </td>
                     <td className="px-4 py-3 align-middle">
@@ -974,7 +974,7 @@ export default function DesigningQueuePage() {
                       >
                         <Layers
                           className={`h-3 w-3 shrink-0 ${
-                            planningForwarded ? 'text-emerald-400' : 'text-slate-500'
+                            planningForwarded ? 'text-emerald-400' : 'text-ds-ink-faint'
                           }`}
                           aria-hidden
                         />
@@ -990,7 +990,7 @@ export default function DesigningQueuePage() {
                       <div className="flex flex-wrap items-center gap-1">
                         <Link
                           href={`/orders/designing/${r.id}`}
-                          className="inline-flex min-w-[80px] items-center justify-center gap-1 rounded border border-slate-200 bg-transparent px-2 py-0.5 text-xs font-medium text-slate-800 hover:border-amber-500/50 hover:bg-amber-500/10 dark:border-border/20 dark:text-slate-100"
+                          className="inline-flex min-w-[80px] items-center justify-center gap-1 rounded border border-neutral-200 bg-transparent px-2 py-0.5 text-xs font-medium text-neutral-800 hover:border-ds-warning/50 hover:bg-ds-warning/8 dark:border-border/20 dark:text-ds-ink"
                         >
                           <Pencil className="h-3 w-3 opacity-70" aria-hidden />
                           Edit
@@ -1000,7 +1000,7 @@ export default function DesigningQueuePage() {
                             type="button"
                             disabled={forwardingId === r.id || rowClosed}
                             onClick={() => void forwardPlanning(r)}
-                            className="min-w-[80px] rounded border border-slate-200 bg-transparent px-2 py-0.5 text-xs font-medium text-slate-800 hover:border-violet-400/50 hover:bg-violet-500/10 disabled:opacity-40 dark:border-border/20 dark:text-slate-100"
+                            className="min-w-[80px] rounded border border-neutral-200 bg-transparent px-2 py-0.5 text-xs font-medium text-neutral-800 hover:border-violet-400/50 hover:bg-violet-500/10 disabled:opacity-40 dark:border-border/20 dark:text-ds-ink"
                           >
                             {forwardingId === r.id ? '…' : 'Forward'}
                           </button>
@@ -1059,7 +1059,7 @@ export default function DesigningQueuePage() {
                           href={r.po?.id ? `/orders/purchase-orders/${r.po.id}` : '#'}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="rounded border border-slate-200 px-1.5 py-0.5 text-xs text-slate-600 hover:text-slate-900 dark:border-border/10 dark:text-slate-500 dark:hover:text-slate-300"
+                          className="rounded border border-neutral-200 px-1.5 py-0.5 text-xs text-ds-ink-faint hover:text-neutral-900 dark:border-border/10 dark:text-ds-ink-faint dark:hover:text-ds-ink-muted"
                         >
                           PO
                         </Link>
@@ -1073,7 +1073,7 @@ export default function DesigningQueuePage() {
         </EnterpriseTableShell>
 
         {sortedRows.length === 0 && (
-          <p className="py-8 text-center text-sm text-slate-600">
+          <p className="py-8 text-center text-sm text-ds-ink-faint">
             {paletteQuery.trim().length >= 2 ? 'No rows match filter.' : 'No items in designing queue.'}
           </p>
         )}

@@ -106,24 +106,24 @@ export function PmSpotlightDrawer({
       onClose={onClose}
       widthClass="max-w-lg"
     >
-      <div className={`space-y-5 text-sm text-zinc-300 bg-background min-h-[120px] ${mono}`}>
+      <div className={`space-y-5 text-sm text-neutral-400 bg-background min-h-[120px] ${mono}`}>
         {loading ? (
-          <p className="text-zinc-500 text-sm">Loading…</p>
+          <p className="text-neutral-500 text-sm">Loading…</p>
         ) : data ? (
           <>
-            <div className="flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-950/80 px-3 py-3">
+            <div className="flex items-center gap-4 rounded-xl border border-ds-line/40 bg-ds-main/80 px-3 py-3">
               <MachineHealthMeter
                 healthPct={data.health.healthPct}
                 hasSchedule={data.health.hasSchedule}
                 size="md"
               />
               <div className="space-y-1 text-xs">
-                <p className="text-zinc-100 font-medium">{data.machine.name}</p>
-                <p className="text-zinc-500">
+                <p className="text-ds-ink font-medium">{data.machine.name}</p>
+                <p className="text-neutral-500">
                   Health {data.health.hasSchedule ? `${data.health.healthPct}%` : 'no schedule'}
                 </p>
                 {data.health.hasSchedule ? (
-                  <p className="text-zinc-500">
+                  <p className="text-neutral-500">
                     Usage {data.usageRunHours}h · {data.usageImpressions} imp.
                     {data.intervalRunHours != null ? ` / ${data.intervalRunHours}h` : ''}
                     {data.intervalImpressions != null ? ` · ${data.intervalImpressions} imp. interval` : ''}
@@ -133,21 +133,21 @@ export function PmSpotlightDrawer({
             </div>
 
             <section>
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
                 Service history (last 3)
               </h3>
               {data.serviceHistory.length === 0 ? (
-                <p className="text-zinc-600 text-xs">No PM sign-offs recorded yet.</p>
+                <p className="text-neutral-600 text-xs">No PM sign-offs recorded yet.</p>
               ) : (
                 <ul className="space-y-2">
                   {data.serviceHistory.map((h) => (
                     <li
                       key={h.verifiedAt}
-                      className="rounded-lg border border-zinc-800 bg-background px-2 py-2 text-xs text-zinc-400"
+                      className="rounded-lg border border-ds-line/40 bg-background px-2 py-2 text-xs text-neutral-500"
                     >
-                      <span className="text-zinc-200">{new Date(h.verifiedAt).toLocaleString()}</span>
-                      <p className="mt-0.5 text-zinc-500">{h.signedOffNote}</p>
-                      <p className="mt-1 text-[10px] text-zinc-600">
+                      <span className="text-ds-ink">{new Date(h.verifiedAt).toLocaleString()}</span>
+                      <p className="mt-0.5 text-neutral-500">{h.signedOffNote}</p>
+                      <p className="mt-1 text-[10px] text-neutral-600">
                         Before reset: {h.runHoursBeforeReset}h · {h.impressionsBeforeReset} impressions
                       </p>
                     </li>
@@ -157,13 +157,13 @@ export function PmSpotlightDrawer({
             </section>
 
             <section>
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
                 Task checklist
               </h3>
               {data.checklist.length === 0 ? (
-                <p className="text-zinc-600 text-xs">Configure checklist on the machine PM schedule.</p>
+                <p className="text-neutral-600 text-xs">Configure checklist on the machine PM schedule.</p>
               ) : (
-                <ol className="list-decimal list-inside space-y-1.5 text-xs text-zinc-400">
+                <ol className="list-decimal list-inside space-y-1.5 text-xs text-neutral-500">
                   {data.checklist.map((step, i) => (
                     <li key={i}>{step}</li>
                   ))}
@@ -172,10 +172,10 @@ export function PmSpotlightDrawer({
             </section>
 
             <section>
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
                 Spare parts
               </h3>
-              <p className="text-xs text-zinc-500 rounded-lg border border-dashed border-zinc-700 bg-zinc-950/50 px-2 py-2">
+              <p className="text-xs text-neutral-500 rounded-lg border border-dashed border-ds-line/50 bg-ds-main/50 px-2 py-2">
                 {data.sparePartsPlaceholder ?? 'Placeholder — inventory pick list integration pending.'}
               </p>
             </section>
@@ -192,7 +192,7 @@ export function PmSpotlightDrawer({
             ) : null}
           </>
         ) : (
-          <p className="text-zinc-600 text-sm">Could not load machine.</p>
+          <p className="text-neutral-600 text-sm">Could not load machine.</p>
         )}
       </div>
     </SlideOverPanel>

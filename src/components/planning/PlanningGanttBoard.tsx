@@ -89,8 +89,8 @@ function SortableGanttBlock({
       style={style}
       className={`shrink-0 rounded border px-1 py-1 cursor-grab active:cursor-grabbing ${
         priorityGlow
-          ? 'border-amber-500 bg-amber-500/15 shadow-[0_0_22px_rgba(245,158,11,0.45)] ring-1 ring-amber-500/60'
-          : 'border-border/20 bg-zinc-900/90'
+          ? 'border-ds-warning bg-ds-warning/15 shadow-[0_0_22px_rgba(245,158,11,0.45)] ring-1 ring-ds-warning/35'
+          : 'border-border/20 bg-ds-card/90'
       } ${isDragging ? 'opacity-70 z-10' : ''}`}
       {...attributes}
       {...listeners}
@@ -99,7 +99,7 @@ function SortableGanttBlock({
         <Link
           href={`/orders/purchase-orders/${line.po.id}`}
           onClick={(e) => e.stopPropagation()}
-          className={`text-[9px] text-amber-300/90 hover:underline truncate ${mono}`}
+          className={`text-[9px] text-ds-warning/90 hover:underline truncate ${mono}`}
         >
           {line.po.poNumber}
         </Link>
@@ -107,13 +107,13 @@ function SortableGanttBlock({
           <Star className={`h-3 w-3 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`} aria-label="Priority" />
         ) : null}
       </div>
-      <p className="text-[9px] text-slate-400 truncate leading-tight" title={line.cartonName}>
+      <p className="text-[9px] text-ds-ink-muted truncate leading-tight" title={line.cartonName}>
         {line.cartonName}
       </p>
-      <p className={`text-[9px] text-slate-500 mt-0.5 ${mono}`}>{formatDurationHMM(durationHours)}</p>
-      <p className={`text-[8px] text-slate-600 ${mono}`}>Fin: {finishLabel}</p>
+      <p className={`text-[9px] text-ds-ink-faint mt-0.5 ${mono}`}>{formatDurationHMM(durationHours)}</p>
+      <p className={`text-[8px] text-ds-ink-faint ${mono}`}>Fin: {finishLabel}</p>
       {ripple && ripple.delayedJobs > 0 ? (
-        <p className="text-[8px] text-amber-500/90 mt-0.5" title="Delivery ripple — jobs after this priority slot">
+        <p className="text-[8px] text-ds-warning/90 mt-0.5" title="Delivery ripple — jobs after this priority slot">
           Ripple: +{ripple.delayedJobs} job · +{formatDurationHMM(ripple.delayedHours)}
         </p>
       ) : null}
@@ -191,7 +191,7 @@ export function PlanningGanttBoard({
 
   if (lanes.length === 0) {
     return (
-      <p className={`text-[11px] text-slate-500 ${mono}`}>
+      <p className={`text-[11px] text-ds-ink-faint ${mono}`}>
         Assign a press to at least one open line to show the Gantt timeline.
       </p>
     )
@@ -199,7 +199,7 @@ export function PlanningGanttBoard({
 
   return (
     <div className="space-y-3">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Time-block Gantt (drag to re-sequence)</h2>
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">Time-block Gantt (drag to re-sequence)</h2>
       {lanes.map(({ machine, ids }) => {
         let totalH = 0
         const hoursByLineId: Record<string, number> = {}
@@ -240,8 +240,8 @@ export function PlanningGanttBoard({
 
         return (
           <div key={machine.id} className="rounded-lg border border-border/10 bg-background p-2">
-            <div className={`flex items-center justify-between text-[10px] text-slate-400 mb-1.5 ${mono}`}>
-              <span className="text-amber-400/90 font-semibold">{machine.machineCode}</span>
+            <div className={`flex items-center justify-between text-[10px] text-ds-ink-muted mb-1.5 ${mono}`}>
+              <span className="text-ds-warning font-semibold">{machine.machineCode}</span>
               <span>
                 Σ {formatDurationHMM(totalH)} · finish{' '}
                 {ids.length

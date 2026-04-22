@@ -38,10 +38,10 @@ export function PoDrawerSpotlightLines({
 
   return (
     <>
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
         Line items
       </div>
-      <div className="mb-2 grid grid-cols-[1fr_auto_auto] gap-x-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-800 pb-1">
+      <div className="mb-2 grid grid-cols-[1fr_auto_auto] gap-x-2 text-[9px] font-semibold uppercase tracking-wide text-ds-ink-faint border-b border-ds-line/40 pb-1">
         <span>Carton</span>
         <span className="text-right">Qty</span>
         <span className="text-right">₹</span>
@@ -53,7 +53,7 @@ export function PoDrawerSpotlightLines({
             tr?.signal === 'green'
               ? 'bg-emerald-500'
               : tr?.signal === 'yellow'
-                ? 'bg-amber-500'
+                ? 'bg-ds-warning'
                 : 'bg-rose-500'
           const isSpotlight =
             active && lineItemMatchesDrawerQuery(li.cartonName, spotlightQuery)
@@ -63,8 +63,8 @@ export function PoDrawerSpotlightLines({
               data-spotlight-match={isSpotlight ? 'true' : undefined}
               className={`rounded-md border px-2 py-1.5 text-xs transition-colors ${
                 isSpotlight
-                  ? 'border-l-2 border-l-orange-500 bg-orange-500/10 border-slate-800/90'
-                  : 'border border-slate-800/90 bg-background'
+                  ? 'border-l-2 border-l-orange-500 bg-orange-500/10 border-ds-line/40'
+                  : 'border border-ds-line/40 bg-background'
               }`}
             >
               <div className="flex items-start gap-2">
@@ -74,7 +74,7 @@ export function PoDrawerSpotlightLines({
                 />
                 <div className="min-w-0 flex-1 grid grid-cols-[1fr_auto_auto] gap-x-2 items-start">
                   <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
-                    <span className="font-medium text-slate-200 truncate">
+                    <span className="font-medium text-ds-ink truncate">
                       {active
                         ? spotlightHighlightText(li.cartonName, spotlightQuery.trim())
                         : li.cartonName}
@@ -85,17 +85,17 @@ export function PoDrawerSpotlightLines({
                       </span>
                     ) : null}
                   </div>
-                  <span className={`${poMono} text-slate-300 text-[11px] text-right tabular-nums`}>
+                  <span className={`${poMono} text-ds-ink-muted text-[11px] text-right tabular-nums`}>
                     {li.quantity}
                   </span>
-                  <span className={`${poMono} text-slate-200 text-[11px] text-right tabular-nums`}>
+                  <span className={`${poMono} text-ds-ink text-[11px] text-right tabular-nums`}>
                     {li.rate != null
                       ? (Number(li.rate) * li.quantity).toLocaleString('en-IN', {
                           maximumFractionDigits: 0,
                         })
                       : '—'}
                   </span>
-                  <div className={`col-span-3 ${poMono} text-slate-500 text-[10px]`}>
+                  <div className={`col-span-3 ${poMono} text-ds-ink-faint text-[10px]`}>
                     {li.rate != null
                       ? `₹${Number(li.rate).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ea`
                       : ''}

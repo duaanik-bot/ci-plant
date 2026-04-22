@@ -134,8 +134,8 @@ export default function DispatchTrackingPage() {
     <div className="p-4 max-w-6xl mx-auto space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-bold text-amber-400">Delivery Tracking</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h1 className="text-xl font-bold text-ds-warning">Delivery Tracking</h1>
+          <p className="text-xs text-ds-ink-faint mt-0.5">
             Dispatch timeline (auto-refresh 30s){isFetching ? ' • refreshing…' : ''}
           </p>
         </div>
@@ -154,7 +154,7 @@ export default function DispatchTrackingPage() {
             )
             downloadText(`dispatch-tracking-${new Date().toISOString().slice(0, 10)}.csv`, csv)
           }}
-          className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 hover:border-amber-500/60 text-sm"
+          className="px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/50 hover:border-ds-warning/60 text-sm"
         >
           Export CSV
         </button>
@@ -164,7 +164,7 @@ export default function DispatchTrackingPage() {
         <select
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground min-w-[220px]"
+          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground min-w-[220px]"
         >
           <option value="">All clients</option>
           {customers.map((c) => (
@@ -176,7 +176,7 @@ export default function DispatchTrackingPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
         >
           <option value="">All statuses</option>
           <option value="pending_qa">Pending QA</option>
@@ -187,39 +187,39 @@ export default function DispatchTrackingPage() {
       </div>
 
       {isLoading ? (
-        <div className="p-4 text-slate-400">Loading…</div>
+        <div className="p-4 text-ds-ink-muted">Loading…</div>
       ) : (
         <div className="space-y-3">
           {filtered.map((r) => (
-            <div key={r.id} className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+            <div key={r.id} className="rounded-xl border border-ds-line/50 bg-ds-card p-4">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
-                  <p className="text-sm font-semibold text-slate-200">
-                    <span className="font-mono text-amber-300">{r.jobNumber}</span> · {r.customerName}
+                  <p className="text-sm font-semibold text-ds-ink">
+                    <span className="font-mono text-ds-warning">{r.jobNumber}</span> · {r.customerName}
                   </p>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="text-xs text-ds-ink-faint mt-0.5">
                     Vehicle: {r.vehicleNumber ?? '—'} · Driver: {r.driverName ?? '—'} · E-way: {r.ewayBillNumber ?? '—'}
                   </p>
                 </div>
-                <span className="px-2 py-0.5 rounded text-xs border bg-slate-800 text-slate-200 border-slate-600">
+                <span className="px-2 py-0.5 rounded text-xs border bg-ds-elevated text-ds-ink border-ds-line/60">
                   {r.status}
                 </span>
               </div>
 
               <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-2">
-                  <p className="text-slate-400">● Dispatched</p>
-                  <p className="text-slate-200 mt-0.5">
+                <div className="rounded-lg border border-ds-line/50 bg-ds-elevated/40 p-2">
+                  <p className="text-ds-ink-muted">● Dispatched</p>
+                  <p className="text-ds-ink mt-0.5">
                     {r.dispatchedAt ? new Date(r.dispatchedAt).toLocaleString() : '—'}
                   </p>
                 </div>
-                <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-2">
-                  <p className="text-slate-400">● In Transit</p>
-                  <p className="text-slate-200 mt-0.5">{r.status === 'dispatched' ? 'Active' : '—'}</p>
+                <div className="rounded-lg border border-ds-line/50 bg-ds-elevated/40 p-2">
+                  <p className="text-ds-ink-muted">● In Transit</p>
+                  <p className="text-ds-ink mt-0.5">{r.status === 'dispatched' ? 'Active' : '—'}</p>
                 </div>
-                <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-2">
-                  <p className="text-slate-400">● Delivered / POD</p>
-                  <p className="text-slate-200 mt-0.5">
+                <div className="rounded-lg border border-ds-line/50 bg-ds-elevated/40 p-2">
+                  <p className="text-ds-ink-muted">● Delivered / POD</p>
+                  <p className="text-ds-ink mt-0.5">
                     {r.podReceivedAt ? new Date(r.podReceivedAt).toLocaleString() : '—'}
                   </p>
                 </div>
@@ -231,8 +231,8 @@ export default function DispatchTrackingPage() {
                   onClick={() => openPod(r)}
                   className={`px-3 py-2 rounded-lg text-sm font-medium border ${
                     r.status === 'pod_received'
-                      ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
-                      : 'bg-amber-600 hover:bg-amber-500 text-primary-foreground border-amber-500/40'
+                      ? 'bg-ds-elevated text-ds-ink-faint border-ds-line/50 cursor-not-allowed'
+                      : 'bg-ds-warning hover:bg-ds-warning text-primary-foreground border-ds-warning/40'
                   }`}
                 >
                   Mark Delivered
@@ -241,7 +241,7 @@ export default function DispatchTrackingPage() {
             </div>
           ))}
           {filtered.length === 0 && (
-            <p className="text-slate-500 text-center py-8 text-sm">No dispatched jobs found.</p>
+            <p className="text-ds-ink-faint text-center py-8 text-sm">No dispatched jobs found.</p>
           )}
         </div>
       )}
@@ -254,57 +254,57 @@ export default function DispatchTrackingPage() {
             aria-label="Close"
             type="button"
           />
-          <div className="relative w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 p-4">
+          <div className="relative w-full max-w-xl rounded-xl border border-ds-line/50 bg-ds-card p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Confirm POD</h2>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-ds-ink-muted mt-0.5">
                   {podRow.jobNumber} · {podRow.customerName}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setPodOpen(false)}
-                className="text-slate-400 hover:text-foreground"
+                className="text-ds-ink-muted hover:text-foreground"
               >
                 ✕
               </button>
             </div>
 
-            <label className="mt-4 flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+            <label className="mt-4 flex items-center gap-2 text-sm text-ds-ink-muted cursor-pointer">
               <input
                 type="checkbox"
                 checked={createDraftBill}
                 onChange={(e) => setCreateDraftBill(e.target.checked)}
-                className="rounded border-slate-600 bg-slate-800 text-amber-500"
+                className="rounded border-ds-line/60 bg-ds-elevated text-ds-warning"
               />
               Create draft bill from this dispatch
             </label>
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Received By</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Received By</label>
                 <input
                   value={receivedBy}
                   onChange={(e) => setReceivedBy(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Delivery Date/Time</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Delivery Date/Time</label>
                 <input
                   type="datetime-local"
                   value={receivedAt}
                   onChange={(e) => setReceivedAt(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-xs text-slate-400 mb-1">Remarks</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Remarks</label>
                 <textarea
                   rows={3}
                   value={remarks}
                   onChange={(e) => setRemarks(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
             </div>
@@ -313,12 +313,12 @@ export default function DispatchTrackingPage() {
               <button
                 type="button"
                 onClick={submitPod}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
+                className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
               >
                 Confirm POD
               </button>
             </div>
-            <p className="text-[11px] text-slate-500 mt-2">
+            <p className="text-[11px] text-ds-ink-faint mt-2">
               If &quot;Create draft bill&quot; is checked, a draft bill (customer + one line from job) will be created when you confirm POD.
             </p>
           </div>

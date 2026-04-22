@@ -112,7 +112,7 @@ export default function EditSupplierPage() {
     }
   }
 
-  if (loading) return <div className="text-slate-400">Loading…</div>
+  if (loading) return <div className="text-ds-ink-muted">Loading…</div>
   if (!supplier) return <div className="text-red-400">Supplier not found</div>
 
   return (
@@ -120,62 +120,62 @@ export default function EditSupplierPage() {
       <h2 className="text-lg font-semibold text-foreground mb-4">Edit supplier</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Supplier name *</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Supplier name *</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-              fieldErrors.name ? 'border-red-500' : 'border-slate-600'
+            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+              fieldErrors.name ? 'border-red-500' : 'border-ds-line/60'
             }`}
           />
           {fieldErrors.name && <p className="mt-1 text-sm text-red-400">{fieldErrors.name}</p>}
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">GST number</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">GST number</label>
           <input
             value={gstNumber}
             onChange={(e) => setGstNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Contact person</label>
+            <label className="block text-sm text-ds-ink-muted mb-1">Contact person</label>
             <input
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Phone</label>
+            <label className="block text-sm text-ds-ink-muted mb-1">Phone</label>
             <input
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Email</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Email</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Address</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Address</label>
           <textarea
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Material types</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Material types</label>
           <div className="flex flex-wrap gap-2">
             {MATERIAL_OPTIONS.map((t) => (
               <label key={t} className="flex items-center gap-1 text-sm">
@@ -183,7 +183,7 @@ export default function EditSupplierPage() {
                   type="checkbox"
                   checked={materialTypes.includes(t)}
                   onChange={() => toggleType(t)}
-                  className="rounded border-slate-600"
+                  className="rounded border-ds-line/60"
                 />
                 {t}
               </label>
@@ -191,35 +191,35 @@ export default function EditSupplierPage() {
           </div>
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Lead time (days)</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Lead time (days)</label>
           <input
             type="number"
             min={0}
             value={leadTimeDays}
             onChange={(e) => setLeadTimeDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Payment terms (days credit)</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Payment terms (days credit)</label>
           <input
             type="number"
             min={0}
             value={paymentTermsDays}
             onChange={(e) => setPaymentTermsDays(e.target.value)}
             placeholder="0 = advance, 30 = Net 30"
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground font-mono tabular-nums"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground font-mono tabular-nums"
           />
-          <p className="mt-1 text-[11px] text-slate-500">
+          <p className="mt-1 text-[11px] text-ds-ink-faint">
             Drives projected payment date from GRN receipt (calendar days).
           </p>
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Payment terms (notes)</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Payment terms (notes)</label>
           <input
             value={paymentTerms}
             onChange={(e) => setPaymentTerms(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -228,19 +228,19 @@ export default function EditSupplierPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-slate-600"
+            className="rounded border-ds-line/60"
           />
-          <label htmlFor="active" className="text-sm text-slate-300">Active</label>
+          <label htmlFor="active" className="text-sm text-ds-ink-muted">Active</label>
         </div>
         <div className="flex gap-2">
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground"
+            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/suppliers" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground">
+          <Link href="/masters/suppliers" className="px-4 py-2 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground">
             Cancel
           </Link>
         </div>

@@ -97,7 +97,7 @@ export default function EditInstrumentPage() {
     }
   }
 
-  if (loading) return <div className="text-slate-400">Loading…</div>
+  if (loading) return <div className="text-ds-ink-muted">Loading…</div>
   if (!inst) return <div className="text-red-400">Instrument not found</div>
 
   return (
@@ -105,82 +105,82 @@ export default function EditInstrumentPage() {
       <h2 className="text-lg font-semibold text-foreground mb-4">Edit instrument</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Instrument name</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Instrument name</label>
           <input
             value={instrumentName}
             onChange={(e) => setInstrumentName(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Specification</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Specification</label>
           <input
             value={specification}
             onChange={(e) => setSpecification(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Range</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Range</label>
           <input
             value={range}
             onChange={(e) => setRange(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Frequency</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Frequency</label>
           <input
             value={frequency}
             onChange={(e) => setFrequency(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Purpose</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Purpose</label>
           <input
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Last calibration</label>
+            <label className="block text-sm text-ds-ink-muted mb-1">Last calibration</label>
             <input
               type="date"
               value={lastCalibration}
               onChange={(e) => setLastCalibration(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Calibration due</label>
+            <label className="block text-sm text-ds-ink-muted mb-1">Calibration due</label>
             <input
               type="date"
               value={calibrationDue}
               onChange={(e) => setCalibrationDue(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Calibration frequency (days)</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Calibration frequency (days)</label>
           <input
             type="number"
             min={1}
             value={calibrationFreqDays}
             onChange={(e) => setCalibrationFreqDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Certificate URL</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Certificate URL</label>
           <input
             value={certificateUrl}
             onChange={(e) => setCertificateUrl(e.target.value)}
             placeholder="https://..."
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -189,19 +189,19 @@ export default function EditInstrumentPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-slate-600"
+            className="rounded border-ds-line/60"
           />
-          <label htmlFor="active" className="text-sm text-slate-300">Active</label>
+          <label htmlFor="active" className="text-sm text-ds-ink-muted">Active</label>
         </div>
         <div className="flex gap-2">
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground"
+            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/instruments" className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-foreground">
+          <Link href="/masters/instruments" className="px-4 py-2 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground">
             Cancel
           </Link>
         </div>

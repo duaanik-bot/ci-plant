@@ -183,21 +183,21 @@ export default function MaterialForm({ mode, initialData }: Props) {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground text-sm'
-  const errCls = (k: string) => fieldErrors[k] ? 'border-red-500' : 'border-slate-600'
+  const cls = 'w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground text-sm'
+  const errCls = (k: string) => fieldErrors[k] ? 'border-red-500' : 'border-ds-line/60'
 
   const health = mode === 'EDIT' ? stockHealth(qtyAvailable, Number(f.reorderPoint), Number(f.safetyStock)) : null
-  const healthColor = health ? { green: 'bg-green-500', yellow: 'bg-amber-500', red: 'bg-red-500' }[health] : ''
+  const healthColor = health ? { green: 'bg-green-500', yellow: 'bg-ds-warning', red: 'bg-red-500' }[health] : ''
   const healthLabel = health ? { green: 'Healthy', yellow: 'Low — approaching reorder point', red: 'Critical — below safety stock' }[health] : ''
 
   return (
     <div className="max-w-3xl">
-      <div className="sticky top-0 z-20 mb-4 rounded-lg border border-slate-700 bg-slate-950/95 backdrop-blur p-3 flex items-center justify-between">
+      <div className="sticky top-0 z-20 mb-4 rounded-lg border border-ds-line/50 bg-ds-main/95 backdrop-blur p-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-foreground">
           {mode === 'ADD' ? 'New Board / Paper Material' : 'Edit Board / Paper Material'}
         </h2>
         <div className="flex items-center gap-3">
-          <label className="inline-flex items-center gap-2 text-slate-300 text-sm">
+          <label className="inline-flex items-center gap-2 text-ds-ink-muted text-sm">
             <input type="checkbox" checked={f.active} onChange={(e) => patch('active', e.target.checked)} />
             {f.active ? 'Active' : 'Deactivated'}
           </label>
@@ -214,7 +214,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
           <button
             type="button"
             onClick={() => router.push('/masters/materials')}
-            className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
+            className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm"
           >
             Cancel
           </button>
@@ -222,7 +222,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
             type="submit"
             form="material-form"
             disabled={submitting}
-            className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
+            className="px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {submitting ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
           </button>
@@ -231,25 +231,25 @@ export default function MaterialForm({ mode, initialData }: Props) {
 
       {/* Stock Health (edit only) */}
       {mode === 'EDIT' && health && (
-        <div className="mb-5 bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm flex items-center gap-3">
+        <div className="mb-5 bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm flex items-center gap-3">
           <span className={`h-3 w-3 rounded-full ${healthColor}`} />
           <div>
-            <span className="text-slate-200 font-medium">Stock Health: </span>
-            <span className="text-slate-400">{healthLabel}</span>
-            <span className="text-slate-500 ml-2">(Qty: {qtyAvailable} / Reorder: {f.reorderPoint} / Safety: {f.safetyStock})</span>
+            <span className="text-ds-ink font-medium">Stock Health: </span>
+            <span className="text-ds-ink-muted">{healthLabel}</span>
+            <span className="text-ds-ink-faint ml-2">(Qty: {qtyAvailable} / Reorder: {f.reorderPoint} / Safety: {f.safetyStock})</span>
           </div>
         </div>
       )}
 
       <form id="material-form" onSubmit={handleSubmit} className="space-y-5">
         {/* Material Code + Auto Toggle */}
-        <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm space-y-3">
+        <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-slate-300 font-medium">Material Code {mode === 'EDIT' ? '*' : ''}</label>
+            <label className="text-ds-ink-muted font-medium">Material Code {mode === 'EDIT' ? '*' : ''}</label>
             {mode === 'ADD' && (
               <button type="button" onClick={() => { setAutoCode((p) => !p); if (!autoCode) patch('materialCode', '') }} className="flex items-center gap-2 text-xs">
-                <span className="text-slate-400">Auto-generate</span>
-                <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoCode ? 'bg-amber-500' : 'bg-slate-600'}`}>
+                <span className="text-ds-ink-muted">Auto-generate</span>
+                <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoCode ? 'bg-ds-warning' : 'bg-ds-line/30'}`}>
                   <span className={`inline-block h-3.5 w-3.5 rounded-full bg-card transition-transform ${autoCode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
                 </span>
               </button>
@@ -266,18 +266,18 @@ export default function MaterialForm({ mode, initialData }: Props) {
         </div>
 
         {/* Board Classification */}
-        <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm">
-          <h3 className="text-slate-300 font-medium mb-3">Board Classification</h3>
+        <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm">
+          <h3 className="text-ds-ink-muted font-medium mb-3">Board Classification</h3>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-slate-400 mb-1">Board type</label>
+              <label className="block text-ds-ink-muted mb-1">Board type</label>
               <select value={f.boardType} onChange={(e) => patch('boardType', e.target.value)} className={cls}>
                 <option value="">Select board type...</option>
                 {BOARD_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Description</label>
+              <label className="block text-ds-ink-muted mb-1">Description</label>
               <input value={f.description} onChange={(e) => patch('description', e.target.value)} className={`${cls} border ${errCls('description')}`} placeholder="e.g. Duplex Board 300gsm" />
               {fieldErrors.description && <p className="text-xs text-red-400 mt-0.5">{fieldErrors.description}</p>}
             </div>
@@ -285,93 +285,93 @@ export default function MaterialForm({ mode, initialData }: Props) {
         </div>
 
         {/* Physical Attributes */}
-        <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm">
-          <h3 className="text-slate-300 font-medium mb-3">Physical Attributes</h3>
+        <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm">
+          <h3 className="text-ds-ink-muted font-medium mb-3">Physical Attributes</h3>
           <div className="grid md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-slate-400 mb-1">GSM</label>
+              <label className="block text-ds-ink-muted mb-1">GSM</label>
               <input type="number" min={0} value={f.gsm} onChange={(e) => patch('gsm', e.target.value)} className={cls} placeholder="e.g. 300" />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Sheet length (mm)</label>
+              <label className="block text-ds-ink-muted mb-1">Sheet length (mm)</label>
               <input type="number" step="0.01" min={0} value={f.sheetLength} onChange={(e) => patch('sheetLength', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Sheet width (mm)</label>
+              <label className="block text-ds-ink-muted mb-1">Sheet width (mm)</label>
               <input type="number" step="0.01" min={0} value={f.sheetWidth} onChange={(e) => patch('sheetWidth', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Sheet weight (g)</label>
+              <label className="block text-ds-ink-muted mb-1">Sheet weight (g)</label>
               <input type="text" readOnly value={sheetWeight > 0 ? `${sheetWeight} g` : '—'} className={`${cls} opacity-60 cursor-not-allowed`} />
-              <p className="text-[10px] text-slate-500 mt-0.5">= L x W x GSM / 1,000,000</p>
+              <p className="text-[10px] text-ds-ink-faint mt-0.5">= L x W x GSM / 1,000,000</p>
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Grain direction</label>
+              <label className="block text-ds-ink-muted mb-1">Grain direction</label>
               <select value={f.grainDirection} onChange={(e) => patch('grainDirection', e.target.value)} className={cls}>
                 <option value="">Select...</option>
                 {GRAIN_DIRECTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Caliper (microns)</label>
+              <label className="block text-ds-ink-muted mb-1">Caliper (microns)</label>
               <input type="number" step="0.01" min={0} value={f.caliperMicrons} onChange={(e) => patch('caliperMicrons', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Brightness %</label>
+              <label className="block text-ds-ink-muted mb-1">Brightness %</label>
               <input type="number" step="0.1" min={0} max={100} value={f.brightnessPct} onChange={(e) => patch('brightnessPct', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Moisture %</label>
+              <label className="block text-ds-ink-muted mb-1">Moisture %</label>
               <input type="number" step="0.1" min={0} max={100} value={f.moisturePct} onChange={(e) => patch('moisturePct', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">HSN code</label>
+              <label className="block text-ds-ink-muted mb-1">HSN code</label>
               <input value={f.hsnCode} onChange={(e) => patch('hsnCode', e.target.value)} className={cls} placeholder="e.g. 4810" />
             </div>
           </div>
         </div>
 
         {/* Inventory & Supply */}
-        <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm">
-          <h3 className="text-slate-300 font-medium mb-3">Inventory & Supply</h3>
+        <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm">
+          <h3 className="text-ds-ink-muted font-medium mb-3">Inventory & Supply</h3>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-slate-400 mb-1">Unit of measure</label>
+              <label className="block text-ds-ink-muted mb-1">Unit of measure</label>
               <select value={f.unit} onChange={(e) => patch('unit', e.target.value)} className={cls}>
                 {UNIT_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Primary supplier</label>
+              <label className="block text-ds-ink-muted mb-1">Primary supplier</label>
               <select value={f.supplierId} onChange={(e) => patch('supplierId', e.target.value)} className={cls}>
                 <option value="">None</option>
                 {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Reorder point</label>
+              <label className="block text-ds-ink-muted mb-1">Reorder point</label>
               <input type="number" min={0} value={f.reorderPoint} onChange={(e) => patch('reorderPoint', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Safety stock</label>
+              <label className="block text-ds-ink-muted mb-1">Safety stock</label>
               <input type="number" min={0} value={f.safetyStock} onChange={(e) => patch('safetyStock', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Lead time (days)</label>
+              <label className="block text-ds-ink-muted mb-1">Lead time (days)</label>
               <input type="number" min={0} value={f.leadTimeDays} onChange={(e) => patch('leadTimeDays', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Storage location</label>
+              <label className="block text-ds-ink-muted mb-1">Storage location</label>
               <input value={f.storageLocation} onChange={(e) => patch('storageLocation', e.target.value)} className={cls} placeholder="e.g. Rack A-3" />
             </div>
             <div>
-              <label className="block text-slate-400 mb-1">Weighted avg cost</label>
+              <label className="block text-ds-ink-muted mb-1">Weighted avg cost</label>
               <input type="number" min={0} step="0.01" value={f.weightedAvgCost} onChange={(e) => patch('weightedAvgCost', e.target.value)} className={cls} />
             </div>
             <div />
           </div>
           {f.unit === 'kg' && sheetWeight > 0 && (
-            <div className="mt-3 p-2 rounded bg-slate-800/60 text-xs text-slate-400">
+            <div className="mt-3 p-2 rounded bg-ds-elevated/60 text-xs text-ds-ink-muted">
               1 kg = ~{Math.round(1000 / sheetWeight)} sheets (at {sheetWeight}g/sheet)
             </div>
           )}

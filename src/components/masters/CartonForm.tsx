@@ -465,16 +465,16 @@ export default function CartonForm({ mode, initialData }: Props) {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground text-sm'
+  const cls = 'w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground text-sm'
   const activeCls = (id: SectionId) =>
-    `w-full text-left px-3 py-2 rounded text-xs ${activeSection === id ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'text-slate-300 hover:bg-slate-800'}`
+    `w-full text-left px-3 py-2 rounded text-xs ${activeSection === id ? 'bg-ds-warning/8 text-ds-warning border border-ds-warning/30' : 'text-ds-ink-muted hover:bg-ds-elevated'}`
 
   return (
     <form onSubmit={handleSubmit} className='relative'>
-      <div className='sticky top-0 z-20 mb-4 rounded-lg border border-slate-700 bg-slate-950/95 backdrop-blur p-3 flex items-center justify-between'>
+      <div className='sticky top-0 z-20 mb-4 rounded-lg border border-ds-line/50 bg-ds-main/95 backdrop-blur p-3 flex items-center justify-between'>
         <h2 className='text-lg font-semibold text-foreground'>{mode === 'ADD' ? 'New Product' : 'Edit Product'}</h2>
         <div className='flex items-center gap-3'>
-          <label className='inline-flex items-center gap-2 text-slate-300 text-sm'>
+          <label className='inline-flex items-center gap-2 text-ds-ink-muted text-sm'>
             <input type='checkbox' checked={f.active} onChange={(e) => patch('active', e.target.checked)} />
             {f.active ? 'Active' : 'Deactivated'}
           </label>
@@ -488,8 +488,8 @@ export default function CartonForm({ mode, initialData }: Props) {
               {deleting ? 'Deleting...' : 'Delete'}
             </button>
           )}
-          <button type='button' onClick={() => router.push('/masters/cartons')} className='px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm'>Cancel</button>
-          <button type='submit' disabled={saving} className='px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium'>
+          <button type='button' onClick={() => router.push('/masters/cartons')} className='px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm'>Cancel</button>
+          <button type='submit' disabled={saving} className='px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium'>
             {saving ? 'Saving...' : mode === 'ADD' ? 'Save' : 'Update'}
           </button>
         </div>
@@ -497,7 +497,7 @@ export default function CartonForm({ mode, initialData }: Props) {
 
       <div className='md:flex md:gap-4'>
         <aside className='hidden md:block w-44 shrink-0'>
-          <div className='sticky top-24 z-40 pointer-events-auto rounded-lg border border-slate-700 bg-slate-900 p-2 space-y-1'>
+          <div className='sticky top-24 z-40 pointer-events-auto rounded-lg border border-ds-line/50 bg-ds-card p-2 space-y-1'>
             <button type='button' className={`${activeCls('identity')} cursor-pointer`} onClick={() => scrollToSection('identity')}>Identity</button>
             <button type='button' className={`${activeCls('dimensions')} cursor-pointer`} onClick={() => scrollToSection('dimensions')}>Dimensions</button>
             <button type='button' className={`${activeCls('specifications')} cursor-pointer`} onClick={() => scrollToSection('specifications')}>Specifications</button>
@@ -506,19 +506,19 @@ export default function CartonForm({ mode, initialData }: Props) {
         </aside>
 
         <div className='flex-1 space-y-4'>
-          <section id='identity' ref={(el) => { sectionEls.current.identity = el }} className='scroll-mt-28 rounded-lg border border-slate-700 bg-slate-900 p-4'>
-            <h3 className='text-sm font-semibold text-slate-200 mb-3'>Identity</h3>
+          <section id='identity' ref={(el) => { sectionEls.current.identity = el }} className='scroll-mt-28 rounded-lg border border-ds-line/50 bg-ds-card p-4'>
+            <h3 className='text-sm font-semibold text-ds-ink mb-3'>Identity</h3>
             <div className='grid md:grid-cols-3 gap-3 text-sm'>
               <div>
-                <label className='block text-slate-400 mb-1'>Carton Name *</label>
+                <label className='block text-ds-ink-muted mb-1'>Carton Name *</label>
                 <input className={cls} value={f.cartonName} onChange={(e) => patch('cartonName', toCaps(e.target.value))} />
               </div>
               <div>
-                <label className='block text-slate-400 mb-1'>Artwork Code</label>
+                <label className='block text-ds-ink-muted mb-1'>Artwork Code</label>
                 <input className={cls} value={f.artworkCode} onChange={(e) => patch('artworkCode', toCaps(e.target.value))} />
               </div>
               <div className='relative'>
-                <label className='block text-slate-400 mb-1'>Client Name *</label>
+                <label className='block text-ds-ink-muted mb-1'>Client Name *</label>
                 <input
                   className={cls}
                   value={customerQuery}
@@ -547,17 +547,17 @@ export default function CartonForm({ mode, initialData }: Props) {
                   }}
                   placeholder='Type at least 2 characters...'
                 />
-                {customerState.loading && <p className='absolute right-3 top-9 text-[11px] text-slate-400'>Searching...</p>}
+                {customerState.loading && <p className='absolute right-3 top-9 text-[11px] text-ds-ink-muted'>Searching...</p>}
                 {customerState.open && !shouldHideCustomerSuggestions && (
-                  <div className='absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-slate-700 bg-slate-900 shadow-lg'>
+                  <div className='absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-ds-line/50 bg-ds-card shadow-lg'>
                     {customerState.loading ? (
-                      <div className='px-3 py-2 text-xs text-slate-400'>Searching…</div>
+                      <div className='px-3 py-2 text-xs text-ds-ink-muted'>Searching…</div>
                     ) : customerQuery.trim().length >= 2 && customerResults.length === 0 ? (
                       <div className='px-3 py-2 space-y-2'>
-                        <p className='text-xs text-slate-400'>No customers match this search.</p>
+                        <p className='text-xs text-ds-ink-muted'>No customers match this search.</p>
                         <Link
                           href={`/masters/customers/new?name=${encodeURIComponent(customerQuery.trim())}`}
-                          className='block text-sm text-amber-400 hover:text-amber-300 underline'
+                          className='block text-sm text-ds-warning hover:text-ds-warning underline'
                           onMouseDown={(e) => e.preventDefault()}
                         >
                           + Add New Customer {toCaps(customerQuery.trim())}
@@ -574,10 +574,10 @@ export default function CartonForm({ mode, initialData }: Props) {
                               e.preventDefault()
                               selectCustomer(c)
                             }}
-                            className={`w-full text-left px-3 py-2 border-b border-slate-800 last:border-0 ${idx === customerState.activeIndex ? 'bg-slate-800' : 'hover:bg-slate-800/70'}`}
+                            className={`w-full text-left px-3 py-2 border-b border-ds-line/40 last:border-0 ${idx === customerState.activeIndex ? 'bg-ds-elevated' : 'hover:bg-ds-elevated/70'}`}
                           >
                             <div className='text-sm text-foreground'>{toCaps(c.name)}</div>
-                            <div className='text-xs text-slate-400'>{cityLine}</div>
+                            <div className='text-xs text-ds-ink-muted'>{cityLine}</div>
                           </button>
                         )
                       })
@@ -587,22 +587,22 @@ export default function CartonForm({ mode, initialData }: Props) {
               </div>
               <div className='md:col-span-2 grid grid-cols-2 gap-3'>
                 <div>
-                  <label className='block text-slate-400 mb-1'>Rate</label>
+                  <label className='block text-ds-ink-muted mb-1'>Rate</label>
                   <input type='number' inputMode='decimal' onKeyDown={blockInvalidNumericKeys} className={cls} value={f.rate} onChange={(e) => patch('rate', e.target.value)} />
                 </div>
                 <div>
-                  <label className='block text-slate-400 mb-1'>GST %</label>
+                  <label className='block text-ds-ink-muted mb-1'>GST %</label>
                   <input type='number' inputMode='decimal' onKeyDown={blockInvalidNumericKeys} className={cls} value={f.gstPct} onChange={(e) => patch('gstPct', e.target.value)} />
                 </div>
               </div>
             </div>
           </section>
 
-          <section id='dimensions' ref={(el) => { sectionEls.current.dimensions = el }} className='scroll-mt-28 rounded-lg border border-slate-700 bg-slate-900 p-4'>
-            <h3 className='text-sm font-semibold text-slate-200 mb-3'>Dimensions</h3>
+          <section id='dimensions' ref={(el) => { sectionEls.current.dimensions = el }} className='scroll-mt-28 rounded-lg border border-ds-line/50 bg-ds-card p-4'>
+            <h3 className='text-sm font-semibold text-ds-ink mb-3'>Dimensions</h3>
             <div className='grid md:grid-cols-3 gap-3 text-sm'>
               <div>
-                <label className='block text-slate-400 mb-1'>L x W x H (mm)</label>
+                <label className='block text-ds-ink-muted mb-1'>L x W x H (mm)</label>
                 <div className='grid grid-cols-3 gap-2'>
                   <input type='number' inputMode='decimal' onKeyDown={blockInvalidNumericKeys} placeholder='L' className={cls} value={f.finishedLength} onChange={(e) => patch('finishedLength', e.target.value)} />
                   <input type='number' inputMode='decimal' onKeyDown={blockInvalidNumericKeys} placeholder='W' className={cls} value={f.finishedWidth} onChange={(e) => patch('finishedWidth', e.target.value)} />
@@ -610,7 +610,7 @@ export default function CartonForm({ mode, initialData }: Props) {
                 </div>
               </div>
               <div>
-                <label className='block text-slate-400 mb-1'>Pasting style</label>
+                <label className='block text-ds-ink-muted mb-1'>Pasting style</label>
                 <select className={cls} value={f.pastingStyle} onChange={(e) => patch('pastingStyle', e.target.value)}>
                   <option value=''>Select...</option>
                   {PASTING_STYLE_ORDER.map((p) => (
@@ -619,7 +619,7 @@ export default function CartonForm({ mode, initialData }: Props) {
                 </select>
               </div>
               <div className='md:col-span-1'>
-                <label className='block text-slate-400 mb-1'>Die Master (tooling)</label>
+                <label className='block text-ds-ink-muted mb-1'>Die Master (tooling)</label>
                 <select
                   className={cls}
                   value={f.dieMasterId}
@@ -632,12 +632,12 @@ export default function CartonForm({ mode, initialData }: Props) {
                     </option>
                   ))}
                 </select>
-                <p className='mt-1 text-[10px] text-slate-500'>
+                <p className='mt-1 text-[10px] text-ds-ink-faint'>
                   PO and Die Hub use this record for type and L×W×H.
                 </p>
               </div>
               <div className='md:col-span-1'>
-                <label className='block text-slate-400 mb-1'>Shade card (production kit)</label>
+                <label className='block text-ds-ink-muted mb-1'>Shade card (production kit)</label>
                 <select
                   className={cls}
                   value={f.shadeCardId}
@@ -650,7 +650,7 @@ export default function CartonForm({ mode, initialData }: Props) {
                     </option>
                   ))}
                 </select>
-                <p className='mt-1 text-[10px] text-slate-500'>
+                <p className='mt-1 text-[10px] text-ds-ink-faint'>
                   Links PO production readiness to Ink Kitchen + approval doc on the shade master.
                 </p>
               </div>
@@ -658,48 +658,48 @@ export default function CartonForm({ mode, initialData }: Props) {
             </div>
           </section>
 
-          <section id='specifications' ref={(el) => { sectionEls.current.specifications = el }} className='scroll-mt-28 rounded-lg border border-slate-700 bg-slate-900 p-4'>
-            <h3 className='text-sm font-semibold text-slate-200 mb-3'>Specifications</h3>
+          <section id='specifications' ref={(el) => { sectionEls.current.specifications = el }} className='scroll-mt-28 rounded-lg border border-ds-line/50 bg-ds-card p-4'>
+            <h3 className='text-sm font-semibold text-ds-ink mb-3'>Specifications</h3>
             <div className='grid md:grid-cols-4 gap-3 text-sm'>
               <div>
-                <label className='block text-slate-400 mb-1'>Board Grade</label>
+                <label className='block text-ds-ink-muted mb-1'>Board Grade</label>
                 <select className={cls} value={f.boardGrade} onChange={(e) => patch('boardGrade', e.target.value)}>
                   <option value=''>Select grade...</option>
                   {BOARD_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
                 </select>
               </div>
               <div>
-                <label className='block text-slate-400 mb-1'>GSM</label>
+                <label className='block text-ds-ink-muted mb-1'>GSM</label>
                 <input type='number' inputMode='decimal' onKeyDown={blockInvalidNumericKeys} className={cls} value={f.gsm} onChange={(e) => patch('gsm', e.target.value)} />
               </div>
               <div>
-                <label className='block text-slate-400 mb-1'>Printing Type</label>
+                <label className='block text-ds-ink-muted mb-1'>Printing Type</label>
                 <select className={cls} value={f.printingType} onChange={(e) => patch('printingType', e.target.value)}>
                   <option value=''>Select printing...</option>
                   {PRINTING_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div>
-                <label className='block text-slate-400 mb-1'>Coating Spec</label>
+                <label className='block text-ds-ink-muted mb-1'>Coating Spec</label>
                 <select className={cls} value={f.coatingType} onChange={(e) => patch('coatingType', e.target.value)}>
                   <option value=''>Select coating...</option>
                   {COATING_SPECS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div className='md:col-span-3 flex flex-wrap items-end gap-4'>
-                <label className='inline-flex items-center gap-2 text-slate-300'>
+                <label className='inline-flex items-center gap-2 text-ds-ink-muted'>
                   <input type='checkbox' checked={f.embossingEnabled} onChange={(e) => patch('embossingEnabled', e.target.checked)} />
                   Embossing
                 </label>
-                <label className='inline-flex items-center gap-2 text-slate-300'>
+                <label className='inline-flex items-center gap-2 text-ds-ink-muted'>
                   <input type='checkbox' checked={f.leafingEnabled} onChange={(e) => patch('leafingEnabled', e.target.checked)} />
                   Leafing
                 </label>
-                <label className='inline-flex items-center gap-2 text-slate-300'>
+                <label className='inline-flex items-center gap-2 text-ds-ink-muted'>
                   <input type='checkbox' checked={f.spotUvEnabled} onChange={(e) => patch('spotUvEnabled', e.target.checked)} />
                   Spot UV
                 </label>
-                <label className='inline-flex items-center gap-2 text-slate-300'>
+                <label className='inline-flex items-center gap-2 text-ds-ink-muted'>
                   <input type='checkbox' checked={f.brailleEnabled} onChange={(e) => patch('brailleEnabled', e.target.checked)} />
                   Braille
                 </label>
@@ -707,15 +707,15 @@ export default function CartonForm({ mode, initialData }: Props) {
             </div>
           </section>
 
-          <section id='instructions' ref={(el) => { sectionEls.current.instructions = el }} className='scroll-mt-28 rounded-lg border border-slate-700 bg-slate-900 p-4'>
-            <h3 className='text-sm font-semibold text-slate-200 mb-3'>Instructions</h3>
+          <section id='instructions' ref={(el) => { sectionEls.current.instructions = el }} className='scroll-mt-28 rounded-lg border border-ds-line/50 bg-ds-card p-4'>
+            <h3 className='text-sm font-semibold text-ds-ink mb-3'>Instructions</h3>
             <div className='grid md:grid-cols-2 gap-3 text-sm'>
               <div>
-                <label className='block text-slate-400 mb-1'>Special Instructions</label>
+                <label className='block text-ds-ink-muted mb-1'>Special Instructions</label>
                 <textarea rows={5} className={`${cls} resize-none`} value={f.specialInstructions} onChange={(e) => patch('specialInstructions', toCaps(e.target.value))} />
               </div>
               <div>
-                <label className='block text-slate-400 mb-1'>Remarks</label>
+                <label className='block text-ds-ink-muted mb-1'>Remarks</label>
                 <textarea rows={5} className={`${cls} resize-none`} value={f.remarks} onChange={(e) => patch('remarks', toCaps(e.target.value))} />
               </div>
             </div>

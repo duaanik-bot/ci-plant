@@ -77,17 +77,17 @@ export default function EmbossBlocksListPage() {
         This module activates automatically when Embossing Required = Yes in Carton Master.
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-slate-900 dark:text-slate-50">Emboss Block Inventory</h1>
+        <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Emboss Block Inventory</h1>
         <div className="flex flex-wrap gap-2">
           <Link
             href="/masters/emboss-blocks/location-view"
-            className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:text-slate-200"
+            className="rounded-lg border border-neutral-200 px-3 py-2 text-xs text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
           >
             Block Location View
           </Link>
           <Link
             href="/masters/emboss-blocks/vendor-orders"
-            className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:text-slate-200"
+            className="rounded-lg border border-neutral-200 px-3 py-2 text-xs text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
           >
             Block Vendor Orders
           </Link>
@@ -123,7 +123,7 @@ export default function EmbossBlocksListPage() {
             className={`rounded border px-3 py-1.5 text-xs font-medium ${
               tab === k
                 ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-300'
+                : 'border-neutral-200 text-neutral-700 dark:border-ds-line/50 dark:text-ds-ink-muted'
             }`}
           >
             {l}
@@ -160,7 +160,7 @@ export default function EmbossBlocksListPage() {
       </div>
 
       <EnterpriseTableShell>
-        <table className="w-full min-w-[1200px] border-collapse text-left text-sm text-slate-900 dark:text-slate-50">
+        <table className="w-full min-w-[1200px] border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>Block</th>
@@ -182,7 +182,7 @@ export default function EmbossBlocksListPage() {
               const pct = b.maxImpressions > 0 ? Math.min(100, Math.round((b.impressionCount / b.maxImpressions) * 100)) : 0
               return (
                 <tr key={b.id} className={enterpriseTrClass}>
-                  <td className={`${enterpriseTdMonoClass} text-amber-700 dark:text-amber-300`}>{b?.blockCode ?? '—'}</td>
+                  <td className={`${enterpriseTdMonoClass} text-ds-warning dark:text-ds-warning`}>{b?.blockCode ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{b?.blockNumber ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{b?.blockType ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{b?.blockMaterial ?? '—'}</td>
@@ -216,16 +216,16 @@ export default function EmbossBlocksListPage() {
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl border border-border bg-card p-3">
-      <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</p>
-      <p className="text-lg font-semibold text-slate-900 dark:text-slate-50">{value}</p>
+      <p className="text-xs uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">{label}</p>
+      <p className="text-lg font-semibold text-neutral-900 dark:text-ds-ink">{value}</p>
     </div>
   )
 }
 
 function LifeBar({ pct }: { pct: number }) {
-  const cls = pct > 85 ? 'bg-red-500' : pct > 70 ? 'bg-amber-500' : 'bg-green-500'
+  const cls = pct > 85 ? 'bg-red-500' : pct > 70 ? 'bg-ds-warning' : 'bg-green-500'
   return (
-    <div className="h-2 w-20 overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+    <div className="h-2 w-20 overflow-hidden rounded bg-neutral-200 dark:bg-ds-elevated">
       <div className={`h-full ${cls}`} style={{ width: `${pct}%` }} />
     </div>
   )

@@ -76,7 +76,7 @@ function AgeRing({ pct, monoClass, tier }: { pct: number; monoClass: string; tie
   const c = 2 * Math.PI * r
   const dash = (pct / 100) * c
   const stroke =
-    tier === 'expired' ? 'text-rose-500' : tier === 'reverify' ? 'text-amber-500' : 'text-emerald-500'
+    tier === 'expired' ? 'text-rose-500' : tier === 'reverify' ? 'text-ds-warning' : 'text-emerald-500'
   return (
     <div className={`relative h-9 w-9 shrink-0 ${monoClass}`} title={`${pct.toFixed(0)}% of 12-mo lifecycle`}>
       <svg width="36" height="36" viewBox="0 0 36 36" className="-rotate-90">
@@ -93,7 +93,7 @@ function AgeRing({ pct, monoClass, tier }: { pct: number; monoClass: string; tie
           strokeLinecap="round"
         />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-zinc-300">
+      <span className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-neutral-400">
         {pct.toFixed(0)}%
       </span>
     </div>
@@ -127,11 +127,11 @@ function KanbanCardInner({
 
   return (
     <div
-      className={`rounded-xl border bg-zinc-950/90 p-2.5 shadow-lg transition-shadow ${
+      className={`rounded-xl border bg-ds-main/90 p-2.5 shadow-lg transition-shadow ${
         amberGlow
-          ? 'border-amber-500/60 shadow-[0_0_14px_rgba(245,158,11,0.25)] animate-pulse'
-          : 'border-zinc-800'
-      } ${isOverlay ? 'ring-2 ring-amber-400/50 scale-[1.02]' : ''} ${
+          ? 'border-ds-warning/60 shadow-[0_0_14px_rgba(245,158,11,0.25)] animate-pulse'
+          : 'border-ds-line/40'
+      } ${isOverlay ? 'ring-2 ring-ds-warning/40 scale-[1.02]' : ''} ${
         row.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
       }`}
     >
@@ -149,27 +149,27 @@ function KanbanCardInner({
       </div>
       <p className="mt-1 text-base font-medium text-foreground leading-snug line-clamp-2 font-sans">{productName}</p>
       <div
-        className="mt-2 h-14 w-full rounded-md border border-zinc-800 shadow-inner"
+        className="mt-2 h-14 w-full rounded-md border border-ds-line/40 shadow-inner"
         style={{ backgroundColor: dna }}
         title="L*a*b* DNA"
       />
       <div className="mt-2 flex items-center justify-between gap-2">
         <AgeRing pct={pct} monoClass={monoClass} tier={tier} />
-        <div className={`text-[9px] text-zinc-500 text-right leading-tight ${monoClass}`}>
+        <div className={`text-[9px] text-neutral-500 text-right leading-tight ${monoClass}`}>
           {months != null ? `${months.toFixed(2)} mo` : '—'}
         </div>
       </div>
-      <div className={`mt-2 flex items-center justify-between gap-2 border-t border-zinc-800/80 pt-2 ${monoClass}`}>
-        <span className="text-[10px] text-zinc-400 truncate">{loc}</span>
+      <div className={`mt-2 flex items-center justify-between gap-2 border-t border-ds-line/50 pt-2 ${monoClass}`}>
+        <span className="text-[10px] text-neutral-500 truncate">{loc}</span>
         <span
           className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium ${
             tier === 'expired'
               ? 'bg-rose-950/90 text-rose-200 border border-rose-500/40'
               : tier === 'reverify'
-                ? 'bg-amber-950/50 text-amber-200 border border-amber-600/40'
+                ? 'bg-ds-warning/10 text-ds-warning border border-ds-warning/45'
                 : row.custodyStatus === 'on_floor'
                   ? 'bg-sky-950/50 text-sky-200 border border-sky-700/40'
-                  : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
+                  : 'bg-ds-elevated text-neutral-400 border border-ds-line/50'
           }`}
         >
           {tier === 'expired' ? 'EXPIRED' : row.custodyStatus === 'on_floor' ? 'FLOOR' : 'STOCK'}
@@ -241,10 +241,10 @@ function DraggableKanbanCard({
         type="button"
         {...listeners}
         {...attributes}
-        className="absolute left-0 top-2 z-10 flex h-[calc(100%-16px)] w-5 cursor-grab items-start justify-center rounded-l-lg border border-transparent bg-zinc-900/40 hover:bg-zinc-800/80 active:cursor-grabbing touch-none"
+        className="absolute left-0 top-2 z-10 flex h-[calc(100%-16px)] w-5 cursor-grab items-start justify-center rounded-l-lg border border-transparent bg-ds-card/40 hover:bg-ds-elevated/80 active:cursor-grabbing touch-none"
         aria-label="Drag to In-Stock or On-Floor"
       >
-        <GripVertical className="h-4 w-4 text-zinc-500 shrink-0 mt-1" />
+        <GripVertical className="h-4 w-4 text-neutral-500 shrink-0 mt-1" />
       </button>
       <div className="w-full pl-5 pr-1 min-w-0">
         <HubPriorityReorderAuditFooter
@@ -288,11 +288,11 @@ function KanbanColumn({
   })
 
   return (
-    <div className="flex min-w-[220px] max-w-[280px] flex-1 flex-col rounded-xl border border-zinc-800 bg-background/40">
-      <div className={`border-b border-zinc-800 px-2 py-2 ${monoClass}`}>
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+    <div className="flex min-w-[220px] max-w-[280px] flex-1 flex-col rounded-xl border border-ds-line/40 bg-background/40">
+      <div className={`border-b border-ds-line/40 px-2 py-2 ${monoClass}`}>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
           {col.title}{' '}
-          <span className="text-zinc-600 font-normal">({count})</span>
+          <span className="text-neutral-600 font-normal">({count})</span>
         </p>
       </div>
       <div
@@ -563,13 +563,13 @@ export function ShadeCardKanbanBoard({
 
       {issueOpen && issueRow ? (
         <div className="fixed inset-0 z-[85] flex items-center justify-center bg-background/70 p-4">
-          <div className={`w-full max-w-md rounded-lg border border-zinc-600 bg-zinc-900 p-4 space-y-3 text-sm ${monoClass}`}>
+          <div className={`w-full max-w-md rounded-lg border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm ${monoClass}`}>
             <h2 className="text-lg font-semibold text-foreground font-sans">Issue to floor</h2>
-            <p className="text-xs text-zinc-500 font-sans">
-              Card <span className="text-amber-300">{issueRow.shadeCode}</span> → On-Floor
+            <p className="text-xs text-neutral-500 font-sans">
+              Card <span className="text-ds-warning">{issueRow.shadeCode}</span> → On-Floor
             </p>
-            <label className="block text-zinc-300 font-sans">
-              Job card link <span className="text-amber-400/90">(required)</span>
+            <label className="block text-neutral-400 font-sans">
+              Job card link <span className="text-ds-warning">(required)</span>
               <input
                 value={jobCardQuery}
                 onChange={(e) => {
@@ -577,7 +577,7 @@ export function ShadeCardKanbanBoard({
                   setIssueJobCardId('')
                   setIssueJobCardNumber(null)
                 }}
-                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground"
+                className="mt-1 w-full px-2 py-2 rounded bg-ds-elevated border border-ds-line/50 text-foreground"
                 placeholder="Search # or customer…"
               />
             </label>
@@ -597,14 +597,14 @@ export function ShadeCardKanbanBoard({
                 </button>
               </p>
             ) : null}
-            {jobCardLoading ? <p className="text-xs text-zinc-500">Searching…</p> : null}
+            {jobCardLoading ? <p className="text-xs text-neutral-500">Searching…</p> : null}
             {!issueJobCardId && jobCardHits.length > 0 ? (
-              <ul className="max-h-28 overflow-y-auto rounded border border-zinc-700 divide-y divide-zinc-800 text-xs">
+              <ul className="max-h-28 overflow-y-auto rounded border border-ds-line/50 divide-y divide-ds-elevated text-xs">
                 {jobCardHits.map((jc) => (
                   <li key={jc.id}>
                     <button
                       type="button"
-                      className="w-full text-left px-2 py-1.5 hover:bg-zinc-800 text-zinc-200 font-sans"
+                      className="w-full text-left px-2 py-1.5 hover:bg-ds-elevated text-ds-ink font-sans"
                       onClick={() => {
                         setIssueJobCardId(jc.id)
                         setIssueJobCardNumber(jc.jobCardNumber)
@@ -617,26 +617,26 @@ export function ShadeCardKanbanBoard({
                 ))}
               </ul>
             ) : null}
-            <label className="block text-zinc-300 font-sans">
-              Initial condition <span className="text-zinc-500 font-normal">(checkout)</span>
+            <label className="block text-neutral-400 font-sans">
+              Initial condition <span className="text-neutral-500 font-normal">(checkout)</span>
               <select
                 value={issueInitialCondition}
                 onChange={(e) =>
                   setIssueInitialCondition(e.target.value as 'mint' | 'used' | 'minor_damage')
                 }
-                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground ${monoClass}`}
+                className={`mt-1 w-full px-2 py-2 rounded bg-ds-elevated border border-ds-line/50 text-foreground ${monoClass}`}
               >
                 <option value="mint">{shadeCardPhysicalLabel('mint')}</option>
                 <option value="used">{shadeCardPhysicalLabel('used')}</option>
                 <option value="minor_damage">{shadeCardPhysicalLabel('minor_damage')}</option>
               </select>
             </label>
-            <label className="block text-zinc-300 font-sans">
+            <label className="block text-neutral-400 font-sans">
               Machine
               <select
                 value={machineId}
                 onChange={(e) => setMachineId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground"
+                className="mt-1 w-full px-2 py-2 rounded bg-ds-elevated border border-ds-line/50 text-foreground"
               >
                 <option value="">Select</option>
                 {machines.map((m) => (
@@ -646,21 +646,21 @@ export function ShadeCardKanbanBoard({
                 ))}
               </select>
             </label>
-            <label className="block text-zinc-300 font-sans">
-              Operator search <span className="text-zinc-500 font-normal">(staff directory)</span>
+            <label className="block text-neutral-400 font-sans">
+              Operator search <span className="text-neutral-500 font-normal">(staff directory)</span>
               <input
                 value={operatorSearch}
                 onChange={(e) => setOperatorSearch(e.target.value)}
                 placeholder="Filter by name…"
-                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground ${monoClass}`}
+                className={`mt-1 w-full px-2 py-2 rounded bg-ds-elevated border border-ds-line/50 text-foreground ${monoClass}`}
               />
             </label>
-            <label className="block text-zinc-300 font-sans">
+            <label className="block text-neutral-400 font-sans">
               Operator
               <select
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground"
+                className="mt-1 w-full px-2 py-2 rounded bg-ds-elevated border border-ds-line/50 text-foreground"
               >
                 <option value="">Select</option>
                 {filteredOperators.map((u) => (
@@ -674,7 +674,7 @@ export function ShadeCardKanbanBoard({
               <button
                 type="button"
                 onClick={() => setIssueOpen(false)}
-                className="px-3 py-1.5 rounded border border-zinc-600 text-zinc-200 font-sans"
+                className="px-3 py-1.5 rounded border border-ds-line/50 text-ds-ink font-sans"
               >
                 Cancel
               </button>
@@ -692,26 +692,26 @@ export function ShadeCardKanbanBoard({
 
       {receiveOpen && receiveRow ? (
         <div className="fixed inset-0 z-[85] flex items-center justify-center bg-background/70 p-4">
-          <div className="w-full max-w-md rounded-lg border border-zinc-600 bg-zinc-900 p-4 space-y-3 text-sm font-sans">
+          <div className="w-full max-w-md rounded-lg border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm font-sans">
             <h2 className="text-lg font-semibold text-foreground">Receive to rack</h2>
-            <p className="text-xs text-zinc-500">
-              Card <span className={`text-amber-300 ${monoClass}`}>{receiveRow.shadeCode}</span>
+            <p className="text-xs text-neutral-500">
+              Card <span className={`text-ds-warning ${monoClass}`}>{receiveRow.shadeCode}</span>
             </p>
-            <label className="block text-zinc-300 text-sm">
-              Returning operator <span className="text-zinc-500">(verify)</span>
+            <label className="block text-neutral-400 text-sm">
+              Returning operator <span className="text-neutral-500">(verify)</span>
               <input
                 value={receiveOperatorSearch}
                 onChange={(e) => setReceiveOperatorSearch(e.target.value)}
                 placeholder="Search staff…"
-                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground ${monoClass}`}
+                className={`mt-1 w-full px-2 py-2 rounded bg-ds-elevated border border-ds-line/50 text-foreground ${monoClass}`}
               />
             </label>
-            <label className="block text-zinc-300 text-sm">
+            <label className="block text-neutral-400 text-sm">
               Staff pick
               <select
                 value={receiveOperatorId}
                 onChange={(e) => setReceiveOperatorId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground"
+                className="mt-1 w-full px-2 py-2 rounded bg-ds-elevated border border-ds-line/50 text-foreground"
               >
                 <option value="">Select operator</option>
                 {filteredReceiveOperators.map((u) => (
@@ -721,33 +721,33 @@ export function ShadeCardKanbanBoard({
                 ))}
               </select>
             </label>
-            <label className="block text-zinc-300 text-sm">
+            <label className="block text-neutral-400 text-sm">
               End condition
               <select
                 value={receiveEndCondition}
                 onChange={(e) =>
                   setReceiveEndCondition(e.target.value as 'mint' | 'used' | 'minor_damage')
                 }
-                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-800 border border-zinc-600 text-foreground ${monoClass}`}
+                className={`mt-1 w-full px-2 py-2 rounded bg-ds-elevated border border-ds-line/50 text-foreground ${monoClass}`}
               >
                 <option value="mint">{shadeCardPhysicalLabel('mint')}</option>
                 <option value="used">{shadeCardPhysicalLabel('used')}</option>
                 <option value="minor_damage">{shadeCardPhysicalLabel('minor_damage')}</option>
               </select>
             </label>
-            <label className="block text-zinc-300 text-sm">
+            <label className="block text-neutral-400 text-sm">
               Return to rack
               <input
                 readOnly
                 value={SHADE_MASTER_RACK_LOCATION}
-                className={`mt-1 w-full px-2 py-2 rounded bg-zinc-950 border border-zinc-600 text-zinc-300 ${monoClass}`}
+                className={`mt-1 w-full px-2 py-2 rounded bg-ds-main border border-ds-line/50 text-neutral-400 ${monoClass}`}
               />
             </label>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setReceiveOpen(false)}
-                className="px-3 py-1.5 rounded border border-zinc-600 text-zinc-200"
+                className="px-3 py-1.5 rounded border border-ds-line/50 text-ds-ink"
               >
                 Cancel
               </button>

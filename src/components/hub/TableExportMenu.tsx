@@ -86,20 +86,20 @@ export function TableExportMenu<T>({
         disabled={disabled || empty}
         onClick={() => setOpen((v) => !v)}
         title={empty ? 'No rows to export' : 'Export current table'}
-        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-zinc-600 bg-zinc-900 text-zinc-100 text-xs font-semibold hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${buttonClassName}`}
+        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-ds-line/50 bg-ds-card text-ds-ink text-xs font-semibold hover:bg-ds-elevated disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${buttonClassName}`}
       >
         <span aria-hidden>⬇️</span>
         Export
       </button>
       {open && !empty && (
         <div
-          className={`absolute right-0 mt-1 min-w-[14rem] rounded-lg border border-zinc-600 bg-zinc-950 py-1 shadow-xl z-50 ${menuClassName}`}
+          className={`absolute right-0 mt-1 min-w-[14rem] rounded-lg border border-ds-line/50 bg-ds-main py-1 shadow-xl z-50 ${menuClassName}`}
           role="menu"
         >
           <button
             type="button"
             role="menuitem"
-            className="w-full text-left px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
+            className="w-full text-left px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated"
             onClick={() => runExport('xlsx')}
           >
             Export to Excel (.xlsx)
@@ -107,7 +107,7 @@ export function TableExportMenu<T>({
           <button
             type="button"
             role="menuitem"
-            className="w-full text-left px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
+            className="w-full text-left px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated"
             onClick={() => runExport('pdf')}
           >
             Export to PDF

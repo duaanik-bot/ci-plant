@@ -1,23 +1,23 @@
 /**
  * Shared enterprise data-grid tokens — use with {@link EnterpriseTableShell}.
- * Light: surfaces white, borders slate-200. Dark: slate-950 body, slate-900 headers.
+ * Maps to the global `ds` palette; light theme uses neutral surfaces, dark uses premium tokens.
  */
 
 /** Root `<table>` — full width, readable body size */
 export const enterpriseTableClass =
-  'w-full border-collapse text-left text-sm text-slate-900 dark:text-slate-50'
+  'w-full border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink'
 
 /** Table header row area */
 export const enterpriseTheadClass =
-  'border-b border-slate-200 bg-white text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400'
+  'border-b border-neutral-200 bg-white text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:border-ds-line/50 dark:bg-ds-elevated/80 dark:text-ds-ink-faint'
 
 /** Table body — dividers + base row background */
 export const enterpriseTbodyClass =
-  'divide-y divide-slate-200 bg-white dark:divide-slate-800 dark:bg-slate-950'
+  'divide-y divide-neutral-200 bg-white dark:divide-ds-line/30 dark:bg-ds-main'
 
 /** Body row — hover scan line */
 export const enterpriseTrClass =
-  'transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50'
+  'transition-colors duration-200 hover:bg-neutral-50 dark:hover:bg-ds-elevated/25'
 
 /** Header cell */
 export const enterpriseThClass =
@@ -25,7 +25,7 @@ export const enterpriseThClass =
 
 /** Data cell padding + type — add ellipsis variant when needed */
 export const enterpriseTdBase =
-  'px-4 py-3 text-sm font-medium align-middle text-slate-900 dark:text-slate-50'
+  'px-4 py-3 text-sm font-medium align-middle text-neutral-900 dark:text-ds-ink'
 
 /** Standard data cell (single-line, clipped) */
 export const enterpriseTdClass = `${enterpriseTdBase} whitespace-nowrap overflow-hidden text-ellipsis`
@@ -35,7 +35,8 @@ export const enterpriseTdMonoClass = `${enterpriseTdClass} font-designing-queue 
 
 /** Secondary / muted cell */
 export const enterpriseTdMutedClass =
-  'px-4 py-3 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap overflow-hidden text-ellipsis'
+  'px-4 py-3 text-sm text-neutral-600 dark:text-ds-ink-muted whitespace-nowrap overflow-hidden text-ellipsis'
 
 /** Sub-label in table context */
-export const enterpriseTableSubLabelClass = 'text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400'
+export const enterpriseTableSubLabelClass =
+  'text-xs uppercase tracking-wider text-neutral-500 dark:text-ds-ink-faint'

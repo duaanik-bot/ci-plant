@@ -153,32 +153,32 @@ export function ToolingJobAuditModal({
       role="presentation"
     >
       <div
-        className="w-full max-w-lg max-h-[90vh] rounded-xl border border-zinc-600 bg-zinc-950 shadow-2xl flex flex-col"
+        className="w-full max-w-lg max-h-[90vh] rounded-xl border border-ds-line/50 bg-ds-main shadow-2xl flex flex-col"
         role="dialog"
         aria-labelledby="tooling-audit-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-zinc-800 shrink-0">
+        <div className="p-4 border-b border-ds-line/40 shrink-0">
           <div className="flex justify-between gap-2 items-start">
             <div className="min-w-0">
               <h2 id="tooling-audit-title" className="text-lg font-semibold text-foreground truncate">
                 Tool details &amp; history
               </h2>
               <p className="text-sm font-medium text-blue-300/90 mt-1 truncate">{context.title}</p>
-              <p className="text-xs text-zinc-400 mt-0.5 font-mono">
+              <p className="text-xs text-neutral-500 mt-0.5 font-mono">
                 {context.displayCode} · {context.zoneLabel}
               </p>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 px-2 py-1 rounded border border-zinc-600 text-zinc-300 text-xs hover:bg-zinc-800"
+              className="shrink-0 px-2 py-1 rounded border border-ds-line/50 text-neutral-400 text-xs hover:bg-ds-elevated"
             >
               Close
             </button>
           </div>
           <div
-            className="mt-3 flex rounded-lg border border-zinc-700 overflow-hidden p-0.5 bg-background/50"
+            className="mt-3 flex rounded-lg border border-ds-line/50 overflow-hidden p-0.5 bg-background/50"
             role="tablist"
             aria-label="Audit sections"
           >
@@ -188,7 +188,7 @@ export function ToolingJobAuditModal({
               aria-selected={tab === 'timeline'}
               onClick={() => setTab('timeline')}
               className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-                tab === 'timeline' ? 'bg-amber-600 text-primary-foreground' : 'text-zinc-400 hover:text-foreground'
+                tab === 'timeline' ? 'bg-ds-warning text-primary-foreground' : 'text-neutral-500 hover:text-foreground'
               }`}
             >
               Timeline
@@ -199,7 +199,7 @@ export function ToolingJobAuditModal({
               aria-selected={tab === 'usage'}
               onClick={() => setTab('usage')}
               className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-                tab === 'usage' ? 'bg-amber-600 text-primary-foreground' : 'text-zinc-400 hover:text-foreground'
+                tab === 'usage' ? 'bg-ds-warning text-primary-foreground' : 'text-neutral-500 hover:text-foreground'
               }`}
             >
               Usage history
@@ -209,67 +209,67 @@ export function ToolingJobAuditModal({
 
         <div className="p-4 overflow-y-auto flex-1 space-y-4">
           <section>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
               Current specs
             </h3>
-            <div className="rounded-lg border border-zinc-800 bg-background/50 p-3 space-y-2">
-              <p className="text-[10px] text-zinc-500 uppercase">Units</p>
-              <p className="text-sm text-zinc-200 font-medium tabular-nums">{context.units}</p>
-              <p className="text-[10px] text-zinc-500 uppercase">Specification</p>
-              <p className="text-sm text-zinc-200 leading-snug">{context.specSummary}</p>
+            <div className="rounded-lg border border-ds-line/40 bg-background/50 p-3 space-y-2">
+              <p className="text-[10px] text-neutral-500 uppercase">Units</p>
+              <p className="text-sm text-ds-ink font-medium tabular-nums">{context.units}</p>
+              <p className="text-[10px] text-neutral-500 uppercase">Specification</p>
+              <p className="text-sm text-ds-ink leading-snug">{context.specSummary}</p>
             </div>
           </section>
 
           {tab === 'timeline' ? (
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
                 Hub event timeline
               </h3>
               {loading ? (
-                <p className="text-sm text-zinc-500">Loading history…</p>
+                <p className="text-sm text-neutral-500">Loading history…</p>
               ) : error ? (
                 <p className="text-sm text-rose-400">{error}</p>
               ) : entries.length === 0 ? (
-                <p className="text-sm text-zinc-500">No hub events recorded yet for this tool.</p>
+                <p className="text-sm text-neutral-500">No hub events recorded yet for this tool.</p>
               ) : (
-                <ul className="relative border-l border-zinc-700 pl-4 space-y-4 ml-1.5">
+                <ul className="relative border-l border-ds-line/50 pl-4 space-y-4 ml-1.5">
                 {entries.map((e, i) => (
                   <li key={e.id ?? `${e.timeLabel}-${i}`} className="relative">
-                    <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-4 ring-zinc-950" />
+                    <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-ds-warning ring-4 ring-ds-main" />
                     {context.tool === 'die' ? (
-                      <div className="rounded-lg border border-zinc-800 bg-background/40 p-2.5 space-y-1.5">
-                        <p className="text-[11px] text-zinc-500 font-mono tabular-nums">{e.timeLabel}</p>
+                      <div className="rounded-lg border border-ds-line/40 bg-background/40 p-2.5 space-y-1.5">
+                        <p className="text-[11px] text-neutral-500 font-mono tabular-nums">{e.timeLabel}</p>
                         <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-1 text-xs">
-                          <dt className="text-zinc-500 font-semibold uppercase tracking-wide">Operator</dt>
-                          <dd className="text-zinc-200">
+                          <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Operator</dt>
+                          <dd className="text-ds-ink">
                             {(e.operatorName ?? e.performedBy)?.trim() || '—'}
                           </dd>
-                          <dt className="text-zinc-500 font-semibold uppercase tracking-wide">Action</dt>
-                          <dd className="text-zinc-100 font-mono text-[11px]">
+                          <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Action</dt>
+                          <dd className="text-ds-ink font-mono text-[11px]">
                             {e.hubAction?.trim() || e.actionType?.trim() || '—'}
                           </dd>
-                          <dt className="text-zinc-500 font-semibold uppercase tracking-wide">Condition</dt>
-                          <dd className="text-zinc-200">{e.condition?.trim() || '—'}</dd>
-                          <dt className="text-zinc-500 font-semibold uppercase tracking-wide">Timestamp</dt>
-                          <dd className="text-zinc-400 font-mono text-[10px] break-all">
+                          <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Condition</dt>
+                          <dd className="text-ds-ink">{e.condition?.trim() || '—'}</dd>
+                          <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Timestamp</dt>
+                          <dd className="text-neutral-500 font-mono text-[10px] break-all">
                             {e.createdAt ?? '—'}
                           </dd>
                         </dl>
                         {e.summaryLine ? (
-                          <p className="text-[11px] text-zinc-500 leading-snug pt-1 border-t border-zinc-800/80">
+                          <p className="text-[11px] text-neutral-500 leading-snug pt-1 border-t border-ds-line/50">
                             {e.summaryLine}
                           </p>
                         ) : null}
                       </div>
                     ) : e.summaryLine ? (
-                      <p className="text-sm text-zinc-100 leading-snug font-medium">{e.summaryLine}</p>
+                      <p className="text-sm text-ds-ink leading-snug font-medium">{e.summaryLine}</p>
                     ) : (
                       <>
-                        <p className="text-[11px] text-zinc-500 font-mono">{e.timeLabel}</p>
-                        <p className="text-sm font-bold text-zinc-100 mt-0.5">{e.action}</p>
-                        <p className="text-xs text-zinc-400 mt-1 leading-snug">{e.detail}</p>
+                        <p className="text-[11px] text-neutral-500 font-mono">{e.timeLabel}</p>
+                        <p className="text-sm font-bold text-ds-ink mt-0.5">{e.action}</p>
+                        <p className="text-xs text-neutral-500 mt-1 leading-snug">{e.detail}</p>
                         {e.performedBy ? (
-                          <p className="text-[10px] text-zinc-600 mt-1">By {e.performedBy}</p>
+                          <p className="text-[10px] text-neutral-600 mt-1">By {e.performedBy}</p>
                         ) : null}
                       </>
                     )}
@@ -280,23 +280,23 @@ export function ToolingJobAuditModal({
             </section>
           ) : (
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
                 Usage history
               </h3>
-              <p className="text-[11px] text-zinc-500 mb-2 leading-snug">
+              <p className="text-[11px] text-neutral-500 mb-2 leading-snug">
                 Returns to rack with the press that was last issued (from hub events).
               </p>
               {loading ? (
-                <p className="text-sm text-zinc-500">Loading…</p>
+                <p className="text-sm text-neutral-500">Loading…</p>
               ) : error ? (
                 <p className="text-sm text-rose-400">{error}</p>
               ) : usageRows.length === 0 ? (
-                <p className="text-sm text-zinc-500">No return cycles recorded yet.</p>
+                <p className="text-sm text-neutral-500">No return cycles recorded yet.</p>
               ) : (
-                <div className="overflow-x-auto rounded-lg border border-zinc-800">
+                <div className="overflow-x-auto rounded-lg border border-ds-line/40">
                   <table className="w-full text-left text-xs border-collapse min-w-[420px]">
                     <thead>
-                      <tr className="border-b border-zinc-800 text-[10px] uppercase tracking-wide text-zinc-500">
+                      <tr className="border-b border-ds-line/40 text-[10px] uppercase tracking-wide text-neutral-500">
                         <th className="px-2 py-2 font-semibold whitespace-nowrap">Date</th>
                         <th className="px-2 py-2 font-semibold">Operator</th>
                         <th className="px-2 py-2 font-semibold">Machine</th>
@@ -305,17 +305,17 @@ export function ToolingJobAuditModal({
                     </thead>
                     <tbody>
                       {usageRows.map((row, i) => (
-                        <tr key={`${row.dateLabel}-${i}`} className="border-b border-zinc-800/80">
-                          <td className="px-2 py-2 text-zinc-400 font-mono whitespace-nowrap">
+                        <tr key={`${row.dateLabel}-${i}`} className="border-b border-ds-line/50">
+                          <td className="px-2 py-2 text-neutral-500 font-mono whitespace-nowrap">
                             {row.dateLabel}
                           </td>
-                          <td className="px-2 py-2 text-zinc-200">{row.operator}</td>
-                          <td className="px-2 py-2 text-zinc-300">{row.machine}</td>
+                          <td className="px-2 py-2 text-ds-ink">{row.operator}</td>
+                          <td className="px-2 py-2 text-neutral-400">{row.machine}</td>
                           <td className="px-2 py-2">
                             {row.returnCondition === 'Poor' ? (
                               <span className="text-red-400 font-semibold">{row.returnCondition}</span>
                             ) : (
-                              <span className="text-zinc-300">{row.returnCondition}</span>
+                              <span className="text-neutral-400">{row.returnCondition}</span>
                             )}
                           </td>
                         </tr>

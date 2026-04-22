@@ -57,18 +57,18 @@ function MachineCard({
   }, [highlight])
 
   const isPress = PRESS.includes(m.machineCode)
-  const statusCls = m.status === 'active' ? 'text-green-400' : m.status === 'under_maintenance' ? 'text-red-400' : 'text-slate-400'
+  const statusCls = m.status === 'active' ? 'text-green-400' : m.status === 'under_maintenance' ? 'text-red-400' : 'text-ds-ink-muted'
   return (
     <div
       ref={cardRef}
       data-machine-flow-id={m.id}
-      className="rounded-lg border border-slate-600 bg-slate-800/50 p-3 min-w-[140px]"
+      className="rounded-lg border border-ds-line/60 bg-ds-elevated/50 p-3 min-w-[140px]"
     >
-      <p className="font-mono text-amber-400 text-sm">{m.machineCode}</p>
-      <p className="text-slate-300 text-xs truncate">{m.name}</p>
+      <p className="font-mono text-ds-warning text-sm">{m.machineCode}</p>
+      <p className="text-ds-ink-muted text-xs truncate">{m.name}</p>
       <p className="text-sm mt-1">{m.currentJob ? m.currentJob.jobNumber : 'Idle'}</p>
       {m.pmHealth.hasSchedule ? (
-        <div className={`flex items-center gap-2 mt-2 ${mono} text-[10px] text-zinc-400`}>
+        <div className={`flex items-center gap-2 mt-2 ${mono} text-[10px] text-neutral-500`}>
           <MachineHealthMeter
             healthPct={m.pmHealth.healthPct}
             hasSchedule
@@ -81,10 +81,10 @@ function MachineCard({
       ) : null}
       {isPress && m.oee != null && (
         <div className="flex items-center gap-1 mt-1">
-          <div className="w-8 h-8 rounded-full border-2 border-slate-500 flex items-center justify-center text-xs">
+          <div className="w-8 h-8 rounded-full border-2 border-ds-line/50 flex items-center justify-center text-xs">
             {m.oee}%
           </div>
-          <span className="text-slate-500 text-xs">
+          <span className="text-ds-ink-faint text-xs">
             {m.sheetsToday ?? 0} / {m.capacityPerShift?.toLocaleString() ?? '—'}
           </span>
         </div>
@@ -92,7 +92,7 @@ function MachineCard({
       <p className={`text-xs mt-1 ${statusCls}`}>
         {m.status === 'active' ? 'Running' : m.status === 'under_maintenance' ? 'Maintenance' : 'Idle'}
       </p>
-      <p className="text-slate-500 text-xs">First article: ○</p>
+      <p className="text-ds-ink-faint text-xs">First article: ○</p>
     </div>
   )
 }
@@ -122,21 +122,21 @@ export default function MachineFlowPage() {
   const postpressItems = machines.filter((m) => POSTPRESS.includes(m.machineCode))
   const finishingItems = machines.filter((m) => FINISHING.includes(m.machineCode))
 
-  if (isLoading) return <div className="p-4 text-slate-400">Loading…</div>
+  if (isLoading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
   return (
     <div className="p-4 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-amber-400">Machine Flow</h1>
-        <Link href="/jobs" className="text-slate-400 hover:text-foreground text-sm">Active Jobs</Link>
+        <h1 className="text-xl font-bold text-ds-warning">Machine Flow</h1>
+        <Link href="/jobs" className="text-ds-ink-muted hover:text-foreground text-sm">Active Jobs</Link>
       </div>
 
       <div className="space-y-6">
         <section>
-          <h2 className="text-sm font-semibold text-slate-400 mb-2">Pre-press</h2>
+          <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">Pre-press</h2>
           <div className="flex flex-wrap gap-2">
-            <div className="rounded-lg border border-slate-600 bg-slate-800/30 p-3 min-w-[100px] text-center">
-              <p className="text-slate-400 text-xs">Board Store</p>
+            <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
+              <p className="text-ds-ink-muted text-xs">Board Store</p>
             </div>
             {prepressItems.map((m) => (
               <MachineCard
@@ -146,14 +146,14 @@ export default function MachineFlowPage() {
                 highlight={highlightMachineId === m.id}
               />
             ))}
-            <div className="rounded-lg border border-slate-600 bg-slate-800/30 p-3 min-w-[100px] text-center">
-              <p className="text-slate-400 text-xs">Plate QC & Store</p>
+            <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
+              <p className="text-ds-ink-muted text-xs">Plate QC & Store</p>
             </div>
           </div>
         </section>
 
         <section>
-          <h2 className="text-sm font-semibold text-slate-400 mb-2">Press</h2>
+          <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">Press</h2>
           <div className="flex flex-wrap gap-2">
             {pressItems.map((m) => (
               <MachineCard
@@ -167,7 +167,7 @@ export default function MachineFlowPage() {
         </section>
 
         <section>
-          <h2 className="text-sm font-semibold text-slate-400 mb-2">Post-press</h2>
+          <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">Post-press</h2>
           <div className="flex flex-wrap gap-2">
             {postpressItems.map((m) => (
               <MachineCard
@@ -181,7 +181,7 @@ export default function MachineFlowPage() {
         </section>
 
         <section>
-          <h2 className="text-sm font-semibold text-slate-400 mb-2">Finishing</h2>
+          <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">Finishing</h2>
           <div className="flex flex-wrap gap-2">
             {finishingItems.map((m) => (
               <MachineCard
@@ -195,21 +195,21 @@ export default function MachineFlowPage() {
         </section>
 
         <section>
-          <h2 className="text-sm font-semibold text-slate-400 mb-2">QC & Dispatch</h2>
+          <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">QC & Dispatch</h2>
           <div className="flex flex-wrap gap-2">
             {['Final QC Bench', 'Auto Counter', 'Packing Line', 'FG Warehouse', 'Dispatch Bay'].map((label) => (
-              <div key={label} className="rounded-lg border border-slate-600 bg-slate-800/30 p-3 min-w-[100px] text-center">
-                <p className="text-slate-400 text-xs">{label}</p>
+              <div key={label} className="rounded-lg border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
+                <p className="text-ds-ink-muted text-xs">{label}</p>
               </div>
             ))}
           </div>
         </section>
       </div>
 
-      <div className="mt-8 overflow-x-auto rounded-xl border border-zinc-800 bg-background ring-1 ring-ring/5">
-        <h2 className="text-sm font-semibold text-slate-400 mb-2 px-4 pt-4">Machine ledger — changeover & PM health</h2>
+      <div className="mt-8 overflow-x-auto rounded-xl border border-ds-line/40 bg-background ring-1 ring-ring/5">
+        <h2 className="text-sm font-semibold text-ds-ink-muted mb-2 px-4 pt-4">Machine ledger — changeover & PM health</h2>
         <table className={`w-full text-sm ${mono}`}>
-          <thead className="bg-zinc-950 text-left text-zinc-500 text-[10px] uppercase tracking-wider">
+          <thead className="bg-ds-main text-left text-neutral-500 text-[10px] uppercase tracking-wider">
             <tr>
               <th className="px-4 py-2">Machine</th>
               <th className="px-4 py-2">Health</th>
@@ -219,13 +219,13 @@ export default function MachineFlowPage() {
               <th className="px-4 py-2">Last Changeover</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-900 text-zinc-300">
+          <tbody className="divide-y divide-ds-card text-neutral-400">
             {pressItems.concat(postpressItems).concat(finishingItems).map((m) => (
               <tr
                 key={m.id}
                 className={m.pmHealth.overdue ? 'bg-rose-950/20 border-l-4 border-rose-600' : ''}
               >
-                <td className="px-4 py-2 font-mono text-amber-300">{m.machineCode}</td>
+                <td className="px-4 py-2 font-mono text-ds-warning">{m.machineCode}</td>
                 <td className="px-4 py-2">
                   {m.pmHealth.hasSchedule ? (
                     <MachineHealthMeter
@@ -237,14 +237,14 @@ export default function MachineFlowPage() {
                     <MachineHealthMeter healthPct={0} hasSchedule={false} />
                   )}
                 </td>
-                <td className="px-4 py-2 text-xs text-zinc-400">
+                <td className="px-4 py-2 text-xs text-neutral-500">
                   {m.pmHealth.hasSchedule
                     ? `${m.pmHealth.usageRunHours}h · ${m.pmHealth.usageImpressions} imp.`
                     : '—'}
                 </td>
-                <td className="px-4 py-2 text-slate-400">45–90 min</td>
+                <td className="px-4 py-2 text-ds-ink-muted">45–90 min</td>
                 <td className="px-4 py-2">—</td>
-                <td className="px-4 py-2 text-slate-500">—</td>
+                <td className="px-4 py-2 text-ds-ink-faint">—</td>
               </tr>
             ))}
           </tbody>

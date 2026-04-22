@@ -6,15 +6,15 @@ import { toast } from 'sonner'
 import type { HubPriorityDomain } from '@/lib/hub-priority-domain'
 
 const iconBtnClass =
-  'h-6 w-6 inline-flex items-center justify-center rounded border border-transparent text-slate-400 ' +
-  'hover:bg-[#1E293B] hover:text-amber-400 active:scale-[0.98] ' +
-  'disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400'
+  'h-6 w-6 inline-flex items-center justify-center rounded border border-transparent text-ds-ink-muted ' +
+  'hover:bg-[#1E293B] hover:text-ds-warning active:scale-[0.98] ' +
+  'disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-ds-ink-muted'
 
 export function HubPriorityRankBadge({ rank }: { rank: number }) {
   if (rank < 1) return null
   return (
     <span
-      className="shrink-0 rounded border border-amber-600/30 bg-slate-900/80 px-1.5 py-0.5 text-[10px] font-bold text-amber-300/90 font-designing-queue tabular-nums"
+      className="shrink-0 rounded border border-ds-warning/50 bg-ds-card/80 px-1.5 py-0.5 text-[10px] font-bold text-ds-warning/90 font-designing-queue tabular-nums"
       title="Column priority"
     >
       #{rank}
@@ -25,7 +25,7 @@ export function HubPriorityRankBadge({ rank }: { rank: number }) {
 type PriorityAction = 'top' | 'up' | 'down' | 'bottom'
 
 /**
- * 4-button priority cluster (24×24, ghost, slate / amber on hover on slate-800).
+ * 4-button priority cluster (24×24, ghost; muted / brand on hover on elevated).
  */
 export function HubPriorityController({
   domain,
@@ -136,7 +136,7 @@ function ActionIconButton({
       }}
       className={iconBtnClass}
     >
-      {isSpinning ? <Loader2 className="h-4 w-4 animate-spin text-amber-400" strokeWidth={2} /> : <Icon className="h-4 w-4" strokeWidth={2} />}
+      {isSpinning ? <Loader2 className="h-4 w-4 animate-spin text-ds-warning" strokeWidth={2} /> : <Icon className="h-4 w-4" strokeWidth={2} />}
     </button>
   )
 }

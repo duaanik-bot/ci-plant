@@ -50,7 +50,7 @@ export default function ArtworkApprovalsPage() {
       )
     }
     return (
-      <span className="px-2 py-0.5 rounded text-xs bg-amber-900/50 text-amber-300">
+      <span className="px-2 py-0.5 rounded text-xs bg-ds-warning/12 text-ds-warning">
         {item.artworkStatusLabel || 'Awaiting approval'}
       </span>
     )
@@ -60,8 +60,8 @@ export default function ArtworkApprovalsPage() {
     <section className="p-4 max-w-6xl mx-auto space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-amber-400">Artwork Gate</h1>
-          <p className="text-sm text-slate-400">
+          <h1 className="text-xl font-bold text-ds-warning">Artwork Gate</h1>
+          <p className="text-sm text-ds-ink-muted">
             Review artwork locks and push finalized jobs to the Plate Hub.
           </p>
         </div>
@@ -74,15 +74,15 @@ export default function ArtworkApprovalsPage() {
       </div>
 
       {loading ? (
-        <div className="text-slate-400 py-8 text-center">Loading artwork queue…</div>
+        <div className="text-ds-ink-muted py-8 text-center">Loading artwork queue…</div>
       ) : items.length === 0 ? (
-        <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-8 text-center text-slate-400 text-sm">
+        <div className="rounded-lg border border-ds-line/40 bg-ds-main/40 p-8 text-center text-ds-ink-muted text-sm">
           No items in the artwork queue.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-700">
+        <div className="overflow-x-auto rounded-lg border border-ds-line/50">
           <table className="w-full text-sm">
-            <thead className="bg-slate-800 text-left">
+            <thead className="bg-ds-elevated text-left">
               <tr>
                 <th className="px-4 py-2 font-medium">PO #</th>
                 <th className="px-4 py-2 font-medium">Customer</th>
@@ -94,10 +94,10 @@ export default function ArtworkApprovalsPage() {
                 <th className="px-4 py-2 font-medium">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-700">
+            <tbody className="divide-y divide-ds-line/40">
               {items.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-800/40">
-                  <td className="px-4 py-2 font-mono text-amber-400 whitespace-nowrap">
+                <tr key={item.id} className="hover:bg-ds-elevated/40">
+                  <td className="px-4 py-2 font-mono text-ds-warning whitespace-nowrap">
                     {item.po.poNumber}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">{item.po.customer.name}</td>
@@ -105,13 +105,13 @@ export default function ArtworkApprovalsPage() {
                   <td className="px-4 py-2 font-mono text-xs">{item.artworkCode || '—'}</td>
                   <td className="px-4 py-2 font-mono text-xs">{item.setNumber || '—'}</td>
                   <td className="px-4 py-2">{statusBadge(item)}</td>
-                  <td className="px-4 py-2 whitespace-nowrap text-slate-400 text-xs">
+                  <td className="px-4 py-2 whitespace-nowrap text-ds-ink-muted text-xs">
                     {item.po.poDate ? format(new Date(item.po.poDate), 'dd MMM yyyy') : '—'}
                   </td>
                   <td className="px-4 py-2">
                     <Link
                       href={`/orders/designing/${item.id}`}
-                      className="text-amber-400 hover:underline text-sm font-medium"
+                      className="text-ds-warning hover:underline text-sm font-medium"
                     >
                       Open →
                     </Link>

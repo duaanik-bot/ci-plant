@@ -74,13 +74,13 @@ export function PlanningProductDetailDrawer({
       >
         <div className="flex items-start justify-between gap-2 border-b border-[#334155] bg-[#0F172A] px-4 py-3">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-slate-500">Product master</p>
-            <h2 className="pr-2 text-sm font-semibold text-slate-100">{name}</h2>
+            <p className="text-xs font-medium text-ds-ink-faint">Product master</p>
+            <h2 className="pr-2 text-sm font-semibold text-ds-ink">{name}</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1.5 text-slate-400 hover:bg-[#1E293B] hover:text-slate-100"
+            className="rounded p-1.5 text-ds-ink-muted hover:bg-[#1E293B] hover:text-ds-ink"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -89,42 +89,42 @@ export function PlanningProductDetailDrawer({
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3 text-[13px]">
           {err ? <p className="text-sm text-rose-400">{err}</p> : null}
-          {loading ? <p className="text-slate-500">Loading…</p> : null}
+          {loading ? <p className="text-ds-ink-faint">Loading…</p> : null}
           {!loading && data && (
             <>
-              <div className="space-y-1.5 rounded border border-[#334155] bg-[#0F172A]/50 p-3 text-slate-200">
-                <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Master specs</p>
+              <div className="space-y-1.5 rounded border border-[#334155] bg-[#0F172A]/50 p-3 text-ds-ink">
+                <p className="text-xs font-medium uppercase tracking-wider text-ds-ink-faint">Master specs</p>
                 <p>
-                  <span className="text-slate-500">GSM:</span>{' '}
+                  <span className="text-ds-ink-faint">GSM:</span>{' '}
                   <span className={mono}>{m?.gsm != null ? String(m.gsm) : '—'}</span>
                 </p>
                 <p>
-                  <span className="text-slate-500">Paper:</span> {String(m?.paperType ?? '—')}
+                  <span className="text-ds-ink-faint">Paper:</span> {String(m?.paperType ?? '—')}
                 </p>
                 <p>
-                  <span className="text-slate-500">Coating:</span> {String(m?.coatingType ?? '—')}
+                  <span className="text-ds-ink-faint">Coating:</span> {String(m?.coatingType ?? '—')}
                 </p>
                 <p>
-                  <span className="text-slate-500">Laminate / secondary:</span> {String(m?.laminateType ?? '—')}
+                  <span className="text-ds-ink-faint">Laminate / secondary:</span> {String(m?.laminateType ?? '—')}
                 </p>
                 <p>
-                  <span className="text-slate-500">AW code:</span>{' '}
-                  <span className={`text-amber-400 ${mono}`}>{String(m?.artworkCode ?? '—')}</span>
+                  <span className="text-ds-ink-faint">AW code:</span>{' '}
+                  <span className={`text-ds-warning ${mono}`}>{String(m?.artworkCode ?? '—')}</span>
                 </p>
               </div>
 
               <div>
-                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
                   Grain direction
                 </p>
-                <p className="whitespace-pre-wrap text-slate-300">{String(data.grainDirectionNote ?? '—')}</p>
+                <p className="whitespace-pre-wrap text-ds-ink-muted">{String(data.grainDirectionNote ?? '—')}</p>
               </div>
 
               <div>
-                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
                   Hub readiness (live)
                 </p>
-                <ul className="space-y-1 text-slate-200">
+                <ul className="space-y-1 text-ds-ink">
                   <li>
                     Plates / die:{' '}
                     {data.hub?.die ? (
@@ -132,7 +132,7 @@ export function PlanningProductDetailDrawer({
                         Die {data.hub.die.dyeNumber}/{data.hub.die.ups} · {data.hub.die.sheetSize}
                       </span>
                     ) : (
-                      <span className="text-amber-400/90">—</span>
+                      <span className="text-ds-warning">—</span>
                     )}
                   </li>
                   <li>
@@ -149,17 +149,17 @@ export function PlanningProductDetailDrawer({
               </div>
 
               <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-500">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
                   Last production runs
                 </p>
                 <ul className="space-y-2">
                   {(data.lastRuns ?? []).map((r) => (
                     <li
                       key={r?.jobCardNumber}
-                      className="rounded border border-[#334155] bg-[#0F172A]/50 px-2 py-1.5 text-slate-300"
+                      className="rounded border border-[#334155] bg-[#0F172A]/50 px-2 py-1.5 text-ds-ink-muted"
                     >
-                      <p className={`${mono} text-amber-400`}>JC #{r?.jobCardNumber ?? '—'}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className={`${mono} text-ds-warning`}>JC #{r?.jobCardNumber ?? '—'}</p>
+                      <p className="text-xs text-ds-ink-faint">
                         {r?.jobDate != null
                           ? new Date(r.jobDate).toISOString().slice(0, 10)
                           : '—'}{' '}
@@ -173,7 +173,7 @@ export function PlanningProductDetailDrawer({
                   ))}
                 </ul>
                 {(data.lastRuns?.length ?? 0) === 0 ? (
-                  <p className="text-slate-500">No prior job cards linked to this product.</p>
+                  <p className="text-ds-ink-faint">No prior job cards linked to this product.</p>
                 ) : null}
               </div>
             </>

@@ -4,7 +4,7 @@ export default function ReportsProductionPage() {
   return (
     <section className="p-6 space-y-4">
       <h1 className="text-2xl font-semibold">Production Summary</h1>
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-ds-ink-muted">
         Use Job Tracking and Live Production for current production summaries.
       </p>
       <div className="flex gap-4 text-sm">

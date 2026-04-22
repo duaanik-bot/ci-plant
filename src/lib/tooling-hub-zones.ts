@@ -111,13 +111,13 @@ export function embossLedgerZoneKeyFromCustody(status: string): ToolingLedgerZon
 }
 
 const LEDGER_BADGE: Record<ToolingLedgerZoneKey, string> = {
-  incoming_triage: 'border-amber-600/70 bg-amber-950/60 text-amber-100',
+  incoming_triage: 'border-ds-warning/50 bg-ds-warning/10 text-ds-ink',
   outside_vendor: 'border-violet-500/70 bg-violet-950/50 text-violet-100',
-  engraving_queue: 'border-amber-500/60 bg-amber-950/40 text-amber-200',
+  engraving_queue: 'border-ds-warning/60 bg-ds-warning/10 text-ds-warning',
   live_inventory: 'border-emerald-600/70 bg-emerald-950/40 text-emerald-100',
   custody_floor: 'border-orange-500/70 bg-orange-950/40 text-orange-100',
   on_machine: 'border-sky-500/70 bg-sky-950/50 text-sky-100',
-  other: 'border-zinc-600 bg-zinc-900 text-zinc-300',
+  other: 'border-ds-line/50 bg-ds-card text-neutral-400',
 }
 
 export function toolingLedgerZoneBadge(zoneKey: ToolingLedgerZoneKey): string {

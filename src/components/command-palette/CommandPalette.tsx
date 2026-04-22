@@ -255,7 +255,7 @@ function CommandPaletteModal({
         onKeyDown={onPaletteKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <Search className="h-4 w-4 shrink-0 text-amber-400/90" aria-hidden />
+          <Search className="h-4 w-4 shrink-0 text-ds-warning" aria-hidden />
           <input
             ref={inputRef}
             value={query}
@@ -268,9 +268,9 @@ function CommandPaletteModal({
             aria-controls="command-palette-results"
           />
           {loading || debouncePending ? (
-            <span className="text-[10px] text-slate-500 tabular-nums">Searching…</span>
+            <span className="text-[10px] text-ds-ink-faint tabular-nums">Searching…</span>
           ) : (
-            <span className="flex items-center gap-0.5 text-[10px] text-slate-500">
+            <span className="flex items-center gap-0.5 text-[10px] text-ds-ink-faint">
               <CornerDownLeft className="h-3 w-3" aria-hidden />
               go
             </span>
@@ -283,14 +283,14 @@ function CommandPaletteModal({
           aria-label="Search results"
         >
           {query.trim().length > 0 && debounced.length < 2 && !debouncePending ? (
-            <p className="px-3 py-6 text-center text-xs text-slate-500">Type at least 2 characters.</p>
+            <p className="px-3 py-6 text-center text-xs text-ds-ink-faint">Type at least 2 characters.</p>
           ) : null}
           {debounced.length >= 2 &&
           !loading &&
           !debouncePending &&
           flatRows.length === 0 &&
           query.trim().length > 0 ? (
-            <p className="px-3 py-8 text-center text-xs leading-relaxed text-slate-500">
+            <p className="px-3 py-8 text-center text-xs leading-relaxed text-ds-ink-faint">
               No records found. Searching for a PO, Die ID, or Product Name?
             </p>
           ) : null}
@@ -313,18 +313,18 @@ function CommandPaletteModal({
                         onMouseEnter={() => setSelectedFlat(flatIndex)}
                         className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left transition ${
                           active
-                            ? 'border-l-2 border-l-[#f97316] bg-[#f97316]/[0.07] text-slate-50 shadow-[inset_0_0_24px_rgba(249,115,22,0.06)]'
-                            : 'border-l-2 border-l-transparent text-slate-200 hover:bg-slate-800/40'
+                            ? 'border-l-2 border-l-[#f97316] bg-[#f97316]/[0.07] text-ds-ink shadow-[inset_0_0_24px_rgba(249,115,22,0.06)]'
+                            : 'border-l-2 border-l-transparent text-ds-ink hover:bg-ds-elevated/40'
                         }`}
                       >
                         {r.isRecent ? (
                           <History
-                            className="mt-0.5 h-4 w-4 shrink-0 text-amber-500/80"
+                            className="mt-0.5 h-4 w-4 shrink-0 text-ds-warning/80"
                             aria-hidden
                           />
                         ) : r.showMasterIcon ? (
                           <Package
-                            className="mt-0.5 h-4 w-4 shrink-0 text-slate-500 opacity-80"
+                            className="mt-0.5 h-4 w-4 shrink-0 text-ds-ink-faint opacity-80"
                             aria-hidden
                           />
                         ) : null}
@@ -350,7 +350,7 @@ function CommandPaletteModal({
                           </div>
                           {r.subtitle ? (
                             <div
-                              className={`truncate text-[11px] text-slate-500 ${r.subtitleMono ? 'font-designing-queue tabular-nums tracking-tight' : ''}`}
+                              className={`truncate text-[11px] text-ds-ink-faint ${r.subtitleMono ? 'font-designing-queue tabular-nums tracking-tight' : ''}`}
                             >
                               {r.subtitle}
                             </div>
@@ -365,9 +365,9 @@ function CommandPaletteModal({
           ))}
         </div>
         <div className="border-t border-border px-3 py-1.5 text-[10px] text-muted-foreground">
-          <span className="text-slate-600">Navigator: </span>
+          <span className="text-ds-ink-faint">Navigator: </span>
           <span className="text-[#f97316]/90">Anik Dua</span>
-          <span className="text-slate-600"> · audits navigation</span>
+          <span className="text-ds-ink-faint"> · audits navigation</span>
         </div>
       </div>
     </div>
@@ -427,9 +427,9 @@ export function CommandPaletteTrigger() {
       className="flex w-full max-w-xl items-center gap-2 rounded-lg border border-border bg-card/70 px-3 py-2 text-left text-sm text-muted-foreground shadow-inner ring-1 ring-ring/20 backdrop-blur-md transition hover:border-primary/40 hover:bg-accent hover:text-accent-foreground"
       aria-label="Open command palette"
     >
-      <Search className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+      <Search className="h-4 w-4 shrink-0 text-ds-ink-faint" aria-hidden />
       <span className="flex-1 truncate">Search POs, dies, products, jobs…</span>
-      <kbd className="hidden sm:inline rounded border border-slate-600 bg-slate-950/80 px-1.5 py-0.5 text-[10px] font-mono text-slate-500">
+      <kbd className="hidden sm:inline rounded border border-ds-line/60 bg-ds-main/80 px-1.5 py-0.5 text-[10px] font-mono text-ds-ink-faint">
         {kbdHint}
       </kbd>
     </button>

@@ -30,27 +30,27 @@ export default function RfqPage() {
   }, [statusFilter])
 
   if (loading) {
-    return <div className="p-4 text-slate-400">Loading RFQs…</div>
+    return <div className="p-4 text-ds-ink-muted">Loading RFQs…</div>
   }
 
   return (
     <div className="p-4 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-amber-400">RFQ Pipeline</h1>
+        <h1 className="text-xl font-bold text-ds-warning">RFQ Pipeline</h1>
         <Link
           href="/rfq/new"
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
+          className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
         >
           New RFQ
         </Link>
       </div>
 
       <div className="mb-4 flex gap-2 items-center">
-        <label className="text-sm text-slate-400">Status</label>
+        <label className="text-sm text-ds-ink-muted">Status</label>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-sm"
+          className="px-3 py-1.5 rounded-lg bg-ds-elevated border border-ds-line/60 text-sm"
         >
           <option value="">All</option>
           <option value="received">RFQ received</option>
@@ -60,9 +60,9 @@ export default function RfqPage() {
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-700">
+      <div className="overflow-x-auto rounded-lg border border-ds-line/50">
         <table className="w-full text-sm">
-          <thead className="bg-slate-800 text-left">
+          <thead className="bg-ds-elevated text-left">
             <tr>
               <th className="px-4 py-2">RFQ #</th>
               <th className="px-4 py-2">Customer</th>
@@ -74,7 +74,7 @@ export default function RfqPage() {
               <th className="px-4 py-2">Action</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700">
+          <tbody className="divide-y divide-ds-line/40">
             {items.map((rfq) => {
               const created = new Date(rfq.createdAt)
               const daysOpen = Math.max(
@@ -82,8 +82,8 @@ export default function RfqPage() {
                 Math.floor((Date.now() - created.getTime()) / (1000 * 60 * 60 * 24))
               )
               return (
-                <tr key={rfq.id} className="hover:bg-slate-800/60">
-                  <td className="px-4 py-2 font-mono text-amber-300">{rfq.rfqNumber}</td>
+                <tr key={rfq.id} className="hover:bg-ds-elevated/60">
+                  <td className="px-4 py-2 font-mono text-ds-warning">{rfq.rfqNumber}</td>
                   <td className="px-4 py-2">{rfq.customer?.name}</td>
                   <td className="px-4 py-2">{rfq.productName}</td>
                   <td className="px-4 py-2">{rfq.packType}</td>
@@ -91,15 +91,15 @@ export default function RfqPage() {
                     {rfq.estimatedVolume ? rfq.estimatedVolume.toLocaleString() : '—'}
                   </td>
                   <td className="px-4 py-2">
-                    <span className="px-2 py-0.5 rounded text-xs bg-slate-800 border border-slate-600 text-slate-200">
+                    <span className="px-2 py-0.5 rounded text-xs bg-ds-elevated border border-ds-line/60 text-ds-ink">
                       {rfq.status}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-slate-400">{daysOpen}</td>
+                  <td className="px-4 py-2 text-ds-ink-muted">{daysOpen}</td>
                   <td className="px-4 py-2">
                     <Link
                       href={`/rfq/${rfq.id}`}
-                      className="text-amber-400 hover:underline text-xs"
+                      className="text-ds-warning hover:underline text-xs"
                     >
                       Open
                     </Link>
@@ -109,7 +109,7 @@ export default function RfqPage() {
             })}
             {items.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-6 text-center text-ds-ink-faint">
                   No RFQs found.
                 </td>
               </tr>

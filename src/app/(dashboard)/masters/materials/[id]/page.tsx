@@ -45,7 +45,7 @@ export default function EditMaterialPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to load'))
   }, [id])
 
-  if (!data) return <div className="text-slate-400">Loading...</div>
+  if (!data) return <div className="text-ds-ink-muted">Loading...</div>
 
   return (
     <MaterialForm

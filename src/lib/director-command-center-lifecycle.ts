@@ -59,13 +59,13 @@ export function artworksBarParts(li: PoLineItem, _jc: ProductionJobCard | null):
   const b = Boolean(spec.shadeCardQaTextApproval)
   if (prePress) return [{ n: 1, c: 'bg-emerald-500' }]
   if (a || b) return [{ n: 1, c: 'bg-sky-500' }]
-  return [{ n: 1, c: 'bg-slate-600' }]
+  return [{ n: 1, c: 'bg-ds-line/30' }]
 }
 
 export function toolingBarParts(li: PoLineItem, dye: DieStatusSnapshot | null | undefined): BarPart[] {
   const sig = classifyPoToolingSignal(computeToolingInput(li), dye ?? undefined)
   if (sig === 'green') return [{ n: 1, c: 'bg-emerald-500' }]
-  if (sig === 'yellow') return [{ n: 1, c: 'bg-amber-400' }]
+  if (sig === 'yellow') return [{ n: 1, c: 'bg-ds-warning/50' }]
   return [{ n: 1, c: 'bg-rose-500' }]
 }
 
@@ -73,18 +73,18 @@ export function materialBarParts(li: PoLineItem): BarPart[] {
   const x = (li.materialProcurementStatus ?? '').trim().toLowerCase()
   if (x === 'received') return [{ n: 1, c: 'bg-emerald-500' }]
   if (x === 'on_order' || x === 'dispatched' || x === 'paper_ordered') return [{ n: 1, c: 'bg-sky-500' }]
-  return [{ n: 1, c: 'bg-slate-600' }]
+  return [{ n: 1, c: 'bg-ds-line/30' }]
 }
 
 export function productionBarParts(li: PoLineItem, jc: ProductionJobCard | null): BarPart[] {
   if (li.planningStatus === 'closed' || jc?.qaReleased) return [{ n: 1, c: 'bg-emerald-500' }]
   if (li.planningStatus === 'in_production') return [{ n: 1, c: 'bg-orange-500' }]
-  return [{ n: 1, c: 'bg-slate-600' }]
+  return [{ n: 1, c: 'bg-ds-line/30' }]
 }
 
 export function logisticsBarParts(_li: PoLineItem, po: PurchaseOrder, _jc: ProductionJobCard | null): BarPart[] {
   if (po.status === 'closed') return [{ n: 1, c: 'bg-emerald-500' }]
-  return [{ n: 1, c: 'bg-slate-600' }]
+  return [{ n: 1, c: 'bg-ds-line/30' }]
 }
 
 export function computeLifeBars(

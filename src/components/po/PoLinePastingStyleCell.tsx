@@ -131,7 +131,7 @@ export function PoLinePastingStyleCell({
   const linkedStyle = pastingStyle === 'BSO' ? PastingStyle.BSO : PastingStyle.LOCK_BOTTOM
   if (!pastingStyle?.trim()) {
     return (
-      <div className={`min-w-[7rem] text-xs text-slate-400 ${ghostFromMaster ? 'opacity-90' : ''}`}>
+      <div className={`min-w-[7rem] text-xs text-ds-ink-muted ${ghostFromMaster ? 'opacity-90' : ''}`}>
         Loading…
         {pasteErr ? <p className="text-[10px] text-red-400 mt-0.5">{pasteErr}</p> : null}
       </div>

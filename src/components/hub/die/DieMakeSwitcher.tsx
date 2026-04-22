@@ -58,8 +58,8 @@ export function DieMakeSwitcher({
       }}
       className={`px-2 py-0.5 min-w-[3.25rem] transition-colors disabled:opacity-50 ${
         v === key
-          ? 'bg-amber-600 text-primary-foreground'
-          : 'bg-zinc-950 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+          ? 'bg-ds-warning text-primary-foreground'
+          : 'bg-ds-main text-neutral-500 hover:text-ds-ink hover:bg-ds-card'
       }`}
     >
       {label}
@@ -68,7 +68,7 @@ export function DieMakeSwitcher({
 
   return (
     <div
-      className={`inline-flex rounded-md border border-zinc-600 overflow-hidden text-[10px] font-bold uppercase tracking-wide ${className}`}
+      className={`inline-flex rounded-md border border-ds-line/50 overflow-hidden text-[10px] font-bold uppercase tracking-wide ${className}`}
       onClick={(e) => e.stopPropagation()}
       role="group"
       aria-label="Die make"

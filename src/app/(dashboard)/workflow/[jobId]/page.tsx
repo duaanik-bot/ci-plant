@@ -64,18 +64,18 @@ export default function JobWorkflowPage() {
     }
   }
 
-  if (loading) return <div className="p-4 text-slate-400">Loading workflow…</div>
+  if (loading) return <div className="p-4 text-ds-ink-muted">Loading workflow…</div>
 
   return (
     <div className="p-4 max-w-3xl mx-auto space-y-4">
       {jobInfo && (
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold text-amber-400">{jobInfo.jobNumber}</h1>
-            <p className="text-slate-200">{jobInfo.productName}</p>
-            <p className="text-slate-400 text-xs">{jobInfo.customerName}</p>
+            <h1 className="text-lg font-bold text-ds-warning">{jobInfo.jobNumber}</h1>
+            <p className="text-ds-ink">{jobInfo.productName}</p>
+            <p className="text-ds-ink-muted text-xs">{jobInfo.customerName}</p>
           </div>
-          <Link href="/workflow" className="text-slate-400 hover:text-foreground text-xs">
+          <Link href="/workflow" className="text-ds-ink-muted hover:text-foreground text-xs">
             ← Back to workflow
           </Link>
         </div>
@@ -86,7 +86,7 @@ export default function JobWorkflowPage() {
           const isCompleted = stage.status === 'completed'
           const isCurrent = stage.status === 'in_progress'
           const color =
-            isCompleted ? 'border-green-600 bg-green-900/20' : isCurrent ? 'border-blue-500 bg-slate-800' : 'border-slate-700 bg-slate-900'
+            isCompleted ? 'border-green-600 bg-green-900/20' : isCurrent ? 'border-blue-500 bg-ds-elevated' : 'border-ds-line/50 bg-ds-card'
           return (
             <div
               key={stage.id}
@@ -95,28 +95,28 @@ export default function JobWorkflowPage() {
               <div className="flex flex-col items-center">
                 <div
                   className={`w-3 h-3 rounded-full ${
-                    isCompleted ? 'bg-green-400' : isCurrent ? 'bg-blue-400 animate-pulse' : 'bg-slate-600'
+                    isCompleted ? 'bg-green-400' : isCurrent ? 'bg-blue-400 animate-pulse' : 'bg-ds-line/30'
                   }`}
                 />
                 {stage.stageNumber < WORKFLOW_STAGE_COUNT && (
-                  <div className="w-px flex-1 bg-slate-700 mt-1" />
+                  <div className="w-px flex-1 bg-ds-elevated mt-1" />
                 )}
               </div>
               <div className="flex-1">
-                <p className="text-sm font-semibold text-slate-100">
+                <p className="text-sm font-semibold text-ds-ink">
                   Stage {stage.stageNumber} — {stage.stageName}
                 </p>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-ds-ink-muted mt-0.5">
                   Status: {stage.status}{' '}
                   {stage.responsibleRole && `· Role: ${stage.responsibleRole}`}
                 </p>
                 {stage.actualStart && (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-ds-ink-faint">
                     Started: {new Date(stage.actualStart).toLocaleString()}
                   </p>
                 )}
                 {stage.actualEnd && (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-ds-ink-faint">
                     Completed: {new Date(stage.actualEnd).toLocaleString()}
                   </p>
                 )}
@@ -125,7 +125,7 @@ export default function JobWorkflowPage() {
                     <button
                       type="button"
                       onClick={() => completeStage(stage.stageNumber)}
-                      className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-xs font-medium text-primary-foreground"
+                      className="px-3 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning text-xs font-medium text-primary-foreground"
                     >
                       Complete Stage
                     </button>

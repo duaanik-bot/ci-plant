@@ -1,9 +1,9 @@
 import type { PrismaClient } from '@prisma/client'
 
 /** Strategic sourcing / director insights accent (Tailwind-friendly). */
-export const STRATEGIC_SOURCING_GOLD = 'text-amber-400'
-export const STRATEGIC_SOURCING_GOLD_BORDER = 'border-amber-500/55'
-export const STRATEGIC_SOURCING_GOLD_SOFT = 'bg-amber-500/10'
+export const STRATEGIC_SOURCING_GOLD = 'text-ds-warning'
+export const STRATEGIC_SOURCING_GOLD_BORDER = 'border-ds-warning/55'
+export const STRATEGIC_SOURCING_GOLD_SOFT = 'bg-ds-warning/8'
 
 export type ReliabilityGrade = 'A' | 'B' | 'C'
 

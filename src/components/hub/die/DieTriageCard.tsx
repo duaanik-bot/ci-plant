@@ -114,12 +114,12 @@ export function DieTriageCard({
       className={`rounded-lg border bg-background p-2 overflow-visible ${
         onHold
           ? 'border-yellow-500/70 shadow-[0_0_16px_rgba(234,179,8,0.22)] ring-2 ring-yellow-400/35'
-          : 'border-zinc-800'
+          : 'border-ds-line/40'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono text-[10px] text-amber-300/90 truncate">{r.displayCode}</span>
+          <span className="font-mono text-[10px] text-ds-warning/90 truncate">{r.displayCode}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <HubCardDeleteAction
@@ -133,7 +133,7 @@ export function DieTriageCard({
             type="button"
             disabled={saving}
             title="Undo last hub action"
-            className="text-[10px] font-bold uppercase tracking-wide text-amber-200/90 border border-amber-700/60 rounded px-1.5 py-0.5 hover:bg-amber-950/50 disabled:opacity-50 whitespace-nowrap"
+            className="text-[10px] font-bold uppercase tracking-wide text-ds-warning border border-ds-warning/30 rounded px-1.5 py-0.5 hover:bg-ds-warning/10 disabled:opacity-50 whitespace-nowrap"
             onClick={onReverse}
           >
             ↺ Reverse
@@ -150,7 +150,7 @@ export function DieTriageCard({
             <button
               type="button"
               onClick={onSimilarClick}
-              className="text-[9px] font-bold uppercase tracking-wider text-amber-500 border border-amber-600/60 rounded px-1.5 py-0.5 hover:bg-amber-950/50"
+              className="text-[9px] font-bold uppercase tracking-wider text-ds-warning border border-ds-warning/50 rounded px-1.5 py-0.5 hover:bg-ds-warning/10"
             >
               Similar
             </button>
@@ -158,7 +158,7 @@ export function DieTriageCard({
           {hubColumnPriority ? <HubPriorityRankBadge rank={hubColumnPriority.rank} /> : null}
         </div>
       </div>
-      <p className="text-[11px] text-zinc-500 truncate mt-1" title={r.title}>
+      <p className="text-[11px] text-neutral-500 truncate mt-1" title={r.title}>
         {r.title}
       </p>
       {onHold ? (
@@ -182,7 +182,7 @@ export function DieTriageCard({
       {specs}
 
       <div className="mt-2 space-y-2">
-        <p className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500">Command center</p>
+        <p className="text-[9px] font-semibold uppercase tracking-wider text-neutral-500">Command center</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <button
             type="button"
@@ -195,15 +195,15 @@ export function DieTriageCard({
           <button
             type="button"
             disabled={triageLocked}
-            className="py-1.5 rounded-md border border-zinc-500 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 text-xs font-semibold disabled:opacity-50"
+            className="py-1.5 rounded-md border border-ds-line/50 bg-ds-card hover:bg-ds-elevated text-ds-ink text-xs font-semibold disabled:opacity-50"
             onClick={onTakeFromStock}
           >
             Pull from rack
           </button>
         </div>
 
-        <div className={`rounded-md border border-zinc-700 bg-zinc-950/80 p-2 ${triageLocked ? 'opacity-50 pointer-events-none' : ''}`}>
-          <p className="text-[10px] font-semibold text-zinc-400 mb-1">Manual link (any rack die)</p>
+        <div className={`rounded-md border border-ds-line/50 bg-ds-main/80 p-2 ${triageLocked ? 'opacity-50 pointer-events-none' : ''}`}>
+          <p className="text-[10px] font-semibold text-neutral-500 mb-1">Manual link (any rack die)</p>
           <input
             value={manualQ}
             onChange={(e) => setManualQ(e.target.value)}
@@ -211,19 +211,19 @@ export function DieTriageCard({
             onBlur={() => window.setTimeout(() => setManualFocused(false), 160)}
             disabled={triageLocked}
             placeholder="Search DYE #, dimensions, pasting…"
-            className="w-full px-2 py-1.5 rounded border border-zinc-600 bg-background text-foreground text-xs placeholder:text-zinc-600"
+            className="w-full px-2 py-1.5 rounded border border-ds-line/50 bg-background text-foreground text-xs placeholder:text-neutral-600"
           />
           {manualFocused && (pickLoading || pickItems.length > 0) ? (
-            <ul className="mt-1 max-h-36 overflow-y-auto rounded border border-zinc-800 bg-background text-xs">
+            <ul className="mt-1 max-h-36 overflow-y-auto rounded border border-ds-line/40 bg-background text-xs">
               {pickLoading && pickItems.length === 0 ? (
-                <li className="px-2 py-2 text-zinc-500">Searching…</li>
+                <li className="px-2 py-2 text-neutral-500">Searching…</li>
               ) : null}
               {pickItems.map((it) => (
                 <li key={it.id}>
                   <button
                     type="button"
                     disabled={triageLocked}
-                    className="w-full text-left px-2 py-1.5 hover:bg-zinc-900 border-b border-zinc-900 last:border-0"
+                    className="w-full text-left px-2 py-1.5 hover:bg-ds-card border-b border-ds-line/30 last:border-0"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       onManualLink(it.id)
@@ -231,8 +231,8 @@ export function DieTriageCard({
                       setPickItems([])
                     }}
                   >
-                    <span className="font-mono text-amber-200/90">{it.displayCode}</span>
-                    <span className="block text-[10px] text-zinc-500 leading-tight">{it.subtitle}</span>
+                    <span className="font-mono text-ds-warning">{it.displayCode}</span>
+                    <span className="block text-[10px] text-neutral-500 leading-tight">{it.subtitle}</span>
                   </button>
                 </li>
               ))}
@@ -252,14 +252,14 @@ export function DieTriageCard({
             </button>
           ) : (
             <>
-              <label className="block text-[10px] text-zinc-400">
+              <label className="block text-[10px] text-neutral-500">
                 Hold reason (logged)
                 <textarea
                   value={holdReasonDraft}
                   onChange={(e) => setHoldReasonDraft(e.target.value)}
                   rows={2}
                   disabled={saving}
-                  className="mt-1 w-full px-2 py-1.5 rounded border border-zinc-600 bg-background text-foreground text-xs"
+                  className="mt-1 w-full px-2 py-1.5 rounded border border-ds-line/50 bg-background text-foreground text-xs"
                 />
               </label>
               <button
@@ -275,7 +275,7 @@ export function DieTriageCard({
         </div>
       </div>
 
-      <p className="mt-1.5 text-[10px] leading-tight text-zinc-500">
+      <p className="mt-1.5 text-[10px] leading-tight text-neutral-500">
         Time in triage: {hubQueueAgeLabel(r.lastStatusUpdatedAt)}
       </p>
       <HubPriorityReorderAuditFooter

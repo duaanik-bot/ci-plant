@@ -35,15 +35,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       const label = this.props.moduleName ?? 'This section'
       return (
         <div
-          className="rounded-lg border border-slate-200 bg-card p-6 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900"
+          className="rounded-lg border border-neutral-200 bg-card p-6 text-center shadow-sm dark:border-ds-line/40 dark:bg-ds-card"
           role="alert"
         >
-          <p className="text-base font-semibold text-slate-900 dark:text-slate-50">Widget failed to load</p>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+          <p className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Widget failed to load</p>
+          <p className="mt-2 text-sm text-ds-ink-faint dark:text-ds-ink-muted">
             {label} encountered an unexpected error. You can try again or refresh the page.
           </p>
           {this.state.error?.message ? (
-            <p className="mt-3 font-designing-queue text-xs text-slate-500 dark:text-slate-500 break-all">
+            <p className="mt-3 font-designing-queue text-xs text-ds-ink-faint dark:text-ds-ink-faint break-all">
               {this.state.error.message}
             </p>
           ) : null}

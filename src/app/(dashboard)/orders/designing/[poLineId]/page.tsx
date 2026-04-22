@@ -199,7 +199,7 @@ function normalizeSheetSizeKey(s: string): string {
 }
 
 const manualInputClass =
-  'mt-1 w-full px-2 py-1.5 rounded bg-card text-foreground text-sm border border-slate-800 focus:border-amber-500/80 focus:outline-none focus:ring-1 focus:ring-amber-500/40 placeholder:text-slate-600'
+  'mt-1 w-full px-2 py-1.5 rounded bg-card text-foreground text-sm border border-ds-line/40 focus:border-ds-warning/80 focus:outline-none focus:ring-1 focus:ring-ds-warning/35 placeholder:text-ds-ink-faint'
 
 const monoInputClass = `${manualInputClass} ${techMono}`
 
@@ -250,21 +250,21 @@ function CartonDimensionsRow({
   return (
     <div
       className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:col-span-3 border-b border-border/40 sm:border-0 pb-2 sm:pb-0 ${
-        smartHighlight ? 'rounded-md px-1 -mx-1 border border-amber-400' : ''
+        smartHighlight ? 'rounded-md px-1 -mx-1 border border-ds-warning/60' : ''
       }`}
     >
-      <span className="text-slate-500 shrink-0 text-xs flex items-center gap-1">
+      <span className="text-ds-ink-faint shrink-0 text-xs flex items-center gap-1">
         Carton dimensions (L × W × H)
         {smartHighlight ? (
-          <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
+          <LinkedIcon className="h-3 w-3 text-ds-warning shrink-0" aria-hidden />
         ) : null}
       </span>
       <div className="flex flex-wrap items-center gap-2 min-w-0">
-        <span className={`flex flex-wrap items-center gap-x-2 text-slate-100 text-sm min-w-0 ${techMono}`}>
+        <span className={`flex flex-wrap items-center gap-x-2 text-ds-ink text-sm min-w-0 ${techMono}`}>
           <span>{showL ?? '—'}</span>
-          <span className="text-slate-500">×</span>
+          <span className="text-ds-ink-faint">×</span>
           <span>{showW ?? '—'}</span>
-          <span className="text-slate-500">×</span>
+          <span className="text-ds-ink-faint">×</span>
           <span>{showH ?? '—'}</span>
         </span>
         {right}
@@ -1852,7 +1852,7 @@ export default function DesigningDetailPage() {
     return null
   }, [data?.line, designerCommand.dieSource, dieDispatchedToHub, dieReserveSent])
 
-  if (!data || !line) return <div className="p-4 text-slate-400">Loading...</div>
+  if (!data || !line) return <div className="p-4 text-ds-ink-muted">Loading...</div>
 
   const showNewProductSetHint =
     historyNoMatch && !setNumberInput.trim() && !!artworkCodeInput.trim()
@@ -1862,8 +1862,8 @@ export default function DesigningDetailPage() {
   const specLocked = !editSpecsEnabled || awPoClosed
 
   return (
-    <div className="flex flex-col min-h-[calc(100dvh-0px)] bg-background text-slate-200">
-      <header className="sticky top-0 z-30 border-b border-slate-800 bg-background backdrop-blur-sm px-3 py-2">
+    <div className="flex flex-col min-h-[calc(100dvh-0px)] bg-background text-ds-ink">
+      <header className="sticky top-0 z-30 border-b border-ds-line/40 bg-background backdrop-blur-sm px-3 py-2">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-4 max-w-7xl mx-auto w-full">
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-2 min-w-0">
@@ -1874,29 +1874,29 @@ export default function DesigningDetailPage() {
                   aria-label="Industrial priority"
                 />
               ) : null}
-              <h1 className="text-lg sm:text-xl font-bold text-amber-400 break-words leading-tight">
+              <h1 className="text-lg sm:text-xl font-bold text-ds-warning break-words leading-tight">
                 {line.cartonName}
               </h1>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400">
+            <p className="text-xs sm:text-sm text-ds-ink-muted">
               {line.po.customer.name} | PO {line.po.poNumber} | Qty {line.quantity}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] leading-tight">
               <div className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-border/50 bg-background px-1.5 py-0.5">
-                <span className={`text-slate-200 ${techMono}`}>
-                  <span className="text-slate-500 font-sans font-normal mr-1">AW</span>
+                <span className={`text-ds-ink ${techMono}`}>
+                  <span className="text-ds-ink-faint font-sans font-normal mr-1">AW</span>
                   {artworkCodeInput.trim() || '—'}
                 </span>
-                <span className="text-slate-600 hidden sm:inline" aria-hidden>
+                <span className="text-ds-ink-faint hidden sm:inline" aria-hidden>
                   |
                 </span>
-                <span className="text-slate-300 font-sans">
-                  <span className="text-slate-500 mr-1">Status</span>
+                <span className="text-ds-ink-muted font-sans">
+                  <span className="text-ds-ink-faint mr-1">Status</span>
                   {line.planningStatus}
                 </span>
               </div>
               {showRepeatJobBadge ? (
-                <span className="px-1.5 py-0.5 rounded border border-amber-600/80 bg-amber-950/50 text-amber-200">
+                <span className="px-1.5 py-0.5 rounded border border-ds-warning/50 bg-ds-warning/10 text-ds-warning">
                   Repeat job
                 </span>
               ) : null}
@@ -1906,12 +1906,12 @@ export default function DesigningDetailPage() {
             <div className="flex flex-wrap items-center gap-2 justify-end">
               <Link
                 href="/orders/designing"
-                className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-sm"
+                className="px-2.5 py-1.5 rounded-lg border border-ds-line/50 text-ds-ink text-sm"
               >
                 Back
               </Link>
               <div
-                className="inline-flex flex-wrap items-center gap-2 sm:gap-3 rounded-lg border border-amber-500/45 bg-amber-950/20 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.08)]"
+                className="inline-flex flex-wrap items-center gap-2 sm:gap-3 rounded-lg border border-ds-warning/45 bg-ds-warning/8 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.08)]"
                 role="group"
                 aria-label="Designer and approvals"
               >
@@ -1919,7 +1919,7 @@ export default function DesigningDetailPage() {
                   value={designerId}
                   onChange={(e) => saveDesigner(e.target.value || undefined)}
                   disabled={savingDesigner || specLocked}
-                  className="px-2 py-1 rounded bg-card border border-slate-800 text-foreground text-xs min-w-[140px] max-w-[200px]"
+                  className="px-2 py-1 rounded bg-card border border-ds-line/40 text-foreground text-xs min-w-[140px] max-w-[200px]"
                   title="Assigned designer"
                 >
                   <option value="">Designer…</option>
@@ -1929,11 +1929,11 @@ export default function DesigningDetailPage() {
                     </option>
                   ))}
                 </select>
-                <span className="hidden sm:block w-px h-5 bg-slate-600 shrink-0" aria-hidden />
-                <label className="flex items-center gap-2 text-xs font-semibold text-amber-100 cursor-pointer whitespace-nowrap">
+                <span className="hidden sm:block w-px h-5 bg-ds-line/30 shrink-0" aria-hidden />
+                <label className="flex items-center gap-2 text-xs font-semibold text-ds-ink cursor-pointer whitespace-nowrap">
                   <input
                     type="checkbox"
-                    className="rounded border-amber-500/60 h-4 w-4 accent-amber-500"
+                    className="rounded border-ds-warning/60 h-4 w-4 accent-ds-warning"
                     checked={customerApproval}
                     onChange={(e) => {
                       const v = e.target.checked
@@ -1944,10 +1944,10 @@ export default function DesigningDetailPage() {
                   />
                   Customer OK
                 </label>
-                <label className="flex items-center gap-2 text-xs font-semibold text-amber-100 cursor-pointer whitespace-nowrap">
+                <label className="flex items-center gap-2 text-xs font-semibold text-ds-ink cursor-pointer whitespace-nowrap">
                   <input
                     type="checkbox"
-                    className="rounded border-amber-500/60 h-4 w-4 accent-amber-500"
+                    className="rounded border-ds-warning/60 h-4 w-4 accent-ds-warning"
                     checked={qaTextApproval}
                     onChange={(e) => {
                       const v = e.target.checked
@@ -1965,7 +1965,7 @@ export default function DesigningDetailPage() {
                 href={`/api/designing/po-lines/${poLineId}/job-spec-pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-2.5 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm hover:bg-slate-800"
+                className="px-2.5 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-elevated"
               >
                 Job spec PDF
               </a>
@@ -1973,7 +1973,7 @@ export default function DesigningDetailPage() {
                 href={links.po}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-2.5 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm hover:bg-slate-800"
+                className="px-2.5 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-elevated"
               >
                 Open PO
               </Link>
@@ -1981,7 +1981,7 @@ export default function DesigningDetailPage() {
                 type="button"
                 disabled={savingSpecs || specLocked}
                 onClick={() => void saveAllSpecs()}
-                className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
+                className="px-2.5 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
               >
                 {savingSpecs ? 'Saving…' : 'Save specs'}
               </button>
@@ -2003,7 +2003,7 @@ export default function DesigningDetailPage() {
                 className={`px-2.5 py-1.5 rounded-lg text-sm font-medium disabled:cursor-not-allowed ${
                   plateHubSent
                     ? 'border border-emerald-500 bg-emerald-950/50 text-emerald-500'
-                    : 'bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-400 text-primary-foreground'
+                    : 'bg-emerald-600 hover:bg-emerald-500 disabled:bg-ds-elevated disabled:text-ds-ink-muted text-primary-foreground'
                 }`}
               >
                 {plateHubSent ? 'Sent' : finalizing ? 'Sending…' : 'Finalize job'}
@@ -2038,15 +2038,15 @@ export default function DesigningDetailPage() {
           <section
             className={clsx(
               'rounded-xl bg-card border p-3 pb-2',
-              plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-slate-800',
+              plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-ds-line/40',
             )}
           >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 items-start">
-              <h2 className="text-sm font-semibold text-slate-200">
+              <h2 className="text-sm font-semibold text-ds-ink">
                 Section 1 — Identification &amp; spec
               </h2>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] text-slate-500 shrink-0">Job type</span>
+                <span className="text-[11px] text-ds-ink-faint shrink-0">Job type</span>
                 <div className="inline-flex rounded-lg border border-border/50 overflow-hidden">
                   <button
                     type="button"
@@ -2054,8 +2054,8 @@ export default function DesigningDetailPage() {
                     onClick={() => void persistJobType('new')}
                     className={`px-3 py-1.5 text-xs font-medium ${
                       jobType === 'new'
-                        ? 'bg-amber-600 text-primary-foreground'
-                        : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
+                        ? 'bg-ds-warning text-primary-foreground'
+                        : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                     }`}
                   >
                     New product
@@ -2066,18 +2066,18 @@ export default function DesigningDetailPage() {
                     onClick={() => void persistJobType('repeat')}
                     className={`px-3 py-1.5 text-xs font-medium border-l border-border/50 ${
                       jobType === 'repeat'
-                        ? 'bg-amber-600 text-primary-foreground'
-                        : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
+                        ? 'bg-ds-warning text-primary-foreground'
+                        : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                     }`}
                   >
                     Repeat product
                   </button>
                 </div>
               </div>
-              <div className="text-[11px] text-slate-500 leading-snug md:text-right">
+              <div className="text-[11px] text-ds-ink-faint leading-snug md:text-right">
                 <span>
-                  Smart Match reads <strong className="text-slate-400">Product Master</strong> when{' '}
-                  <strong className="text-slate-400">Set #</strong> or <strong className="text-slate-400">product selection</strong>{' '}
+                  Smart Match reads <strong className="text-ds-ink-muted">Product Master</strong> when{' '}
+                  <strong className="text-ds-ink-muted">Set #</strong> or <strong className="text-ds-ink-muted">product selection</strong>{' '}
                   changes.
                 </span>
               </div>
@@ -2086,13 +2086,13 @@ export default function DesigningDetailPage() {
               <div
                 className={`mb-3 flex items-start gap-2 border-l-2 pl-2 py-0.5 text-[11px] leading-snug ${
                   section1ManualHubOk
-                    ? 'border-amber-500/80 text-slate-400'
-                    : 'border-rose-500/80 text-slate-400'
+                    ? 'border-ds-warning/80 text-ds-ink-muted'
+                    : 'border-rose-500/80 text-ds-ink-muted'
                 }`}
                 role="status"
               >
                 <AlertTriangle
-                  className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${section1ManualHubOk ? 'text-amber-500' : 'text-rose-400'}`}
+                  className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${section1ManualHubOk ? 'text-ds-warning' : 'text-rose-400'}`}
                   aria-hidden
                 />
                 <span>
@@ -2111,7 +2111,7 @@ export default function DesigningDetailPage() {
               </div>
             ) : null}
             <div className="flex flex-wrap items-center gap-2 mb-2">
-              <span className="text-[11px] text-slate-500 shrink-0">Pre-batch Printed</span>
+              <span className="text-[11px] text-ds-ink-faint shrink-0">Pre-batch Printed</span>
               <div className="inline-flex rounded-lg border border-border/50 overflow-hidden">
                 <button
                   type="button"
@@ -2119,8 +2119,8 @@ export default function DesigningDetailPage() {
                   onClick={() => void persistPreBatchPrinted(true)}
                   className={`px-3 py-1.5 text-xs font-medium ${
                     preBatchPrinted
-                      ? 'bg-amber-600 text-primary-foreground'
-                      : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
+                      ? 'bg-ds-warning text-primary-foreground'
+                      : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                   }`}
                 >
                   Yes
@@ -2131,8 +2131,8 @@ export default function DesigningDetailPage() {
                   onClick={() => void persistPreBatchPrinted(false)}
                   className={`px-3 py-1.5 text-xs font-medium border-l border-border/50 ${
                     !preBatchPrinted
-                      ? 'bg-amber-600 text-primary-foreground'
-                      : 'bg-zinc-950 text-slate-300 hover:bg-zinc-900'
+                      ? 'bg-ds-warning text-primary-foreground'
+                      : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                   }`}
                 >
                   No
@@ -2144,7 +2144,7 @@ export default function DesigningDetailPage() {
                     <button
                       type="button"
                       disabled={specLocked}
-                      className="rounded-md border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-900 disabled:opacity-50"
+                      className="rounded-md border border-ds-line/50 bg-ds-main px-2.5 py-1.5 text-[11px] font-semibold text-ds-ink hover:bg-ds-card disabled:opacity-50"
                     >
                       Batch details…
                     </button>
@@ -2153,20 +2153,20 @@ export default function DesigningDetailPage() {
                     <Dialog.Overlay className="fixed inset-0 z-[90] bg-background/60 data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0" />
                     <Dialog.Content
                       className={clsx(
-                        'fixed z-[91] inset-y-0 right-0 flex w-[min(100vw-1rem,22rem)] flex-col border-l border-slate-800 bg-background p-4 shadow-2xl',
+                        'fixed z-[91] inset-y-0 right-0 flex w-[min(100vw-1rem,22rem)] flex-col border-l border-ds-line/40 bg-background p-4 shadow-2xl',
                         'data-[state=open]:animate-in data-[state=closed]:animate-out slide-in-from-right duration-200',
                       )}
                     >
-                      <Dialog.Title className="text-sm font-semibold text-slate-100">
+                      <Dialog.Title className="text-sm font-semibold text-ds-ink">
                         Pharma pre-batch
                       </Dialog.Title>
-                      <Dialog.Description className="mt-1 text-[11px] text-slate-500">
+                      <Dialog.Description className="mt-1 text-[11px] text-ds-ink-faint">
                         Batch coding fields (compact drawer).
                       </Dialog.Description>
                       <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
-                        <label className="block text-xs text-slate-400">
+                        <label className="block text-xs text-ds-ink-muted">
                           Batch details / format{' '}
-                          <span className="text-slate-600 font-mono text-[10px]">batch_details_format</span>
+                          <span className="text-ds-ink-faint font-mono text-[10px]">batch_details_format</span>
                           <input
                             type="text"
                             value={batchDetailsInput}
@@ -2177,9 +2177,9 @@ export default function DesigningDetailPage() {
                             autoComplete="off"
                           />
                         </label>
-                        <label className="block text-xs text-slate-400">
+                        <label className="block text-xs text-ds-ink-muted">
                           Batch block size{' '}
-                          <span className="text-slate-600 font-mono text-[10px]">batch_block_size</span>
+                          <span className="text-ds-ink-faint font-mono text-[10px]">batch_block_size</span>
                           <input
                             type="text"
                             value={batchSizeInput}
@@ -2190,9 +2190,9 @@ export default function DesigningDetailPage() {
                             autoComplete="off"
                           />
                         </label>
-                        <label className="block text-xs text-slate-400">
+                        <label className="block text-xs text-ds-ink-muted">
                           Batch total qty{' '}
-                          <span className="text-slate-600 font-mono text-[10px]">batch_total_qty</span>
+                          <span className="text-ds-ink-faint font-mono text-[10px]">batch_total_qty</span>
                           <input
                             type="text"
                             inputMode="numeric"
@@ -2208,7 +2208,7 @@ export default function DesigningDetailPage() {
                       <Dialog.Close asChild>
                         <button
                           type="button"
-                          className="mt-6 w-full rounded-md border border-slate-700 py-2 text-xs text-slate-300 hover:bg-slate-900"
+                          className="mt-6 w-full rounded-md border border-ds-line/50 py-2 text-xs text-ds-ink-muted hover:bg-ds-card"
                         >
                           Close
                         </button>
@@ -2219,10 +2219,10 @@ export default function DesigningDetailPage() {
               ) : null}
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2 items-start">
-              <label className="block text-xs text-slate-400 min-w-0">
+              <label className="block text-xs text-ds-ink-muted min-w-0">
                 Set # <span className="text-red-400">*</span>
                 {setLookupState === 'loading' ? (
-                  <span className="ml-2 text-slate-500 normal-case">Looking up…</span>
+                  <span className="ml-2 text-ds-ink-faint normal-case">Looking up…</span>
                 ) : null}
                 <input
                   type="text"
@@ -2234,26 +2234,26 @@ export default function DesigningDetailPage() {
                   disabled={specLocked}
                   className={`${monoInputClass} ${
                     showNewProductSetHint
-                      ? 'border-amber-500/90 ring-1 ring-amber-600/35'
+                      ? 'border-ds-warning/90 ring-1 ring-ds-warning/35'
                       : ''
                   }`}
                   placeholder="e.g. 1"
                   aria-invalid={showNewProductSetHint}
                 />
                 {jobType === 'repeat' && lastUsedFromHistory?.setNumber ? (
-                  <p className="mt-0.5 text-[10px] text-slate-700/90 font-designing-queue">Last used: {lastUsedFromHistory.setNumber}</p>
+                  <p className="mt-0.5 text-[10px] text-neutral-700/90 font-designing-queue">Last used: {lastUsedFromHistory.setNumber}</p>
                 ) : null}
                 {showNewProductSetHint ? (
-                  <p className="mt-1 text-[11px] text-amber-400/90">
+                  <p className="mt-1 text-[11px] text-ds-warning">
                     New product — enter a set # (no plate history for this carton / artwork).
                   </p>
                 ) : null}
               </label>
-              <label className="block text-xs text-slate-400 min-w-0">
+              <label className="block text-xs text-ds-ink-muted min-w-0">
                 <span className="flex items-center gap-1">
                   AW code <span className="text-red-400">*</span>
                   {smartLinked.awCode ? (
-                    <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
+                    <LinkedIcon className="h-3 w-3 text-ds-warning shrink-0" aria-hidden />
                   ) : null}
                 </span>
                 <input
@@ -2267,25 +2267,25 @@ export default function DesigningDetailPage() {
                   onBlur={() => void onArtworkCodeBlur()}
                   disabled={specLocked}
                   className={`${manualInputClass} ${techMono} ${
-                    smartLinked.awCode ? 'border border-amber-400' : ''
+                    smartLinked.awCode ? 'border border-ds-warning/60' : ''
                   }`}
                   placeholder="Manual artwork / revision code"
                 />
                 {jobType === 'repeat' && lastUsedFromHistory?.aw ? (
-                  <p className="mt-0.5 text-[10px] text-slate-700/80 font-designing-queue">Last used: {lastUsedFromHistory.aw}</p>
+                  <p className="mt-0.5 text-[10px] text-neutral-700/80 font-designing-queue">Last used: {lastUsedFromHistory.aw}</p>
                 ) : null}
               </label>
-              <label className="block text-xs text-slate-400 min-w-0">
+              <label className="block text-xs text-ds-ink-muted min-w-0">
                 <span className="flex items-center gap-1">
                   Actual sheet size
                   {smartLinked.actualSheetSize ? (
-                    <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
+                    <LinkedIcon className="h-3 w-3 text-ds-warning shrink-0" aria-hidden />
                   ) : null}
                 </span>
                 <div
                   className={clsx(
                     'rounded',
-                    sheetMasterMismatch && 'animate-pulse bg-amber-950/40 ring-1 ring-amber-600/50',
+                    sheetMasterMismatch && 'animate-pulse bg-ds-warning/10 ring-1 ring-ds-warning/50',
                   )}
                 >
                   <input
@@ -2298,26 +2298,26 @@ export default function DesigningDetailPage() {
                     }}
                     disabled={specLocked}
                     className={`${monoInputClass} ${
-                      smartLinked.actualSheetSize ? 'border border-amber-400' : ''
+                      smartLinked.actualSheetSize ? 'border border-ds-warning/60' : ''
                     }`}
                     placeholder="e.g. 25 x 36"
                     autoComplete="off"
                   />
                 </div>
                 {jobType === 'repeat' && lastUsedFromHistory?.sheet ? (
-                  <p className="mt-0.5 text-[10px] text-slate-700 font-designing-queue">
+                  <p className="mt-0.5 text-[10px] text-neutral-700 font-designing-queue">
                     Last used: {lastUsedFromHistory.sheet}
                   </p>
                 ) : null}
                 {sheetMasterMismatch ? (
-                  <p className="mt-0.5 text-[10px] text-amber-500/90">Differs from product master sheet.</p>
+                  <p className="mt-0.5 text-[10px] text-ds-warning/90">Differs from product master sheet.</p>
                 ) : null}
               </label>
-              <label className="block text-xs text-slate-400 min-w-0">
+              <label className="block text-xs text-ds-ink-muted min-w-0">
                 <span className="flex items-center gap-1">
                   Number of UPS
                   {smartLinked.numberOfUps ? (
-                    <LinkedIcon className="h-3 w-3 text-amber-400 shrink-0" aria-hidden />
+                    <LinkedIcon className="h-3 w-3 text-ds-warning shrink-0" aria-hidden />
                   ) : null}
                 </span>
                 <input
@@ -2331,13 +2331,13 @@ export default function DesigningDetailPage() {
                   }}
                   disabled={specLocked}
                   className={`${monoInputClass} ${
-                    smartLinked.numberOfUps ? 'border border-amber-400' : ''
+                    smartLinked.numberOfUps ? 'border border-ds-warning/60' : ''
                   }`}
                   placeholder="e.g. 4"
                   autoComplete="off"
                 />
                 {jobType === 'repeat' && lastUsedFromHistory?.ups ? (
-                  <p className="mt-0.5 text-[10px] text-slate-700 font-designing-queue">
+                  <p className="mt-0.5 text-[10px] text-neutral-700 font-designing-queue">
                     Last used: {lastUsedFromHistory.ups}
                   </p>
                 ) : null}
@@ -2348,13 +2348,13 @@ export default function DesigningDetailPage() {
                 type="button"
                 disabled={savingSetAw || specLocked}
                 onClick={() => void saveSetAndAwCode()}
-                className="px-3 py-1.5 rounded-lg border border-amber-700/80 bg-amber-900/30 text-amber-100 text-xs font-medium hover:bg-amber-900/45 disabled:opacity-50"
+                className="px-3 py-1.5 rounded-lg border border-ds-warning/50 bg-ds-warning/12 text-ds-ink text-xs font-medium hover:bg-ds-warning/12 disabled:opacity-50"
               >
                 {savingSetAw ? 'Saving…' : 'Save set & AW code'}
               </button>
               {artworkCodeInput.trim() ? (
                 <p
-                  className={`text-[10px] ${effectiveArtworkId ? 'text-emerald-500/80' : section1ManualHubOk ? 'text-amber-500/85' : 'text-rose-400/85'}`}
+                  className={`text-[10px] ${effectiveArtworkId ? 'text-emerald-500/80' : section1ManualHubOk ? 'text-ds-warning/85' : 'text-rose-400/85'}`}
                 >
                   {effectiveArtworkId
                     ? 'Artwork linked for die / emboss / send-all dispatch.'
@@ -2364,7 +2364,7 @@ export default function DesigningDetailPage() {
                 </p>
               ) : null}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm border-t border-slate-800 pt-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm border-t border-ds-line/40 pt-3">
               <CartonDimensionsRow
                 carton={line.carton}
                 overrideLwh={smartCartonLwh}
@@ -2383,8 +2383,8 @@ export default function DesigningDetailPage() {
                 }
               />
               {line.cartonId && !line.dieMasterId && !line.carton?.dieMasterId ? (
-                <div className="sm:col-span-3 flex items-start gap-2 border-l-2 border-amber-600/60 pl-2 py-0.5 text-[11px] text-amber-200/95">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500 mt-0.5" aria-hidden />
+                <div className="sm:col-span-3 flex items-start gap-2 border-l-2 border-ds-warning/50 pl-2 py-0.5 text-[11px] text-ds-warning">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-ds-warning mt-0.5" aria-hidden />
                   <span>
                     Unlinked tooling — no die master on this line or product master. Use Smart Match or link from
                     masters.
@@ -2414,7 +2414,7 @@ export default function DesigningDetailPage() {
                 title="Reserved area for batch / coding print (typically L × W in mm from carton master or PO spec)."
               />
             </div>
-            <label className="block text-xs text-slate-400 mt-3 pt-3 border-t border-slate-800 w-full max-w-full">
+            <label className="block text-xs text-ds-ink-muted mt-3 pt-3 border-t border-ds-line/40 w-full max-w-full">
               Pre-press remarks
               <textarea
                 value={prePressRemarksInput}
@@ -2430,24 +2430,24 @@ export default function DesigningDetailPage() {
         <section
           className={clsx(
             'rounded-xl bg-card border p-3 space-y-2',
-            plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-slate-800',
+            plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-ds-line/40',
           )}
         >
-          <h2 className="text-sm font-semibold text-slate-200 border-b border-slate-800 pb-2">
+          <h2 className="text-sm font-semibold text-ds-ink border-b border-ds-line/40 pb-2">
             Section 2 — Tooling (die · emboss · plate requirement)
           </h2>
 
           <div className="grid md:grid-cols-2 gap-3">
-            <div className="space-y-3 rounded-lg border border-slate-800 bg-card p-3">
-              <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
+            <div className="space-y-3 rounded-lg border border-ds-line/40 bg-card p-3">
+              <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
                 Die inventory
               </h3>
               {designerCommand.dieSource ? (
-                <p className="text-[10px] text-slate-500 leading-snug">
-                  <span className="font-semibold text-slate-400">Live handshake</span>
+                <p className="text-[10px] text-ds-ink-faint leading-snug">
+                  <span className="font-semibold text-ds-ink-muted">Live handshake</span>
                   {' · '}
                   Hub status:{' '}
-                  <span className="text-amber-200/90 font-designing-queue">
+                  <span className="text-ds-warning font-designing-queue">
                     {dieHubHandshakeLabel ?? 'Standing by'}
                   </span>
                 </p>
@@ -2460,11 +2460,11 @@ export default function DesigningDetailPage() {
                 disabled={specLocked}
               />
               {line.dieMaster && designerCommand.dieSource === 'old' ? (
-                <div className="rounded-md border border-amber-400/55 bg-amber-950/20 px-2.5 py-2 space-y-2">
-                  <p className="text-[10px] uppercase tracking-wide text-amber-400/90 font-semibold">
+                <div className="rounded-md border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
+                  <p className="text-[10px] uppercase tracking-wide text-ds-warning font-semibold">
                     Tooling handshake — die
                   </p>
-                  <p className={`text-[11px] text-slate-100 leading-relaxed break-all ${techMono}`}>
+                  <p className={`text-[11px] text-ds-ink leading-relaxed break-all ${techMono}`}>
                     Asset ID: {line.dieMaster.id} · Rack: {line.dieMaster.location?.trim() || '—'}
                   </p>
                   {dieReserveSent ? (
@@ -2487,7 +2487,7 @@ export default function DesigningDetailPage() {
                       type="button"
                       disabled={specLocked}
                       onClick={() => void recallDieFromHub()}
-                      className="w-full px-2 py-1.5 rounded-md border border-amber-600/70 bg-amber-950/30 text-amber-100 text-[11px] font-semibold hover:bg-amber-950/50 disabled:opacity-50"
+                      className="w-full px-2 py-1.5 rounded-md border border-ds-warning/50 bg-ds-warning/10 text-ds-ink text-[11px] font-semibold hover:bg-ds-warning/10 disabled:opacity-50"
                     >
                       Recall from Hub
                     </button>
@@ -2524,20 +2524,20 @@ export default function DesigningDetailPage() {
                           : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                       }
                       onClick={() => void diePushToHub()}
-                      className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                      className="px-2.5 py-1.5 rounded-md bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
                       Push to Die Hub
                     </button>
                   )}
                 </div>
               ) : (
-                <span className="text-[11px] text-slate-500">Select New or Old to show actions.</span>
+                <span className="text-[11px] text-ds-ink-faint">Select New or Old to show actions.</span>
               )}
             </div>
 
             {embossRequired ? (
-              <div className="space-y-3 rounded-lg border border-slate-800 bg-card p-3">
-                <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
+              <div className="space-y-3 rounded-lg border border-ds-line/40 bg-card p-3">
+                <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
                   Emboss blocks
                 </h3>
                 <ToolSourceRow
@@ -2548,11 +2548,11 @@ export default function DesigningDetailPage() {
                   disabled={specLocked}
                 />
                 {line.carton?.embossBlock && designerCommand.embossSource === 'old' ? (
-                  <div className="rounded-md border border-amber-400/55 bg-amber-950/20 px-2.5 py-2 space-y-2">
-                    <p className="text-[10px] uppercase tracking-wide text-amber-400/90 font-semibold">
+                  <div className="rounded-md border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
+                    <p className="text-[10px] uppercase tracking-wide text-ds-warning font-semibold">
                       Tooling handshake — emboss block
                     </p>
-                    <p className={`text-[11px] text-slate-100 leading-relaxed break-all ${techMono}`}>
+                    <p className={`text-[11px] text-ds-ink leading-relaxed break-all ${techMono}`}>
                       Asset ID: {line.carton.embossBlock.id} · Rack:{' '}
                       {line.carton.embossBlock.storageLocation?.trim() || '—'}
                     </p>
@@ -2574,8 +2574,8 @@ export default function DesigningDetailPage() {
                   </div>
                 ) : null}
                 {designerCommand.embossSource && !effectiveArtworkId && embossManualSpecsComplete ? (
-                  <p className="flex items-start gap-1.5 text-[11px] text-slate-500 leading-snug" role="status">
-                    <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500/90 mt-0.5" aria-hidden />
+                  <p className="flex items-start gap-1.5 text-[11px] text-ds-ink-faint leading-snug" role="status">
+                    <AlertTriangle className="h-3 w-3 shrink-0 text-ds-warning/90 mt-0.5" aria-hidden />
                     Manual emboss: artwork optional; push uses sheet + dimensions + block type from spec.
                   </p>
                 ) : null}
@@ -2609,26 +2609,26 @@ export default function DesigningDetailPage() {
                             : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                         }
                         onClick={() => void embossPushToHub()}
-                        className="px-2.5 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                        className="px-2.5 py-1.5 rounded-md bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                       >
                         Push to Embossing Hub
                       </button>
                     )}
                   </div>
                 ) : (
-                  <span className="text-[11px] text-slate-500">Select New or Old to show actions.</span>
+                  <span className="text-[11px] text-ds-ink-faint">Select New or Old to show actions.</span>
                 )}
               </div>
             ) : (
-              <div className="rounded-lg border border-slate-800 bg-card p-3 text-[11px] text-slate-500">
+              <div className="rounded-lg border border-ds-line/40 bg-card p-3 text-[11px] text-ds-ink-faint">
                 Emboss tooling not required for this carton (no embossing on spec).
               </div>
             )}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-slate-800 bg-card p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2">
-              <h3 className="text-xs font-semibold text-amber-200/95 uppercase tracking-wide">
+          <div className="space-y-3 rounded-lg border border-ds-line/40 bg-card p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ds-line/40 pb-2 mb-2">
+              <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
                 Plate hub — requirement
               </h3>
               <div className="flex flex-wrap items-center gap-2">
@@ -2671,17 +2671,17 @@ export default function DesigningDetailPage() {
                 ) : null}
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500 mb-1">
-              <span className="shrink-0 font-semibold text-slate-500">Plate readiness</span>
+            <div className="flex flex-wrap items-center gap-2 text-[10px] text-ds-ink-faint mb-1">
+              <span className="shrink-0 font-semibold text-ds-ink-faint">Plate readiness</span>
               <PlateHubReadinessSparkline plateFlowStatus={orch.plateFlowStatus} />
-              <span className="text-slate-600 hidden sm:inline">·</span>
-              <span className="text-slate-600">CTP pipeline position (orchestration)</span>
+              <span className="text-ds-ink-faint hidden sm:inline">·</span>
+              <span className="text-ds-ink-faint">CTP pipeline position (orchestration)</span>
             </div>
             <div className="flex flex-wrap items-end gap-4">
-              <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-ds-ink cursor-pointer">
                 <input
                   type="checkbox"
-                  className="rounded border-slate-600"
+                  className="rounded border-ds-line/60"
                   disabled={specLocked}
                   checked={designerCommand.plateRequirement.pantoneEnabled}
                   onChange={(e) =>
@@ -2698,7 +2698,7 @@ export default function DesigningDetailPage() {
                 Pantone
               </label>
               {designerCommand.plateRequirement.pantoneEnabled ? (
-                <label className="block text-[11px] text-slate-400">
+                <label className="block text-[11px] text-ds-ink-muted">
                   Number of Pantones
                   <input
                     type="number"
@@ -2721,13 +2721,13 @@ export default function DesigningDetailPage() {
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-[11px] text-slate-400 shrink-0">Standard</span>
+              <span className="text-[11px] text-ds-ink-muted shrink-0">Standard</span>
               {(
                 [
                   ['standardC', 'C', 'border-cyan-500/70 bg-cyan-950/40 text-cyan-50'],
                   ['standardM', 'M', 'border-fuchsia-500/70 bg-fuchsia-950/40 text-fuchsia-50'],
                   ['standardY', 'Y', 'border-yellow-500/75 bg-yellow-950/35 text-yellow-50'],
-                  ['standardK', 'K', 'border-zinc-500/80 bg-zinc-950/80 text-zinc-100'],
+                  ['standardK', 'K', 'border-ds-line/50 bg-ds-main/80 text-ds-ink'],
                 ] as const
               ).map(([key, lab, box]) => (
                 <label
@@ -2763,7 +2763,7 @@ export default function DesigningDetailPage() {
               ).map(([key, lab]) => {
                 const pHex = pantoneHexApprox(designerCommand.plateRequirement[key])
                 return (
-                <label key={key} className="block text-[11px] text-slate-400">
+                <label key={key} className="block text-[11px] text-ds-ink-muted">
                   {lab} (Pantone code)
                   <input
                     type="text"
@@ -2794,7 +2794,7 @@ export default function DesigningDetailPage() {
                 )
               })}
             </div>
-            <label className="block text-[11px] text-slate-400">
+            <label className="block text-[11px] text-ds-ink-muted">
               Special colour / effect note
               <input
                 type="text"
@@ -2811,10 +2811,10 @@ export default function DesigningDetailPage() {
               />
             </label>
             <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-ds-ink cursor-pointer">
                 <input
                   type="checkbox"
-                  className="rounded border-slate-600"
+                  className="rounded border-ds-line/60"
                   disabled={specLocked}
                   checked={designerCommand.plateRequirement.dripOffPlate}
                   onChange={(e) =>
@@ -2829,10 +2829,10 @@ export default function DesigningDetailPage() {
                   <span className="text-[10px] text-emerald-400/90">Previously used</span>
                 ) : null}
               </label>
-              <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-ds-ink cursor-pointer">
                 <input
                   type="checkbox"
-                  className="rounded border-slate-600"
+                  className="rounded border-ds-line/60"
                   disabled={specLocked}
                   checked={designerCommand.plateRequirement.spotUvPlate}
                   onChange={(e) =>
@@ -2849,12 +2849,12 @@ export default function DesigningDetailPage() {
               </label>
             </div>
             {historyDesignerCommand ? (
-              <p className="text-[11px] text-slate-500 border-t border-slate-800 pt-2">
+              <p className="text-[11px] text-ds-ink-faint border-t border-ds-line/40 pt-2">
                 Previous AW match summary: {formatPlateHistorySummary(historyDesignerCommand)}
               </p>
             ) : null}
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
-              <label className="text-[11px] text-slate-400 shrink-0">Set type</label>
+              <label className="text-[11px] text-ds-ink-muted shrink-0">Set type</label>
               <select
                 value={designerCommand.setType}
                 disabled={specLocked}
@@ -2864,7 +2864,7 @@ export default function DesigningDetailPage() {
                     setType: e.target.value as DesignerCommand['setType'],
                   }))
                 }
-                className="px-2 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground text-sm max-w-xs"
+                className="px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm max-w-xs"
               >
                 <option value="">Select…</option>
                 <option value="new_set">New set</option>
@@ -2879,9 +2879,9 @@ export default function DesigningDetailPage() {
           </div>
         </section>
 
-        <section className="rounded-xl bg-card border border-slate-800 px-3 py-2">
+        <section className="rounded-xl bg-card border border-ds-line/40 px-3 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="text-[11px] font-semibold text-slate-200 shrink-0">Post-press routing</span>
+            <span className="text-[11px] font-semibold text-ds-ink shrink-0">Post-press routing</span>
             <div className="flex flex-wrap gap-1.5 text-xs">
               <RouteBadge label="Chemical coating" active={routing.needsChemicalCoating} />
               <RouteBadge label="Lamination" active={routing.needsLamination} />
@@ -2902,7 +2902,7 @@ export default function DesigningDetailPage() {
           onSelect={(row) => void linkDieFromSmartMatch(row)}
         />
 
-        <p className="text-center text-[10px] text-slate-500 pt-3 mt-1 border-t border-slate-800 font-designing-queue tracking-tight">
+        <p className="text-center text-[10px] text-ds-ink-faint pt-3 mt-1 border-t border-ds-line/40 font-designing-queue tracking-tight">
           Smart Match Active - Verification against Master Rev. 2026.
         </p>
       </div>
@@ -2925,7 +2925,7 @@ function ToolSourceRow({
 }) {
   return (
     <div>
-      <span className="text-xs text-slate-400">{label}</span>
+      <span className="text-xs text-ds-ink-muted">{label}</span>
       <div className="flex flex-wrap gap-2 mt-1">
         {(['new', 'old'] as const).map((k) => (
           <button
@@ -2935,8 +2935,8 @@ function ToolSourceRow({
             onClick={() => onChange(k)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
               value === k
-                ? 'bg-amber-600/90 border-amber-500 text-primary-foreground'
-                : 'bg-slate-800 border-slate-600 text-slate-300'
+                ? 'bg-ds-warning/90 border-ds-warning text-primary-foreground'
+                : 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted'
             } disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             {k === 'new' ? 'New' : 'Old'}
@@ -2973,11 +2973,11 @@ function formatPlateHistorySummary(h: DesignerCommand): string {
 function KV({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
     <div
-      className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 py-1 border-b border-slate-800/80 sm:border-0"
+      className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 py-1 border-b border-ds-line/50 sm:border-0"
       title={title}
     >
-      <span className="text-slate-500 shrink-0 text-xs sm:text-sm">{label}</span>
-      <span className="text-slate-100 text-sm text-right text-balance break-words max-w-full sm:max-w-[min(100%,20rem)] font-designing-queue tabular-nums tracking-tight">
+      <span className="text-ds-ink-faint shrink-0 text-xs sm:text-sm">{label}</span>
+      <span className="text-ds-ink text-sm text-right text-balance break-words max-w-full sm:max-w-[min(100%,20rem)] font-designing-queue tabular-nums tracking-tight">
         {value}
       </span>
     </div>
@@ -2988,7 +2988,7 @@ function RouteBadge({ label, active }: { label: string; active: boolean }) {
   return (
     <span
       className={`px-2 py-1 rounded border ${
-        active ? 'bg-blue-900/30 border-blue-600 text-blue-200' : 'bg-slate-800 border-slate-700 text-slate-400'
+        active ? 'bg-blue-900/30 border-blue-600 text-blue-200' : 'bg-ds-elevated border-ds-line/50 text-ds-ink-muted'
       }`}
     >
       {label} {active ? '✓' : '—'}

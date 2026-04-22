@@ -416,7 +416,7 @@ export default function StoresIssuePage() {
     if (remaining <= 0) return 'text-red-400 bg-red-900/30'
     const pct = (remaining / approved) * 100
     if (pct < 5) return 'text-red-400'
-    if (pct < 20) return 'text-amber-400'
+    if (pct < 20) return 'text-ds-warning'
     return 'text-green-400'
   }
 
@@ -448,30 +448,30 @@ export default function StoresIssuePage() {
               <button
                 type="button"
                 onClick={() => setFifoDrawerDismissed(true)}
-                className="rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-foreground text-sm"
+                className="rounded px-2 py-1 text-ds-ink-muted hover:bg-ds-elevated hover:text-foreground text-sm"
               >
                 Close
               </button>
             </div>
-            <p className="text-sm text-slate-300 mb-4">
+            <p className="text-sm text-ds-ink-muted mb-4">
               Older stock exists for the same GSM, grade, and paper spec. Record a reason to use a newer lot (minimum 8
               characters).
             </p>
-            <p className="text-xs font-mono text-slate-500 mb-2">Older batches (gate date)</p>
+            <p className="text-xs font-mono text-ds-ink-faint mb-2">Older batches (gate date)</p>
             <ul className="space-y-2 mb-4">
               {fifoJobCardCheck.olderBatches.map((b) => (
                 <li
                   key={b.id}
-                  className="rounded-lg border border-slate-700 bg-background/40 px-3 py-2 font-mono text-xs text-slate-200"
+                  className="rounded-lg border border-ds-line/50 bg-background/40 px-3 py-2 font-mono text-xs text-ds-ink"
                 >
-                  <span className="text-amber-300">Lot {b.lotNumber ?? '—'}</span>
-                  <span className="block text-slate-400">
+                  <span className="text-ds-warning">Lot {b.lotNumber ?? '—'}</span>
+                  <span className="block text-ds-ink-muted">
                     {b.receiptDate} · {b.ageDays}d · {b.qtySheets} sh
                   </span>
                 </li>
               ))}
             </ul>
-            <label htmlFor="fifo-skip-reason" className="text-xs text-slate-500 mb-1 block">
+            <label htmlFor="fifo-skip-reason" className="text-xs text-ds-ink-faint mb-1 block">
               Reason for skip
             </label>
             <textarea
@@ -480,9 +480,9 @@ export default function StoresIssuePage() {
               onChange={(e) => setFifoSkipReason(e.target.value)}
               placeholder='e.g. "Older stock inaccessible in rack A3"'
               rows={4}
-              className="w-full rounded-lg border border-slate-600 bg-card px-3 py-2 font-mono text-sm text-foreground placeholder:text-slate-600"
+              className="w-full rounded-lg border border-ds-line/60 bg-card px-3 py-2 font-mono text-sm text-foreground placeholder:text-ds-ink-faint"
             />
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-ds-ink-faint">
               {fifoSkipReason.trim().length < 8
                 ? `${Math.max(0, 8 - fifoSkipReason.trim().length)} more characters required to issue.`
                 : 'You can issue from the line below.'}
@@ -526,15 +526,15 @@ export default function StoresIssuePage() {
 
       {/* Excess request form */}
       {excessForm && (
-        <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col items-center justify-center p-6 overflow-y-auto">
-          <h2 className="text-lg font-bold text-amber-400 mb-4">Excess Request</h2>
+        <div className="fixed inset-0 z-50 bg-ds-card flex flex-col items-center justify-center p-6 overflow-y-auto">
+          <h2 className="text-lg font-bold text-ds-warning mb-4">Excess Request</h2>
           <div className="w-full max-w-sm space-y-4">
             <div>
-              <label className="block text-sm text-slate-400 mb-1">Reason (required)</label>
+              <label className="block text-sm text-ds-ink-muted mb-1">Reason (required)</label>
               <select
                 value={excessForm.reasonCode}
                 onChange={(e) => setExcessForm((f) => f ? { ...f, reasonCode: e.target.value } : null)}
-                className="w-full px-3 py-2 rounded-lg bg-card border border-slate-600 text-foreground"
+                className="w-full px-3 py-2 rounded-lg bg-card border border-ds-line/60 text-foreground"
               >
                 <option value="">— Select —</option>
                 {REASON_CODES.map((r) => (
@@ -544,11 +544,11 @@ export default function StoresIssuePage() {
             </div>
             {excessForm.reasonCode === 'other' && (
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Detail (required)</label>
+                <label className="block text-sm text-ds-ink-muted mb-1">Detail (required)</label>
                 <textarea
                   value={excessForm.reasonDetail}
                   onChange={(e) => setExcessForm((f) => f ? { ...f, reasonDetail: e.target.value } : null)}
-                  className="w-full px-3 py-2 rounded-lg bg-card border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded-lg bg-card border border-ds-line/60 text-foreground"
                   rows={3}
                 />
               </div>
@@ -558,7 +558,7 @@ export default function StoresIssuePage() {
                 type="button"
                 onClick={handleExcessSubmit}
                 disabled={excessSubmitting || !excessForm.reasonCode}
-                className="flex-1 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground font-medium"
+                className="flex-1 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium"
               >
                 {excessSubmitting ? 'Sending…' : 'Submit'}
               </button>
@@ -572,8 +572,8 @@ export default function StoresIssuePage() {
             </div>
           </div>
           {pollingApproval && (
-            <p className="mt-6 text-slate-400 text-sm flex items-center gap-2">
-              <span className="animate-spin w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full" />
+            <p className="mt-6 text-ds-ink-muted text-sm flex items-center gap-2">
+              <span className="animate-spin w-4 h-4 border-2 border-ds-warning border-t-transparent rounded-full" />
               Waiting for supervisor approval…
             </p>
           )}
@@ -583,13 +583,13 @@ export default function StoresIssuePage() {
       {!jobContext ? (
         <div className="space-y-4">
           <div id="qr-reader" className="rounded-lg overflow-hidden bg-card hidden" />
-          {scanning && <p className="text-slate-400 text-sm">Scan job QR code</p>}
+          {scanning && <p className="text-ds-ink-muted text-sm">Scan job QR code</p>}
           {!scanning && (
             <>
               <button
                 type="button"
                 onClick={startScanner}
-                className="w-full py-3 px-4 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground font-medium"
+                className="w-full py-3 px-4 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground font-medium"
               >
                 Scan job QR code
               </button>
@@ -611,13 +611,13 @@ export default function StoresIssuePage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-400 mb-1">Or enter job / job card number or ID</label>
+                  <label className="block text-sm text-ds-ink-muted mb-1">Or enter job / job card number or ID</label>
                   <input
                     type="text"
                     value={manualJobId}
                     onChange={(e) => setManualJobId(e.target.value)}
                     placeholder="e.g. CI-JOB-2025-0001 or JC# 12345"
-                    className="w-full px-3 py-2 rounded-lg bg-card border border-slate-600 text-foreground"
+                    className="w-full px-3 py-2 rounded-lg bg-card border border-ds-line/60 text-foreground"
                   />
                   <button
                     type="button"
@@ -628,22 +628,22 @@ export default function StoresIssuePage() {
                   </button>
                 </div>
               </div>
-              <p className="text-xs text-slate-500">
-                <Link href="/production/job-cards" className="text-amber-400 hover:underline">Job cards</Link>
+              <p className="text-xs text-ds-ink-faint">
+                <Link href="/production/job-cards" className="text-ds-warning hover:underline">Job cards</Link>
                 {' · '}
-                <Link href="/production/stages" className="text-amber-400 hover:underline">Production planning</Link>
+                <Link href="/production/stages" className="text-ds-warning hover:underline">Production planning</Link>
               </p>
             </>
           )}
         </div>
       ) : (
         <>
-          <div className="bg-slate-800 rounded-lg p-4 mb-4">
-            <p className="font-semibold text-amber-400">{jobContext.jobNumber}</p>
+          <div className="bg-ds-elevated rounded-lg p-4 mb-4">
+            <p className="font-semibold text-ds-warning">{jobContext.jobNumber}</p>
             <p>{jobContext.productName}</p>
-            <p className="text-slate-400 text-sm">{jobContext.customerName}</p>
+            <p className="text-ds-ink-muted text-sm">{jobContext.customerName}</p>
             {jobContext.type === 'job_card' && fifoJobCardCheck?.message && (
-              <p className="mt-2 text-xs text-amber-200/90 font-mono">{fifoJobCardCheck.message}</p>
+              <p className="mt-2 text-xs text-ds-warning font-mono">{fifoJobCardCheck.message}</p>
             )}
           </div>
 
@@ -659,26 +659,26 @@ export default function StoresIssuePage() {
               return (
                 <div
                   key={line.id}
-                  className={`rounded-lg border p-4 ${isLocked ? 'border-red-700 bg-red-900/20' : 'border-slate-600 bg-slate-800/50'}`}
+                  className={`rounded-lg border p-4 ${isLocked ? 'border-red-700 bg-red-900/20' : 'border-ds-line/60 bg-ds-elevated/50'}`}
                 >
                   {isLocked && (
                     <div className="mb-2 py-1.5 px-2 rounded bg-red-900/50 text-red-200 text-sm font-medium">
                       LOCKED — 0 remaining
                     </div>
                   )}
-                  <p className="font-mono text-amber-400">{line.materialCode}</p>
-                  <p className="text-slate-400 text-sm">{line.materialDescription}</p>
+                  <p className="font-mono text-ds-warning">{line.materialCode}</p>
+                  <p className="text-ds-ink-muted text-sm">{line.materialDescription}</p>
                   <div className="grid grid-cols-3 gap-2 my-2 text-sm">
                     <div className="text-center">
-                      <p className="text-slate-400">Approved</p>
+                      <p className="text-ds-ink-muted">Approved</p>
                       <p className="text-green-400 font-semibold text-lg">{line.qtyApproved.toLocaleString()} {line.unit}</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-slate-400">Issued so far</p>
+                      <p className="text-ds-ink-muted">Issued so far</p>
                       <p className="text-blue-400 font-semibold">{line.qtyAlreadyIssued.toLocaleString()}</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-slate-400">Remaining</p>
+                      <p className="text-ds-ink-muted">Remaining</p>
                       <p className={`font-semibold text-lg ${remainingColor(remaining, line.qtyApproved)}`}>
                         {remaining.toLocaleString()} {line.unit}
                       </p>
@@ -686,7 +686,7 @@ export default function StoresIssuePage() {
                   </div>
                   <div className="flex flex-wrap gap-2 items-end">
                     <div>
-                      <label className="block text-xs text-slate-500">Issue qty</label>
+                      <label className="block text-xs text-ds-ink-faint">Issue qty</label>
                       <input
                         type="number"
                         min={1}
@@ -694,17 +694,17 @@ export default function StoresIssuePage() {
                         value={issueQty[line.id] ?? ''}
                         onChange={(e) => setIssueQty((prev) => ({ ...prev, [line.id]: e.target.value }))}
                         disabled={isLocked}
-                        className="w-24 px-2 py-2 rounded bg-card border border-slate-600 text-foreground"
+                        className="w-24 px-2 py-2 rounded bg-card border border-ds-line/60 text-foreground"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-500">Lot</label>
+                      <label className="block text-xs text-ds-ink-faint">Lot</label>
                       <input
                         type="text"
                         value={lotNumber[line.id] ?? ''}
                         onChange={(e) => setLotNumber((prev) => ({ ...prev, [line.id]: e.target.value }))}
                         placeholder="Lot #"
-                        className="w-28 px-2 py-2 rounded bg-card border border-slate-600 text-foreground text-sm"
+                        className="w-28 px-2 py-2 rounded bg-card border border-ds-line/60 text-foreground text-sm"
                       />
                     </div>
                     <button
@@ -717,7 +717,7 @@ export default function StoresIssuePage() {
                         parseInt(issueQty[line.id], 10) > remaining ||
                         fifoBlocked
                       }
-                      className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground font-medium"
+                      className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium"
                     >
                       Issue
                     </button>
@@ -735,7 +735,7 @@ export default function StoresIssuePage() {
           <button
             type="button"
             onClick={() => { setJobContext(null); setIssueQty({}); setLotNumber({}) }}
-            className="mt-6 w-full py-2 text-slate-400 hover:text-foreground text-sm"
+            className="mt-6 w-full py-2 text-ds-ink-muted hover:text-foreground text-sm"
           >
             Scan another job
           </button>

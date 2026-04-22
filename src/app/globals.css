@@ -4,6 +4,33 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .ds-focus {
+    @apply transition duration-200 ease-out;
+  }
+  .ds-focus:focus-visible {
+    @apply border-ds-brand/80 outline-none ring-2 ring-ds-brand/20;
+  }
+  .ds-input {
+    @apply ds-focus w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/60 px-3 py-2.5 text-[15px] text-ds-ink shadow-sm placeholder:text-ds-ink-faint;
+  }
+  .ds-input:focus {
+    @apply border-ds-brand/60 ring-1 ring-ds-brand/15;
+  }
+  .ds-typo-label {
+    @apply text-[12px] font-medium leading-snug text-ds-ink-muted;
+  }
+  .ds-typo-input {
+    @apply text-[15px] leading-normal text-ds-ink;
+  }
+  .ds-typo-heading {
+    @apply text-base font-semibold leading-tight text-ds-ink md:text-[18px];
+  }
+  .ds-typo-total {
+    @apply text-[20px] font-bold leading-tight text-ds-success tabular-nums md:text-[22px];
+  }
+}
+
 /*
  * Plate Hub — printing-industry channel colours (active swatches use Tailwind in components):
  * C → cyan-500 + white text | M → plateMagenta (#FF00FF) + white

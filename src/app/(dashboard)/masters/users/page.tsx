@@ -38,13 +38,13 @@ export default function MastersUsersPage() {
   }, [])
 
   if (loading) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">User Master</h2>
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">User Master</h2>
         <Link
           href="/masters/users/new"
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-primary-foreground hover:bg-blue-700"
@@ -90,7 +90,7 @@ export default function MastersUsersPage() {
           </tbody>
         </table>
       </EnterpriseTableShell>
-      {list.length === 0 && <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No users.</p>}
+      {list.length === 0 && <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No users.</p>}
     </div>
   )
 }

@@ -66,57 +66,57 @@ export default function ToolsHubPage() {
   return (
     <div className="p-4 max-w-6xl mx-auto space-y-4">
       <div>
-        <h1 className="text-2xl font-bold text-amber-400">Tools Hub - Pre-Press Inventory</h1>
-        <p className="text-sm text-slate-400">
+        <h1 className="text-2xl font-bold text-ds-warning">Tools Hub - Pre-Press Inventory</h1>
+        <p className="text-sm text-ds-ink-muted">
           Central control for Plates, Dies, and Embossing Blocks
         </p>
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
-        <section className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-2">
-          <p className="text-xs text-slate-400">PLATE HUB</p>
+        <section className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2">
+          <p className="text-xs text-ds-ink-muted">PLATE HUB</p>
           <p className="text-2xl">🖨️</p>
-          <p className="text-sm text-slate-200">
+          <p className="text-sm text-ds-ink">
             {plateStats.inRack} in rack | {plateStats.issued} issued | {plateStats.ctpPending} CTP pending
           </p>
-          <div className="h-2 rounded bg-slate-800 overflow-hidden">
+          <div className="h-2 rounded bg-ds-elevated overflow-hidden">
             <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, plateStats.inRack * 10)}%` }} />
           </div>
-          <Link href="/pre-press/plate-store" className="text-sm text-amber-400 hover:underline">
+          <Link href="/pre-press/plate-store" className="text-sm text-ds-warning hover:underline">
             Open Plate Hub →
           </Link>
         </section>
 
-        <section className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-2">
-          <p className="text-xs text-slate-400">DIE INVENTORY</p>
+        <section className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2">
+          <p className="text-xs text-ds-ink-muted">DIE INVENTORY</p>
           <p className="text-2xl">✂️</p>
-          <p className="text-sm text-slate-200">
+          <p className="text-sm text-ds-ink">
             {dieStats.inStock} in stock | {dieStats.issued} issued | {dieStats.withVendor} with vendor
           </p>
-          <Link href="/masters/dies" className="text-sm text-amber-400 hover:underline">
+          <Link href="/masters/dies" className="text-sm text-ds-warning hover:underline">
             Open Die Inventory →
           </Link>
         </section>
 
-        <section className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-2">
-          <p className="text-xs text-slate-400">EMBOSS BLOCKS</p>
+        <section className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2">
+          <p className="text-xs text-ds-ink-muted">EMBOSS BLOCKS</p>
           <p className="text-2xl">🔲</p>
-          <p className="text-sm text-slate-200">
+          <p className="text-sm text-ds-ink">
             {embossStats.inStock} in stock | {embossStats.issued} issued | {embossStats.withVendor} with vendor
           </p>
-          <p className="text-xs text-slate-500">Conditional - activates based on Product Master</p>
-          <Link href="/masters/emboss-blocks" className="text-sm text-amber-400 hover:underline">
+          <p className="text-xs text-ds-ink-faint">Conditional - activates based on Product Master</p>
+          <Link href="/masters/emboss-blocks" className="text-sm text-ds-warning hover:underline">
             Open Emboss Inventory →
           </Link>
         </section>
       </div>
 
-      <section className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-        <h2 className="text-sm font-semibold text-slate-200 mb-2">Alerts</h2>
+      <section className="rounded-xl border border-ds-line/50 bg-ds-card p-4">
+        <h2 className="text-sm font-semibold text-ds-ink mb-2">Alerts</h2>
         <div className="space-y-2 text-sm">
-          {alerts.length === 0 ? <p className="text-slate-500">No tool-related alerts.</p> : null}
+          {alerts.length === 0 ? <p className="text-ds-ink-faint">No tool-related alerts.</p> : null}
           {alerts.slice(0, 10).map((a, idx) => (
-            <div key={a.id ?? idx} className="rounded border border-slate-700 px-3 py-2 text-slate-300">
+            <div key={a.id ?? idx} className="rounded border border-ds-line/50 px-3 py-2 text-ds-ink-muted">
               {a.title || a.message || 'Alert'}
             </div>
           ))}

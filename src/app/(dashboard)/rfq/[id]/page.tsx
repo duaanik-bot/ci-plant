@@ -86,7 +86,7 @@ export default function RfqDetailPage() {
     return (rfq?.status ?? '') !== 'po_received'
   }, [rfq?.status])
 
-  if (isLoading) return <div className="p-4 text-slate-400">Loading RFQ…</div>
+  if (isLoading) return <div className="p-4 text-ds-ink-muted">Loading RFQ…</div>
   if (!rfq || (rfq as any).error) return <div className="p-4 text-red-400">RFQ not found.</div>
 
   const saveFeasibility = async () => {
@@ -182,77 +182,77 @@ export default function RfqDetailPage() {
     <div className="p-4 max-w-3xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-amber-400">{rfq.rfqNumber}</h1>
-          <p className="text-slate-300">{rfq.customer.name}</p>
-          <p className="text-slate-400 text-sm">
+          <h1 className="text-xl font-bold text-ds-warning">{rfq.rfqNumber}</h1>
+          <p className="text-ds-ink-muted">{rfq.customer.name}</p>
+          <p className="text-ds-ink-muted text-sm">
             {rfq.productName} · {rfq.packType}
           </p>
         </div>
-        <span className="px-3 py-1 rounded-full bg-slate-800 border border-slate-600 text-xs text-slate-200">
+        <span className="px-3 py-1 rounded-full bg-ds-elevated border border-ds-line/60 text-xs text-ds-ink">
           {rfq.status}
         </span>
       </div>
 
-      <section className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-        <h2 className="font-semibold text-slate-200 mb-2">Stage 1 — RFQ</h2>
-        <p className="text-sm text-slate-400">
+      <section className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-4">
+        <h2 className="font-semibold text-ds-ink mb-2">Stage 1 — RFQ</h2>
+        <p className="text-sm text-ds-ink-muted">
           Estimated volume:{' '}
           {rfq.estimatedVolume ? rfq.estimatedVolume.toLocaleString() : 'Not specified'}
         </p>
-        <p className="text-xs text-slate-500 mt-2">
+        <p className="text-xs text-ds-ink-faint mt-2">
           Specs are stored in <span className="font-mono">rfq.feasibilityData</span>.
         </p>
       </section>
 
-      <section className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-        <h2 className="font-semibold text-slate-200 mb-2">Stage 2 — Feasibility</h2>
+      <section className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-4">
+        <h2 className="font-semibold text-ds-ink mb-2">Stage 2 — Feasibility</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Board Spec</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Board Spec</label>
             <input
               value={feas.boardSpec}
               onChange={(e) => setFeas((p) => ({ ...p, boardSpec: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
               placeholder="e.g. FBB 300gsm + matte lamination"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Print Process</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Print Process</label>
             <input
               value={feas.printProcess}
               onChange={(e) => setFeas((p) => ({ ...p, printProcess: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
               placeholder="e.g. Offset + Aqueous Varnish"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Estimated Cost / 1000</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Estimated Cost / 1000</label>
             <input
               type="number"
               min={0}
               value={feas.estimatedCostPer1000}
               onChange={(e) => setFeas((p) => ({ ...p, estimatedCostPer1000: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Tooling Cost</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Tooling Cost</label>
             <input
               type="number"
               min={0}
               value={feas.toolingCost}
               onChange={(e) => setFeas((p) => ({ ...p, toolingCost: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">MOQ</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">MOQ</label>
             <input
               type="number"
               min={0}
               value={feas.moq}
               onChange={(e) => setFeas((p) => ({ ...p, moq: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             />
           </div>
         </div>
@@ -268,89 +268,89 @@ export default function RfqDetailPage() {
           <button
             onClick={saveFeasibility}
             disabled={saving}
-            className="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm"
+            className="px-3 py-2 rounded bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm"
           >
             {saving ? 'Saving…' : 'Save Feasibility'}
           </button>
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-        <h2 className="font-semibold text-slate-200 mb-2">Stage 3 — Quotation</h2>
+      <section className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-4">
+        <h2 className="font-semibold text-ds-ink mb-2">Stage 3 — Quotation</h2>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-sm text-slate-300">
-            Quotation number: <span className="font-mono text-amber-300">{rfq.quotationNumber || '—'}</span>
+          <p className="text-sm text-ds-ink-muted">
+            Quotation number: <span className="font-mono text-ds-warning">{rfq.quotationNumber || '—'}</span>
           </p>
           <button
             type="button"
             onClick={generateQuotationNumber}
-            className="text-xs text-amber-400 hover:underline"
+            className="text-xs text-ds-warning hover:underline"
           >
             Auto-generate QT number
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Quotation Number</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Quotation Number</label>
             <input
               value={quote.quotationNumber}
               onChange={(e) => setQuote((p) => ({ ...p, quotationNumber: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground font-mono"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground font-mono"
               placeholder="QT-YYYY-NNNN"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Unit Price</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Unit Price</label>
             <input
               type="number"
               min={0}
               value={quote.unitPrice}
               onChange={(e) => setQuote((p) => ({ ...p, unitPrice: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Tooling</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Tooling</label>
             <input
               type="number"
               min={0}
               value={quote.tooling}
               onChange={(e) => setQuote((p) => ({ ...p, tooling: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Payment Terms</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Payment Terms</label>
             <input
               value={quote.paymentTerms}
               onChange={(e) => setQuote((p) => ({ ...p, paymentTerms: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Validity</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Validity</label>
             <input
               value={quote.validity}
               onChange={(e) => setQuote((p) => ({ ...p, validity: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
               placeholder="e.g. 30 days"
             />
           </div>
           <div className="md:col-span-2">
-            <label className="block text-xs text-slate-400 mb-1">Notes</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Notes</label>
             <textarea
               rows={2}
               value={quote.notes}
               onChange={(e) => setQuote((p) => ({ ...p, notes: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Client Decision</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Client Decision</label>
             <select
               value={quote.clientDecision}
               onChange={(e) => setQuote((p) => ({ ...p, clientDecision: e.target.value as any }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             >
               <option value="">—</option>
               <option value="approved">Client Approved</option>
@@ -359,11 +359,11 @@ export default function RfqDetailPage() {
           </div>
           {quote.clientDecision === 'rejected' && (
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Rejection Reason</label>
+              <label className="block text-xs text-ds-ink-muted mb-1">Rejection Reason</label>
               <input
                 value={quote.rejectReason}
                 onChange={(e) => setQuote((p) => ({ ...p, rejectReason: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
               />
             </div>
           )}
@@ -380,33 +380,33 @@ export default function RfqDetailPage() {
           <button
             onClick={saveQuotation}
             disabled={saving}
-            className="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm"
+            className="px-3 py-2 rounded bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm"
           >
             {saving ? 'Saving…' : 'Save Quotation'}
           </button>
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-700 bg-slate-800/60 p-4">
-        <h2 className="font-semibold text-slate-200 mb-2">Stage 4 — PO & Job</h2>
-        <p className="text-sm text-slate-400">PO number: {rfq.poNumber || 'Not received'}</p>
+      <section className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-4">
+        <h2 className="font-semibold text-ds-ink mb-2">Stage 4 — PO & Job</h2>
+        <p className="text-sm text-ds-ink-muted">PO number: {rfq.poNumber || 'Not received'}</p>
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">PO Number</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">PO Number</label>
             <input
               value={quote.poNumber}
               onChange={(e) => setQuote((p) => ({ ...p, poNumber: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">PO Value</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">PO Value</label>
             <input
               type="number"
               min={0}
               value={quote.poValue}
               onChange={(e) => setQuote((p) => ({ ...p, poValue: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
             />
           </div>
         </div>
@@ -414,7 +414,7 @@ export default function RfqDetailPage() {
           <button
             type="button"
             onClick={() => router.push('/orders/planning')}
-            className="text-sm text-amber-300 hover:underline"
+            className="text-sm text-ds-warning hover:underline"
           >
             Job ready for Planning. Go to Planning →
           </button>

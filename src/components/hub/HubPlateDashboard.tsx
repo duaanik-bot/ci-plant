@@ -68,7 +68,7 @@ function ZoneCapacitySubheader({
   plateCount: number
 }) {
   return (
-    <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold tabular-nums leading-tight shrink-0">
+    <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold tabular-nums leading-tight shrink-0">
       {jobCount} jobs · {plateCount} total plates
     </p>
   )
@@ -249,7 +249,7 @@ function PlateHubStageDays({ lastStatusUpdatedAt }: { lastStatusUpdatedAt?: stri
   return (
     <p
       className={`text-[10px] font-semibold tabular-nums mt-0.5 ${
-        critical ? 'text-rose-400 animate-industrial-age-pulse' : 'text-zinc-500'
+        critical ? 'text-rose-400 animate-industrial-age-pulse' : 'text-neutral-500'
       }`}
     >
       {days.toFixed(1)}d in stage
@@ -336,12 +336,12 @@ function TriageInventoryStockLine({ stock }: { stock: TriageStockInfo }) {
   }
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5">
-      <span className="text-xs text-zinc-400 shrink-0">In rack:</span>
+      <span className="text-xs text-neutral-500 shrink-0">In rack:</span>
       {stock.labels.length > 0 ? (
         <PlateHubColourSwatchStrip labels={stock.labels} size="sm" className="inline-flex" />
       ) : null}
       {stock.locationLabel ? (
-        <span className="text-xs text-zinc-500">({stock.locationLabel})</span>
+        <span className="text-xs text-neutral-500">({stock.locationLabel})</span>
       ) : null}
     </div>
   )
@@ -359,7 +359,7 @@ function CustodySourcePill({ source }: { source: CustodyCard['custodySource'] })
       ? 'border-emerald-800/60 bg-emerald-950/70 text-emerald-200/95'
       : source === 'vendor'
         ? 'border-violet-800/60 bg-violet-950/70 text-violet-200/95'
-        : 'border-amber-800/60 bg-amber-950/70 text-amber-200/95'
+        : 'border-ds-warning/45 bg-ds-warning/12 text-ds-warning'
   return (
     <span
       className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold shrink-0 ${tone}`}
@@ -388,7 +388,7 @@ function HubStarLedgerSection({
   if (!rows.length) return null
   return (
     <div className="rounded-md bg-gray-900/40 px-2 py-1.5 border border-gray-800/60">
-      <p className="text-[9px] font-semibold uppercase tracking-wide text-zinc-500 mb-0.5">
+      <p className="text-[9px] font-semibold uppercase tracking-wide text-neutral-500 mb-0.5">
         Star ledger
       </p>
       <PlateStarLedger labels={labels} cycleData={cycleData} />
@@ -407,7 +407,7 @@ function PlateCountBadge({ count }: { count: number }) {
   const n = Math.max(0, Math.min(99, count))
   return (
     <div
-      className="pointer-events-none absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-amber-500 bg-zinc-950 text-[11px] font-extrabold text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.3)] tabular-nums z-10"
+      className="pointer-events-none absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-ds-warning bg-ds-main text-[11px] font-extrabold text-ds-warning shadow-[0_0_10px_rgba(245,158,11,0.3)] tabular-nums z-10"
       aria-label={`${n} plates`}
     >
       {n}
@@ -430,7 +430,7 @@ function ShopfloorPlateAdjustTrigger({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="absolute top-[0.4rem] right-[2.35rem] z-20 flex h-6 w-6 items-center justify-center rounded-md border border-zinc-600/70 bg-zinc-900/95 text-zinc-300 hover:border-amber-500/50 hover:text-amber-200 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+      className="absolute top-[0.4rem] right-[2.35rem] z-20 flex h-6 w-6 items-center justify-center rounded-md border border-ds-line/50 bg-ds-card/95 text-neutral-400 hover:border-ds-warning/50 hover:text-ds-warning shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
       title={title}
       aria-label={title}
     >
@@ -470,7 +470,7 @@ type ShopfloorSpecPatch = Partial<
 function ShopfloorQueueColourStrip({ job }: { job: CtpRow }) {
   const inactive = new Set(job.shopfloorInactiveCanonicalKeys ?? [])
   if (!job.plateColours.length) {
-    return <span className="text-xs text-zinc-500">—</span>
+    return <span className="text-xs text-neutral-500">—</span>
   }
   return (
     <PlateHubColourSwatchStrip
@@ -531,25 +531,25 @@ function AdjustPlatesModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-      <div className="w-full max-w-md rounded-xl border border-amber-700/45 bg-zinc-950 p-4 space-y-3 max-h-[90vh] overflow-y-auto shadow-xl shadow-black/40">
+      <div className="w-full max-w-md rounded-xl border border-ds-warning/50 bg-ds-main p-4 space-y-3 max-h-[90vh] overflow-y-auto shadow-xl shadow-black/40">
         <div>
           <h3 className="text-lg font-semibold text-foreground">Adjust plates</h3>
-          <p className="text-zinc-500 text-xs mt-1 leading-snug">
+          <p className="text-neutral-500 text-xs mt-1 leading-snug">
             Select only the colors to be manufactured/ordered for this run.
           </p>
-          <p className="text-xs font-mono text-amber-300 mt-2">{job.requirementCode}</p>
+          <p className="text-xs font-mono text-ds-warning mt-2">{job.requirementCode}</p>
           <p className="text-sm text-foreground font-medium break-words whitespace-normal leading-snug">
             {job.cartonName}
           </p>
         </div>
-        <div className="rounded-lg border border-zinc-700 bg-background/50 p-2.5 space-y-1.5">
+        <div className="rounded-lg border border-ds-line/50 bg-background/50 p-2.5 space-y-1.5">
           {items.length === 0 ? (
-            <p className="text-xs text-zinc-500">No colour channels on this job.</p>
+            <p className="text-xs text-neutral-500">No colour channels on this job.</p>
           ) : (
             items.map((it) => (
               <label
                 key={it.canon}
-                className="flex items-center gap-2.5 text-sm text-zinc-200 cursor-pointer py-0.5"
+                className="flex items-center gap-2.5 text-sm text-ds-ink cursor-pointer py-0.5"
               >
                 <input
                   type="checkbox"
@@ -557,7 +557,7 @@ function AdjustPlatesModal({
                   onChange={(e) =>
                     setChecks((prev) => ({ ...prev, [it.canon]: e.target.checked }))
                   }
-                  className="rounded border-zinc-600 shrink-0"
+                  className="rounded border-ds-line/50 shrink-0"
                 />
                 <span className="flex items-center gap-2 min-w-0 flex-1">
                   <PlateHubColourSwatch
@@ -565,14 +565,14 @@ function AdjustPlatesModal({
                     label={it.label}
                     ghost={!(checks[it.canon] ?? true)}
                   />
-                  <span className="text-xs text-zinc-300 break-words whitespace-normal">{it.label}</span>
+                  <span className="text-xs text-neutral-400 break-words whitespace-normal">{it.label}</span>
                 </span>
               </label>
             ))
           )}
         </div>
         <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 mb-1">
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1">
             Reason (optional)
           </label>
           <textarea
@@ -580,18 +580,18 @@ function AdjustPlatesModal({
             onChange={(e) => setReason(e.target.value)}
             rows={2}
             placeholder="e.g. Using existing stock / Job change"
-            className="w-full px-2.5 py-1.5 rounded-md bg-background border border-zinc-600 text-foreground text-xs placeholder:text-zinc-600 resize-y min-h-[2.5rem]"
+            className="w-full px-2.5 py-1.5 rounded-md bg-background border border-ds-line/50 text-foreground text-xs placeholder:text-neutral-600 resize-y min-h-[2.5rem]"
           />
         </div>
-        <p className="text-[11px] text-zinc-500 leading-snug">
+        <p className="text-[11px] text-neutral-500 leading-snug">
           {selectedCount < 1 ? (
-            <span className="text-amber-200/90">
+            <span className="text-ds-warning">
               At least one colour must stay selected. If none are needed, close this dialog and use{' '}
               <strong className="font-semibold">Send back to Triage</strong>.
             </span>
           ) : (
             <>
-              <span className="text-zinc-400 font-semibold tabular-nums">{selectedCount}</span> of{' '}
+              <span className="text-neutral-500 font-semibold tabular-nums">{selectedCount}</span> of{' '}
               <span className="tabular-nums">{items.length}</span> channels will be manufactured
               (badge updates after save).
             </>
@@ -600,7 +600,7 @@ function AdjustPlatesModal({
         <div className="flex justify-end gap-2 pt-1">
           <button
             type="button"
-            className="px-3 py-2 rounded border border-zinc-600 text-zinc-300 text-sm"
+            className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400 text-sm"
             onClick={onClose}
             disabled={submitting}
           >
@@ -611,7 +611,7 @@ function AdjustPlatesModal({
             disabled={
               submitting || savingDisabled || items.length === 0 || selectedCount < 1
             }
-            className="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-semibold disabled:opacity-45"
+            className="px-3 py-2 rounded bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-semibold disabled:opacity-45"
             onClick={() => {
               void (async () => {
                 const activeCanonicalKeys = items
@@ -677,7 +677,7 @@ function ShopfloorQueueSizeSelect({
   const value = (job.plateSize ?? 'SIZE_560_670') as HubPlateSize
   return (
     <div className="mt-0.5 inline-flex items-baseline gap-1 flex-wrap max-w-full">
-      <span className="text-xs font-medium text-zinc-400 shrink-0">Size:</span>
+      <span className="text-xs font-medium text-neutral-500 shrink-0">Size:</span>
       <select
         disabled={disabled}
         value={value}
@@ -713,11 +713,11 @@ function ShopfloorQueueSizeSelect({
           })()
         }}
         aria-label="Plate sheet size (shop floor)"
-        className="text-xs font-medium text-zinc-400 bg-transparent border-0 border-b border-dashed border-zinc-600/0 hover:border-zinc-500/60 hover:text-zinc-300 focus-visible:border-amber-500/70 focus-visible:text-zinc-200 focus:outline-none cursor-pointer py-0 pl-0 pr-5 -ml-0.5 max-w-[10rem] rounded-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
+        className="text-xs font-medium text-neutral-500 bg-transparent border-0 border-b border-dashed border-ds-line/0 hover:border-ds-line/50 hover:text-neutral-400 focus-visible:border-ds-warning/70 focus-visible:text-ds-ink focus:outline-none cursor-pointer py-0 pl-0 pr-5 -ml-0.5 max-w-[10rem] rounded-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
         style={{ backgroundImage: 'none' }}
       >
         {HUB_PLATE_SIZE_OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value} className="bg-zinc-900 text-zinc-200">
+          <option key={opt.value} value={opt.value} className="bg-ds-card text-ds-ink">
             {opt.mm}
           </option>
         ))}
@@ -739,17 +739,17 @@ function TriageInlinePlateSize({
   const value = row.plateSize ?? row.cartonMasterPlateSize ?? 'SIZE_560_670'
   return (
     <div className="mt-0.5 inline-flex items-baseline gap-1 flex-wrap">
-      <span className="text-xs font-medium text-zinc-400 shrink-0">Size:</span>
+      <span className="text-xs font-medium text-neutral-500 shrink-0">Size:</span>
       <select
         disabled={disabled}
         value={value}
         onChange={(e) => onSizeChange(row.id, e.target.value as HubPlateSize)}
         aria-label="Plate sheet size"
-        className="text-xs font-medium text-zinc-400 bg-transparent border-0 border-b border-dashed border-zinc-600/0 hover:border-zinc-500/60 hover:text-zinc-300 focus-visible:border-amber-500/70 focus-visible:text-zinc-200 focus:outline-none cursor-pointer py-0.5 pl-0 pr-5 -ml-0.5 max-w-[10rem] rounded-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
+        className="text-xs font-medium text-neutral-500 bg-transparent border-0 border-b border-dashed border-ds-line/0 hover:border-ds-line/50 hover:text-neutral-400 focus-visible:border-ds-warning/70 focus-visible:text-ds-ink focus:outline-none cursor-pointer py-0.5 pl-0 pr-5 -ml-0.5 max-w-[10rem] rounded-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
         style={{ backgroundImage: 'none' }}
       >
         {HUB_PLATE_SIZE_OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value} className="bg-zinc-900 text-zinc-200">
+          <option key={opt.value} value={opt.value} className="bg-ds-card text-ds-ink">
             {opt.mm}
           </option>
         ))}
@@ -772,11 +772,11 @@ function HubPlateSizeSegmented({
       ? 'bg-violet-600 border-violet-500 text-primary-foreground'
       : accent === 'emerald'
         ? 'bg-emerald-600 border-emerald-500 text-primary-foreground'
-        : 'bg-amber-600 border-amber-500 text-primary-foreground'
-  const off = 'text-zinc-400 hover:text-foreground hover:bg-zinc-800 border-transparent'
+        : 'bg-ds-warning border-ds-warning text-primary-foreground'
+  const off = 'text-neutral-500 hover:text-foreground hover:bg-ds-elevated border-transparent'
   return (
     <div
-      className="flex rounded-lg border border-zinc-600 overflow-hidden p-0.5 bg-background/60"
+      className="flex rounded-lg border border-ds-line/50 overflow-hidden p-0.5 bg-background/60"
       role="radiogroup"
       aria-label="Plate size"
     >
@@ -839,7 +839,7 @@ function JobCardStatusBadge({
     hub.key === 'printed'
       ? 'border-emerald-600/60 bg-emerald-950/50 text-emerald-200'
       : hub.key === 'planning'
-        ? 'border-amber-600/60 bg-amber-950/50 text-amber-200'
+        ? 'border-ds-warning/50 bg-ds-warning/10 text-ds-warning'
         : 'border-sky-600/60 bg-sky-950/50 text-sky-200'
   return (
     <span
@@ -2261,21 +2261,21 @@ export default function HubPlateDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-zinc-100 p-4 md:p-6">
+    <div className="min-h-screen bg-background text-ds-ink p-4 md:p-6">
       <div className="max-w-[1600px] mx-auto space-y-6">
         <HubCategoryNav active="plates" />
 
-        <header className="flex flex-col gap-3 border-b border-zinc-700 pb-4">
+        <header className="flex flex-col gap-3 border-b border-ds-line/50 pb-4">
           <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
             <div className="min-w-0">
               <h1 className="text-2xl font-bold tracking-tight text-foreground">Plate Hub</h1>
-              <p className="text-sm text-zinc-400 mt-1">
+              <p className="text-sm text-neutral-500 mt-1">
                 Preparation lanes → custody floor staging (mark ready). High-contrast layout for floor
                 speed.
               </p>
             </div>
             <div
-              className="flex rounded-lg border border-zinc-600 overflow-hidden p-0.5 bg-card/60 shrink-0"
+              className="flex rounded-lg border border-ds-line/50 overflow-hidden p-0.5 bg-card/60 shrink-0"
               role="tablist"
               aria-label="Hub view"
             >
@@ -2286,8 +2286,8 @@ export default function HubPlateDashboard() {
                 onClick={() => setHubView('board')}
                 className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
                   hubView === 'board'
-                    ? 'bg-amber-600 text-primary-foreground'
-                    : 'text-zinc-400 hover:text-foreground hover:bg-zinc-800'
+                    ? 'bg-ds-warning text-primary-foreground'
+                    : 'text-neutral-500 hover:text-foreground hover:bg-ds-elevated'
                 }`}
               >
                 📊 Board view
@@ -2299,8 +2299,8 @@ export default function HubPlateDashboard() {
                 onClick={() => setHubView('table')}
                 className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
                   hubView === 'table'
-                    ? 'bg-amber-600 text-primary-foreground'
-                    : 'text-zinc-400 hover:text-foreground hover:bg-zinc-800'
+                    ? 'bg-ds-warning text-primary-foreground'
+                    : 'text-neutral-500 hover:text-foreground hover:bg-ds-elevated'
                 }`}
               >
                 ≡ Table view
@@ -2318,30 +2318,30 @@ export default function HubPlateDashboard() {
               label="Bottlenecks >24h"
               value={plateIntelKpis.bottlenecks}
               hint="Stale status clock"
-              valueClassName={plateIntelKpis.bottlenecks > 0 ? 'text-rose-300' : 'text-slate-100'}
+              valueClassName={plateIntelKpis.bottlenecks > 0 ? 'text-rose-300' : 'text-ds-ink'}
             />
             <IndustrialKpiTile
               label="Avg lead (days)"
               value={plateIntelKpis.leadDays.toLocaleString('en-IN', { maximumFractionDigits: 1 })}
               hint={`Ledger priority rows: ${plateIntelKpis.priLedger}`}
-              valueClassName="text-amber-200/95"
+              valueClassName="text-ds-warning"
             />
           </div>
         </header>
 
         {loading ? (
-          <p className="text-zinc-500">Loading…</p>
+          <p className="text-neutral-500">Loading…</p>
         ) : hubView === 'table' ? (
           <div className="space-y-4">
             <div
-              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold tabular-nums"
+              className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-2 text-[10px] uppercase tracking-wider text-neutral-500 font-semibold tabular-nums"
               role="status"
             >
-              <span className="text-zinc-300">
+              <span className="text-neutral-400">
                 Showing {ledgerFilteredTotals.jobs}{' '}
                 {ledgerFilteredTotals.jobs === 1 ? 'job' : 'jobs'}
               </span>
-              <span className="text-zinc-600 mx-1">·</span>
+              <span className="text-neutral-600 mx-1">·</span>
               <span>
                 {ledgerFilteredTotals.plates} total plates across selected filters
               </span>
@@ -2349,24 +2349,24 @@ export default function HubPlateDashboard() {
             <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end lg:justify-between">
               <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end flex-1 min-w-0">
                 <label className="block flex-1 min-w-[200px]">
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                  <span className="text-[10px] uppercase tracking-wide text-neutral-500 font-semibold">
                     Search (all columns)
                   </span>
                   <input
                     value={ledgerSearch}
                     onChange={(e) => setLedgerSearch(e.target.value)}
                     placeholder="Job ID, carton, AW code, zone…"
-                    className="mt-1 w-full px-3 py-2 rounded-md bg-card border border-zinc-600 text-foreground text-sm placeholder:text-zinc-500"
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-card border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
                   />
                 </label>
                 <label className="block min-w-[180px]">
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                  <span className="text-[10px] uppercase tracking-wide text-neutral-500 font-semibold">
                     Zone
                   </span>
                   <select
                     value={ledgerZoneFilter}
                     onChange={(e) => setLedgerZoneFilter(e.target.value)}
-                    className="mt-1 w-full px-3 py-2 rounded-md bg-card border border-zinc-600 text-foreground text-sm"
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-card border border-ds-line/50 text-foreground text-sm"
                   >
                     {LEDGER_ZONE_FILTER_OPTIONS.map((o) => (
                       <option key={o.value || 'all'} value={o.value}>
@@ -2376,13 +2376,13 @@ export default function HubPlateDashboard() {
                   </select>
                 </label>
                 <label className="block min-w-[160px]">
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+                  <span className="text-[10px] uppercase tracking-wide text-neutral-500 font-semibold">
                     Plate size
                   </span>
                   <select
                     value={ledgerSizeFilter}
                     onChange={(e) => setLedgerSizeFilter(e.target.value)}
-                    className="mt-1 w-full px-3 py-2 rounded-md bg-card border border-zinc-600 text-foreground text-sm"
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-card border border-ds-line/50 text-foreground text-sm"
                   >
                     {ledgerSizeOptions.map((o) => (
                       <option key={o.value || 'all-sz'} value={o.value}>
@@ -2414,9 +2414,9 @@ export default function HubPlateDashboard() {
         ) : (
           <>
             {/* ZONE 1 — Triage */}
-            <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3">
+            <section className="rounded-xl border-2 border-ds-line/50 bg-ds-main p-3">
               <div className="flex flex-col gap-1 mb-2 min-w-0">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">
                   Incoming triage
                 </h2>
                 <ZoneCapacitySubheader
@@ -2430,13 +2430,13 @@ export default function HubPlateDashboard() {
                   value={triageSearch}
                   onChange={(e) => setTriageSearch(e.target.value)}
                   placeholder="Customer, product, PO #, job code…"
-                  className="w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground text-sm placeholder:text-zinc-500"
+                  className="w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
                 />
               </label>
               <pre className="sr-only">Designer queue — AW / job codes</pre>
               <div className="space-y-3">
                 {filteredTriageBoard.length === 0 ? (
-                  <p className="text-zinc-500 text-sm">No jobs awaiting triage.</p>
+                  <p className="text-neutral-500 text-sm">No jobs awaiting triage.</p>
                 ) : (
                   <AnimatePresence initial={false}>
                     {filteredTriageBoard.map((row) => (
@@ -2465,7 +2465,7 @@ export default function HubPlateDashboard() {
                         })}
                       />
                       <div className="flex-1 min-w-0 flex flex-col space-y-2 pr-10 lg:pr-11">
-                        <p className="font-mono text-amber-300 text-sm">{row.requirementCode}</p>
+                        <p className="font-mono text-ds-warning text-sm">{row.requirementCode}</p>
                         <PlateHubStageDays lastStatusUpdatedAt={row.lastStatusUpdatedAt} />
                         <div className="min-w-0 w-full pr-8">
                           <HubCartonAuditTitle
@@ -2513,7 +2513,7 @@ export default function HubPlateDashboard() {
                             <>
                               {' · '}
                               <span
-                                className="inline-flex items-center text-amber-400/90 cursor-help select-none"
+                                className="inline-flex items-center text-ds-warning cursor-help select-none"
                                 title="Linked PO line not found — may be deleted or archived"
                                 aria-label="PO link broken"
                               >
@@ -2524,7 +2524,7 @@ export default function HubPlateDashboard() {
                             <>
                               {' · '}
                               <span
-                                className="inline-flex items-center text-zinc-500 cursor-help select-none"
+                                className="inline-flex items-center text-neutral-500 cursor-help select-none"
                                 title="No PO link - Manual Job"
                                 aria-label="No PO link"
                               >
@@ -2559,7 +2559,7 @@ export default function HubPlateDashboard() {
                           type="button"
                           disabled={saving}
                           onClick={() => dispatchTriageToProduction(row, 'inhouse_ctp')}
-                          className="px-3 py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-semibold disabled:opacity-50"
+                          className="px-3 py-2 rounded-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-semibold disabled:opacity-50"
                         >
                           In-house CTP
                         </button>
@@ -2570,7 +2570,7 @@ export default function HubPlateDashboard() {
                             setStockModal(row)
                             setStockBatchPick({})
                           }}
-                          className="px-3 py-2 rounded-md border border-zinc-500 bg-zinc-900 hover:bg-zinc-800 text-sm font-medium"
+                          className="px-3 py-2 rounded-md border border-ds-line/50 bg-ds-card hover:bg-ds-elevated text-sm font-medium"
                         >
                           Take from stock
                         </button>
@@ -2578,7 +2578,7 @@ export default function HubPlateDashboard() {
                           type="button"
                           disabled={saving}
                           onClick={() => dispatchTriageToProduction(row, 'outside_vendor')}
-                          className="px-3 py-2 rounded-md border border-zinc-600 text-zinc-300 hover:bg-zinc-900 text-sm"
+                          className="px-3 py-2 rounded-md border border-ds-line/50 text-neutral-400 hover:bg-ds-card text-sm"
                         >
                           Send to vendor
                         </button>
@@ -2606,10 +2606,10 @@ export default function HubPlateDashboard() {
             {/* Lanes: CTP · outside vendor · rack · custody */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6 xl:min-h-[min(70vh,calc(100vh-14rem))] xl:items-stretch">
               {/* CTP */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
+              <section className="rounded-xl border-2 border-ds-line/50 bg-ds-main p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-2 mb-2 min-w-0">
                   <div className="flex flex-col gap-1 min-w-0">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">
                       CTP queue
                     </h2>
                     <ZoneCapacitySubheader
@@ -2623,7 +2623,7 @@ export default function HubPlateDashboard() {
                       resetManualCtpForm()
                       setManualCtpOpen(true)
                     }}
-                    className="w-full px-3 py-2 rounded-md border border-amber-600/80 bg-amber-950/40 text-amber-100 text-xs font-bold hover:bg-amber-950/70 shrink-0"
+                    className="w-full px-3 py-2 rounded-md border border-ds-warning/50 bg-ds-warning/10 text-ds-ink text-xs font-bold hover:bg-ds-warning/12 shrink-0"
                   >
                     + Manual CTP Request
                   </button>
@@ -2632,11 +2632,11 @@ export default function HubPlateDashboard() {
                   value={ctpSearch}
                   onChange={(e) => setCtpSearch(e.target.value)}
                   placeholder="Customer, product, PO #, job code…"
-                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground text-sm placeholder:text-zinc-500"
+                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {filteredCtp.length === 0 ? (
-                    <li className="text-zinc-500 text-sm">Empty.</li>
+                    <li className="text-neutral-500 text-sm">Empty.</li>
                   ) : (
                     <AnimatePresence initial={false}>
                     {filteredCtp.map((job) => {
@@ -2675,7 +2675,7 @@ export default function HubPlateDashboard() {
                           }
                         />
                         <div className="flex items-center justify-between gap-2 pr-0">
-                          <p className="font-mono text-amber-300 text-xs min-w-0">{job.requirementCode}</p>
+                          <p className="font-mono text-ds-warning text-xs min-w-0">{job.requirementCode}</p>
                           <HubPriorityRankBadge rank={ctpPos.rank} />
                         </div>
                         <PlateHubStageDays lastStatusUpdatedAt={job.lastStatusUpdatedAt} />
@@ -2748,7 +2748,7 @@ export default function HubPlateDashboard() {
                             type="button"
                             disabled={saving}
                             onClick={() => void sendBackTriage(job.id)}
-                            className="w-full px-2 py-1.5 rounded border border-amber-700/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                            className="w-full px-2 py-1.5 rounded border border-ds-warning/50 bg-ds-card text-ds-ink hover:bg-ds-elevated text-xs font-semibold"
                           >
                             Send back to Triage
                           </button>
@@ -2780,7 +2780,7 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Outside vendor */}
-              <section className="rounded-xl border-2 border-violet-900/80 bg-zinc-950 p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
+              <section className="rounded-xl border-2 border-violet-900/80 bg-ds-main p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-2 mb-1 min-w-0">
                   <div className="flex flex-col gap-1 min-w-0">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-300">
@@ -2802,16 +2802,16 @@ export default function HubPlateDashboard() {
                     + Manual Vendor PO
                   </button>
                 </div>
-                <p className="text-[11px] text-zinc-500 mb-2">Awaiting delivery · two-way decisions</p>
+                <p className="text-[11px] text-neutral-500 mb-2">Awaiting delivery · two-way decisions</p>
                 <input
                   value={vendorSearch}
                   onChange={(e) => setVendorSearch(e.target.value)}
                   placeholder="Customer, product, PO #, job code…"
-                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground text-sm placeholder:text-zinc-500"
+                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {filteredVendor.length === 0 ? (
-                    <li className="text-zinc-500 text-sm">None at vendor.</li>
+                    <li className="text-neutral-500 text-sm">None at vendor.</li>
                   ) : (
                     <AnimatePresence initial={false}>
                     {filteredVendor.map((job) => {
@@ -2923,7 +2923,7 @@ export default function HubPlateDashboard() {
                             type="button"
                             disabled={saving}
                             onClick={() => void sendVendorBackTriage(job.id)}
-                            className="w-full px-2 py-1.5 rounded border border-amber-700/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                            className="w-full px-2 py-1.5 rounded border border-ds-warning/50 bg-ds-card text-ds-ink hover:bg-ds-elevated text-xs font-semibold"
                           >
                             Send back to Triage
                           </button>
@@ -2955,9 +2955,9 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Inventory */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
+              <section className="rounded-xl border-2 border-ds-line/50 bg-ds-main p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-1 mb-2 min-w-0">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">
                     Live inventory
                   </h2>
                   <ZoneCapacitySubheader
@@ -2981,11 +2981,11 @@ export default function HubPlateDashboard() {
                   value={invSearch}
                   onChange={(e) => setInvSearch(e.target.value)}
                   placeholder="Search…"
-                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground text-sm placeholder:text-zinc-500"
+                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {filteredInventory.length === 0 ? (
-                    <li className="text-zinc-500 text-sm">No plates in rack.</li>
+                    <li className="text-neutral-500 text-sm">No plates in rack.</li>
                   ) : (
                     <AnimatePresence initial={false}>
                     {filteredInventory.map((p) => {
@@ -3024,7 +3024,7 @@ export default function HubPlateDashboard() {
                               totalPlates: p.totalPlates,
                             })}
                           />
-                          <p className="font-mono text-amber-300 text-xs">{p.plateSetCode}</p>
+                          <p className="font-mono text-ds-warning text-xs">{p.plateSetCode}</p>
                           <div className="min-w-0 w-full pr-8">
                             <HubCartonAuditTitle
                               onOpenAudit={() =>
@@ -3071,7 +3071,7 @@ export default function HubPlateDashboard() {
                           ) : null}
                           <HubJobCardMetaLine>
                             <span className="text-foreground font-semibold">{locPrimary || '—'}</span>
-                            <span className="text-zinc-500">
+                            <span className="text-neutral-500">
                               {' '}
                               · Rack / slot
                               {p.ups != null && p.ups > 0 ? ` · UPS ${p.ups}` : ''}
@@ -3098,7 +3098,7 @@ export default function HubPlateDashboard() {
                             </button>
                             <button
                               type="button"
-                              className="w-full py-1.5 rounded border border-zinc-600 bg-zinc-900 text-zinc-200 text-[11px] font-semibold hover:bg-zinc-800"
+                              className="w-full py-1.5 rounded border border-ds-line/50 bg-ds-card text-ds-ink text-[11px] font-semibold hover:bg-ds-elevated"
                               onClick={() => setRemakePlate(p)}
                             >
                               Partial remake (CTP / vendor)
@@ -3121,9 +3121,9 @@ export default function HubPlateDashboard() {
               </section>
 
               {/* Custody */}
-              <section className="rounded-xl border-2 border-zinc-600 bg-zinc-950 p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
+              <section className="rounded-xl border-2 border-ds-line/50 bg-ds-main p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-1 mb-0.5 min-w-0">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">
                     Custody floor
                   </h2>
                   <ZoneCapacitySubheader
@@ -3131,16 +3131,16 @@ export default function HubPlateDashboard() {
                     plateCount={custodyZoneMetrics.plateCount}
                   />
                 </div>
-                <p className="text-[11px] text-zinc-500 mb-2">Staging · plates marked ready</p>
+                <p className="text-[11px] text-neutral-500 mb-2">Staging · plates marked ready</p>
                 <input
                   value={custSearch}
                   onChange={(e) => setCustSearch(e.target.value)}
                   placeholder="Search…"
-                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground text-sm placeholder:text-zinc-500"
+                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {filteredCustody.length === 0 ? (
-                    <li className="text-zinc-500 text-sm">Nothing in staging.</li>
+                    <li className="text-neutral-500 text-sm">Nothing in staging.</li>
                   ) : (
                     <AnimatePresence initial={false}>
                     {filteredCustody.map((c) => (
@@ -3183,7 +3183,7 @@ export default function HubPlateDashboard() {
                           }
                         />
                         <CustodySourcePill source={c.custodySource} />
-                        <p className="font-mono text-amber-300 text-xs">{c.displayCode}</p>
+                        <p className="font-mono text-ds-warning text-xs">{c.displayCode}</p>
                         <div className="flex flex-wrap items-start gap-x-1 gap-y-0.5 min-w-0 w-full pr-8">
                           <HubCartonAuditTitle
                             className="!w-auto flex-1 min-w-0"
@@ -3292,7 +3292,7 @@ export default function HubPlateDashboard() {
                           </button>
                           <button
                             type="button"
-                            className="w-full py-1.5 rounded border border-amber-800/80 bg-zinc-900 text-amber-100 hover:bg-zinc-800 text-xs font-semibold"
+                            className="w-full py-1.5 rounded border border-ds-warning/45 bg-ds-card text-ds-ink hover:bg-ds-elevated text-xs font-semibold"
                             onClick={() => void reverseCustodyItem(c)}
                           >
                             Reverse / Undo
@@ -3308,7 +3308,7 @@ export default function HubPlateDashboard() {
                 </ul>
               </section>
             </div>
-            <p className="mt-4 text-center text-[9px] text-zinc-500 font-[family-name:var(--font-designing-queue)] tracking-tight px-2">
+            <p className="mt-4 text-center text-[9px] text-neutral-500 font-[family-name:var(--font-designing-queue)] tracking-tight px-2">
               Audit Trail Synchronized - Accountability Layer Active.
             </p>
           </>
@@ -3320,14 +3320,14 @@ export default function HubPlateDashboard() {
       {/* Add plate stock — master-linked */}
       {addStockOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="w-full max-w-lg max-h-[90vh] rounded-xl border border-zinc-600 bg-zinc-950 flex flex-col shadow-2xl">
-            <div className="p-4 pb-2 shrink-0 border-b border-zinc-800 z-20 relative">
+          <div className="w-full max-w-lg max-h-[90vh] rounded-xl border border-ds-line/50 bg-ds-main flex flex-col shadow-2xl">
+            <div className="p-4 pb-2 shrink-0 border-b border-ds-line/40 z-20 relative">
             <h3 className="text-lg font-semibold text-foreground">Add plate stock</h3>
-            <p className="text-zinc-500 text-xs">
+            <p className="text-neutral-500 text-xs">
               Search carton master first — AW code and UPS fill from the selected carton. Edit before save.
             </p>
             <div className="relative mt-3">
-              <label className="block text-sm text-zinc-300">
+              <label className="block text-sm text-neutral-400">
                 Carton name
                 <input
                   value={addCartonQuery}
@@ -3338,25 +3338,25 @@ export default function HubPlateDashboard() {
                       setAddSelectedCarton(null)
                     }
                   }}
-                  className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                   placeholder="Type at least 2 characters…"
                   autoComplete="off"
                 />
               </label>
-              {addCartonLoading ? <p className="text-xs text-zinc-500 mt-1">Searching…</p> : null}
+              {addCartonLoading ? <p className="text-xs text-neutral-500 mt-1">Searching…</p> : null}
               {addCartonResults.length > 0 ? (
-                <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-600 bg-zinc-900 shadow-lg">
+                <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-ds-line/50 bg-ds-card shadow-lg">
                   {addCartonResults.map((hit) => (
                     <li key={hit.id}>
                       <button
                         type="button"
-                        className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-zinc-800 border-b border-zinc-800 last:border-0"
+                        className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-ds-elevated border-b border-ds-line/40 last:border-0"
                         onClick={() => applyCartonSelection(hit)}
                       >
                         <span className="font-medium block break-words whitespace-normal text-sm text-blue-400">
                           {hit.cartonName}
                         </span>
-                        <span className="text-[11px] text-zinc-400">
+                        <span className="text-[11px] text-neutral-500">
                           {hit.customer.name}
                           {hit.artworkCode ? ` · ${hit.artworkCode}` : ''}
                           {hit.ups != null && hit.ups > 0 ? ` · UPS ${hit.ups}` : ''}
@@ -3372,34 +3372,34 @@ export default function HubPlateDashboard() {
                 Linked: {addSelectedCarton.customer.name}
               </p>
             ) : (
-              <p className="text-[11px] text-zinc-500">Pick a row above to link carton + customer.</p>
+              <p className="text-[11px] text-neutral-500">Pick a row above to link carton + customer.</p>
             )}
             </div>
             <div className="p-4 pt-3 space-y-3 overflow-y-auto flex-1 min-h-0">
-            <label className="block text-sm text-zinc-300">
+            <label className="block text-sm text-neutral-400">
               AW code
               <input
                 value={addAwCode}
                 onChange={(e) => setAddAwCode(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                 placeholder="e.g. R234"
               />
             </label>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <label className="block text-sm text-zinc-300 flex-1">
+              <label className="block text-sm text-neutral-400 flex-1">
                 Serial number
                 <input
                   value={addSerial}
                   onChange={(e) => setAddSerial(e.target.value)}
                   disabled={addAutoSerial}
-                  className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground disabled:opacity-50"
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground disabled:opacity-50"
                   placeholder={addAutoSerial ? 'Auto-generated on save' : 'Enter serial'}
                 />
                 {addStockFieldErrors.serialNumber ? (
                   <span className="text-xs text-red-400">{addStockFieldErrors.serialNumber}</span>
                 ) : null}
               </label>
-              <label className="flex items-center gap-2 text-sm text-zinc-300 pb-2 sm:pb-0 shrink-0 cursor-pointer select-none">
+              <label className="flex items-center gap-2 text-sm text-neutral-400 pb-2 sm:pb-0 shrink-0 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={addAutoSerial}
@@ -3407,36 +3407,36 @@ export default function HubPlateDashboard() {
                     setAddAutoSerial(e.target.checked)
                     if (e.target.checked) setAddSerial('')
                   }}
-                  className="rounded border-zinc-600"
+                  className="rounded border-ds-line/50"
                 />
                 Auto-generate
               </label>
             </div>
-            <label className="block text-sm text-zinc-300">
+            <label className="block text-sm text-neutral-400">
               Output number
-              <span className="block text-[11px] text-zinc-500 font-normal mt-0.5">
+              <span className="block text-[11px] text-neutral-500 font-normal mt-0.5">
                 Also used as set / output reference in custody workflows.
               </span>
               <input
                 value={addOutputNumber}
                 onChange={(e) => setAddOutputNumber(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
               />
             </label>
-            <label className="block text-sm text-zinc-300">
+            <label className="block text-sm text-neutral-400">
               Rack number
               <input
                 value={addRackNumber}
                 onChange={(e) => setAddRackNumber(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
               />
             </label>
-            <label className="block text-sm text-zinc-300">
+            <label className="block text-sm text-neutral-400">
               No. of UPS
               <input
                 value={addUps}
                 onChange={(e) => setAddUps(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                 placeholder="From dye / carton master"
                 inputMode="numeric"
               />
@@ -3445,7 +3445,7 @@ export default function HubPlateDashboard() {
               ) : null}
             </label>
             <div>
-              <p className="text-sm text-zinc-300 mb-2">
+              <p className="text-sm text-neutral-400 mb-2">
                 Plate size <span className="text-red-400">*</span>
               </p>
               <HubPlateSizeSegmented
@@ -3455,7 +3455,7 @@ export default function HubPlateDashboard() {
               />
             </div>
             <div>
-              <p className="text-sm text-zinc-300 mb-2">Colours on plate</p>
+              <p className="text-sm text-neutral-400 mb-2">Colours on plate</p>
               <div className="flex flex-wrap gap-2 items-center">
                 {(
                   [
@@ -3472,8 +3472,8 @@ export default function HubPlateDashboard() {
                     title={HUB_CMYK_CHANNEL_LABEL[ch]}
                     className={`rounded-md border p-0.5 flex items-center justify-center ${
                       on
-                        ? 'border-amber-500/90 ring-1 ring-amber-500/35 shadow-sm'
-                        : 'border-zinc-700'
+                        ? 'border-ds-warning/90 ring-1 ring-ds-warning/35 shadow-sm'
+                        : 'border-ds-line/50'
                     }`}
                   >
                     <PlateHubColourSwatch
@@ -3490,14 +3490,14 @@ export default function HubPlateDashboard() {
                   className={`rounded-md border p-0.5 flex items-center justify-center ${
                     pantoneOn
                       ? 'border-violet-500 ring-1 ring-violet-500/35'
-                      : 'border-zinc-700'
+                      : 'border-ds-line/50'
                   }`}
                 >
                   <PlateHubColourSwatch short="P1" label="Pantone" ghost={!pantoneOn} />
                 </button>
               </div>
               {pantoneOn ? (
-                <label className="block text-sm text-zinc-300 mt-3">
+                <label className="block text-sm text-neutral-400 mt-3">
                   How many Pantones?
                   <input
                     type="number"
@@ -3505,19 +3505,19 @@ export default function HubPlateDashboard() {
                     max={12}
                     value={pantoneCount}
                     onChange={(e) => setPantoneCount(Number(e.target.value) || 1)}
-                    className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                   />
                 </label>
               ) : null}
             </div>
-            <div className="rounded-lg border border-zinc-700 bg-background/50 px-3 py-2 flex items-center justify-between">
-              <span className="text-sm text-zinc-400">Total plates required</span>
-              <span className="text-lg font-bold text-amber-300 tabular-nums">{addStockTotalPlates}</span>
+            <div className="rounded-lg border border-ds-line/50 bg-background/50 px-3 py-2 flex items-center justify-between">
+              <span className="text-sm text-neutral-500">Total plates required</span>
+              <span className="text-lg font-bold text-ds-warning tabular-nums">{addStockTotalPlates}</span>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
                 onClick={() => {
                   setAddStockOpen(false)
                   resetAddStockForm()
@@ -3542,11 +3542,11 @@ export default function HubPlateDashboard() {
       {/* Stock modal */}
       {stockModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="w-full max-w-3xl rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-3 max-h-[90vh] flex flex-col">
+          <div className="w-full max-w-3xl rounded-xl border border-ds-line/50 bg-ds-main p-4 space-y-3 max-h-[90vh] flex flex-col">
             <h3 className="text-lg font-semibold text-foreground shrink-0">Take from stock</h3>
-            <p className="text-slate-400 text-sm shrink-0">
+            <p className="text-ds-ink-muted text-sm shrink-0">
               Pull channels from live inventory into custody floor (
-              <span className="text-amber-200/90">Source: Rack</span>). Plate sets match this job’s{' '}
+              <span className="text-ds-warning">Source: Rack</span>). Plate sets match this job’s{' '}
               {stockModal.artworkCode?.trim() ? 'AW code' : 'carton name'}.
             </p>
             {stockModalPlateOptions.length === 0 ? (
@@ -3554,10 +3554,10 @@ export default function HubPlateDashboard() {
                 No matching plate sets in live inventory for this AW / carton.
               </p>
             ) : (
-              <div className="overflow-auto rounded-lg border border-zinc-800 min-h-0">
+              <div className="overflow-auto rounded-lg border border-ds-line/40 min-h-0">
                 <table className="w-full text-[11px] border-collapse">
-                  <thead className="sticky top-0 bg-zinc-950 z-[1]">
-                    <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                  <thead className="sticky top-0 bg-ds-main z-[1]">
+                    <tr className="text-left text-neutral-500 border-b border-ds-line/40">
                       <th className="py-1 px-1 w-8 font-semibold uppercase tracking-wide">Sel</th>
                       <th className="py-1 px-1 font-semibold uppercase tracking-wide">Rack / slot</th>
                       <th className="py-1 px-1 font-semibold uppercase tracking-wide">Set ID</th>
@@ -3576,11 +3576,11 @@ export default function HubPlateDashboard() {
                       const allOn =
                         eligible.length > 0 && eligible.every(({ submitKey }) => picks[submitKey])
                       return (
-                        <tr key={p.id} className="border-b border-zinc-800/80 align-top">
+                        <tr key={p.id} className="border-b border-ds-line/50 align-top">
                           <td className="py-1 px-1">
                             <input
                               type="checkbox"
-                              className="rounded border-zinc-600"
+                              className="rounded border-ds-line/50"
                               checked={allOn}
                               disabled={eligible.length === 0}
                               onChange={(e) => {
@@ -3594,8 +3594,8 @@ export default function HubPlateDashboard() {
                               title="Select all channels needed for this job in this slot"
                             />
                           </td>
-                          <td className="py-1 px-1 text-zinc-300 whitespace-nowrap">{loc}</td>
-                          <td className="py-1 px-1 text-zinc-200 font-mono tabular-nums">
+                          <td className="py-1 px-1 text-neutral-400 whitespace-nowrap">{loc}</td>
+                          <td className="py-1 px-1 text-ds-ink font-mono tabular-nums">
                             {p.plateSetCode}
                           </td>
                           <td className="py-1 px-1">
@@ -3618,7 +3618,7 @@ export default function HubPlateDashboard() {
                                   >
                                     <input
                                       type="checkbox"
-                                      className="rounded border-zinc-600 shrink-0 scale-90"
+                                      className="rounded border-ds-line/50 shrink-0 scale-90"
                                       checked={!!picks[submitKey]}
                                       disabled={!inJob}
                                       onChange={(e) =>
@@ -3638,7 +3638,7 @@ export default function HubPlateDashboard() {
                                         size="sm"
                                       />
                                     ) : (
-                                      <span className="text-zinc-500">{displayLabel}</span>
+                                      <span className="text-neutral-500">{displayLabel}</span>
                                     )}
                                   </label>
                                 )
@@ -3652,8 +3652,8 @@ export default function HubPlateDashboard() {
                 </table>
               </div>
             )}
-            <div className="rounded-lg border border-zinc-700 bg-background/50 px-2 py-1.5 shrink-0">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 mb-1">
+            <div className="rounded-lg border border-ds-line/50 bg-background/50 px-2 py-1.5 shrink-0">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1">
                 Fulfillment status
               </p>
               <div className="flex flex-wrap items-center gap-1">
@@ -3679,7 +3679,7 @@ export default function HubPlateDashboard() {
             <div className="flex justify-end gap-2 pt-1 shrink-0">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
                 onClick={() => {
                   setStockModal(null)
                   setStockBatchPick({})
@@ -3694,7 +3694,7 @@ export default function HubPlateDashboard() {
                   stockBatchSelectionSummary.channelCount === 0 ||
                   stockModalPlateOptions.length === 0
                 }
-                className="px-3 py-2 rounded bg-amber-600 text-primary-foreground font-medium disabled:opacity-50"
+                className="px-3 py-2 rounded bg-ds-warning text-primary-foreground font-medium disabled:opacity-50"
                 onClick={() => void submitTakeFromStock()}
               >
                 Confirm
@@ -3706,17 +3706,17 @@ export default function HubPlateDashboard() {
 
       {triageSizeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-amber-700/50 bg-zinc-950 p-4 space-y-4">
+          <div className="w-full max-w-md rounded-xl border border-ds-warning/30 bg-ds-main p-4 space-y-4">
             <div>
               <h3 className="text-lg font-semibold text-foreground">Confirm plate size</h3>
-              <p className="text-zinc-500 text-xs mt-1">
+              <p className="text-neutral-500 text-xs mt-1">
                 No plate size is set on this requirement or the linked carton master. Pick the sheet size
                 before sending to{' '}
                 {triageSizeModal.channel === 'inhouse_ctp' ? 'in-house CTP' : 'outside vendor'}.
               </p>
             </div>
             <div>
-              <p className="text-sm text-zinc-300 mb-2">
+              <p className="text-sm text-neutral-400 mb-2">
                 Plate size <span className="text-red-400">*</span>
               </p>
               <HubPlateSizeSegmented
@@ -3728,7 +3728,7 @@ export default function HubPlateDashboard() {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
                 onClick={() => setTriageSizeModal(null)}
                 disabled={saving}
               >
@@ -3737,7 +3737,7 @@ export default function HubPlateDashboard() {
               <button
                 type="button"
                 disabled={saving}
-                className="px-3 py-2 rounded bg-amber-600 text-primary-foreground font-semibold disabled:opacity-50"
+                className="px-3 py-2 rounded bg-ds-warning text-primary-foreground font-semibold disabled:opacity-50"
                 onClick={() => {
                   if (!triageSizeModal) return
                   void patchTriage(triageSizeModal.rowId, triageSizeModal.channel, triagePlateSizePick)
@@ -3753,14 +3753,14 @@ export default function HubPlateDashboard() {
       {/* Manual CTP — bypass triage */}
       {manualCtpOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="w-full max-w-lg max-h-[90vh] rounded-xl border border-zinc-600 bg-zinc-950 flex flex-col shadow-2xl">
-            <div className="p-4 border-b border-zinc-800 shrink-0">
+          <div className="w-full max-w-lg max-h-[90vh] rounded-xl border border-ds-line/50 bg-ds-main flex flex-col shadow-2xl">
+            <div className="p-4 border-b border-ds-line/40 shrink-0">
               <h3 className="text-lg font-semibold text-foreground">Manual CTP request</h3>
-              <p className="text-zinc-500 text-xs mt-1">
+              <p className="text-neutral-500 text-xs mt-1">
                 Bypass designer triage. Job drops straight into the CTP queue.
               </p>
               <div className="relative mt-3">
-                <label className="block text-sm text-zinc-300">
+                <label className="block text-sm text-neutral-400">
                   Carton name
                   <input
                     value={mCtpQuery}
@@ -3771,19 +3771,19 @@ export default function HubPlateDashboard() {
                         setMCtpSelected(null)
                       }
                     }}
-                    className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                     placeholder="Type at least 2 characters…"
                     autoComplete="off"
                   />
                 </label>
-                {mCtpLoading ? <p className="text-xs text-zinc-500 mt-1">Searching…</p> : null}
+                {mCtpLoading ? <p className="text-xs text-neutral-500 mt-1">Searching…</p> : null}
                 {mCtpResults.length > 0 ? (
-                  <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-600 bg-zinc-900 shadow-lg">
+                  <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-ds-line/50 bg-ds-card shadow-lg">
                     {mCtpResults.map((hit) => (
                       <li key={hit.id}>
                         <button
                           type="button"
-                          className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-zinc-800 border-b border-zinc-800 last:border-0"
+                          className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-ds-elevated border-b border-ds-line/40 last:border-0"
                           onClick={() => {
                             setMCtpSelected(hit)
                             setMCtpQuery(hit.cartonName)
@@ -3794,7 +3794,7 @@ export default function HubPlateDashboard() {
                           <span className="font-medium block break-words whitespace-normal text-sm text-blue-400">
                             {hit.cartonName}
                           </span>
-                          <span className="text-[11px] text-zinc-400">
+                          <span className="text-[11px] text-neutral-500">
                             {hit.customer.name}
                             {hit.artworkCode ? ` · ${hit.artworkCode}` : ''}
                           </span>
@@ -3809,12 +3809,12 @@ export default function HubPlateDashboard() {
                   Linked: {mCtpSelected.customer.name}
                 </p>
               ) : (
-                <p className="text-[11px] text-zinc-500 mt-2">Pick a carton from search results.</p>
+                <p className="text-[11px] text-neutral-500 mt-2">Pick a carton from search results.</p>
               )}
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div>
-                <p className="text-sm text-zinc-300 mb-2">
+                <p className="text-sm text-neutral-400 mb-2">
                   Plate size <span className="text-red-400">*</span>
                 </p>
                 <HubPlateSizeSegmented
@@ -3824,7 +3824,7 @@ export default function HubPlateDashboard() {
                 />
               </div>
               <div>
-                <p className="text-sm text-zinc-300 mb-2">Colours to burn</p>
+                <p className="text-sm text-neutral-400 mb-2">Colours to burn</p>
                 <div className="flex flex-wrap gap-2 items-center">
                   {(
                     [
@@ -3841,8 +3841,8 @@ export default function HubPlateDashboard() {
                       title={HUB_CMYK_CHANNEL_LABEL[ch]}
                       className={`rounded-md border p-0.5 flex items-center justify-center ${
                         on
-                          ? 'border-amber-500/90 ring-1 ring-amber-500/35 shadow-sm'
-                          : 'border-zinc-700'
+                          ? 'border-ds-warning/90 ring-1 ring-ds-warning/35 shadow-sm'
+                          : 'border-ds-line/50'
                       }`}
                     >
                       <PlateHubColourSwatch
@@ -3859,14 +3859,14 @@ export default function HubPlateDashboard() {
                     className={`rounded-md border p-0.5 flex items-center justify-center ${
                       mCtpPantone
                         ? 'border-violet-500 ring-1 ring-violet-500/35'
-                        : 'border-zinc-700'
+                        : 'border-ds-line/50'
                     }`}
                   >
                     <PlateHubColourSwatch short="P1" label="Pantone" ghost={!mCtpPantone} />
                   </button>
                 </div>
                 {mCtpPantone ? (
-                  <label className="block text-sm text-zinc-300 mt-3">
+                  <label className="block text-sm text-neutral-400 mt-3">
                     How many Pantones?
                     <input
                       type="number"
@@ -3874,15 +3874,15 @@ export default function HubPlateDashboard() {
                       max={12}
                       value={mCtpPantoneN}
                       onChange={(e) => setMCtpPantoneN(Number(e.target.value) || 1)}
-                      className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                      className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                     />
                   </label>
                 ) : null}
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+              <div className="flex justify-end gap-2 pt-2 border-t border-ds-line/40">
                 <button
                   type="button"
-                  className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                  className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
                   onClick={() => {
                     setManualCtpOpen(false)
                     resetManualCtpForm()
@@ -3893,7 +3893,7 @@ export default function HubPlateDashboard() {
                 <button
                   type="button"
                   disabled={saving || !mCtpSelected}
-                  className="px-3 py-2 rounded bg-amber-600 text-primary-foreground font-semibold disabled:opacity-50"
+                  className="px-3 py-2 rounded bg-ds-warning text-primary-foreground font-semibold disabled:opacity-50"
                   onClick={() => void submitManualCtpRequest()}
                 >
                   Create CTP job
@@ -3907,14 +3907,14 @@ export default function HubPlateDashboard() {
       {/* Manual vendor PO */}
       {manualVendorOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="w-full max-w-lg max-h-[90vh] rounded-xl border border-violet-600/60 bg-zinc-950 flex flex-col shadow-2xl">
-            <div className="p-4 border-b border-zinc-800 shrink-0">
+          <div className="w-full max-w-lg max-h-[90vh] rounded-xl border border-violet-600/60 bg-ds-main flex flex-col shadow-2xl">
+            <div className="p-4 border-b border-ds-line/40 shrink-0">
               <h3 className="text-lg font-semibold text-foreground">Manual vendor PO</h3>
-              <p className="text-zinc-500 text-xs mt-1">
+              <p className="text-neutral-500 text-xs mt-1">
                 Bypass triage. Job goes to Outside vendor (awaiting delivery).
               </p>
               <div className="relative mt-3">
-                <label className="block text-sm text-zinc-300">
+                <label className="block text-sm text-neutral-400">
                   Carton name
                   <input
                     value={mvQuery}
@@ -3925,19 +3925,19 @@ export default function HubPlateDashboard() {
                         setMvSelected(null)
                       }
                     }}
-                    className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                     placeholder="Type at least 2 characters…"
                     autoComplete="off"
                   />
                 </label>
-                {mvLoading ? <p className="text-xs text-zinc-500 mt-1">Searching…</p> : null}
+                {mvLoading ? <p className="text-xs text-neutral-500 mt-1">Searching…</p> : null}
                 {mvResults.length > 0 ? (
-                  <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-600 bg-zinc-900 shadow-lg">
+                  <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-ds-line/50 bg-ds-card shadow-lg">
                     {mvResults.map((hit) => (
                       <li key={hit.id}>
                         <button
                           type="button"
-                          className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-zinc-800 border-b border-zinc-800 last:border-0"
+                          className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-ds-elevated border-b border-ds-line/40 last:border-0"
                           onClick={() => {
                             setMvSelected(hit)
                             setMvQuery(hit.cartonName)
@@ -3948,7 +3948,7 @@ export default function HubPlateDashboard() {
                           <span className="font-medium block break-words whitespace-normal text-sm text-blue-400">
                             {hit.cartonName}
                           </span>
-                          <span className="text-[11px] text-zinc-400">
+                          <span className="text-[11px] text-neutral-500">
                             {hit.customer.name}
                             {hit.artworkCode ? ` · ${hit.artworkCode}` : ''}
                           </span>
@@ -3963,12 +3963,12 @@ export default function HubPlateDashboard() {
                   Linked: {mvSelected.customer.name}
                 </p>
               ) : (
-                <p className="text-[11px] text-zinc-500 mt-2">Pick a carton from search results.</p>
+                <p className="text-[11px] text-neutral-500 mt-2">Pick a carton from search results.</p>
               )}
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div>
-                <p className="text-sm text-zinc-300 mb-2">
+                <p className="text-sm text-neutral-400 mb-2">
                   Plate size <span className="text-red-400">*</span>
                 </p>
                 <HubPlateSizeSegmented
@@ -3978,7 +3978,7 @@ export default function HubPlateDashboard() {
                 />
               </div>
               <div>
-                <p className="text-sm text-zinc-300 mb-2">Colours (vendor will supply)</p>
+                <p className="text-sm text-neutral-400 mb-2">Colours (vendor will supply)</p>
                 <div className="flex flex-wrap gap-2 items-center">
                   {(
                     [
@@ -3996,7 +3996,7 @@ export default function HubPlateDashboard() {
                       className={`rounded-md border p-0.5 flex items-center justify-center ${
                         on
                           ? 'border-violet-400 ring-1 ring-violet-500/35 shadow-sm'
-                          : 'border-zinc-700'
+                          : 'border-ds-line/50'
                       }`}
                     >
                       <PlateHubColourSwatch
@@ -4013,14 +4013,14 @@ export default function HubPlateDashboard() {
                     className={`rounded-md border p-0.5 flex items-center justify-center ${
                       mvPantone
                         ? 'border-violet-500 ring-1 ring-violet-500/35'
-                        : 'border-zinc-700'
+                        : 'border-ds-line/50'
                     }`}
                   >
                     <PlateHubColourSwatch short="P1" label="Pantone" ghost={!mvPantone} />
                   </button>
                 </div>
                 {mvPantone ? (
-                  <label className="block text-sm text-zinc-300 mt-3">
+                  <label className="block text-sm text-neutral-400 mt-3">
                     How many Pantones?
                     <input
                       type="number"
@@ -4028,15 +4028,15 @@ export default function HubPlateDashboard() {
                       max={12}
                       value={mvPantoneN}
                       onChange={(e) => setMvPantoneN(Number(e.target.value) || 1)}
-                      className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                      className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                     />
                   </label>
                 ) : null}
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+              <div className="flex justify-end gap-2 pt-2 border-t border-ds-line/40">
                 <button
                   type="button"
-                  className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                  className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
                   onClick={() => {
                     setManualVendorOpen(false)
                     resetManualVendorForm()
@@ -4068,31 +4068,31 @@ export default function HubPlateDashboard() {
       {/* Scrap & damage — per channel */}
       {scrapModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-rose-800/50 bg-zinc-950 p-4 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-md rounded-xl border border-rose-800/50 bg-ds-main p-4 space-y-4 max-h-[90vh] overflow-y-auto">
             <div>
               <h3 className="text-lg font-semibold text-foreground">Scrap &amp; damage report</h3>
-              <p className="text-zinc-500 text-xs mt-1">
+              <p className="text-neutral-500 text-xs mt-1">
                 Step 1 — which plates are scrapped? Step 2 — reason. Counts update immediately.
               </p>
-              <p className="text-xs font-mono text-amber-300 mt-2">{scrapModal.plateSetCode}</p>
+              <p className="text-xs font-mono text-ds-warning mt-2">{scrapModal.plateSetCode}</p>
               <p className="text-sm font-bold leading-snug tracking-tight text-blue-400 break-words whitespace-normal">
                 {scrapModal.cartonName}
               </p>
             </div>
             <div>
-              <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+              <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
                 Step 1 — Which plate?
               </p>
-              <div className="space-y-2 rounded-lg border border-zinc-700 bg-background/40 p-3">
+              <div className="space-y-2 rounded-lg border border-ds-line/50 bg-background/40 p-3">
                 {scrapModal.colourNames.length === 0 ? (
-                  <p className="text-xs text-zinc-500">No active channels on this set.</p>
+                  <p className="text-xs text-neutral-500">No active channels on this set.</p>
                 ) : (
                   scrapModal.colourNames.map((name) => {
                     const ch = hubChannelRowsFromLabels([name])[0]
                     return (
                       <label
                         key={name}
-                        className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer"
+                        className="flex items-center gap-2 text-sm text-ds-ink cursor-pointer"
                       >
                         <input
                           type="checkbox"
@@ -4100,7 +4100,7 @@ export default function HubPlateDashboard() {
                           onChange={(e) =>
                             setScrapChannelPick((prev) => ({ ...prev, [name]: e.target.checked }))
                           }
-                          className="rounded border-zinc-600 shrink-0"
+                          className="rounded border-ds-line/50 shrink-0"
                         />
                         <span className="flex items-center gap-2 min-w-0">
                           {ch ? (
@@ -4115,7 +4115,7 @@ export default function HubPlateDashboard() {
               </div>
             </div>
             <div>
-              <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+              <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
                 Step 2 — Reason for scrapping?
               </p>
               <select
@@ -4124,7 +4124,7 @@ export default function HubPlateDashboard() {
                   const v = e.target.value
                   setScrapReasonCode(v ? (v as PlateScrapReasonCode) : '')
                 }}
-                className="w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground text-sm"
+                className="w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm"
               >
                 <option value="">Select reason…</option>
                 {PLATE_SCRAP_REASONS.map((r) => (
@@ -4137,7 +4137,7 @@ export default function HubPlateDashboard() {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
                 onClick={() => setScrapModal(null)}
               >
                 Cancel
@@ -4163,14 +4163,14 @@ export default function HubPlateDashboard() {
       {/* Return to rack — custody audit */}
       {returnAuditModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-emerald-800/50 bg-zinc-950 p-4 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-md rounded-xl border border-emerald-800/50 bg-ds-main p-4 space-y-4 max-h-[90vh] overflow-y-auto">
             <div>
               <h3 className="text-lg font-semibold text-foreground">Return &amp; audit</h3>
-              <p className="text-zinc-500 text-xs mt-1">
+              <p className="text-neutral-500 text-xs mt-1">
                 Confirm which plates go back to live inventory. Unchecked channels are logged as not
                 returned and follow the scrap workflow.
               </p>
-              <p className="text-xs font-mono text-amber-300 mt-2">{returnAuditModal.plateSetCode}</p>
+              <p className="text-xs font-mono text-ds-warning mt-2">{returnAuditModal.plateSetCode}</p>
               <p className="text-sm font-bold leading-snug tracking-tight text-blue-400 break-words whitespace-normal">
                 {returnAuditModal.cartonName}
               </p>
@@ -4179,12 +4179,12 @@ export default function HubPlateDashboard() {
             {returnAuditStep === 1 ? (
               <>
                 <div>
-                  <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
                     Step 1 — Select plates safely returning to rack
                   </p>
-                  <div className="space-y-2 rounded-lg border border-zinc-700 bg-background/40 p-3">
+                  <div className="space-y-2 rounded-lg border border-ds-line/50 bg-background/40 p-3">
                     {returnAuditModal.colourNames.length === 0 ? (
-                      <p className="text-xs text-zinc-400 leading-snug">
+                      <p className="text-xs text-neutral-500 leading-snug">
                         No channel list on this card. On confirm, all active plates for this custody
                         row are returned to live inventory (same as selecting every channel).
                       </p>
@@ -4194,7 +4194,7 @@ export default function HubPlateDashboard() {
                         return (
                           <label
                             key={name}
-                            className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer"
+                            className="flex items-center gap-2 text-sm text-ds-ink cursor-pointer"
                           >
                             <input
                               type="checkbox"
@@ -4202,7 +4202,7 @@ export default function HubPlateDashboard() {
                               onChange={(e) =>
                                 setReturnAuditPick((prev) => ({ ...prev, [name]: e.target.checked }))
                               }
-                              className="rounded border-zinc-600 shrink-0"
+                              className="rounded border-ds-line/50 shrink-0"
                             />
                             <span className="flex items-center gap-2 min-w-0">
                               {ch ? (
@@ -4215,14 +4215,14 @@ export default function HubPlateDashboard() {
                       })
                     )}
                   </div>
-                  <p className="text-[11px] text-zinc-500 mt-2 leading-snug">
+                  <p className="text-[11px] text-neutral-500 mt-2 leading-snug">
                     Any plate left unchecked is flagged for the scrap / damage workflow automatically.
                   </p>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                    className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
                     onClick={() => setReturnAuditModal(null)}
                   >
                     Cancel
@@ -4252,13 +4252,13 @@ export default function HubPlateDashboard() {
               </>
             ) : (
               <>
-                <div className="rounded-lg border border-zinc-700 bg-background/40 p-2.5 space-y-2">
-                  <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+                <div className="rounded-lg border border-ds-line/50 bg-background/40 p-2.5 space-y-2">
+                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
                     Verify plate dimensions
                   </p>
-                  <p className="text-[11px] text-zinc-500 leading-snug">
+                  <p className="text-[11px] text-neutral-500 leading-snug">
                     Current:{' '}
-                    <span className="text-zinc-300">
+                    <span className="text-neutral-400">
                       {HUB_PLATE_SIZE_OPTIONS.find((o) => o.value === returnSizeOriginal)?.mm ??
                         returnSizeOriginal}
                     </span>
@@ -4276,8 +4276,8 @@ export default function HubPlateDashboard() {
                     accent="emerald"
                   />
                   {returnSizePick !== returnSizeOriginal ? (
-                    <div className="mt-2 pt-2 border-t border-zinc-700/80 space-y-2 transition-all">
-                      <p className="text-xs font-semibold text-amber-200/90">
+                    <div className="mt-2 pt-2 border-t border-ds-line/50 space-y-2 transition-all">
+                      <p className="text-xs font-semibold text-ds-warning">
                         Reason for size modification?{' '}
                         <span className="text-red-400">*</span>
                       </p>
@@ -4285,27 +4285,27 @@ export default function HubPlateDashboard() {
                         {RETURN_SIZE_MOD_REASONS.map((opt) => (
                           <label
                             key={opt.value}
-                            className="flex items-start gap-2 text-sm text-zinc-200 cursor-pointer leading-tight"
+                            className="flex items-start gap-2 text-sm text-ds-ink cursor-pointer leading-tight"
                           >
                             <input
                               type="radio"
                               name="returnSizeModReason"
                               checked={returnSizeModReason === opt.value}
                               onChange={() => setReturnSizeModReason(opt.value)}
-                              className="border-zinc-600 mt-0.5 shrink-0"
+                              className="border-ds-line/50 mt-0.5 shrink-0"
                             />
                             <span>{opt.label}</span>
                           </label>
                         ))}
                       </fieldset>
-                      <label className="block text-[11px] text-zinc-400">
+                      <label className="block text-[11px] text-neutral-500">
                         Remarks (optional)
                         <input
                           type="text"
                           value={returnSizeRemarks}
                           onChange={(e) => setReturnSizeRemarks(e.target.value)}
                           placeholder="e.g. Cut by Team B for Machine 2"
-                          className="mt-1 w-full px-2 py-1.5 rounded-md bg-background border border-zinc-600 text-foreground text-sm placeholder:text-zinc-600"
+                          className="mt-1 w-full px-2 py-1.5 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-600"
                         />
                       </label>
                     </div>
@@ -4313,24 +4313,24 @@ export default function HubPlateDashboard() {
                 </div>
 
                 <div>
-                  <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
                     Step 2 — Confirm plate origin (for analytics)
                   </p>
-                  <p className="text-[11px] text-zinc-500 mb-3">
+                  <p className="text-[11px] text-neutral-500 mb-3">
                     Default follows custody source; override if needed for reporting accuracy.
                   </p>
-                  <fieldset className="space-y-2 rounded-lg border border-zinc-700 bg-background/40 p-3">
+                  <fieldset className="space-y-2 rounded-lg border border-ds-line/50 bg-background/40 p-3">
                     {PLATE_FIRST_ORIGIN_OPTIONS.map((opt) => (
                       <label
                         key={opt.value}
-                        className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer"
+                        className="flex items-center gap-2 text-sm text-ds-ink cursor-pointer"
                       >
                         <input
                           type="radio"
                           name="returnAuditOrigin"
                           checked={returnAuditOrigin === opt.value}
                           onChange={() => setReturnAuditOrigin(opt.value)}
-                          className="border-zinc-600"
+                          className="border-ds-line/50"
                         />
                         {opt.label}
                       </label>
@@ -4340,7 +4340,7 @@ export default function HubPlateDashboard() {
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                    className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
                     onClick={() => setReturnAuditStep(1)}
                     disabled={saving}
                   >
@@ -4367,56 +4367,56 @@ export default function HubPlateDashboard() {
       {/* Partial remake from live inventory */}
       {remakePlate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-600 bg-zinc-950 p-4 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-md rounded-xl border border-ds-line/50 bg-ds-main p-4 space-y-4 max-h-[90vh] overflow-y-auto">
             <div>
               <h3 className="text-lg font-semibold text-foreground">Report damage / remake</h3>
-              <p className="text-zinc-500 text-xs mt-1">
+              <p className="text-neutral-500 text-xs mt-1">
                 Which plate is missing or damaged? The rack set stays; a new{' '}
                 <span className="text-rose-400 font-semibold">(Remake)</span> job is created for only the
                 selected colours.
               </p>
-              <p className="text-sm text-amber-200/90 font-mono mt-2">{remakePlate.plateSetCode}</p>
+              <p className="text-sm text-ds-warning font-mono mt-2">{remakePlate.plateSetCode}</p>
               <p className="text-sm font-bold leading-snug tracking-tight text-blue-400 break-words whitespace-normal">
                 {remakePlate.cartonName}
               </p>
             </div>
             <fieldset className="space-y-2">
-              <legend className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">
+              <legend className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
                 Send partial job to
               </legend>
-              <label className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-ds-ink cursor-pointer">
                 <input
                   type="radio"
                   name="remakeLane"
                   checked={remakeLane === 'inhouse_ctp'}
                   onChange={() => setRemakeLane('inhouse_ctp')}
-                  className="border-zinc-600"
+                  className="border-ds-line/50"
                 />
                 In-house CTP queue
               </label>
-              <label className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-ds-ink cursor-pointer">
                 <input
                   type="radio"
                   name="remakeLane"
                   checked={remakeLane === 'outside_vendor'}
                   onChange={() => setRemakeLane('outside_vendor')}
-                  className="border-zinc-600"
+                  className="border-ds-line/50"
                 />
                 Outside vendor
               </label>
             </fieldset>
             <div>
-              <p className="text-sm text-zinc-300 mb-2">Missing / damaged colours</p>
-              <div className="space-y-2 rounded-lg border border-zinc-700 bg-background/40 p-3">
+              <p className="text-sm text-neutral-400 mb-2">Missing / damaged colours</p>
+              <div className="space-y-2 rounded-lg border border-ds-line/50 bg-background/40 p-3">
                 {Object.keys(remakePick).length === 0 ? (
-                  <p className="text-xs text-zinc-500">No colour channels on this set.</p>
+                  <p className="text-xs text-neutral-500">No colour channels on this set.</p>
                 ) : (
                   Object.keys(remakePick).map((name) => {
                     const ch = hubChannelRowsFromLabels([name])[0]
                     return (
                       <label
                         key={name}
-                        className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer"
+                        className="flex items-center gap-2 text-sm text-ds-ink cursor-pointer"
                       >
                         <input
                           type="checkbox"
@@ -4424,13 +4424,13 @@ export default function HubPlateDashboard() {
                           onChange={(e) =>
                             setRemakePick((prev) => ({ ...prev, [name]: e.target.checked }))
                           }
-                          className="rounded border-zinc-600 shrink-0"
+                          className="rounded border-ds-line/50 shrink-0"
                         />
                         <span className="flex items-center gap-2 min-w-0">
                           {ch ? (
                             <PlateHubColourSwatch short={ch.short} label={ch.label} />
                           ) : null}
-                          <span className="text-xs text-zinc-300 break-words whitespace-normal">{name}</span>
+                          <span className="text-xs text-neutral-400 break-words whitespace-normal">{name}</span>
                         </span>
                       </label>
                     )
@@ -4441,7 +4441,7 @@ export default function HubPlateDashboard() {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-zinc-600 text-zinc-300"
+                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
                 onClick={() => setRemakePlate(null)}
               >
                 Cancel

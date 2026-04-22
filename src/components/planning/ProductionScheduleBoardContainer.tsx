@@ -355,7 +355,7 @@ export function ProductionScheduleBoardContainer() {
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-border/10 bg-background px-4 py-8 text-center text-sm text-slate-500">
+      <div className="rounded-2xl border border-border/10 bg-background px-4 py-8 text-center text-sm text-ds-ink-faint">
         Loading production schedule…
       </div>
     )
@@ -363,7 +363,7 @@ export function ProductionScheduleBoardContainer() {
 
   return (
     <div className="rounded-2xl border border-border/10 bg-background px-4 py-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]">
-      <p className="text-xs text-slate-500 mb-3">
+      <p className="text-xs text-ds-ink-faint mb-3">
         Drag lines from the ready sidebar into machine × shift cells. Changes sync to PO line specs. For readiness and
         job-card actions use{' '}
         <a href="/orders/planning" className="text-orange-400 hover:underline">

@@ -50,7 +50,7 @@ export function colourDotFromLabel(label: string, index: number): HubColourDot {
     return {
       key: `p-${index}`,
       bgClass: 'bg-white',
-      ringClass: 'ring-2 ring-amber-500 ring-offset-1 ring-offset-black border border-zinc-500',
+      ringClass: 'ring-2 ring-ds-warning ring-offset-1 ring-offset-black border border-ds-line/50',
       title,
     }
   }
@@ -64,7 +64,7 @@ export function colourDotFromLabel(label: string, index: number): HubColourDot {
     return { key: `k-${index}`, bgClass: 'bg-gray-900 border border-gray-600', ringClass: '', title }
   return {
     key: `x-${index}`,
-    bgClass: 'bg-zinc-600',
+    bgClass: 'bg-ds-line/40',
     ringClass: '',
     title,
   }

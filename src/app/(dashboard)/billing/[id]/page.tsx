@@ -66,17 +66,17 @@ export default function BillDetailPage() {
     }
   }
 
-  if (!bill) return <div className="p-4 text-slate-400">Loading…</div>
+  if (!bill) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
   return (
     <div className="p-4 max-w-4xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <Link href="/billing" className="text-sm text-slate-400 hover:text-foreground mb-1 inline-block">
+          <Link href="/billing" className="text-sm text-ds-ink-muted hover:text-foreground mb-1 inline-block">
             ← Bills
           </Link>
-          <h1 className="text-xl font-bold text-amber-400">{bill.billNumber}</h1>
-          <p className="text-sm text-slate-400">
+          <h1 className="text-xl font-bold text-ds-warning">{bill.billNumber}</h1>
+          <p className="text-sm text-ds-ink-muted">
             {bill.customer.name} · {new Date(bill.billDate).toLocaleDateString()}
           </p>
         </div>
@@ -84,7 +84,7 @@ export default function BillDetailPage() {
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-foreground text-sm"
+            className="px-3 py-1.5 rounded-lg bg-ds-card border border-ds-line/60 text-foreground text-sm"
           >
             <option value="draft">Draft</option>
             <option value="sent">Sent</option>
@@ -93,16 +93,16 @@ export default function BillDetailPage() {
           <button
             onClick={handleSaveStatus}
             disabled={saving}
-            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm"
+            className="px-3 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
 
-      <div className="rounded-xl bg-slate-900 border border-slate-700 overflow-hidden">
+      <div className="rounded-xl bg-ds-card border border-ds-line/50 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-800 text-slate-300">
+          <thead className="bg-ds-elevated text-ds-ink-muted">
             <tr>
               <th className="px-4 py-2 text-left">Description</th>
               <th className="px-4 py-2 text-right">Qty</th>
@@ -111,16 +111,16 @@ export default function BillDetailPage() {
               <th className="px-4 py-2 text-right">Amount</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700">
+          <tbody className="divide-y divide-ds-line/40">
             {bill.lineItems.map((li) => (
               <tr key={li.id}>
-                <td className="px-4 py-2 text-slate-200">{li.description}</td>
-                <td className="px-4 py-2 text-right text-slate-300">{li.quantity}</td>
-                <td className="px-4 py-2 text-right text-slate-300">
+                <td className="px-4 py-2 text-ds-ink">{li.description}</td>
+                <td className="px-4 py-2 text-right text-ds-ink-muted">{li.quantity}</td>
+                <td className="px-4 py-2 text-right text-ds-ink-muted">
                   ₹{li.rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                 </td>
-                <td className="px-4 py-2 text-right text-slate-300">{li.gstPct}%</td>
-                <td className="px-4 py-2 text-right text-slate-200">
+                <td className="px-4 py-2 text-right text-ds-ink-muted">{li.gstPct}%</td>
+                <td className="px-4 py-2 text-right text-ds-ink">
                   ₹{li.amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                 </td>
               </tr>
@@ -129,21 +129,21 @@ export default function BillDetailPage() {
         </table>
       </div>
 
-      <div className="rounded-xl bg-slate-900 border border-slate-700 p-4 flex justify-end">
+      <div className="rounded-xl bg-ds-card border border-ds-line/50 p-4 flex justify-end">
         <div className="text-sm space-y-1 text-right">
           <div className="flex justify-between gap-8">
-            <span className="text-slate-400">Subtotal</span>
-            <span className="text-slate-200">
+            <span className="text-ds-ink-muted">Subtotal</span>
+            <span className="text-ds-ink">
               ₹{bill.subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
             </span>
           </div>
           <div className="flex justify-between gap-8">
-            <span className="text-slate-400">GST</span>
-            <span className="text-slate-200">
+            <span className="text-ds-ink-muted">GST</span>
+            <span className="text-ds-ink">
               ₹{bill.gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
             </span>
           </div>
-          <div className="flex justify-between gap-8 font-semibold text-amber-300 border-t border-slate-700 pt-2 mt-2">
+          <div className="flex justify-between gap-8 font-semibold text-ds-warning border-t border-ds-line/50 pt-2 mt-2">
             <span>Total</span>
             <span>₹{bill.totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
           </div>

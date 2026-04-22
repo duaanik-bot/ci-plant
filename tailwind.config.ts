@@ -74,21 +74,21 @@ const config: Config = {
         },
         /** Plate Hub — process magenta (matches industry CMYK “M” on dark UI) */
         plateMagenta: '#FF00FF',
-        /** COLOUR IMPRESSIONS SaaS — bg-ds-*, text-ds-ink*, border-ds-line* */
+        /** COLOUR IMPRESSIONS SaaS — premium dark skin (indigo accent, soft surfaces) */
         ds: {
-          main: '#0B1220',
+          main: '#0A0F1C',
           card: '#111827',
-          elevated: '#121A2A',
-          line: '#1F2937',
-          lineStrong: '#374151',
+          elevated: '#131A2B',
+          line: '#1A2332',
+          lineStrong: '#2A3344',
           ink: '#E5E7EB',
           'ink-muted': '#9CA3AF',
           'ink-faint': '#6B7280',
-          brand: '#3B82F6',
-          'brand-hover': '#2563EB',
-          success: '#22C55E',
-          warning: '#F59E0B',
-          error: '#EF4444',
+          brand: '#6366F1',
+          'brand-hover': '#4F46E5',
+          success: '#3FCF8E',
+          warning: '#EAB308',
+          error: '#F87171',
         },
         /** Precision Pharma — enterprise light theme (see globals.css) */
         pharma: {

@@ -119,20 +119,20 @@ export default function ArtworkJobPage() {
 
   if (loading || !data) {
     return (
-      <div className="p-4 text-slate-400">Loading…</div>
+      <div className="p-4 text-ds-ink-muted">Loading…</div>
     )
   }
 
-  const statusBadge = art?.status === 'approved' ? 'bg-green-900/50 text-green-300' : art?.status === 'partially_approved' ? 'bg-amber-900/50 text-amber-300' : 'bg-slate-700 text-slate-300'
+  const statusBadge = art?.status === 'approved' ? 'bg-green-900/50 text-green-300' : art?.status === 'partially_approved' ? 'bg-ds-warning/12 text-ds-warning' : 'bg-ds-elevated text-ds-ink-muted'
 
   return (
     <div className="p-4 max-w-3xl mx-auto space-y-6">
-      <div className="bg-slate-800 rounded-lg p-4">
+      <div className="bg-ds-elevated rounded-lg p-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
-            <h1 className="text-lg font-bold text-amber-400">{data.job.jobNumber}</h1>
-            <p className="text-slate-300">{data.job.productName}</p>
-            <p className="text-slate-400 text-sm">{data.job.customerName}</p>
+            <h1 className="text-lg font-bold text-ds-warning">{data.job.jobNumber}</h1>
+            <p className="text-ds-ink-muted">{data.job.productName}</p>
+            <p className="text-ds-ink-muted text-sm">{data.job.customerName}</p>
           </div>
           <span className={`px-3 py-1 rounded text-sm font-medium ${statusBadge}`}>
             {art?.status ?? 'pending'}
@@ -149,7 +149,7 @@ export default function ArtworkJobPage() {
               <span
                 key={n}
                 className={`px-3 py-1 rounded text-sm ${
-                  done ? 'bg-green-700 text-primary-foreground' : current ? 'bg-blue-700 text-primary-foreground' : 'bg-slate-600 text-slate-400'
+                  done ? 'bg-green-700 text-primary-foreground' : current ? 'bg-blue-700 text-primary-foreground' : 'bg-ds-line/30 text-ds-ink-muted'
                 }`}
               >
                 Lock {n} {done ? '✓' : current ? '●' : '○'}
@@ -160,9 +160,9 @@ export default function ArtworkJobPage() {
       )}
 
       {!art && (
-        <div className="bg-slate-800 rounded-lg p-4">
-          <p className="text-slate-400 mb-2">No artwork yet.</p>
-          <label className="inline-block px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground cursor-pointer">
+        <div className="bg-ds-elevated rounded-lg p-4">
+          <p className="text-ds-ink-muted mb-2">No artwork yet.</p>
+          <label className="inline-block px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground cursor-pointer">
             {uploading ? 'Uploading…' : 'Upload customer approval document'}
             <input
               type="file"
@@ -180,7 +180,7 @@ export default function ArtworkJobPage() {
           {/* Lock 1 */}
           <div
             className={`rounded-lg p-4 border-2 ${
-              lock1Done ? 'bg-green-900/30 border-green-600' : 'bg-slate-800 border-slate-600'
+              lock1Done ? 'bg-green-900/30 border-green-600' : 'bg-ds-elevated border-ds-line/60'
             }`}
           >
             <h2 className="font-semibold mb-2">
@@ -191,7 +191,7 @@ export default function ArtworkJobPage() {
             ) : (
               <div className="flex items-center gap-4">
                 <span className="text-red-400 text-sm">Not completed</span>
-                <label className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm cursor-pointer">
+                <label className="px-3 py-1.5 rounded bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm cursor-pointer">
                   Upload document
                   <input
                     type="file"
@@ -208,7 +208,7 @@ export default function ArtworkJobPage() {
           {/* Lock 2 */}
           <div
             className={`rounded-lg p-4 border-2 ${
-              lock2Done ? 'bg-green-900/30 border-green-600' : 'bg-slate-800 border-slate-600'
+              lock2Done ? 'bg-green-900/30 border-green-600' : 'bg-ds-elevated border-ds-line/60'
             }`}
           >
             <h2 className="font-semibold mb-2">
@@ -235,7 +235,7 @@ export default function ArtworkJobPage() {
                   type="button"
                   disabled={!lock2AllChecked || submittingLock !== null}
                   onClick={() => submitLock(2)}
-                  className="mt-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-primary-foreground text-sm"
+                  className="mt-2 px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground text-sm"
                 >
                   {submittingLock === 2 ? 'Submitting…' : 'Submit checklist'}
                 </button>
@@ -246,7 +246,7 @@ export default function ArtworkJobPage() {
           {/* Lock 3 */}
           <div
             className={`rounded-lg p-4 border-2 ${
-              lock3Done ? 'bg-green-900/30 border-green-600' : 'bg-slate-800 border-slate-600'
+              lock3Done ? 'bg-green-900/30 border-green-600' : 'bg-ds-elevated border-ds-line/60'
             }`}
           >
             <h2 className="font-semibold mb-2">
@@ -256,12 +256,12 @@ export default function ArtworkJobPage() {
               <p className="text-green-300 text-sm">QA Manager sign-off done.</p>
             ) : (
               <div>
-                <p className="text-slate-400 text-sm mb-2">Version comparison — QA Manager sign-off.</p>
+                <p className="text-ds-ink-muted text-sm mb-2">Version comparison — QA Manager sign-off.</p>
                 <button
                   type="button"
                   disabled={submittingLock !== null}
                   onClick={() => submitLock(3)}
-                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-primary-foreground text-sm"
+                  className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground text-sm"
                 >
                   {submittingLock === 3 ? 'Submitting…' : 'Sign off'}
                 </button>
@@ -272,7 +272,7 @@ export default function ArtworkJobPage() {
           {/* Lock 4 */}
           <div
             className={`rounded-lg p-4 border-2 ${
-              lock4Done ? 'bg-green-900/30 border-green-600' : 'bg-slate-800 border-slate-600'
+              lock4Done ? 'bg-green-900/30 border-green-600' : 'bg-ds-elevated border-ds-line/60'
             }`}
           >
             <h2 className="font-semibold mb-2">
@@ -287,7 +287,7 @@ export default function ArtworkJobPage() {
                 )}
               </div>
             ) : (
-              <p className="text-slate-400 text-sm">Auto-generated after Lock 3.</p>
+              <p className="text-ds-ink-muted text-sm">Auto-generated after Lock 3.</p>
             )}
           </div>
         </>

@@ -17,11 +17,11 @@ export default async function MastersLayout({
   }
 
   return (
-    <div className="mx-auto min-h-0 max-w-6xl bg-slate-50 p-4 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+    <div className="mx-auto min-h-0 max-w-6xl bg-neutral-50 p-4 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <Link
           href="/dashboard"
-          className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50"
+          className="text-sm text-ds-ink-faint hover:text-neutral-900 dark:text-ds-ink-muted dark:hover:text-ds-ink"
         >
           ← Dashboard
         </Link>

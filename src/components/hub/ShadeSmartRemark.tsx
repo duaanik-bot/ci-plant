@@ -15,7 +15,7 @@ export function ShadeSmartRemark({
 }) {
   const full = (text ?? '').trim()
   if (!full) {
-    return <span className={`text-zinc-600 ${monoClass}`}>—</span>
+    return <span className={`text-neutral-600 ${monoClass}`}>—</span>
   }
   const short = full.length > 20 ? `${full.slice(0, 20)}…` : full
   const by = editedBy?.trim() || '—'
@@ -23,14 +23,14 @@ export function ShadeSmartRemark({
   const tsLabel = ts ? new Date(ts).toLocaleString() : '—'
   return (
     <div className="group relative max-w-[7rem] font-sans">
-      <span className="block truncate text-zinc-400 cursor-default">{short}</span>
+      <span className="block truncate text-neutral-500 cursor-default">{short}</span>
       <div
-        className="pointer-events-none invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity absolute z-[80] bottom-full left-0 mb-1 w-72 rounded-lg border border-zinc-700 bg-zinc-950 p-2 text-[11px] shadow-xl text-zinc-200"
+        className="pointer-events-none invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity absolute z-[80] bottom-full left-0 mb-1 w-72 rounded-lg border border-ds-line/50 bg-ds-main p-2 text-[11px] shadow-xl text-ds-ink"
         role="tooltip"
       >
-        <p className="whitespace-pre-wrap text-zinc-100">{full}</p>
-        <p className={`mt-1 text-zinc-500 ${monoClass}`}>Updated by {by}</p>
-        <p className={`text-zinc-500 ${monoClass}`}>{tsLabel}</p>
+        <p className="whitespace-pre-wrap text-ds-ink">{full}</p>
+        <p className={`mt-1 text-neutral-500 ${monoClass}`}>Updated by {by}</p>
+        <p className={`text-neutral-500 ${monoClass}`}>{tsLabel}</p>
       </div>
     </div>
   )

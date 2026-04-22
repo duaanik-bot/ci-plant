@@ -64,7 +64,7 @@ function Verdict({
     )
   }
   return (
-    <div className="flex items-center gap-2 text-slate-500 text-sm">
+    <div className="flex items-center gap-2 text-ds-ink-faint text-sm">
       <HelpCircle className="h-4 w-4 shrink-0" />
       <span>{label}: not enough data</span>
     </div>
@@ -124,34 +124,34 @@ export function JobCardHubAuditDrawer({
       onClose={onClose}
       widthClass="max-w-lg"
     >
-      {loading && <p className="text-slate-500 text-sm">Loading audit…</p>}
+      {loading && <p className="text-ds-ink-faint text-sm">Loading audit…</p>}
       {!loading && data && (
-        <div className="space-y-6 text-slate-200">
+        <div className="space-y-6 text-ds-ink">
           <section className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">OEE tracker</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">OEE tracker</h3>
             {data.liveOee ? (
-              <div className={`rounded-lg border border-slate-800 bg-slate-950/80 p-3 space-y-2 ${mono} text-sm`}>
+              <div className={`rounded-lg border border-ds-line/40 bg-ds-main/80 p-3 space-y-2 ${mono} text-sm`}>
                 <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">Live speed</span>
+                  <span className="text-ds-ink-faint">Live speed</span>
                   <span className="text-emerald-300">{data.liveOee.currentSpeedPph} sh/h</span>
                 </div>
                 <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">Rated capacity</span>
-                  <span className="text-slate-200">{data.liveOee.ratedSpeedPph} sh/h</span>
+                  <span className="text-ds-ink-faint">Rated capacity</span>
+                  <span className="text-ds-ink">{data.liveOee.ratedSpeedPph} sh/h</span>
                 </div>
-                <div className="flex justify-between gap-4 border-t border-slate-800 pt-2">
-                  <span className="text-slate-500">Performance</span>
+                <div className="flex justify-between gap-4 border-t border-ds-line/40 pt-2">
+                  <span className="text-ds-ink-faint">Performance</span>
                   <span>{data.liveOee.performance}%</span>
                 </div>
                 <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">Availability</span>
+                  <span className="text-ds-ink-faint">Availability</span>
                   <span>{data.liveOee.availability}%</span>
                 </div>
                 <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">Quality</span>
+                  <span className="text-ds-ink-faint">Quality</span>
                   <span>{data.liveOee.quality}%</span>
                 </div>
-                <div className="flex justify-between gap-4 font-semibold text-amber-200">
+                <div className="flex justify-between gap-4 font-semibold text-ds-warning">
                   <span>OEE</span>
                   <span>{data.liveOee.oee}%</span>
                 </div>
@@ -163,22 +163,22 @@ export function JobCardHubAuditDrawer({
                 ) : null}
               </div>
             ) : (
-              <p className="text-slate-500 text-sm">No live printing stage in progress — OEE not active.</p>
+              <p className="text-ds-ink-faint text-sm">No live printing stage in progress — OEE not active.</p>
             )}
           </section>
 
           <section className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Waste ledger</h3>
-            <div className={`rounded-lg border border-slate-800 bg-slate-950/80 p-3 space-y-2 ${mono} text-sm`}>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">Waste ledger</h3>
+            <div className={`rounded-lg border border-ds-line/40 bg-ds-main/80 p-3 space-y-2 ${mono} text-sm`}>
               <div className="flex justify-between">
-                <span className="text-slate-500">Setup sheets (job card)</span>
+                <span className="text-ds-ink-faint">Setup sheets (job card)</span>
                 <span>{data.waste.setupSheets}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Running waste (excess issues)</span>
+                <span className="text-ds-ink-faint">Running waste (excess issues)</span>
                 <span className="text-rose-300">{data.waste.runningWasteSheets}</span>
               </div>
-              <div className="flex justify-between text-xs text-slate-500">
+              <div className="flex justify-between text-xs text-ds-ink-faint">
                 <span>Sheet issue rows</span>
                 <span>{data.waste.sheetIssueCount}</span>
               </div>
@@ -186,23 +186,23 @@ export function JobCardHubAuditDrawer({
           </section>
 
           <section className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tooling verification</h3>
-            <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-3 space-y-3 text-sm">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">Tooling verification</h3>
+            <div className="rounded-lg border border-ds-line/40 bg-ds-main/80 p-3 space-y-3 text-sm">
               <div className={`grid grid-cols-2 gap-2 ${mono} text-xs`}>
                 <div>
-                  <div className="text-slate-500">PO die # (spec)</div>
+                  <div className="text-ds-ink-faint">PO die # (spec)</div>
                   <div>{data.tooling.dieNumberSpec ?? '—'}</div>
                 </div>
                 <div>
-                  <div className="text-slate-500">Emboss on card</div>
+                  <div className="text-ds-ink-faint">Emboss on card</div>
                   <div>{data.tooling.embossBlockCode ?? '—'}</div>
                 </div>
                 <div>
-                  <div className="text-slate-500">PO shade (spec)</div>
+                  <div className="text-ds-ink-faint">PO shade (spec)</div>
                   <div>{data.tooling.shadeCodeSpec ?? '—'}</div>
                 </div>
                 <div>
-                  <div className="text-slate-500">Shade issued to job</div>
+                  <div className="text-ds-ink-faint">Shade issued to job</div>
                   <div>{data.tooling.shadeCodesIssued.length ? data.tooling.shadeCodesIssued.join(', ') : '—'}</div>
                 </div>
               </div>
@@ -212,27 +212,27 @@ export function JobCardHubAuditDrawer({
           </section>
 
           <section className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Operator remarks timeline</h3>
-            <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/80 divide-y divide-slate-800/80">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">Operator remarks timeline</h3>
+            <div className="max-h-56 overflow-y-auto rounded-lg border border-ds-line/40 bg-ds-main/80 divide-y divide-ds-line/40">
               {data.remarksTimeline.length === 0 ? (
-                <p className="p-3 text-slate-500 text-sm">No floor notes yet.</p>
+                <p className="p-3 text-ds-ink-faint text-sm">No floor notes yet.</p>
               ) : (
                 data.remarksTimeline.map((row, i) => (
                   <div key={`${row.at}-${i}`} className="p-2.5 text-sm">
-                    <div className={`text-[10px] uppercase tracking-wide text-slate-500 ${mono}`}>
+                    <div className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>
                       {new Date(row.at).toLocaleString()} · {row.kind}
                     </div>
-                    <p className="text-slate-200 mt-0.5">{row.text}</p>
+                    <p className="text-ds-ink mt-0.5">{row.text}</p>
                   </div>
                 ))
               )}
             </div>
           </section>
 
-          <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800">
+          <div className="flex flex-wrap gap-2 pt-2 border-t border-ds-line/40">
             <Link
               href={jobCardId ? `/production/job-cards/${jobCardId}` : '#'}
-              className="px-3 py-2 rounded-lg bg-slate-800 text-slate-100 text-sm hover:bg-slate-700"
+              className="px-3 py-2 rounded-lg bg-ds-elevated text-ds-ink text-sm hover:bg-ds-elevated"
             >
               Open job card
             </Link>
@@ -240,7 +240,7 @@ export function JobCardHubAuditDrawer({
               href={jobCardId ? `/api/job-cards/${jobCardId}/card-pdf` : '#'}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-2 rounded-lg bg-amber-600 text-primary-foreground text-sm font-medium hover:bg-amber-500"
+              className="px-3 py-2 rounded-lg bg-ds-warning text-primary-foreground text-sm font-medium hover:bg-ds-warning"
             >
               Print official card
             </a>

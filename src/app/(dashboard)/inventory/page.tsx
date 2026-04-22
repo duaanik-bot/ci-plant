@@ -227,14 +227,14 @@ function InventoryPageContent() {
     }
   }
 
-  if (loading) return <div className="p-4 text-slate-400">Loading…</div>
+  if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
   const fmt = (n: number) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
   const fmtVal = (n: number) => `₹${fmt(n)}`
 
   function ageDotClass(bucket: PaperLedgerRow['ageBucket']) {
     if (bucket === 'fresh') return 'bg-emerald-500'
-    if (bucket === 'mature') return 'bg-amber-500'
+    if (bucket === 'mature') return 'bg-ds-warning'
     return 'bg-red-500 animate-pulse'
   }
 
@@ -250,18 +250,18 @@ function InventoryPageContent() {
     <div className="p-4 max-w-6xl mx-auto">
       <section
         id="paper-ledger"
-        className="mb-8 rounded-xl border border-slate-800 overflow-hidden bg-background text-slate-200"
+        className="mb-8 rounded-xl border border-ds-line/40 overflow-hidden bg-background text-ds-ink"
       >
         <div className="p-4 md:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-4">
             <div>
-              <h2 className="text-lg font-semibold text-amber-400">Warehouse hub — Paper pending issue</h2>
-              <p className="text-xs text-slate-500 mt-1 font-mono">
+              <h2 className="text-lg font-semibold text-ds-warning">Warehouse hub — Paper pending issue</h2>
+              <p className="text-xs text-ds-ink-faint mt-1 font-mono">
                 Director priority stars sort to the top. Search customer PO # to trace batches. JetBrains mono for
                 weights and PO numbers.
               </p>
               {(ledgerGsm || ledgerBoard) && (
-                <p className={`text-xs text-amber-400/90 mt-2 ${ledgerMono}`}>
+                <p className={`text-xs text-ds-warning mt-2 ${ledgerMono}`}>
                   Job card deep link · GSM {ledgerGsm || '—'} · Board {ledgerBoard || '—'}
                 </p>
               )}
@@ -271,18 +271,18 @@ function InventoryPageContent() {
               <p className={`text-2xl text-red-200 ${ledgerMono}`}>
                 {fmtVal(paperLedger?.staleCapitalInr ?? 0)}
               </p>
-              <p className="text-[11px] text-slate-500 mt-1">₹ value of sheets on hand &gt; 60 days</p>
+              <p className="text-[11px] text-ds-ink-faint mt-1">₹ value of sheets on hand &gt; 60 days</p>
             </div>
           </div>
 
-          <label className="block mb-3 text-[11px] text-slate-500 uppercase tracking-wide">
+          <label className="block mb-3 text-[11px] text-ds-ink-faint uppercase tracking-wide">
             Deep search — Customer PO #
             <input
               type="text"
               value={hubSearchPo}
               onChange={(e) => setHubSearchPo(e.target.value)}
               placeholder="e.g. CI-PO-2026-0001"
-              className={`mt-1 w-full max-w-md rounded-lg border border-slate-700 bg-background px-3 py-2 text-sm text-foreground placeholder:text-slate-600 ${ledgerMono}`}
+              className={`mt-1 w-full max-w-md rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
             />
           </label>
 
@@ -292,8 +292,8 @@ function InventoryPageContent() {
               onClick={() => setPaperLedgerSort('oldest')}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
                 paperLedgerSort === 'oldest'
-                  ? 'bg-amber-600 border-amber-500 text-primary-foreground'
-                  : 'bg-background border-slate-700 text-slate-400 hover:border-slate-500'
+                  ? 'bg-ds-warning border-ds-warning text-primary-foreground'
+                  : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
               }`}
             >
               Oldest first
@@ -303,17 +303,17 @@ function InventoryPageContent() {
               onClick={() => setPaperLedgerSort('newest')}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
                 paperLedgerSort === 'newest'
-                  ? 'bg-amber-600 border-amber-500 text-primary-foreground'
-                  : 'bg-background border-slate-700 text-slate-400 hover:border-slate-500'
+                  ? 'bg-ds-warning border-ds-warning text-primary-foreground'
+                  : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
               }`}
             >
               Newest first
             </button>
           </div>
-          <div className="overflow-x-auto rounded-lg border border-slate-800">
+          <div className="overflow-x-auto rounded-lg border border-ds-line/40">
             <table className="w-full text-sm">
-              <thead className="bg-background text-left border-b border-slate-800">
-                <tr className="text-slate-400 text-xs uppercase tracking-wide">
+              <thead className="bg-background text-left border-b border-ds-line/40">
+                <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
                   <th className="px-2 py-2 w-8">Pri</th>
                   <th className="px-3 py-2">Lot</th>
                   <th className="px-3 py-2">GSM</th>
@@ -325,7 +325,7 @@ function InventoryPageContent() {
                   <th className="px-3 py-2">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-900">
+              <tbody className="divide-y divide-ds-card">
                 {sortedPaperRows.map((row) => {
                   const priGlow = row.industrialPriority
                     ? 'shadow-[0_0_20px_rgba(251,146,60,0.35)] ring-1 ring-orange-500/50 bg-orange-950/15'
@@ -342,27 +342,27 @@ function InventoryPageContent() {
                           setDrawerRow(row)
                         }
                       }}
-                      className={`hover:bg-zinc-950/80 cursor-pointer ${priGlow}`}
+                      className={`hover:bg-ds-main/80 cursor-pointer ${priGlow}`}
                     >
                       <td className="px-2 py-2 align-middle">
                         <Star
                           className={`h-4 w-4 ${
                             row.industrialPriority
                               ? 'text-orange-400 fill-orange-400 drop-shadow-[0_0_6px_rgba(251,146,60,0.9)]'
-                              : 'text-zinc-700'
+                              : 'text-neutral-700'
                           }`}
                           strokeWidth={row.industrialPriority ? 0 : 1.2}
                         />
                       </td>
-                      <td className={`px-3 py-2 text-xs text-slate-200 ${ledgerMono}`}>{row.lotNumber ?? '—'}</td>
-                      <td className={`px-3 py-2 text-slate-200 ${ledgerMono}`}>{row.gsm}</td>
-                      <td className="px-3 py-2 text-slate-300">
+                      <td className={`px-3 py-2 text-xs text-ds-ink ${ledgerMono}`}>{row.lotNumber ?? '—'}</td>
+                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.gsm}</td>
+                      <td className="px-3 py-2 text-ds-ink-muted">
                         {(row.boardGrade ?? '').trim() || row.paperType}
                       </td>
-                      <td className={`px-3 py-2 text-slate-200 ${ledgerMono}`}>
+                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>
                         {row.qtySheets.toLocaleString('en-IN')}
                       </td>
-                      <td className={`px-3 py-2 text-slate-300 ${ledgerMono}`}>{row.receiptDate}</td>
+                      <td className={`px-3 py-2 text-ds-ink-muted ${ledgerMono}`}>{row.receiptDate}</td>
                       <td className="px-3 py-2">
                         <span className={`inline-flex items-center gap-2 tabular-nums ${ledgerMono}`}>
                           <span
@@ -370,18 +370,18 @@ function InventoryPageContent() {
                             title={ageLabel(row.ageBucket)}
                           />
                           {row.ageDays}d
-                          <span className="text-[10px] text-slate-500">({ageLabel(row.ageBucket)})</span>
+                          <span className="text-[10px] text-ds-ink-faint">({ageLabel(row.ageBucket)})</span>
                         </span>
                       </td>
-                      <td className={`px-3 py-2 text-slate-200 ${ledgerMono}`}>{fmtVal(row.valueInr)}</td>
-                      <td className="px-3 py-2 text-xs text-slate-500">{row.status}</td>
+                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmtVal(row.valueInr)}</td>
+                      <td className="px-3 py-2 text-xs text-ds-ink-faint">{row.status}</td>
                     </tr>
                   )
                 })}
               </tbody>
             </table>
             {sortedPaperRows.length === 0 && (
-              <p className="p-6 text-center text-slate-500 text-sm">
+              <p className="p-6 text-center text-ds-ink-faint text-sm">
                 No main-warehouse paper rows with quantity (or no match for this PO search).
               </p>
             )}
@@ -395,32 +395,32 @@ function InventoryPageContent() {
         onClose={() => setDrawerRow(null)}
         widthClass="max-w-md"
         backdropClassName="bg-background/60"
-        panelClassName="border-l border-zinc-800 bg-background shadow-2xl"
+        panelClassName="border-l border-ds-line/40 bg-background shadow-2xl"
       >
         {drawerRow ? (
-          <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-slate-300 ${ledgerMono}`}>
+          <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-ds-ink-muted ${ledgerMono}`}>
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">Lot / batch</p>
-              <p className="text-sm font-semibold text-slate-100 mt-0.5">{drawerRow.lotNumber ?? drawerRow.id.slice(0, 8)}</p>
-              <p className="text-slate-500">
+              <p className="text-[10px] uppercase tracking-wide text-ds-ink-faint font-semibold">Lot / batch</p>
+              <p className="text-sm font-semibold text-ds-ink mt-0.5">{drawerRow.lotNumber ?? drawerRow.id.slice(0, 8)}</p>
+              <p className="text-ds-ink-faint">
                 {drawerRow.gsm} gsm · {(drawerRow.boardGrade ?? '').trim() || drawerRow.paperType}
               </p>
-              <p className="text-amber-200/90 mt-1">
+              <p className="text-ds-warning mt-1">
                 On hand: {drawerRow.qtySheets.toLocaleString('en-IN')} sheets
                 {drawerRow.estKgRemaining != null && (
-                  <span className="text-slate-400"> · est. {drawerRow.estKgRemaining.toFixed(2)} kg</span>
+                  <span className="text-ds-ink-muted"> · est. {drawerRow.estKgRemaining.toFixed(2)} kg</span>
                 )}
               </p>
             </div>
 
             {drawerRow.totalIssuedToFloor > 0 && (
-              <div className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 space-y-1">
-                <p className="text-[10px] uppercase text-amber-500/90 font-semibold">Fragmented balance</p>
-                <p className="text-slate-300">
+              <div className="rounded-lg border border-ds-warning/40 bg-ds-warning/8 p-3 space-y-1">
+                <p className="text-[10px] uppercase text-ds-warning/90 font-semibold">Fragmented balance</p>
+                <p className="text-ds-ink-muted">
                   Already issued to floor:{' '}
-                  <span className="text-amber-200">{drawerRow.totalIssuedToFloor.toLocaleString('en-IN')}</span> sh
+                  <span className="text-ds-warning">{drawerRow.totalIssuedToFloor.toLocaleString('en-IN')}</span> sh
                 </p>
-                <p className="text-slate-500 text-[10px]">
+                <p className="text-ds-ink-faint text-[10px]">
                   Original batch (est.):{' '}
                   {(drawerRow.qtySheets + drawerRow.totalIssuedToFloor).toLocaleString('en-IN')} sh cumulative
                 </p>
@@ -439,49 +439,49 @@ function InventoryPageContent() {
                 Material genealogy
               </p>
               {genealogyLoading ? (
-                <p className="text-slate-500">Loading trail…</p>
+                <p className="text-ds-ink-faint">Loading trail…</p>
               ) : genealogy?.steps?.length ? (
-                <ol className="space-y-2 border-l border-zinc-700 pl-3">
+                <ol className="space-y-2 border-l border-ds-line/50 pl-3">
                   {genealogy.steps.map((s, i) => (
                     <li key={`${s.stage}-${i}`} className="text-[11px]">
-                      <span className="text-slate-500">{s.stage}</span>
-                      <div className="text-slate-200 font-medium">{s.mono ?? s.label}</div>
-                      <div className="text-slate-500">{s.detail}</div>
+                      <span className="text-ds-ink-faint">{s.stage}</span>
+                      <div className="text-ds-ink font-medium">{s.mono ?? s.label}</div>
+                      <div className="text-ds-ink-faint">{s.detail}</div>
                     </li>
                   ))}
                 </ol>
               ) : (
-                <p className="text-slate-500">No linked mill PO trail for this spec (heuristic).</p>
+                <p className="text-ds-ink-faint">No linked mill PO trail for this spec (heuristic).</p>
               )}
             </div>
 
             {drawerRow.linkedCustomerPos.length > 0 && (
               <div>
-                <p className="text-[10px] uppercase text-slate-500 mb-1">Linked customer PO #</p>
-                <p className="text-slate-200">{drawerRow.linkedCustomerPos.join(' · ')}</p>
+                <p className="text-[10px] uppercase text-ds-ink-faint mb-1">Linked customer PO #</p>
+                <p className="text-ds-ink">{drawerRow.linkedCustomerPos.join(' · ')}</p>
               </div>
             )}
 
-            <div className="rounded-lg border border-zinc-700 bg-background p-3 space-y-3 ring-1 ring-ring/5">
-              <p className="text-[10px] uppercase tracking-wide text-amber-500/90 font-semibold">Issue to floor</p>
-              <p className="text-[10px] text-slate-500">
-                Moves sheets from main warehouse to <strong className="text-slate-300">FLOOR</strong> stock (new split
+            <div className="rounded-lg border border-ds-line/50 bg-background p-3 space-y-3 ring-1 ring-ring/5">
+              <p className="text-[10px] uppercase tracking-wide text-ds-warning/90 font-semibold">Issue to floor</p>
+              <p className="text-[10px] text-ds-ink-faint">
+                Moves sheets from main warehouse to <strong className="text-ds-ink-muted">FLOOR</strong> stock (new split
                 row). Operator: {operatorLabel}
               </p>
-              <label className="block text-[10px] text-slate-500">
+              <label className="block text-[10px] text-ds-ink-faint">
                 Link to production job (optional)
                 <input
                   type="text"
                   value={jobSearch}
                   onChange={(e) => setJobSearch(e.target.value)}
                   placeholder="Search JC# or customer…"
-                  className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-[11px] text-foreground"
+                  className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-[11px] text-foreground"
                 />
               </label>
               <select
                 value={issueJobCardId}
                 onChange={(e) => setIssueJobCardId(e.target.value)}
-                className="w-full rounded border border-zinc-700 bg-background px-2 py-2 text-[11px] text-foreground"
+                className="w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-[11px] text-foreground"
               >
                 <option value="">— Select job card —</option>
                 {filteredJobCards.map((j) => (
@@ -490,7 +490,7 @@ function InventoryPageContent() {
                   </option>
                 ))}
               </select>
-              <label className="block text-[10px] text-slate-500">
+              <label className="block text-[10px] text-ds-ink-faint">
                 Quantity (sheets)
                 <input
                   type="number"
@@ -498,15 +498,15 @@ function InventoryPageContent() {
                   max={drawerRow.qtySheets}
                   value={issueQty}
                   onChange={(e) => setIssueQty(e.target.value)}
-                  className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-[11px] text-foreground"
+                  className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-[11px] text-foreground"
                 />
               </label>
-              <label className="flex items-center gap-2 text-[11px] text-slate-400">
+              <label className="flex items-center gap-2 text-[11px] text-ds-ink-muted">
                 <input
                   type="checkbox"
                   checked={issueHighPri}
                   onChange={(e) => setIssueHighPri(e.target.checked)}
-                  className="rounded border-zinc-600"
+                  className="rounded border-ds-line/50"
                 />
                 High-priority issuance (director authorization audit)
               </label>
@@ -514,7 +514,7 @@ function InventoryPageContent() {
                 type="button"
                 disabled={issueSubmitting}
                 onClick={() => void submitIssueToFloor()}
-                className="w-full rounded-md bg-amber-600 hover:bg-amber-500 py-2 text-[12px] font-semibold text-primary-foreground disabled:opacity-50"
+                className="w-full rounded-md bg-ds-warning hover:bg-ds-warning py-2 text-[12px] font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {issueSubmitting ? 'Saving…' : 'Save — issue to floor'}
               </button>
@@ -524,29 +524,29 @@ function InventoryPageContent() {
       </SlideOverPanel>
 
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-amber-400">Stock States</h1>
+        <h1 className="text-xl font-bold text-ds-warning">Stock States</h1>
         <div className="flex gap-2">
           <Link
             href="/inventory/flow"
-            className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
           >
             Inventory Flow
           </Link>
           <Link
             href="/inventory/simulation"
-            className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
           >
             Live Simulation
           </Link>
           <Link
             href="/inventory/purchase-requisitions"
-            className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
           >
             Purchase Requisitions
           </Link>
           <Link
             href="/inventory/grn"
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
           >
             Goods receipt (GRN)
           </Link>
@@ -575,7 +575,7 @@ function InventoryPageContent() {
                 <span className="text-red-200/80 text-xs">{fmtVal(i.valueQuarantine)}</span>
               </div>
             ))}
-          {items.every((i) => i.qtyQuarantine === 0) && <p className="text-slate-500 text-sm">None</p>}
+          {items.every((i) => i.qtyQuarantine === 0) && <p className="text-ds-ink-faint text-sm">None</p>}
         </div>
         <div className="rounded-lg border-2 border-green-700/50 bg-green-900/20 p-4">
           <h2 className="font-semibold text-green-300 mb-2">Available</h2>
@@ -592,10 +592,10 @@ function InventoryPageContent() {
                 <span className="text-green-200/80 text-xs">{fmtVal(i.valueAvailable)}</span>
               </div>
             ))}
-          {items.every((i) => i.qtyAvailable === 0) && <p className="text-slate-500 text-sm">None</p>}
+          {items.every((i) => i.qtyAvailable === 0) && <p className="text-ds-ink-faint text-sm">None</p>}
         </div>
-        <div className="rounded-lg border-2 border-amber-700/50 bg-amber-900/20 p-4">
-          <h2 className="font-semibold text-amber-300 mb-2">Reserved / WIP</h2>
+        <div className="rounded-lg border-2 border-ds-warning/30 bg-ds-warning/8 p-4">
+          <h2 className="font-semibold text-ds-warning mb-2">Reserved / WIP</h2>
           {items
             .filter((i) => i.qtyReserved > 0)
             .map((i) => (
@@ -606,10 +606,10 @@ function InventoryPageContent() {
                     {fmt(i.qtyReserved)} {i.unit}
                   </span>
                 </span>
-                <span className="text-amber-200/80 text-xs">{fmtVal(i.valueReserved)}</span>
+                <span className="text-ds-warning/80 text-xs">{fmtVal(i.valueReserved)}</span>
               </div>
             ))}
-          {items.every((i) => i.qtyReserved === 0) && <p className="text-slate-500 text-sm">None</p>}
+          {items.every((i) => i.qtyReserved === 0) && <p className="text-ds-ink-faint text-sm">None</p>}
         </div>
         <div className="rounded-lg border-2 border-blue-700/50 bg-blue-900/20 p-4">
           <h2 className="font-semibold text-blue-300 mb-2">Finished Goods</h2>
@@ -626,13 +626,13 @@ function InventoryPageContent() {
                 <span className="text-blue-200/80 text-xs">{fmtVal(i.valueFg)}</span>
               </div>
             ))}
-          {items.every((i) => i.qtyFg === 0) && <p className="text-slate-500 text-sm">None</p>}
+          {items.every((i) => i.qtyFg === 0) && <p className="text-ds-ink-faint text-sm">None</p>}
         </div>
       </div>
 
       <div className="mt-6 overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-800 text-left">
+          <thead className="bg-ds-elevated text-left">
             <tr>
               <th className="px-4 py-2">Code</th>
               <th className="px-4 py-2">Description</th>
@@ -646,11 +646,11 @@ function InventoryPageContent() {
               <th className="px-4 py-2">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700">
+          <tbody className="divide-y divide-ds-line/40">
             {items.map((i) => {
               const totalVal = i.valueQuarantine + i.valueAvailable + i.valueReserved + i.valueFg
               return (
-                <tr key={i.id} className="hover:bg-slate-800/50">
+                <tr key={i.id} className="hover:bg-ds-elevated/50">
                   <td className={`px-4 py-2 ${ledgerMono}`}>{i.materialCode}</td>
                   <td className="px-4 py-2">{i.description}</td>
                   <td className="px-4 py-2">{i.unit}</td>
@@ -662,7 +662,7 @@ function InventoryPageContent() {
                   <td className={`px-4 py-2 ${ledgerMono}`}>{fmtVal(totalVal)}</td>
                   <td className="px-4 py-2">
                     {i.qtyQuarantine > 0 && (
-                      <Link href={`/inventory/release/${i.id}`} className="text-amber-400 hover:underline text-xs">
+                      <Link href={`/inventory/release/${i.id}`} className="text-ds-warning hover:underline text-xs">
                         Release
                       </Link>
                     )}
@@ -681,7 +681,7 @@ export default function InventoryPage() {
   return (
     <Suspense
       fallback={
-        <div className="p-4 max-w-6xl mx-auto text-slate-400 bg-background min-h-[30vh]">Loading warehouse…</div>
+        <div className="p-4 max-w-6xl mx-auto text-ds-ink-muted bg-background min-h-[30vh]">Loading warehouse…</div>
       }
     >
       <InventoryPageContent />

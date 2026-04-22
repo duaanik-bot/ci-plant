@@ -12,7 +12,7 @@ const ACTIVE_CLASSES: Record<PlateHubSwatchKind, string> = {
   cyan: 'bg-cyan-500 text-primary-foreground',
   magenta: 'bg-plateMagenta text-foreground',
   yellow: 'bg-yellow-400 text-gray-900',
-  black: 'bg-background text-foreground border border-zinc-500',
+  black: 'bg-background text-foreground border border-ds-line/50',
   spotOrange: 'bg-orange-500 text-foreground',
   spotPurple: 'bg-purple-600 text-foreground',
   other: 'bg-orange-500 text-foreground',
@@ -44,7 +44,7 @@ export function PlateHubColourSwatch({
     return (
       <div
         title={label}
-        className={`${base} bg-gray-700/30 text-foreground border border-zinc-500/50 ${className}`}
+        className={`${base} bg-gray-700/30 text-foreground border border-ds-line/50 ${className}`}
       >
         {display}
       </div>
@@ -73,7 +73,7 @@ export function PlateHubColourSwatchStrip({
 }) {
   const rows = hubChannelRowsFromLabels(labels)
   if (!rows.length) {
-    return <span className="text-xs text-zinc-500">—</span>
+    return <span className="text-xs text-neutral-500">—</span>
   }
   return (
     <div

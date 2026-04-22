@@ -155,18 +155,18 @@ export default function NewJobPage() {
     setFormError('')
   }
 
-  if (loading) return <div className="p-4 text-slate-400">Loading…</div>
+  if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
   return (
     <div className="p-4 max-w-2xl mx-auto">
       <div className="flex items-center gap-4 mb-6">
-        <Link href="/jobs" className="text-slate-400 hover:text-foreground text-sm">
+        <Link href="/jobs" className="text-ds-ink-muted hover:text-foreground text-sm">
           ← Jobs
         </Link>
-        <h1 className="text-xl font-bold text-amber-400">New job</h1>
+        <h1 className="text-xl font-bold text-ds-warning">New job</h1>
       </div>
 
-      <p className="text-slate-400 text-sm mb-4">
+      <p className="text-ds-ink-muted text-sm mb-4">
         Required: Customer, Product name, Qty ordered, Imposition, Due date, and at least one machine in sequence.
       </p>
 
@@ -180,22 +180,22 @@ export default function NewJobPage() {
         <button
           type="button"
           onClick={fillTestData}
-          className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm"
+          className="px-3 py-1.5 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-ds-ink text-sm"
         >
           Fill test data
         </button>
-        <span className="text-slate-500 text-xs">Pre-fills form with sample values</span>
+        <span className="text-ds-ink-faint text-xs">Pre-fills form with sample values</span>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Customer *</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Customer *</label>
           <select
             value={customerId}
             onChange={(ev) => { setCustomerId(ev.target.value); setFieldErrors((prev) => ({ ...prev, customerId: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-              (fieldErrors.customerId || requiredErrors.customerId) ? 'border-red-500' : 'border-slate-600'
+            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+              (fieldErrors.customerId || requiredErrors.customerId) ? 'border-red-500' : 'border-ds-line/60'
             }`}
           >
             <option value="">Select customer</option>
@@ -208,14 +208,14 @@ export default function NewJobPage() {
           )}
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Product name *</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Product name *</label>
           <input
             type="text"
             value={productName}
             onChange={(ev) => { setProductName(ev.target.value); setFieldErrors((prev) => ({ ...prev, productName: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-              (fieldErrors.productName || requiredErrors.productName) ? 'border-red-500' : 'border-slate-600'
+            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+              (fieldErrors.productName || requiredErrors.productName) ? 'border-red-500' : 'border-ds-line/60'
             }`}
           />
           {(fieldErrors.productName || requiredErrors.productName) && (
@@ -224,15 +224,15 @@ export default function NewJobPage() {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Qty ordered *</label>
+            <label className="block text-sm text-ds-ink-muted mb-1">Qty ordered *</label>
             <input
               type="number"
               min={1}
               value={qtyOrdered}
               onChange={(ev) => { setQtyOrdered(ev.target.value); setFieldErrors((prev) => ({ ...prev, qtyOrdered: '' })) }}
               required
-              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-                (fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) ? 'border-red-500' : 'border-slate-600'
+              className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+                (fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) ? 'border-red-500' : 'border-ds-line/60'
               }`}
             />
             {(fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) && (
@@ -240,15 +240,15 @@ export default function NewJobPage() {
             )}
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Imposition *</label>
+            <label className="block text-sm text-ds-ink-muted mb-1">Imposition *</label>
             <input
               type="number"
               min={1}
               value={imposition}
               onChange={(ev) => { setImposition(ev.target.value); setFieldErrors((prev) => ({ ...prev, imposition: '' })) }}
               required
-              className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-                (fieldErrors.imposition || requiredErrors.imposition) ? 'border-red-500' : 'border-slate-600'
+              className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+                (fieldErrors.imposition || requiredErrors.imposition) ? 'border-red-500' : 'border-ds-line/60'
               }`}
             />
             {(fieldErrors.imposition || requiredErrors.imposition) && (
@@ -257,14 +257,14 @@ export default function NewJobPage() {
           </div>
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Due date *</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Due date *</label>
           <input
             type="date"
             value={dueDate}
             onChange={(ev) => { setDueDate(ev.target.value); setFieldErrors((prev) => ({ ...prev, dueDate: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-              (fieldErrors.dueDate || requiredErrors.dueDate) ? 'border-red-500' : 'border-slate-600'
+            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+              (fieldErrors.dueDate || requiredErrors.dueDate) ? 'border-red-500' : 'border-ds-line/60'
             }`}
           />
           {(fieldErrors.dueDate || requiredErrors.dueDate) && (
@@ -272,17 +272,17 @@ export default function NewJobPage() {
           )}
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Machine sequence * (drag to reorder)</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Machine sequence * (drag to reorder)</label>
           <div className={`space-y-1 ${(fieldErrors.machineSequence || requiredErrors.machineSequence) ? 'rounded-lg border border-red-500' : ''}`}>
             {machineOrder.map((id, i) => {
               const m = machines.find((x) => x.id === id)
               return (
                 <div
                   key={id}
-                  className="flex items-center gap-2 px-3 py-2 rounded bg-slate-800 border border-slate-600"
+                  className="flex items-center gap-2 px-3 py-2 rounded bg-ds-elevated border border-ds-line/60"
                 >
-                  <button type="button" onClick={() => moveMachine(i, -1)} className="text-slate-400 hover:text-foreground">↑</button>
-                  <button type="button" onClick={() => moveMachine(i, 1)} className="text-slate-400 hover:text-foreground">↓</button>
+                  <button type="button" onClick={() => moveMachine(i, -1)} className="text-ds-ink-muted hover:text-foreground">↑</button>
+                  <button type="button" onClick={() => moveMachine(i, 1)} className="text-ds-ink-muted hover:text-foreground">↓</button>
                   <span className="flex-1">{m?.machineCode ?? id} — {m?.name ?? ''}</span>
                 </div>
               )
@@ -293,12 +293,12 @@ export default function NewJobPage() {
           )}
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Board material (optional)</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Board material (optional)</label>
           <select
             value={boardMaterialId}
             onChange={(ev) => { setBoardMaterialId(ev.target.value); setFieldErrors((prev) => ({ ...prev, boardMaterialId: '' })) }}
-            className={`w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground ${
-              fieldErrors.boardMaterialId ? 'border-red-500' : 'border-slate-600'
+            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
+              fieldErrors.boardMaterialId ? 'border-red-500' : 'border-ds-line/60'
             }`}
           >
             <option value="">None</option>
@@ -311,27 +311,27 @@ export default function NewJobPage() {
           )}
         </div>
         <div>
-          <label className="block text-sm text-slate-400 mb-1">Special instructions</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Special instructions</label>
           <textarea
             value={specialInstructions}
             onChange={(e) => setSpecialInstructions(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-foreground"
+            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
 
-        <div className="p-4 rounded-lg bg-slate-800 border border-slate-600">
-          <p className="text-sm font-medium text-slate-300 mb-2">BOM preview</p>
+        <div className="p-4 rounded-lg bg-ds-elevated border border-ds-line/60">
+          <p className="text-sm font-medium text-ds-ink-muted mb-2">BOM preview</p>
           <p>Net sheets: {netSheets}</p>
           <p>Approved sheets (with waste): {approvedSheets}</p>
           <p>Waste allowance: {wastePct}%</p>
-          <p className="text-slate-400 text-xs mt-1">Material will be reserved on create if board material selected.</p>
+          <p className="text-ds-ink-muted text-xs mt-1">Material will be reserved on create if board material selected.</p>
         </div>
 
         <button
           type="submit"
           disabled={submitting || !isFormValid}
-          className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-primary-foreground font-medium"
+          className="w-full py-2.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium"
         >
           {submitting ? 'Creating…' : isFormValid ? 'Create job' : 'Fill required fields to continue'}
         </button>

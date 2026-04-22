@@ -38,13 +38,13 @@ export default function MastersSuppliersPage() {
   }, [])
 
   if (loading) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">Supplier Master</h2>
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Supplier Master</h2>
         <Link
           href="/masters/suppliers/new"
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-primary-foreground hover:bg-blue-700"
@@ -74,7 +74,7 @@ export default function MastersSuppliersPage() {
                 <td className={`${enterpriseTdClass} max-w-[14rem]`}>
                   {s?.materialTypes?.length
                     ? s.materialTypes.map((t) => (
-                        <span key={t} className="mr-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-800 dark:bg-slate-800 dark:text-slate-200">
+                        <span key={t} className="mr-1 inline-block rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-800 dark:bg-ds-elevated dark:text-ds-ink">
                           {t}
                         </span>
                       ))
@@ -96,7 +96,7 @@ export default function MastersSuppliersPage() {
           </tbody>
         </table>
       </EnterpriseTableShell>
-      {list.length === 0 && <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No suppliers.</p>}
+      {list.length === 0 && <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No suppliers.</p>}
     </div>
   )
 }

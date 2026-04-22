@@ -45,16 +45,16 @@ export function custodyBadgeClass(s: string): string {
     case CUSTODY_ON_FLOOR:
       return 'bg-blue-900/60 border-blue-600 text-blue-200'
     case CUSTODY_AT_VENDOR:
-      return 'bg-amber-900/50 border-amber-600 text-amber-200'
+      return 'bg-ds-warning/12 border-ds-warning text-ds-warning'
     case CUSTODY_HUB_TRIAGE:
-      return 'bg-zinc-800 border-zinc-500 text-zinc-200'
+      return 'bg-ds-elevated border-ds-line/50 text-ds-ink'
     case CUSTODY_PREPARING_FOR_PRODUCTION:
-      return 'bg-amber-950/70 border-amber-500 text-amber-100'
+      return 'bg-ds-warning/12 border-ds-warning text-ds-ink'
     case CUSTODY_HUB_CUSTODY_READY:
-      return 'bg-amber-950/60 border-amber-600 text-amber-200'
+      return 'bg-ds-warning/10 border-ds-warning text-ds-warning'
     case CUSTODY_HUB_ENGRAVING_QUEUE:
       return 'bg-violet-950/50 border-violet-600 text-violet-200'
     default:
-      return 'bg-slate-800 border-slate-600 text-slate-300'
+      return 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted'
   }
 }

@@ -46,9 +46,9 @@ export function PlanningBatchDecisionPanel({ lines, onApply, busy }: Props) {
 
   return (
     <div className="rounded-lg border border-[#334155] bg-[#0f172a] px-2 py-2">
-      <h2 className="text-[11px] font-bold uppercase tracking-wider text-amber-400/95">Batch decisions</h2>
-      <p className="mb-2 text-[11px] text-slate-500">
-        Approve a batch, place it on hold, or send a <span className="text-slate-400">ready</span> batch to artwork.
+      <h2 className="text-[11px] font-bold uppercase tracking-wider text-ds-warning/95">Batch decisions</h2>
+      <p className="mb-2 text-[11px] text-ds-ink-faint">
+        Approve a batch, place it on hold, or send a <span className="text-ds-ink-muted">ready</span> batch to artwork.
         Held batches are blocked from handoff and processing.
       </p>
       <div className="max-h-[22rem] space-y-2 overflow-auto pr-0.5">
@@ -78,12 +78,12 @@ export function PlanningBatchDecisionPanel({ lines, onApply, busy }: Props) {
                 >
                   {BATCH_STATUS_LABEL[st]}
                 </span>
-                <span className="min-w-0 truncate text-[12px] font-mono text-slate-300" title={g.title}>
+                <span className="min-w-0 truncate text-[12px] font-mono text-ds-ink-muted" title={g.title}>
                   {g.title}
                 </span>
-                <span className="text-[11px] text-slate-500">
+                <span className="text-[11px] text-ds-ink-faint">
                   {g.lineIds.length} job{g.lineIds.length === 1 ? '' : 's'} · Σ{' '}
-                  <span className="font-mono text-amber-200/90">
+                  <span className="font-mono text-ds-warning">
                     {g.lineIds
                       .reduce((s, id) => s + (lines.find((l) => l.id === id)?.quantity ?? 0), 0)
                       .toLocaleString('en-IN')}
@@ -95,7 +95,7 @@ export function PlanningBatchDecisionPanel({ lines, onApply, busy }: Props) {
                   <span className="font-semibold text-rose-300/95">Reason:</span> {core.batchHoldReason}
                 </p>
               ) : null}
-              <ul className="mt-1 max-h-16 overflow-y-auto text-[10px] text-slate-500">
+              <ul className="mt-1 max-h-16 overflow-y-auto text-[10px] text-ds-ink-faint">
                 {g.lineIds.map((id) => {
                   const li = lines.find((l) => l.id === id)
                   if (!li) return null
@@ -119,7 +119,7 @@ export function PlanningBatchDecisionPanel({ lines, onApply, busy }: Props) {
                 <button
                   type="button"
                   disabled={busy || !canHold}
-                  className="rounded bg-amber-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded bg-ds-warning/20 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-ds-warning/30 disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={() => {
                     setHoldReason('')
                     setHoldOpenKey((k) => (k === g.key ? null : g.key))
@@ -130,7 +130,7 @@ export function PlanningBatchDecisionPanel({ lines, onApply, busy }: Props) {
                 {holdOpenKey === g.key ? (
                   <span className="inline-flex w-full min-w-0 flex-wrap items-center gap-1 py-0.5">
                     <input
-                      className="min-w-0 flex-1 rounded border border-amber-700/50 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100"
+                      className="min-w-0 flex-1 rounded border border-ds-warning/30 bg-ds-main px-1.5 py-0.5 text-[11px] text-ds-ink"
                       placeholder="Reason required"
                       value={holdReason}
                       onChange={(e) => setHoldReason(e.target.value)}
@@ -181,7 +181,7 @@ export function PlanningBatchDecisionPanel({ lines, onApply, busy }: Props) {
                 <button
                   type="button"
                   disabled={busy || !canResume}
-                  className="rounded border border-slate-600 bg-slate-800/90 px-2 py-0.5 text-[11px] text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded border border-ds-line/60 bg-ds-elevated/90 px-2 py-0.5 text-[11px] text-ds-ink hover:bg-ds-elevated disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={() => void onApply(g.lineIds, 'resume_from_hold')}
                 >
                   Resume

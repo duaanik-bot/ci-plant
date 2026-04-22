@@ -21,7 +21,7 @@ export function PlateStarLedger({
 
   return (
     <div
-      className={`text-[10px] font-mono leading-tight text-zinc-400 space-y-0.5 ${className}`}
+      className={`text-[10px] font-mono leading-tight text-neutral-500 space-y-0.5 ${className}`}
       aria-label="Usage cycles by colour"
     >
       {rows.map((r, idx) => {
@@ -41,7 +41,7 @@ export function PlateStarLedger({
                 +{plus}
               </span>
             ) : null}
-            <span className="text-zinc-500 shrink-0">({n})</span>
+            <span className="text-neutral-500 shrink-0">({n})</span>
           </div>
         )
       })}

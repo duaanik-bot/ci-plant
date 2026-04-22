@@ -127,20 +127,20 @@ export default function ProductionStagesHubPage() {
 
   return (
     <>
-    <div className="min-h-screen bg-background text-slate-200">
+    <div className="min-h-screen bg-background text-ds-ink">
       <div className="p-4 max-w-5xl mx-auto space-y-8">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-orange-400">Production Planning</h1>
           <div className="flex items-center gap-2">
             <Link
               href="/orders/planning"
-              className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
+              className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm"
             >
               Planning
             </Link>
             <Link
               href="/production/job-cards"
-              className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm"
+              className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm"
             >
               Job Cards
             </Link>
@@ -154,11 +154,11 @@ export default function ProductionStagesHubPage() {
         <section className="rounded-2xl border border-border/10 bg-background px-4 py-5 space-y-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]">
           <div className="flex items-center gap-2">
             <Star className="h-4 w-4 text-orange-400 fill-orange-400 drop-shadow-[0_0_8px_rgba(251,146,60,0.75)]" />
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ds-ink-muted">
               Yield summary — Yield Guardian
             </h2>
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ds-ink-faint">
             Net yield from active jobs; wastage value from material issued vs theoretical output this month.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -170,7 +170,7 @@ export default function ProductionStagesHubPage() {
                 ) : yieldSummary?.netYieldPercent != null ? (
                   <span className={mono}>{yieldSummary.netYieldPercent}%</span>
                 ) : (
-                  <span className="text-slate-500">N/A</span>
+                  <span className="text-ds-ink-faint">N/A</span>
                 )
               }
               valueClassName={`${mono} text-orange-300`}
@@ -205,7 +205,7 @@ export default function ProductionStagesHubPage() {
                     {yieldSummary.topAnomaly.poNumber}
                   </span>
                 ) : (
-                  <span className="text-slate-500">None flagged</span>
+                  <span className="text-ds-ink-faint">None flagged</span>
                 )
               }
               valueClassName={mono}
@@ -220,10 +220,10 @@ export default function ProductionStagesHubPage() {
         </section>
 
         <section className="rounded-2xl border border-border/10 bg-background px-4 py-5 space-y-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-ds-ink-muted">
             Machine health — PM scheduler
           </h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ds-ink-faint">
             Health = worst of hour and impression progress vs service interval. Usage accrues from closed production
             ledger runs. Click the meter for checklist and sign-off.
           </p>
@@ -236,7 +236,7 @@ export default function ProductionStagesHubPage() {
                 ) : pmHealth?.factoryHealthAvg != null ? (
                   <span className={mono}>{pmHealth.factoryHealthAvg}%</span>
                 ) : (
-                  <span className="text-slate-500">N/A</span>
+                  <span className="text-ds-ink-faint">N/A</span>
                 )
               }
               valueClassName={`${mono} text-emerald-400`}
@@ -261,14 +261,14 @@ export default function ProductionStagesHubPage() {
                   <span className={mono}>{pmHealth?.scheduledPmHoursThisWeek ?? '—'}</span>
                 )
               }
-              valueClassName={`${mono} text-amber-300`}
+              valueClassName={`${mono} text-ds-warning`}
               hint="Planned downtime overlapping this week"
-              shellClassName="ring-1 ring-amber-500/15"
+              shellClassName="ring-1 ring-ds-warning/35"
             />
           </div>
-          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <div className="overflow-x-auto rounded-lg border border-ds-line/40">
             <table className="w-full text-sm text-left">
-              <thead className="bg-zinc-950 text-zinc-500 text-[10px] uppercase tracking-wider">
+              <thead className="bg-ds-main text-neutral-500 text-[10px] uppercase tracking-wider">
                 <tr>
                   <th className="px-3 py-2">Machine</th>
                   <th className="px-3 py-2">Health</th>
@@ -276,16 +276,16 @@ export default function ProductionStagesHubPage() {
                   <th className="px-3 py-2">Impressions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-900">
+              <tbody className="divide-y divide-ds-card">
                 {pmLoading ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-6 text-zinc-500">
+                    <td colSpan={4} className="px-3 py-6 text-neutral-500">
                       Loading…
                     </td>
                   </tr>
                 ) : (pmHealth?.machines ?? []).length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-6 text-zinc-600 text-xs">
+                    <td colSpan={4} className="px-3 py-6 text-neutral-600 text-xs">
                       No machines.
                     </td>
                   </tr>
@@ -297,7 +297,7 @@ export default function ProductionStagesHubPage() {
                     >
                       <td className="px-3 py-2">
                         <span className={`${mono} text-orange-300`}>{m.machineCode}</span>
-                        <span className="text-zinc-500 text-xs block truncate max-w-[200px]">{m.name}</span>
+                        <span className="text-neutral-500 text-xs block truncate max-w-[200px]">{m.name}</span>
                       </td>
                       <td className="px-3 py-2">
                         <MachineHealthMeter
@@ -306,10 +306,10 @@ export default function ProductionStagesHubPage() {
                           onClick={() => m.hasSchedule && setPmMachineId(m.machineId)}
                         />
                       </td>
-                      <td className={`px-3 py-2 ${mono} text-zinc-400`}>
+                      <td className={`px-3 py-2 ${mono} text-neutral-500`}>
                         {m.hasSchedule ? m.usageRunHours : '—'}
                       </td>
-                      <td className={`px-3 py-2 ${mono} text-zinc-400`}>
+                      <td className={`px-3 py-2 ${mono} text-neutral-500`}>
                         {m.hasSchedule ? m.usageImpressions : '—'}
                       </td>
                     </tr>
@@ -321,16 +321,16 @@ export default function ProductionStagesHubPage() {
         </section>
 
         <section className="rounded-2xl border border-border/10 bg-background px-4 py-5 space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-ds-ink-muted">
             Top performers — operator performance index
           </h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ds-ink-faint">
             Index = (Avg OEE × 0.4) + (Avg yield × 0.4) + (Downtime efficiency × 0.2). Sparkline = last 7
             closed jobs (OEE). Red-alert border = underperforming index.
           </p>
-          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <div className="overflow-x-auto rounded-lg border border-ds-line/40">
             <table className="w-full text-sm text-left">
-              <thead className="bg-zinc-950 text-zinc-500 text-[10px] uppercase tracking-wider">
+              <thead className="bg-ds-main text-neutral-500 text-[10px] uppercase tracking-wider">
                 <tr>
                   <th className="px-3 py-2">Rank</th>
                   <th className="px-3 py-2">Operator</th>
@@ -341,16 +341,16 @@ export default function ProductionStagesHubPage() {
                   <th className="px-3 py-2">7-shift OEE</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-900">
+              <tbody className="divide-y divide-ds-card">
                 {leaderboardLoading ? (
                   <tr>
-                    <td colSpan={7} className="px-3 py-6 text-zinc-500">
+                    <td colSpan={7} className="px-3 py-6 text-neutral-500">
                       Loading…
                     </td>
                   </tr>
                 ) : leaderboard.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-3 py-6 text-zinc-600 text-xs">
+                    <td colSpan={7} className="px-3 py-6 text-neutral-600 text-xs">
                       No attributed closed jobs in the last 28 days. Assign shift operators on job cards.
                     </td>
                   </tr>
@@ -358,9 +358,9 @@ export default function ProductionStagesHubPage() {
                   leaderboard.map((row) => (
                     <tr
                       key={row.userId}
-                      className={`hover:bg-zinc-950/80 ${row.underperformer ? 'border-l-4 border-rose-600 bg-rose-950/10' : ''}`}
+                      className={`hover:bg-ds-main/80 ${row.underperformer ? 'border-l-4 border-rose-600 bg-rose-950/10' : ''}`}
                     >
-                      <td className={`px-3 py-2 ${mono} ${row.rank === 1 ? 'text-orange-400 font-semibold' : 'text-zinc-300'}`}>
+                      <td className={`px-3 py-2 ${mono} ${row.rank === 1 ? 'text-orange-400 font-semibold' : 'text-neutral-400'}`}>
                         {row.rank}
                       </td>
                       <td className="px-3 py-2">
@@ -372,10 +372,10 @@ export default function ProductionStagesHubPage() {
                           {row.name}
                         </button>
                       </td>
-                      <td className={`px-3 py-2 ${mono} text-zinc-200`}>{row.performanceIndex}</td>
-                      <td className={`px-3 py-2 ${mono} text-zinc-400`}>{row.avgOee}%</td>
-                      <td className={`px-3 py-2 ${mono} text-zinc-400`}>{row.avgYield}%</td>
-                      <td className={`px-3 py-2 ${mono} text-zinc-400`}>{row.downtimeEfficiency}%</td>
+                      <td className={`px-3 py-2 ${mono} text-ds-ink`}>{row.performanceIndex}</td>
+                      <td className={`px-3 py-2 ${mono} text-neutral-500`}>{row.avgOee}%</td>
+                      <td className={`px-3 py-2 ${mono} text-neutral-500`}>{row.avgYield}%</td>
+                      <td className={`px-3 py-2 ${mono} text-neutral-500`}>{row.downtimeEfficiency}%</td>
                       <td className="px-3 py-2">
                         <OeeSparkline values={row.oeeSparkline} />
                       </td>
@@ -387,7 +387,7 @@ export default function ProductionStagesHubPage() {
           </div>
         </section>
 
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-ds-ink-muted">
           Open a stage to see job cards at that step and update progress.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -395,16 +395,16 @@ export default function ProductionStagesHubPage() {
             <Link
               key={s.key}
               href={`/production/stages/${s.key}`}
-              className="rounded-xl bg-zinc-950 border border-zinc-800 p-4 hover:border-orange-500/50 flex items-center gap-3"
+              className="rounded-xl bg-ds-main border border-ds-line/40 p-4 hover:border-orange-500/50 flex items-center gap-3"
             >
               <span
-                className={`flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-900 text-orange-400 ${mono} text-sm`}
+                className={`flex h-10 w-10 items-center justify-center rounded-lg bg-ds-card text-orange-400 ${mono} text-sm`}
               >
                 {idx + 1}
               </span>
               <div>
-                <p className="font-semibold text-slate-200">{s.label}</p>
-                <p className="text-xs text-slate-500">View job cards →</p>
+                <p className="font-semibold text-ds-ink">{s.label}</p>
+                <p className="text-xs text-ds-ink-faint">View job cards →</p>
               </div>
             </Link>
           ))}

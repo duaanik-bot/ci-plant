@@ -280,6 +280,6 @@ export function oeeBandClass(oee: number): 'emerald' | 'amber' | 'rose' {
 export function oeeCellClass(oee: number): string {
   const b = oeeBandClass(oee)
   if (b === 'emerald') return 'text-emerald-500'
-  if (b === 'amber') return 'text-amber-500'
+  if (b === 'amber') return 'text-ds-warning'
   return 'text-rose-500'
 }

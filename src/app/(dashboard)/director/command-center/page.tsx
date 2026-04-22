@@ -84,9 +84,9 @@ function formatRupee(n: number) {
 function MicroBar({ parts }: { parts: BarPart[] }) {
   const total = parts.reduce((s, p) => s + p.n, 0)
   return (
-    <div className="h-1 w-full overflow-hidden rounded-sm bg-slate-900 ring-1 ring-slate-800">
+    <div className="h-1 w-full overflow-hidden rounded-sm bg-ds-card ring-1 ring-ds-line/40">
       {total === 0 ? (
-        <div className="h-full w-full bg-slate-800" />
+        <div className="h-full w-full bg-ds-elevated" />
       ) : (
         <div className="flex h-full w-full">
           {parts.map((p, j) =>
@@ -105,7 +105,7 @@ function RevenueSparkline({ series }: { series: { day: string; value: number }[]
   const h = 52
   const pad = 4
   if (!series.length) {
-    return <div className={`h-[52px] rounded bg-zinc-950 ring-1 ring-ring/30 ${mono} text-[10px] text-slate-600 flex items-center justify-center`}>No data</div>
+    return <div className={`h-[52px] rounded bg-ds-main ring-1 ring-ring/30 ${mono} text-[10px] text-ds-ink-faint flex items-center justify-center`}>No data</div>
   }
   const vals = series.map((d) => d.value)
   const max = Math.max(...vals, 1)
@@ -128,7 +128,7 @@ function RevenueSparkline({ series }: { series: { day: string; value: number }[]
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}
-      className="w-full h-[52px] text-amber-400"
+      className="w-full h-[52px] text-ds-warning"
       preserveAspectRatio="none"
       aria-hidden
     >
@@ -154,17 +154,17 @@ function StageDistributionStack({
 }) {
   const parts = [
     { key: 'artworks' as const, n: dist.artworks, c: 'bg-violet-500', label: 'Artworks' },
-    { key: 'tooling' as const, n: dist.tooling, c: 'bg-slate-500', label: 'Tooling' },
+    { key: 'tooling' as const, n: dist.tooling, c: 'bg-ds-line/40', label: 'Tooling' },
     { key: 'material' as const, n: dist.material, c: 'bg-sky-500', label: 'Material' },
     { key: 'production' as const, n: dist.production, c: 'bg-emerald-500', label: 'Production' },
-    { key: 'dispatch' as const, n: dist.dispatch, c: 'bg-amber-600', label: 'Dispatch' },
+    { key: 'dispatch' as const, n: dist.dispatch, c: 'bg-ds-warning', label: 'Dispatch' },
   ]
   const total = parts.reduce((s, p) => s + p.n, 0)
   return (
     <div>
-      <div className="flex h-5 w-full overflow-hidden rounded-sm ring-1 ring-ring/40 bg-zinc-950">
+      <div className="flex h-5 w-full overflow-hidden rounded-sm ring-1 ring-ring/40 bg-ds-main">
         {total === 0 ? (
-          <div className="h-full flex-1 bg-zinc-900" title="No open pipeline sample" />
+          <div className="h-full flex-1 bg-ds-card" title="No open pipeline sample" />
         ) : (
           parts.map((p) =>
             p.n > 0 ? (
@@ -178,12 +178,12 @@ function StageDistributionStack({
           )
         )}
       </div>
-      <div className={`mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-slate-500 ${mono}`}>
+      <div className={`mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-ds-ink-faint ${mono}`}>
         {parts.map((p) => (
           <span key={p.key} className="inline-flex items-center gap-1">
             <span className={`inline-block h-2 w-2 shrink-0 rounded-sm ${p.c}`} />
             {p.label}{' '}
-            <span className="text-slate-400">{p.n.toLocaleString('en-IN')}</span>
+            <span className="text-ds-ink-muted">{p.n.toLocaleString('en-IN')}</span>
           </span>
         ))}
       </div>
@@ -203,7 +203,7 @@ function FiveStageBar({ bars }: { bars: DirectorLifeBars }) {
     <div className="flex gap-1 min-w-[11rem]">
       {cols.map(({ key, label }) => (
         <div key={key} className="min-w-0 flex-1" title={label}>
-          <div className="text-[6px] uppercase text-slate-600 text-center mb-px">{label}</div>
+          <div className="text-[6px] uppercase text-ds-ink-faint text-center mb-px">{label}</div>
           <MicroBar parts={bars[key]} />
         </div>
       ))}
@@ -317,7 +317,7 @@ export default function DirectorCommandCenterPage() {
   const alerts = vitals?.alerts ?? []
 
   return (
-    <div className="min-h-screen bg-background text-slate-200 flex">
+    <div className="min-h-screen bg-background text-ds-ink flex">
       <DirectorWorkspaceSidebar
         rows={rows}
         focusedLineId={focusedLineId}
@@ -327,18 +327,18 @@ export default function DirectorCommandCenterPage() {
       <div className="min-w-0 flex-1 p-3 md:p-4 max-w-[1800px] mx-auto space-y-3 pb-24">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-lg md:text-xl font-bold text-amber-400 tracking-tight">
+            <h1 className="text-lg md:text-xl font-bold text-ds-warning tracking-tight">
               Director Command Center
             </h1>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-ds-ink-faint">
               Business vitals · pipeline · priority overrides (audit logged)
             </p>
-            <p className="mt-1 text-[10px] text-slate-600">
-              <kbd className="rounded border border-slate-700 bg-zinc-950 px-1 py-px font-director-cc text-slate-400">
+            <p className="mt-1 text-[10px] text-ds-ink-faint">
+              <kbd className="rounded border border-ds-line/50 bg-ds-main px-1 py-px font-director-cc text-ds-ink-muted">
                 ⌘K
               </kbd>{' '}
               /{' '}
-              <kbd className="rounded border border-slate-700 bg-zinc-950 px-1 py-px font-director-cc text-slate-400">
+              <kbd className="rounded border border-ds-line/50 bg-ds-main px-1 py-px font-director-cc text-ds-ink-muted">
                 Ctrl+K
               </kbd>{' '}
               — search KPIs, vendors, and customer records from anywhere in the app.
@@ -347,13 +347,13 @@ export default function DirectorCommandCenterPage() {
           <div className="flex flex-wrap gap-2 text-xs">
             <Link
               href="/orders/designing"
-              className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 hover:border-slate-500"
+              className="px-3 py-1.5 rounded-lg border border-ds-line/50 text-ds-ink hover:border-ds-line/50"
             >
               Artwork queue
             </Link>
             <Link
               href="/orders/planning"
-              className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 hover:border-slate-500"
+              className="px-3 py-1.5 rounded-lg border border-ds-line/50 text-ds-ink hover:border-ds-line/50"
             >
               Planning
             </Link>
@@ -365,7 +365,7 @@ export default function DirectorCommandCenterPage() {
             </Link>
             <Link
               href="/orders/purchase-orders"
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground font-semibold"
+              className="px-3 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground font-semibold"
             >
               Customer POs
             </Link>
@@ -373,30 +373,30 @@ export default function DirectorCommandCenterPage() {
         </div>
 
         <section aria-label="Business vitals" className="grid gap-3 lg:grid-cols-3">
-          <div className="rounded-xl border border-amber-500/35 bg-card p-3 shadow-[inset_0_1px_0_0_rgba(251,191,36,0.12)]">
-            <h2 className="text-[10px] font-bold uppercase tracking-widest text-amber-400/95">
+          <div className="rounded-xl border border-ds-warning/30 bg-card p-3 shadow-[inset_0_1px_0_0_rgba(251,191,36,0.12)]">
+            <h2 className="text-[10px] font-bold uppercase tracking-widest text-ds-warning/95">
               Zone 1 · Sales
             </h2>
             <div className="mt-2 grid gap-2">
-              <div className="rounded-lg border border-amber-500/20 bg-zinc-950/80 px-3 py-2">
-                <div className="text-[9px] font-semibold uppercase text-amber-500/80">
+              <div className="rounded-lg border border-ds-warning/20 bg-ds-main/80 px-3 py-2">
+                <div className="text-[9px] font-semibold uppercase text-ds-warning/80">
                   Live order book
                 </div>
-                <div className={`text-base font-semibold text-amber-100 ${mono}`}>
+                <div className={`text-base font-semibold text-ds-ink ${mono}`}>
                   {vitalsLoading ? '—' : formatRupee(vitals?.sales.liveOrderBookValue ?? 0)}
                 </div>
-                <div className="text-[9px] text-slate-600">Active customer PO lines (draft + confirmed)</div>
+                <div className="text-[9px] text-ds-ink-faint">Active customer PO lines (draft + confirmed)</div>
               </div>
-              <div className="rounded-lg border border-amber-500/20 bg-zinc-950/80 px-3 py-2">
-                <div className="text-[9px] font-semibold uppercase text-amber-500/80">
+              <div className="rounded-lg border border-ds-warning/20 bg-ds-main/80 px-3 py-2">
+                <div className="text-[9px] font-semibold uppercase text-ds-warning/80">
                   Revenue dispatched (MTD)
                 </div>
-                <div className={`text-base font-semibold text-amber-100 ${mono}`}>
+                <div className={`text-base font-semibold text-ds-ink ${mono}`}>
                   {vitalsLoading
                     ? '—'
                     : formatRupee(vitals?.sales.revenueDispatchedMtdValue ?? 0)}
                 </div>
-                <div className="text-[9px] text-slate-600">
+                <div className="text-[9px] text-ds-ink-faint">
                   Closed PO ₹ this month (until gate passes carry ₹). Gate passes MTD:{' '}
                   <span className={mono}>
                     {vitalsLoading
@@ -415,16 +415,16 @@ export default function DirectorCommandCenterPage() {
               Zone 2 · Procurement
             </h2>
             <div className="mt-2 grid gap-2">
-              <div className="rounded-lg border border-sky-500/25 bg-zinc-950/80 px-3 py-2">
+              <div className="rounded-lg border border-sky-500/25 bg-ds-main/80 px-3 py-2">
                 <div className="text-[9px] font-semibold uppercase text-sky-400/90">
                   Open material spend
                 </div>
                 <div className={`text-base font-semibold text-sky-100 ${mono}`}>
                   {vitalsLoading ? '—' : formatRupee(vitals?.procurement.openMaterialSpend ?? 0)}
                 </div>
-                <div className="text-[9px] text-slate-600">Open vendor material POs (₹ est.)</div>
+                <div className="text-[9px] text-ds-ink-faint">Open vendor material POs (₹ est.)</div>
               </div>
-              <div className="rounded-lg border border-sky-500/25 bg-zinc-950/80 px-3 py-2">
+              <div className="rounded-lg border border-sky-500/25 bg-ds-main/80 px-3 py-2">
                 <div className="text-[9px] font-semibold uppercase text-sky-400/90">
                   Incoming tonnage (7d)
                 </div>
@@ -433,7 +433,7 @@ export default function DirectorCommandCenterPage() {
                     ? '—'
                     : `${((vitals?.procurement.incomingBoardKg7d ?? 0) / 1000).toLocaleString('en-IN', { maximumFractionDigits: 2 })} t`}
                 </div>
-                <div className={`text-[9px] text-slate-600 ${mono}`}>
+                <div className={`text-[9px] text-ds-ink-faint ${mono}`}>
                   {(vitals?.procurement.incomingBoardKg7d ?? 0).toLocaleString('en-IN', {
                     maximumFractionDigits: 0,
                   })}{' '}
@@ -448,7 +448,7 @@ export default function DirectorCommandCenterPage() {
               Zone 3 · Production
             </h2>
             <div className="mt-2 grid gap-2">
-              <div className="rounded-lg border border-emerald-500/25 bg-zinc-950/80 px-3 py-2">
+              <div className="rounded-lg border border-emerald-500/25 bg-ds-main/80 px-3 py-2">
                 <div className="text-[9px] font-semibold uppercase text-emerald-400/90">
                   Factory OEE
                 </div>
@@ -457,9 +457,9 @@ export default function DirectorCommandCenterPage() {
                     ? '—'
                     : `${(vitals?.production.factoryOeePct ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })}%`}
                 </div>
-                <div className="text-[9px] text-slate-600">CI-01 · CI-02 · CI-03 average (today)</div>
+                <div className="text-[9px] text-ds-ink-faint">CI-01 · CI-02 · CI-03 average (today)</div>
               </div>
-              <div className="rounded-lg border border-emerald-500/25 bg-zinc-950/80 px-3 py-2">
+              <div className="rounded-lg border border-emerald-500/25 bg-ds-main/80 px-3 py-2">
                 <div className="text-[9px] font-semibold uppercase text-emerald-400/90">
                   Late order alert
                 </div>
@@ -468,7 +468,7 @@ export default function DirectorCommandCenterPage() {
                     ? '—'
                     : (vitals?.production.lateOrdersPastDue ?? 0).toLocaleString('en-IN')}
                 </div>
-                <div className="text-[9px] text-slate-600">Customer POs past &quot;delivery required by&quot;</div>
+                <div className="text-[9px] text-ds-ink-faint">Customer POs past &quot;delivery required by&quot;</div>
               </div>
             </div>
           </div>
@@ -476,10 +476,10 @@ export default function DirectorCommandCenterPage() {
 
         <div className="grid gap-3 md:grid-cols-2">
           <div className="rounded-xl border border-border/40 bg-card px-3 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
               Revenue trend (30 days)
             </div>
-            <p className="mt-0.5 text-[9px] text-slate-600">
+            <p className="mt-0.5 text-[9px] text-ds-ink-faint">
               Sales volume (₹) from customer POs closed each day — sparkline for directional view.
             </p>
             <div className="mt-2">
@@ -487,10 +487,10 @@ export default function DirectorCommandCenterPage() {
             </div>
           </div>
           <div className="rounded-xl border border-border/40 bg-card px-3 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
               Stage distribution
             </div>
-            <p className="mt-0.5 text-[9px] text-slate-600">
+            <p className="mt-0.5 text-[9px] text-ds-ink-faint">
               Job volume by pipeline stage (sample of open lines).
             </p>
             <div className="mt-3">
@@ -511,25 +511,25 @@ export default function DirectorCommandCenterPage() {
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           <div className="rounded-xl border border-border/40 bg-card px-3 py-2">
-            <div className="text-[10px] font-semibold uppercase text-slate-500">Total WIP value</div>
+            <div className="text-[10px] font-semibold uppercase text-ds-ink-faint">Total WIP value</div>
             <div className={`text-lg font-semibold text-emerald-300 ${mono}`}>
               {loading ? '—' : formatRupee(metrics?.totalWipValue ?? 0)}
             </div>
-            <div className="text-[9px] text-slate-600">Tooling · Material · Printing</div>
+            <div className="text-[9px] text-ds-ink-faint">Tooling · Material · Printing</div>
           </div>
-          <div className="rounded-xl border border-amber-500/25 bg-card px-3 py-2">
-            <div className="text-[10px] font-semibold uppercase text-amber-500/80">Priority jobs</div>
-            <div className={`text-lg font-semibold text-amber-200 ${mono}`}>
+          <div className="rounded-xl border border-ds-warning/25 bg-card px-3 py-2">
+            <div className="text-[10px] font-semibold uppercase text-ds-warning/80">Priority jobs</div>
+            <div className={`text-lg font-semibold text-ds-warning ${mono}`}>
               {loading ? '—' : (metrics?.priorityJobs ?? 0).toLocaleString('en-IN')}
             </div>
-            <div className="text-[9px] text-slate-600">Director star</div>
+            <div className="text-[9px] text-ds-ink-faint">Director star</div>
           </div>
           <div className="rounded-xl border border-rose-500/25 bg-card px-3 py-2">
             <div className="text-[10px] font-semibold uppercase text-rose-400/90">Bottlenecks</div>
             <div className={`text-lg font-semibold text-rose-200 ${mono}`}>
               {loading ? '—' : (metrics?.systemBottlenecks ?? 0).toLocaleString('en-IN')}
             </div>
-            <div className="text-[9px] text-slate-600">&gt; 48h in stage</div>
+            <div className="text-[9px] text-ds-ink-faint">&gt; 48h in stage</div>
           </div>
           <div className="rounded-xl border border-sky-500/25 bg-card px-3 py-2">
             <div className="text-[10px] font-semibold uppercase text-sky-400/90">Velocity</div>
@@ -538,16 +538,16 @@ export default function DirectorCommandCenterPage() {
                 ? '—'
                 : `${(metrics?.velocityDaysAvg30d ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
             </div>
-            <div className="text-[9px] text-slate-600">
+            <div className="text-[9px] text-ds-ink-faint">
               PO → dispatch · 30d · n={metrics?.velocitySampleCount ?? 0}
             </div>
           </div>
         </div>
 
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
-          <div className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-slate-800 bg-card">
+          <div className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-ds-line/40 bg-card">
             <table className="w-full min-w-[1100px] border-collapse text-left text-[10px]">
-              <thead className="sticky top-0 z-30 border-b border-slate-800 bg-card text-slate-500 backdrop-blur-md">
+              <thead className="sticky top-0 z-30 border-b border-ds-line/40 bg-card text-ds-ink-faint backdrop-blur-md">
             <tr>
               <th className="px-1 py-1 w-8">★</th>
               <th className="px-1 py-1 w-10">Hold</th>
@@ -558,13 +558,13 @@ export default function DirectorCommandCenterPage() {
               <th className="px-1 py-1 min-w-[8rem]">Broadcast</th>
             </tr>
               </thead>
-              <tbody className="bg-card text-slate-200">
+              <tbody className="bg-card text-ds-ink">
             {rows.map((r) => {
               const ageCls =
                 r.ageDaysSincePoReceipt > 7
                   ? 'text-rose-400 animate-po-age-alert'
                   : r.ageDaysSincePoReceipt > 3
-                    ? 'text-amber-400'
+                    ? 'text-ds-warning'
                     : 'text-emerald-400'
               return (
                 <tr
@@ -583,7 +583,7 @@ export default function DirectorCommandCenterPage() {
                       setDrawerId(r.id)
                     }
                   }}
-                  className={`border-b border-slate-900 hover:bg-slate-950/80 cursor-pointer transition-[box-shadow] duration-200 ease-in-out ${
+                  className={`border-b border-ds-card hover:bg-ds-main/80 cursor-pointer transition-[box-shadow] duration-200 ease-in-out ${
                     r.directorHold ? 'opacity-45' : ''
                   } ${
                     focusedLineId === r.id
@@ -599,12 +599,12 @@ export default function DirectorCommandCenterPage() {
                       onClick={() =>
                         void patchLine(r.id, { directorPriority: !r.directorPriority })
                       }
-                      className="p-0.5 rounded text-slate-600 hover:bg-slate-900 disabled:opacity-40"
+                      className="p-0.5 rounded text-ds-ink-faint hover:bg-ds-card disabled:opacity-40"
                     >
                       <Star
                         className={`h-3.5 w-3.5 ${
                           r.directorPriority
-                            ? 'fill-amber-400 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.5)]'
+                            ? 'fill-ds-warning text-ds-warning drop-shadow-[0_0_6px_rgba(251,191,36,0.5)]'
                             : ''
                         }`}
                       />
@@ -616,31 +616,31 @@ export default function DirectorCommandCenterPage() {
                       disabled={busyId === r.id}
                       title={r.directorHold ? 'Release hold' : 'Hold line'}
                       onClick={() => void patchLine(r.id, { directorHold: !r.directorHold })}
-                      className="p-0.5 rounded text-slate-500 hover:text-amber-400 hover:bg-slate-900 disabled:opacity-40"
+                      className="p-0.5 rounded text-ds-ink-faint hover:text-ds-warning hover:bg-ds-card disabled:opacity-40"
                     >
                       {r.directorHold ? (
-                        <PauseCircle className="h-4 w-4 text-amber-500/90" />
+                        <PauseCircle className="h-4 w-4 text-ds-warning/90" />
                       ) : (
                         <PlayCircle className="h-4 w-4" />
                       )}
                     </button>
                   </td>
                   <td className="px-1 py-0.5 align-top">
-                    <div className={`font-semibold text-slate-100 ${mono}`}>{r.cartonName}</div>
-                    <div className="text-slate-500">
+                    <div className={`font-semibold text-ds-ink ${mono}`}>{r.cartonName}</div>
+                    <div className="text-ds-ink-faint">
                       <span className={mono}>{r.po.poNumber}</span> · {r.po.customer.name}
                     </div>
-                    <div className="text-[9px] text-slate-600">
+                    <div className="text-[9px] text-ds-ink-faint">
                       Stage: {r.stageKeyDerived}
                       {r.directorPriority ? (
-                        <span className="ml-1 text-amber-400 font-bold">DIRECTOR PRIORITY</span>
+                        <span className="ml-1 text-ds-warning font-bold">DIRECTOR PRIORITY</span>
                       ) : null}
                     </div>
                   </td>
                   <td className="px-1 py-0.5 align-middle">
                     <FiveStageBar bars={r.lifeBars} />
                   </td>
-                  <td className={`px-1 py-0.5 align-middle text-right ${mono} text-slate-100`}>
+                  <td className={`px-1 py-0.5 align-middle text-right ${mono} text-ds-ink`}>
                     {formatRupee(r.lineValue)}
                   </td>
                   <td className={`px-1 py-0.5 align-middle text-right ${mono} font-medium ${ageCls}`}>
@@ -660,7 +660,7 @@ export default function DirectorCommandCenterPage() {
                         void patchLine(r.id, { directorBroadcastNote: next || null })
                       }}
                       placeholder="Floor note…"
-                      className="w-full min-w-[7rem] rounded border border-slate-800 bg-card px-1 py-0.5 text-[10px] text-slate-200 placeholder:text-slate-700 focus:border-amber-500/50 focus:outline-none"
+                      className="w-full min-w-[7rem] rounded border border-ds-line/40 bg-card px-1 py-0.5 text-[10px] text-ds-ink placeholder:text-neutral-700 focus:border-ds-warning/50 focus:outline-none"
                     />
                   </td>
                 </tr>
@@ -678,13 +678,13 @@ export default function DirectorCommandCenterPage() {
               <div className="text-[10px] font-bold uppercase tracking-widest text-rose-300">
                 Alert center
               </div>
-              <p className="text-[9px] text-slate-600">Critical issues for review.</p>
+              <p className="text-[9px] text-ds-ink-faint">Critical issues for review.</p>
             </div>
             <div className="max-h-[min(70vh,520px)] space-y-2 overflow-y-auto rounded-xl border border-border/40 bg-card p-2">
               {vitalsLoading ? (
-                <p className={`px-2 py-4 text-center text-[11px] text-slate-500 ${mono}`}>Loading alerts…</p>
+                <p className={`px-2 py-4 text-center text-[11px] text-ds-ink-faint ${mono}`}>Loading alerts…</p>
               ) : alerts.length === 0 ? (
-                <p className={`px-2 py-4 text-center text-[11px] text-slate-600 ${mono}`}>
+                <p className={`px-2 py-4 text-center text-[11px] text-ds-ink-faint ${mono}`}>
                   No critical alerts.
                 </p>
               ) : (
@@ -693,15 +693,15 @@ export default function DirectorCommandCenterPage() {
                     a.severity === 'critical'
                       ? 'border-rose-500/45 bg-rose-950/20'
                       : a.severity === 'warning'
-                        ? 'border-amber-500/35 bg-amber-950/15'
-                        : 'border-slate-600/50 bg-zinc-950/50'
+                        ? 'border-ds-warning/30 bg-ds-warning/8'
+                        : 'border-ds-line/60 bg-ds-main/50'
                   return (
                     <div
                       key={a.id}
                       className={`rounded-lg border px-2.5 py-2 text-[11px] leading-snug ${border}`}
                     >
-                      <div className="font-semibold text-slate-100">{a.title}</div>
-                      <div className={`mt-1 text-slate-500 ${mono}`}>{a.detail}</div>
+                      <div className="font-semibold text-ds-ink">{a.title}</div>
+                      <div className={`mt-1 text-ds-ink-faint ${mono}`}>{a.detail}</div>
                     </div>
                   )
                 })
@@ -711,7 +711,7 @@ export default function DirectorCommandCenterPage() {
         </div>
 
         {rows.length === 0 && !loading ? (
-          <p className="py-6 text-center text-sm text-slate-500">No active pipeline lines.</p>
+          <p className="py-6 text-center text-sm text-ds-ink-faint">No active pipeline lines.</p>
         ) : null}
 
         <SlideOverPanel
@@ -720,10 +720,10 @@ export default function DirectorCommandCenterPage() {
         onClose={() => setDrawerId(null)}
         widthClass="max-w-lg"
         backdropClassName="bg-background/60"
-        panelClassName="border-l border-slate-800 bg-slate-950/95 backdrop-blur-xl"
+        panelClassName="border-l border-ds-line/40 bg-ds-main/95 backdrop-blur-xl"
       >
         {drawerLoading || !drawerDetail ? (
-          <p className="text-slate-500 text-sm">Loading…</p>
+          <p className="text-ds-ink-faint text-sm">Loading…</p>
         ) : (
           <DrawerBody detail={drawerDetail} audit={drawerAudit} mono={mono} />
         )}
@@ -756,39 +756,39 @@ function DrawerBody({
   return (
     <div className="space-y-4 text-sm">
       <div>
-        <div className="text-xs text-slate-500">Carton</div>
+        <div className="text-xs text-ds-ink-faint">Carton</div>
         <div className="font-medium text-foreground">{String(line?.cartonName ?? '')}</div>
       </div>
       <div className={`grid grid-cols-2 gap-2 text-xs ${mono}`}>
         <div>
-          <span className="text-slate-500">Qty</span> {String(line?.quantity ?? '')}
+          <span className="text-ds-ink-faint">Qty</span> {String(line?.quantity ?? '')}
         </div>
         <div>
-          <span className="text-slate-500">GSM</span> {String(line?.gsm ?? '—')}
+          <span className="text-ds-ink-faint">GSM</span> {String(line?.gsm ?? '—')}
         </div>
         <div className="col-span-2">
-          <span className="text-slate-500">Paper</span> {String(line?.paperType ?? '—')}
+          <span className="text-ds-ink-faint">Paper</span> {String(line?.paperType ?? '—')}
         </div>
         <div className="col-span-2">
-          <span className="text-slate-500">Coating</span> {String(line?.coatingType ?? '—')}
+          <span className="text-ds-ink-faint">Coating</span> {String(line?.coatingType ?? '—')}
         </div>
       </div>
       {d.jobCard?.fileUrl ? (
         <div>
-          <div className="text-xs text-slate-500 mb-1">Artwork / file</div>
+          <div className="text-xs text-ds-ink-faint mb-1">Artwork / file</div>
           <a
             href={d.jobCard.fileUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-amber-400 hover:underline text-xs break-all"
+            className="text-ds-warning hover:underline text-xs break-all"
           >
             {d.jobCard.fileUrl}
           </a>
         </div>
       ) : null}
-      <div className="text-xs text-slate-400 space-y-1">
+      <div className="text-xs text-ds-ink-muted space-y-1">
         <div>
-          <span className="text-slate-500">Dims (mm)</span> L {String(spec.dimLengthMm ?? line?.dimLengthMm ?? '—')}{' '}
+          <span className="text-ds-ink-faint">Dims (mm)</span> L {String(spec.dimLengthMm ?? line?.dimLengthMm ?? '—')}{' '}
           × W {String(spec.dimWidthMm ?? line?.dimWidthMm ?? '—')} × H{' '}
           {String(spec.dimHeightMm ?? line?.dimHeightMm ?? '—')}
         </div>
@@ -796,28 +796,28 @@ function DrawerBody({
       {d.links?.po ? (
         <Link
           href={d.links.po}
-          className="inline-flex rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-amber-500"
+          className="inline-flex rounded-lg bg-ds-warning px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-ds-warning"
         >
           Open PO
         </Link>
       ) : null}
 
       <div>
-        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint mb-2">
           Command Center audit
         </div>
-        <ul className="max-h-48 overflow-y-auto space-y-2 text-[11px] border-t border-slate-800 pt-2">
+        <ul className="max-h-48 overflow-y-auto space-y-2 text-[11px] border-t border-ds-line/40 pt-2">
           {audit.length === 0 ? (
-            <li className="text-slate-600">No director actions yet.</li>
+            <li className="text-ds-ink-faint">No director actions yet.</li>
           ) : (
             audit.map((a) => {
               const nv = a.newValue as { summary?: string } | null
               return (
-                <li key={a.id} className="border-b border-slate-900 pb-1">
-                  <div className="text-slate-500 text-[10px]">
+                <li key={a.id} className="border-b border-ds-card pb-1">
+                  <div className="text-ds-ink-faint text-[10px]">
                     {new Date(a.timestamp).toLocaleString('en-IN')}
                   </div>
-                  <div className="text-slate-300">{nv?.summary ?? 'Update'}</div>
+                  <div className="text-ds-ink-muted">{nv?.summary ?? 'Update'}</div>
                 </li>
               )
             })

@@ -122,20 +122,20 @@ export default function DyeForm({ mode, initialData }: Props) {
   }
 
   const inpCls = (errKey?: string) =>
-    `w-full px-3 py-2 rounded-lg bg-slate-800 border text-foreground text-sm ${errKey && fieldErrors[errKey] ? 'border-red-500' : 'border-slate-600'}`
+    `w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground text-sm ${errKey && fieldErrors[errKey] ? 'border-red-500' : 'border-ds-line/60'}`
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
       <h2 className="text-lg font-semibold text-foreground">{mode === 'ADD' ? 'Add Die' : 'Edit Die'}</h2>
 
       {/* Die Number + Auto Toggle */}
-      <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm space-y-3">
+      <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm space-y-3">
         <div className="flex items-center justify-between">
-          <label className="text-slate-300 font-medium">Die Number</label>
+          <label className="text-ds-ink-muted font-medium">Die Number</label>
           {mode === 'ADD' && (
             <button type="button" onClick={toggleAutoGenerate} className="flex items-center gap-2 text-xs">
-              <span className="text-slate-400">Auto-generate</span>
-              <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoGenerate ? 'bg-amber-500' : 'bg-slate-600'}`}>
+              <span className="text-ds-ink-muted">Auto-generate</span>
+              <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoGenerate ? 'bg-ds-warning' : 'bg-ds-line/30'}`}>
                 <span className={`inline-block h-3.5 w-3.5 rounded-full bg-card transition-transform ${autoGenerate ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
               </span>
             </button>
@@ -153,23 +153,23 @@ export default function DyeForm({ mode, initialData }: Props) {
       </div>
 
       {/* Type & UPS */}
-      <div className="grid grid-cols-2 gap-4 bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm">
+      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm">
         <div>
-          <label className="block text-slate-400 mb-1">Die type *</label>
+          <label className="block text-ds-ink-muted mb-1">Die type *</label>
           <select value={f.dyeType} onChange={(e) => patch('dyeType', e.target.value)} className={inpCls()}>
             {DYE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">UPS *</label>
+          <label className="block text-ds-ink-muted mb-1">UPS *</label>
           <input type="number" min={1} value={f.ups} onChange={(e) => patch('ups', e.target.value)} className={inpCls('ups')} />
           {fieldErrors.ups && <p className="text-xs text-red-400">{fieldErrors.ups}</p>}
         </div>
       </div>
 
       {/* Sheet Size (L x W) */}
-      <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm space-y-2">
-        <label className="block text-slate-400 font-medium">Sheet Size (mm) *</label>
+      <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm space-y-2">
+        <label className="block text-ds-ink-muted font-medium">Sheet Size (mm) *</label>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <input type="number" step="0.01" min={0} placeholder="Length" value={f.sheetLength} onChange={(e) => patch('sheetLength', e.target.value)} className={inpCls('sheetLength')} />
@@ -180,12 +180,12 @@ export default function DyeForm({ mode, initialData }: Props) {
             {fieldErrors.sheetWidth && <p className="text-xs text-red-400 mt-0.5">{fieldErrors.sheetWidth}</p>}
           </div>
         </div>
-        {f.sheetLength && f.sheetWidth && <p className="text-xs text-slate-500">Preview: {f.sheetLength}&times;{f.sheetWidth}</p>}
+        {f.sheetLength && f.sheetWidth && <p className="text-xs text-ds-ink-faint">Preview: {f.sheetLength}&times;{f.sheetWidth}</p>}
       </div>
 
       {/* Carton Size (L x W x H) */}
-      <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm space-y-2">
-        <label className="block text-slate-400 font-medium">Carton Size (mm) *</label>
+      <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm space-y-2">
+        <label className="block text-ds-ink-muted font-medium">Carton Size (mm) *</label>
         <div className="grid grid-cols-3 gap-3">
           <div>
             <input type="number" step="0.01" min={0} placeholder="L" value={f.cartonL} onChange={(e) => patch('cartonL', e.target.value)} className={inpCls('cartonL')} />
@@ -200,28 +200,28 @@ export default function DyeForm({ mode, initialData }: Props) {
             {fieldErrors.cartonH && <p className="text-xs text-red-400 mt-0.5">{fieldErrors.cartonH}</p>}
           </div>
         </div>
-        {f.cartonL && f.cartonW && f.cartonH && <p className="text-xs text-slate-500">Preview: {f.cartonL}&times;{f.cartonW}&times;{f.cartonH}</p>}
+        {f.cartonL && f.cartonW && f.cartonH && <p className="text-xs text-ds-ink-faint">Preview: {f.cartonL}&times;{f.cartonW}&times;{f.cartonH}</p>}
       </div>
 
       {/* Location & Condition & Max Impressions */}
-      <div className="grid grid-cols-2 gap-4 bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm">
+      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm">
         <div>
-          <label className="block text-slate-400 mb-1">Storage location</label>
+          <label className="block text-ds-ink-muted mb-1">Storage location</label>
           <input type="text" value={f.location} onChange={(e) => patch('location', e.target.value)} placeholder="e.g. Rack A-3" className={inpCls()} />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Max impressions</label>
+          <label className="block text-ds-ink-muted mb-1">Max impressions</label>
           <input type="number" min={1} value={f.maxImpressions} onChange={(e) => patch('maxImpressions', e.target.value)} className={inpCls()} />
         </div>
         <div>
-          <label className="block text-slate-400 mb-1">Condition</label>
+          <label className="block text-ds-ink-muted mb-1">Condition</label>
           <input type="text" value={f.condition} onChange={(e) => patch('condition', e.target.value)} className={inpCls()} />
         </div>
       </div>
 
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={() => router.push('/masters/dyes')} className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-sm">Cancel</button>
-        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium">
+        <button type="button" onClick={() => router.push('/masters/dyes')} className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
+        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium">
           {saving ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
         </button>
       </div>

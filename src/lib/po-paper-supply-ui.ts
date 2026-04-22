@@ -18,6 +18,6 @@ export function paperSupplyIconMeta(status: string | undefined): {
   }
   return {
     title: 'Not yet ordered',
-    iconClassName: 'text-slate-500',
+    iconClassName: 'text-ds-ink-faint',
   }
 }

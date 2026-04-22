@@ -336,7 +336,7 @@ export function ShadeCardSpotlightDrawer({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[70] bg-background/60 backdrop-blur-[2px]" />
         <Dialog.Content
-          className={`fixed z-[70] right-0 top-0 flex h-full w-full max-w-lg flex-col border-l border-zinc-800 bg-background shadow-2xl outline-none ${mono}`}
+          className={`fixed z-[70] right-0 top-0 flex h-full w-full max-w-lg flex-col border-l border-ds-line/40 bg-background shadow-2xl outline-none ${mono}`}
         >
           <Dialog.Title className="sr-only">
             {row ? `Product DNA — ${productTitle}` : 'Shade card'}
@@ -345,15 +345,15 @@ export function ShadeCardSpotlightDrawer({
             Color specification, digital proof, and custody usage for this shade card.
           </Dialog.Description>
 
-          <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 shrink-0">
-            <h2 className="min-w-0 text-sm font-semibold leading-tight text-zinc-100 font-sans">
-              <span className="text-zinc-500 font-normal">Product DNA — </span>
+          <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3 shrink-0">
+            <h2 className="min-w-0 text-sm font-semibold leading-tight text-ds-ink font-sans">
+              <span className="text-neutral-500 font-normal">Product DNA — </span>
               <span className="text-foreground">{row ? productTitle : '—'}</span>
             </h2>
             <Dialog.Close asChild>
               <button
                 type="button"
-                className="rounded px-2 py-1 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-foreground font-sans"
+                className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-ds-card hover:text-foreground font-sans"
                 aria-label="Close"
               >
                 ✕
@@ -363,25 +363,25 @@ export function ShadeCardSpotlightDrawer({
 
           <div className="flex-1 overflow-y-auto px-4 py-3">
             {row ? (
-              <div className="space-y-4 text-sm text-zinc-300">
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 font-sans">
+              <div className="space-y-4 text-sm text-neutral-400">
+                <div className="rounded-xl border border-ds-line/40 bg-ds-main/70 px-3 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     Total cumulative runs
                   </p>
-                  <p className={`mt-1 text-2xl font-bold text-amber-400 tabular-nums ${mono}`}>
+                  <p className={`mt-1 text-2xl font-bold text-ds-warning tabular-nums ${mono}`}>
                     {issueEventCount}
                   </p>
-                  <p className={`mt-0.5 text-[10px] text-zinc-600 ${mono}`}>
+                  <p className={`mt-0.5 text-[10px] text-neutral-600 ${mono}`}>
                     Issued-to-floor handshakes (ledger count)
                   </p>
                 </div>
                 <div
                   className={`rounded-xl border px-3 py-3 flex gap-4 items-center ${
-                    row.fadeAlert ? 'border-red-600 animate-pulse bg-red-950/20' : 'border-zinc-800 bg-zinc-950/60'
+                    row.fadeAlert ? 'border-red-600 animate-pulse bg-red-950/20' : 'border-ds-line/40 bg-ds-main/60'
                   }`}
                 >
                   <div
-                    className="h-16 w-16 rounded-lg border border-zinc-700 shrink-0 shadow-inner"
+                    className="h-16 w-16 rounded-lg border border-ds-line/50 shrink-0 shadow-inner"
                     style={{
                       backgroundColor:
                         row.colorSwatchHex && /^#[0-9A-Fa-f]{6}$/.test(row.colorSwatchHex)
@@ -402,13 +402,13 @@ export function ShadeCardSpotlightDrawer({
                     ) : (
                       <p className="mt-0.5 truncate text-sm text-foreground">{productTitle}</p>
                     )}
-                    <p className={`mt-1 text-[10px] text-zinc-500 ${mono}`}>
-                      <span className="text-zinc-400">{awLine}</span>
-                      <span className="text-zinc-700"> | </span>
-                      <span className="text-amber-300/90">{row.shadeCode}</span>
+                    <p className={`mt-1 text-[10px] text-neutral-500 ${mono}`}>
+                      <span className="text-neutral-500">{awLine}</span>
+                      <span className="text-neutral-700"> | </span>
+                      <span className="text-ds-warning/90">{row.shadeCode}</span>
                     </p>
                     {row.mfgDate ? (
-                      <p className={`mt-1 text-[10px] text-zinc-500 ${mono}`}>
+                      <p className={`mt-1 text-[10px] text-neutral-500 ${mono}`}>
                         MFG {row.mfgDate}
                         {row.currentAgeMonths != null ? (
                           <>
@@ -420,7 +420,7 @@ export function ShadeCardSpotlightDrawer({
                                 EXPIRED · {row.currentAgeMonths.toFixed(2)} mo
                               </span>
                             ) : shadeCardAgeTier(row.currentAgeMonths) === 'reverify' ? (
-                              <span className="inline-flex items-center gap-1 text-amber-500">
+                              <span className="inline-flex items-center gap-1 text-ds-warning">
                                 <RefreshCw className="h-3 w-3 shrink-0 animate-pulse" aria-hidden />
                                 {row.currentAgeMonths.toFixed(2)} mo
                               </span>
@@ -431,59 +431,59 @@ export function ShadeCardSpotlightDrawer({
                         ) : null}
                       </p>
                     ) : null}
-                    <p className="mt-1 text-[10px] text-zinc-500" title="ΔE Limit Enforced < 2.0">
+                    <p className="mt-1 text-[10px] text-neutral-500" title="ΔE Limit Enforced < 2.0">
                       ΔE{' '}
                       <span className={row.deltaEAlert ? 'text-red-400 font-semibold' : 'text-emerald-400'}>
                         {row.deltaEReading != null ? row.deltaEReading : '—'}
                       </span>{' '}
-                      <span className="text-zinc-600">(limit &lt; 2.0)</span>
+                      <span className="text-neutral-600">(limit &lt; 2.0)</span>
                     </p>
                   </div>
                 </div>
 
-                <section className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-3 space-y-2">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 font-sans">
+                <section className="rounded-xl border border-ds-line/40 bg-ds-main/40 px-3 py-3 space-y-2">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     LAB values
                   </h3>
                   <div className={`grid grid-cols-3 gap-2 text-center ${mono}`}>
-                    <div className="rounded-lg border border-zinc-800 bg-background px-2 py-2">
-                      <p className="text-[9px] uppercase text-zinc-500">L*</p>
-                      <p className="text-base font-semibold text-zinc-100 tabular-nums">{labL.trim() || '—'}</p>
+                    <div className="rounded-lg border border-ds-line/40 bg-background px-2 py-2">
+                      <p className="text-[9px] uppercase text-neutral-500">L*</p>
+                      <p className="text-base font-semibold text-ds-ink tabular-nums">{labL.trim() || '—'}</p>
                     </div>
-                    <div className="rounded-lg border border-zinc-800 bg-background px-2 py-2">
-                      <p className="text-[9px] uppercase text-zinc-500">a*</p>
-                      <p className="text-base font-semibold text-zinc-100 tabular-nums">{labA.trim() || '—'}</p>
+                    <div className="rounded-lg border border-ds-line/40 bg-background px-2 py-2">
+                      <p className="text-[9px] uppercase text-neutral-500">a*</p>
+                      <p className="text-base font-semibold text-ds-ink tabular-nums">{labA.trim() || '—'}</p>
                     </div>
-                    <div className="rounded-lg border border-zinc-800 bg-background px-2 py-2">
-                      <p className="text-[9px] uppercase text-zinc-500">b*</p>
-                      <p className="text-base font-semibold text-zinc-100 tabular-nums">{labB.trim() || '—'}</p>
+                    <div className="rounded-lg border border-ds-line/40 bg-background px-2 py-2">
+                      <p className="text-[9px] uppercase text-neutral-500">b*</p>
+                      <p className="text-base font-semibold text-ds-ink tabular-nums">{labB.trim() || '—'}</p>
                     </div>
                   </div>
                   <div className={`grid grid-cols-3 gap-2 pt-1 ${mono}`}>
-                    <label className="block text-[9px] text-zinc-500 font-sans">
+                    <label className="block text-[9px] text-neutral-500 font-sans">
                       Edit L*
                       <input
                         value={labL}
                         onChange={(e) => setLabL(e.target.value)}
-                        className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
+                        className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
                         inputMode="decimal"
                       />
                     </label>
-                    <label className="block text-[9px] text-zinc-500 font-sans">
+                    <label className="block text-[9px] text-neutral-500 font-sans">
                       Edit a*
                       <input
                         value={labA}
                         onChange={(e) => setLabA(e.target.value)}
-                        className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
+                        className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
                         inputMode="decimal"
                       />
                     </label>
-                    <label className="block text-[9px] text-zinc-500 font-sans">
+                    <label className="block text-[9px] text-neutral-500 font-sans">
                       Edit b*
                       <input
                         value={labB}
                         onChange={(e) => setLabB(e.target.value)}
-                        className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
+                        className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
                         inputMode="decimal"
                       />
                     </label>
@@ -492,10 +492,10 @@ export function ShadeCardSpotlightDrawer({
 
                 {proofUrl ? (
                   <section>
-                    <h3 className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500 font-sans">
+                    <h3 className="mb-1 text-[10px] uppercase tracking-wider text-neutral-500 font-sans">
                       Digital proof (client-signed)
                     </h3>
-                    <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/50">
+                    <div className="overflow-hidden rounded-lg border border-ds-line/40 bg-ds-main/50">
                       {previewIsImage(proofUrl) ? (
                         <div className="relative h-64 w-full bg-background">
                           <Image
@@ -508,9 +508,9 @@ export function ShadeCardSpotlightDrawer({
                           />
                         </div>
                       ) : previewIsPdf(proofUrl) ? (
-                        <iframe title="Approval PDF" src={proofUrl} className="h-64 w-full bg-zinc-900" />
+                        <iframe title="Approval PDF" src={proofUrl} className="h-64 w-full bg-ds-card" />
                       ) : (
-                        <p className="p-3 text-xs text-zinc-500 font-sans">
+                        <p className="p-3 text-xs text-neutral-500 font-sans">
                           Preview not available.{' '}
                           <a href={proofUrl} target="_blank" rel="noopener noreferrer" className="text-sky-400 underline">
                             Open file →
@@ -522,22 +522,22 @@ export function ShadeCardSpotlightDrawer({
                 ) : null}
 
                 <section>
-                  <h3 className="mb-2 text-[10px] uppercase tracking-wider text-zinc-500 font-sans">
+                  <h3 className="mb-2 text-[10px] uppercase tracking-wider text-neutral-500 font-sans">
                     Usage ledger (handshake)
                   </h3>
-                  <p className={`text-[10px] text-zinc-600 font-sans mb-2 ${mono}`}>
+                  <p className={`text-[10px] text-neutral-600 font-sans mb-2 ${mono}`}>
                     [Timestamp] | [Operator] | [Job #] | [Resulting ΔE]
                   </p>
                   {usageLoading ? (
-                    <p className="text-xs text-zinc-500 font-sans">Loading…</p>
+                    <p className="text-xs text-neutral-500 font-sans">Loading…</p>
                   ) : handshakeLedger.length === 0 ? (
-                    <p className="text-xs text-zinc-600 font-sans">No issue / receive handshakes yet.</p>
+                    <p className="text-xs text-neutral-600 font-sans">No issue / receive handshakes yet.</p>
                   ) : (
-                    <ul className="max-h-[min(28rem,50vh)] space-y-2 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950/40 px-2 py-2">
+                    <ul className="max-h-[min(28rem,50vh)] space-y-2 overflow-y-auto rounded-lg border border-ds-line/40 bg-ds-main/40 px-2 py-2">
                       {handshakeLedger.map((e) => (
                         <li
                           key={e.id}
-                          className={`text-[10px] leading-relaxed text-zinc-300 border-b border-zinc-900/80 pb-2 last:border-0 last:pb-0 ${mono}`}
+                          className={`text-[10px] leading-relaxed text-neutral-400 border-b border-ds-line/30 pb-2 last:border-0 last:pb-0 ${mono}`}
                           title={usageLabel(e.actionType)}
                         >
                           {handshakeLedgerPipeLine(e)}
@@ -547,16 +547,16 @@ export function ShadeCardSpotlightDrawer({
                   )}
                 </section>
 
-                <section className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-3 space-y-3">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 font-sans">
+                <section className="rounded-xl border border-ds-line/40 bg-ds-main/40 px-3 py-3 space-y-3">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     Substrate &amp; ink
                   </h3>
-                  <label className="block text-[10px] text-zinc-500 font-sans">
+                  <label className="block text-[10px] text-neutral-500 font-sans">
                     Substrate type
                     <select
                       value={substrate}
                       onChange={(e) => setSubstrate(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                     >
                       <option value="">—</option>
                       {SHADE_SUBSTRATE_VALUES.map((v) => (
@@ -566,21 +566,21 @@ export function ShadeCardSpotlightDrawer({
                       ))}
                     </select>
                   </label>
-                  <label className="block text-[10px] text-zinc-500 font-sans">
+                  <label className="block text-[10px] text-neutral-500 font-sans">
                     Ink recipe (PMS / lab mix)
                     <textarea
                       value={inkRecipeNotes}
                       onChange={(e) => setInkRecipeNotes(e.target.value)}
                       rows={3}
-                      className="mt-0.5 w-full resize-y rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
+                      className="mt-0.5 w-full resize-y rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
                       placeholder="Pigment loads, varnish, white underprint…"
                     />
                   </label>
                 </section>
 
                 <section>
-                  <h3 className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500 font-sans">Spectro summary</h3>
-                  <p className="min-h-[4rem] whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950/50 px-2 py-2 text-xs text-zinc-400">
+                  <h3 className="mb-1 text-[10px] uppercase tracking-wider text-neutral-500 font-sans">Spectro summary</h3>
+                  <p className="min-h-[4rem] whitespace-pre-wrap rounded-lg border border-ds-line/40 bg-ds-main/50 px-2 py-2 text-xs text-neutral-500">
                     {row.spectroReportSummary ?? 'No spectro report on file.'}
                   </p>
                 </section>
@@ -596,67 +596,67 @@ export function ShadeCardSpotlightDrawer({
                   </a>
                 ) : null}
 
-                <div className="space-y-2 border-t border-zinc-800 pt-3">
-                  <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-sans">Record verification</p>
-                  <label className="block text-[10px] text-zinc-500 font-sans">
+                <div className="space-y-2 border-t border-ds-line/40 pt-3">
+                  <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-sans">Record verification</p>
+                  <label className="block text-[10px] text-neutral-500 font-sans">
                     Last verified date
                     <input
                       type="date"
                       value={verified}
                       onChange={(e) => setVerified(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                     />
                   </label>
-                  <label className="block text-[10px] text-zinc-500 font-sans">
+                  <label className="block text-[10px] text-neutral-500 font-sans">
                     ΔE reading
                     <input
                       value={deltaE}
                       onChange={(e) => setDeltaE(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                       inputMode="decimal"
                     />
                   </label>
-                  <label className="block text-[10px] text-zinc-500 font-sans">
+                  <label className="block text-[10px] text-neutral-500 font-sans">
                     Approval URL (legacy / mirror)
                     <input
                       value={attach}
                       onChange={(e) => setAttach(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                     />
                   </label>
-                  <label className="block text-[10px] text-zinc-500 font-sans">
+                  <label className="block text-[10px] text-neutral-500 font-sans">
                     Ink recipe link (PMS / lab)
                     <input
                       value={inkLink}
                       onChange={(e) => setInkLink(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                       placeholder="https://…"
                     />
                   </label>
-                  <label className="block text-[10px] text-zinc-500 font-sans">
+                  <label className="block text-[10px] text-neutral-500 font-sans">
                     Customer approval document (signed scan)
                     <input
                       value={custDoc}
                       onChange={(e) => setCustDoc(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                       placeholder="https://…"
                     />
                   </label>
-                  <label className="block text-[10px] text-zinc-500 font-sans">
+                  <label className="block text-[10px] text-neutral-500 font-sans">
                     Spectro summary
                     <textarea
                       value={spectro}
                       onChange={(e) => setSpectro(e.target.value)}
                       rows={3}
-                      className="mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200"
+                      className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
                     />
                   </label>
-                  <label className="block text-[10px] text-zinc-500 font-sans">
+                  <label className="block text-[10px] text-neutral-500 font-sans">
                     Swatch hex (#RRGGBB)
                     <input
                       value={hex}
                       onChange={(e) => setHex(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-zinc-700 bg-background px-2 py-1.5 text-xs text-zinc-200 ${mono}`}
+                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                       placeholder="#C41E3A"
                     />
                   </label>
@@ -670,7 +670,7 @@ export function ShadeCardSpotlightDrawer({
                   </button>
                 </div>
 
-                <p className="pt-1 text-center text-[10px] text-zinc-600 font-sans">
+                <p className="pt-1 text-center text-[10px] text-neutral-600 font-sans">
                   Custody Handshake Verified - 100% Audit Traceability Active.
                 </p>
               </div>

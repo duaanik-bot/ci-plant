@@ -94,7 +94,7 @@ export function pastingStyleSearchBadgeClass(s: PastingStyle | null | undefined)
     return 'rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-indigo-600/80 text-white ring-1 ring-indigo-300/35'
   }
   if (s === PastingStyle.SPECIAL) {
-    return 'rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-slate-600/80 text-slate-200 ring-1 ring-slate-400/30'
+    return 'rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-ds-line/30 text-ds-ink ring-1 ring-ds-line/30'
   }
-  return 'rounded px-1.5 py-0.5 text-[9px] font-semibold text-slate-500 ring-1 ring-slate-600/60'
+  return 'rounded px-1.5 py-0.5 text-[9px] font-semibold text-ds-ink-faint ring-1 ring-ds-line/50'
 }

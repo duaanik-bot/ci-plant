@@ -127,10 +127,10 @@ const RFQ_PIPELINE_STAGES = [
 
 function StatCardSkeleton() {
   return (
-    <div className="bg-slate-800 rounded-xl p-5 border border-slate-700 animate-pulse">
-      <div className="h-6 w-6 rounded bg-slate-700 ml-auto mb-3" />
-      <div className="h-9 w-16 bg-slate-700 rounded mb-2" />
-      <div className="h-4 w-24 bg-slate-700 rounded" />
+    <div className="bg-ds-elevated rounded-xl p-5 border border-ds-line/50 animate-pulse">
+      <div className="h-6 w-6 rounded bg-ds-elevated ml-auto mb-3" />
+      <div className="h-9 w-16 bg-ds-elevated rounded mb-2" />
+      <div className="h-4 w-24 bg-ds-elevated rounded" />
     </div>
   )
 }
@@ -142,7 +142,7 @@ function dueDateClass(dueDate: string): string {
   due.setHours(0, 0, 0, 0)
   const diff = due.getTime() - today.getTime()
   if (diff < 0) return 'text-red-400'
-  if (diff === 0) return 'text-amber-400'
+  if (diff === 0) return 'text-ds-warning'
   return 'text-foreground'
 }
 
@@ -217,13 +217,13 @@ export default function DashboardClient() {
             <Link
               key={card.key}
               href={card.href}
-              className="bg-slate-800 rounded-xl p-5 border border-slate-700 cursor-pointer hover:border-blue-500 transition-colors flex flex-col relative"
+              className="bg-ds-elevated rounded-xl p-5 border border-ds-line/50 cursor-pointer hover:border-blue-500 transition-colors flex flex-col relative"
             >
-              <div className="absolute top-4 right-4 text-slate-500">
+              <div className="absolute top-4 right-4 text-ds-ink-faint">
                 <Icon className="h-6 w-6" />
               </div>
               <span className="text-3xl font-bold text-foreground mt-2">{display}</span>
-              <span className="text-sm text-slate-400 mt-1">{card.label}</span>
+              <span className="text-sm text-ds-ink-muted mt-1">{card.label}</span>
             </Link>
           )
         })}
@@ -232,14 +232,14 @@ export default function DashboardClient() {
       {/* ROW 2 — THREE COLUMNS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* LEFT — Press Status — Live */}
-        <div className="rounded-xl bg-slate-800 border border-slate-700 p-4">
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">Press Status — Live</h2>
+        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+          <h2 className="text-sm font-semibold text-ds-ink mb-3">Press Status — Live</h2>
           {isLoading ? (
             <div className="space-y-2">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="rounded-lg border border-slate-700 bg-slate-800/60 p-3 animate-pulse">
-                  <div className="h-4 w-16 bg-slate-700 rounded mb-2" />
-                  <div className="h-3 w-full bg-slate-700 rounded" />
+                <div key={i} className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-3 animate-pulse">
+                  <div className="h-4 w-16 bg-ds-elevated rounded mb-2" />
+                  <div className="h-3 w-full bg-ds-elevated rounded" />
                 </div>
               ))}
             </div>
@@ -251,62 +251,62 @@ export default function DashboardClient() {
                     ? 'border-l-green-500'
                     : p.status === 'under_maintenance'
                     ? 'border-l-red-500'
-                    : 'border-l-slate-500'
+                    : 'border-l-ds-line/50'
                 const dotColor =
                   p.status === 'active'
                     ? 'bg-green-500'
                     : p.status === 'under_maintenance'
                     ? 'bg-red-500'
-                    : 'bg-slate-500'
+                    : 'bg-ds-line/40'
                 const barPct = Math.min(100, (p.sheets / SHEETS_TARGET) * 100)
 
                 return (
                   <div
                     key={p.machineCode}
-                    className={`rounded-lg border border-slate-700 border-l-4 ${borderColor} bg-slate-800/60 p-3 space-y-2`}
+                    className={`rounded-lg border border-ds-line/50 border-l-4 ${borderColor} bg-ds-elevated/60 p-3 space-y-2`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-amber-300">{p.machineCode}</span>
+                      <span className="font-mono font-bold text-ds-warning">{p.machineCode}</span>
                       <span className={`h-2 w-2 rounded-full ${dotColor}`} title={p.status} />
                     </div>
-                    <p className="text-xs text-slate-300 truncate">
+                    <p className="text-xs text-ds-ink-muted truncate">
                       {p.job
                         ? `${p.job.jobNumber} — ${p.job.productName}`
                         : 'No active job — Idle'}
                     </p>
-                    <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                    <div className="h-1.5 rounded-full bg-ds-elevated overflow-hidden">
                       <div
-                        className="h-full bg-amber-500 rounded-full"
+                        className="h-full bg-ds-warning rounded-full"
                         style={{ width: `${barPct}%` }}
                       />
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-400">
+                      <span className="text-ds-ink-muted">
                         Sheets: {p.sheets.toLocaleString()} / {SHEETS_TARGET.toLocaleString()}
                       </span>
-                      <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-200">
+                      <span className="px-2 py-0.5 rounded bg-ds-elevated text-ds-ink">
                         OEE {p.oee.toFixed(1)}%
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-ds-ink-faint">
                       Artwork: {p.firstArticleStatus ? '✅' : '🔒'}
                     </p>
                   </div>
                 )
               })}
               {(!presses || presses.length === 0) && (
-                <p className="text-xs text-slate-500">No press data.</p>
+                <p className="text-xs text-ds-ink-faint">No press data.</p>
               )}
             </div>
           )}
         </div>
 
         {/* MIDDLE — Active Jobs Pipeline */}
-        <div className="rounded-xl bg-slate-800 border border-slate-700 p-4 flex flex-col">
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">Active Jobs Pipeline</h2>
+        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4 flex flex-col">
+          <h2 className="text-sm font-semibold text-ds-ink mb-3">Active Jobs Pipeline</h2>
           <div className="space-y-2 overflow-y-auto max-h-80">
             {(pipeline || []).length === 0 && (
-              <p className="text-xs text-slate-500">No active jobs</p>
+              <p className="text-xs text-ds-ink-faint">No active jobs</p>
             )}
             {(pipeline || []).map((job) => {
               const filled = Math.round((job.percentComplete / 100) * WORKFLOW_STAGE_COUNT)
@@ -320,23 +320,23 @@ export default function DashboardClient() {
                 <Link
                   key={job.id}
                   href={`/workflow/${job.id}`}
-                  className="block rounded-lg bg-slate-800/60 border border-slate-700 px-3 py-2 hover:border-blue-500/60 transition-colors"
+                  className="block rounded-lg bg-ds-elevated/60 border border-ds-line/50 px-3 py-2 hover:border-blue-500/60 transition-colors"
                 >
                   <div className="flex justify-between text-xs">
-                    <span className="font-mono text-amber-300">{job.jobNumber}</span>
-                    <span className="text-slate-500 truncate max-w-[100px]">{job.customerName}</span>
+                    <span className="font-mono text-ds-warning">{job.jobNumber}</span>
+                    <span className="text-ds-ink-faint truncate max-w-[100px]">{job.customerName}</span>
                   </div>
-                  <p className="text-xs text-slate-300 truncate mt-0.5">{job.productName}</p>
+                  <p className="text-xs text-ds-ink-muted truncate mt-0.5">{job.productName}</p>
                   <div className="flex items-center gap-0.5 mt-1.5 flex-wrap">
                     {Array.from({ length: WORKFLOW_STAGE_COUNT }, (_, i) =>
                       i < filled ? (
                         <CircleDot key={i} className="h-2.5 w-2.5 text-blue-400 fill-blue-400" />
                       ) : (
-                        <Circle key={i} className="h-2.5 w-2.5 text-slate-600" />
+                        <Circle key={i} className="h-2.5 w-2.5 text-ds-ink-faint" />
                       )
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">
+                  <p className="text-[11px] text-ds-ink-muted mt-1">
                     Stage {job.currentStageNumber ?? '—'}/{WORKFLOW_STAGE_COUNT}
                     {job.currentStageName ? ` · ${job.currentStageName}` : ''}
                   </p>
@@ -350,38 +350,38 @@ export default function DashboardClient() {
         </div>
 
         {/* RIGHT — Action Required */}
-        <div className="rounded-xl bg-slate-800 border border-slate-700 p-4 flex flex-col">
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">Action Required</h2>
+        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4 flex flex-col">
+          <h2 className="text-sm font-semibold text-ds-ink mb-3">Action Required</h2>
           <div className="space-y-1 overflow-y-auto max-h-80">
             {(alerts || []).length === 0 && (
-              <p className="text-xs text-slate-500">No alerts.</p>
+              <p className="text-xs text-ds-ink-faint">No alerts.</p>
             )}
             {(alerts || []).map((a, idx) => {
               const barColor =
                 a.severity === 'critical'
                   ? 'border-l-red-500'
                   : a.severity === 'warning'
-                  ? 'border-l-amber-500'
+                  ? 'border-l-ds-warning'
                   : 'border-l-blue-500'
 
               return (
                 <Link
                   key={idx}
                   href={a.link}
-                  className={`block rounded-r border border-slate-700 border-l-4 ${barColor} pl-3 py-2 pr-2 hover:bg-slate-700/50 transition-colors`}
+                  className={`block rounded-r border border-ds-line/50 border-l-4 ${barColor} pl-3 py-2 pr-2 hover:bg-ds-elevated/50 transition-colors`}
                 >
                   <p
                     className={`text-xs font-semibold ${
                       a.severity === 'critical'
                         ? 'text-red-400'
                         : a.severity === 'warning'
-                        ? 'text-amber-400'
-                        : 'text-slate-200'
+                        ? 'text-ds-warning'
+                        : 'text-ds-ink'
                     }`}
                   >
                     {a.title}
                   </p>
-                  <p className="text-[11px] text-slate-400 truncate mt-0.5">{a.description}</p>
+                  <p className="text-[11px] text-ds-ink-muted truncate mt-0.5">{a.description}</p>
                 </Link>
               )
             })}
@@ -391,8 +391,8 @@ export default function DashboardClient() {
 
       {/* ROW 3 — Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
-        <div className="lg:col-span-3 rounded-xl bg-slate-800 border border-slate-700 p-4">
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">Impressions This Week</h2>
+        <div className="lg:col-span-3 rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+          <h2 className="text-sm font-semibold text-ds-ink mb-3">Impressions This Week</h2>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={TREND_DATA}>
               <XAxis dataKey="day" stroke="#94a3b8" fontSize={12} />
@@ -408,8 +408,8 @@ export default function DashboardClient() {
             </LineChart>
           </ResponsiveContainer>
         </div>
-        <div className="lg:col-span-2 rounded-xl bg-slate-800 border border-slate-700 p-4">
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">Wastage % This Month</h2>
+        <div className="lg:col-span-2 rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+          <h2 className="text-sm font-semibold text-ds-ink mb-3">Wastage % This Month</h2>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={WASTAGE_DATA} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
               <XAxis dataKey="machine" stroke="#94a3b8" fontSize={12} />
@@ -439,22 +439,22 @@ export default function DashboardClient() {
       </div>
 
       {/* ROW 4 — RFQ Pipeline */}
-      <div className="rounded-xl bg-slate-800 border border-slate-700 p-4 mb-6">
-        <h2 className="text-sm font-semibold text-slate-200 mb-3">RFQ Pipeline</h2>
+      <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4 mb-6">
+        <h2 className="text-sm font-semibold text-ds-ink mb-3">RFQ Pipeline</h2>
         <div className="flex flex-wrap items-center gap-2">
           {RFQ_PIPELINE_STAGES.map((stage, idx) => (
             <span key={stage.key} className="flex items-center gap-2">
               <Link
                 href={`/rfq?status=${stage.key}`}
-                className="bg-slate-700 rounded-lg px-4 py-3 text-center hover:bg-slate-600 transition-colors min-w-[100px]"
+                className="bg-ds-elevated rounded-lg px-4 py-3 text-center hover:bg-ds-line/30 transition-colors min-w-[100px]"
               >
                 <span className="block text-xl font-bold text-foreground">
                   {rfqCountByStatus[stage.key] ?? 0}
                 </span>
-                <span className="block text-xs text-slate-400 mt-0.5">{stage.label}</span>
+                <span className="block text-xs text-ds-ink-muted mt-0.5">{stage.label}</span>
               </Link>
               {idx < RFQ_PIPELINE_STAGES.length - 1 && (
-                <span className="text-slate-500">→</span>
+                <span className="text-ds-ink-faint">→</span>
               )}
             </span>
           ))}
@@ -463,8 +463,8 @@ export default function DashboardClient() {
 
       {/* ROW 5 — Three columns */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-xl bg-slate-800 border border-slate-700 p-4">
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">Stock Alerts</h2>
+        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+          <h2 className="text-sm font-semibold text-ds-ink mb-3">Stock Alerts</h2>
           <div className="space-y-2 overflow-y-auto max-h-48">
             {(stockAlerts || []).length === 0 ? (
               <p className="text-sm text-green-400">All stock levels normal ✓</p>
@@ -479,12 +479,12 @@ export default function DashboardClient() {
                     className="flex justify-between items-center text-sm gap-2"
                   >
                     <span className="text-foreground truncate flex-1">{item.description || item.materialCode}</span>
-                    <span className="text-slate-400 shrink-0">
+                    <span className="text-ds-ink-muted shrink-0">
                       {available.toLocaleString()} / {reorder.toLocaleString()}
                     </span>
                     <span
                       className={`shrink-0 px-2 py-0.5 rounded text-xs font-medium ${
-                        critical ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                        critical ? 'bg-red-500/20 text-red-400' : 'bg-ds-warning/8 text-ds-warning'
                       }`}
                     >
                       {critical ? 'Critical' : 'Warning'}
@@ -495,11 +495,11 @@ export default function DashboardClient() {
             )}
           </div>
         </div>
-        <div className="rounded-xl bg-slate-800 border border-slate-700 p-4">
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">Dispatch This Week</h2>
+        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+          <h2 className="text-sm font-semibold text-ds-ink mb-3">Dispatch This Week</h2>
           <div className="space-y-2 overflow-y-auto max-h-48">
             {dispatchThisWeek.length === 0 ? (
-              <p className="text-sm text-slate-500">No dispatches scheduled this week</p>
+              <p className="text-sm text-ds-ink-faint">No dispatches scheduled this week</p>
             ) : (
               dispatchThisWeek.map((job) => {
                 const dueStr = new Date(job.dueDate).toLocaleDateString('en-IN', {
@@ -513,11 +513,11 @@ export default function DashboardClient() {
                     key={job.id}
                     className="flex justify-between items-start gap-2 text-sm flex-wrap"
                   >
-                    <span className="font-mono text-amber-300">{job.jobNumber}</span>
-                    <span className="text-slate-300 truncate max-w-[120px]" title={job.productName}>
+                    <span className="font-mono text-ds-warning">{job.jobNumber}</span>
+                    <span className="text-ds-ink-muted truncate max-w-[120px]" title={job.productName}>
                       {job.productName}
                     </span>
-                    <span className="text-slate-400">{job.qtyOrdered.toLocaleString()}</span>
+                    <span className="text-ds-ink-muted">{job.qtyOrdered.toLocaleString()}</span>
                     <span className={`font-medium ${dueDateClass(job.dueDate)}`}>{dueStr}</span>
                     <span className="shrink-0" title={qaReleased ? 'QA released' : 'QA not released'}>
                       {qaReleased ? '✅' : '🔒'}
@@ -528,20 +528,20 @@ export default function DashboardClient() {
             )}
           </div>
         </div>
-        <div className="rounded-xl bg-slate-800 border border-slate-700 p-4">
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">Quality Overview</h2>
+        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+          <h2 className="text-sm font-semibold text-ds-ink mb-3">Quality Overview</h2>
           <div className="space-y-2">
             {(openNcrs || []).length === 0 ? (
               <p className="text-sm text-green-400">No open NCRs ✓</p>
             ) : (
               <>
-                <p className="text-sm text-slate-300">
+                <p className="text-sm text-ds-ink-muted">
                   🔴 Critical: {ncrCountBySeverity.critical}
                 </p>
-                <p className="text-sm text-slate-300">
+                <p className="text-sm text-ds-ink-muted">
                   🟡 Major: {ncrCountBySeverity.major}
                 </p>
-                <p className="text-sm text-slate-300">
+                <p className="text-sm text-ds-ink-muted">
                   ⚪ Minor: {ncrCountBySeverity.minor}
                 </p>
                 <Link

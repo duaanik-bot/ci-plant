@@ -33,9 +33,9 @@ function entryKind(entry: PaletteRecentStored): 'po' | 'product' | 'die' {
 }
 
 function KindIcon({ kind }: { kind: 'po' | 'product' | 'die' }) {
-  if (kind === 'po') return <FileText className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-  if (kind === 'die') return <Cog className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-  return <Box className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+  if (kind === 'po') return <FileText className="h-4 w-4 shrink-0 text-ds-ink-muted" aria-hidden />
+  if (kind === 'die') return <Cog className="h-4 w-4 shrink-0 text-ds-ink-muted" aria-hidden />
+  return <Box className="h-4 w-4 shrink-0 text-ds-ink-muted" aria-hidden />
 }
 
 type StatusDot = 'green' | 'amber' | 'red'
@@ -62,7 +62,7 @@ function StatusDotEl({ tone }: { tone: StatusDot }) {
       ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.45)]'
       : tone === 'red'
         ? 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.45)]'
-        : 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.45)]'
+        : 'bg-ds-warning shadow-[0_0_6px_rgba(245,158,11,0.45)]'
   return <span className={`h-2 w-2 shrink-0 rounded-full ${cls}`} aria-hidden />
 }
 
@@ -193,8 +193,8 @@ export function DirectorWorkspaceSidebar({
                 toggleWorkspacePin(entry)
                 refresh()
               }}
-              className={`shrink-0 rounded p-1 transition-opacity hover:bg-slate-800/80 ${
-                isPinned(entry) ? 'text-[#f97316]' : 'text-slate-600 opacity-60 hover:opacity-100'
+              className={`shrink-0 rounded p-1 transition-opacity hover:bg-ds-elevated/80 ${
+                isPinned(entry) ? 'text-[#f97316]' : 'text-ds-ink-faint opacity-60 hover:opacity-100'
               }`}
               aria-label={isPinned(entry) ? 'Unpin' : 'Pin'}
             >
@@ -205,14 +205,14 @@ export function DirectorWorkspaceSidebar({
             type="button"
             title={collapsed ? tip : undefined}
             onClick={() => onItemActivate(entry)}
-            className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors duration-200 ease-in-out hover:bg-slate-800/60 ${
+            className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors duration-200 ease-in-out hover:bg-ds-elevated/60 ${
               active ? 'bg-[#f97316]/10 ring-1 ring-[#f97316]/40' : ''
             }`}
           >
             <KindIcon kind={kind} />
             {!collapsed ? (
               <>
-                <span className={`min-w-0 flex-1 truncate text-[11px] font-medium text-slate-200 ${monoClass}`}>
+                <span className={`min-w-0 flex-1 truncate text-[11px] font-medium text-ds-ink ${monoClass}`}>
                   {entry.title}
                 </span>
                 <StatusDotEl tone={dotTone} />
@@ -224,7 +224,7 @@ export function DirectorWorkspaceSidebar({
         </div>
         {!collapsed ? (
           <div
-            className="pointer-events-none absolute left-full top-1/2 z-[60] ml-2 w-max max-w-[240px] -translate-y-1/2 rounded border border-slate-700 bg-slate-950/95 px-2 py-1.5 text-[10px] leading-snug text-slate-200 opacity-0 shadow-xl backdrop-blur-md ring-1 ring-ring/20 transition-opacity duration-150 group-hover:opacity-100"
+            className="pointer-events-none absolute left-full top-1/2 z-[60] ml-2 w-max max-w-[240px] -translate-y-1/2 rounded border border-ds-line/50 bg-ds-main/95 px-2 py-1.5 text-[10px] leading-snug text-ds-ink opacity-0 shadow-xl backdrop-blur-md ring-1 ring-ring/20 transition-opacity duration-150 group-hover:opacity-100"
             role="tooltip"
           >
             {tip}
@@ -237,7 +237,7 @@ export function DirectorWorkspaceSidebar({
   if (!hydrated) {
     return (
       <aside
-        className={`hidden shrink-0 border-r border-slate-800 bg-slate-950/50 backdrop-blur-xl md:block ${TRANSITION}`}
+        className={`hidden shrink-0 border-r border-ds-line/40 bg-ds-main/50 backdrop-blur-xl md:block ${TRANSITION}`}
         style={{ width: 52, minWidth: 52 }}
         aria-hidden
       />
@@ -248,13 +248,13 @@ export function DirectorWorkspaceSidebar({
 
   return (
     <aside
-      className={`hidden shrink-0 border-r border-slate-800 bg-slate-950/50 backdrop-blur-xl md:flex md:flex-col ${TRANSITION}`}
+      className={`hidden shrink-0 border-r border-ds-line/40 bg-ds-main/50 backdrop-blur-xl md:flex md:flex-col ${TRANSITION}`}
       style={{ width: w, minWidth: w }}
       aria-label="Workspace quick access"
     >
-      <div className="flex items-center justify-between gap-1 border-b border-slate-800/80 px-2 py-2">
+      <div className="flex items-center justify-between gap-1 border-b border-ds-line/50 px-2 py-2">
         {!collapsed ? (
-          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-ds-ink-faint">
             Workspace
           </span>
         ) : (
@@ -263,7 +263,7 @@ export function DirectorWorkspaceSidebar({
         <button
           type="button"
           onClick={toggleCollapsed}
-          className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-800/80 hover:text-[#f97316]"
+          className="rounded-md p-1.5 text-ds-ink-faint transition-colors hover:bg-ds-elevated/80 hover:text-[#f97316]"
           title={collapsed ? 'Expand workspace' : 'Collapse workspace'}
           aria-expanded={!collapsed}
         >
@@ -290,7 +290,7 @@ export function DirectorWorkspaceSidebar({
         {recentFiltered.length > 0 ? (
           <div>
             {!collapsed ? (
-              <div className="mb-1.5 px-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+              <div className="mb-1.5 px-1 text-[9px] font-bold uppercase tracking-wider text-ds-ink-faint">
                 Recent
               </div>
             ) : null}
@@ -301,14 +301,14 @@ export function DirectorWorkspaceSidebar({
         ) : null}
 
         {pins.length === 0 && recentFiltered.length === 0 && !collapsed ? (
-          <p className={`px-1 py-4 text-center text-[10px] leading-relaxed text-slate-600 ${monoClass}`}>
+          <p className={`px-1 py-4 text-center text-[10px] leading-relaxed text-ds-ink-faint ${monoClass}`}>
             Use global search (⌘K). Items appear here automatically.
           </p>
         ) : null}
       </div>
 
-      <div className="border-t border-slate-800/80 px-2 py-1.5">
-        <p className={`text-[9px] text-slate-600 ${monoClass}`}>
+      <div className="border-t border-ds-line/50 px-2 py-1.5">
+        <p className={`text-[9px] text-ds-ink-faint ${monoClass}`}>
           <span className="text-[#f97316]/90">Anik Dua</span>
           {!collapsed ? <span> · quick access</span> : null}
         </p>

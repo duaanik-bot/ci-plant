@@ -168,8 +168,8 @@ export default function DispatchPlanningPage() {
     <div className="p-4 max-w-6xl mx-auto space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-bold text-amber-400">Dispatch Planning</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h1 className="text-xl font-bold text-ds-warning">Dispatch Planning</h1>
+          <p className="text-xs text-ds-ink-faint mt-0.5">
             Ready for dispatch jobs (auto-refresh 30s){isFetching ? ' • refreshing…' : ''}
           </p>
         </div>
@@ -185,7 +185,7 @@ export default function DispatchPlanningPage() {
             )
             downloadText(`dispatch-ready-${new Date().toISOString().slice(0, 10)}.csv`, csv)
           }}
-          className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 hover:border-amber-500/60 text-sm"
+          className="px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/50 hover:border-ds-warning/60 text-sm"
         >
           Export CSV
         </button>
@@ -195,7 +195,7 @@ export default function DispatchPlanningPage() {
         <select
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground min-w-[220px]"
+          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground min-w-[220px]"
         >
           <option value="">All clients</option>
           {customers.map((c) => (
@@ -207,7 +207,7 @@ export default function DispatchPlanningPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
         >
           <option value="">All statuses</option>
           <option value="ready">Ready</option>
@@ -220,22 +220,22 @@ export default function DispatchPlanningPage() {
           type="date"
           value={from}
           onChange={(e) => setFrom(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
         />
         <input
           type="date"
           value={to}
           onChange={(e) => setTo(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
         />
       </div>
 
       {isLoading ? (
-        <div className="p-4 text-slate-400">Loading…</div>
+        <div className="p-4 text-ds-ink-muted">Loading…</div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-700">
+        <div className="overflow-x-auto rounded-lg border border-ds-line/50">
           <table className="w-full text-sm text-left">
-            <thead className="bg-slate-800 text-slate-300">
+            <thead className="bg-ds-elevated text-ds-ink-muted">
               <tr>
                 <th className="px-4 py-2">Job #</th>
                 <th className="px-4 py-2">Client</th>
@@ -246,31 +246,31 @@ export default function DispatchPlanningPage() {
                 <th className="px-4 py-2">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-700">
+            <tbody className="divide-y divide-ds-line/40">
               {filtered.map((r) => {
                 const st = r.existingDispatch?.status ?? 'ready'
                 return (
-                  <tr key={r.jobId} className="hover:bg-slate-800/60">
-                    <td className="px-4 py-2 font-mono text-amber-300">{r.jobNumber}</td>
-                    <td className="px-4 py-2 text-slate-200">{r.customerName}</td>
-                    <td className="px-4 py-2 text-slate-300">
+                  <tr key={r.jobId} className="hover:bg-ds-elevated/60">
+                    <td className="px-4 py-2 font-mono text-ds-warning">{r.jobNumber}</td>
+                    <td className="px-4 py-2 text-ds-ink">{r.customerName}</td>
+                    <td className="px-4 py-2 text-ds-ink-muted">
                       {new Date(r.dueDate).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-2">
-                      <span className="px-2 py-0.5 rounded text-xs border bg-slate-800 text-slate-200 border-slate-600">
+                      <span className="px-2 py-0.5 rounded text-xs border bg-ds-elevated text-ds-ink border-ds-line/60">
                         {st}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-slate-300">
+                    <td className="px-4 py-2 text-ds-ink-muted">
                       {r.existingDispatch?.vehicleNumber ?? '—'}
                     </td>
-                    <td className="px-4 py-2 text-slate-300">
+                    <td className="px-4 py-2 text-ds-ink-muted">
                       {r.existingDispatch?.driverName ?? '—'}
                     </td>
                     <td className="px-4 py-2">
                       <button
                         onClick={() => openPlan(r)}
-                        className="text-amber-400 hover:underline"
+                        className="text-ds-warning hover:underline"
                       >
                         Plan Dispatch
                       </button>
@@ -284,7 +284,7 @@ export default function DispatchPlanningPage() {
       )}
 
       {!isLoading && filtered.length === 0 && (
-        <p className="text-slate-500 text-center py-8 text-sm">No jobs ready for dispatch.</p>
+        <p className="text-ds-ink-faint text-center py-8 text-sm">No jobs ready for dispatch.</p>
       )}
 
       {planOpen && planJob && (
@@ -295,18 +295,18 @@ export default function DispatchPlanningPage() {
             aria-label="Close"
             type="button"
           />
-          <div className="relative w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 p-4">
+          <div className="relative w-full max-w-xl rounded-xl border border-ds-line/50 bg-ds-card p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Plan Dispatch</h2>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-ds-ink-muted mt-0.5">
                   {planJob.jobNumber} · {planJob.customerName}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setPlanOpen(false)}
-                className="text-slate-400 hover:text-foreground"
+                className="text-ds-ink-muted hover:text-foreground"
               >
                 ✕
               </button>
@@ -314,11 +314,11 @@ export default function DispatchPlanningPage() {
 
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Transport Mode</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Transport Mode</label>
                 <select
                   value={transportMode}
                   onChange={(e) => setTransportMode(e.target.value as 'Road' | 'Air' | 'Sea')}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 >
                   <option value="Road">Road</option>
                   <option value="Air">Air</option>
@@ -326,67 +326,67 @@ export default function DispatchPlanningPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Qty Dispatched *</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Qty Dispatched *</label>
                 <input
                   type="number"
                   min={1}
                   value={qtyDispatched || ''}
                   onChange={(e) => setQtyDispatched(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Vehicle Number</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Vehicle Number</label>
                 <input
                   value={vehicleNumber}
                   onChange={(e) => setVehicleNumber(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Driver Name</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Driver Name</label>
                 <input
                   value={driverName}
                   onChange={(e) => setDriverName(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Driver Phone</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Driver Phone</label>
                 <input
                   value={driverPhone}
                   onChange={(e) => setDriverPhone(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Departure Date/Time</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Departure Date/Time</label>
                 <input
                   type="datetime-local"
                   value={departureAt}
                   onChange={(e) => setDepartureAt(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-xs text-slate-400 mb-1">Delivery Address</label>
+                <label className="block text-xs text-ds-ink-muted mb-1">Delivery Address</label>
                 <textarea
                   value={deliveryAddress}
                   onChange={(e) => setDeliveryAddress(e.target.value)}
                   rows={3}
-                  className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-600 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
             </div>
 
             <div className="mt-4 flex items-center justify-between">
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-ds-ink-faint">
                 Documents: Invoice · Packing List · CoA · E-Way Bill (wired in later steps)
               </p>
               <button
                 type="button"
                 onClick={submitPlan}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
+                className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
               >
                 Confirm Dispatch
               </button>

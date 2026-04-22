@@ -81,7 +81,7 @@ function HubStatusBadge({ kind, label }: { kind: HubBadgeKind; label: string }) 
       )
     case 'setup':
       return (
-        <span className={clsx(base, 'bg-amber-500/15 text-amber-400 border-amber-500/35')}>{label}</span>
+        <span className={clsx(base, 'bg-ds-warning/15 text-ds-warning border-ds-warning/30')}>{label}</span>
       )
     case 'halt':
       return (
@@ -97,7 +97,7 @@ function HubStatusBadge({ kind, label }: { kind: HubBadgeKind; label: string }) 
     case 'completed':
     default:
       return (
-        <span className={clsx(base, 'bg-slate-800/80 text-slate-400 border-slate-600/60')}>{label}</span>
+        <span className={clsx(base, 'bg-ds-elevated/80 text-ds-ink-muted border-ds-line/50')}>{label}</span>
       )
   }
 }
@@ -254,7 +254,7 @@ export default function JobCardsPage() {
         type="button"
         onClick={() => toggleSort(k)}
         className={clsx(
-          'inline-flex items-center gap-1 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-200',
+          'inline-flex items-center gap-1 text-left text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted hover:text-ds-ink',
           className,
         )}
       >
@@ -272,56 +272,56 @@ export default function JobCardsPage() {
 
   if (loading && list.length === 0) {
     return (
-      <div className="min-h-[40vh] flex items-center justify-center bg-background text-slate-500 text-sm">
+      <div className="min-h-[40vh] flex items-center justify-center bg-background text-ds-ink-faint text-sm">
         Loading job card hub…
       </div>
     )
   }
 
   return (
-    <div className="min-h-0 flex flex-col bg-background text-slate-100">
-      <div className="border-b border-slate-800 px-4 py-3 flex flex-wrap items-center gap-3">
+    <div className="min-h-0 flex flex-col bg-background text-ds-ink">
+      <div className="border-b border-ds-line/40 px-4 py-3 flex flex-wrap items-center gap-3">
         <div>
-          <h1 className="text-lg font-bold text-amber-400 tracking-tight">Job Card Hub</h1>
-          <p className="text-[11px] text-slate-500 mt-0.5">High-density ledger · live audit</p>
+          <h1 className="text-lg font-bold text-ds-warning tracking-tight">Job Card Hub</h1>
+          <p className="text-[11px] text-ds-ink-faint mt-0.5">High-density ledger · live audit</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 ml-auto">
           <Link
             href="/orders/planning"
-            className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs hover:bg-slate-900"
+            className="px-3 py-1.5 rounded-lg border border-ds-line/50 text-ds-ink-muted text-xs hover:bg-ds-card"
           >
             Planning
           </Link>
           <a
             href="/api/job-cards/reconciliation-export"
-            className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-200 text-xs hover:bg-slate-900"
+            className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-xs hover:bg-ds-card"
           >
             Manual export (material batches)
           </a>
           <Link
             href="/production/job-cards/new"
-            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-xs font-medium"
+            className="px-3 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-xs font-medium"
           >
             New job card
           </Link>
         </div>
       </div>
 
-      <div className="px-4 py-3 space-y-3 border-b border-slate-800/80">
+      <div className="px-4 py-3 space-y-3 border-b border-ds-line/50">
         <div className="flex flex-wrap gap-2 items-center">
           <input
             type="search"
             placeholder="Search PO, customer, AW code…"
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
-            className="min-w-[220px] flex-1 max-w-md px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+            className="min-w-[220px] flex-1 max-w-md px-3 py-2 rounded-lg bg-ds-main border border-ds-line/50 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:outline-none focus:ring-1 focus:ring-ds-warning/35"
           />
-          <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+          <label className="flex items-center gap-2 text-xs text-ds-ink-muted cursor-pointer select-none">
             <input
               type="checkbox"
               checked={priorityOnly}
               onChange={(e) => setPriorityOnly(e.target.checked)}
-              className="rounded border-slate-600 bg-slate-950"
+              className="rounded border-ds-line/60 bg-ds-main"
             />
             Director: priority only
           </label>
@@ -336,8 +336,8 @@ export default function JobCardsPage() {
               className={clsx(
                 'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
                 segment === s.id
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-600',
+                  ? 'bg-ds-warning/8 text-ds-warning border-ds-warning/50'
+                  : 'bg-ds-main text-ds-ink-muted border-ds-line/40 hover:border-ds-line/60',
               )}
             >
               {s.label}
@@ -347,11 +347,11 @@ export default function JobCardsPage() {
 
         <div className="flex flex-wrap gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <span className="text-slate-500 shrink-0">Machine</span>
+            <span className="text-ds-ink-faint shrink-0">Machine</span>
             <select
               value={machineId}
               onChange={(e) => setMachineId(e.target.value)}
-              className="px-2 py-1.5 rounded-md bg-slate-950 border border-slate-700 text-slate-200 max-w-[160px]"
+              className="px-2 py-1.5 rounded-md bg-ds-main border border-ds-line/50 text-ds-ink max-w-[160px]"
             >
               <option value="">All</option>
               {machines.map((m) => (
@@ -362,11 +362,11 @@ export default function JobCardsPage() {
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-slate-500 shrink-0">Operator</span>
+            <span className="text-ds-ink-faint shrink-0">Operator</span>
             <select
               value={operatorId}
               onChange={(e) => setOperatorId(e.target.value)}
-              className="px-2 py-1.5 rounded-md bg-slate-950 border border-slate-700 text-slate-200 max-w-[180px]"
+              className="px-2 py-1.5 rounded-md bg-ds-main border border-ds-line/50 text-ds-ink max-w-[180px]"
             >
               <option value="">All</option>
               {operatorOptions.map((o) => (
@@ -382,15 +382,15 @@ export default function JobCardsPage() {
       <div className="flex-1 overflow-x-auto px-2 pb-4">
         <table className="w-full text-sm min-w-[960px] border-collapse">
           <thead>
-            <tr className="border-b border-slate-800 text-left">
+            <tr className="border-b border-ds-line/40 text-left">
               <th className="py-2 pl-2 pr-1 w-8" aria-label="Priority" />
               <th className="py-2 px-2">
                 <SortHeader k="po" label="PO #" />
               </th>
-              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
                 Client
               </th>
-              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
                 Product
               </th>
               <th className="py-2 px-2">
@@ -405,7 +405,7 @@ export default function JobCardsPage() {
               <th className="py-2 px-2 text-right">
                 <SortHeader k="yield" label="Live yield %" className="justify-end w-full" />
               </th>
-              <th className="py-2 px-2 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <th className="py-2 px-2 text-right text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
                 Card
               </th>
             </tr>
@@ -427,7 +427,7 @@ export default function JobCardsPage() {
                     }
                   }}
                   className={clsx(
-                    'border-b border-slate-900/90 cursor-pointer hover:bg-slate-950/80 transition-colors',
+                    'border-b border-ds-card/90 cursor-pointer hover:bg-ds-main/80 transition-colors',
                     jc.poLine?.industrialPriority === true ? INDUSTRIAL_PRIORITY_ROW_CLASS : '',
                   )}
                 >
@@ -441,26 +441,26 @@ export default function JobCardsPage() {
                       <span className="inline-block w-4" />
                     )}
                   </td>
-                  <td className={`py-2 px-2 align-middle ${mono} text-amber-200/95`}>
+                  <td className={`py-2 px-2 align-middle ${mono} text-ds-warning`}>
                     <div className="flex flex-col gap-0.5">
                       <span>{jc.poLine?.poNumber ?? '—'}</span>
                       {jc.poLine?.artworkCode ? (
-                        <span className="text-[10px] text-slate-500">{jc.poLine.artworkCode}</span>
+                        <span className="text-[10px] text-ds-ink-faint">{jc.poLine.artworkCode}</span>
                       ) : null}
                     </div>
                   </td>
-                  <td className="py-2 px-2 text-slate-300 align-middle max-w-[140px] truncate" title={jc.customer?.name}>
+                  <td className="py-2 px-2 text-ds-ink-muted align-middle max-w-[140px] truncate" title={jc.customer?.name}>
                     {jc.customer?.name}
                   </td>
-                  <td className="py-2 px-2 text-slate-300 align-middle max-w-[200px]">
+                  <td className="py-2 px-2 text-ds-ink-muted align-middle max-w-[200px]">
                     <div className="truncate" title={jc.poLine?.cartonName ?? ''}>
                       {jc.poLine?.cartonName ?? '—'}
                     </div>
                   </td>
-                  <td className={`py-2 px-2 align-middle ${mono} text-slate-200`}>
+                  <td className={`py-2 px-2 align-middle ${mono} text-ds-ink`}>
                     {jc.machine?.machineCode ?? '—'}
                   </td>
-                  <td className={`py-2 px-2 align-middle ${mono} text-slate-300 max-w-[120px] truncate`} title={op}>
+                  <td className={`py-2 px-2 align-middle ${mono} text-ds-ink-muted max-w-[120px] truncate`} title={op}>
                     {op}
                   </td>
                   <td className="py-2 px-2 align-middle">
@@ -476,7 +476,7 @@ export default function JobCardsPage() {
                         {jc.yield.yieldPercent}%
                       </span>
                     ) : (
-                      <span className="text-slate-600">—</span>
+                      <span className="text-ds-ink-faint">—</span>
                     )}
                   </td>
                   <td className="py-2 px-2 align-middle text-right" onClick={(e) => e.stopPropagation()}>
@@ -485,7 +485,7 @@ export default function JobCardsPage() {
                         href={`/api/job-cards/${jc.id}/card-pdf`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="p-1.5 rounded-md text-slate-400 hover:text-amber-400 hover:bg-slate-900"
+                        className="p-1.5 rounded-md text-ds-ink-muted hover:text-ds-warning hover:bg-ds-card"
                         title="Print official card"
                         aria-label="Print official card"
                       >
@@ -493,7 +493,7 @@ export default function JobCardsPage() {
                       </a>
                       <Link
                         href={`/production/job-cards/${jc.id}`}
-                        className="text-[11px] text-amber-500/90 hover:underline px-1 py-1.5"
+                        className="text-[11px] text-ds-warning/90 hover:underline px-1 py-1.5"
                       >
                         Open
                       </Link>
@@ -505,16 +505,16 @@ export default function JobCardsPage() {
           </tbody>
         </table>
         {sortedList.length === 0 && (
-          <p className="text-center text-slate-600 text-sm py-12">No job cards match these filters.</p>
+          <p className="text-center text-ds-ink-faint text-sm py-12">No job cards match these filters.</p>
         )}
       </div>
 
-      <footer className="mt-auto border-t border-slate-800 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+      <footer className="mt-auto border-t border-ds-line/40 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-ds-ink-faint">
         <span>
           Live Data Stream Verified - Last Sync:{' '}
-          <span className={clsx(mono, 'text-slate-400')}>{lastSync ?? '—'}</span>.
+          <span className={clsx(mono, 'text-ds-ink-muted')}>{lastSync ?? '—'}</span>.
         </span>
-        <span className="text-slate-600">Anik Dua · Industrial priority star</span>
+        <span className="text-ds-ink-faint">Anik Dua · Industrial priority star</span>
       </footer>
 
       <JobCardHubAuditDrawer

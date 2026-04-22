@@ -63,53 +63,53 @@ export function OperatorProfileDrawer({
       widthClass="max-w-lg"
     >
       {loading ? (
-        <p className="text-zinc-500 text-sm">Loading…</p>
+        <p className="text-neutral-500 text-sm">Loading…</p>
       ) : profile ? (
-        <div className={`space-y-6 text-sm text-zinc-300 ${mono}`}>
+        <div className={`space-y-6 text-sm text-neutral-400 ${mono}`}>
           <div className="grid grid-cols-3 gap-3 text-xs">
             <div>
-              <div className="text-zinc-500 uppercase tracking-wider">Jobs</div>
-              <div className="text-zinc-100 text-base">{profile.jobCount}</div>
+              <div className="text-neutral-500 uppercase tracking-wider">Jobs</div>
+              <div className="text-ds-ink text-base">{profile.jobCount}</div>
             </div>
             <div>
-              <div className="text-zinc-500 uppercase tracking-wider">Avg OEE</div>
+              <div className="text-neutral-500 uppercase tracking-wider">Avg OEE</div>
               <div className="text-orange-300 text-base">{profile.avgOee}%</div>
             </div>
             <div>
-              <div className="text-zinc-500 uppercase tracking-wider">Avg yield</div>
+              <div className="text-neutral-500 uppercase tracking-wider">Avg yield</div>
               <div className="text-orange-300 text-base">{profile.avgYield}%</div>
             </div>
           </div>
 
           <section>
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
               Waste profile
             </h3>
             <p>
               Operator avg wastage:{' '}
-              <span className="text-zinc-100">{profile.avgWastagePct}%</span> vs factory{' '}
-              <span className="text-zinc-400">{profile.factoryAvgWastagePct}%</span>
+              <span className="text-ds-ink">{profile.avgWastagePct}%</span> vs factory{' '}
+              <span className="text-neutral-500">{profile.factoryAvgWastagePct}%</span>
             </p>
           </section>
 
           <section>
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
               Machine history (run best)
             </h3>
             {profile.machineHistory.length === 0 ? (
-              <p className="text-zinc-600 text-xs">No attributed ledger runs in window.</p>
+              <p className="text-neutral-600 text-xs">No attributed ledger runs in window.</p>
             ) : (
               <ul className="space-y-2">
                 {profile.machineHistory.map((m) => (
                   <li
                     key={m.machineCode}
-                    className="flex justify-between border-b border-zinc-900 pb-1 text-xs"
+                    className="flex justify-between border-b border-ds-line/30 pb-1 text-xs"
                   >
                     <span>
                       {m.machineCode} · {m.machineName}
                     </span>
                     <span className="text-emerald-400">
-                      {m.avgOee}% <span className="text-zinc-600">({m.jobCount} jobs)</span>
+                      {m.avgOee}% <span className="text-neutral-600">({m.jobCount} jobs)</span>
                     </span>
                   </li>
                 ))}
@@ -118,18 +118,18 @@ export function OperatorProfileDrawer({
           </section>
 
           <section>
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
               Downtime signature
             </h3>
             {profile.downtimeSignature.length === 0 ? (
-              <p className="text-zinc-600 text-xs">No downtime logs in window.</p>
+              <p className="text-neutral-600 text-xs">No downtime logs in window.</p>
             ) : (
               <ul className="space-y-1.5 text-xs">
                 {profile.downtimeSignature.map((d) => (
                   <li key={d.reasonKey} className="flex justify-between gap-2">
-                    <span className="text-zinc-400">{reasonLabel(d.reasonKey)}</span>
+                    <span className="text-neutral-500">{reasonLabel(d.reasonKey)}</span>
                     <span>
-                      {d.totalMinutes}m <span className="text-zinc-600">· {d.count}×</span>
+                      {d.totalMinutes}m <span className="text-neutral-600">· {d.count}×</span>
                     </span>
                   </li>
                 ))}
@@ -138,7 +138,7 @@ export function OperatorProfileDrawer({
           </section>
         </div>
       ) : (
-        <p className="text-zinc-500 text-sm">Could not load profile.</p>
+        <p className="text-neutral-500 text-sm">Could not load profile.</p>
       )}
     </SlideOverPanel>
   )

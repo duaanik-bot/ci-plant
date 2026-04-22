@@ -99,46 +99,46 @@ export default function DieHubSettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-zinc-100 p-4 md:p-6">
+    <div className="min-h-screen bg-background text-ds-ink p-4 md:p-6">
       <div className="max-w-[720px] mx-auto space-y-6">
         <HubCategoryNav active="dies" />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Die Hub settings</h1>
-            <p className="text-sm text-zinc-400 mt-1">Staff management and floor operator directory.</p>
+            <p className="text-sm text-neutral-500 mt-1">Staff management and floor operator directory.</p>
           </div>
           <Link
             href="/hub/dies"
-            className="text-sm font-semibold text-amber-400 hover:text-amber-300 border border-amber-700/60 rounded-lg px-3 py-2"
+            className="text-sm font-semibold text-ds-warning hover:text-ds-warning border border-ds-warning/30 rounded-lg px-3 py-2"
           >
             ← Back to board
           </Link>
         </div>
 
         {status === 'loading' ? (
-          <p className="text-zinc-500">Loading…</p>
+          <p className="text-neutral-500">Loading…</p>
         ) : !isAdmin ? (
-          <p className="text-zinc-400 text-sm rounded-lg border border-zinc-700 bg-zinc-950 p-4">
+          <p className="text-neutral-500 text-sm rounded-lg border border-ds-line/50 bg-ds-main p-4">
             Only administrators can manage Operator Master records. Floor staff can still select operators
             on the Die Hub board.
           </p>
         ) : loading ? (
-          <p className="text-zinc-500">Loading staff…</p>
+          <p className="text-neutral-500">Loading staff…</p>
         ) : (
-          <section className="rounded-xl border border-zinc-700 bg-zinc-950 p-4 space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">Staff management</h2>
-            <p className="text-xs text-zinc-500">
+          <section className="rounded-xl border border-ds-line/50 bg-ds-main p-4 space-y-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">Staff management</h2>
+            <p className="text-xs text-neutral-500">
               Active operators appear in issuance and return modals. Inactive names stay in the audit history.
             </p>
 
-            <div className="rounded-lg border border-zinc-800 bg-background/40 p-3 space-y-2">
-              <h3 className="text-xs font-bold uppercase text-zinc-500">Add new operator</h3>
-              <label className="block text-sm text-zinc-300">
+            <div className="rounded-lg border border-ds-line/40 bg-background/40 p-3 space-y-2">
+              <h3 className="text-xs font-bold uppercase text-neutral-500">Add new operator</h3>
+              <label className="block text-sm text-neutral-400">
                 Name
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-zinc-600 text-foreground"
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                   placeholder="e.g. Jane Smith"
                 />
               </label>
@@ -146,25 +146,25 @@ export default function DieHubSettingsPage() {
                 type="button"
                 disabled={saving || !name.trim()}
                 onClick={() => void addOperator()}
-                className="w-full py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-bold disabled:opacity-50"
+                className="w-full py-2 rounded-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-bold disabled:opacity-50"
               >
                 Add operator
               </button>
             </div>
 
-            <ul className="divide-y divide-zinc-800 border border-zinc-800 rounded-lg overflow-hidden">
+            <ul className="divide-y divide-ds-elevated border border-ds-line/40 rounded-lg overflow-hidden">
               {operators.length === 0 ? (
-                <li className="px-3 py-6 text-center text-zinc-500 text-sm">No operators yet.</li>
+                <li className="px-3 py-6 text-center text-neutral-500 text-sm">No operators yet.</li>
               ) : (
                 operators.map((o) => (
                   <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-background/30">
                     <div>
-                      <p className="text-sm font-medium text-zinc-100">{o.name}</p>
-                      <p className="text-[11px] text-zinc-500">
+                      <p className="text-sm font-medium text-ds-ink">{o.name}</p>
+                      <p className="text-[11px] text-neutral-500">
                         {o.isActive ? (
                           <span className="text-emerald-500 font-semibold">Active</span>
                         ) : (
-                          <span className="text-zinc-600 font-semibold">Inactive</span>
+                          <span className="text-neutral-600 font-semibold">Inactive</span>
                         )}
                       </p>
                     </div>
@@ -174,7 +174,7 @@ export default function DieHubSettingsPage() {
                       onClick={() => void toggleActive(o.id, !o.isActive)}
                       className={`text-xs font-bold px-2 py-1 rounded border ${
                         o.isActive
-                          ? 'border-zinc-600 text-zinc-300 hover:bg-zinc-900'
+                          ? 'border-ds-line/50 text-neutral-400 hover:bg-ds-card'
                           : 'border-emerald-700 text-emerald-300 hover:bg-emerald-950/40'
                       }`}
                     >

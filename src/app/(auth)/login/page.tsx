@@ -37,24 +37,24 @@ function LoginForm() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-ds-card to-ds-elevated p-4">
       <div className="w-full max-w-md">
         {/* Branding */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-foreground tracking-tight">
             Colour Impressions
           </h1>
-          <p className="text-slate-400 mt-1 text-sm">
+          <p className="text-ds-ink-muted mt-1 text-sm">
             Plant Management System · Patiala
           </p>
         </div>
 
         {/* Card */}
-        <div className="bg-slate-800/80 border border-slate-700 rounded-xl shadow-xl p-6">
+        <div className="bg-ds-elevated/80 border border-ds-line/50 rounded-xl shadow-xl p-6">
           <h2 className="text-lg font-semibold text-foreground mb-4">Sign in</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-slate-300 mb-1">
+              <label htmlFor="email" className="block text-sm font-medium text-ds-ink-muted mb-1">
                 Email
               </label>
               <input
@@ -69,7 +69,7 @@ function LoginForm() {
               />
             </div>
             <div>
-              <label htmlFor="pin" className="block text-sm font-medium text-slate-300 mb-1">
+              <label htmlFor="pin" className="block text-sm font-medium text-ds-ink-muted mb-1">
                 6-digit PIN
               </label>
               <input
@@ -100,7 +100,7 @@ function LoginForm() {
           </form>
         </div>
 
-        <p className="text-center text-slate-500 text-xs mt-6">
+        <p className="text-center text-ds-ink-faint text-xs mt-6">
           © Colour Impressions. Authorised personnel only.
         </p>
       </div>
@@ -110,7 +110,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-400">Loading…</div>}>
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-ds-card text-ds-ink-muted">Loading…</div>}>
       <LoginForm />
     </Suspense>
   )

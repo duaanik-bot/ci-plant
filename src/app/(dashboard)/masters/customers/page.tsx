@@ -57,13 +57,13 @@ export default function MastersCustomersPage() {
   }
 
   if (loading) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">Customer Master</h2>
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Customer Master</h2>
         <Link
           href="/masters/customers/new"
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-primary-foreground hover:bg-blue-700"
@@ -102,7 +102,7 @@ export default function MastersCustomersPage() {
                     Edit
                   </Link>
                   {c?.active && (
-                    <button type="button" onClick={() => deactivate(c)} className="text-slate-600 hover:underline dark:text-slate-400">
+                    <button type="button" onClick={() => deactivate(c)} className="text-ds-ink-faint hover:underline dark:text-ds-ink-muted">
                       Deactivate
                     </button>
                   )}
@@ -113,7 +113,7 @@ export default function MastersCustomersPage() {
         </table>
       </EnterpriseTableShell>
       {list.length === 0 && (
-        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No customers. Add one to get started.</p>
+        <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No customers. Add one to get started.</p>
       )}
     </div>
   )

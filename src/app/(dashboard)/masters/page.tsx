@@ -43,7 +43,7 @@ export default function MastersHomePage() {
           className="block rounded-lg border border-border bg-card p-5 text-card-foreground shadow-sm ring-1 ring-ring/30 transition-colors hover:border-blue-300 hover:ring-blue-200/50 dark:hover:border-blue-600/50"
         >
           <span className="font-semibold text-blue-600 dark:text-blue-400">{c.label}</span>
-          <span className="mt-1 block text-sm text-slate-600 dark:text-slate-400">{c.description}</span>
+          <span className="mt-1 block text-sm text-ds-ink-faint dark:text-ds-ink-muted">{c.description}</span>
         </Link>
       ))}
     </div>

@@ -17,6 +17,7 @@ import {
   INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
 } from '@/lib/industrial-priority-ui'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
+import { ActionBar, PageHeader } from '@/components/design-system'
 
 type LineItem = {
   id: string
@@ -83,16 +84,16 @@ function poAgeCalendarDays(poDate: string): number {
 
 function ageCellClass(days: number): string {
   if (days <= 3) return 'text-emerald-400'
-  if (days <= 7) return 'text-amber-400'
+  if (days <= 7) return 'text-ds-warning'
   return 'text-rose-400 animate-po-age-alert'
 }
 
 function MiniHubColumn({ parts }: { parts: { n: number; c: string }[] }) {
   const total = parts.reduce((s, p) => s + p.n, 0)
   return (
-    <div className="h-1 min-w-[1.1rem] flex-1 overflow-hidden rounded-sm bg-slate-800/95 ring-1 ring-slate-700/70">
+    <div className="h-1 min-w-[1.1rem] flex-1 overflow-hidden rounded-sm bg-ds-elevated/95 ring-1 ring-ds-line/50">
       {total === 0 ? (
-        <div className="h-full w-full bg-slate-700/85" />
+        <div className="h-full w-full bg-ds-elevated/85" />
       ) : (
         <div className="flex h-full w-full flex-row">
           {parts.map((p, j) =>
@@ -118,21 +119,21 @@ function ReadinessTriBar({ r }: { r: PoReadiness }) {
     >
       <MiniHubColumn
         parts={[
-          { n: r.tooling.r, c: 'bg-slate-600' },
+          { n: r.tooling.r, c: 'bg-ds-line/30' },
           { n: r.tooling.y, c: 'bg-sky-500' },
           { n: r.tooling.g, c: 'bg-emerald-500' },
         ]}
       />
       <MiniHubColumn
         parts={[
-          { n: r.material.grey, c: 'bg-slate-600' },
+          { n: r.material.grey, c: 'bg-ds-line/30' },
           { n: r.material.blue, c: 'bg-sky-500' },
           { n: r.material.green, c: 'bg-emerald-500' },
         ]}
       />
       <MiniHubColumn
         parts={[
-          { n: r.production.grey, c: 'bg-slate-600' },
+          { n: r.production.grey, c: 'bg-ds-line/30' },
           { n: r.production.blue, c: 'bg-sky-500' },
           { n: r.production.green, c: 'bg-emerald-500' },
         ]}
@@ -156,7 +157,7 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
   if (po.status === 'closed') {
     return {
       label: 'Dispatched',
-      className: 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30',
+      className: 'bg-ds-warning/8 text-ds-warning ring-1 ring-ds-warning/35',
     }
   }
   if (po.status === 'sent_to_planning') {
@@ -186,7 +187,7 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
   }
   return {
     label: 'Draft',
-    className: 'bg-slate-600/25 text-slate-300 ring-1 ring-slate-500/30',
+    className: 'bg-ds-elevated/30 text-ds-ink-muted ring-1 ring-ds-line/30',
   }
 }
 
@@ -214,13 +215,13 @@ function PoDeepFilterBar({
   return (
     <div className="flex w-full max-w-2xl mx-auto items-stretch gap-2">
       <div
-        className={`group min-w-0 flex-1 flex items-center gap-2 rounded-xl border bg-slate-900/50 px-3 py-1.5 sm:px-4 sm:py-2 text-sm backdrop-blur-md transition-all duration-300 ${
+        className={`group min-w-0 flex-1 flex items-center gap-2 rounded-xl border bg-ds-card/50 px-3 py-1.5 sm:px-4 sm:py-2 text-sm backdrop-blur-md transition-all duration-300 ${
           filterActive
             ? 'border-emerald-500/45 shadow-[0_0_32px_rgba(52,211,153,0.22),0_0_56px_rgba(245,158,11,0.12)] ring-2 ring-emerald-400/35'
-            : 'border-amber-500/45 shadow-[0_0_14px_rgba(245,158,11,0.12)] ring-1 ring-amber-400/25'
+            : 'border-ds-warning/45 shadow-[0_0_14px_rgba(245,158,11,0.12)] ring-1 ring-ds-warning/40'
         }`}
       >
-        <Search className="h-4 w-4 text-amber-400 shrink-0" aria-hidden />
+        <Search className="h-4 w-4 text-ds-warning shrink-0" aria-hidden />
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {value.trim().length >= 2 ? (
             <span className="shrink-0 text-emerald-400/90 text-xs sm:text-sm">Filtering:</span>
@@ -232,7 +233,7 @@ function PoDeepFilterBar({
             autoComplete="off"
             spellCheck={false}
             aria-label="Filter purchase orders"
-            className="min-w-0 flex-1 bg-transparent py-1 text-slate-200 placeholder:text-slate-500 focus:outline-none text-center sm:text-left text-sm"
+            className="min-w-0 flex-1 bg-transparent py-1 text-ds-ink placeholder:text-ds-ink-faint focus:outline-none text-center sm:text-left text-sm"
           />
         </div>
       </div>
@@ -240,7 +241,7 @@ function PoDeepFilterBar({
         <button
           type="button"
           onClick={() => onClear()}
-          className="shrink-0 self-center rounded-xl border border-slate-600/80 bg-slate-900/60 px-2.5 py-2 text-slate-500 backdrop-blur-md hover:border-amber-500/40 hover:bg-slate-800/80 hover:text-amber-300"
+          className="shrink-0 self-center rounded-xl border border-ds-line/50 bg-ds-card/60 px-2.5 py-2 text-ds-ink-faint backdrop-blur-md hover:border-ds-warning/40 hover:bg-ds-elevated/80 hover:text-ds-warning"
           title="Clear list filter"
           aria-label="Clear list filter"
         >
@@ -649,74 +650,105 @@ export default function PurchaseOrdersPage() {
   )
 
   if (loading && list.length === 0) {
-    return <div className="p-4 text-slate-400 text-sm">Loading purchase orders…</div>
+    return <div className="p-4 text-ds-ink-muted text-sm">Loading purchase orders…</div>
   }
 
   return (
     <div className="p-3 md:p-4 max-w-[1480px] mx-auto space-y-4 pb-24">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-lg md:text-xl font-bold text-foreground tracking-tight">
-            Predictive command center · Customer POs
-          </h1>
-          <p className="text-[11px] text-slate-500 mt-0.5">
+      <PageHeader
+        className="pb-0"
+        title="Predictive command center · Customer POs"
+        description={
+          <p className="text-[11px] text-ds-ink-faint">
             Priority pinning · aging & readiness · operator {PO_DASHBOARD_OPERATOR}
           </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/orders/designing"
-            className="px-3 py-1.5 rounded-lg border border-border text-foreground text-xs hover:bg-accent"
-          >
-            Prepress →
-          </Link>
-          <Link
-            href="/orders/purchase-orders/new"
-            className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold"
-          >
-            New PO
-          </Link>
-          <span className="md:hidden">
-            <CommandPaletteTriggerIcon />
-          </span>
-        </div>
-      </div>
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/orders/designing"
+              className="inline-flex items-center justify-center rounded-ds-sm border border-ds-line bg-ds-elevated/80 px-3 py-1.5 text-xs font-medium text-ds-ink shadow-sm transition duration-200 hover:bg-ds-card"
+            >
+              Prepress →
+            </Link>
+            <Link
+              href="/orders/purchase-orders/new"
+              className="inline-flex items-center justify-center rounded-ds-sm bg-ds-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-ds-brand-hover"
+            >
+              New PO
+            </Link>
+            <span className="md:hidden">
+              <CommandPaletteTriggerIcon />
+            </span>
+          </div>
+        }
+      />
 
-      <div className="px-1 flex justify-center">
-        <div className="w-full max-w-2xl">
-          <PoDeepFilterBar
-            value={listFilterQuery}
-            onChange={setListFilterQuery}
-            onClear={() => setListFilterQuery('')}
-            filterActive={listFilterQuery.trim().length >= 2}
-          />
+      <ActionBar className="border-b border-ds-line/30 py-0 pb-3 !gap-4">
+        <div className="flex w-full flex-1 flex-col items-stretch justify-center gap-3 md:items-center">
+          <div className="flex w-full justify-center px-1">
+            <div className="w-full max-w-2xl">
+              <PoDeepFilterBar
+                value={listFilterQuery}
+                onChange={setListFilterQuery}
+                onClear={() => setListFilterQuery('')}
+                filterActive={listFilterQuery.trim().length >= 2}
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs items-center">
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="ds-input rounded-ds-sm px-2 py-1.5 text-foreground"
+            >
+              <option value="">All statuses</option>
+              <option value="draft">Draft</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="approved">Approved</option>
+              <option value="sent_to_planning">In Planning</option>
+              <option value="closed">Closed</option>
+            </select>
+            <select
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              className="ds-input min-w-[160px] rounded-ds-sm px-2 py-1.5 text-foreground"
+            >
+              <option value="">All customers</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-      </div>
+      </ActionBar>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
         <div className="rounded-xl border border-border bg-card/80 px-3 py-2 backdrop-blur-xl shadow-sm">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
             Total active POs
           </div>
-          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-slate-100 ${poMono}`}>
+          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-ds-ink ${poMono}`}>
             {kpiLoading ? '—' : (kpi?.totalActivePosCount ?? 0).toLocaleString('en-IN')}
           </div>
-          <div className="text-[10px] text-slate-600 mt-0.5">
+          <div className="text-[10px] text-ds-ink-faint mt-0.5">
             {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
           </div>
         </div>
         <div className="rounded-xl border border-border bg-card/80 px-3 py-2 backdrop-blur-xl shadow-sm">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
             Pending line items
           </div>
-          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-slate-100 ${poMono}`}>
+          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-ds-ink ${poMono}`}>
             {kpiLoading ? '—' : (kpi?.pendingItemsSum ?? 0).toLocaleString('en-IN')}
           </div>
-          <div className="text-[10px] text-slate-600 mt-0.5">
+          <div className="text-[10px] text-ds-ink-faint mt-0.5">
             {listFilterQuery.trim().length >= 2 ? 'Σ qty · matching POs' : 'Σ qty · confirmed POs'}
           </div>
         </div>
-        <div className="rounded-xl border border-emerald-500/30 bg-slate-950/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_0_28px_rgba(16,185,129,0.14)]">
+        <div className="rounded-xl border border-emerald-500/30 bg-ds-main/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_0_28px_rgba(16,185,129,0.14)]">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/90">
             Live order book
           </div>
@@ -727,46 +759,19 @@ export default function PurchaseOrdersPage() {
             {listFilterQuery.trim().length >= 2 ? '₹ filtered order book' : '₹ total · confirmed'}
           </div>
         </div>
-        <div className="rounded-xl border border-amber-500/35 bg-slate-950/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_0_26px_rgba(245,158,11,0.12)]">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-500/90">
+        <div className="rounded-xl border border-ds-warning/30 bg-ds-main/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_0_26px_rgba(245,158,11,0.12)]">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-warning/90">
             System velocity
           </div>
-          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-amber-200 ${poMono}`}>
+          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-ds-warning ${poMono}`}>
             {kpiLoading
               ? '—'
               : `${(kpi?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
           </div>
-          <div className="text-[10px] text-amber-700/75 mt-0.5">
+          <div className="text-[10px] text-ds-warning mt-0.5">
             {listFilterQuery.trim().length >= 2 ? 'Avg. age · matching POs' : 'Avg. age · confirmed'}
           </div>
         </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2 text-xs items-center">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="px-2 py-1 rounded-lg bg-card border border-border text-foreground"
-        >
-          <option value="">All statuses</option>
-          <option value="draft">Draft</option>
-          <option value="confirmed">Confirmed</option>
-          <option value="approved">Approved</option>
-          <option value="sent_to_planning">In Planning</option>
-          <option value="closed">Closed</option>
-        </select>
-        <select
-          value={customerId}
-          onChange={(e) => setCustomerId(e.target.value)}
-          className="px-2 py-1 rounded-lg bg-card border border-border text-foreground min-w-[160px]"
-        >
-          <option value="">All customers</option>
-          {customers.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
       </div>
 
       <EnterpriseTableShell>
@@ -805,7 +810,7 @@ export default function PurchaseOrdersPage() {
                       setDrawerPoId(po.id)
                     }
                   }}
-                  className={`group/po cursor-pointer border-b border-slate-800/80 transition-[background,box-shadow] duration-150 ${
+                  className={`group/po cursor-pointer border-b border-ds-line/50 transition-[background,box-shadow] duration-150 ${
                     po.isPriority === true
                       ? INDUSTRIAL_PRIORITY_ROW_CLASS
                       : ''
@@ -819,13 +824,13 @@ export default function PurchaseOrdersPage() {
                       aria-label={po.isPriority === true ? 'Unpin priority' : 'Pin priority'}
                       disabled={priorityBusyId === po.id}
                       onClick={(e) => void togglePriority(po, e)}
-                      className="inline-flex rounded-md p-0.5 text-slate-500 transition-colors hover:bg-slate-800/80 disabled:opacity-40"
+                      className="inline-flex rounded-md p-0.5 text-ds-ink-faint transition-colors hover:bg-ds-elevated/80 disabled:opacity-40"
                     >
                       <Star
                         className={`h-3.5 w-3.5 ${
                           po.isPriority === true
                             ? INDUSTRIAL_PRIORITY_STAR_ICON_CLASS
-                            : 'text-slate-500 group-hover/po:text-slate-400'
+                            : 'text-ds-ink-faint group-hover/po:text-ds-ink-muted'
                         }`}
                         strokeWidth={2}
                       />
@@ -834,7 +839,7 @@ export default function PurchaseOrdersPage() {
                   <td className="px-1.5 py-px align-middle">
                     <div className="flex flex-col gap-0.5 min-w-0">
                       <div className="flex flex-wrap items-center gap-1">
-                        <span className={`${poMono} font-bold text-amber-300`}>{po.poNumber}</span>
+                        <span className={`${poMono} font-bold text-ds-warning`}>{po.poNumber}</span>
                         {po.toolingCritical ? (
                           <span title="Critical tooling on one or more lines">
                             <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" aria-hidden />
@@ -843,7 +848,7 @@ export default function PurchaseOrdersPage() {
                       </div>
                       {po.deepMatchProductName ? (
                         <div
-                          className="text-[10px] text-amber-500/85 truncate max-w-[14rem]"
+                          className="text-[10px] text-ds-warning/85 truncate max-w-[14rem]"
                           title={`Matched line: ${po.deepMatchProductName}`}
                         >
                           Matched: {po.deepMatchProductName}
@@ -854,15 +859,15 @@ export default function PurchaseOrdersPage() {
                   <td className="px-1.5 py-px align-middle">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-slate-700 to-slate-800 text-[8px] font-bold text-amber-200/90 ring-1 ring-slate-600/80"
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-ds-elevated to-ds-elevated text-[8px] font-bold text-ds-warning ring-1 ring-ds-line/80"
                         aria-hidden
                       >
                         {customerInitials(po.customer?.name ?? '')}
                       </span>
-                      <span className="truncate text-slate-700 dark:text-slate-200 text-[10px] md:text-[11px]">{po.customer?.name}</span>
+                      <span className="truncate text-neutral-700 dark:text-ds-ink text-[10px] md:text-[11px]">{po.customer?.name}</span>
                     </div>
                   </td>
-                  <td className={`px-1.5 py-px align-middle whitespace-nowrap text-slate-400 ${poMono}`}>
+                  <td className={`px-1.5 py-px align-middle whitespace-nowrap text-ds-ink-muted ${poMono}`}>
                     {new Date(po.poDate).toLocaleDateString('en-IN', {
                       day: '2-digit',
                       month: 'short',
@@ -878,11 +883,11 @@ export default function PurchaseOrdersPage() {
                   <td className="px-1.5 py-px align-middle">
                     <ReadinessTriBar r={readiness} />
                   </td>
-                  <td className={`px-1.5 py-px align-middle text-right ${poMono} text-slate-300`}>
+                  <td className={`px-1.5 py-px align-middle text-right ${poMono} text-ds-ink-muted`}>
                     {po.lineItems.length}
                   </td>
-                  <td className={`px-1.5 py-px align-middle text-right ${poMono} text-slate-100`}>
-                    <span className="text-slate-500 text-[9px] mr-0.5">₹</span>
+                  <td className={`px-1.5 py-px align-middle text-right ${poMono} text-ds-ink`}>
+                    <span className="text-ds-ink-faint text-[9px] mr-0.5">₹</span>
                     {(po.value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </td>
                   <td className="px-1.5 py-px align-middle">
@@ -903,7 +908,7 @@ export default function PurchaseOrdersPage() {
                         aria-label="Download PDF"
                         disabled={pdfLoadingId === po.id}
                         onClick={(e) => void downloadPoPdf(po, e)}
-                        className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-800/90 disabled:opacity-40 group-hover/po:text-amber-400 hover:text-amber-300"
+                        className="rounded-md p-1 text-ds-ink-muted transition-colors hover:bg-ds-elevated/90 disabled:opacity-40 group-hover/po:text-ds-warning hover:text-ds-warning"
                       >
                         <FileDown className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -915,7 +920,7 @@ export default function PurchaseOrdersPage() {
                           e.stopPropagation()
                           setDrawerPoId(po.id)
                         }}
-                        className="inline-flex items-center justify-center rounded-md border border-transparent bg-transparent px-1.5 py-1 text-slate-400 transition-colors hover:border-amber-500/45 hover:bg-amber-500/10 hover:text-amber-400"
+                        className="inline-flex items-center justify-center rounded-md border border-transparent bg-transparent px-1.5 py-1 text-ds-ink-muted transition-colors hover:border-ds-warning/45 hover:bg-ds-warning/8 hover:text-ds-warning"
                       >
                         <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -935,7 +940,7 @@ export default function PurchaseOrdersPage() {
                         aria-label="Delete purchase order"
                         onClick={(e) => handleDelete(po, e)}
                         disabled={deletingId === po.id}
-                        className="rounded-md p-1 text-slate-400 transition-colors hover:bg-red-950/50 hover:text-red-300 disabled:opacity-40 group-hover/po:text-amber-400"
+                        className="rounded-md p-1 text-ds-ink-muted transition-colors hover:bg-red-950/50 hover:text-red-300 disabled:opacity-40 group-hover/po:text-ds-warning"
                       >
                         <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -949,9 +954,9 @@ export default function PurchaseOrdersPage() {
       </EnterpriseTableShell>
 
       {list.length === 0 && !loading ? (
-        <p className="text-slate-500 text-center py-8 text-sm">No purchase orders found.</p>
+        <p className="text-ds-ink-faint text-center py-8 text-sm">No purchase orders found.</p>
       ) : viewRows.length === 0 && listFilterQuery.trim().length >= 2 && !loading ? (
-        <p className="text-slate-500 text-center py-8 text-sm max-w-lg mx-auto leading-relaxed">
+        <p className="text-ds-ink-faint text-center py-8 text-sm max-w-lg mx-auto leading-relaxed">
           {masterProductExists === true ? (
             <>
               Product &apos;{listFilterQuery.trim()}&apos; found in Master, but no active Purchase
@@ -972,29 +977,29 @@ export default function PurchaseOrdersPage() {
         panelClassName="border-l border-border bg-card shadow-2xl"
       >
         {drawerLoading || !drawerPo ? (
-          <p className="text-slate-500 text-sm">Loading…</p>
+          <p className="text-ds-ink-faint text-sm">Loading…</p>
         ) : (
           <div className="space-y-4 text-sm text-foreground">
-            <p className="text-[10px] text-slate-600 leading-snug">
+            <p className="text-[10px] text-ds-ink-faint leading-snug">
               Default operator / metadata:{' '}
-              <span className="text-slate-400 font-medium">{PO_DASHBOARD_OPERATOR}</span>
+              <span className="text-ds-ink-muted font-medium">{PO_DASHBOARD_OPERATOR}</span>
             </p>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-xs text-slate-500">Customer</div>
-                <div className="font-medium text-slate-100">{drawerPo.customer?.name}</div>
+                <div className="text-xs text-ds-ink-faint">Customer</div>
+                <div className="font-medium text-ds-ink">{drawerPo.customer?.name}</div>
               </div>
-              <div className={`text-right ${poMono} text-amber-200/90`}>
-                <div className="text-[10px] text-slate-500 uppercase">Value</div>
+              <div className={`text-right ${poMono} text-ds-warning`}>
+                <div className="text-[10px] text-ds-ink-faint uppercase">Value</div>
                 {formatRupee(drawerPo.value)}
               </div>
             </div>
 
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
                 Tooling readiness
               </div>
-              <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-900 ring-1 ring-slate-800">
+              <div className="flex h-2 w-full overflow-hidden rounded-full bg-ds-card ring-1 ring-ds-line/40">
                 {toolingBar.total > 0 ? (
                   <>
                     <div
@@ -1002,7 +1007,7 @@ export default function PurchaseOrdersPage() {
                       style={{ width: `${(toolingBar.g / toolingBar.total) * 100}%` }}
                     />
                     <div
-                      className="h-full bg-amber-500 transition-[width]"
+                      className="h-full bg-ds-warning transition-[width]"
                       style={{ width: `${(toolingBar.y / toolingBar.total) * 100}%` }}
                     />
                     <div
@@ -1011,12 +1016,12 @@ export default function PurchaseOrdersPage() {
                     />
                   </>
                 ) : (
-                  <div className="h-full flex-1 bg-slate-800/80" />
+                  <div className="h-full flex-1 bg-ds-elevated/80" />
                 )}
               </div>
-              <div className="mt-1 text-[10px] text-slate-500 tabular-nums">
+              <div className="mt-1 text-[10px] text-ds-ink-faint tabular-nums">
                 Green {toolingBar.g} · Yellow {toolingBar.y} · Red {toolingBar.r}{' '}
-                <span className="text-slate-600">/ {toolingBar.total} lines</span>
+                <span className="text-ds-ink-faint">/ {toolingBar.total} lines</span>
               </div>
             </div>
 
@@ -1029,14 +1034,14 @@ export default function PurchaseOrdersPage() {
                 poMono={poMono}
               />
               {listFilterQuery.trim().length >= 2 ? (
-                <p className="mt-2 text-[9px] text-slate-600 leading-snug">
+                <p className="mt-2 text-[9px] text-ds-ink-faint leading-snug">
                   Deep Audit Performed by Anik Dua.
                 </p>
               ) : null}
             </div>
 
-            <div className="space-y-2 border-t border-slate-800 pt-3">
-              <label className="block text-[10px] uppercase tracking-wider text-slate-500">PO status</label>
+            <div className="space-y-2 border-t border-ds-line/40 pt-3">
+              <label className="block text-[10px] uppercase tracking-wider text-ds-ink-faint">PO status</label>
               <select
                 value={drawerPo.status}
                 disabled={updatingId === drawerPo.id}
@@ -1053,7 +1058,7 @@ export default function PurchaseOrdersPage() {
 
             <Link
               href={`/orders/purchase-orders/${drawerPo.id}`}
-              className="block w-full text-center text-[11px] text-slate-500 hover:text-amber-400/90 underline-offset-2 hover:underline"
+              className="block w-full text-center text-[11px] text-ds-ink-faint hover:text-ds-warning underline-offset-2 hover:underline"
             >
               Open full-page editor (advanced)
             </Link>

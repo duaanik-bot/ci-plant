@@ -19,14 +19,14 @@ function poStatusBadge(status: string): { text: string; className: string } {
     return { text: 'Confirmed', className: 'bg-sky-600/70 text-primary-foreground ring-1 ring-sky-300/30' }
   }
   if (s === 'draft') {
-    return { text: 'Pending', className: 'bg-amber-700/55 text-amber-50 ring-1 ring-amber-400/30' }
+    return { text: 'Pending', className: 'bg-ds-warning/18 text-ds-ink ring-1 ring-ds-warning/40' }
   }
   if (s === 'closed') {
-    return { text: 'Closed', className: 'bg-slate-700/80 text-slate-200 ring-1 ring-slate-500/30' }
+    return { text: 'Closed', className: 'bg-ds-elevated/80 text-ds-ink ring-1 ring-ds-line/30' }
   }
   return {
     text: status.replace(/_/g, ' '),
-    className: 'bg-amber-700/60 text-amber-50 ring-1 ring-amber-400/25',
+    className: 'bg-ds-warning/20 text-ds-ink ring-1 ring-ds-warning/40',
   }
 }
 
@@ -335,7 +335,7 @@ export async function GET(req: NextRequest) {
       href: `/hub/dies?focusDie=${encodeURIComponent(d.id)}`,
       pastingStyle: mapPasting(d.pastingStyle),
       statusBadge: !d.active
-        ? { text: 'Inactive', className: 'bg-slate-700/80 text-slate-300 ring-1 ring-slate-500/30' }
+        ? { text: 'Inactive', className: 'bg-ds-elevated/80 text-ds-ink-muted ring-1 ring-ds-line/30' }
         : dieConditionBadge(d.condition || d.conditionRating),
     }
   })

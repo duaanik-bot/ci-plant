@@ -177,7 +177,7 @@ function IconSpecSelect({
   return (
     <div className="relative flex min-w-[6.5rem] max-w-[9rem] flex-col items-stretch gap-0.5" title={label}>
       <Icon
-        className="h-3 w-3 shrink-0 self-center text-slate-500 opacity-70 transition-colors group-hover:text-[#f97316]"
+        className="h-3 w-3 shrink-0 self-center text-ds-ink-faint opacity-70 transition-colors group-hover:text-[#f97316]"
         strokeWidth={2}
         aria-hidden
       />
@@ -186,8 +186,8 @@ function IconSpecSelect({
         options={options}
         value={value || null}
         onChange={(v) => onChange(v ?? '')}
-        controlClassName="border-slate-700 bg-slate-900/90 hover:bg-slate-900 focus-within:ring-blue-500/30"
-        inputClassName={`text-[9px] leading-tight text-slate-200 placeholder:text-slate-600 ${mono ? 'po-mono-metric' : ''}`}
+        controlClassName="border-ds-line/50 bg-ds-card/90 hover:bg-ds-card focus-within:ring-blue-500/30"
+        inputClassName={`text-[9px] leading-tight text-ds-ink placeholder:text-ds-ink-faint ${mono ? 'po-mono-metric' : ''}`}
         className="w-full"
       />
     </div>
@@ -280,7 +280,7 @@ function CartonLookupField({
         dropdownClassName="min-w-[280px]"
       />
       {!line.cartonId && line.cartonName.trim() ? (
-        <span className="mt-1 inline-block text-[10px] text-amber-400">Unsaved carton name</span>
+        <span className="mt-1 inline-block text-[10px] text-ds-warning">Unsaved carton name</span>
       ) : null}
     </div>
   )
@@ -762,7 +762,7 @@ export default function EditPurchaseOrderPage() {
   }
 
   const inputBase =
-    'w-full px-1.5 py-0.5 rounded-md bg-[#111827]/90 border border-slate-800 text-[11px] text-slate-100 placeholder:text-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/45'
+    'w-full px-1.5 py-0.5 rounded-md bg-[#111827]/90 border border-ds-line/40 text-[11px] text-ds-ink placeholder:text-ds-ink-faint focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/45'
   const inputCls = inputBase
   const lineCellPad = 'px-1 py-0.5'
   const poMono = 'po-mono-metric'
@@ -770,7 +770,7 @@ export default function EditPurchaseOrderPage() {
 
   if (loading) {
     return (
-      <div className="min-h-[40vh] bg-[#0B0F1A] p-4 text-slate-400">Loading…</div>
+      <div className="min-h-[40vh] bg-[#0B0F1A] p-4 text-ds-ink-muted">Loading…</div>
     )
   }
 
@@ -783,7 +783,7 @@ export default function EditPurchaseOrderPage() {
       <div className="rounded-xl border border-border/40 bg-card/30 px-3 py-3 backdrop-blur-md sm:px-4">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/40 pb-3">
           <div className="min-w-0">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">PO #</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-ds-ink-muted">PO #</div>
             <input
               type="text"
               value={poNumber}
@@ -796,7 +796,7 @@ export default function EditPurchaseOrderPage() {
                   return next
                 })
               }}
-              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-amber-400 focus:border-blue-500 focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-red-500/60' : ''} ${poSentToPlanning ? 'cursor-not-allowed opacity-80' : ''}`}
+              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-ds-warning focus:border-blue-500 focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-red-500/60' : ''} ${poSentToPlanning ? 'cursor-not-allowed opacity-80' : ''}`}
             />
             {fieldErrors.poNumber ? (
               <span className="mt-0.5 block text-xs text-red-400">{fieldErrors.poNumber}</span>
@@ -804,12 +804,12 @@ export default function EditPurchaseOrderPage() {
           </div>
           <div className="flex shrink-0 max-w-md flex-col items-stretch gap-2 sm:items-end">
             <div>
-              <div className="text-xs font-medium uppercase tracking-wide text-slate-400 sm:text-right">Status</div>
+              <div className="text-xs font-medium uppercase tracking-wide text-ds-ink-muted sm:text-right">Status</div>
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
                 disabled={poSentToPlanning}
-                className="mt-1 w-full min-w-[10rem] rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 sm:text-right enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
+                className="mt-1 w-full min-w-[10rem] rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 sm:text-right enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
               >
                 <option value="draft">Draft</option>
                 <option value="confirmed">Confirmed</option>
@@ -821,15 +821,15 @@ export default function EditPurchaseOrderPage() {
             {!poSentToPlanning ? (
               <div className="flex w-full min-w-0 flex-col items-stretch gap-1.5 sm:max-w-xs sm:items-end">
                 {!releaseStatusOk ? (
-                  <p className="text-right text-[10px] text-amber-500/90 sm:max-w-[16rem]">
+                  <p className="text-right text-[10px] text-ds-warning/90 sm:max-w-[16rem]">
                     Set status to Confirmed or Approved to release to Planning.
                   </p>
                 ) : null}
                 {releaseStatusOk && !productionKitLoading && productionKit && !productionKit.allOk ? (
-                  <label className="flex cursor-pointer items-center justify-end gap-2 text-[10px] text-amber-200/90">
+                  <label className="flex cursor-pointer items-center justify-end gap-2 text-[10px] text-ds-warning">
                     <input
                       type="checkbox"
-                      className="h-3.5 w-3.5 rounded border-slate-500"
+                      className="h-3.5 w-3.5 rounded border-ds-line/50"
                       checked={toolingGapAck}
                       onChange={(e) => setToolingGapAck(e.target.checked)}
                     />
@@ -837,16 +837,16 @@ export default function EditPurchaseOrderPage() {
                   </label>
                 ) : null}
                 {releaseStatusOk && validLines.length > 0 && !allLinesProductLinked ? (
-                  <p className="text-right text-[10px] text-amber-500/90">Link every line to a master product to release.</p>
+                  <p className="text-right text-[10px] text-ds-warning/90">Link every line to a master product to release.</p>
                 ) : null}
                 {releaseStatusOk && (!deliveryRequiredBy.trim() || !poDate.trim()) ? (
-                  <p className="text-right text-[10px] text-amber-500/90">PO date and delivery date are required.</p>
+                  <p className="text-right text-[10px] text-ds-warning/90">PO date and delivery date are required.</p>
                 ) : null}
                 <button
                   type="button"
                   onClick={releaseToPlanning}
                   disabled={!canReleaseToPlanning || releasingToPlanning}
-                  className="w-full rounded-lg bg-amber-600 px-3 py-2 text-xs font-bold text-white shadow transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                  className="w-full rounded-lg bg-ds-warning px-3 py-2 text-xs font-bold text-white shadow transition-colors hover:bg-ds-warning disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
                 >
                   {releasingToPlanning ? 'Releasing…' : 'Release to Planning'}
                 </button>
@@ -854,7 +854,7 @@ export default function EditPurchaseOrderPage() {
             ) : (
               <p className="text-right text-[10px] leading-snug text-emerald-400/90">
                 In Planning — lines are read-only.{' '}
-                <Link href="/orders/planning" className="font-semibold text-amber-300 underline underline-offset-2">
+                <Link href="/orders/planning" className="font-semibold text-ds-warning underline underline-offset-2">
                   Open queue
                 </Link>
                 .
@@ -866,7 +866,7 @@ export default function EditPurchaseOrderPage() {
         <fieldset disabled={poSentToPlanning} className="min-w-0 space-y-3 border-0 p-0">
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="min-w-0">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Customer</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-ds-ink-muted">Customer</div>
             <div className="mt-1">
               <MasterSearchSelect
                 label="Customer"
@@ -889,55 +889,55 @@ export default function EditPurchaseOrderPage() {
                 emptyMessage="No customer found."
                 recentLabel="Recent customers"
                 loadingMessage="Searching customers..."
-                inputClassName="min-w-0 w-full border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
+                inputClassName="min-w-0 w-full border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
               />
             </div>
             {selectedCustomer ? (
-              <p className="mt-1 text-[10px] text-slate-500">
+              <p className="mt-1 text-[10px] text-ds-ink-faint">
                 {[selectedCustomer.contactName, selectedCustomer.contactPhone].filter(Boolean).join(' · ')}
               </p>
             ) : null}
           </div>
           <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">PO date</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-ds-ink-muted">PO date</div>
             <input
               type="date"
               value={poDate}
               onChange={(e) => setPoDate(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
             />
           </div>
           <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Delivery</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-ds-ink-muted">Delivery</div>
             <input
               type="date"
               value={deliveryRequiredBy}
               onChange={(e) => setDeliveryRequiredBy(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
             />
           </div>
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Payment terms</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-ds-ink-muted">Payment terms</div>
             <input
               type="text"
               value={paymentTerms}
               onChange={(e) => setPaymentTerms(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
               placeholder="e.g. 30 days"
             />
           </div>
         </div>
         </fieldset>
         <div className="mt-3">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Remarks (editable after release)</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-ds-ink-muted">Remarks (editable after release)</div>
             <input
               type="text"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-800 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
             />
         </div>
       </div>
@@ -953,7 +953,7 @@ export default function EditPurchaseOrderPage() {
       <fieldset disabled={poSentToPlanning} className="min-w-0 border-0 p-0">
       <div className="rounded-xl border border-border/40 bg-card/20 p-2 text-[11px] backdrop-blur-sm sm:p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Line items</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ds-ink-muted">Line items</h2>
           <button
             type="button"
             onClick={addLine}
@@ -963,9 +963,9 @@ export default function EditPurchaseOrderPage() {
           </button>
         </div>
         {fieldErrors.lines ? <p className="mb-2 text-xs text-red-400">{fieldErrors.lines}</p> : null}
-        <div className="max-h-[min(calc(100vh-14rem),760px)] overflow-x-hidden overflow-y-auto rounded-lg border border-slate-800/80">
+        <div className="max-h-[min(calc(100vh-14rem),760px)] overflow-x-hidden overflow-y-auto rounded-lg border border-ds-line/50">
           <table className="w-full table-fixed border-collapse text-left">
-            <thead className="sticky top-0 z-20 border-b border-slate-800 bg-[#111827]/95 text-[10px] font-semibold uppercase tracking-wide text-slate-500 backdrop-blur-md">
+            <thead className="sticky top-0 z-20 border-b border-ds-line/40 bg-[#111827]/95 text-[10px] font-semibold uppercase tracking-wide text-ds-ink-faint backdrop-blur-md">
               <tr>
                 <th className={`${lineCellPad} w-10 text-center`} title="Priority & row tools" aria-label="Row tools">
                   {/* 40px tool column */}
@@ -1010,7 +1010,7 @@ export default function EditPurchaseOrderPage() {
                   <tr
                     key={ln.id ?? idx}
                     onFocusCapture={() => setFocusedRowIndex(idx)}
-                    className={`group border-b border-slate-800/90 ${rowStripe(idx)} ${
+                    className={`group border-b border-ds-line/40 ${rowStripe(idx)} ${
                       focused ? 'border-l-2 border-l-[#f59e0b]' : 'border-l-2 border-l-transparent'
                     }`}
                   >
@@ -1023,7 +1023,7 @@ export default function EditPurchaseOrderPage() {
                           className={`rounded p-0.5 transition-colors ${
                             ln.directorPriority
                               ? 'text-[#f59e0b] group-hover:text-[#f97316]'
-                              : 'text-slate-500 group-hover:text-[#f97316]'
+                              : 'text-ds-ink-faint group-hover:text-[#f97316]'
                           }`}
                         >
                           <Star
@@ -1035,7 +1035,7 @@ export default function EditPurchaseOrderPage() {
                           type="button"
                           title="Duplicate line"
                           onClick={() => duplicateLine(idx)}
-                          className="rounded p-0.5 text-slate-500 transition-colors group-hover:text-[#f97316]"
+                          className="rounded p-0.5 text-ds-ink-faint transition-colors group-hover:text-[#f97316]"
                         >
                           <Copy className="h-3.5 w-3.5" strokeWidth={2} />
                         </button>
@@ -1044,7 +1044,7 @@ export default function EditPurchaseOrderPage() {
                           title={lines.length > 1 ? 'Remove line' : 'At least one line required'}
                           disabled={lines.length <= 1}
                           onClick={() => lines.length > 1 && removeLine(idx)}
-                          className="rounded p-0.5 text-slate-500 transition-colors group-hover:text-[#f97316] disabled:cursor-not-allowed disabled:opacity-25 disabled:group-hover:text-slate-500"
+                          className="rounded p-0.5 text-ds-ink-faint transition-colors group-hover:text-[#f97316] disabled:cursor-not-allowed disabled:opacity-25 disabled:group-hover:text-ds-ink-faint"
                         >
                           <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
                         </button>
@@ -1108,8 +1108,8 @@ export default function EditPurchaseOrderPage() {
                         options={BOARD_GRADES}
                         value={ln.boardGrade || null}
                         onChange={(v) => updateLine(idx, { boardGrade: v ?? '' })}
-                        controlClassName="border-slate-700 bg-slate-900/80"
-                        inputClassName="text-[10px] text-slate-100"
+                        controlClassName="border-ds-line/50 bg-ds-card/80"
+                        inputClassName="text-[10px] text-ds-ink"
                         className="min-w-[6rem] max-w-[10rem]"
                       />
                     </td>
@@ -1127,14 +1127,14 @@ export default function EditPurchaseOrderPage() {
                         options={PAPER_TYPES}
                         value={ln.paperType || null}
                         onChange={(v) => updateLine(idx, { paperType: v ?? '' })}
-                        controlClassName="border-slate-700 bg-slate-900/80"
-                        inputClassName="text-[9px] text-slate-100"
+                        controlClassName="border-ds-line/50 bg-ds-card/80"
+                        inputClassName="text-[9px] text-ds-ink"
                         className="min-w-[6rem] max-w-[10rem]"
                       />
                     </td>
                     <td className={lineCellPad}>
-                      <div className="rounded-md bg-slate-800/95 px-1.5 py-1 ring-1 ring-slate-700/90">
-                        <div className="flex items-center justify-between gap-1 text-[9px] text-slate-500">
+                      <div className="rounded-md bg-ds-elevated/95 px-1.5 py-1 ring-1 ring-ds-line/50">
+                        <div className="flex items-center justify-between gap-1 text-[9px] text-ds-ink-faint">
                           <span>Rate</span>
                           <input
                             type="number"
@@ -1142,10 +1142,10 @@ export default function EditPurchaseOrderPage() {
                             step={0.01}
                             value={ln.rate}
                             onChange={(e) => updateLine(idx, { rate: e.target.value })}
-                            className={`w-16 border-0 bg-transparent p-0 text-right ${poMono} text-[10px] font-semibold text-slate-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/60`}
+                            className={`w-16 border-0 bg-transparent p-0 text-right ${poMono} text-[10px] font-semibold text-ds-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/60`}
                           />
                         </div>
-                        <div className="mt-0.5 flex items-center justify-between gap-1 text-[9px] text-slate-500">
+                        <div className="mt-0.5 flex items-center justify-between gap-1 text-[9px] text-ds-ink-faint">
                           <span>GST%</span>
                           <input
                             type="number"
@@ -1153,11 +1153,11 @@ export default function EditPurchaseOrderPage() {
                             max={28}
                             value={ln.gstPct}
                             onChange={(e) => updateLine(idx, { gstPct: e.target.value })}
-                            className={`w-10 border-0 bg-transparent p-0 text-right ${poMono} text-[10px] text-slate-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/60`}
+                            className={`w-10 border-0 bg-transparent p-0 text-right ${poMono} text-[10px] text-ds-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/60`}
                           />
                         </div>
                         <div
-                          className={`mt-0.5 border-t border-slate-700/80 pt-0.5 text-right text-[10px] font-semibold text-foreground ${poMono}`}
+                          className={`mt-0.5 border-t border-ds-line/50 pt-0.5 text-right text-[10px] font-semibold text-foreground ${poMono}`}
                         >
                           {beforeGst.toFixed(2)}
                         </div>
@@ -1232,14 +1232,14 @@ export default function EditPurchaseOrderPage() {
       >
         <div className="mx-auto flex max-w-[1920px] flex-col gap-2 px-3 py-2.5 sm:px-4">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-ds-ink-faint">
               Supply
             </span>
-            <div className="flex h-1.5 min-w-[120px] flex-1 max-w-md flex-row overflow-hidden rounded-full bg-slate-800 ring-1 ring-slate-700/80">
+            <div className="flex h-1.5 min-w-[120px] flex-1 max-w-md flex-row overflow-hidden rounded-full bg-ds-elevated ring-1 ring-ds-line/50">
               {supplyMaterialCounts.total > 0 ? (
                 <>
                   <div
-                    className="h-full flex-none bg-slate-600 transition-[width] duration-300"
+                    className="h-full flex-none bg-ds-line/30 transition-[width] duration-300"
                     style={{
                       width: `${(supplyMaterialCounts.grey / supplyMaterialCounts.total) * 100}%`,
                     }}
@@ -1259,29 +1259,29 @@ export default function EditPurchaseOrderPage() {
                 </>
               ) : null}
             </div>
-            <span className="text-[10px] tabular-nums text-slate-500">
+            <span className="text-[10px] tabular-nums text-ds-ink-faint">
               {supplyMaterialCounts.grey}/{supplyMaterialCounts.blue}/{supplyMaterialCounts.green}
             </span>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-1 text-[11px] text-slate-400">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-1 text-[11px] text-ds-ink-muted">
               <span>
-                Qty <span className={`${poMono} font-semibold text-slate-200`}>{totalQty}</span>
+                Qty <span className={`${poMono} font-semibold text-ds-ink`}>{totalQty}</span>
               </span>
               <span>
                 Subtotal{' '}
-                <span className={`${poMono} font-semibold text-slate-100`}>
+                <span className={`${poMono} font-semibold text-ds-ink`}>
                   ₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </span>
               </span>
               <span title="Sum of GST from each line (line rate × qty × GST %).">
                 <span className="uppercase tracking-wide">GST (18%)</span>{' '}
-                <span className={`${poMono} font-semibold text-slate-100`}>
+                <span className={`${poMono} font-semibold text-ds-ink`}>
                   ₹{totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </span>
               </span>
-              <span className="flex items-baseline gap-1.5 text-slate-300">
+              <span className="flex items-baseline gap-1.5 text-ds-ink-muted">
                 <span className="text-[11px] font-medium uppercase tracking-wide">Grand total</span>
                 <span
                   className={`${poMono} text-[1.2rem] font-bold leading-none text-[#f97316] sm:text-[1.35rem]`}
@@ -1294,7 +1294,7 @@ export default function EditPurchaseOrderPage() {
               <button
                 type="button"
                 onClick={() => router.push('/orders/purchase-orders')}
-                className="rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-200 hover:border-slate-500"
+                className="rounded-lg border border-ds-line/50 bg-ds-card/80 px-3 py-2 text-xs font-medium text-ds-ink hover:border-ds-line/50"
               >
                 Cancel
               </button>
@@ -1314,7 +1314,7 @@ export default function EditPurchaseOrderPage() {
       <SlideOverPanel title="Quick Create Carton" isOpen={qcCartonOpen} onClose={() => { setQcCartonOpen(false); setActiveCartonLineIndex(null) }}>
         <form onSubmit={submitQuickCreateCarton} className="space-y-3 text-sm">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Carton name<span className="text-red-400">*</span></label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Carton name<span className="text-red-400">*</span></label>
             <input
               type="text"
               value={qcCarton.cartonName}
@@ -1324,7 +1324,7 @@ export default function EditPurchaseOrderPage() {
             {qcCartonErrors.cartonName && <p className="text-xs text-red-400 mt-1">{qcCartonErrors.cartonName}</p>}
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Artwork Code (AW)</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Artwork Code (AW)</label>
             <input
               type="text"
               value={qcCarton.artworkCode}
@@ -1335,65 +1335,65 @@ export default function EditPurchaseOrderPage() {
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">L</label>
+              <label className="block text-xs text-ds-ink-muted mb-1">L</label>
               <input type="number" step={0.01} value={qcCarton.sizeL} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeL: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">W</label>
+              <label className="block text-xs text-ds-ink-muted mb-1">W</label>
               <input type="number" step={0.01} value={qcCarton.sizeW} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeW: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">H</label>
+              <label className="block text-xs text-ds-ink-muted mb-1">H</label>
               <input type="number" step={0.01} value={qcCarton.sizeH} onChange={(e) => setQcCarton((prev) => ({ ...prev, sizeH: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Rate</label>
+              <label className="block text-xs text-ds-ink-muted mb-1">Rate</label>
               <input type="number" step={0.01} value={qcCarton.rate} onChange={(e) => setQcCarton((prev) => ({ ...prev, rate: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">GST%</label>
+              <label className="block text-xs text-ds-ink-muted mb-1">GST%</label>
               <input type="number" min={0} max={28} value={qcCarton.gstPct} onChange={(e) => setQcCarton((prev) => ({ ...prev, gstPct: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Board grade</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Board grade</label>
             <PackagingEnumCombobox
               aria-label="Board grade"
               options={BOARD_GRADES}
               value={qcCarton.boardGrade || null}
               onChange={(v) => setQcCarton((prev) => ({ ...prev, boardGrade: v ?? '' }))}
-              controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+              controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
               inputClassName="text-foreground placeholder:text-muted-foreground"
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">GSM</label>
+              <label className="block text-xs text-ds-ink-muted mb-1">GSM</label>
               <input type="number" value={qcCarton.gsm} onChange={(e) => setQcCarton((prev) => ({ ...prev, gsm: e.target.value }))} className="w-full px-3 py-2 rounded bg-card border border-border text-foreground" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Paper</label>
+              <label className="block text-xs text-ds-ink-muted mb-1">Paper</label>
               <PackagingEnumCombobox
                 aria-label="Paper / board"
                 options={PAPER_TYPES}
                 value={qcCarton.paperType || null}
                 onChange={(v) => setQcCarton((prev) => ({ ...prev, paperType: v ?? '' }))}
-                controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+                controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
                 inputClassName="text-foreground placeholder:text-muted-foreground"
               />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Coating / Emboss / Foil</label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Coating / Emboss / Foil</label>
             <div className="mb-1">
               <PackagingEnumCombobox
                 aria-label="Coating"
                 options={COATING_TYPES}
                 value={qcCarton.coatingType || null}
                 onChange={(v) => setQcCarton((prev) => ({ ...prev, coatingType: v ?? '' }))}
-                controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+                controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
                 inputClassName="text-foreground placeholder:text-muted-foreground"
               />
             </div>
@@ -1403,7 +1403,7 @@ export default function EditPurchaseOrderPage() {
                 options={EMBOSSING_TYPES}
                 value={qcCarton.embossingLeafing || null}
                 onChange={(v) => setQcCarton((prev) => ({ ...prev, embossingLeafing: v ?? '' }))}
-                controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+                controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
                 inputClassName="text-foreground placeholder:text-muted-foreground"
               />
             </div>
@@ -1412,7 +1412,7 @@ export default function EditPurchaseOrderPage() {
               options={FOIL_TYPES}
               value={qcCarton.foilType || null}
               onChange={(v) => setQcCarton((prev) => ({ ...prev, foilType: v ?? '' }))}
-              controlClassName="border-slate-600 bg-slate-800 hover:bg-slate-800/90 focus-within:ring-slate-500/30"
+              controlClassName="border-ds-line/60 bg-ds-elevated hover:bg-ds-elevated/90 focus-within:ring-ds-line/30"
               inputClassName="text-foreground placeholder:text-muted-foreground"
             />
           </div>

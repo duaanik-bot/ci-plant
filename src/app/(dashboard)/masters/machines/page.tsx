@@ -67,14 +67,14 @@ export default function MastersMachinesPage() {
   }, [])
 
   if (loading) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading…</div>
+    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
   }
 
   return (
     <div>
-      <h2 className="mb-4 text-base font-semibold text-slate-900 dark:text-slate-50">Machine Master (CI-01 to CI-12)</h2>
+      <h2 className="mb-4 text-base font-semibold text-neutral-900 dark:text-ds-ink">Machine Master (CI-01 to CI-12)</h2>
       <EnterpriseTableShell>
-        <table className={`w-full min-w-[900px] border-collapse text-left text-sm text-slate-900 dark:text-slate-50 ${mono}`}>
+        <table className={`w-full min-w-[900px] border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink ${mono}`}>
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>Code</th>
@@ -98,7 +98,7 @@ export default function MastersMachinesPage() {
                   key={m.id}
                   className={`${enterpriseTrClass} ${pm?.overdue ? 'bg-rose-50 dark:bg-rose-950/20' : ''}`}
                 >
-                  <td className={`${enterpriseTdClass} text-amber-700 dark:text-amber-300`}>{m?.machineCode ?? '—'}</td>
+                  <td className={`${enterpriseTdClass} text-ds-warning dark:text-ds-warning`}>{m?.machineCode ?? '—'}</td>
                   <td className={enterpriseTdClass}>{m?.name ?? '—'}</td>
                   <td className={enterpriseTdBase}>
                     {pm?.hasSchedule ? (
@@ -123,7 +123,7 @@ export default function MastersMachinesPage() {
                         m?.status === 'active'
                           ? 'text-emerald-600 dark:text-emerald-400'
                           : m?.status === 'under_maintenance'
-                            ? 'text-amber-600 dark:text-amber-400'
+                            ? 'text-ds-warning dark:text-ds-warning'
                             : 'text-rose-600 dark:text-rose-400'
                       }
                     >
@@ -147,7 +147,7 @@ export default function MastersMachinesPage() {
           </tbody>
         </table>
       </EnterpriseTableShell>
-      {list.length === 0 && <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No machines. Run seed.</p>}
+      {list.length === 0 && <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No machines. Run seed.</p>}
       <PmSpotlightDrawer machineId={pmMachineId} onClose={() => setPmMachineId(null)} />
     </div>
   )

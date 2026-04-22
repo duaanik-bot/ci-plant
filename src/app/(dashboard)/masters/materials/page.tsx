@@ -37,7 +37,7 @@ function stockHealth(available: number, reorder: number, safety: number): 'green
 
 const DOT: Record<string, string> = {
   green: 'bg-green-500',
-  yellow: 'bg-amber-500',
+  yellow: 'bg-ds-warning',
   red: 'bg-red-500',
 }
 
@@ -78,13 +78,13 @@ export default function MastersMaterialsPage() {
   }, [list, search])
 
   if (loading) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">Loading...</div>
+    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading...</div>
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-slate-50">Board / Paper Master</h2>
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Board / Paper Master</h2>
         <Link href="/masters/materials/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
           Add material
         </Link>
@@ -101,7 +101,7 @@ export default function MastersMaterialsPage() {
       </div>
 
       <EnterpriseTableShell>
-        <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-sm text-slate-900 dark:text-slate-50">
+        <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>Stock</th>
@@ -150,7 +150,7 @@ export default function MastersMaterialsPage() {
         </table>
       </EnterpriseTableShell>
       {filtered.length === 0 && (
-        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">No materials match your search.</p>
+        <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No materials match your search.</p>
       )}
     </div>
   )

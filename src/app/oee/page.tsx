@@ -37,27 +37,27 @@ export default function OeePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500 text-2xl">
+      <div className="min-h-screen bg-ds-main flex items-center justify-center text-ds-ink-faint text-2xl">
         Loading…
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-foreground p-8">
-      <h1 className="text-4xl font-bold text-amber-400 text-center mb-8">
+    <div className="min-h-screen bg-ds-main text-foreground p-8">
+      <h1 className="text-4xl font-bold text-ds-warning text-center mb-8">
         OEE Live — Colour Impressions
       </h1>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
         {data.map((press) => (
           <div
             key={press.machineCode}
-            className="bg-slate-900 rounded-2xl border border-slate-700 p-6 text-center"
+            className="bg-ds-card rounded-2xl border border-ds-line/50 p-6 text-center"
           >
-            <h2 className="text-2xl font-bold text-slate-200 mb-1">
+            <h2 className="text-2xl font-bold text-ds-ink mb-1">
               {press.machineCode}
             </h2>
-            <p className="text-slate-500 text-sm mb-4">{press.machineName}</p>
+            <p className="text-ds-ink-faint text-sm mb-4">{press.machineName}</p>
             <div className="relative w-32 h-32 mx-auto mb-4">
               <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
                 <path
@@ -65,14 +65,14 @@ export default function OeePage() {
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2.5"
-                  className="text-slate-700"
+                  className="text-neutral-700"
                 />
                 <path
                   d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                   fill="none"
                   strokeWidth="2.5"
                   strokeDasharray={`${press.oee}, 100`}
-                  className="text-amber-400"
+                  className="text-ds-warning"
                   stroke="currentColor"
                 />
               </svg>
@@ -80,21 +80,21 @@ export default function OeePage() {
                 {press.oee}%
               </span>
             </div>
-            <p className="text-slate-400 text-sm">OEE</p>
-            <div className="mt-4 pt-4 border-t border-slate-700 text-left text-sm">
+            <p className="text-ds-ink-muted text-sm">OEE</p>
+            <div className="mt-4 pt-4 border-t border-ds-line/50 text-left text-sm">
               <p>Sheets today: {press.totalSheets} in / {press.goodSheets} good</p>
               {press.activeJob ? (
-                <p className="mt-2 text-amber-400">
+                <p className="mt-2 text-ds-warning">
                   Job: {press.activeJob.jobNumber} — {press.activeJob.productName}
                 </p>
               ) : (
-                <p className="mt-2 text-slate-500">No active job</p>
+                <p className="mt-2 text-ds-ink-faint">No active job</p>
               )}
             </div>
           </div>
         ))}
       </div>
-      <p className="text-center text-slate-600 text-sm mt-8">
+      <p className="text-center text-ds-ink-faint text-sm mt-8">
         Auto-refresh 60s · Readable from 3m
       </p>
     </div>

@@ -46,28 +46,28 @@ export function SimilarDiesModal({
         className="ci-hub-modal-panel max-w-lg max-h-[85vh] flex flex-col !p-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-3.5 py-3 border-b border-zinc-800 shrink-0">
+        <div className="px-3.5 py-3 border-b border-ds-line/40 shrink-0">
           <h2
             id="similar-dies-title"
             className={`ci-hub-modal-title border-0 pb-0 ${isMismatch ? '!text-red-400' : ''}`}
           >
             {title}
           </h2>
-          <p className="text-[11px] text-zinc-500 mt-2 leading-snug">
+          <p className="text-[11px] text-neutral-500 mt-2 leading-snug">
             {isMismatch ? (
               <>
-                Same footprint as <span className="text-amber-300 font-mono">{sourceLabel}</span>
+                Same footprint as <span className="text-ds-warning font-mono">{sourceLabel}</span>
                 {sourceDieType ? (
                   <>
                     {' '}
-                    (<span className="text-zinc-300">{sourceDieType}</span>)
+                    (<span className="text-neutral-400">{sourceDieType}</span>)
                   </>
                 ) : null}
                 — verify master type before taking from rack.
               </>
             ) : (
               <>
-                Matches for <span className="text-amber-300 font-mono">{sourceLabel}</span> — rack / star
+                Matches for <span className="text-ds-warning font-mono">{sourceLabel}</span> — rack / star
                 ledger usage
               </>
             )}
@@ -75,21 +75,21 @@ export function SimilarDiesModal({
         </div>
         <div className="overflow-y-auto p-3 space-y-2">
           {matches.length === 0 ? (
-            <p className="text-sm text-zinc-500">{emptyCopy}</p>
+            <p className="text-sm text-neutral-500">{emptyCopy}</p>
           ) : (
             matches.map((m) => (
               <div
                 key={m.id}
                 className={`rounded-lg border px-3 py-2 text-xs ${
-                  isMismatch ? 'border-red-900/80 bg-red-950/20' : 'border-zinc-800 bg-background'
+                  isMismatch ? 'border-red-900/80 bg-red-950/20' : 'border-ds-line/40 bg-background'
                 }`}
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="font-mono text-amber-200/90 font-semibold">{m.displayCode}</span>
-                  <span className="text-[10px] text-zinc-500">
-                    Imp: <span className="text-zinc-300 tabular-nums">{m.impressionCount}</span>
-                    <span className="mx-1 text-zinc-700">·</span>
-                    Cycles: <span className="text-zinc-300 tabular-nums">{m.reuseCount}</span>
+                  <span className="font-mono text-ds-warning font-semibold">{m.displayCode}</span>
+                  <span className="text-[10px] text-neutral-500">
+                    Imp: <span className="text-neutral-400 tabular-nums">{m.impressionCount}</span>
+                    <span className="mx-1 text-neutral-700">·</span>
+                    Cycles: <span className="text-neutral-400 tabular-nums">{m.reuseCount}</span>
                   </span>
                 </div>
                 {isMismatch && m.dieTypeLabel ? (
@@ -97,18 +97,18 @@ export function SimilarDiesModal({
                     Master type: <span className="text-red-200">{m.dieTypeLabel}</span>
                   </p>
                 ) : null}
-                <p className="text-[11px] text-zinc-400 mt-1">
+                <p className="text-[11px] text-neutral-500 mt-1">
                   Rack / slot:{' '}
-                  <span className="text-zinc-200">{m.location?.trim() || '—'}</span>
+                  <span className="text-ds-ink">{m.location?.trim() || '—'}</span>
                 </p>
               </div>
             ))
           )}
         </div>
-        <div className="px-4 py-2 border-t border-zinc-800 shrink-0 flex justify-end">
+        <div className="px-4 py-2 border-t border-ds-line/40 shrink-0 flex justify-end">
           <button
             type="button"
-            className="px-3 py-1.5 rounded-md border border-zinc-600 text-zinc-300 text-xs font-semibold hover:bg-zinc-900"
+            className="px-3 py-1.5 rounded-md border border-ds-line/50 text-neutral-400 text-xs font-semibold hover:bg-ds-card"
             onClick={onClose}
           >
             Close

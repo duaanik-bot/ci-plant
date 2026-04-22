@@ -42,15 +42,15 @@ export default function BillingPage() {
       .catch(() => {})
   }, [])
 
-  if (loading) return <div className="p-4 text-slate-400">Loading…</div>
+  if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
   return (
     <div className="p-4 max-w-5xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-amber-400">Billing</h1>
+        <h1 className="text-xl font-bold text-ds-warning">Billing</h1>
         <Link
           href="/billing/new"
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-primary-foreground text-sm font-medium"
+          className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
         >
           New bill
         </Link>
@@ -60,7 +60,7 @@ export default function BillingPage() {
         <select
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground min-w-[180px]"
+          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground min-w-[180px]"
         >
           <option value="">All customers</option>
           {customers.map((c) => (
@@ -72,7 +72,7 @@ export default function BillingPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-foreground"
+          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
         >
           <option value="">All statuses</option>
           <option value="draft">Draft</option>
@@ -81,9 +81,9 @@ export default function BillingPage() {
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-700">
+      <div className="overflow-x-auto rounded-lg border border-ds-line/50">
         <table className="w-full text-sm text-left">
-          <thead className="bg-slate-800 text-slate-300">
+          <thead className="bg-ds-elevated text-ds-ink-muted">
             <tr>
               <th className="px-4 py-2">Bill #</th>
               <th className="px-4 py-2">Customer</th>
@@ -95,30 +95,30 @@ export default function BillingPage() {
               <th className="px-4 py-2">Action</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700">
+          <tbody className="divide-y divide-ds-line/40">
             {list.map((b) => (
-              <tr key={b.id} className="hover:bg-slate-800/60">
-                <td className="px-4 py-2 font-mono text-amber-300">{b.billNumber}</td>
-                <td className="px-4 py-2 text-slate-200">{b.customer.name}</td>
-                <td className="px-4 py-2 text-slate-300">
+              <tr key={b.id} className="hover:bg-ds-elevated/60">
+                <td className="px-4 py-2 font-mono text-ds-warning">{b.billNumber}</td>
+                <td className="px-4 py-2 text-ds-ink">{b.customer.name}</td>
+                <td className="px-4 py-2 text-ds-ink-muted">
                   {new Date(b.billDate).toLocaleDateString()}
                 </td>
-                <td className="px-4 py-2 text-slate-300">
+                <td className="px-4 py-2 text-ds-ink-muted">
                   ₹{b.subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                 </td>
-                <td className="px-4 py-2 text-slate-300">
+                <td className="px-4 py-2 text-ds-ink-muted">
                   ₹{b.gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                 </td>
-                <td className="px-4 py-2 text-slate-200 font-medium">
+                <td className="px-4 py-2 text-ds-ink font-medium">
                   ₹{b.totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                 </td>
                 <td className="px-4 py-2">
-                  <span className="px-2 py-0.5 rounded text-xs border bg-slate-800 text-slate-200 border-slate-600">
+                  <span className="px-2 py-0.5 rounded text-xs border bg-ds-elevated text-ds-ink border-ds-line/60">
                     {b.status}
                   </span>
                 </td>
                 <td className="px-4 py-2">
-                  <Link href={`/billing/${b.id}`} className="text-amber-400 hover:underline">
+                  <Link href={`/billing/${b.id}`} className="text-ds-warning hover:underline">
                     Open
                   </Link>
                 </td>
@@ -128,7 +128,7 @@ export default function BillingPage() {
         </table>
       </div>
       {list.length === 0 && (
-        <p className="text-slate-500 text-center py-8 text-sm">No bills found.</p>
+        <p className="text-ds-ink-faint text-center py-8 text-sm">No bills found.</p>
       )}
     </div>
   )

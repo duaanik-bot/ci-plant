@@ -213,16 +213,16 @@ export default function ShopfloorPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col pb-20">
-      <header className="p-4 border-b border-zinc-800 sticky top-0 bg-background z-10">
+      <header className="p-4 border-b border-ds-line/40 sticky top-0 bg-background z-10">
         <h1 className="text-xl font-bold text-orange-400">Shopfloor</h1>
-        <p className="text-xs text-slate-500 mt-0.5">Production job cards</p>
+        <p className="text-xs text-ds-ink-faint mt-0.5">Production job cards</p>
       </header>
 
       <main className="flex-1 p-4 overflow-y-auto">
         {tab === 'jobs' && (
           <div className="space-y-3">
             {loading ? (
-              <p className="text-slate-400">Loading…</p>
+              <p className="text-ds-ink-muted">Loading…</p>
             ) : (
               jobCards.map((jc) => {
                 const stage = currentStage(jc)
@@ -230,7 +230,7 @@ export default function ShopfloorPage() {
                 return (
                   <div
                     key={jc.id}
-                    className="rounded-xl border border-zinc-800 bg-zinc-950/80 overflow-hidden"
+                    className="rounded-xl border border-ds-line/40 bg-ds-main/80 overflow-hidden"
                   >
                     <button
                       type="button"
@@ -238,12 +238,12 @@ export default function ShopfloorPage() {
                       className="w-full p-4 text-left flex items-center justify-between"
                     >
                       <div>
-                        <p className="font-mono font-semibold text-amber-400">
+                        <p className="font-mono font-semibold text-ds-warning">
                           JC#{jc.jobCardNumber}
                           {jc.productName ? ` · ${jc.productName}` : ''}
                         </p>
-                        <p className="text-sm text-slate-300">{jc.customer.name}</p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-sm text-ds-ink-muted">{jc.customer.name}</p>
+                        <p className="text-xs text-ds-ink-faint">
                           {jc.setNumber ? `Set ${jc.setNumber}` : ''} · Sheets: {jc.sheetsIssued}/{jc.totalSheets}
                         </p>
                       </div>
@@ -251,34 +251,34 @@ export default function ShopfloorPage() {
                         {stage && (
                           <span
                             className={`inline-block px-2 py-0.5 rounded text-xs ${
-                              stage.status === 'in_progress' ? 'bg-amber-600 text-primary-foreground' : 'bg-slate-600 text-slate-200'
+                              stage.status === 'in_progress' ? 'bg-ds-warning text-primary-foreground' : 'bg-ds-line/30 text-ds-ink'
                             }`}
                           >
                             {stage.stageName}
                           </span>
                         )}
-                        <span className="block text-xs text-slate-500 mt-1">{jc.status}</span>
-                        <span className="text-slate-400">{isExpanded ? '▼' : '▶'}</span>
+                        <span className="block text-xs text-ds-ink-faint mt-1">{jc.status}</span>
+                        <span className="text-ds-ink-muted">{isExpanded ? '▼' : '▶'}</span>
                       </div>
                     </button>
                     {isExpanded && (
-                      <div className="border-t border-zinc-800 p-4 space-y-3 bg-background/40">
+                      <div className="border-t border-ds-line/40 p-4 space-y-3 bg-background/40">
                         {jc.stages.map((s) => {
                           const idleSec = idleSecondsInProgress(s, jc.createdAt)
                           const lock = s.status === 'in_progress' && idleSec > PRODUCTION_DOWNTIME_LOCK_SECONDS
                           return (
                           <div
                             key={s.id}
-                            className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 p-3"
+                            className="flex flex-wrap items-center gap-2 rounded-lg border border-ds-line/40 p-3"
                           >
-                            <span className="font-medium text-slate-200 w-32">{s.stageName}</span>
+                            <span className="font-medium text-ds-ink w-32">{s.stageName}</span>
                             <span
                               className={`px-2 py-0.5 rounded text-xs ${
                                 s.status === 'completed'
                                   ? 'bg-green-800 text-green-200'
                                   : s.status === 'in_progress'
-                                    ? 'bg-amber-600 text-primary-foreground'
-                                    : 'bg-slate-700 text-slate-400'
+                                    ? 'bg-ds-warning text-primary-foreground'
+                                    : 'bg-ds-elevated text-ds-ink-muted'
                               }`}
                             >
                               {s.status}
@@ -291,10 +291,10 @@ export default function ShopfloorPage() {
                                   placeholder="Counter"
                                   value={counterVal[s.id] ?? ''}
                                   onChange={(e) => setCounterVal((prev) => ({ ...prev, [s.id]: e.target.value }))}
-                                  className={`w-24 px-2 py-1 rounded bg-zinc-900 border text-foreground text-sm font-designing-queue ${
+                                  className={`w-24 px-2 py-1 rounded bg-ds-card border text-foreground text-sm font-designing-queue ${
                                     lock
                                       ? 'border-rose-500 ring-2 ring-rose-500/70 animate-pulse'
-                                      : 'border-zinc-600'
+                                      : 'border-ds-line/50'
                                   }`}
                                 />
                                 <input
@@ -305,7 +305,7 @@ export default function ShopfloorPage() {
                                   onChange={(e) =>
                                     setExcessSheetsVal((prev) => ({ ...prev, [s.id]: e.target.value }))
                                   }
-                                  className="w-28 px-2 py-1 rounded bg-zinc-900 border border-zinc-600 text-foreground text-sm"
+                                  className="w-28 px-2 py-1 rounded bg-ds-card border border-ds-line/50 text-foreground text-sm"
                                 />
                                 <button
                                   type="button"
@@ -341,7 +341,7 @@ export default function ShopfloorPage() {
                                 type="button"
                                 disabled={saving}
                                 onClick={() => updateStage(jc.id, s.id, { status: 'in_progress' })}
-                                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-primary-foreground text-sm font-medium"
+                                className="px-3 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
                               >
                                 Start
                               </button>
@@ -351,7 +351,7 @@ export default function ShopfloorPage() {
                         })}
                         <Link
                           href={`/production/job-cards/${jc.id}`}
-                          className="inline-block text-sm text-amber-400 hover:underline"
+                          className="inline-block text-sm text-ds-warning hover:underline"
                         >
                           Open job card →
                         </Link>
@@ -362,7 +362,7 @@ export default function ShopfloorPage() {
               })
             )}
             {!loading && jobCards.length === 0 && (
-              <p className="text-slate-500 text-center py-8">No active job cards.</p>
+              <p className="text-ds-ink-faint text-center py-8">No active job cards.</p>
             )}
           </div>
         )}
@@ -375,10 +375,10 @@ export default function ShopfloorPage() {
                   key={s.key}
                   type="button"
                   onClick={() => setStageKey(s.key)}
-                  className="w-full p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-left flex items-center justify-between"
+                  className="w-full p-4 rounded-xl border border-ds-line/50 bg-ds-elevated/80 text-left flex items-center justify-between"
                 >
-                  <span className="font-medium text-slate-200">{s.label}</span>
-                  <span className="text-slate-400">→</span>
+                  <span className="font-medium text-ds-ink">{s.label}</span>
+                  <span className="text-ds-ink-muted">→</span>
                 </button>
               ))
             ) : (
@@ -386,7 +386,7 @@ export default function ShopfloorPage() {
                 <button
                   type="button"
                   onClick={() => setStageKey(null)}
-                  className="text-sm text-slate-400 hover:text-foreground mb-2"
+                  className="text-sm text-ds-ink-muted hover:text-foreground mb-2"
                 >
                   ← Back to stages
                 </button>
@@ -394,19 +394,19 @@ export default function ShopfloorPage() {
                   {stageQueue.map((item, i) => (
                     <div
                       key={item.stageRecord.id + i}
-                      className="p-4 rounded-xl border border-slate-700 bg-slate-800/80"
+                      className="p-4 rounded-xl border border-ds-line/50 bg-ds-elevated/80"
                     >
                       {item.jobCard && (
                         <>
-                          <p className="font-mono text-amber-400">
+                          <p className="font-mono text-ds-warning">
                             JC#{item.jobCard.jobCardNumber}
                             {item.jobCard.productName ? ` · ${item.jobCard.productName}` : ''}
                           </p>
-                          <p className="text-sm text-slate-300">{item.jobCard.customer.name}</p>
-                          <p className="text-xs text-slate-500">{item.stageRecord.status}</p>
+                          <p className="text-sm text-ds-ink-muted">{item.jobCard.customer.name}</p>
+                          <p className="text-xs text-ds-ink-faint">{item.stageRecord.status}</p>
                           <Link
                             href={`/production/job-cards/${item.jobCard.id}`}
-                            className="inline-block mt-2 text-sm text-amber-400 hover:underline"
+                            className="inline-block mt-2 text-sm text-ds-warning hover:underline"
                           >
                             Open
                           </Link>
@@ -414,7 +414,7 @@ export default function ShopfloorPage() {
                       )}
                     </div>
                   ))}
-                  {stageQueue.length === 0 && <p className="text-slate-500 py-4">No jobs at this stage.</p>}
+                  {stageQueue.length === 0 && <p className="text-ds-ink-faint py-4">No jobs at this stage.</p>}
                 </div>
               </>
             )}
@@ -425,23 +425,23 @@ export default function ShopfloorPage() {
           <div className="space-y-3">
             <Link
               href="/stores/issue"
-              className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-amber-400 font-medium"
+              className="block p-4 rounded-xl border border-ds-line/50 bg-ds-elevated/80 text-ds-warning font-medium"
             >
               Sheet issue (Stores)
             </Link>
             <Link
               href="/production/job-cards"
-              className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200"
+              className="block p-4 rounded-xl border border-ds-line/50 bg-ds-elevated/80 text-ds-ink"
             >
               All job cards
             </Link>
             <Link
               href="/production/stages"
-              className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200"
+              className="block p-4 rounded-xl border border-ds-line/50 bg-ds-elevated/80 text-ds-ink"
             >
               Production planning
             </Link>
-            <Link href="/" className="block p-4 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200">
+            <Link href="/" className="block p-4 rounded-xl border border-ds-line/50 bg-ds-elevated/80 text-ds-ink">
               Dashboard
             </Link>
           </div>
@@ -459,15 +459,15 @@ export default function ShopfloorPage() {
             <h2 id="downtime-title" className="text-lg font-semibold text-orange-400">
               Reason required — downtime lock
             </h2>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-neutral-500">
               No production logged for {Math.floor(PRODUCTION_DOWNTIME_LOCK_SECONDS / 60)}+ minutes. Select a
               category; log is timestamped and tied to your operator ID.
             </p>
-            <label className="block text-xs text-zinc-400 uppercase tracking-wider">Category</label>
+            <label className="block text-xs text-neutral-500 uppercase tracking-wider">Category</label>
             <select
               value={downtimeCategory}
               onChange={(e) => setDowntimeCategory(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-foreground text-sm"
+              className="w-full px-3 py-2 rounded-lg bg-ds-main border border-ds-line/50 text-foreground text-sm"
             >
               {PRODUCTION_DOWNTIME_CATEGORIES.map((c) => (
                 <option key={c.key} value={c.key}>
@@ -475,18 +475,18 @@ export default function ShopfloorPage() {
                 </option>
               ))}
             </select>
-            <label className="block text-xs text-zinc-400 uppercase tracking-wider">Notes (optional)</label>
+            <label className="block text-xs text-neutral-500 uppercase tracking-wider">Notes (optional)</label>
             <textarea
               value={downtimeNotes}
               onChange={(e) => setDowntimeNotes(e.target.value)}
               rows={2}
-              className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-foreground text-sm"
+              className="w-full px-3 py-2 rounded-lg bg-ds-main border border-ds-line/50 text-foreground text-sm"
             />
             <button
               type="button"
               disabled={downtimeSubmitting || !session?.user}
               onClick={() => void submitDowntimeReason()}
-              className="w-full py-3 rounded-xl bg-gradient-to-b from-amber-500 to-orange-600 text-foreground font-semibold disabled:opacity-50"
+              className="w-full py-3 rounded-xl bg-gradient-to-b from-ds-warning to-ds-brand-hover text-foreground font-semibold disabled:opacity-50"
             >
               {downtimeSubmitting ? 'Saving…' : 'Submit downtime log'}
             </button>
@@ -497,14 +497,14 @@ export default function ShopfloorPage() {
         </div>
       ) : null}
 
-      <nav className="fixed bottom-0 left-0 right-0 border-t border-zinc-800 bg-background flex justify-around py-2 safe-area-pb">
+      <nav className="fixed bottom-0 left-0 right-0 border-t border-ds-line/40 bg-background flex justify-around py-2 safe-area-pb">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
             className={`flex flex-col items-center gap-0.5 px-6 py-2 rounded-lg text-sm ${
-              tab === t.id ? 'text-amber-400 bg-slate-800' : 'text-slate-400'
+              tab === t.id ? 'text-ds-warning bg-ds-elevated' : 'text-ds-ink-muted'
             }`}
           >
             <span className="text-lg">{t.icon}</span>

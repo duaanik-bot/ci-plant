@@ -121,7 +121,7 @@ export function PackagingEnumCombobox({
     <div ref={containerRef} className={`relative min-w-0 ${className}`}>
       <div
         className={`flex items-center gap-0.5 rounded border border-[#E2E8F0] bg-card shadow-sm transition-colors ${
-          disabled ? 'opacity-50 pointer-events-none' : 'hover:bg-slate-50 focus-within:ring-2 focus-within:ring-blue-500/25'
+          disabled ? 'opacity-50 pointer-events-none' : 'hover:bg-neutral-50 focus-within:ring-2 focus-within:ring-blue-500/25'
         } ${controlClassName}`}
       >
         <input
@@ -135,7 +135,7 @@ export function PackagingEnumCombobox({
           aria-label={ariaLabel}
           disabled={disabled}
           placeholder={placeholder}
-          className={`min-w-0 flex-1 border-0 bg-transparent py-1.5 pl-2 pr-1 text-[13px] text-[#0F172A] outline-none placeholder:text-slate-400 ${inputClassName}`}
+          className={`min-w-0 flex-1 border-0 bg-transparent py-1.5 pl-2 pr-1 text-[13px] text-[#0F172A] outline-none placeholder:text-ds-ink-muted ${inputClassName}`}
           value={open ? query : displayValue}
           onChange={(e) => {
             setQuery(e.target.value)
@@ -169,7 +169,7 @@ export function PackagingEnumCombobox({
           type="button"
           tabIndex={-1}
           disabled={disabled}
-          className="shrink-0 rounded-r px-1.5 py-1.5 text-slate-500 hover:bg-slate-100"
+          className="shrink-0 rounded-r px-1.5 py-1.5 text-ds-ink-faint hover:bg-neutral-100"
           aria-label="Open list"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
@@ -189,7 +189,7 @@ export function PackagingEnumCombobox({
           {allowEmpty ? (
             <li
               role="option"
-              className="cursor-pointer px-2 py-1.5 text-[12px] text-slate-500 hover:bg-slate-50"
+              className="cursor-pointer px-2 py-1.5 text-[12px] text-ds-ink-faint hover:bg-neutral-50"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onPick('')}
             >
@@ -200,7 +200,7 @@ export function PackagingEnumCombobox({
             <li
               key={opt}
               role="option"
-              className={`cursor-pointer px-2 py-1.5 text-[12px] text-[#0F172A] hover:bg-slate-50 ${
+              className={`cursor-pointer px-2 py-1.5 text-[12px] text-[#0F172A] hover:bg-neutral-50 ${
                 opt === displayValue ? 'bg-blue-50' : ''
               }`}
               onMouseDown={(e) => e.preventDefault()}
@@ -210,7 +210,7 @@ export function PackagingEnumCombobox({
             </li>
           ))}
           {filtered.length === 0 ? (
-            <li className="px-2 py-2 text-[11px] text-slate-500">No match — pick from master list</li>
+            <li className="px-2 py-2 text-[11px] text-ds-ink-faint">No match — pick from master list</li>
           ) : null}
         </ul>
       ) : null}
