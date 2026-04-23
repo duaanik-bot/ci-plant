@@ -844,6 +844,7 @@ export default function DesigningQueuePage() {
                   planningForwarded &&
                   !machineAllocated &&
                   !['in_production', 'closed'].includes(r.planningStatus)
+                const showRecall = !!r.id
                 const phase = r.readiness?.pipelinePhase ?? 'drafting'
                 const dQ = daysInQueue(r.createdAt)
                 const badge = pipelineBadge(phase)
@@ -1031,12 +1032,21 @@ export default function DesigningQueuePage() {
                             Planning
                           </Link>
                         )}
-                        {canRecallPlanning && (
+                        {showRecall && (
                           <button
                             type="button"
                             disabled={recallingPlanningId === r.id}
                             onClick={() => void recallPlanning(r)}
-                            className="min-w-[80px] rounded border border-rose-500/35 px-2 py-0.5 text-xs text-rose-700 hover:bg-rose-500/10 disabled:opacity-40 dark:text-rose-300"
+                            title={
+                              canRecallPlanning
+                                ? 'Recall to Planning'
+                                : 'Recall is allowed only before machine allocation / production'
+                            }
+                            className={`min-w-[80px] rounded border px-2 py-0.5 text-xs disabled:opacity-40 ${
+                              canRecallPlanning
+                                ? 'border-rose-500/35 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300'
+                                : 'border-ds-line text-ds-warning hover:bg-ds-warning/10'
+                            }`}
                           >
                             {recallingPlanningId === r.id ? '…' : 'Recall'}
                           </button>
