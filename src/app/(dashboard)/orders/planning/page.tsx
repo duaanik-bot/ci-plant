@@ -813,39 +813,47 @@ export default function PlanningPage() {
     [rows],
   )
 
+  const makeProcessingForIds = useCallback(
+    async (ids: string[], opts?: { suppressToast?: boolean }): Promise<boolean> => {
+      if (ids.length === 0) return false
+      const blocked = ids.filter((id) => {
+        const r = rows.find((x) => x.id === id)
+        if (!r) return false
+        return isBatchExcludedFromForwardSteps(readPlanningCore(r.specOverrides as Record<string, unknown>))
+      })
+      if (blocked.length > 0) {
+        if (!opts?.suppressToast) toast.error('A selected line is in a batch on hold — clear hold first')
+        return false
+      }
+      setMixConflictMessage(null)
+      setMakeProcessingBusy(true)
+      try {
+        const res = await fetch('/api/planning/po-lines/make-processing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lineIds: ids }),
+        })
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        if (!res.ok) {
+          setMixConflictMessage(j.error ?? 'Could not send to processing')
+          if (!opts?.suppressToast) toast.error(j.error ?? 'Failed')
+          return false
+        }
+        if (!opts?.suppressToast) toast.success(`Sent ${ids.length} line(s) to AW queue`)
+        setPlanningSelection(new Set())
+        await fetchRows()
+        return true
+      } finally {
+        setMakeProcessingBusy(false)
+      }
+    },
+    [rows, fetchRows],
+  )
+
   const handleMakeProcessing = useCallback(async () => {
     const ids = Array.from(planningSelection)
-    if (ids.length === 0) return
-    const blocked = ids.filter((id) => {
-      const r = rows.find((x) => x.id === id)
-      if (!r) return false
-      return isBatchExcludedFromForwardSteps(readPlanningCore(r.specOverrides as Record<string, unknown>))
-    })
-    if (blocked.length > 0) {
-      toast.error('A selected line is in a batch on hold — clear hold first')
-      return
-    }
-    setMixConflictMessage(null)
-    setMakeProcessingBusy(true)
-    try {
-      const res = await fetch('/api/planning/po-lines/make-processing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lineIds: ids }),
-      })
-      const j = (await res.json().catch(() => ({}))) as { error?: string }
-      if (!res.ok) {
-        setMixConflictMessage(j.error ?? 'Could not send to processing')
-        toast.error(j.error ?? 'Failed')
-        return
-      }
-      toast.success(`Sent ${ids.length} line(s) to AW queue`)
-      setPlanningSelection(new Set())
-      await fetchRows()
-    } finally {
-      setMakeProcessingBusy(false)
-    }
-  }, [planningSelection, rows, fetchRows])
+    void makeProcessingForIds(ids)
+  }, [planningSelection, makeProcessingForIds])
 
   const recallLine = useCallback(
     async (lineId: string) => {
@@ -1213,6 +1221,8 @@ export default function PlanningPage() {
           onCreateBatch={linkAsMixSet}
           updateRow={updateRow}
           onSaveLine={savePlanningLine}
+          onBatchDecision={applyBatchDecision}
+          onMakeProcessingBatch={makeProcessingForIds}
           onRemoveFromSelection={(lineId) =>
             setPlanningSelection((prev) => {
               const next = new Set(prev)

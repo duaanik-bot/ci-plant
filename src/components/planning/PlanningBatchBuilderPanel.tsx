@@ -1,14 +1,25 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Layers, Plus, X } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   boardLabel,
   type PlanningGridLine,
   type PlanningLineFieldPatch,
 } from '@/components/planning/PlanningDecisionGrid'
-import { mergePlanningMetaUps, readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
-import { BATCH_STATUS_BADGE_CLASS, BATCH_STATUS_LABEL, effectiveBatchStatus } from '@/lib/planning-batch-decision'
+import {
+  mergePlanningMetaDesigner,
+  mergePlanningMetaUps,
+  readPlanningCore,
+  readPlanningMeta,
+} from '@/lib/planning-decision-spec'
+import {
+  BATCH_STATUS_BADGE_CLASS,
+  BATCH_STATUS_LABEL,
+  effectiveBatchStatus,
+  type PlanningBatchDecisionAction,
+} from '@/lib/planning-batch-decision'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
@@ -141,6 +152,13 @@ type Props = {
   onCreateBatch: () => void
   updateRow: (lineId: string, patch: Partial<PlanningGridLine>) => void
   onSaveLine: (lineId: string, patch: PlanningLineFieldPatch) => void | Promise<boolean | void>
+  onBatchDecision: (
+    lineIds: string[],
+    action: PlanningBatchDecisionAction,
+    holdReason?: string,
+    opts?: { suppressToast?: boolean },
+  ) => Promise<boolean | void>
+  onMakeProcessingBatch: (lineIds: string[], opts?: { suppressToast?: boolean }) => Promise<boolean>
   onRemoveFromSelection: (lineId: string) => void
   onClearSelection: () => void
   onClose: () => void
@@ -152,12 +170,28 @@ export function PlanningBatchBuilderPanel({
   onCreateBatch,
   updateRow,
   onSaveLine,
+  onBatchDecision,
+  onMakeProcessingBatch,
   onRemoveFromSelection,
   onClearSelection,
   onClose,
 }: Props) {
   const compatRows = useMemo(() => buildCompatibilityRows(lines), [lines])
   const hasAnyMixed = compatRows.some((r) => r.mixed)
+  const [designer, setDesigner] = useState('')
+  const [sendingToArtwork, setSendingToArtwork] = useState(false)
+  const [makingProcessing, setMakingProcessing] = useState(false)
+
+  useEffect(() => {
+    const choices = new Set<string>()
+    for (const li of lines) {
+      const spec = (li.specOverrides || {}) as Record<string, unknown>
+      const meta = readPlanningMeta(spec)
+      const md = typeof meta.designer === 'string' ? meta.designer.trim() : ''
+      if (md) choices.add(md)
+    }
+    setDesigner(choices.size === 1 ? Array.from(choices)[0]! : '')
+  }, [lines])
 
   const totalQty = useMemo(
     () => lines.reduce((s, r) => s + (r.quantity || 0), 0),
@@ -168,6 +202,74 @@ export function PlanningBatchBuilderPanel({
   if (lines.length < 2) return null
 
   const renderUpsField = true
+
+  const applyDesignerToBatch = async (name: string) => {
+    const n = name.trim()
+    setDesigner(n)
+    for (const li of lines) {
+      const spec = (li.specOverrides || {}) as Record<string, unknown>
+      const withMeta = mergePlanningMetaDesigner(spec, n || null)
+      updateRow(li.id, { specOverrides: withMeta })
+      await onSaveLine(li.id, { specOverrides: withMeta })
+    }
+  }
+
+  const handleSendToArtwork = async () => {
+    if (lines.length === 0) return
+    setSendingToArtwork(true)
+    try {
+      const designerName = designer.trim()
+      if (designerName) await applyDesignerToBatch(designerName)
+      const withLatest = lines.map((li) => {
+        const spec = (li.specOverrides || {}) as Record<string, unknown>
+        const meta = readPlanningMeta(spec)
+        const ups = typeof meta.ups === 'number' && Number.isFinite(meta.ups) && meta.ups >= 1 ? meta.ups : null
+        const md = typeof meta.designer === 'string' ? meta.designer.trim() : designerName
+        return { id: li.id, ups, designer: md }
+      })
+      const hasUps = withLatest.every((x) => x.ups != null)
+      const hasDesigner = withLatest.every((x) => !!x.designer)
+      if (!hasDesigner || !hasUps) {
+        toast.warning('Designer or Ups not set. Proceeding may cause rework.')
+      }
+      let success = 0
+      let failed = 0
+      for (const li of withLatest) {
+        const ok = (await onBatchDecision([li.id], 'send_to_artwork', undefined, { suppressToast: true })) !== false
+        if (ok) success += 1
+        else failed += 1
+      }
+      toast.success(`Sent to Artwork • ${success} items${failed ? ` • ${failed} failed` : ''}`)
+    } finally {
+      setSendingToArtwork(false)
+    }
+  }
+
+  const handleMakeProcessingBatch = async () => {
+    if (lines.length === 0) return
+    setMakingProcessing(true)
+    try {
+      const designerName = designer.trim()
+      if (designerName) await applyDesignerToBatch(designerName)
+      const withLatest = lines.map((li) => {
+        const spec = (li.specOverrides || {}) as Record<string, unknown>
+        const meta = readPlanningMeta(spec)
+        const ups = typeof meta.ups === 'number' && Number.isFinite(meta.ups) && meta.ups >= 1 ? meta.ups : null
+        const md = typeof meta.designer === 'string' ? meta.designer.trim() : designerName
+        return { ups, designer: md }
+      })
+      if (withLatest.some((x) => !x.designer || x.ups == null)) {
+        toast.warning('Designer or Ups missing. Proceeding may cause rework.')
+      }
+      const ok = await onMakeProcessingBatch(
+        lines.map((l) => l.id),
+        { suppressToast: true },
+      )
+      if (ok) toast.success(`Sent to Processing • ${lines.length} items`)
+    } finally {
+      setMakingProcessing(false)
+    }
+  }
 
   return (
     <SlideOverPanel
@@ -194,6 +296,22 @@ export function PlanningBatchBuilderPanel({
           >
             <Plus className="h-4 w-4" aria-hidden />
             Create batch
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSendToArtwork()}
+            disabled={sendingToArtwork}
+            className="w-full rounded-lg bg-ds-brand px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-brand/90 disabled:opacity-60"
+          >
+            {sendingToArtwork ? 'Sending…' : 'Send to Artwork'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleMakeProcessingBatch()}
+            disabled={makingProcessing}
+            className="w-full rounded-lg border border-ds-line bg-ds-elevated py-2 text-xs font-semibold text-ds-ink transition-colors hover:bg-ds-main disabled:opacity-60"
+          >
+            {makingProcessing ? 'Sending…' : 'Make Processing'}
           </button>
           <button
             type="button"
@@ -228,6 +346,24 @@ export function PlanningBatchBuilderPanel({
               </li>
             ))}
           </ul>
+        </div>
+
+        <div className="rounded-md border border-ds-line/40 bg-ds-elevated/20 px-3 py-2.5">
+          <label htmlFor="batch-designer" className="block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            Designer assignment
+          </label>
+          <select
+            id="batch-designer"
+            className="ds-input mt-1 h-9 w-full text-sm"
+            value={designer}
+            onChange={(e) => {
+              void applyDesignerToBatch(e.target.value)
+            }}
+          >
+            <option value="">Select Designer</option>
+            <option value="Avneet Singh">Avneet Singh</option>
+            <option value="Shamsher Inder">Shamsher Inder</option>
+          </select>
         </div>
 
         <div>

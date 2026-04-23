@@ -129,6 +129,21 @@ export function mergePlanningMetaUps(spec: Record<string, unknown>, ups: number 
   return next
 }
 
+/** Persist `meta.designer` (string) or clear when empty. Preserves other `meta` keys. */
+export function mergePlanningMetaDesigner(spec: Record<string, unknown>, designer: string | null): Record<string, unknown> {
+  const nextMeta = { ...readPlanningMeta(spec) }
+  const d = typeof designer === 'string' ? designer.trim() : ''
+  if (d) nextMeta.designer = d
+  else delete nextMeta.designer
+  const next = { ...spec }
+  if (Object.keys(nextMeta).length === 0) {
+    delete next.meta
+  } else {
+    next.meta = nextMeta
+  }
+  return next
+}
+
 export function planningHandoffComplete(spec: Record<string, unknown> | null | undefined): boolean {
   const c = readPlanningCore(spec)
   return !!c.savedAt?.trim() && !!c.designerKey
