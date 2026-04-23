@@ -1229,7 +1229,6 @@ export default function PlanningPage() {
           onCreateBatch={linkAsMixSet}
           updateRow={updateRow}
           onSaveLine={savePlanningLine}
-          onBatchDecision={applyBatchDecision}
           onMakeProcessingBatch={makeProcessingForIds}
           onRemoveFromSelection={(lineId) =>
             setPlanningSelection((prev) => {

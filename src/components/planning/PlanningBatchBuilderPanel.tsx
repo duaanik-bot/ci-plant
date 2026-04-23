@@ -9,6 +9,7 @@ import {
   type PlanningLineFieldPatch,
 } from '@/components/planning/PlanningDecisionGrid'
 import {
+  generateMasterSetId,
   mergePlanningMetaDesigner,
   mergePlanningMetaUps,
   readPlanningCore,
@@ -18,7 +19,6 @@ import {
   BATCH_STATUS_BADGE_CLASS,
   BATCH_STATUS_LABEL,
   effectiveBatchStatus,
-  type PlanningBatchDecisionAction,
 } from '@/lib/planning-batch-decision'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 
@@ -152,12 +152,6 @@ type Props = {
   onCreateBatch: () => void
   updateRow: (lineId: string, patch: Partial<PlanningGridLine>) => void
   onSaveLine: (lineId: string, patch: PlanningLineFieldPatch) => void | Promise<boolean | void>
-  onBatchDecision: (
-    lineIds: string[],
-    action: PlanningBatchDecisionAction,
-    holdReason?: string,
-    opts?: { suppressToast?: boolean },
-  ) => Promise<boolean | void>
   onMakeProcessingBatch: (lineIds: string[], opts?: { suppressToast?: boolean }) => Promise<boolean>
   onRemoveFromSelection: (lineId: string) => void
   onClearSelection: () => void
@@ -170,7 +164,6 @@ export function PlanningBatchBuilderPanel({
   onCreateBatch,
   updateRow,
   onSaveLine,
-  onBatchDecision,
   onMakeProcessingBatch,
   onRemoveFromSelection,
   onClearSelection,
@@ -203,6 +196,32 @@ export function PlanningBatchBuilderPanel({
 
   const renderUpsField = true
 
+  const ensureBatchPackageTag = async () => {
+    if (lines.length < 2) return null
+    const ids = lines.map((l) => l.id)
+    const existing = new Set<string>()
+    for (const li of lines) {
+      const c = readPlanningCore((li.specOverrides || {}) as Record<string, unknown>)
+      if (c.masterSetId?.trim()) existing.add(c.masterSetId.trim())
+    }
+    const packageId = existing.size === 1 ? Array.from(existing)[0]! : generateMasterSetId()
+    for (const li of lines) {
+      const spec = (li.specOverrides || {}) as Record<string, unknown>
+      const prevCore = readPlanningCore(spec)
+      const planningCore = {
+        ...prevCore,
+        masterSetId: packageId,
+        mixSetMemberIds: ids,
+        layoutType: 'gang' as const,
+        batchStatus: prevCore.batchStatus ?? 'draft',
+      }
+      const next = { ...spec, planningCore } as Record<string, unknown>
+      updateRow(li.id, { specOverrides: next })
+      await onSaveLine(li.id, { specOverrides: next })
+    }
+    return packageId
+  }
+
   const applyDesignerToBatch = async (name: string) => {
     const n = name.trim()
     setDesigner(n)
@@ -218,6 +237,7 @@ export function PlanningBatchBuilderPanel({
     if (lines.length === 0) return
     setSendingToArtwork(true)
     try {
+      await ensureBatchPackageTag()
       const designerName = designer.trim()
       if (designerName) await applyDesignerToBatch(designerName)
       const withLatest = lines.map((li) => {
@@ -232,13 +252,12 @@ export function PlanningBatchBuilderPanel({
       if (!hasDesigner || !hasUps) {
         toast.warning('Designer or Ups not set. Proceeding may cause rework.')
       }
-      let success = 0
-      let failed = 0
-      for (const li of withLatest) {
-        const ok = (await onBatchDecision([li.id], 'send_to_artwork', undefined, { suppressToast: true })) !== false
-        if (ok) success += 1
-        else failed += 1
-      }
+      const ok = await onMakeProcessingBatch(
+        withLatest.map((x) => x.id),
+        { suppressToast: true },
+      )
+      const success = ok ? withLatest.length : 0
+      const failed = ok ? 0 : withLatest.length
       toast.success(`Sent to Artwork • ${success} items${failed ? ` • ${failed} failed` : ''}`)
     } finally {
       setSendingToArtwork(false)
@@ -291,7 +310,11 @@ export function PlanningBatchBuilderPanel({
           ) : null}
           <button
             type="button"
-            onClick={onCreateBatch}
+            onClick={async () => {
+              await ensureBatchPackageTag()
+              onCreateBatch()
+              toast.success('Batch tagged as one package')
+            }}
             className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-ds-warning px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-warning/90"
           >
             <Plus className="h-4 w-4" aria-hidden />

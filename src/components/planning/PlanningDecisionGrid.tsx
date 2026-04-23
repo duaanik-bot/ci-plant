@@ -15,6 +15,7 @@ import {
 } from '@/lib/planning-batch-decision'
 import {
   PLANNING_DESIGNERS,
+  mergePlanningMetaDesigner,
   readPlanningCore,
   readPlanningMeta,
   type PlanningDesignerKey,
@@ -29,7 +30,7 @@ const inp =
 
 function rowClickTargetOk(target: EventTarget | null): boolean {
   if (!target || !(target instanceof HTMLElement)) return true
-  return !target.closest('input, button, textarea, [data-batch-actions]')
+  return !target.closest('input, select, button, textarea, [data-batch-actions]')
 }
 
 const batchBtnApprove =
@@ -175,6 +176,23 @@ function designerHandoffLabel(spec: Record<string, unknown>, planCore: ReturnTyp
   if (k === 'avneet_singh' || k === 'shamsher_inder') return PLANNING_DESIGNERS[k as PlanningDesignerKey]
   const md = readPlanningMeta(spec).designer
   if (typeof md === 'string' && md.trim()) return md.trim()
+  return ''
+}
+
+function resolveDesignerKey(spec: Record<string, unknown>, planCore: ReturnType<typeof readPlanningCore>): PlanningDesignerKey | '' {
+  if (planCore.designerKey === 'avneet_singh' || planCore.designerKey === 'shamsher_inder') {
+    return planCore.designerKey
+  }
+  const disp =
+    typeof spec.planningDesignerDisplayName === 'string'
+      ? spec.planningDesignerDisplayName.trim().toLowerCase()
+      : ''
+  if (disp === PLANNING_DESIGNERS.avneet_singh.toLowerCase()) return 'avneet_singh'
+  if (disp === PLANNING_DESIGNERS.shamsher_inder.toLowerCase()) return 'shamsher_inder'
+  const md = readPlanningMeta(spec).designer
+  const metaDesigner = typeof md === 'string' ? md.trim().toLowerCase() : ''
+  if (metaDesigner === PLANNING_DESIGNERS.avneet_singh.toLowerCase()) return 'avneet_singh'
+  if (metaDesigner === PLANNING_DESIGNERS.shamsher_inder.toLowerCase()) return 'shamsher_inder'
   return ''
 }
 
@@ -667,12 +685,14 @@ export function PlanningDecisionGrid({
                   Qty {sortKey === 'qty' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} w-[18%] min-w-0`}>
+              <th className={`${dataTable.th} w-[14%] min-w-0`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('board')}>
                   Board {sortKey === 'board' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} w-[26%] min-w-0 text-right`}>
+              <th className={`${dataTable.th} w-[11%] min-w-0`}>Designer</th>
+              <th className={`${dataTable.th} w-[11%] min-w-0`}>Set type</th>
+              <th className={`${dataTable.th} w-[22%] min-w-0 text-right`}>
                 <button
                   type="button"
                   className={`${dataTable.thSortBtn} w-full justify-end text-right`}
@@ -720,6 +740,8 @@ export function PlanningDecisionGrid({
                   onClick={(e) => e.stopPropagation()}
                 />
               </th>
+              <th className="px-2 py-2" />
+              <th className="px-2 py-2" />
               <th className="px-2 py-2">
                 <input
                   className={filterGhost}
@@ -757,6 +779,7 @@ export function PlanningDecisionGrid({
               const batchTypeClass = batchType === 'MIXED' ? 'text-ds-warning' : 'text-ds-success'
               const batchMixed = isMixedBatchGroup(batchGroup, rows)
               const designerLabel = designerHandoffLabel(spec, planCore)
+              const designerKey = resolveDesignerKey(spec, planCore)
               const upsNum = typeof pm.ups === 'number' && Number.isFinite(pm.ups) && pm.ups >= 1 ? pm.ups : null
               const upsFinal = upsNum != null
               const recallHighlight = highlightedRowId === r.id
@@ -874,6 +897,67 @@ export function PlanningDecisionGrid({
                       >
                         {brd}
                       </p>
+                    </td>
+                    <td className={`${cellBase} min-w-0`}>
+                      <select
+                        className={inp + ' h-8 py-1 text-[12px]'}
+                        disabled={processed}
+                        value={designerKey}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const key = e.target.value as PlanningDesignerKey | ''
+                          const prevMeta = readPlanningMeta(spec)
+                          const named = key ? PLANNING_DESIGNERS[key] : null
+                          const withMeta = mergePlanningMetaDesigner(spec, named)
+                          const nextCore = { ...planCore, designerKey: key || null }
+                          const nextSpec: Record<string, unknown> = {
+                            ...withMeta,
+                            planningCore: nextCore,
+                          }
+                          if (named) nextSpec.planningDesignerDisplayName = named
+                          else delete nextSpec.planningDesignerDisplayName
+                          if (Object.keys(prevMeta).length === 0 && !named) delete nextSpec.meta
+                          updateRow(r.id, { specOverrides: nextSpec })
+                          void onSaveLine(r.id, { specOverrides: nextSpec })
+                        }}
+                      >
+                        <option value="">Select</option>
+                        {(Object.keys(PLANNING_DESIGNERS) as PlanningDesignerKey[]).map((k) => (
+                          <option key={k} value={k}>
+                            {PLANNING_DESIGNERS[k]}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className={`${cellBase} min-w-0`}>
+                      <select
+                        className={inp + ' h-8 py-1 text-[12px]'}
+                        disabled={processed}
+                        value={planCore.layoutType === 'gang' ? 'batch' : 'single'}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const mode = e.target.value === 'batch' ? 'gang' : 'single'
+                          const nextCore =
+                            mode === 'single'
+                              ? {
+                                  ...planCore,
+                                  layoutType: 'single' as const,
+                                  masterSetId: null,
+                                  mixSetMemberIds: null,
+                                  batchStatus: 'draft' as const,
+                                }
+                              : {
+                                  ...planCore,
+                                  layoutType: 'gang' as const,
+                                }
+                          const nextSpec: Record<string, unknown> = { ...spec, planningCore: nextCore }
+                          updateRow(r.id, { specOverrides: nextSpec })
+                          void onSaveLine(r.id, { specOverrides: nextSpec })
+                        }}
+                      >
+                        <option value="single">Single</option>
+                        <option value="batch">Batch</option>
+                      </select>
                     </td>
                     <td className={`${cellBase} min-w-0 align-top overflow-visible`}>
                       <div className="flex min-w-0 flex-col items-end gap-1 text-right">
