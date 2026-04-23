@@ -32,6 +32,7 @@ import { PlanningSuggestedBatchesPanel } from '@/components/planning/PlanningSug
 import { PlanningPoSummaryDrawer } from '@/components/planning/PlanningPoSummaryDrawer'
 import { PlanningProductDetailDrawer } from '@/components/planning/PlanningProductDetailDrawer'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { PlanningSummaryPanel } from '@/components/planning/PlanningSummaryPanel'
 import {
   PlanningDecisionLayerToolbar,
   type PlanningGroupBy,
@@ -1192,33 +1193,52 @@ export default function PlanningPage() {
         </div>
       </ActionBar>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-1 pb-0.5 pt-0.5">
-        <ErrorBoundary moduleName="Planning Grid">
-          <PlanningDecisionGrid
-            rows={rows as PlanningGridLine[]}
-            ledgerView={ledgerView}
-            planningSelection={planningSelection}
-            setPlanningSelection={setPlanningSelection}
-            onRowBackgroundClick={(id) => {
-              setPlanningDrawerLineId(id)
-            }}
-            updateRow={updateRow}
-            onRecallLine={recallLine}
-            onSaveLine={savePlanningLine}
-            mixAdvisoryNote={null}
-            mixConflictMessage={null}
-            onBatchDecision={applyBatchDecision}
-            batchActionBusy={batchActionBusy}
-            highlightedRowId={highlightedRowId}
-          />
-        </ErrorBoundary>
+      {/* ── Main workspace: grid (left) + summary panel (right) ── */}
+      <div className="flex min-h-0 flex-1 gap-0 overflow-hidden">
+        {/* Grid — takes all remaining width */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-1 pb-0.5 pt-0.5">
+          <ErrorBoundary moduleName="Planning Grid">
+            <PlanningDecisionGrid
+              rows={rows as PlanningGridLine[]}
+              ledgerView={ledgerView}
+              planningSelection={planningSelection}
+              setPlanningSelection={setPlanningSelection}
+              onRowBackgroundClick={(id) => {
+                setPlanningDrawerLineId(id)
+              }}
+              updateRow={updateRow}
+              onRecallLine={recallLine}
+              onSaveLine={savePlanningLine}
+              mixAdvisoryNote={null}
+              mixConflictMessage={null}
+              onBatchDecision={applyBatchDecision}
+              batchActionBusy={batchActionBusy}
+              highlightedRowId={highlightedRowId}
+            />
+          </ErrorBoundary>
+        </div>
+
+        {/* Summary panel — fixed width, full height, scrolls independently */}
+        <div className="hidden w-[270px] shrink-0 overflow-hidden border-l border-ds-line/50 bg-ds-main/40 xl:flex xl:flex-col">
+          <div className="shrink-0 border-b border-ds-line/50 bg-ds-elevated/10 px-3 py-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-ds-ink-faint">Queue overview</p>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+            <PlanningSummaryPanel
+              rows={rows}
+              blockerData={blockerData}
+              readyToScheduleCount={readyToScheduleCount}
+              totalQty={totalQty}
+            />
+          </div>
+        </div>
       </div>
 
-        <footer
-          className={`shrink-0 border-t border-ds-line/50 py-1.5 text-center text-[10px] text-ds-ink-faint ${mono}`}
-        >
-          Planning workspace
-        </footer>
+      <footer
+        className={`shrink-0 border-t border-ds-line/50 py-1.5 text-center text-[10px] text-ds-ink-faint ${mono}`}
+      >
+        Planning workspace
+      </footer>
 
         <PlanningJobDetailDrawer
           line={planningDrawerLine}
