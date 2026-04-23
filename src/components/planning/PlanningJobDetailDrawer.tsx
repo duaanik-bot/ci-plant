@@ -184,11 +184,11 @@ export function PlanningJobDetailDrawer({
   if (!line || !open) return null
 
   const spec = (line.specOverrides || {}) as Record<string, unknown>
+  const renderUpsField = true
   const meta = readPlanningMeta(spec)
-  const rawGangUps = meta.ups
   const gangUpsStr =
-    typeof rawGangUps === 'number' && Number.isFinite(rawGangUps) && rawGangUps >= 1
-      ? String(Math.floor(rawGangUps))
+    renderUpsField && meta.ups != null && Number(meta.ups) >= 1
+      ? String(Math.floor(Number(meta.ups)))
       : ''
   const boardInput = String(spec.boardGrade || line.materialQueue?.boardType || '').trim()
   const amount = (line.quantity || 0) * (line.rate != null ? Number(line.rate) : 0)
@@ -417,35 +417,49 @@ export function PlanningJobDetailDrawer({
         </CardSection>
 
         <CardSection title="Gang print" id="plan-drawer-gang-ups">
-          <div id="placement-ref" className="space-y-1.5">
+          <div id="placement-ref">
+            <div id="fix-ups-render" className="space-y-1.5">
             <label htmlFor="ups-input" id="label" className="block text-[12px] font-medium text-ds-ink-muted">
               Ups (per plate/output)
             </label>
-            <input
-              id="ups-input"
-              type="number"
-              min={1}
-              step={1}
-              placeholder="Enter ups"
-              className={`${fieldInput} max-w-[8rem]`}
-              value={gangUpsStr}
-              onChange={(e) => {
-                const v = e.target.value.trim()
-                if (v === '') {
-                  const next = mergePlanningMetaUps(spec, null)
+            <div id="fix-ups-save">
+              <input
+                id="ups-input"
+                data-fix-ups-binding
+                type="number"
+                min={1}
+                step={1}
+                placeholder="Enter ups"
+                className={`${fieldInput} max-w-[8rem] ${gangUpsStr ? 'border-ds-success/50 bg-ds-success/10' : ''}`}
+                value={gangUpsStr}
+                onChange={(e) => {
+                  const v = e.target.value.trim()
+                  if (v === '') {
+                    const next = mergePlanningMetaUps(spec, null)
+                    updateRow(line.id, { specOverrides: next })
+                    return
+                  }
+                  const n = parseInt(v, 10)
+                  if (!Number.isFinite(n) || n < 1) return
+                  const next = mergePlanningMetaUps(spec, n)
                   updateRow(line.id, { specOverrides: next })
-                  return
-                }
-                const n = parseInt(v, 10)
-                if (!Number.isFinite(n) || n < 1) return
-                const next = mergePlanningMetaUps(spec, n)
-                updateRow(line.id, { specOverrides: next })
-              }}
-              onBlur={() => void onSaveLine(line.id, {})}
-            />
+                }}
+                onBlur={(e) => {
+                  const v = e.target.value.trim()
+                  const n = v === '' ? null : parseInt(v, 10)
+                  const next =
+                    Number.isFinite(n) && (n as number) >= 1
+                      ? mergePlanningMetaUps(spec, n as number)
+                      : mergePlanningMetaUps(spec, null)
+                  updateRow(line.id, { specOverrides: next })
+                  void onSaveLine(line.id, { specOverrides: next })
+                }}
+              />
+            </div>
             <p id="helper" className="text-[11px] text-ds-ink-faint">
               No. of repeats of this product in one gang layout
             </p>
+            </div>
           </div>
         </CardSection>
 

@@ -2,7 +2,11 @@
 
 import { useMemo } from 'react'
 import { AlertTriangle, Layers, Plus, X } from 'lucide-react'
-import { boardLabel, type PlanningGridLine } from '@/components/planning/PlanningDecisionGrid'
+import {
+  boardLabel,
+  type PlanningGridLine,
+  type PlanningLineFieldPatch,
+} from '@/components/planning/PlanningDecisionGrid'
 import { mergePlanningMetaUps, readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
 import { BATCH_STATUS_BADGE_CLASS, BATCH_STATUS_LABEL, effectiveBatchStatus } from '@/lib/planning-batch-decision'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
@@ -136,7 +140,7 @@ type Props = {
   lines: PlanningGridLine[]
   onCreateBatch: () => void
   updateRow: (lineId: string, patch: Partial<PlanningGridLine>) => void
-  onFlushLineSpec: (lineId: string) => void | Promise<void>
+  onSaveLine: (lineId: string, patch: PlanningLineFieldPatch) => void | Promise<boolean | void>
   onRemoveFromSelection: (lineId: string) => void
   onClearSelection: () => void
   onClose: () => void
@@ -147,7 +151,7 @@ export function PlanningBatchBuilderPanel({
   lines,
   onCreateBatch,
   updateRow,
-  onFlushLineSpec,
+  onSaveLine,
   onRemoveFromSelection,
   onClearSelection,
   onClose,
@@ -162,6 +166,8 @@ export function PlanningBatchBuilderPanel({
 
   if (!isOpen) return null
   if (lines.length < 2) return null
+
+  const renderUpsField = true
 
   return (
     <SlideOverPanel
@@ -233,11 +239,9 @@ export function PlanningBatchBuilderPanel({
               const b = effectiveBatchStatus(planCore)
               const hasBatch = !!(planCore.masterSetId && planCore.mixSetMemberIds && planCore.mixSetMemberIds.length > 0)
               const meta = readPlanningMeta(spec)
-              const rawUps = meta.ups
+              const rawUps = renderUpsField ? meta.ups : undefined
               const gangUpsStr =
-                typeof rawUps === 'number' && Number.isFinite(rawUps) && rawUps >= 1
-                  ? String(Math.floor(rawUps))
-                  : ''
+                rawUps != null && Number(rawUps) >= 1 ? String(Math.floor(Number(rawUps))) : ''
               return (
                 <li
                   key={r.id}
@@ -251,16 +255,19 @@ export function PlanningBatchBuilderPanel({
                       {r.po.poNumber} · {r.quantity.toLocaleString('en-IN')} · {boardLabel(r)}
                     </p>
                     <div id={r.id === lines[0]?.id ? 'placement-ref' : undefined}>
+                      <div id={r.id === lines[0]?.id ? 'fix-ups-render' : undefined}>
                       <label htmlFor={`ups-input-${r.id}`} id={r.id === lines[0]?.id ? 'label' : undefined} className="block text-[11px] font-medium text-ds-ink-muted">
                         Ups (per plate/output)
                       </label>
+                      <div id={r.id === lines[0]?.id ? 'fix-ups-save' : undefined}>
                       <input
                         id={`ups-input-${r.id}`}
+                        data-fix-ups-binding
                         type="number"
                         min={1}
                         step={1}
                         placeholder="Enter ups"
-                        className="ds-input mt-0.5 h-9 w-full max-w-[7rem] py-1.5 text-sm"
+                        className={`ds-input mt-0.5 h-9 w-full max-w-[7rem] py-1.5 text-sm ${gangUpsStr ? 'border-ds-success/50 bg-ds-success/10' : ''}`}
                         value={gangUpsStr}
                         onChange={(e) => {
                           const v = e.target.value.trim()
@@ -274,11 +281,22 @@ export function PlanningBatchBuilderPanel({
                           const next = mergePlanningMetaUps(spec, n)
                           updateRow(r.id, { specOverrides: next })
                         }}
-                        onBlur={() => void onFlushLineSpec(r.id)}
+                        onBlur={(e) => {
+                          const v = e.target.value.trim()
+                          const n = v === '' ? null : parseInt(v, 10)
+                          const next =
+                            Number.isFinite(n) && (n as number) >= 1
+                              ? mergePlanningMetaUps(spec, n as number)
+                              : mergePlanningMetaUps(spec, null)
+                          updateRow(r.id, { specOverrides: next })
+                          void onSaveLine(r.id, { specOverrides: next })
+                        }}
                       />
+                      </div>
                       <p id={r.id === lines[0]?.id ? 'helper' : undefined} className="text-[10px] text-ds-ink-faint">
                         No. of repeats of this product in one gang layout
                       </p>
+                      </div>
                     </div>
                     {hasBatch ? (
                       <span
@@ -292,7 +310,10 @@ export function PlanningBatchBuilderPanel({
                   </div>
                   <button
                     type="button"
-                    onClick={() => onRemoveFromSelection(r.id)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onRemoveFromSelection(r.id)
+                    }}
                     className="shrink-0 rounded p-0.5 text-ds-ink-faint transition-colors hover:bg-accent/20 hover:text-rose-300"
                     title="Remove from selection"
                     aria-label="Remove from selection"

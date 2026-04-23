@@ -13,6 +13,7 @@ import {
   generateMasterSetId,
   PLANNING_DESIGNERS,
   readPlanningCore,
+  readPlanningMeta,
   suggestNextAutoSetNumber,
   type PlanningCore,
   type PlanningDesignerKey,
@@ -69,7 +70,7 @@ type PlanningSpec = {
   /** Denormalized for AW filters */
   planningDesignerDisplayName?: string
   /** Per-line planner notes; `ups` = repeats of this product in one gang layout (not `planningCore.ups`). */
-  meta?: { ups?: number } & Record<string, unknown>
+  meta?: { ups?: number; designer?: string } & Record<string, unknown>
 }
 
 type InterlockSegment = {
@@ -360,6 +361,7 @@ export default function PlanningPage() {
   const [planningGroupBy, setPlanningGroupBy] = useState<PlanningGroupBy>('none')
   const [planningSetIdMode, setPlanningSetIdMode] = useState<PlanningSetIdMode>('auto')
   const [planningDrawerLineId, setPlanningDrawerLineId] = useState<string | null>(null)
+  const [highlightedRowId, setHighlightedRowId] = useState<string | null>(null)
   const [poSummaryDrawerId, setPoSummaryDrawerId] = useState<string | null>(null)
   const [productDrawerLine, setProductDrawerLine] = useState<PlanningGridLine | null>(null)
   const [savingPlanningHandoff, setSavingPlanningHandoff] = useState(false)
@@ -397,9 +399,10 @@ export default function PlanningPage() {
     }
   }
 
-  const fetchRows = useCallback(async () => {
+  const fetchRows = useCallback(async (opts?: { force?: boolean }) => {
     const params = new URLSearchParams()
     if (customerId) params.set('customerId', customerId)
+    if (opts?.force) params.set('_', String(Date.now()))
     const res = await fetch(`/api/planning/po-lines?${params}`, { cache: 'no-store' })
     const json = await res.json()
     const list = Array.isArray(json) ? (json as Line[]) : []
@@ -592,20 +595,25 @@ export default function PlanningPage() {
   }, [rows, ledgerView])
 
   const applyBatchDecision = useCallback(
-    async (lineIds: string[], action: PlanningBatchDecisionAction, holdReason?: string) => {
-      if (lineIds.length === 0) return
+    async (
+      lineIds: string[],
+      action: PlanningBatchDecisionAction,
+      holdReason?: string,
+      opts?: { suppressToast?: boolean },
+    ): Promise<boolean> => {
+      if (lineIds.length === 0) return false
       setBatchActionBusy(true)
       try {
         const first = rows.find((r) => r.id === lineIds[0])
         if (!first) {
           toast.error('Line not found')
-          return
+          return false
         }
         const base = readPlanningCore(first.specOverrides as Record<string, unknown>)
         const result = applyBatchDecisionAction(base, action, { holdReason })
         if (!result) {
           toast.error('This action is not available for the current batch status')
-          return
+          return false
         }
         const batchSlice = projectPlanningBatchFields(result)
         for (const id of lineIds) {
@@ -630,10 +638,30 @@ export default function PlanningPage() {
             throw new Error(j.error || 'Update failed')
           }
         }
-        toast.success('Batch updated')
+        if (action === 'send_to_artwork' && !opts?.suppressToast) {
+          const fs = ((first.specOverrides && typeof first.specOverrides === 'object'
+            ? first.specOverrides
+            : {}) as Record<string, unknown>)
+          const fm = readPlanningMeta(fs)
+          const designer =
+            typeof fs.planningDesignerDisplayName === 'string' && fs.planningDesignerDisplayName.trim()
+              ? fs.planningDesignerDisplayName.trim()
+              : (() => {
+                  const k = readPlanningCore(fs).designerKey
+                  return k ? PLANNING_DESIGNERS[k] : ''
+                })()
+          const ups = typeof fm.ups === 'number' && Number.isFinite(fm.ups) && fm.ups >= 1 ? Math.floor(fm.ups) : null
+          toast.success(
+            designer || ups != null ? `Assigned to ${designer || 'designer'}${ups != null ? ` • Ups: ${ups}` : ''}` : 'Batch updated',
+          )
+        } else if (!opts?.suppressToast) {
+          toast.success('Batch updated')
+        }
         await fetchRows()
+        return true
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Update failed')
+        return false
       } finally {
         setBatchActionBusy(false)
       }
@@ -724,9 +752,11 @@ export default function PlanningPage() {
       try {
         const raw =
           specSnapshot ??
-          (li.specOverrides && typeof li.specOverrides === 'object'
-            ? (li.specOverrides as Record<string, unknown>)
-            : ({} as Record<string, unknown>))
+          (patch.specOverrides !== undefined
+            ? { ...patch.specOverrides }
+            : li.specOverrides && typeof li.specOverrides === 'object'
+              ? (li.specOverrides as Record<string, unknown>)
+              : ({} as Record<string, unknown>))
         let specOverrides: Record<string, unknown> = { ...raw }
         if (String(specOverrides.machineId || '').trim()) {
           specOverrides = mergeOrchestrationIntoSpec(specOverrides, {
@@ -769,18 +799,6 @@ export default function PlanningPage() {
       }
     },
     [rows, fetchRows],
-  )
-
-  const flushPlanningLineSpec = useCallback(
-    async (lineId: string) => {
-      const li = rows.find((x) => x.id === lineId)
-      if (!li) return
-      const spec = (li.specOverrides && typeof li.specOverrides === 'object'
-        ? li.specOverrides
-        : {}) as Record<string, unknown>
-      await savePlanningLine(lineId, {}, spec)
-    },
-    [rows, savePlanningLine],
   )
 
   const save = async (id: string, opts?: { remarks?: string | null }) => {
@@ -838,15 +856,21 @@ export default function PlanningPage() {
         })
         const j = (await res.json().catch(() => ({}))) as { error?: string }
         if (!res.ok) throw new Error(j.error || 'Recall failed')
-        toast.success('Recalled — returned to Pending planning')
-        setLedgerView('pending')
         setPlanningDrawerLineId(null)
-        await fetchRows()
+        setHighlightedRowId(lineId)
+        window.setTimeout(() => setHighlightedRowId(null), 3000)
+        await fetchRows({ force: true })
+        toast.success('Returned to Planning', {
+          action: {
+            label: 'View Pending',
+            onClick: () => setLedgerView('pending'),
+          },
+        })
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Recall failed')
       }
     },
-    [fetchRows],
+    [fetchRows, setLedgerView],
   )
 
   const planningDrawerLine = useMemo(
@@ -1157,6 +1181,7 @@ export default function PlanningPage() {
             mixConflictMessage={mixConflictMessage}
             onBatchDecision={applyBatchDecision}
             batchActionBusy={batchActionBusy}
+            highlightedRowId={highlightedRowId}
           />
         </ErrorBoundary>
       </div>
@@ -1187,7 +1212,7 @@ export default function PlanningPage() {
           lines={selectedGridLines}
           onCreateBatch={linkAsMixSet}
           updateRow={updateRow}
-          onFlushLineSpec={flushPlanningLineSpec}
+          onSaveLine={savePlanningLine}
           onRemoveFromSelection={(lineId) =>
             setPlanningSelection((prev) => {
               const next = new Set(prev)
