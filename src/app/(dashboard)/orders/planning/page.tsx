@@ -441,6 +441,14 @@ export default function PlanningPage() {
     return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
   }, [])
 
+  useEffect(() => {
+    const onPlanningRefresh = () => {
+      void fetchRowsRef.current({ force: true })
+    }
+    window.addEventListener('planning:refresh', onPlanningRefresh)
+    return () => window.removeEventListener('planning:refresh', onPlanningRefresh)
+  }, [])
+
   const blockerData = useMemo(() => aggregatePlanningBlockers(rows), [rows])
 
   const readyToScheduleCount = useMemo(

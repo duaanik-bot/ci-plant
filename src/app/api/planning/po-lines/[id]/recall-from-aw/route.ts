@@ -21,6 +21,7 @@ function stripAwHandoff(spec: Record<string, unknown>) {
 /** Same PO line row: clear AW handoff + unlock planning facts so Pending queue can edit again. */
 function resetSpecForRecallFromAw(spec: Record<string, unknown>): Record<string, unknown> {
   const base = stripAwHandoff({ ...spec }) as Record<string, unknown>
+  delete base.orchestration
   delete base.planningMakeProcessingAt
   delete base.planningMakeProcessingBy
   delete base.planningHandoffTarget

@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { format } from 'date-fns'
+import { toast } from 'sonner'
 import { PLANNING_DESIGNERS, readPlanningCore, readPlanningMeta, type PlanningDesignerKey } from '@/lib/planning-decision-spec'
 
 type ArtworkQueueItem = {
@@ -72,8 +74,10 @@ function getBatchType(items: ArtworkQueueItem[]): BatchType {
 }
 
 export default function ArtworkApprovalsPage() {
+  const router = useRouter()
   const [items, setItems] = useState<ArtworkQueueItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [recallingId, setRecallingId] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/designing/po-lines')
@@ -147,6 +151,33 @@ export default function ArtworkApprovalsPage() {
     )
   }
 
+  const handleRecall = useCallback(
+    async (lineId: string) => {
+      try {
+        setRecallingId(lineId)
+        const res = await fetch(`/api/planning/po-lines/${lineId}/recall-from-aw`, {
+          method: 'POST',
+          cache: 'no-store',
+        })
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        if (!res.ok) throw new Error(j.error || 'Recall failed')
+        setItems((prev) => prev.filter((r) => r.id !== lineId))
+        window.dispatchEvent(new CustomEvent('planning:refresh'))
+        toast.success('Returned to Planning', {
+          action: {
+            label: 'View Planning',
+            onClick: () => router.push('/orders/planning?view=pending'),
+          },
+        })
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Recall failed')
+      } finally {
+        setRecallingId((prev) => (prev === lineId ? null : prev))
+      }
+    },
+    [router],
+  )
+
   return (
     <section className="p-4 max-w-6xl mx-auto space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -188,6 +219,7 @@ export default function ArtworkApprovalsPage() {
             <tbody className="divide-y divide-ds-line/40">
               {items.map((item) => {
                 const summary = batchSummaryByLineId.get(item.id)
+                const showRecall = !!item.id
                 return (
                 <tr key={item.id} className="hover:bg-ds-elevated/40">
                   <td className="px-4 py-2 font-mono text-ds-warning whitespace-nowrap">
@@ -215,12 +247,27 @@ export default function ArtworkApprovalsPage() {
                     {item.po.poDate ? format(new Date(item.po.poDate), 'dd MMM yyyy') : '—'}
                   </td>
                   <td className="px-4 py-2">
-                    <Link
-                      href={`/orders/designing/${item.id}`}
-                      className="text-ds-warning hover:underline text-sm font-medium"
-                    >
-                      Open →
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/orders/designing/${item.id}`}
+                        className="text-ds-warning hover:underline text-sm font-medium"
+                      >
+                        Open →
+                      </Link>
+                      {showRecall ? (
+                        <button
+                          type="button"
+                          className="rounded border border-ds-line px-2 py-1 text-xs font-medium text-ds-warning transition hover:bg-ds-warning/10 disabled:opacity-60"
+                          disabled={recallingId === item.id}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void handleRecall(item.id)
+                          }}
+                        >
+                          {recallingId === item.id ? 'Recalling…' : 'Recall'}
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
                 )
