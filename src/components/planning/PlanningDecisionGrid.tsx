@@ -22,11 +22,11 @@ import {
 } from '@/lib/planning-decision-spec'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 
-const cellBase = `align-middle border-b border-ds-line/30 ${dataTable.td.base}`
+const cellBase = `align-middle border-b border-ds-line/30 ${dataTable.td.base} min-h-[40px] px-2.5 py-2`
 const filterGhost = dataTable.filter.input
 
 const inp =
-  'h-9 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[14px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
+  'h-8 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[13px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
 
 const batchBtnApprove =
   'rounded bg-sky-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40'
@@ -710,7 +710,7 @@ export function PlanningDecisionGrid({
           <thead className={dataTable.thead}>
             <tr>
               <th
-                className={`${dataTable.th} ${dataTable.thSticky} w-10 min-w-0 max-w-10 bg-ds-elevated px-0 text-center text-[10px] text-ds-ink-faint`}
+                className={`${dataTable.th} ${dataTable.thSticky} min-h-[40px] w-10 min-w-0 max-w-10 bg-ds-elevated px-0 py-1.5 text-center text-[10px] text-ds-ink-faint`}
               >
                 <div className="flex flex-col items-center gap-0.5">
                   <span>#</span>
@@ -724,29 +724,29 @@ export function PlanningDecisionGrid({
                   ) : null}
                 </div>
               </th>
-              <th className={`${dataTable.th} w-[24%] min-w-0`}>
+              <th className={`${dataTable.th} min-h-[40px] w-[24%] min-w-0 py-1.5`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('cartonName')}>
                   Carton {sortKey === 'cartonName' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} w-[12%] min-w-0`}>
+              <th className={`${dataTable.th} min-h-[40px] w-[12%] min-w-0 py-1.5`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('cartonSize')}>
                   Size {sortKey === 'cartonSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} w-[10%] min-w-0 text-center`}>
+              <th className={`${dataTable.th} min-h-[40px] w-[10%] min-w-0 py-1.5 text-center`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('qty')}>
                   Qty {sortKey === 'qty' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} w-[14%] min-w-0`}>
+              <th className={`${dataTable.th} min-h-[40px] w-[14%] min-w-0 py-1.5`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('board')}>
                   Board {sortKey === 'board' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} w-[11%] min-w-0`}>Designer</th>
-              <th className={`${dataTable.th} w-[11%] min-w-0`}>Set type</th>
-              <th className={`${dataTable.th} w-[22%] min-w-0 text-right`}>
+              <th className={`${dataTable.th} min-h-[40px] w-[11%] min-w-0 py-1.5`}>Designer</th>
+              <th className={`${dataTable.th} min-h-[40px] w-[11%] min-w-0 py-1.5`}>Set type</th>
+              <th className={`${dataTable.th} min-h-[40px] w-[22%] min-w-0 py-1.5 text-right`}>
                 <button
                   type="button"
                   className={`${dataTable.thSortBtn} w-full justify-end text-right`}
@@ -757,7 +757,7 @@ export function PlanningDecisionGrid({
               </th>
             </tr>
             <tr className="border-b border-ds-line/50 bg-ds-card/20">
-              <th className={`${dataTable.th} ${dataTable.thSticky} w-10 bg-ds-elevated px-0`} />
+              <th className={`${dataTable.th} ${dataTable.thSticky} min-h-[40px] w-10 bg-ds-elevated px-0 py-1`} />
               <th className="px-2 py-2">
                 <input
                   className={filterGhost}

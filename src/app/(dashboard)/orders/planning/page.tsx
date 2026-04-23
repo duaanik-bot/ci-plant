@@ -1192,7 +1192,7 @@ export default function PlanningPage() {
         </div>
       </ActionBar>
 
-      <div className="min-h-0 flex-1 overflow-hidden px-2 pb-1 pt-1">
+      <div className="min-h-0 flex-1 overflow-hidden px-1 pb-0.5 pt-0.5">
         <ErrorBoundary moduleName="Planning Grid">
           <PlanningDecisionGrid
             rows={rows as PlanningGridLine[]}
@@ -1215,7 +1215,7 @@ export default function PlanningPage() {
       </div>
 
         <footer
-          className={`shrink-0 border-t border-ds-line/50 py-3 text-center text-[11px] text-ds-ink-faint ${mono}`}
+          className={`shrink-0 border-t border-ds-line/50 py-1.5 text-center text-[10px] text-ds-ink-faint ${mono}`}
         >
           Planning workspace
         </footer>
