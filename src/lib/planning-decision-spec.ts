@@ -105,6 +105,30 @@ export function readPlanningCore(spec: Record<string, unknown> | null | undefine
   }
 }
 
+/** Planner-only gang-print hint per PO line (`specOverrides.meta`); not used in sheet math or handoff gates. */
+export function readPlanningMeta(spec: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const m = spec?.meta
+  if (m && typeof m === 'object' && !Array.isArray(m)) return { ...(m as Record<string, unknown>) }
+  return {}
+}
+
+/** Persist `meta.ups` (integer ≥ 1) or clear when null. Preserves other `meta` keys. */
+export function mergePlanningMetaUps(spec: Record<string, unknown>, ups: number | null): Record<string, unknown> {
+  const nextMeta = { ...readPlanningMeta(spec) }
+  if (ups != null && Number.isFinite(ups) && ups >= 1) {
+    nextMeta.ups = Math.floor(ups)
+  } else {
+    delete nextMeta.ups
+  }
+  const next = { ...spec }
+  if (Object.keys(nextMeta).length === 0) {
+    delete next.meta
+  } else {
+    next.meta = nextMeta
+  }
+  return next
+}
+
 export function planningHandoffComplete(spec: Record<string, unknown> | null | undefined): boolean {
   const c = readPlanningCore(spec)
   return !!c.savedAt?.trim() && !!c.designerKey

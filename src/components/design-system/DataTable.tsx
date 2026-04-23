@@ -16,8 +16,8 @@ export const dataTable = {
       'w-full min-w-0 border-0 border-b border-ds-line/80 bg-transparent py-1.5 text-[13px] text-ds-ink placeholder:text-ds-ink-faint focus:border-b-2 focus:border-ds-brand focus:outline-none focus:ring-0',
   },
   tr: {
-    body: 'border-b border-ds-line/20 transition-[background,box-shadow] duration-150 ease-out',
-    hover: 'hover:bg-ds-elevated/30',
+    body: 'border-b border-ds-line/20 transition-[background-color] duration-200 ease-out',
+    hover: 'hover:bg-ds-elevated/40',
     selected:
       'bg-ds-elevated/40 shadow-[inset_3px_0_0_0_#6366F1] ring-1 ring-inset ring-ds-brand/20',
   },

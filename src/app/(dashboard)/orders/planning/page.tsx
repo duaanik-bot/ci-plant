@@ -20,7 +20,6 @@ import {
 } from '@/lib/planning-decision-spec'
 import {
   PlanningDecisionGrid,
-  boardLabel,
   type PlanningGridLine,
   type PlanningLineFieldPatch,
 } from '@/components/planning/PlanningDecisionGrid'
@@ -53,11 +52,6 @@ import {
   type PlanningBatchDecisionAction,
 } from '@/lib/planning-batch-decision'
 import type { SuggestableLine } from '@/lib/planning-batch-suggestions'
-import {
-  PlanningBatchDecisionPanel,
-  type PlanningBatchPanelLine,
-} from '@/components/planning/PlanningBatchDecisionPanel'
-
 type PlanningSpec = {
   machineId?: string
   shift?: string
@@ -74,6 +68,8 @@ type PlanningSpec = {
   planningCore?: PlanningCore
   /** Denormalized for AW filters */
   planningDesignerDisplayName?: string
+  /** Per-line planner notes; `ups` = repeats of this product in one gang layout (not `planningCore.ups`). */
+  meta?: { ups?: number } & Record<string, unknown>
 }
 
 type InterlockSegment = {
@@ -404,7 +400,7 @@ export default function PlanningPage() {
   const fetchRows = useCallback(async () => {
     const params = new URLSearchParams()
     if (customerId) params.set('customerId', customerId)
-    const res = await fetch(`/api/planning/po-lines?${params}`)
+    const res = await fetch(`/api/planning/po-lines?${params}`, { cache: 'no-store' })
     const json = await res.json()
     const list = Array.isArray(json) ? (json as Line[]) : []
     setRows(
@@ -575,18 +571,25 @@ export default function PlanningPage() {
       const pending = r.planningStatus === 'pending'
       return ledgerView === 'pending' ? pending : !pending
     })
-    return view.map(lineToSuggestable)
+    const bumpAt = (r: Line) =>
+      String(
+        r.specOverrides && typeof r.specOverrides === 'object'
+          ? (r.specOverrides as Record<string, unknown>).planningQueueBumpAt ?? ''
+          : '',
+      )
+    const ordered =
+      ledgerView === 'pending'
+        ? [...view]
+            .map((r, idx) => ({ r, idx }))
+            .sort((a, b) => {
+              const c = bumpAt(b.r).localeCompare(bumpAt(a.r))
+              if (c !== 0) return c
+              return a.idx - b.idx
+            })
+            .map(({ r }) => r)
+        : view
+    return ordered.map(lineToSuggestable)
   }, [rows, ledgerView])
-
-  const batchPanelLines = useMemo((): PlanningBatchPanelLine[] => {
-    return rows.map((r) => ({
-      id: r.id,
-      poNumber: r.po.poNumber,
-      cartonName: r.cartonName,
-      quantity: r.quantity,
-      specOverrides: (r.specOverrides as Record<string, unknown> | null) ?? null,
-    }))
-  }, [rows])
 
   const applyBatchDecision = useCallback(
     async (lineIds: string[], action: PlanningBatchDecisionAction, holdReason?: string) => {
@@ -768,6 +771,18 @@ export default function PlanningPage() {
     [rows, fetchRows],
   )
 
+  const flushPlanningLineSpec = useCallback(
+    async (lineId: string) => {
+      const li = rows.find((x) => x.id === lineId)
+      if (!li) return
+      const spec = (li.specOverrides && typeof li.specOverrides === 'object'
+        ? li.specOverrides
+        : {}) as Record<string, unknown>
+      await savePlanningLine(lineId, {}, spec)
+    },
+    [rows, savePlanningLine],
+  )
+
   const save = async (id: string, opts?: { remarks?: string | null }) => {
     const patch: PlanningLineFieldPatch = {}
     if (opts && opts.remarks !== undefined) patch.remarks = opts.remarks
@@ -817,10 +832,15 @@ export default function PlanningPage() {
   const recallLine = useCallback(
     async (lineId: string) => {
       try {
-        const res = await fetch(`/api/planning/po-lines/${lineId}/recall-from-aw`, { method: 'POST' })
+        const res = await fetch(`/api/planning/po-lines/${lineId}/recall-from-aw`, {
+          method: 'POST',
+          cache: 'no-store',
+        })
         const j = (await res.json().catch(() => ({}))) as { error?: string }
         if (!res.ok) throw new Error(j.error || 'Recall failed')
-        toast.success('Recalled — row unlocked')
+        toast.success('Recalled — returned to Pending planning')
+        setLedgerView('pending')
+        setPlanningDrawerLineId(null)
         await fetchRows()
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Recall failed')
@@ -850,34 +870,12 @@ export default function PlanningPage() {
       ),
     )
     const gsms = new Set(sel.map((r) => String(r.gsm ?? r.carton?.gsm ?? '')))
-    const conflict =
+    const advisoryNote =
       sel.length >= 2 && (coatings.size > 1 || gsms.size > 1)
-        ? 'Mix-Set Conflict: Specs do not match.'
+        ? 'Mixed coating or GSM across selected lines — open the batch builder for the full compatibility breakdown.'
         : null
-    return { conflict }
+    return { advisoryNote }
   }, [selectedGridLines])
-
-  const selectionBoardSizeCompat = useMemo(() => {
-    const sel = selectedGridLines
-    if (sel.length < 2) return true
-    const boards = new Set(sel.map((r) => boardLabel(r).toLowerCase().trim()))
-    const sizes = new Set(sel.map((r) => String(r.cartonSize ?? '').trim().toLowerCase() || '—'))
-    return boards.size <= 1 && sizes.size <= 1
-  }, [selectedGridLines])
-
-  const createBatchDisabled =
-    selectedGridLines.length < 2 ||
-    !selectionBoardSizeCompat ||
-    !!selectedForMix.conflict ||
-    !!mixConflictMessage
-
-  const createBatchTitle = useMemo(() => {
-    if (selectedGridLines.length < 2) return 'Select at least two lines'
-    if (!selectionBoardSizeCompat) return 'Board and carton size must match across selected lines'
-    if (selectedForMix.conflict) return selectedForMix.conflict
-    if (mixConflictMessage) return mixConflictMessage
-    return undefined
-  }, [selectedGridLines.length, selectionBoardSizeCompat, selectedForMix.conflict, mixConflictMessage])
 
   if (loading) {
     return (
@@ -930,12 +928,7 @@ export default function PlanningPage() {
                 <Button
                   type="button"
                   onClick={() => void handleMakeProcessing()}
-                  disabled={
-                    planningSelection.size === 0 ||
-                    makeProcessingBusy ||
-                    !!selectedForMix.conflict ||
-                    !!mixConflictMessage
-                  }
+                  disabled={planningSelection.size === 0 || makeProcessingBusy || !!mixConflictMessage}
                   className="px-3 py-2 text-[13px]"
                 >
                   {makeProcessingBusy ? 'Processing…' : 'Make processing'}
@@ -1096,11 +1089,6 @@ export default function PlanningPage() {
               )
             }}
           />
-          <PlanningBatchDecisionPanel
-            lines={batchPanelLines}
-            onApply={(lineIds, action, holdReason) => applyBatchDecision(lineIds, action, holdReason)}
-            busy={batchActionBusy}
-          />
         </div>
       </div>
 
@@ -1165,7 +1153,10 @@ export default function PlanningPage() {
             updateRow={updateRow}
             onRecallLine={recallLine}
             onSaveLine={savePlanningLine}
-            mixConflictMessage={mixConflictMessage ?? selectedForMix.conflict}
+            mixAdvisoryNote={selectedForMix.advisoryNote}
+            mixConflictMessage={mixConflictMessage}
+            onBatchDecision={applyBatchDecision}
+            batchActionBusy={batchActionBusy}
           />
         </ErrorBoundary>
       </div>
@@ -1195,6 +1186,8 @@ export default function PlanningPage() {
           onClose={() => setPlanningSelection(new Set())}
           lines={selectedGridLines}
           onCreateBatch={linkAsMixSet}
+          updateRow={updateRow}
+          onFlushLineSpec={flushPlanningLineSpec}
           onRemoveFromSelection={(lineId) =>
             setPlanningSelection((prev) => {
               const next = new Set(prev)
@@ -1203,8 +1196,6 @@ export default function PlanningPage() {
             })
           }
           onClearSelection={() => setPlanningSelection(new Set())}
-          createDisabled={createBatchDisabled}
-          createTitle={createBatchTitle}
         />
         <PlanningPoSummaryDrawer
           open={poSummaryDrawerId != null}

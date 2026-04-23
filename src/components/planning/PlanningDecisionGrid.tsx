@@ -2,10 +2,15 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { RotateCcw } from 'lucide-react'
+import { toast } from 'sonner'
 import {
+  applyBatchDecisionAction,
+  batchKeyForLine,
   BATCH_STATUS_BADGE_CLASS,
   BATCH_STATUS_LABEL,
+  buildBatchGroups,
   effectiveBatchStatus,
+  type PlanningBatchDecisionAction,
 } from '@/lib/planning-batch-decision'
 import { readPlanningCore } from '@/lib/planning-decision-spec'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
@@ -18,7 +23,32 @@ const inp =
 
 function rowClickTargetOk(target: EventTarget | null): boolean {
   if (!target || !(target instanceof HTMLElement)) return true
-  return !target.closest('input, button, textarea')
+  return !target.closest('input, button, textarea, [data-batch-actions]')
+}
+
+const batchBtnApprove =
+  'rounded bg-sky-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40'
+const batchBtnHold =
+  'rounded bg-ds-warning/20 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-ds-warning/30 disabled:cursor-not-allowed disabled:opacity-40'
+const batchBtnArtwork =
+  'rounded bg-violet-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40'
+const batchBtnProduction =
+  'rounded bg-emerald-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40'
+const batchBtnResume =
+  'rounded border border-ds-line/60 bg-ds-elevated/90 px-2 py-0.5 text-[11px] text-ds-ink hover:bg-ds-elevated disabled:cursor-not-allowed disabled:opacity-40'
+
+function firstSpecCoreForGroup(
+  rows: PlanningGridLine[],
+  lineIds: string[],
+): ReturnType<typeof readPlanningCore> {
+  const firstId = lineIds[0]
+  const row = firstId ? rows.find((l) => l.id === firstId) : undefined
+  return readPlanningCore(
+    (row?.specOverrides && typeof row.specOverrides === 'object' ? row.specOverrides : {}) as Record<
+      string,
+      unknown
+    >,
+  )
 }
 
 export type PlanningGridLine = {
@@ -139,8 +169,11 @@ export function PlanningDecisionGrid({
   onRowBackgroundClick,
   updateRow,
   onSaveLine,
+  mixAdvisoryNote,
   mixConflictMessage,
   onRecallLine,
+  onBatchDecision,
+  batchActionBusy,
 }: {
   rows: PlanningGridLine[]
   ledgerView: 'pending' | 'processed'
@@ -153,8 +186,11 @@ export function PlanningDecisionGrid({
     patch: PlanningLineFieldPatch,
     specSnapshot?: Record<string, unknown> | null,
   ) => Promise<boolean | void>
+  mixAdvisoryNote: string | null
   mixConflictMessage: string | null
   onRecallLine: (lineId: string) => Promise<void>
+  onBatchDecision: (lineIds: string[], action: PlanningBatchDecisionAction, holdReason?: string) => Promise<void>
+  batchActionBusy: boolean
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('cartonName')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
@@ -164,6 +200,42 @@ export function PlanningDecisionGrid({
   const [fQty, setFQty] = useState('')
   const [fBoard, setFBoard] = useState('')
   const [fBatch, setFBatch] = useState('')
+  const [holdOpenKey, setHoldOpenKey] = useState<string | null>(null)
+  const [holdReason, setHoldReason] = useState('')
+  const [bulkHoldOpen, setBulkHoldOpen] = useState(false)
+  const [bulkHoldReason, setBulkHoldReason] = useState('')
+
+  const batchGroups = useMemo(
+    () =>
+      buildBatchGroups(
+        rows.map((r) => ({
+          id: r.id,
+          poNumber: r.po.poNumber,
+          specOverrides: r.specOverrides,
+        })),
+      ),
+    [rows],
+  )
+
+  const groupByKey = useMemo(() => new Map(batchGroups.map((g) => [g.key, g])), [batchGroups])
+
+  const bulkMultiBatch = useMemo(() => {
+    if (planningSelection.size < 2) return null
+    const ids = Array.from(planningSelection)
+    const keys = new Set<string>()
+    for (const id of ids) {
+      const r = rows.find((x) => x.id === id)
+      if (!r) continue
+      const core = readPlanningCore((r.specOverrides || {}) as Record<string, unknown>)
+      keys.add(batchKeyForLine(r.id, core))
+    }
+    if (keys.size !== 1) return { unified: false as const, keys }
+    const key = Array.from(keys)[0]!
+    const g = groupByKey.get(key)
+    if (!g) return { unified: false as const, keys }
+    const core = firstSpecCoreForGroup(rows, g.lineIds)
+    return { unified: true as const, group: g, core }
+  }, [planningSelection, rows, groupByKey])
 
   useEffect(() => {
     if (!mixConflictMessage) return
@@ -220,8 +292,141 @@ export function PlanningDecisionGrid({
 
   const isProcessedRow = (r: PlanningGridLine) => r.planningStatus !== 'pending'
 
+  const renderBatchDecisionControls = (
+    lineIds: string[],
+    groupKey: string,
+    mode: 'row' | 'bulk',
+  ) => {
+    const core = firstSpecCoreForGroup(rows, lineIds)
+    const st = effectiveBatchStatus(core)
+    const canApprove = applyBatchDecisionAction(core, 'approve_batch') != null
+    const canHold = applyBatchDecisionAction(core, 'hold_batch') != null
+    const canSend = applyBatchDecisionAction(core, 'send_to_artwork') != null
+    const canRelease = applyBatchDecisionAction(core, 'release_to_production') != null
+    const canResume = applyBatchDecisionAction(core, 'resume_from_hold') != null
+    const onHold = st === 'hold'
+    const holdIsOpen = mode === 'row' ? holdOpenKey === groupKey : bulkHoldOpen
+    const reasonVal = mode === 'row' ? holdReason : bulkHoldReason
+    const setReasonVal = mode === 'row' ? setHoldReason : setBulkHoldReason
+
+    const openHold = () => {
+      setReasonVal('')
+      if (mode === 'row') {
+        setBulkHoldOpen(false)
+        setHoldOpenKey((k) => (k === groupKey ? null : groupKey))
+      } else {
+        setHoldOpenKey(null)
+        setBulkHoldOpen((v) => !v)
+      }
+    }
+
+    const confirmHold = async () => {
+      if (!reasonVal.trim()) {
+        toast.error('Enter a hold reason')
+        return
+      }
+      const test = applyBatchDecisionAction(core, 'hold_batch', { holdReason: reasonVal.trim() })
+      if (!test) {
+        toast.error('Cannot hold this batch now')
+        return
+      }
+      if (mode === 'row') setHoldOpenKey(null)
+      else setBulkHoldOpen(false)
+      await onBatchDecision(lineIds, 'hold_batch', reasonVal.trim())
+    }
+
+    return (
+      <div
+        data-batch-actions
+        className="flex min-w-0 flex-col items-end gap-0.5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {onHold && core.batchHoldReason ? (
+          <p
+            className="order-first max-w-full text-right text-[10px] leading-tight text-rose-200/90 line-clamp-2"
+            title={core.batchHoldReason}
+          >
+            <span className="font-semibold text-rose-300/95">Reason:</span> {core.batchHoldReason}
+          </p>
+        ) : null}
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
+          <button
+            type="button"
+            disabled={batchActionBusy || !canApprove}
+            title={!canApprove ? 'Only available from Draft' : 'Mark batch ready (approved for next step)'}
+            className={batchBtnApprove}
+            onClick={() => void onBatchDecision(lineIds, 'approve_batch')}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            disabled={batchActionBusy || !canHold}
+            className={batchBtnHold}
+            onClick={openHold}
+          >
+            Hold
+          </button>
+          <button
+            type="button"
+            disabled={batchActionBusy || !canSend}
+            title={!canSend ? 'Only ready batches can go to artwork' : 'Mark approved for artwork'}
+            className={batchBtnArtwork}
+            onClick={() => void onBatchDecision(lineIds, 'send_to_artwork')}
+          >
+            To Artwork
+          </button>
+          <button
+            type="button"
+            disabled={batchActionBusy || !canRelease}
+            className={batchBtnProduction}
+            onClick={() => void onBatchDecision(lineIds, 'release_to_production')}
+          >
+            To Production
+          </button>
+          <button
+            type="button"
+            disabled={batchActionBusy || !canResume}
+            className={batchBtnResume}
+            onClick={() => void onBatchDecision(lineIds, 'resume_from_hold')}
+          >
+            Resume
+          </button>
+        </div>
+        {holdIsOpen ? (
+          <span className="flex w-full min-w-0 flex-wrap items-center justify-end gap-1 py-0.5">
+            <input
+              className="min-w-0 max-w-[14rem] flex-1 rounded border border-ds-warning/30 bg-ds-main px-1.5 py-0.5 text-[11px] text-ds-ink"
+              placeholder="Reason required"
+              value={reasonVal}
+              onChange={(e) => setReasonVal(e.target.value)}
+            />
+            <button
+              type="button"
+              disabled={batchActionBusy}
+              className="shrink-0 rounded bg-rose-800 px-2 py-0.5 text-[11px] text-white"
+              onClick={() => void confirmHold()}
+            >
+              Confirm
+            </button>
+          </span>
+        ) : null}
+      </div>
+    )
+  }
+
+  const bulkReady = bulkMultiBatch?.unified === true
+  const bulkGroup = bulkReady ? bulkMultiBatch.group : null
+  const bulkLineIds = bulkGroup?.lineIds ?? []
+  const bulkGroupKey = bulkGroup?.key ?? ''
+
   return (
     <DataTableFrame className="border-ds-line/80 bg-ds-elevated/20">
+      {mixAdvisoryNote ? (
+        <div className="shrink-0 border-b border-ds-warning/25 bg-ds-warning/10 px-3 py-1.5 text-[12px] text-ds-ink">
+          {mixAdvisoryNote}
+        </div>
+      ) : null}
       {mixConflictMessage ? (
         <div
           className={`shrink-0 px-3 py-1.5 text-[12px] ${
@@ -229,6 +434,56 @@ export function PlanningDecisionGrid({
           }`}
         >
           {mixConflictMessage}
+        </div>
+      ) : null}
+
+      {planningSelection.size >= 2 ? (
+        <div
+          className="shrink-0 border-b border-ds-line/50 bg-ds-elevated/35 px-2 py-1.5"
+          data-batch-actions
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+            <p className="pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              Batch actions · {planningSelection.size} selected
+              {!bulkReady ? (
+                <span className="ml-1.5 font-normal normal-case text-ds-warning">
+                  (select rows from one batch)
+                </span>
+              ) : null}
+            </p>
+            <div
+              className="min-w-0 flex-1"
+              title={!bulkReady ? 'Select rows from a single batch to enable actions' : undefined}
+            >
+              {bulkReady ? (
+                renderBatchDecisionControls(bulkLineIds, bulkGroupKey, 'bulk')
+              ) : (
+                <div
+                  className="flex min-w-0 flex-col items-end gap-0.5 opacity-35"
+                  aria-disabled
+                >
+                  <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
+                    <button type="button" disabled className={batchBtnApprove}>
+                      Approve
+                    </button>
+                    <button type="button" disabled className={batchBtnHold}>
+                      Hold
+                    </button>
+                    <button type="button" disabled className={batchBtnArtwork}>
+                      To Artwork
+                    </button>
+                    <button type="button" disabled className={batchBtnProduction}>
+                      To Production
+                    </button>
+                    <button type="button" disabled className={batchBtnResume}>
+                      Resume
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -256,14 +511,18 @@ export function PlanningDecisionGrid({
                   Qty {sortKey === 'qty' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} w-[22%] min-w-0`}>
+              <th className={`${dataTable.th} w-[18%] min-w-0`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('board')}>
                   Board {sortKey === 'board' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} w-[20%] min-w-0`}>
-                <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('batch')}>
-                  Batch {sortKey === 'batch' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+              <th className={`${dataTable.th} w-[26%] min-w-0 text-right`}>
+                <button
+                  type="button"
+                  className={`${dataTable.thSortBtn} w-full justify-end text-right`}
+                  onClick={() => toggleSort('batch')}
+                >
+                  Batch / actions {sortKey === 'batch' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
             </tr>
@@ -329,6 +588,11 @@ export function PlanningDecisionGrid({
               const bStatus = effectiveBatchStatus(planCore)
               const brd = boardLabel(r)
               const rowSel = !processed && planningSelection.has(r.id)
+              const batchGroupKey = batchKeyForLine(r.id, planCore)
+              const batchGroup = groupByKey.get(batchGroupKey)
+              const batchLineIds = batchGroup?.lineIds ?? [r.id]
+              const batchTitle =
+                batchGroup?.title ?? ((planCore.masterSetId ?? '').slice(0, 12) || '—')
 
               return (
                 <Fragment key={r.id}>
@@ -424,9 +688,9 @@ export function PlanningDecisionGrid({
                         {brd}
                       </p>
                     </td>
-                    <td className={`${cellBase} min-w-0`}>
-                      {hasBatch ? (
-                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <td className={`${cellBase} min-w-0 align-top`}>
+                      <div className="flex min-w-0 flex-col items-end gap-1 text-right">
+                        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
                           <span
                             className={`inline-flex max-w-full shrink-0 rounded-ds-sm border px-1.5 py-0.5 text-[10px] font-semibold ${
                               BATCH_STATUS_BADGE_CLASS[bStatus]
@@ -434,17 +698,25 @@ export function PlanningDecisionGrid({
                           >
                             {BATCH_STATUS_LABEL[bStatus]}
                           </span>
-                          <span
-                            className="min-w-0 truncate font-mono text-[10px] text-ds-ink-faint"
-                            title={planCore.masterSetId ?? ''}
-                          >
-                            {(planCore.masterSetId ?? '').slice(0, 10)}
-                            {String(planCore.masterSetId).length > 10 ? '…' : ''}
-                          </span>
+                          {hasBatch ? (
+                            <span
+                              className="min-w-0 truncate font-mono text-[10px] text-ds-ink-faint"
+                              title={planCore.masterSetId ?? ''}
+                            >
+                              {(planCore.masterSetId ?? '').slice(0, 10)}
+                              {String(planCore.masterSetId).length > 10 ? '…' : ''}
+                            </span>
+                          ) : (
+                            <span
+                              className="min-w-0 max-w-[6rem] truncate text-[10px] text-ds-ink-faint"
+                              title={batchTitle}
+                            >
+                              {batchTitle}
+                            </span>
+                          )}
                         </div>
-                      ) : (
-                        <span className={`${dataTable.td.tertiary}`}>—</span>
-                      )}
+                        {renderBatchDecisionControls(batchLineIds, batchGroupKey, 'row')}
+                      </div>
                     </td>
                   </tr>
                 </Fragment>

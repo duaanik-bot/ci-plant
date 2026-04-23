@@ -1041,10 +1041,10 @@ export default function EditPurchaseOrderPage() {
 
       {/* Line items — same summary table + drawer as Create PO */}
       <fieldset disabled={poSentToPlanning} className="min-w-0 border-0 p-0">
-        <div className="space-y-3 rounded-ds-lg border border-ds-line/80 bg-ds-card/30 p-4 text-sm shadow-sm">
+        <div className="space-y-4 rounded-ds-lg border border-ds-line/80 bg-ds-card/30 p-4 text-sm shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-[16px] font-semibold tracking-tight text-ds-ink md:text-[18px]">Line items</h2>
-            <Button type="button" variant="secondary" className="text-xs" onClick={addLine}>
+            <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">Line items</p>
+            <Button type="button" variant="secondary" onClick={addLine}>
               + Add line
             </Button>
           </div>
@@ -1218,8 +1218,7 @@ export default function EditPurchaseOrderPage() {
                         <td
                           className={cn(
                             lineCellPad,
-                            'text-right align-top',
-                            dataTable.td.moneyTotal,
+                            'text-right align-top text-base font-bold tabular-nums text-ds-success',
                             poMono,
                           )}
                         >

@@ -10,6 +10,7 @@ import {
   MASTER_COATINGS_AND_VARNISHES,
   MASTER_EMBOSSING_AND_LEAFING,
 } from '@/lib/master-enums'
+import { mergePlanningMetaUps, readPlanningMeta } from '@/lib/planning-decision-spec'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
 import { StandardDrawer } from '@/components/design-system/StandardDrawer'
@@ -183,6 +184,12 @@ export function PlanningJobDetailDrawer({
   if (!line || !open) return null
 
   const spec = (line.specOverrides || {}) as Record<string, unknown>
+  const meta = readPlanningMeta(spec)
+  const rawGangUps = meta.ups
+  const gangUpsStr =
+    typeof rawGangUps === 'number' && Number.isFinite(rawGangUps) && rawGangUps >= 1
+      ? String(Math.floor(rawGangUps))
+      : ''
   const boardInput = String(spec.boardGrade || line.materialQueue?.boardType || '').trim()
   const amount = (line.quantity || 0) * (line.rate != null ? Number(line.rate) : 0)
 
@@ -406,6 +413,39 @@ export function PlanningJobDetailDrawer({
                 }}
               />
             </label>
+          </div>
+        </CardSection>
+
+        <CardSection title="Gang print" id="plan-drawer-gang-ups">
+          <div id="placement-ref" className="space-y-1.5">
+            <label htmlFor="ups-input" id="label" className="block text-[12px] font-medium text-ds-ink-muted">
+              Ups (per plate/output)
+            </label>
+            <input
+              id="ups-input"
+              type="number"
+              min={1}
+              step={1}
+              placeholder="Enter ups"
+              className={`${fieldInput} max-w-[8rem]`}
+              value={gangUpsStr}
+              onChange={(e) => {
+                const v = e.target.value.trim()
+                if (v === '') {
+                  const next = mergePlanningMetaUps(spec, null)
+                  updateRow(line.id, { specOverrides: next })
+                  return
+                }
+                const n = parseInt(v, 10)
+                if (!Number.isFinite(n) || n < 1) return
+                const next = mergePlanningMetaUps(spec, n)
+                updateRow(line.id, { specOverrides: next })
+              }}
+              onBlur={() => void onSaveLine(line.id, {})}
+            />
+            <p id="helper" className="text-[11px] text-ds-ink-faint">
+              No. of repeats of this product in one gang layout
+            </p>
           </div>
         </CardSection>
 

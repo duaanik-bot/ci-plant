@@ -75,11 +75,12 @@ function computeChargeableQty(quantity: string, wastagePct: string) {
   return q * (1 + w / 100)
 }
 
-const labelSec = 'mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-ds-ink-faint'
-const labelKey = 'mb-1.5 block text-sm font-medium text-ds-ink'
+const labelSec =
+  'ds-typo-label mb-1.5 block font-semibold uppercase tracking-wider text-ds-ink-faint'
+const labelKey = 'ds-typo-label mb-1.5 block text-[13px] font-semibold text-ds-ink'
 
 const comboboxControl = 'border-ds-line/80 bg-ds-elevated/50'
-const comboboxInput = 'text-sm text-ds-ink'
+const comboboxInput = 'text-[15px] text-ds-ink'
 
 export function PoNewLineItemDrawer({
   isOpen,
@@ -210,8 +211,6 @@ export function PoNewLineItemDrawer({
           <p className="text-sm text-ds-ink-faint">No line selected.</p>
         ) : (
           <>
-            <p className="text-[10px] text-ds-ink-faint">Tab / Enter between fields · Ctrl+Enter to finish</p>
-
             <CardSection id="po-sec-material" title="Material">
               <div>
                 <label className={labelSec}>Board</label>
@@ -361,7 +360,7 @@ export function PoNewLineItemDrawer({
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className={labelSec}>Wastage %</label>
                   <input
@@ -391,7 +390,6 @@ export function PoNewLineItemDrawer({
                     onChange={(e) => updateLine(lineIndex, { gstPct: e.target.value })}
                     className={`w-full text-sm text-ds-ink-muted ${inputCls} ${poMono}`}
                   />
-                  <p className="mt-1.5 text-[10px] text-ds-ink-faint">On line value (ex-GST) unless changed.</p>
                 </div>
               </div>
 

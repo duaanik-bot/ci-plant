@@ -19,7 +19,7 @@
     @apply tabular-nums tracking-tight text-ds-ink;
   }
   .ds-input:focus {
-    @apply border-ds-brand/50 shadow-ds-focus outline-none ring-0;
+    @apply border-ds-brand/55 outline-none ring-0 shadow-[0_0_0_3px_rgba(99,102,241,0.2),0_0_18px_rgba(99,102,241,0.14)];
   }
   .ds-typo-label {
     @apply text-[12px] font-medium leading-snug text-ds-ink-muted;

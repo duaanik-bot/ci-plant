@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { PLANNING_FLOW, readOrchestration } from '@/lib/orchestration-spec'
+import { readPlanningCore } from '@/lib/planning-decision-spec'
 import { releaseReservedToolingForPoLine } from '@/lib/aw-queue-release-tooling'
 
 export const dynamic = 'force-dynamic'
@@ -15,6 +16,25 @@ function stripAwHandoff(spec: Record<string, unknown>) {
   delete next.awQueueHandoffAt
   delete next.planningForwardedAt
   return { ...spec, orchestration: next }
+}
+
+/** Same PO line row: clear AW handoff + unlock planning facts so Pending queue can edit again. */
+function resetSpecForRecallFromAw(spec: Record<string, unknown>): Record<string, unknown> {
+  const base = stripAwHandoff({ ...spec }) as Record<string, unknown>
+  delete base.planningMakeProcessingAt
+  delete base.planningMakeProcessingBy
+  delete base.planningHandoffTarget
+
+  const coreRaw = base.planningCore
+  if (coreRaw && typeof coreRaw === 'object' && !Array.isArray(coreRaw)) {
+    const pc = readPlanningCore(base)
+    base.planningCore = { ...pc, savedAt: null }
+  }
+
+  /** Pending-tab sort hint so recalled lines surface immediately (no schema change). */
+  base.planningQueueBumpAt = new Date().toISOString()
+
+  return base
 }
 
 /** Pull a line back from AW queue to pending planning (reverse of Make Processing). */
@@ -42,9 +62,7 @@ export async function POST(
   }
 
   const spec = (line.specOverrides as Record<string, unknown> | null) || {}
-  const base = stripAwHandoff({ ...spec }) as Record<string, unknown>
-  delete base.planningMakeProcessingAt
-  delete base.planningMakeProcessingBy
+  const base = resetSpecForRecallFromAw(spec)
 
   const actorName = user!.name ?? user!.email ?? 'planner'
 
@@ -59,6 +77,8 @@ export async function POST(
       data: {
         planningStatus: 'pending',
         specOverrides: base as object,
+        toolingLocked: false,
+        artworkStageEnteredAt: null,
       },
     })
   })

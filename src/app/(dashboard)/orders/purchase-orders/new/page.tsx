@@ -1062,7 +1062,7 @@ export default function NewPurchaseOrderPage() {
     <form
       id="form-new-po"
       onSubmit={handleSubmit}
-      className="mx-auto max-w-[1600px] space-y-4 p-4 pb-32"
+      className="mx-auto max-w-[1600px] space-y-6 p-4 pb-32"
     >
       <div className="sticky top-0 z-40 -mx-4 border-b border-ds-line/80 bg-ds-main/90 px-4 py-3 backdrop-blur-md">
         <PageHeader
@@ -1083,9 +1083,9 @@ export default function NewPurchaseOrderPage() {
         />
       </div>
 
-      <div className="space-y-4 rounded-ds-lg border border-ds-line/80 bg-ds-card/40 p-4 text-sm shadow-sm transition-colors">
+      <div className="space-y-6 rounded-ds-lg border border-ds-line/80 bg-ds-card/40 p-4 text-sm shadow-sm transition-colors">
         <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">Header</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="md:col-span-1">
             <MasterSearchSelect
               label="Supplier (customer)"
@@ -1147,14 +1147,13 @@ export default function NewPurchaseOrderPage() {
             ) : null}
           </div>
           <div>
-            <label className="ds-typo-label mb-1 block">PO number</label>
-            <p className="rounded-ds-sm border border-ds-line/60 bg-ds-elevated/50 px-3 py-2.5 text-sm text-ds-ink">
+            <label className="ds-typo-label mb-1.5 block">PO number</label>
+            <p className="rounded-ds-sm border border-ds-line/60 bg-ds-elevated/50 px-3 py-2.5 text-[15px] leading-normal text-ds-ink">
               {customPoNumber.trim() || <span className="text-ds-ink-faint">Auto on save (CI-PO-YYYY-####)</span>}
             </p>
-            <p className="text-[10px] text-ds-ink-faint">Optional number below overrides auto-sequence</p>
           </div>
           <div>
-            <label className="ds-typo-label mb-1 block">PO date *</label>
+            <label className="ds-typo-label mb-1.5 block">PO date *</label>
             <input
               type="date"
               value={poDate}
@@ -1163,10 +1162,10 @@ export default function NewPurchaseOrderPage() {
             />
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
-            <label className="mb-1 block text-ds-ink-muted">
-              Custom PO number <span className="text-ds-ink-faint">(optional)</span>
+            <label className="ds-typo-label mb-1.5 block">
+              Custom PO number <span className="font-normal text-ds-ink-faint">(optional)</span>
             </label>
             <div className="flex items-stretch gap-2">
               <input
@@ -1194,7 +1193,7 @@ export default function NewPurchaseOrderPage() {
                 aria-label={
                   isPriority ? 'PO is high priority' : 'Mark PO as high priority for Planning and CTP'
                 }
-                className="flex h-auto w-10 shrink-0 items-center justify-center rounded-ds-sm border border-ds-line bg-ds-elevated/80 transition hover:bg-ds-elevated"
+                className="flex h-auto w-10 shrink-0 items-center justify-center rounded-ds-sm border border-ds-line bg-ds-elevated/80 transition-colors duration-200 hover:bg-ds-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-brand/30"
               >
                 <Star
                   className={`h-5 w-5 ${isPriority ? 'fill-ds-warning text-ds-warning' : 'text-ds-ink-faint'}`}
@@ -1218,7 +1217,7 @@ export default function NewPurchaseOrderPage() {
             }}
           />
           <div>
-            <label className="mb-1 block text-ds-ink-muted">Payment terms</label>
+            <label className="ds-typo-label mb-1.5 block">Payment terms</label>
             <input
               type="text"
               value={paymentTerms}
@@ -1228,9 +1227,9 @@ export default function NewPurchaseOrderPage() {
             />
           </div>
         </div>
-        <div className="grid grid-cols-1 items-end gap-6 md:grid-cols-3">
-          <div className="md:col-span-2">
-            <label className="mb-1 block text-ds-ink-muted">Remarks</label>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="md:col-span-3">
+            <label className="ds-typo-label mb-1.5 block">Remarks</label>
             <input
               type="text"
               value={remarks}
@@ -1238,16 +1237,13 @@ export default function NewPurchaseOrderPage() {
               className="ds-input w-full rounded-ds-sm [color-scheme:dark]"
             />
           </div>
-          <div className="pb-2 text-xs leading-snug text-ds-ink-faint">
-            Arrows + Enter (row) · Esc · Alt+N / D / Delete · Ctrl+S · line drawer for full detail.
-          </div>
         </div>
       </div>
 
-      <div className="space-y-3 rounded-ds-lg border border-ds-line/80 bg-ds-card/30 p-4 text-sm shadow-sm">
+      <div className="space-y-4 rounded-ds-lg border border-ds-line/80 bg-ds-card/30 p-4 text-sm shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-[16px] font-semibold tracking-tight text-ds-ink md:text-[18px]">Line items</h2>
-          <Button type="button" variant="secondary" className="text-xs" onClick={addLine}>
+          <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">Line items</p>
+          <Button type="button" variant="secondary" onClick={addLine}>
             + Add line
           </Button>
         </div>
@@ -1388,7 +1384,9 @@ export default function NewPurchaseOrderPage() {
                         } ${tableInputPrimary} ${poMono}`}
                       />
                     </td>
-                    <td className={`${lineCellPad} text-right align-top ${dataTable.td.moneyTotal} ${poMono}`}>
+                    <td
+                      className={`${lineCellPad} text-right align-top text-base font-bold tabular-nums text-ds-success ${poMono}`}
+                    >
                       {amount.toFixed(2)}
                     </td>
                     <td
@@ -1430,21 +1428,22 @@ export default function NewPurchaseOrderPage() {
         aria-live="polite"
         aria-label="Purchase order financial summary"
       >
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3 text-[11px] sm:text-xs">
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3.5 text-xs sm:text-[13px]">
           <span className="ds-typo-label font-semibold uppercase tracking-wider">Summary</span>
-          <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1 text-ds-ink-muted">
+          <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1.5 text-ds-ink-muted">
             <span>
-              Total qty <span className={cn(poMono, 'text-ds-ink')}>{totalQty}</span>
+              Total qty{' '}
+              <span className={cn(poMono, 'text-[14px] font-semibold text-ds-ink')}>{totalQty}</span>
             </span>
             <span>
               Subtotal{' '}
-              <span className={cn(poMono, 'text-ds-ink')}>
+              <span className={cn(poMono, 'text-[14px] font-semibold text-ds-ink')}>
                 ₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>
             <span>
               GST{' '}
-              <span className={cn(poMono, 'text-ds-ink')}>
+              <span className={cn(poMono, 'text-[14px] font-semibold text-ds-ink')}>
                 ₹ {totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>
