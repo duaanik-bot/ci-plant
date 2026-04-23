@@ -356,7 +356,6 @@ export default function PlanningPage() {
   const [savingId, setSavingId] = useState<string | null>(null)
   const [ledgerView, setLedgerView] = useState<'pending' | 'processed'>('pending')
   const [makeProcessingBusy, setMakeProcessingBusy] = useState(false)
-  const [mixConflictMessage, setMixConflictMessage] = useState<string | null>(null)
   const [planningSelection, setPlanningSelection] = useState<Set<string>>(new Set())
   const [batchBuilderOpen, setBatchBuilderOpen] = useState(false)
   const [planningGroupBy, setPlanningGroupBy] = useState<PlanningGroupBy>('none')
@@ -854,7 +853,6 @@ export default function PlanningPage() {
         if (!opts?.suppressToast) toast.error('A selected line is in a batch on hold — clear hold first')
         return false
       }
-      setMixConflictMessage(null)
       setMakeProcessingBusy(true)
       try {
         const res = await fetch('/api/planning/po-lines/make-processing', {
@@ -864,7 +862,6 @@ export default function PlanningPage() {
         })
         const j = (await res.json().catch(() => ({}))) as { error?: string }
         if (!res.ok) {
-          setMixConflictMessage(j.error ?? 'Could not send to processing')
           if (!opts?.suppressToast) toast.error(j.error ?? 'Failed')
           return false
         }
@@ -920,23 +917,6 @@ export default function PlanningPage() {
       .map((id) => rows.find((r) => r.id === id))
       .filter((r): r is Line => !!r) as PlanningGridLine[]
   }, [planningSelection, rows])
-
-  const selectedForMix = useMemo(() => {
-    const sel = selectedGridLines
-    const coatings = new Set(
-      sel.map((r) =>
-        String(r.coatingType ?? r.carton?.coatingType ?? '')
-          .trim()
-          .toLowerCase(),
-      ),
-    )
-    const gsms = new Set(sel.map((r) => String(r.gsm ?? r.carton?.gsm ?? '')))
-    const advisoryNote =
-      sel.length >= 2 && (coatings.size > 1 || gsms.size > 1)
-        ? 'Mixed coating or GSM across selected lines — open the batch builder for the full compatibility breakdown.'
-        : null
-    return { advisoryNote }
-  }, [selectedGridLines])
 
   if (loading) {
     return (
@@ -1000,7 +980,7 @@ export default function PlanningPage() {
                 <Button
                   type="button"
                   onClick={() => void handleMakeProcessing()}
-                  disabled={planningSelection.size === 0 || makeProcessingBusy || !!mixConflictMessage}
+                  disabled={planningSelection.size === 0 || makeProcessingBusy}
                   className="px-3 py-2 text-[13px]"
                 >
                   {makeProcessingBusy ? 'Processing…' : 'Make processing'}
@@ -1225,8 +1205,8 @@ export default function PlanningPage() {
             updateRow={updateRow}
             onRecallLine={recallLine}
             onSaveLine={savePlanningLine}
-            mixAdvisoryNote={selectedForMix.advisoryNote}
-            mixConflictMessage={mixConflictMessage}
+            mixAdvisoryNote={null}
+            mixConflictMessage={null}
             onBatchDecision={applyBatchDecision}
             batchActionBusy={batchActionBusy}
             highlightedRowId={highlightedRowId}
