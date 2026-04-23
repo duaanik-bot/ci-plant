@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -333,6 +333,8 @@ export function PlanningDecisionGrid({
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('cartonName')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [pageSize, setPageSize] = useState<25 | 50 | 100>(25)
+  const [page, setPage] = useState(0)
   const [flash, setFlash] = useState(false)
   const [fCarton, setFCarton] = useState('')
   const [fSize, setFSize] = useState('')
@@ -417,6 +419,27 @@ export function PlanningDecisionGrid({
     const base = sortLines(filtered, sortKey, sortDir)
     return coalescePackageRows(base)
   }, [filtered, sortKey, sortDir])
+
+  // Reset to page 0 when filters/sort/view change
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize))
+  const safePage = Math.min(page, totalPages - 1)
+  const paginated = sorted.slice(safePage * pageSize, (safePage + 1) * pageSize)
+  const pageStart = sorted.length === 0 ? 0 : safePage * pageSize + 1
+  const pageEnd = Math.min((safePage + 1) * pageSize, sorted.length)
+
+  // Reset page on filter/sort/view change
+  const prevFiltersRef = useRef({ fCarton, fSize, fQty, fBoard, fBatch, ledgerView, sortKey, sortDir })
+  useEffect(() => {
+    const prev = prevFiltersRef.current
+    if (
+      prev.fCarton !== fCarton || prev.fSize !== fSize || prev.fQty !== fQty ||
+      prev.fBoard !== fBoard || prev.fBatch !== fBatch || prev.ledgerView !== ledgerView ||
+      prev.sortKey !== sortKey || prev.sortDir !== sortDir
+    ) {
+      setPage(0)
+      prevFiltersRef.current = { fCarton, fSize, fQty, fBoard, fBatch, ledgerView, sortKey, sortDir }
+    }
+  }, [fCarton, fSize, fQty, fBoard, fBatch, ledgerView, sortKey, sortDir])
 
   const toggleSort = (k: SortKey) => {
     setSortKey((prev) => {
@@ -808,7 +831,7 @@ export function PlanningDecisionGrid({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r, idx) => {
+            {paginated.map((r, idx) => {
               const spec = (r.specOverrides || {}) as Record<string, unknown>
               const planCore = readPlanningCore(spec)
               const processed = isProcessedRow(r)
@@ -1075,6 +1098,55 @@ export function PlanningDecisionGrid({
           </tbody>
         </table>
         {sorted.length === 0 ? <p className={dataTable.empty}>No lines in this view.</p> : null}
+      </div>
+
+      {/* ── Pagination bar ── */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-ds-line/50 bg-ds-elevated/30 px-4 py-2.5 text-[12px] text-ds-ink-muted">
+        {/* Left: rows-per-page selector */}
+        <div className="flex items-center gap-2">
+          <span className="text-ds-ink-faint">Rows per page:</span>
+          {([25, 50, 100] as const).map((n) => (
+            <button
+              key={n}
+              onClick={() => { setPageSize(n); setPage(0) }}
+              className={`rounded px-2 py-0.5 font-medium transition-colors duration-150 ${
+                pageSize === n
+                  ? 'bg-ds-brand text-white'
+                  : 'text-ds-ink hover:bg-ds-elevated hover:text-ds-ink'
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+
+        {/* Centre: count */}
+        <span className="tabular-nums text-ds-ink-muted">
+          {sorted.length === 0
+            ? 'No lines'
+            : `${pageStart}–${pageEnd} of ${sorted.length} line${sorted.length !== 1 ? 's' : ''}`}
+        </span>
+
+        {/* Right: prev / next */}
+        <div className="flex items-center gap-1">
+          <button
+            disabled={safePage === 0}
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            className="rounded px-2.5 py-1 font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-30 hover:bg-ds-elevated hover:text-ds-ink"
+          >
+            ← Prev
+          </button>
+          <span className="px-2 tabular-nums">
+            {safePage + 1} / {totalPages}
+          </span>
+          <button
+            disabled={safePage >= totalPages - 1}
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            className="rounded px-2.5 py-1 font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-30 hover:bg-ds-elevated hover:text-ds-ink"
+          >
+            Next →
+          </button>
+        </div>
       </div>
     </DataTableFrame>
   )
