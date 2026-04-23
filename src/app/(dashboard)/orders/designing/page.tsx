@@ -598,11 +598,21 @@ export default function DesigningQueuePage() {
   const recallPlanning = async (r: Row) => {
     setRecallingPlanningId(r.id)
     try {
-      const res = await fetch(`/api/designing/po-lines/${r.id}/recall-planning`, { method: 'POST' })
+      const res = await fetch(`/api/planning/po-lines/${r.id}/recall-from-aw`, {
+        method: 'POST',
+        cache: 'no-store',
+      })
       const json = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(json.error || 'Recall failed')
-      toast.success('Recalled from planning')
-      await load()
+      setRows((prev) => prev.filter((row) => row.id !== r.id))
+      window.dispatchEvent(new CustomEvent('planning:refresh'))
+      toast.success('Returned to Planning', {
+        action: {
+          label: 'View Planning',
+          onClick: () => router.push('/orders/planning?view=pending'),
+        },
+      })
+      void load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Recall failed')
     } finally {
