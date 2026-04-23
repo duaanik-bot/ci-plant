@@ -233,7 +233,7 @@ export default function ArtworkApprovalsPage() {
                       {summary?.ups != null ? <span>Ups: {summary.ups}</span> : null}
                       {summary ? (
                         <span className={summary.batchType === 'MIXED' ? 'text-ds-warning' : 'text-ds-success'}>
-                          {summary.batchType === 'MIXED' ? 'Mixed Batch' : 'Standard'}
+                          {summary.batchType === 'MIXED' ? 'Mixed Group' : 'Standard'}
                         </span>
                       ) : null}
                       {summary ? <span>{summary.itemCount} items</span> : null}

@@ -100,7 +100,7 @@ export function PlanningJobDetailDrawer({
       next.add(line.id)
       return next
     })
-    toast.info('Line added to selection. Select more lines, then click Open Batch Builder.', { duration: 4000 })
+    toast.info('Line added to selection. Select more lines, then click Open Group Builder.', { duration: 4000 })
   }, [line, setPlanningSelection])
 
   const handlePriority = useCallback(async () => {
@@ -574,7 +574,7 @@ export function PlanningJobDetailDrawer({
             onClick={handleAddToBatch}
           >
             <Layers className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            Add to batch
+            Add to group
           </Button>
           <Button type="button" variant="secondary" className="w-full" disabled={actionBusy} onClick={handleHold}>
             <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />

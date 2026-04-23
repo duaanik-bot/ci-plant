@@ -86,7 +86,7 @@ export function applyBatchDecisionAction(
       }
     }
     case 'send_to_artwork': {
-      if (s !== 'ready') return null
+      if (s !== 'ready' && s !== 'draft' && s !== 'approved_for_artwork') return null
       return {
         ...touch,
         batchStatus: 'approved_for_artwork',

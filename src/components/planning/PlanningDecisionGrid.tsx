@@ -522,7 +522,7 @@ export function PlanningDecisionGrid({
       if (mode === 'row') {
         const test = applyBatchDecisionAction(core, 'hold_batch', { holdReason: reasonVal.trim() })
         if (!test) {
-          toast.error('Cannot hold this batch now')
+          toast.error('Cannot hold this group now')
           return
         }
         setHoldOpenKey(null)
@@ -533,9 +533,9 @@ export function PlanningDecisionGrid({
       }
     }
 
-    const bulkTitle = 'Runs once per selected row using that row’s batch state'
+    const bulkTitle = 'Runs once per selected row using that row’s group state'
     const rowTitleApprove = canApprove
-      ? 'Mark batch ready (approved for next step)'
+      ? 'Mark group ready (approved for next step)'
       : 'Only available from Draft — click to try or see message'
 
     return (
@@ -687,7 +687,7 @@ export function PlanningDecisionGrid({
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
             <div className="min-w-0 pt-0.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
-                Batch actions · {planningSelection.size} selected
+                Group actions · {planningSelection.size} selected
                 <span className="ml-1.5 font-normal normal-case text-ds-ink-muted">
                   (one run per row)
                 </span>
@@ -712,7 +712,17 @@ export function PlanningDecisionGrid({
               <th
                 className={`${dataTable.th} ${dataTable.thSticky} w-10 min-w-0 max-w-10 bg-ds-elevated px-0 text-center text-[10px] text-ds-ink-faint`}
               >
-                #
+                <div className="flex flex-col items-center gap-0.5">
+                  <span>#</span>
+                  {planningSelection.size > 0 ? (
+                    <span
+                      className="rounded border border-ds-brand/35 bg-ds-brand/10 px-1 py-0 text-[9px] font-medium text-ds-brand"
+                      title={`${planningSelection.size} selected`}
+                    >
+                      {planningSelection.size}
+                    </span>
+                  ) : null}
+                </div>
               </th>
               <th className={`${dataTable.th} w-[24%] min-w-0`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('cartonName')}>
@@ -742,7 +752,7 @@ export function PlanningDecisionGrid({
                   className={`${dataTable.thSortBtn} w-full justify-end text-right`}
                   onClick={() => toggleSort('batch')}
                 >
-                  Batch / actions {sortKey === 'batch' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                  Group / actions {sortKey === 'batch' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
             </tr>
@@ -789,7 +799,7 @@ export function PlanningDecisionGrid({
               <th className="px-2 py-2">
                 <input
                   className={filterGhost}
-                  placeholder="Batch"
+                  placeholder="Group"
                   value={fBatch}
                   onChange={(e) => setFBatch(e.target.value)}
                   onClick={(e) => e.stopPropagation()}
@@ -884,7 +894,7 @@ export function PlanningDecisionGrid({
                                 return next
                               })
                             }}
-                            aria-label="Select row for batch"
+                            aria-label="Select row for group"
                           />
                         )}
                       </div>
@@ -999,7 +1009,7 @@ export function PlanningDecisionGrid({
                         }}
                       >
                         <option value="single">Single</option>
-                        <option value="batch">Batch</option>
+                        <option value="batch">Group</option>
                       </select>
                     </td>
                     <td className={`${cellBase} min-w-0 align-top overflow-visible`}>
@@ -1013,10 +1023,10 @@ export function PlanningDecisionGrid({
                             {BATCH_STATUS_LABEL[bStatus]}
                           </span>
                           <span className="text-[10px] text-ds-ink-muted">
-                            {batchIdLabel ? `Batch: ${batchIdLabel}` : 'Single'}
+                            {batchIdLabel ? `Group: ${batchIdLabel}` : 'Single'}
                           </span>
                           <span className={`text-[10px] font-medium ${batchTypeClass}`}>
-                            {batchType === 'MIXED' ? 'Mixed Batch' : 'Standard'}
+                            {batchType === 'MIXED' ? 'Mixed Group' : 'Standard'}
                           </span>
                           <span className="text-[10px] text-ds-ink-faint">{batchItemCount} items</span>
                           {!hasBatch ? (

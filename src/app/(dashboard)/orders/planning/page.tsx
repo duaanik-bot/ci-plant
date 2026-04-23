@@ -624,7 +624,7 @@ export default function PlanningPage() {
         const base = readPlanningCore(first.specOverrides as Record<string, unknown>)
         const result = applyBatchDecisionAction(base, action, { holdReason })
         if (!result) {
-          toast.error('This action is not available for the current batch status')
+          toast.error('This action is not available for the current group status')
           return false
         }
         const batchSlice = projectPlanningBatchFields(result)
@@ -680,10 +680,10 @@ export default function PlanningPage() {
                 })()
           const ups = typeof fm.ups === 'number' && Number.isFinite(fm.ups) && fm.ups >= 1 ? Math.floor(fm.ups) : null
           toast.success(
-            designer || ups != null ? `Assigned to ${designer || 'designer'}${ups != null ? ` • Ups: ${ups}` : ''}` : 'Batch updated',
+            designer || ups != null ? `Assigned to ${designer || 'designer'}${ups != null ? ` • Ups: ${ups}` : ''}` : 'Group updated',
           )
         } else if (!opts?.suppressToast) {
-          toast.success('Batch updated')
+          toast.success('Group updated')
         }
         await fetchRows()
         return true
@@ -711,7 +711,7 @@ export default function PlanningPage() {
       isBatchExcludedFromForwardSteps(readPlanningCore(r.specOverrides as Record<string, unknown>)),
     )
     if (held.length > 0) {
-      toast.error('A batch is on hold — resume the batch or exclude those lines before saving handoff')
+      toast.error('A group is on hold — resume the group or exclude those lines before saving handoff')
       return
     }
     setSavingPlanningHandoff(true)
@@ -850,7 +850,7 @@ export default function PlanningPage() {
         return isBatchExcludedFromForwardSteps(readPlanningCore(r.specOverrides as Record<string, unknown>))
       })
       if (blocked.length > 0) {
-        if (!opts?.suppressToast) toast.error('A selected line is in a batch on hold — clear hold first')
+        if (!opts?.suppressToast) toast.error('A selected line is in a group on hold — clear hold first')
         return false
       }
       setMakeProcessingBusy(true)
@@ -974,8 +974,8 @@ export default function PlanningPage() {
                   className="px-3 py-2 text-[13px]"
                 >
                   {batchBuilderOpen
-                    ? `Close Batch Builder (${planningSelection.size})`
-                    : `Open Batch Builder (${planningSelection.size})`}
+                    ? `Close Group Builder (${planningSelection.size})`
+                    : `Open Group Builder (${planningSelection.size})`}
                 </Button>
                 <Button
                   type="button"
@@ -1135,8 +1135,8 @@ export default function PlanningPage() {
               setPlanningSelection(new Set(lineIds))
               toast.info(
                 lineIds.length >= 2
-                  ? 'Selection ready — click Open Batch Builder to review and package.'
-                  : 'Select at least two lines, then open Batch Builder.',
+                  ? 'Selection ready — click Open Group Builder to review and package.'
+                  : 'Select at least two lines, then open Group Builder.',
                 { duration: 5000 },
               )
             }}

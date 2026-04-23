@@ -303,7 +303,7 @@ export function PlanningBatchBuilderPanel({
     <SlideOverPanel
       isOpen={isOpen}
       onClose={onClose}
-      title="Batch builder"
+      title="Group builder"
       backdropClassName="bg-ds-main/50 backdrop-blur-[1.5px]"
       panelClassName="border-l border-ds-line/80 bg-ds-card text-ds-ink shadow-2xl"
       zIndexClass="z-[60]"
@@ -313,7 +313,7 @@ export function PlanningBatchBuilderPanel({
             <p className={`flex gap-1.5 text-[11px] leading-snug text-ds-warning ${mono}`}>
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
               <span>
-                Mixed configurations detected. This batch may require mixed tooling and additional setup.
+                Mixed configurations detected. This group may require mixed tooling and additional setup.
               </span>
             </p>
           ) : null}
@@ -322,12 +322,12 @@ export function PlanningBatchBuilderPanel({
             onClick={async () => {
               await ensureBatchPackageTag()
               onCreateBatch()
-              toast.success('Batch tagged as one package')
+              toast.success('Group tagged as one package')
             }}
             className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-ds-warning px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-warning/90"
           >
             <Plus className="h-4 w-4" aria-hidden />
-            Create batch
+            Create group
           </button>
           <button
             type="button"
@@ -355,7 +355,7 @@ export function PlanningBatchBuilderPanel({
         </div>
       }
     >
-      <div className="space-y-4 text-sm text-foreground" aria-label="Batch builder">
+      <div className="space-y-4 text-sm text-foreground" aria-label="Group builder">
         <div className="flex items-center gap-2 text-ds-warning">
           <Layers className="h-4 w-4 shrink-0" aria-hidden />
           <p className={`text-xs text-ds-ink-faint ${mono}`}>

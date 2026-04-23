@@ -203,7 +203,7 @@ function SortableJobCard({
       </p>
       <p className={`text-[8px] text-ds-ink-faint ${mono}`}>{formatDurationHMM(hours)}</p>
 
-      <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded-sm bg-ds-elevated gap-px" title="Batch segments (PO)">
+      <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded-sm bg-ds-elevated gap-px" title="Group segments (PO)">
         {segments.map((seg) => {
           const bg =
             seg.status === 'done'

@@ -29,7 +29,13 @@ function resetSpecForRecallFromAw(spec: Record<string, unknown>): Record<string,
   const coreRaw = base.planningCore
   if (coreRaw && typeof coreRaw === 'object' && !Array.isArray(coreRaw)) {
     const pc = readPlanningCore(base)
-    base.planningCore = { ...pc, savedAt: null }
+    base.planningCore = {
+      ...pc,
+      savedAt: null,
+      batchStatus: 'draft',
+      batchHoldReason: null,
+      batchStatusBeforeHold: null,
+    }
   }
 
   /** Pending-tab sort hint so recalled lines surface immediately (no schema change). */

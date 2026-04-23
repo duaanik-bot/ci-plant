@@ -33,7 +33,7 @@ export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onAccept, o
   if (suggestions.length === 0) {
     return (
       <div className="rounded-lg border border-ds-line/55 bg-ds-card/30 px-3 py-2 text-center text-[12px] text-ds-ink-faint">
-        No batch suggestions for the current view.
+        No group suggestions for the current view.
       </div>
     )
   }
@@ -42,7 +42,7 @@ export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onAccept, o
     <div>
       <div className="mb-2 flex items-center gap-2 text-ds-ink-muted">
         <Sparkles className="h-4 w-4 text-cyan-400" aria-hidden />
-        <h2 className="text-[12px] font-semibold tracking-tight text-cyan-400/95">Suggested batches</h2>
+        <h2 className="text-[12px] font-semibold tracking-tight text-cyan-400/95">Suggested groups</h2>
         <span className={`text-[11px] text-ds-ink-faint ${mono}`}>{suggestions.length}</span>
       </div>
       <div className="flex flex-wrap gap-2">
