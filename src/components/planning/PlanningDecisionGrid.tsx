@@ -684,7 +684,7 @@ export function PlanningDecisionGrid({
   }, [bulkLineIds, rows])
 
   return (
-    <DataTableFrame className="border-ds-line/80 bg-ds-elevated/20">
+    <DataTableFrame className="h-full border-ds-line/80 bg-ds-elevated/20">
       {mixAdvisoryNote ? (
         <div className="shrink-0 border-b border-ds-warning/25 bg-ds-warning/10 px-3 py-1.5 text-[12px] text-ds-ink">
           {mixAdvisoryNote}

@@ -1192,7 +1192,7 @@ export default function PlanningPage() {
         </div>
       </ActionBar>
 
-      <div className="min-h-0 flex-1 overflow-hidden px-1 pb-0.5 pt-0.5">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-1 pb-0.5 pt-0.5">
         <ErrorBoundary moduleName="Planning Grid">
           <PlanningDecisionGrid
             rows={rows as PlanningGridLine[]}
