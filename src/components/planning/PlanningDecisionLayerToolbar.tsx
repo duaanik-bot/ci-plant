@@ -27,19 +27,19 @@ export function PlanningDecisionLayerToolbar({
   onSetIdModeChange: (m: PlanningSetIdMode) => void
   saving?: boolean
 }) {
-  const panel = 'rounded-lg border border-ds-line/50 bg-ds-card/70 p-4 space-y-3 shadow-sm'
+  const panel = 'rounded-lg border border-ds-line/50 bg-ds-card/70 p-3 space-y-2.5 shadow-sm'
 
-  const selectCls = `h-8 min-w-[10rem] rounded border border-ds-line/50 bg-ds-main px-2 text-[13px] text-ds-ink ${mono}`
+  const selectCls = `h-8 w-full min-w-[12rem] max-w-[22rem] rounded border border-ds-line/50 bg-ds-main px-2 text-[13px] text-ds-ink ${mono}`
 
   return (
     <div className={panel}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
           <p className={`text-[12px] font-medium uppercase tracking-wider text-ds-ink-faint ${mono}`}>
             Planning decision layer
           </p>
-          <p className="text-[13px] text-ds-ink-muted mt-0.5 leading-normal">
-            PO intake → decisions here → immutable handoff to AW Queue on save.
+          <p className="mt-0.5 max-w-[52rem] break-words text-[12px] leading-snug text-ds-ink-muted">
+            PO intake &rarr; decisions here &rarr; immutable handoff to AW Queue on save.
           </p>
         </div>
         <button
@@ -53,8 +53,8 @@ export function PlanningDecisionLayerToolbar({
         </button>
       </div>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="space-y-0.5">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(16rem,auto)_auto_auto] lg:items-end">
+        <label className="min-w-0 space-y-0.5">
           <span className={`text-[12px] font-medium uppercase tracking-wider text-ds-ink-faint ${mono}`}>Spec sort / group</span>
           <select
             value={groupBy}

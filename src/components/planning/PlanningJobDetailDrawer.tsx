@@ -100,7 +100,7 @@ export function PlanningJobDetailDrawer({
       next.add(line.id)
       return next
     })
-    toast.info('Line added to selection. Select one more line to open the Batch builder drawer.', { duration: 4000 })
+    toast.info('Line added to selection. Select more lines, then click Open Batch Builder.', { duration: 4000 })
   }, [line, setPlanningSelection])
 
   const handlePriority = useCallback(async () => {

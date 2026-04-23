@@ -28,11 +28,6 @@ const filterGhost = dataTable.filter.input
 const inp =
   'h-9 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[14px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
 
-function rowClickTargetOk(target: EventTarget | null): boolean {
-  if (!target || !(target instanceof HTMLElement)) return true
-  return !target.closest('input, select, button, textarea, [data-batch-actions]')
-}
-
 const batchBtnApprove =
   'rounded bg-sky-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40'
 const batchBtnHold =
@@ -251,6 +246,52 @@ function sortLines(list: PlanningGridLine[], key: SortKey, dir: 'asc' | 'desc'):
   })
 }
 
+function packageKeyForRow(row: PlanningGridLine): string | null {
+  const core = readPlanningCore((row.specOverrides || {}) as Record<string, unknown>)
+  const members = core.mixSetMemberIds ?? []
+  if (core.masterSetId && members.length > 1) return `pack:${core.masterSetId}`
+  return null
+}
+
+function packageMemberOrder(row: PlanningGridLine): number {
+  const core = readPlanningCore((row.specOverrides || {}) as Record<string, unknown>)
+  const members = core.mixSetMemberIds ?? []
+  const idx = members.indexOf(row.id)
+  return idx >= 0 ? idx : Number.MAX_SAFE_INTEGER
+}
+
+/**
+ * Keep multi-line package rows adjacent as one block, preserving
+ * first-appearance order and member sequence within each package.
+ */
+function coalescePackageRows(sorted: PlanningGridLine[]): PlanningGridLine[] {
+  const groups = new Map<string, PlanningGridLine[]>()
+  for (const row of sorted) {
+    const k = packageKeyForRow(row)
+    if (!k) continue
+    const arr = groups.get(k) ?? []
+    arr.push(row)
+    groups.set(k, arr)
+  }
+  for (const [k, arr] of Array.from(groups.entries())) {
+    arr.sort((a, b) => packageMemberOrder(a) - packageMemberOrder(b))
+    groups.set(k, arr)
+  }
+  const seen = new Set<string>()
+  const out: PlanningGridLine[] = []
+  for (const row of sorted) {
+    const k = packageKeyForRow(row)
+    if (!k) {
+      out.push(row)
+      continue
+    }
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(...(groups.get(k) ?? [row]))
+  }
+  return out
+}
+
 export function PlanningDecisionGrid({
   rows,
   ledgerView,
@@ -372,7 +413,10 @@ export function PlanningDecisionGrid({
     })
   }, [viewRows, fCarton, fSize, fQty, fBoard, fBatch])
 
-  const sorted = useMemo(() => sortLines(filtered, sortKey, sortDir), [filtered, sortKey, sortDir])
+  const sorted = useMemo(() => {
+    const base = sortLines(filtered, sortKey, sortDir)
+    return coalescePackageRows(base)
+  }, [filtered, sortKey, sortDir])
 
   const toggleSort = (k: SortKey) => {
     setSortKey((prev) => {
@@ -795,7 +839,7 @@ export function PlanningDecisionGrid({
               return (
                 <Fragment key={r.id}>
                   <tr
-                    className={`${dataTable.tr.body} ${dataTable.tr.hover} cursor-pointer ${
+                    className={`${dataTable.tr.body} ${dataTable.tr.hover} ${
                       recallHighlight
                         ? 'bg-ds-success/15 ring-1 ring-inset ring-ds-success/35'
                         : rowSel
@@ -806,10 +850,6 @@ export function PlanningDecisionGrid({
                             ? 'bg-ds-main/20'
                             : 'bg-ds-elevated/15'
                     } ${isNewBatch ? 'border-t border-ds-line' : ''}`}
-                    onClick={(e) => {
-                      if (!rowClickTargetOk(e.target)) return
-                      onRowBackgroundClick(r.id)
-                    }}
                   >
                     <td
                       className={`${dataTable.th} sticky left-0 z-10 w-10 min-w-0 max-w-10 border-b border-ds-line/30 border-r border-ds-line/50 px-0 text-center ${
@@ -850,27 +890,30 @@ export function PlanningDecisionGrid({
                       </div>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <input
-                        className={inp + ' text-[15px] font-semibold text-ds-ink'}
-                        disabled={processed}
-                        value={r.cartonName}
-                        onChange={(e) => updateRow(r.id, { cartonName: e.target.value })}
-                        onBlur={(e) => {
-                          const v = e.target.value.trim()
-                          if (v) void onSaveLine(r.id, { cartonName: v })
+                      <button
+                        type="button"
+                        className={`${inp} text-left text-[15px] font-semibold text-ds-ink hover:border-ds-brand/50`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onRowBackgroundClick(r.id)
                         }}
-                        aria-label="Carton name"
-                      />
+                        title="Open product spec drawer"
+                      >
+                        {r.cartonName}
+                      </button>
                     </td>
                     <td className={`${cellBase} ${dataTable.td.secondary} min-w-0`}>
-                      <input
-                        className={inp + ' text-[13px] text-ds-ink-muted'}
-                        disabled={processed}
-                        value={r.cartonSize ?? ''}
-                        onChange={(e) => updateRow(r.id, { cartonSize: e.target.value || null })}
-                        onBlur={(e) => void onSaveLine(r.id, { cartonSize: e.target.value.trim() || null })}
-                        aria-label="Size"
-                      />
+                      <button
+                        type="button"
+                        className={`${inp} text-left text-[13px] text-ds-ink-muted hover:border-ds-brand/50`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onRowBackgroundClick(r.id)
+                        }}
+                        title="Open product spec drawer"
+                      >
+                        {r.cartonSize ?? '—'}
+                      </button>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <input

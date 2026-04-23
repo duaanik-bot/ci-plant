@@ -19,6 +19,7 @@ import {
   BATCH_STATUS_BADGE_CLASS,
   BATCH_STATUS_LABEL,
   effectiveBatchStatus,
+  type PlanningBatchDecisionAction,
 } from '@/lib/planning-batch-decision'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 
@@ -152,6 +153,12 @@ type Props = {
   onCreateBatch: () => void
   updateRow: (lineId: string, patch: Partial<PlanningGridLine>) => void
   onSaveLine: (lineId: string, patch: PlanningLineFieldPatch) => void | Promise<boolean | void>
+  onBatchDecision: (
+    lineIds: string[],
+    action: PlanningBatchDecisionAction,
+    holdReason?: string,
+    opts?: { suppressToast?: boolean },
+  ) => Promise<boolean | void>
   onMakeProcessingBatch: (lineIds: string[], opts?: { suppressToast?: boolean }) => Promise<boolean>
   onRemoveFromSelection: (lineId: string) => void
   onClearSelection: () => void
@@ -164,6 +171,7 @@ export function PlanningBatchBuilderPanel({
   onCreateBatch,
   updateRow,
   onSaveLine,
+  onBatchDecision,
   onMakeProcessingBatch,
   onRemoveFromSelection,
   onClearSelection,
@@ -252,12 +260,13 @@ export function PlanningBatchBuilderPanel({
       if (!hasDesigner || !hasUps) {
         toast.warning('Designer or Ups not set. Proceeding may cause rework.')
       }
-      const ok = await onMakeProcessingBatch(
-        withLatest.map((x) => x.id),
-        { suppressToast: true },
-      )
-      const success = ok ? withLatest.length : 0
-      const failed = ok ? 0 : withLatest.length
+      let success = 0
+      let failed = 0
+      for (const li of withLatest) {
+        const ok = (await onBatchDecision([li.id], 'send_to_artwork', undefined, { suppressToast: true })) !== false
+        if (ok) success += 1
+        else failed += 1
+      }
       toast.success(`Sent to Artwork • ${success} items${failed ? ` • ${failed} failed` : ''}`)
     } finally {
       setSendingToArtwork(false)
@@ -371,13 +380,13 @@ export function PlanningBatchBuilderPanel({
           </ul>
         </div>
 
-        <div className="rounded-md border border-ds-line/40 bg-ds-elevated/20 px-3 py-2.5">
-          <label htmlFor="batch-designer" className="block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+        <div className="rounded-md border border-ds-line/40 bg-ds-elevated/20 px-3 py-2">
+          <label htmlFor="batch-designer" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
             Designer assignment
           </label>
           <select
             id="batch-designer"
-            className="ds-input mt-1 h-9 w-full text-sm"
+            className="ds-input h-8 w-full text-[13px]"
             value={designer}
             onChange={(e) => {
               void applyDesignerToBatch(e.target.value)

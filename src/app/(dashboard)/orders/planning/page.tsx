@@ -358,6 +358,7 @@ export default function PlanningPage() {
   const [makeProcessingBusy, setMakeProcessingBusy] = useState(false)
   const [mixConflictMessage, setMixConflictMessage] = useState<string | null>(null)
   const [planningSelection, setPlanningSelection] = useState<Set<string>>(new Set())
+  const [batchBuilderOpen, setBatchBuilderOpen] = useState(false)
   const [planningGroupBy, setPlanningGroupBy] = useState<PlanningGroupBy>('none')
   const [planningSetIdMode, setPlanningSetIdMode] = useState<PlanningSetIdMode>('auto')
   const [planningDrawerLineId, setPlanningDrawerLineId] = useState<string | null>(null)
@@ -377,6 +378,10 @@ export default function PlanningPage() {
   /** Batch builder (2+ checkboxes) supersedes row detail — one primary slide-over at a time. */
   useEffect(() => {
     if (planningSelection.size >= 2) setPlanningDrawerLineId(null)
+  }, [planningSelection.size])
+
+  useEffect(() => {
+    if (planningSelection.size < 2) setBatchBuilderOpen(false)
   }, [planningSelection.size])
 
   const customerSearch = useAutoPopulate<Customer>({
@@ -633,11 +638,27 @@ export default function PlanningPage() {
           >
           const p = readPlanningCore(spec)
           const planningCore = { ...p, ...batchSlice }
+          const now = new Date().toISOString()
+          const handoffSpec =
+            action === 'send_to_artwork'
+              ? mergeOrchestrationIntoSpec(
+                  {
+                    ...spec,
+                    planningMakeProcessingAt: now,
+                    planningMakeProcessingBy: 'planner',
+                  },
+                  {
+                    planningFlowStatus: PLANNING_FLOW.in_progress,
+                    awQueueHandoffAt: now,
+                  },
+                )
+              : spec
           const res = await fetch(`/api/planning/po-lines/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              specOverrides: { ...spec, planningCore },
+              planningStatus: action === 'send_to_artwork' ? 'planned' : li.planningStatus,
+              specOverrides: { ...handoffSpec, planningCore },
               planningDecisionRevision: true,
             }),
           })
@@ -967,6 +988,17 @@ export default function PlanningPage() {
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <Button
                   type="button"
+                  variant={batchBuilderOpen ? 'secondary' : 'primary'}
+                  onClick={() => setBatchBuilderOpen((o) => !o)}
+                  disabled={planningSelection.size < 2}
+                  className="px-3 py-2 text-[13px]"
+                >
+                  {batchBuilderOpen
+                    ? `Close Batch Builder (${planningSelection.size})`
+                    : `Open Batch Builder (${planningSelection.size})`}
+                </Button>
+                <Button
+                  type="button"
                   onClick={() => void handleMakeProcessing()}
                   disabled={planningSelection.size === 0 || makeProcessingBusy || !!mixConflictMessage}
                   className="px-3 py-2 text-[13px]"
@@ -1123,8 +1155,8 @@ export default function PlanningPage() {
               setPlanningSelection(new Set(lineIds))
               toast.info(
                 lineIds.length >= 2
-                  ? 'Batch builder opened — review compatibility, then create batch or clear selection.'
-                  : 'Select a second line to open the Batch builder drawer.',
+                  ? 'Selection ready — click Open Batch Builder to review and package.'
+                  : 'Select at least two lines, then open Batch Builder.',
                 { duration: 5000 },
               )
             }}
@@ -1223,12 +1255,13 @@ export default function PlanningPage() {
           }
         />
         <PlanningBatchBuilderPanel
-          isOpen={planningSelection.size >= 2}
-          onClose={() => setPlanningSelection(new Set())}
+          isOpen={batchBuilderOpen && planningSelection.size >= 2}
+          onClose={() => setBatchBuilderOpen(false)}
           lines={selectedGridLines}
           onCreateBatch={linkAsMixSet}
           updateRow={updateRow}
           onSaveLine={savePlanningLine}
+          onBatchDecision={applyBatchDecision}
           onMakeProcessingBatch={makeProcessingForIds}
           onRemoveFromSelection={(lineId) =>
             setPlanningSelection((prev) => {
