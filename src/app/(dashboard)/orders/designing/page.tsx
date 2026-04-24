@@ -39,6 +39,7 @@ import {
 } from '@/lib/industrial-priority-sync'
 import { readPlanningCore } from '@/lib/planning-decision-spec'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
+import { AwGroupEditDrawer } from '@/components/designing/AwGroupEditDrawer'
 
 type SpecOverrides = {
   assignedDesignerId?: string
@@ -426,6 +427,7 @@ export default function DesigningQueuePage() {
   const [myJobsOnly, setMyJobsOnly] = useState(false)
   const [designerFilter, setDesignerFilter] = useState<DesignerFilterValue>('all')
   const [expandedAwGroups, setExpandedAwGroups] = useState<Set<string>>(new Set())
+  const [activeGroupEdit, setActiveGroupEdit] = useState<{ groupId: string; rows: Row[] } | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -974,17 +976,14 @@ export default function DesigningQueuePage() {
                             >
                               {isExpanded ? '▲ Collapse' : `▼ ${groupRows.length} items`}
                             </button>
-                            {groupRows.map((r) => (
-                              <Link
-                                key={r.id}
-                                href={`/orders/designing/${r.id}`}
-                                className="inline-flex items-center justify-center gap-1 rounded border border-neutral-200 bg-transparent px-2 py-0.5 text-xs font-medium text-neutral-800 hover:border-ds-warning/50 hover:bg-ds-warning/8 dark:border-border/20 dark:text-ds-ink"
-                                title={r.cartonName}
-                              >
-                                <Pencil className="h-3 w-3 opacity-70" aria-hidden />
-                                {r.po.poNumber}
-                              </Link>
-                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setActiveGroupEdit({ groupId, rows: groupRows })}
+                              className="inline-flex items-center justify-center gap-1 rounded border border-ds-warning/40 bg-ds-warning/8 px-2 py-0.5 text-xs font-medium text-ds-warning hover:bg-ds-warning/15 dark:border-ds-warning/40 dark:text-ds-warning"
+                            >
+                              <Pencil className="h-3 w-3 opacity-80" aria-hidden />
+                              Edit group
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1322,6 +1321,17 @@ export default function DesigningQueuePage() {
         alt={lightbox?.alt ?? ''}
         onClose={() => setLightbox(null)}
       />
+
+      {activeGroupEdit && (
+        <AwGroupEditDrawer
+          groupId={activeGroupEdit.groupId}
+          rows={activeGroupEdit.rows}
+          users={users}
+          isOpen={true}
+          onClose={() => setActiveGroupEdit(null)}
+          onRefresh={() => { void load() }}
+        />
+      )}
     </div>
   )
 }
