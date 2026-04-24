@@ -1,7 +1,7 @@
 'use client'
 
 import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { RotateCcw } from 'lucide-react'
+import { Layers, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   applyBatchDecisionAction,
@@ -348,6 +348,7 @@ export function PlanningDecisionGrid({
   const [actionFeedbackByLineId, setActionFeedbackByLineId] = useState<
     Record<string, { ok: boolean; text: string }>
   >({})
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   const setActionFeedback = (lineId: string, ok: boolean, text: string) => {
     setActionFeedbackByLineId((prev) => ({ ...prev, [lineId]: { ok, text } }))
@@ -683,6 +684,51 @@ export function PlanningDecisionGrid({
     return keys.size > 1
   }, [bulkLineIds, rows])
 
+  // Visual row entries for grouped rendering
+  type VisualEntry =
+    | { kind: 'single'; row: PlanningGridLine; pIdx: number }
+    | { kind: 'group'; rows: PlanningGridLine[]; groupId: string; batchGroupKey: string; batchGroup: PlanningBatchGroup | undefined; pIdx: number }
+    | { kind: 'sub'; row: PlanningGridLine; groupId: string; subIdx: number; pIdx: number }
+
+  const visualRows = useMemo((): VisualEntry[] => {
+    const result: VisualEntry[] = []
+    const seenGroups = new Set<string>()
+
+    paginated.forEach((r, pIdx) => {
+      const spec = (r.specOverrides || {}) as Record<string, unknown>
+      const planCore = readPlanningCore(spec)
+      const mid = planCore.masterSetId
+      const members = planCore.mixSetMemberIds ?? []
+      const isGangGroup = !!(mid && members.length > 1)
+      const bgKey = batchKeyForLine(r.id, planCore)
+      const bg = groupByKey.get(bgKey)
+
+      if (!isGangGroup || (bg?.lineIds.length ?? 0) <= 1) {
+        result.push({ kind: 'single', row: r, pIdx })
+        return
+      }
+
+      if (seenGroups.has(mid!)) {
+        if (expandedGroups.has(mid!)) {
+          const subIdx = result.filter((e) => e.kind === 'sub' && e.groupId === mid).length
+          result.push({ kind: 'sub', row: r, groupId: mid!, subIdx, pIdx })
+        }
+        return
+      }
+
+      seenGroups.add(mid!)
+
+      const groupRows = paginated.filter((pl) => {
+        const ps = (pl.specOverrides || {}) as Record<string, unknown>
+        return readPlanningCore(ps).masterSetId === mid
+      })
+
+      result.push({ kind: 'group', rows: groupRows, groupId: mid!, batchGroupKey: bgKey, batchGroup: bg, pIdx })
+    })
+
+    return result
+  }, [paginated, expandedGroups, groupByKey])
+
   return (
     <DataTableFrame className="h-full border-ds-line/80 bg-ds-elevated/20">
       {mixAdvisoryNote ? (
@@ -831,7 +877,218 @@ export function PlanningDecisionGrid({
             </tr>
           </thead>
           <tbody>
-            {paginated.map((r, idx) => {
+            {visualRows.map((entry) => {
+              // ── GROUP HEADER ROW ──────────────────────────────────────
+              if (entry.kind === 'group') {
+                const { rows: groupRows, groupId, batchGroupKey, batchGroup, pIdx } = entry
+                const firstRow = groupRows[0]!
+                const spec0 = (firstRow.specOverrides || {}) as Record<string, unknown>
+                const planCore0 = readPlanningCore(spec0)
+                const bStatus0 = effectiveBatchStatus(planCore0)
+                const batchLineIds0 = batchGroup?.lineIds ?? groupRows.map((r) => r.id)
+                const totalGroupQty = groupRows.reduce((s, r) => s + (r.quantity || 0), 0)
+                const allBoards = Array.from(new Set(groupRows.map((r) => boardLabel(r))))
+                const boardDisplay = allBoards.length === 1 ? allBoards[0]! : 'Mixed'
+                const designerLabel0 = designerHandoffLabel(spec0, planCore0)
+                const isExpanded = expandedGroups.has(groupId)
+                const allGroupSel = groupRows.every((r) => planningSelection.has(r.id))
+                const someGroupSel = groupRows.some((r) => planningSelection.has(r.id))
+                const allSizes = Array.from(new Set(groupRows.map((r) => String(r.cartonSize ?? '').trim())))
+                const sizeDisplay = allSizes.length === 1 ? allSizes[0]! : 'Mixed'
+
+                return (
+                  <Fragment key={`group:${groupId}`}>
+                    <tr
+                      className={`border-l-[3px] border-ds-brand transition-colors ${
+                        someGroupSel ? 'bg-ds-brand/12' : 'bg-ds-brand/6 hover:bg-ds-brand/10'
+                      }`}
+                    >
+                      {/* # + group checkbox */}
+                      <td
+                        className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 border-b border-ds-line/30 border-r border-ds-line/50 bg-ds-brand/10 px-0 text-center`}
+                      >
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="text-[9px] font-bold text-ds-brand">{pIdx + 1}</span>
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 accent-ds-brand"
+                            checked={allGroupSel}
+                            ref={(el) => { if (el) el.indeterminate = someGroupSel && !allGroupSel }}
+                            onChange={() => {
+                              setPlanningSelection((prev) => {
+                                const next = new Set(prev)
+                                if (allGroupSel) groupRows.forEach((r) => next.delete(r.id))
+                                else groupRows.forEach((r) => next.add(r.id))
+                                return next
+                              })
+                            }}
+                          />
+                        </div>
+                      </td>
+
+                      {/* Carton — all item names + group badge */}
+                      <td className={`${cellBase} min-w-0`}>
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <div className="flex items-center gap-1">
+                            <span className="inline-flex items-center gap-0.5 rounded border border-ds-brand/40 bg-ds-brand/15 px-1 py-px text-[9px] font-bold text-ds-brand">
+                              <Layers className="h-2.5 w-2.5" aria-hidden /> GANG · {groupRows.length} items
+                            </span>
+                            <span className="text-[9px] text-ds-ink-faint">{firstRow.po.customer.name}</span>
+                          </div>
+                          {groupRows.slice(0, 2).map((r) => (
+                            <button
+                              key={r.id}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); onRowBackgroundClick(r.id) }}
+                              className="line-clamp-1 text-left text-[12px] font-semibold text-ds-ink transition-colors hover:text-ds-brand"
+                              title={r.cartonName}
+                            >
+                              {r.cartonName}
+                            </button>
+                          ))}
+                          {groupRows.length > 2 && (
+                            <span className="text-[9px] text-ds-ink-faint">+{groupRows.length - 2} more items</span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Size */}
+                      <td className={`${cellBase} min-w-0`}>
+                        <span className={`text-[12px] ${allSizes.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+                          {sizeDisplay || '—'}
+                        </span>
+                      </td>
+
+                      {/* Qty — combined */}
+                      <td className={`${cellBase} min-w-0 text-center`}>
+                        <div className="flex flex-col items-center">
+                          <span className="text-[14px] font-bold tabular-nums text-ds-brand">
+                            {totalGroupQty.toLocaleString('en-IN')}
+                          </span>
+                          <span className="text-[9px] text-ds-ink-faint">combined</span>
+                        </div>
+                      </td>
+
+                      {/* Board */}
+                      <td className={`${cellBase} min-w-0`}>
+                        <span className={`text-[12px] font-medium ${allBoards.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+                          {boardDisplay}
+                        </span>
+                      </td>
+
+                      {/* Designer */}
+                      <td className={`${cellBase} min-w-0`}>
+                        <span className="text-[12px] text-ds-ink-muted">{designerLabel0 || '—'}</span>
+                      </td>
+
+                      {/* Set type */}
+                      <td className={`${cellBase} min-w-0`}>
+                        <span className="inline-flex items-center rounded border border-ds-brand/35 bg-ds-brand/10 px-1.5 py-px text-[10px] font-semibold text-ds-brand">
+                          Gang
+                        </span>
+                      </td>
+
+                      {/* Group actions + expand */}
+                      <td className={`${cellBase} min-w-0 align-middle overflow-visible`}>
+                        <div className="flex min-w-0 flex-col items-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
+                            <span className={`inline-flex shrink-0 rounded border px-1 py-px text-[9px] font-bold leading-none ${BATCH_STATUS_BADGE_CLASS[bStatus0]}`}>
+                              {BATCH_STATUS_LABEL[bStatus0]}
+                            </span>
+                            <span className="text-[9px] text-ds-ink-faint">{(planCore0.masterSetId ?? '').slice(0, 10)}</span>
+                          </div>
+                          {renderBatchDecisionControls(batchLineIds0, batchGroupKey, 'row')}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExpandedGroups((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(groupId)) next.delete(groupId)
+                                else next.add(groupId)
+                                return next
+                              })
+                            }}
+                            className="mt-0.5 flex items-center gap-0.5 rounded border border-ds-brand/30 bg-ds-brand/8 px-1.5 py-px text-[9px] font-medium text-ds-brand hover:bg-ds-brand/15 transition-colors"
+                          >
+                            {isExpanded ? '▲ Hide items' : `▼ Show ${groupRows.length} items`}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  </Fragment>
+                )
+              }
+
+              // ── SUB-ROW (expanded group item) ──────────────────────────
+              if (entry.kind === 'sub') {
+                const r = entry.row
+                const spec = (r.specOverrides || {}) as Record<string, unknown>
+                const planCore = readPlanningCore(spec)
+                const pm = readPlanningMeta(spec)
+                const brd = boardLabel(r)
+                const upsNum = typeof pm.ups === 'number' && Number.isFinite(pm.ups) && pm.ups >= 1 ? pm.ups : null
+                const designerLabelSub = designerHandoffLabel(spec, planCore)
+                return (
+                  <Fragment key={`sub:${r.id}`}>
+                    <tr className="border-l-[3px] border-ds-brand/40 bg-ds-brand/3 hover:bg-ds-brand/6 transition-colors">
+                      <td
+                        className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 border-b border-ds-line/20 border-r border-ds-brand/20 bg-ds-brand/5 px-0 text-center`}
+                      >
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="text-[8px] text-ds-brand/60">↳</span>
+                          <span className="text-[8px] font-medium text-ds-ink-faint">{entry.subIdx + 1}</span>
+                        </div>
+                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0 pl-3`}>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onRowBackgroundClick(r.id) }}
+                          className="group flex min-w-0 flex-col items-start text-left"
+                          title="Open item spec drawer"
+                        >
+                          <span className="line-clamp-1 text-[12px] font-semibold text-ds-ink transition-colors group-hover:text-ds-brand">
+                            {r.cartonName}
+                          </span>
+                          <span className="text-[9px] text-ds-ink-faint">{r.po.poNumber}</span>
+                        </button>
+                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                        <span className="text-[11px] text-ds-ink-muted">{r.cartonSize ?? '—'}</span>
+                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0 text-center`}>
+                        <span className="text-[12px] font-semibold tabular-nums text-ds-ink">{r.quantity.toLocaleString('en-IN')}</span>
+                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                        <span className="text-[11px] text-ds-ink-muted">{brd}</span>
+                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                        <span className="text-[11px] text-ds-ink-muted">{designerLabelSub || '—'}</span>
+                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                        <div className="flex flex-col gap-0.5">
+                          {upsNum != null && (
+                            <span className="text-[10px] font-medium text-ds-brand">×{upsNum} ups</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0 text-right`}>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onRowBackgroundClick(r.id) }}
+                          className="rounded border border-ds-line/50 px-1.5 py-px text-[9px] text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+                        >
+                          Spec ↗
+                        </button>
+                      </td>
+                    </tr>
+                  </Fragment>
+                )
+              }
+
+              // ── SINGLE ROW ──────────────────────────────────────────────
+              // entry.kind === 'single'
+              const r = entry.row
+              const idx = entry.pIdx
               const spec = (r.specOverrides || {}) as Record<string, unknown>
               const planCore = readPlanningCore(spec)
               const processed = isProcessedRow(r)
@@ -847,14 +1104,11 @@ export function PlanningDecisionGrid({
               const batchGroupKey = batchKeyForLine(r.id, planCore)
               const batchGroup = groupByKey.get(batchGroupKey)
               const batchLineIds = batchGroup?.lineIds ?? [r.id]
-              const batchTitle =
-                batchGroup?.title ?? ((planCore.masterSetId ?? '').slice(0, 12) || '—')
               const batchIdLabel = hasBatch ? (planCore.masterSetId ?? '').trim() || '—' : null
               const batchLines = linesForBatchGroup(batchGroup, rows)
               const batchItemCount = hasBatch ? batchLines.length : 1
               const batchType = getBatchType(hasBatch ? batchLines : [r])
               const batchTypeClass = batchType === 'MIXED' ? 'text-ds-warning' : 'text-ds-success'
-              const batchMixed = isMixedBatchGroup(batchGroup, rows)
               const designerLabel = designerHandoffLabel(spec, planCore)
               const designerKey = resolveDesignerKey(spec, planCore)
               const upsNum = typeof pm.ups === 'number' && Number.isFinite(pm.ups) && pm.ups >= 1 ? pm.ups : null

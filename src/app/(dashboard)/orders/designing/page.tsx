@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -425,6 +425,7 @@ export default function DesigningQueuePage() {
   const [priorityBusyPoId, setPriorityBusyPoId] = useState<string | null>(null)
   const [myJobsOnly, setMyJobsOnly] = useState(false)
   const [designerFilter, setDesignerFilter] = useState<DesignerFilterValue>('all')
+  const [expandedAwGroups, setExpandedAwGroups] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     try {
@@ -543,6 +544,48 @@ export default function DesigningQueuePage() {
     })
     return out
   }, [filteredRows, sortKey, sortDir])
+
+  type AwVisualEntry =
+    | { kind: 'single'; row: Row }
+    | { kind: 'group'; rows: Row[]; groupId: string }
+    | { kind: 'sub'; row: Row; groupId: string; subIdx: number }
+
+  const sortedVisualRows = useMemo((): AwVisualEntry[] => {
+    const result: AwVisualEntry[] = []
+    const seenGroups = new Set<string>()
+
+    for (const r of sortedRows) {
+      const spec = (r.specOverrides || {}) as Record<string, unknown>
+      const core = readPlanningCore(spec)
+      const mid = core.masterSetId
+      const members = core.mixSetMemberIds ?? []
+      const isGang = !!(mid && members.length > 1 && core.layoutType === 'gang')
+
+      if (!isGang || !mid) {
+        result.push({ kind: 'single', row: r })
+        continue
+      }
+
+      if (seenGroups.has(mid)) {
+        if (expandedAwGroups.has(mid)) {
+          const subIdx = result.filter((e) => e.kind === 'sub' && e.groupId === mid).length
+          result.push({ kind: 'sub', row: r, groupId: mid, subIdx })
+        }
+        continue
+      }
+
+      seenGroups.add(mid)
+
+      const groupRows = sortedRows.filter((sr) => {
+        const ss = (sr.specOverrides || {}) as Record<string, unknown>
+        return readPlanningCore(ss).masterSetId === mid
+      })
+
+      result.push({ kind: 'group', rows: groupRows, groupId: mid })
+    }
+
+    return result
+  }, [sortedRows, expandedAwGroups])
 
   const togglePoPriority = async (r: Row, e: React.MouseEvent) => {
     e.preventDefault()
@@ -833,7 +876,182 @@ export default function DesigningQueuePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200 bg-card dark:divide-ds-line/30">
-              {sortedRows.map((r) => {
+              {sortedVisualRows.map((entry) => {
+                // ── GROUP HEADER ROW ──────────────────────────────────────
+                if (entry.kind === 'group') {
+                  const { rows: groupRows, groupId } = entry
+                  const firstRow = groupRows[0]!
+                  const totalQty = groupRows.reduce((s, r) => s + r.quantity, 0)
+                  const isExpanded = expandedAwGroups.has(groupId)
+                  const spec0 = (firstRow.specOverrides || {}) as Record<string, unknown>
+                  const designerId0 = spec0.assignedDesignerId as string | undefined
+                  const designerName0 = designerId0 ? (userById[designerId0]?.name ?? '—') : '—'
+                  const priRow0 = rowIndustrialPriority(firstRow)
+                  const dQ0 = daysInQueue(firstRow.createdAt)
+                  const phase0 = firstRow.readiness?.pipelinePhase ?? 'drafting'
+                  const badge0 = pipelineBadge(phase0)
+
+                  return (
+                    <Fragment key={`aw-group:${groupId}`}>
+                      <tr className={`border-l-[3px] border-sky-500/70 bg-sky-500/5 transition-colors hover:bg-sky-500/8 ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}>
+                        {/* Preview — first item's preview */}
+                        <td className="px-4 py-2 align-middle">
+                          <ArtworkPreviewCell
+                            url={firstRow.artworkPreviewUrl ?? null}
+                            alt={firstRow.cartonName}
+                            onOpenLightbox={(src) => setLightbox({ src, alt: `${firstRow.po.poNumber} · ${firstRow.cartonName}` })}
+                          />
+                        </td>
+                        {/* PO / priority */}
+                        <td className={`px-4 py-2 align-middle text-sm font-medium ${mono} text-neutral-900 dark:text-ds-warning`}>
+                          <div className="flex flex-col gap-0.5 leading-tight">
+                            <span className="inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-bold text-sky-600 dark:text-sky-300">
+                              <Layers className="h-3 w-3 shrink-0" aria-hidden /> GANG · {groupRows.length} items
+                            </span>
+                            {groupRows.map((r) => (
+                              <span key={r.id} className={`truncate text-[11px] ${mono} text-ds-warning`}>{r.po.poNumber}</span>
+                            ))}
+                          </div>
+                        </td>
+                        {/* Customer */}
+                        <td className="px-4 py-2 align-middle text-sm font-medium leading-tight text-neutral-700 dark:text-ds-ink-muted">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <CustomerAvatar name={firstRow.po.customer.name} logoUrl={firstRow.po.customer.logoUrl} />
+                            <span className="min-w-0 overflow-hidden text-ellipsis">{firstRow.po.customer.name}</span>
+                          </div>
+                        </td>
+                        {/* Carton — all items */}
+                        <td className="px-4 py-2 align-middle text-sm leading-snug text-neutral-900 dark:text-ds-ink">
+                          <div className="flex min-w-0 flex-col gap-0.5">
+                            {groupRows.map((r) => (
+                              <span key={r.id} className="min-w-0 truncate text-[12px]" title={r.cartonName}>{r.cartonName}</span>
+                            ))}
+                            <span className="w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-[10px] font-semibold uppercase text-sky-700 dark:text-sky-300">
+                              Gang print
+                            </span>
+                          </div>
+                        </td>
+                        {/* Qty — combined */}
+                        <td className={`px-4 py-2 align-middle text-right text-sm font-bold ${mono} text-ds-brand`}>
+                          <div className="flex flex-col items-end">
+                            <span>{totalQty.toLocaleString('en-IN')}</span>
+                            <span className="text-[9px] font-normal text-ds-ink-faint">combined</span>
+                          </div>
+                        </td>
+                        {/* Set */}
+                        <td className={`px-4 py-2 align-middle text-sm ${mono} text-ds-ink-muted`}>
+                          {firstRow.setNumber ?? '—'}
+                        </td>
+                        {/* Designer */}
+                        <td className="px-4 py-2 align-middle text-xs text-ds-ink-faint">
+                          {designerName0}
+                        </td>
+                        {/* Pipeline */}
+                        <td className="px-4 py-2 align-middle">
+                          <span className={`${badge0.className} ${badge0.pulse ? 'animate-pulse' : ''}`}>
+                            <Layers className="h-3 w-3 shrink-0" aria-hidden />
+                            {badge0.label}
+                          </span>
+                        </td>
+                        {/* Days */}
+                        <td className={`px-4 py-2 align-middle text-right text-sm ${mono} ${ageClass(dQ0)}`}>
+                          {dQ0}d
+                        </td>
+                        {/* Actions */}
+                        <td className="px-4 py-2 align-middle">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setExpandedAwGroups((prev) => {
+                                  const next = new Set(prev)
+                                  if (next.has(groupId)) next.delete(groupId)
+                                  else next.add(groupId)
+                                  return next
+                                })
+                              }}
+                              className="inline-flex items-center gap-0.5 rounded border border-sky-500/40 bg-sky-500/8 px-2 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-500/15 dark:text-sky-300"
+                            >
+                              {isExpanded ? '▲ Collapse' : `▼ ${groupRows.length} items`}
+                            </button>
+                            {groupRows.map((r) => (
+                              <Link
+                                key={r.id}
+                                href={`/orders/designing/${r.id}`}
+                                className="inline-flex items-center justify-center gap-1 rounded border border-neutral-200 bg-transparent px-2 py-0.5 text-xs font-medium text-neutral-800 hover:border-ds-warning/50 hover:bg-ds-warning/8 dark:border-border/20 dark:text-ds-ink"
+                                title={r.cartonName}
+                              >
+                                <Pencil className="h-3 w-3 opacity-70" aria-hidden />
+                                {r.po.poNumber}
+                              </Link>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Expanded sub-rows */}
+                      {isExpanded && groupRows.map((r, si) => {
+                        const spec = (r.specOverrides || {}) as Record<string, unknown>
+                        const designerId = spec.assignedDesignerId as string | undefined
+                        const designerName = designerId ? (userById[designerId]?.name ?? '—') : '—'
+                        const phase = r.readiness?.pipelinePhase ?? 'drafting'
+                        const badge = pipelineBadge(phase)
+                        const dQ = daysInQueue(r.createdAt)
+                        const approvalsDone = !!r.readiness?.approvalsComplete
+                        const finalized = !!r.readiness?.prePressFinalized
+                        const awPo = readAwPoStatus(spec)
+                        const rowClosed = awPo === AW_PO_STATUS.CLOSED
+                        const canFinalizeRow = approvalsDone && !finalized && !!(r.setNumber || '').trim() && !!(r.artworkCode || '').trim() && !rowClosed
+
+                        return (
+                          <tr key={`aw-sub:${r.id}`} className="border-l-[3px] border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6 transition-colors">
+                            <td className="px-3 py-1.5 align-middle">
+                              <span className="text-[10px] text-sky-500/60">↳{si + 1}</span>
+                            </td>
+                            <td className={`px-3 py-1.5 align-middle text-xs font-medium ${mono} text-ds-warning`}>
+                              {r.po.poNumber}
+                            </td>
+                            <td className="px-3 py-1.5 align-middle text-xs text-ds-ink-muted">{r.po.customer.name}</td>
+                            <td className="px-3 py-1.5 align-middle text-xs font-medium text-ds-ink">
+                              <span className="line-clamp-1">{r.cartonName}</span>
+                            </td>
+                            <td className={`px-3 py-1.5 align-middle text-right text-xs ${mono} text-ds-ink`}>{r.quantity.toLocaleString('en-IN')}</td>
+                            <td className={`px-3 py-1.5 align-middle text-xs ${mono} text-ds-ink-muted`}>{r.setNumber ?? '—'}</td>
+                            <td className="px-3 py-1.5 align-middle text-xs text-ds-ink-faint">{designerName}</td>
+                            <td className="px-3 py-1.5 align-middle">
+                              <span className={`${badge.className} text-[10px] py-0 ${badge.pulse ? 'animate-pulse' : ''}`}>
+                                {badge.label}
+                              </span>
+                            </td>
+                            <td className={`px-3 py-1.5 align-middle text-right text-xs ${mono} ${ageClass(dQ)}`}>{dQ}d</td>
+                            <td className="px-3 py-1.5 align-middle">
+                              <div className="flex flex-wrap items-center gap-1">
+                                <Link
+                                  href={`/orders/designing/${r.id}`}
+                                  className="inline-flex items-center gap-1 rounded border border-neutral-200 bg-transparent px-1.5 py-0.5 text-xs text-neutral-800 hover:border-ds-warning/50 dark:border-border/20 dark:text-ds-ink"
+                                >
+                                  <Pencil className="h-3 w-3 opacity-70" aria-hidden />
+                                  Edit
+                                </Link>
+                                {canFinalizeRow && (
+                                  <button type="button" disabled={finalizingId === r.id} onClick={() => void finalizeFromList(r)}
+                                    className="rounded border border-emerald-500/40 px-1.5 py-0.5 text-xs text-emerald-800 hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-200"
+                                  >
+                                    {finalizingId === r.id ? '…' : 'Plate Hub'}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </Fragment>
+                  )
+                }
+
+                // ── SINGLE ROW ──────────────────────────────────────────────
+                // entry.kind === 'single' (sub rows are rendered inline in group above)
+                const r = entry.kind === 'single' ? entry.row : entry.row
                 const designerId = r.specOverrides?.assignedDesignerId
                 const designerName = designerId ? (userById[designerId]?.name ?? '—') : '—'
                 const approvalsDone = !!r.readiness?.approvalsComplete
