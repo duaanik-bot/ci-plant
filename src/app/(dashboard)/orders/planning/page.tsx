@@ -926,7 +926,7 @@ export default function PlanningPage() {
   }
 
   return (
-    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-ds-main text-ds-ink">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-ds-main text-ds-ink">
       <div className="shrink-0 space-y-2 border-b border-ds-line/60 bg-ds-main px-3 py-2">
         <PageHeader
           className="!pb-2"

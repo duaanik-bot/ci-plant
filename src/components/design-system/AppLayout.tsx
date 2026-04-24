@@ -7,6 +7,6 @@ import { cn } from '@/lib/cn'
  */
 export function AppLayout({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn('min-h-screen bg-transparent text-ds-ink antialiased', className)}>{children}</div>
+    <div className={cn('h-screen overflow-hidden bg-transparent text-ds-ink antialiased', className)}>{children}</div>
   )
 }

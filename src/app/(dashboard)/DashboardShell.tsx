@@ -137,7 +137,7 @@ export function DashboardShell({
             </button>
           </div>
         </header>
-        <main className="min-h-screen min-w-0 flex-1 bg-ds-main">
+        <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-ds-main">
           <ErrorBoundary moduleName="Page">{children}</ErrorBoundary>
         </main>
       </div>

@@ -22,22 +22,22 @@ import {
 } from '@/lib/planning-decision-spec'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 
-const cellBase = `align-middle border-b border-ds-line/30 ${dataTable.td.base} min-h-[40px] px-2.5 py-2`
+const cellBase = `align-middle border-b border-ds-line/30 text-[13px] text-ds-ink min-h-[36px] px-2 py-1`
 const filterGhost = dataTable.filter.input
 
 const inp =
-  'h-8 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[13px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
+  'h-7 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[13px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
 
 const batchBtnApprove =
-  'rounded bg-sky-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40'
+  'rounded bg-sky-800/90 px-1.5 py-px text-[10px] font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
 const batchBtnHold =
-  'rounded bg-ds-warning/20 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-ds-warning/30 disabled:cursor-not-allowed disabled:opacity-40'
+  'rounded bg-ds-warning/20 px-1.5 py-px text-[10px] font-medium text-ds-warning hover:bg-ds-warning/30 disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
 const batchBtnArtwork =
-  'rounded bg-violet-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40'
+  'rounded bg-violet-800/90 px-1.5 py-px text-[10px] font-medium text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
 const batchBtnProduction =
-  'rounded bg-emerald-800/90 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40'
+  'rounded bg-emerald-800/90 px-1.5 py-px text-[10px] font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
 const batchBtnResume =
-  'rounded border border-ds-line/60 bg-ds-elevated/90 px-2 py-0.5 text-[11px] text-ds-ink hover:bg-ds-elevated disabled:cursor-not-allowed disabled:opacity-40'
+  'rounded border border-ds-line/60 bg-ds-elevated/90 px-1.5 py-px text-[10px] text-ds-ink hover:bg-ds-elevated disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
 
 function firstSpecCoreForGroup(
   rows: PlanningGridLine[],
@@ -570,13 +570,13 @@ export function PlanningDecisionGrid({
       >
         {mode === 'row' && onHold && core.batchHoldReason ? (
           <p
-            className="order-first max-w-full text-right text-[10px] leading-tight text-rose-200/90 line-clamp-2"
+            className="order-first max-w-full text-right text-[9px] leading-tight text-rose-200/90 line-clamp-1"
             title={core.batchHoldReason}
           >
-            <span className="font-semibold text-rose-300/95">Reason:</span> {core.batchHoldReason}
+            <span className="font-semibold text-rose-300/95">Hold:</span> {core.batchHoldReason}
           </p>
         ) : null}
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 overflow-x-auto">
+        <div className="flex min-w-0 flex-nowrap items-center justify-end gap-1 overflow-x-auto">
           <button
             type="button"
             disabled={batchActionBusy}
@@ -644,9 +644,9 @@ export function PlanningDecisionGrid({
           </button>
         </div>
         {holdIsOpen ? (
-          <span className="flex w-full min-w-0 flex-wrap items-center justify-end gap-1 py-0.5">
+          <span className="flex w-full min-w-0 flex-nowrap items-center justify-end gap-1">
             <input
-              className="min-w-0 max-w-[14rem] flex-1 rounded border border-ds-warning/30 bg-ds-main px-1.5 py-0.5 text-[11px] text-ds-ink"
+              className="min-w-0 max-w-[10rem] flex-1 rounded border border-ds-warning/30 bg-ds-main px-1.5 py-px text-[10px] text-ds-ink"
               placeholder="Reason required"
               value={reasonVal}
               onChange={(e) => setReasonVal(e.target.value)}
@@ -654,7 +654,7 @@ export function PlanningDecisionGrid({
             <button
               type="button"
               disabled={batchActionBusy}
-              className="shrink-0 rounded bg-rose-800 px-2 py-0.5 text-[11px] text-white"
+              className="shrink-0 rounded bg-rose-800 px-1.5 py-px text-[10px] text-white"
               onClick={(e) => {
                 e.stopPropagation()
                 void confirmHold()
@@ -733,7 +733,7 @@ export function PlanningDecisionGrid({
           <thead className={dataTable.thead}>
             <tr>
               <th
-                className={`${dataTable.th} ${dataTable.thSticky} min-h-[40px] w-10 min-w-0 max-w-10 bg-ds-elevated px-0 py-1.5 text-center text-[10px] text-ds-ink-faint`}
+                className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 bg-ds-elevated px-0 py-1.5 text-center text-[10px] text-ds-ink-faint`}
               >
                 <div className="flex flex-col items-center gap-0.5">
                   <span>#</span>
@@ -747,29 +747,29 @@ export function PlanningDecisionGrid({
                   ) : null}
                 </div>
               </th>
-              <th className={`${dataTable.th} min-h-[40px] w-[24%] min-w-0 py-1.5`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[24%] min-w-0 py-1.5`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('cartonName')}>
                   Carton {sortKey === 'cartonName' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[40px] w-[12%] min-w-0 py-1.5`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[12%] min-w-0 py-1.5`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('cartonSize')}>
                   Size {sortKey === 'cartonSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[40px] w-[10%] min-w-0 py-1.5 text-center`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[10%] min-w-0 py-1.5 text-center`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('qty')}>
                   Qty {sortKey === 'qty' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[40px] w-[14%] min-w-0 py-1.5`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[14%] min-w-0 py-1.5`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('board')}>
                   Board {sortKey === 'board' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[40px] w-[11%] min-w-0 py-1.5`}>Designer</th>
-              <th className={`${dataTable.th} min-h-[40px] w-[11%] min-w-0 py-1.5`}>Set type</th>
-              <th className={`${dataTable.th} min-h-[40px] w-[22%] min-w-0 py-1.5 text-right`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[11%] min-w-0 py-1.5`}>Designer</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[11%] min-w-0 py-1.5`}>Set type</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[22%] min-w-0 py-1.5 text-right`}>
                 <button
                   type="button"
                   className={`${dataTable.thSortBtn} w-full justify-end text-right`}
@@ -780,8 +780,8 @@ export function PlanningDecisionGrid({
               </th>
             </tr>
             <tr className="border-b border-ds-line/50 bg-ds-card/20">
-              <th className={`${dataTable.th} ${dataTable.thSticky} min-h-[40px] w-10 bg-ds-elevated px-0 py-1`} />
-              <th className="px-2 py-2">
+              <th className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 bg-ds-elevated px-0 py-1`} />
+              <th className="px-2 py-1">
                 <input
                   className={filterGhost}
                   placeholder="Filter…"
@@ -790,7 +790,7 @@ export function PlanningDecisionGrid({
                   onClick={(e) => e.stopPropagation()}
                 />
               </th>
-              <th className="px-2 py-2">
+              <th className="px-2 py-1">
                 <input
                   className={filterGhost}
                   placeholder="Size"
@@ -799,7 +799,7 @@ export function PlanningDecisionGrid({
                   onClick={(e) => e.stopPropagation()}
                 />
               </th>
-              <th className="px-2 py-2">
+              <th className="px-2 py-1">
                 <input
                   className={filterGhost + ' text-center'}
                   placeholder="Qty"
@@ -808,7 +808,7 @@ export function PlanningDecisionGrid({
                   onClick={(e) => e.stopPropagation()}
                 />
               </th>
-              <th className="px-2 py-2">
+              <th className="px-2 py-1">
                 <input
                   className={filterGhost}
                   placeholder="Board"
@@ -817,9 +817,9 @@ export function PlanningDecisionGrid({
                   onClick={(e) => e.stopPropagation()}
                 />
               </th>
-              <th className="px-2 py-2" />
-              <th className="px-2 py-2" />
-              <th className="px-2 py-2">
+              <th className="px-2 py-1" />
+              <th className="px-2 py-1" />
+              <th className="px-2 py-1">
                 <input
                   className={filterGhost}
                   placeholder="Group"
@@ -923,22 +923,28 @@ export function PlanningDecisionGrid({
                       </div>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
+                      {/* DC-style: name bold + PO·customer below */}
                       <button
                         type="button"
-                        className={`${inp} text-left text-[15px] font-semibold text-ds-ink hover:border-ds-brand/50`}
+                        className="group flex min-w-0 flex-col items-start text-left"
                         onClick={(e) => {
                           e.stopPropagation()
                           onRowBackgroundClick(r.id)
                         }}
                         title="Open product spec drawer"
                       >
-                        {r.cartonName}
+                        <span className="line-clamp-1 text-[13px] font-semibold text-ds-ink group-hover:text-ds-brand transition-colors">
+                          {r.cartonName}
+                        </span>
+                        <span className="text-[10px] text-ds-ink-faint">
+                          {r.po.poNumber} · {r.po.customer.name}
+                        </span>
                       </button>
                     </td>
-                    <td className={`${cellBase} ${dataTable.td.secondary} min-w-0`}>
+                    <td className={`${cellBase} min-w-0`}>
                       <button
                         type="button"
-                        className={`${inp} text-left text-[13px] text-ds-ink-muted hover:border-ds-brand/50`}
+                        className="text-left text-[12px] text-ds-ink-muted hover:text-ds-brand transition-colors"
                         onClick={(e) => {
                           e.stopPropagation()
                           onRowBackgroundClick(r.id)
@@ -952,7 +958,7 @@ export function PlanningDecisionGrid({
                       <input
                         type="number"
                         min={1}
-                        className={inp + ' text-center text-[15px] font-semibold text-ds-ink tabular-nums'}
+                        className={inp + ' text-center text-[13px] font-semibold text-ds-ink tabular-nums'}
                         disabled={processed}
                         value={r.quantity}
                         onChange={(e) => {
@@ -968,7 +974,7 @@ export function PlanningDecisionGrid({
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <p
-                        className={`${dataTable.td.secondary} truncate text-[13px] font-medium`}
+                        className="truncate text-[12px] font-medium text-ds-ink-muted"
                         title={brd}
                       >
                         {brd}
@@ -976,7 +982,7 @@ export function PlanningDecisionGrid({
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <select
-                        className={inp + ' h-8 py-1 text-[12px]'}
+                        className={inp + ' py-0 text-[12px]'}
                         disabled={processed}
                         value={designerKey}
                         onClick={(e) => e.stopPropagation()}
@@ -1007,7 +1013,7 @@ export function PlanningDecisionGrid({
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <select
-                        className={inp + ' h-8 py-1 text-[12px]'}
+                        className={inp + ' py-0 text-[12px]'}
                         disabled={processed}
                         value={planCore.layoutType === 'gang' ? 'batch' : 'single'}
                         onClick={(e) => e.stopPropagation()}
@@ -1035,59 +1041,54 @@ export function PlanningDecisionGrid({
                         <option value="batch">Group</option>
                       </select>
                     </td>
-                    <td className={`${cellBase} min-w-0 align-top overflow-visible`}>
-                      <div className="flex min-w-0 flex-col items-end gap-1 text-right">
+                    <td className={`${cellBase} min-w-0 align-middle overflow-visible`}>
+                      {/* ── DC-style compact action cell ── */}
+                      <div className="flex min-w-0 flex-col items-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        {/* Row 1: status badge · type · PO · quick meta */}
                         <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
                           <span
-                            className={`inline-flex max-w-full shrink-0 rounded-ds-sm border px-1.5 py-0.5 text-[10px] font-semibold ${
+                            className={`inline-flex shrink-0 rounded border px-1 py-px text-[9px] font-bold leading-none ${
                               BATCH_STATUS_BADGE_CLASS[bStatus]
                             }`}
                           >
                             {BATCH_STATUS_LABEL[bStatus]}
                           </span>
-                          <span className="text-[10px] text-ds-ink-muted">
-                            {batchIdLabel ? `Group: ${batchIdLabel}` : 'Single'}
+                          <span className={`text-[9px] font-medium ${batchTypeClass}`}>
+                            {batchItemCount} items · {batchType === 'MIXED' ? 'Mix' : 'Std'}
                           </span>
-                          <span className={`text-[10px] font-medium ${batchTypeClass}`}>
-                            {batchType === 'MIXED' ? 'Mixed Group' : 'Standard'}
+                          <span className="text-[9px] text-ds-ink-faint">
+                            {batchIdLabel ? batchIdLabel.slice(0, 10) : 'Single'} · {r.po.poNumber}
                           </span>
-                          <span className="text-[10px] text-ds-ink-faint">{batchItemCount} items</span>
-                          {!hasBatch ? (
-                            <span
-                              className="min-w-0 max-w-[8rem] truncate text-[10px] text-ds-ink-faint"
-                              title={batchTitle}
-                            >
-                              {batchTitle}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="flex flex-wrap items-center justify-end gap-2">
                           {designerLabel ? (
-                            <span className="text-[10px] text-ds-ink-muted">👤 {designerLabel}</span>
+                            <span className="text-[9px] text-ds-ink-muted" title={designerLabel}>
+                              {designerLabel.split(' ')[0]}
+                            </span>
                           ) : null}
                           {upsFinal ? (
                             <span
                               id={`show-ups-row-${r.id}`}
                               data-final-decision="ups"
-                              className={`shrink-0 rounded-ds-sm px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-ds-brand ${markFieldAsFinal('ups', true)}`}
+                              className="shrink-0 text-[9px] font-medium tabular-nums text-ds-brand"
                             >
-                              ✔ Ups: {upsNum}
+                              ×{upsNum}
                             </span>
                           ) : null}
-                          {batchMixed ? <span className="text-[10px] font-medium text-ds-warning">Mixed</span> : null}
-                          {isReadyForArtwork ? <span className="text-[10px] text-ds-success">Ready for Artwork</span> : null}
+                          {isReadyForArtwork ? (
+                            <span className="text-[9px] font-semibold text-ds-success">✓ AW ready</span>
+                          ) : null}
                           {rowActionFeedback ? (
                             <span
-                              className={`rounded-ds-sm px-1.5 py-0.5 text-[10px] font-medium ${
+                              className={`rounded px-1 py-px text-[9px] font-medium ${
                                 rowActionFeedback.ok
-                                  ? 'border border-ds-success/35 bg-ds-success/10 text-ds-success'
-                                  : 'border border-ds-warning/40 bg-ds-warning/10 text-ds-warning'
+                                  ? 'bg-ds-success/10 text-ds-success'
+                                  : 'bg-ds-warning/10 text-ds-warning'
                               }`}
                             >
                               {rowActionFeedback.text}
                             </span>
                           ) : null}
                         </div>
+                        {/* Row 2: action buttons — nowrap, scrollable if needed */}
                         {renderBatchDecisionControls(batchLineIds, batchGroupKey, 'row')}
                       </div>
                     </td>
