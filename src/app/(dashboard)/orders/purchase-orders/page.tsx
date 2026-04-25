@@ -16,6 +16,13 @@ import {
   INDUSTRIAL_PRIORITY_ROW_CLASS,
   INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
 } from '@/lib/industrial-priority-ui'
+import {
+  ACTION_PILL_BASE,
+  ICON_BUTTON_BASE,
+  ICON_BUTTON_TIGHT,
+  PUSHED_CHIP_CLASS,
+  STATUS_CHIP_BASE,
+} from '@/components/design-system/tokens'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 import { ActionBar, PageHeader } from '@/components/design-system'
 
@@ -86,6 +93,17 @@ function ageCellClass(days: number): string {
   if (days <= 3) return 'text-emerald-400'
   if (days <= 7) return 'text-ds-warning'
   return 'text-rose-400 animate-po-age-alert'
+}
+
+function shortAgeFromIso(iso: string): string {
+  const delta = Date.now() - new Date(iso).getTime()
+  if (!Number.isFinite(delta) || delta < 0) return 'just now'
+  const mins = Math.floor(delta / 60_000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
 }
 
 function MiniHubColumn({ parts }: { parts: { n: number; c: string }[] }) {
@@ -468,6 +486,9 @@ export default function PurchaseOrdersPage() {
       const paNum = a.isPriority === true ? 1 : 0
       const pbNum = b.isPriority === true ? 1 : 0
       if (pbNum !== paNum) return pbNum - paNum
+      const aPushed = a.status === 'sent_to_planning' ? 1 : 0
+      const bPushed = b.status === 'sent_to_planning' ? 1 : 0
+      if (aPushed !== bPushed) return aPushed - bPushed
       return poAgeCalendarDays(b.poDate) - poAgeCalendarDays(a.poDate)
     })
   }, [list, listFilterQuery])
@@ -798,6 +819,7 @@ export default function PurchaseOrdersPage() {
               const ageDays = poAgeCalendarDays(po.poDate)
               const readiness = po.readiness ?? EMPTY_READINESS
               const criticalAge = ageDays > 10 && po.status !== 'closed'
+              const pushedToPlanning = po.status === 'sent_to_planning'
               return (
                 <tr
                   key={po.id}
@@ -813,8 +835,10 @@ export default function PurchaseOrdersPage() {
                   className={`group/po cursor-pointer border-b border-ds-line/50 transition-[background,box-shadow] duration-150 ${
                     po.isPriority === true
                       ? INDUSTRIAL_PRIORITY_ROW_CLASS
-                      : ''
-                  } hover:bg-accent`}
+                      : pushedToPlanning
+                        ? 'bg-emerald-500/8 hover:bg-emerald-500/12'
+                        : 'hover:bg-accent'
+                  }`}
                 >
                   <td className="px-0.5 py-px align-middle text-center">
                     <button
@@ -824,7 +848,7 @@ export default function PurchaseOrdersPage() {
                       aria-label={po.isPriority === true ? 'Unpin priority' : 'Pin priority'}
                       disabled={priorityBusyId === po.id}
                       onClick={(e) => void togglePriority(po, e)}
-                      className="inline-flex rounded-md p-0.5 text-ds-ink-faint transition-colors hover:bg-ds-elevated/80 disabled:opacity-40"
+                      className={`${ICON_BUTTON_TIGHT} text-ds-ink-faint hover:bg-ds-elevated/80`}
                     >
                       <Star
                         className={`h-3.5 w-3.5 ${
@@ -891,11 +915,16 @@ export default function PurchaseOrdersPage() {
                     {(po.value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </td>
                   <td className="px-1.5 py-px align-middle">
-                    <span
-                      className={`inline-flex rounded-md px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide ${badge.className}`}
-                    >
-                      {badge.label}
-                    </span>
+                    <div className="flex flex-col items-start gap-0.5">
+                      <span className={`${STATUS_CHIP_BASE} ${badge.className}`}>
+                        {badge.label}
+                      </span>
+                      {pushedToPlanning ? (
+                        <span className={PUSHED_CHIP_CLASS}>
+                          Pushed {shortAgeFromIso(po.poDate)}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-1.5 py-px align-middle text-right">
                     <div
@@ -908,7 +937,7 @@ export default function PurchaseOrdersPage() {
                         aria-label="Download PDF"
                         disabled={pdfLoadingId === po.id}
                         onClick={(e) => void downloadPoPdf(po, e)}
-                        className="rounded-md p-1 text-ds-ink-muted transition-colors hover:bg-ds-elevated/90 disabled:opacity-40 group-hover/po:text-ds-warning hover:text-ds-warning"
+                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted group-hover/po:text-ds-warning hover:bg-ds-elevated/90 hover:text-ds-warning`}
                       >
                         <FileDown className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -929,7 +958,7 @@ export default function PurchaseOrdersPage() {
                           type="button"
                           onClick={(e) => handleConfirm(po, e)}
                           disabled={confirmingId === po.id}
-                        className="rounded px-1.5 py-px text-[9px] font-semibold bg-emerald-600 text-primary-foreground hover:bg-emerald-700 disabled:opacity-40"
+                        className={`${ACTION_PILL_BASE} min-w-0 border-transparent bg-emerald-600 px-1.5 py-px text-[9px] text-primary-foreground hover:bg-emerald-700`}
                         >
                           {confirmingId === po.id ? '…' : 'Confirm'}
                         </button>
@@ -940,7 +969,7 @@ export default function PurchaseOrdersPage() {
                         aria-label="Delete purchase order"
                         onClick={(e) => handleDelete(po, e)}
                         disabled={deletingId === po.id}
-                        className="rounded-md p-1 text-ds-ink-muted transition-colors hover:bg-red-950/50 hover:text-red-300 disabled:opacity-40 group-hover/po:text-ds-warning"
+                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted group-hover/po:text-ds-warning hover:bg-red-950/50 hover:text-red-300`}
                       >
                         <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>

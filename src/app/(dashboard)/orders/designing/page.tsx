@@ -24,10 +24,6 @@ import {
   readAwPoStatus,
   totalContractBatches,
 } from '@/lib/aw-queue-spec'
-import {
-  useCommandPalette,
-  CommandPaletteTriggerIcon,
-} from '@/components/command-palette/CommandPalette'
 import { DEFAULT_PREPRESS_AUDIT_LEAD } from '@/lib/pre-press-defaults'
 import {
   INDUSTRIAL_PRIORITY_ROW_CLASS,
@@ -37,7 +33,14 @@ import {
   broadcastIndustrialPriorityChange,
   INDUSTRIAL_PRIORITY_EVENT,
 } from '@/lib/industrial-priority-sync'
-import { readPlanningCore } from '@/lib/planning-decision-spec'
+import { PLANNING_DESIGNERS, readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
+import {
+  ACTION_PILL_NEUTRAL,
+  ICON_BUTTON_BASE,
+  ICON_BUTTON_TIGHT,
+  PUSHED_CHIP_CLASS,
+  STATUS_CHIP_BASE,
+} from '@/components/design-system/tokens'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 import { AwGroupEditDrawer } from '@/components/designing/AwGroupEditDrawer'
 
@@ -104,17 +107,8 @@ type Row = {
 type Customer = { id: string; name: string; logoUrl?: string | null }
 type User = { id: string; name: string }
 
-/** AW queue designer column filter — value is user id, or sentinel keys. */
+/** AW queue designer column filter. */
 type DesignerFilterValue = 'all' | 'unassigned' | string
-
-const DESIGNER_OPTION_AVNEET = 'Avneet Singh'
-const DESIGNER_OPTION_SHAMSHER = 'Shamsher Inder'
-
-function findUserIdByName(users: User[], displayName: string): string | null {
-  const t = displayName.trim().toLowerCase()
-  const u = users.find((x) => x.name.trim().toLowerCase() === t)
-  return u?.id ?? null
-}
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const PREPRESS_AUDIT_LEAD = DEFAULT_PREPRESS_AUDIT_LEAD
@@ -135,8 +129,7 @@ function ageClass(days: number): string {
 }
 
 function pipelineBadge(phase: Row['readiness']['pipelinePhase']) {
-  const base =
-    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ring-1'
+  const base = `${STATUS_CHIP_BASE} gap-1 ring-1`
   switch (phase) {
     case 'finalized':
       return {
@@ -163,6 +156,18 @@ function pipelineBadge(phase: Row['readiness']['pipelinePhase']) {
         pulse: false,
       }
   }
+}
+
+function shortAgeFromIso(iso: unknown): string | null {
+  if (typeof iso !== 'string' || !iso) return null
+  const delta = Date.now() - new Date(iso).getTime()
+  if (!Number.isFinite(delta) || delta < 0) return null
+  const mins = Math.floor(delta / 60_000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
 }
 
 function hashHue(name: string): number {
@@ -216,41 +221,28 @@ function CustomerAvatar({
 }
 
 function NeonCommandFilterTrigger({
-  paletteQuery,
+  searchQuery,
+  onQueryChange,
   onClearQuery,
 }: {
-  paletteQuery: string
+  searchQuery: string
+  onQueryChange: (v: string) => void
   onClearQuery: () => void
 }) {
-  const { open } = useCommandPalette()
-  const [kbd, setKbd] = useState('⌘K')
-  useEffect(() => {
-    const mac = /Mac|iPod|iPhone|iPad/i.test(navigator.userAgent)
-    setKbd(mac ? '⌘K' : 'Ctrl+K')
-  }, [])
   return (
     <div className="flex w-full max-w-2xl mx-auto items-stretch gap-2">
-      <button
-        type="button"
-        onClick={() => open()}
-        className="group min-w-0 flex-1 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-left text-sm text-card-foreground shadow-sm ring-1 ring-ring/30 transition hover:border-neutral-300 dark:border-ds-warning/40 dark:shadow-[0_0_20px_rgba(245,158,11,0.08)] dark:hover:border-ds-warning/60/70"
-        aria-label="Open command palette"
-      >
+      <label className="group min-w-0 flex-1 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-left text-sm text-card-foreground shadow-sm ring-1 ring-ring/30 transition hover:border-neutral-300 dark:border-ds-warning/40 dark:shadow-[0_0_20px_rgba(245,158,11,0.08)] dark:hover:border-ds-warning/60/70">
         <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-ds-warning" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-center text-ds-ink-faint group-hover:text-neutral-800 sm:text-left dark:text-ds-ink-muted dark:group-hover:text-ds-ink">
-          {paletteQuery.trim().length >= 2 ? (
-            <>
-              <span className="text-emerald-600 dark:text-emerald-400/90">Filtering queue:</span>{' '}
-              <span className="text-neutral-900 dark:text-ds-ink">{paletteQuery.trim()}</span>
-            </>
-          ) : (
-            <>
-              Search carton or PO # <span className="text-blue-600 dark:text-ds-warning/90">({kbd})</span>
-            </>
-          )}
-        </span>
-      </button>
-      {paletteQuery.trim().length >= 2 ? (
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => onQueryChange(e.target.value)}
+          placeholder="Search carton or PO #"
+          className="min-w-0 flex-1 bg-transparent text-center text-ds-ink-faint placeholder:text-ds-ink-faint/80 focus:outline-none sm:text-left dark:text-ds-ink-muted dark:placeholder:text-ds-ink-muted/80"
+          aria-label="Search carton or PO number in AW queue"
+        />
+      </label>
+      {searchQuery.trim().length >= 2 ? (
         <button
           type="button"
           onClick={() => onClearQuery()}
@@ -341,6 +333,26 @@ function rowIndustrialPriority(r: Row): boolean {
   return r.po.isPriority === true || r.directorPriority === true
 }
 
+function isAwPushedRow(r: Row): boolean {
+  return !!r.readiness?.prePressFinalized
+}
+
+function resolvePlanningDesignerName(
+  spec: Record<string, unknown>,
+  userById: Record<string, User>,
+): string {
+  const direct = typeof spec.planningDesignerDisplayName === 'string' ? spec.planningDesignerDisplayName.trim() : ''
+  if (direct) return direct
+  const core = readPlanningCore(spec)
+  if (core.designerKey) return PLANNING_DESIGNERS[core.designerKey] || core.designerKey
+  const meta = readPlanningMeta(spec)
+  const metaDesigner = typeof meta.designer === 'string' ? meta.designer.trim() : ''
+  if (metaDesigner) return metaDesigner
+  const assignedDesignerId = typeof spec.assignedDesignerId === 'string' ? spec.assignedDesignerId : ''
+  if (assignedDesignerId) return userById[assignedDesignerId]?.name ?? ''
+  return ''
+}
+
 function SortHeader({
   label,
   column,
@@ -411,7 +423,7 @@ function LightboxModal({ src, alt, onClose }: { src: string | null; alt: string;
 
 export default function DesigningQueuePage() {
   const router = useRouter()
-  const { paletteQuery, clearPaletteQuery } = useCommandPalette()
+  const [awSearchQuery, setAwSearchQuery] = useState('')
   const [rows, setRows] = useState<Row[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [users, setUsers] = useState<User[]>([])
@@ -475,12 +487,21 @@ export default function DesigningQueuePage() {
 
   const userById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
 
-  const avneetId = useMemo(() => findUserIdByName(users, DESIGNER_OPTION_AVNEET), [users])
-  const shamsherId = useMemo(() => findUserIdByName(users, DESIGNER_OPTION_SHAMSHER), [users])
+  const planningDesignerOptions = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const r of rows) {
+      const spec = (r.specOverrides || {}) as Record<string, unknown>
+      const name = resolvePlanningDesignerName(spec, userById).trim()
+      if (!name) continue
+      const key = name.toLowerCase()
+      if (!seen.has(key)) seen.set(key, name)
+    }
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b))
+  }, [rows, userById])
 
   const filteredRows = useMemo(() => {
     let list = rows
-    const q = paletteQuery.trim().toLowerCase()
+    const q = awSearchQuery.trim().toLowerCase()
     if (q.length >= 2) {
       list = list.filter(
         (r) =>
@@ -489,12 +510,39 @@ export default function DesigningQueuePage() {
       )
     }
     if (designerFilter === 'unassigned') {
-      list = list.filter((r) => !String(r.specOverrides?.assignedDesignerId ?? '').trim())
+      list = list.filter((r) => {
+        const spec = (r.specOverrides || {}) as Record<string, unknown>
+        return !resolvePlanningDesignerName(spec, userById)
+      })
     } else if (designerFilter !== 'all') {
-      list = list.filter((r) => r.specOverrides?.assignedDesignerId === designerFilter)
+      const wanted = designerFilter.replace(/^planning:/, '').trim().toLowerCase()
+      list = list.filter((r) => {
+        const spec = (r.specOverrides || {}) as Record<string, unknown>
+        return resolvePlanningDesignerName(spec, userById).trim().toLowerCase() === wanted
+      })
     }
     return list
-  }, [rows, paletteQuery, designerFilter])
+  }, [rows, awSearchQuery, designerFilter, userById])
+
+  const awFilterChips = useMemo(() => {
+    const chips: Array<{ key: string; label: string; onClear?: () => void }> = []
+    if (awSearchQuery.trim()) {
+      chips.push({ key: 'search', label: `Search: ${awSearchQuery.trim()}`, onClear: () => setAwSearchQuery('') })
+    }
+    if (designerFilter !== 'all') {
+      chips.push({
+        key: 'designer',
+        label: `Designer: ${designerFilter === 'unassigned' ? 'Unassigned' : designerFilter.replace(/^planning:/, '')}`,
+        onClear: () => setDesignerFilter('all'),
+      })
+    }
+    if (customerId) {
+      const c = customers.find((x) => x.id === customerId)
+      chips.push({ key: 'customer', label: `Customer: ${c?.name || customerId}`, onClear: () => setCustomerId('') })
+    }
+    if (myJobsOnly) chips.push({ key: 'my-jobs', label: 'My jobs only', onClear: () => setMyJobsOnly(false) })
+    return chips
+  }, [awSearchQuery, designerFilter, customerId, myJobsOnly, customers])
 
   const cycleSort = useCallback((column: AuditSortKey) => {
     setSortKey((prev) => {
@@ -542,6 +590,9 @@ export default function DesigningQueuePage() {
       const pa = rowIndustrialPriority(a) ? 1 : 0
       const pb = rowIndustrialPriority(b) ? 1 : 0
       if (pa !== pb) return pb - pa
+      const aPushed = isAwPushedRow(a) ? 1 : 0
+      const bPushed = isAwPushedRow(b) ? 1 : 0
+      if (aPushed !== bPushed) return aPushed - bPushed
       return cmpSecondary(a, b)
     })
     return out
@@ -725,7 +776,6 @@ export default function DesigningQueuePage() {
     <div className="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 text-card-foreground md:hidden">
         <span className="truncate text-sm font-semibold text-neutral-900 dark:text-ds-ink">Artwork queue</span>
-        <CommandPaletteTriggerIcon />
       </div>
 
       <div className="mx-auto max-w-[1600px] space-y-3 px-2 py-3 pb-10 sm:px-3">
@@ -752,8 +802,9 @@ export default function DesigningQueuePage() {
         <div className="py-1 flex flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-2">
           <div className="min-w-0 flex-1">
             <NeonCommandFilterTrigger
-              paletteQuery={paletteQuery}
-              onClearQuery={clearPaletteQuery}
+              searchQuery={awSearchQuery}
+              onQueryChange={setAwSearchQuery}
+              onClearQuery={() => setAwSearchQuery('')}
             />
           </div>
           <div className="relative flex shrink-0 items-center self-stretch sm:self-auto">
@@ -769,16 +820,55 @@ export default function DesigningQueuePage() {
               value={designerFilter}
               onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
               aria-label="Filter by designer"
-              title="Filter by designer — All Designers, Unassigned, or pick a designer"
+              title="Filter by planning designer — All, Unassigned, or planning names"
               className={`h-full min-h-[42px] w-full min-w-[12rem] appearance-none rounded-xl border border-border bg-card py-2 pl-8 pr-9 text-sm font-medium text-card-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 sm:min-w-[13.5rem] sm:min-h-0 ${
                 designerFilter !== 'all' ? 'bg-blue-50/70 hover:bg-muted/70' : 'hover:bg-muted/70'
               }`}
             >
               <option value="all">Filter by Designer…</option>
               <option value="unassigned">Unassigned</option>
-              {avneetId ? <option value={avneetId}>{DESIGNER_OPTION_AVNEET}</option> : null}
-              {shamsherId ? <option value={shamsherId}>{DESIGNER_OPTION_SHAMSHER}</option> : null}
+              {planningDesignerOptions.map((name) => (
+                <option key={name} value={`planning:${name}`}>
+                  {name}
+                </option>
+              ))}
             </select>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-ds-line/40 bg-ds-elevated/20 px-2.5 py-1.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Applied filters</span>
+              {awFilterChips.length === 0 ? (
+                <span className="text-[11px] text-ds-ink-faint">None</span>
+              ) : (
+                awFilterChips.map((chip) => (
+                  <span
+                    key={chip.key}
+                    className="inline-flex items-center gap-1 rounded border border-ds-line/60 bg-ds-main/50 px-2 py-0.5 text-[11px] text-ds-ink"
+                  >
+                    {chip.label}
+                    {chip.onClear ? (
+                      <button
+                        type="button"
+                        onClick={chip.onClear}
+                        className="text-ds-ink-faint hover:text-ds-ink"
+                        title={`Clear ${chip.key} filter`}
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </span>
+                ))
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-muted">
+              <span className="font-semibold text-ds-ink-faint">Row states:</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-warning" /> Priority</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Pushed</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-elevated ring-1 ring-ds-line/50" /> Normal</span>
+            </div>
           </div>
         </div>
 
@@ -886,16 +976,27 @@ export default function DesigningQueuePage() {
                   const totalQty = groupRows.reduce((s, r) => s + r.quantity, 0)
                   const isExpanded = expandedAwGroups.has(groupId)
                   const spec0 = (firstRow.specOverrides || {}) as Record<string, unknown>
-                  const designerId0 = spec0.assignedDesignerId as string | undefined
-                  const designerName0 = designerId0 ? (userById[designerId0]?.name ?? '—') : '—'
+                  const designerName0 = resolvePlanningDesignerName(spec0, userById) || '—'
                   const priRow0 = rowIndustrialPriority(firstRow)
                   const dQ0 = daysInQueue(firstRow.createdAt)
                   const phase0 = firstRow.readiness?.pipelinePhase ?? 'drafting'
                   const badge0 = pipelineBadge(phase0)
+                  const groupPushed = groupRows.every((r) => isAwPushedRow(r))
+                  const groupPushAge = groupPushed
+                    ? shortAgeFromIso(
+                        ((spec0.prePressSentToPlateHubAt as string | undefined) || (spec0.prePressFinalizedAt as string | undefined) || firstRow.createdAt),
+                      )
+                    : null
 
                   return (
                     <Fragment key={`aw-group:${groupId}`}>
-                      <tr className={`border-l-[3px] border-sky-500/70 bg-sky-500/5 transition-colors hover:bg-sky-500/8 ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}>
+                      <tr
+                        className={`border-l-[3px] transition-colors ${
+                          groupPushed
+                            ? 'border-emerald-500/70 bg-emerald-500/8 hover:bg-emerald-500/12'
+                            : 'border-sky-500/70 bg-sky-500/5 hover:bg-sky-500/8'
+                        } ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}
+                      >
                         {/* Preview — first item's preview */}
                         <td className="px-4 py-2 align-middle">
                           <ArtworkPreviewCell
@@ -954,6 +1055,13 @@ export default function DesigningQueuePage() {
                             <Layers className="h-3 w-3 shrink-0" aria-hidden />
                             {badge0.label}
                           </span>
+                          {groupPushAge ? (
+                            <div className="mt-0.5">
+                              <span className={PUSHED_CHIP_CLASS}>
+                                Pushed {groupPushAge}
+                              </span>
+                            </div>
+                          ) : null}
                         </td>
                         {/* Days */}
                         <td className={`px-4 py-2 align-middle text-right text-sm ${mono} ${ageClass(dQ0)}`}>
@@ -991,19 +1099,30 @@ export default function DesigningQueuePage() {
                       {/* Expanded sub-rows */}
                       {isExpanded && groupRows.map((r, si) => {
                         const spec = (r.specOverrides || {}) as Record<string, unknown>
-                        const designerId = spec.assignedDesignerId as string | undefined
-                        const designerName = designerId ? (userById[designerId]?.name ?? '—') : '—'
+                        const designerName = resolvePlanningDesignerName(spec, userById) || '—'
                         const phase = r.readiness?.pipelinePhase ?? 'drafting'
                         const badge = pipelineBadge(phase)
                         const dQ = daysInQueue(r.createdAt)
                         const approvalsDone = !!r.readiness?.approvalsComplete
                         const finalized = !!r.readiness?.prePressFinalized
+                        const pushedAge = finalized
+                          ? shortAgeFromIso(
+                              ((spec.prePressSentToPlateHubAt as string | undefined) || (spec.prePressFinalizedAt as string | undefined) || r.createdAt),
+                            )
+                          : null
                         const awPo = readAwPoStatus(spec)
                         const rowClosed = awPo === AW_PO_STATUS.CLOSED
                         const canFinalizeRow = approvalsDone && !finalized && !!(r.setNumber || '').trim() && !!(r.artworkCode || '').trim() && !rowClosed
 
                         return (
-                          <tr key={`aw-sub:${r.id}`} className="border-l-[3px] border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6 transition-colors">
+                          <tr
+                            key={`aw-sub:${r.id}`}
+                            className={`border-l-[3px] transition-colors ${
+                              finalized
+                                ? 'border-emerald-500/35 bg-emerald-500/8 hover:bg-emerald-500/12'
+                                : 'border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6'
+                            }`}
+                          >
                             <td className="px-3 py-1.5 align-middle">
                               <span className="text-[10px] text-sky-500/60">↳{si + 1}</span>
                             </td>
@@ -1021,13 +1140,20 @@ export default function DesigningQueuePage() {
                               <span className={`${badge.className} text-[10px] py-0 ${badge.pulse ? 'animate-pulse' : ''}`}>
                                 {badge.label}
                               </span>
+                              {pushedAge ? (
+                                <div className="mt-0.5">
+                                  <span className={PUSHED_CHIP_CLASS}>
+                                    Pushed {pushedAge}
+                                  </span>
+                                </div>
+                              ) : null}
                             </td>
                             <td className={`px-3 py-1.5 align-middle text-right text-xs ${mono} ${ageClass(dQ)}`}>{dQ}d</td>
                             <td className="px-3 py-1.5 align-middle">
                               <div className="flex flex-wrap items-center gap-1">
                                 <Link
                                   href={`/orders/designing/${r.id}`}
-                                  className="inline-flex items-center gap-1 rounded border border-neutral-200 bg-transparent px-1.5 py-0.5 text-xs text-neutral-800 hover:border-ds-warning/50 dark:border-border/20 dark:text-ds-ink"
+                                  className={`${ACTION_PILL_NEUTRAL} min-w-0 px-1.5 hover:border-ds-warning/50`}
                                 >
                                   <Pencil className="h-3 w-3 opacity-70" aria-hidden />
                                   Edit
@@ -1051,8 +1177,8 @@ export default function DesigningQueuePage() {
                 // ── SINGLE ROW ──────────────────────────────────────────────
                 // entry.kind === 'single' (sub rows are rendered inline in group above)
                 const r = entry.kind === 'single' ? entry.row : entry.row
-                const designerId = r.specOverrides?.assignedDesignerId
-                const designerName = designerId ? (userById[designerId]?.name ?? '—') : '—'
+                const rowSpec = (r.specOverrides || {}) as Record<string, unknown>
+                const designerName = resolvePlanningDesignerName(rowSpec, userById) || '—'
                 const approvalsDone = !!r.readiness?.approvalsComplete
                 const finalized = !!r.readiness?.prePressFinalized
                 const planningForwarded = !!r.readiness?.planningForwarded
@@ -1075,6 +1201,11 @@ export default function DesigningQueuePage() {
                 const phase = r.readiness?.pipelinePhase ?? 'drafting'
                 const dQ = daysInQueue(r.createdAt)
                 const badge = pipelineBadge(phase)
+                const pushedAge = finalized
+                  ? shortAgeFromIso(
+                      ((spec.prePressSentToPlateHubAt as string | undefined) || (spec.prePressFinalizedAt as string | undefined) || r.createdAt),
+                    )
+                  : null
                 const previewUrl = r.artworkPreviewUrl ?? null
 
                 const priRow = rowIndustrialPriority(r)
@@ -1084,6 +1215,8 @@ export default function DesigningQueuePage() {
                     className={`transition-colors ${
                       priRow
                         ? `${INDUSTRIAL_PRIORITY_ROW_CLASS} hover:bg-ds-warning/5 dark:hover:bg-ds-warning/12`
+                        : finalized
+                          ? 'border-l-2 border-emerald-500/60 bg-emerald-500/8 hover:bg-emerald-500/12'
                         : 'border-l-2 border-transparent hover:border-ds-warning hover:bg-neutral-50 dark:hover:bg-ds-elevated/50'
                     } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''}`}
                   >
@@ -1112,7 +1245,7 @@ export default function DesigningQueuePage() {
                             }
                             disabled={priorityBusyPoId === r.po.id}
                             onClick={(e) => void togglePoPriority(r, e)}
-                            className="mt-0.5 shrink-0 rounded p-0.5 text-ds-ink-faint hover:bg-neutral-100 hover:text-ds-warning disabled:opacity-40 dark:hover:bg-card/5 dark:hover:text-ds-warning"
+                            className={`mt-0.5 shrink-0 ${ICON_BUTTON_TIGHT} text-ds-ink-faint hover:bg-neutral-100 hover:text-ds-warning dark:hover:bg-card/5 dark:hover:text-ds-warning`}
                           >
                             <Star
                               className={`h-3.5 w-3.5 ${
@@ -1208,6 +1341,13 @@ export default function DesigningQueuePage() {
                         />
                         {badge.label}
                       </span>
+                      {pushedAge ? (
+                        <div className="mt-0.5">
+                          <span className={PUSHED_CHIP_CLASS}>
+                            Pushed {pushedAge}
+                          </span>
+                        </div>
+                      ) : null}
                     </td>
                     <td
                       className={`px-4 py-3 align-middle text-right text-sm font-medium ${mono} whitespace-nowrap ${ageClass(dQ)}`}
@@ -1218,7 +1358,7 @@ export default function DesigningQueuePage() {
                       <div className="flex flex-wrap items-center gap-1">
                         <Link
                           href={`/orders/designing/${r.id}`}
-                          className="inline-flex min-w-[80px] items-center justify-center gap-1 rounded border border-neutral-200 bg-transparent px-2 py-0.5 text-xs font-medium text-neutral-800 hover:border-ds-warning/50 hover:bg-ds-warning/8 dark:border-border/20 dark:text-ds-ink"
+                          className={`${ACTION_PILL_NEUTRAL} hover:border-ds-warning/50 hover:bg-ds-warning/8`}
                         >
                           <Pencil className="h-3 w-3 opacity-70" aria-hidden />
                           Edit
@@ -1228,7 +1368,7 @@ export default function DesigningQueuePage() {
                             type="button"
                             disabled={forwardingId === r.id || rowClosed}
                             onClick={() => void forwardPlanning(r)}
-                            className="min-w-[80px] rounded border border-neutral-200 bg-transparent px-2 py-0.5 text-xs font-medium text-neutral-800 hover:border-violet-400/50 hover:bg-violet-500/10 disabled:opacity-40 dark:border-border/20 dark:text-ds-ink"
+                            className={`${ACTION_PILL_NEUTRAL} hover:border-violet-400/50 hover:bg-violet-500/10`}
                           >
                             {forwardingId === r.id ? '…' : 'Forward'}
                           </button>
@@ -1238,7 +1378,7 @@ export default function DesigningQueuePage() {
                             type="button"
                             disabled={finalizingId === r.id || rowClosed}
                             onClick={() => void finalizeFromList(r)}
-                            className="min-w-[80px] rounded border border-emerald-500/40 bg-transparent px-2 py-0.5 text-xs font-medium text-emerald-800 hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-200"
+                            className={`${ACTION_PILL_NEUTRAL} border-emerald-500/40 text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-200`}
                           >
                             {finalizingId === r.id ? '…' : 'Plate Hub'}
                           </button>
@@ -1246,7 +1386,7 @@ export default function DesigningQueuePage() {
                         {finalized && (
                           <Link
                             href="/hub/plates"
-                            className="rounded border border-emerald-500/30 px-2 py-0.5 text-xs text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+                            className={`${ACTION_PILL_NEUTRAL} border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300`}
                           >
                             Plates
                           </Link>
@@ -1254,7 +1394,7 @@ export default function DesigningQueuePage() {
                         {planningForwarded && (
                           <Link
                             href="/orders/planning"
-                            className="rounded border border-emerald-500/30 px-2 py-0.5 text-xs text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+                            className={`${ACTION_PILL_NEUTRAL} border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300`}
                           >
                             Planning
                           </Link>
@@ -1269,7 +1409,7 @@ export default function DesigningQueuePage() {
                                 ? 'Recall to Planning'
                                 : 'Recall is allowed only before machine allocation / production'
                             }
-                            className={`min-w-[80px] rounded border px-2 py-0.5 text-xs disabled:opacity-40 ${
+                            className={`${ACTION_PILL_NEUTRAL} ${
                               canRecallPlanning
                                 ? 'border-rose-500/35 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300'
                                 : 'border-ds-line text-ds-warning hover:bg-ds-warning/10'
@@ -1282,7 +1422,7 @@ export default function DesigningQueuePage() {
                           href={`/api/designing/po-lines/${r.id}/job-spec-pdf`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center justify-center rounded border p-1 hover:bg-orange-500/15"
+                          className={`${ICON_BUTTON_BASE} border hover:bg-orange-500/15`}
                           style={{
                             borderColor: `${BRAND_ORANGE}99`,
                             color: BRAND_ORANGE,
@@ -1311,7 +1451,7 @@ export default function DesigningQueuePage() {
 
         {sortedRows.length === 0 && (
           <p className="py-8 text-center text-sm text-ds-ink-faint">
-            {paletteQuery.trim().length >= 2 ? 'No rows match filter.' : 'No items in designing queue.'}
+            {awSearchQuery.trim().length >= 2 ? 'No rows match filter.' : 'No items in designing queue.'}
           </p>
         )}
       </div>

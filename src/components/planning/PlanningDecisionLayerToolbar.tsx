@@ -27,18 +27,18 @@ export function PlanningDecisionLayerToolbar({
   onSetIdModeChange: (m: PlanningSetIdMode) => void
   saving?: boolean
 }) {
-  const panel = 'rounded-lg border border-ds-line/50 bg-ds-card/70 p-3 space-y-2.5 shadow-sm'
+  const panel = 'rounded-lg border border-ds-line/70 bg-ds-elevated/70 p-3 space-y-2.5 shadow-md ring-1 ring-ds-line/30'
 
-  const selectCls = `h-8 w-full min-w-[12rem] max-w-[22rem] rounded border border-ds-line/50 bg-ds-main px-2 text-[13px] text-ds-ink ${mono}`
+  const selectCls = `h-9 w-full min-w-[12rem] max-w-[22rem] rounded border border-ds-brand/35 bg-ds-main/95 px-2 text-[13px] font-medium text-ds-ink shadow-sm transition focus:border-ds-brand focus:outline-none focus:ring-2 focus:ring-ds-brand/30 ${mono}`
 
   return (
     <div className={panel}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
-          <p className={`text-[12px] font-medium uppercase tracking-wider text-ds-ink-faint ${mono}`}>
+          <p className={`text-[12px] font-semibold uppercase tracking-wider text-ds-ink ${mono}`}>
             Planning decision layer
           </p>
-          <p className="mt-0.5 max-w-[52rem] break-words text-[12px] leading-snug text-ds-ink-muted">
+          <p className="mt-0.5 max-w-[52rem] break-words text-[12px] leading-snug text-ds-ink">
             PO intake &rarr; decisions here &rarr; immutable handoff to AW Queue on save.
           </p>
         </div>
@@ -55,7 +55,7 @@ export function PlanningDecisionLayerToolbar({
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(16rem,auto)_auto_auto] lg:items-end">
         <label className="min-w-0 space-y-0.5">
-          <span className={`text-[12px] font-medium uppercase tracking-wider text-ds-ink-faint ${mono}`}>Spec sort / group</span>
+          <span className={`text-[12px] font-semibold uppercase tracking-wider text-ds-ink ${mono}`}>Spec sort / group</span>
           <select
             value={groupBy}
             onChange={(e) => onGroupByChange(e.target.value as PlanningGroupBy)}

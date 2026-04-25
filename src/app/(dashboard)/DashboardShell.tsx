@@ -28,7 +28,9 @@ export function DashboardShell({
   const userRole = session?.user?.role as string | undefined
   const canSeeMasters = userRole === 'operations_head' || userRole === 'md'
   const hideGlobalCommandBar =
-    pathname === '/orders/purchase-orders' || pathname === '/orders/designing'
+    pathname === '/orders/purchase-orders' ||
+    pathname === '/orders/designing' ||
+    pathname === '/orders/planning'
 
   useEffect(() => {
     setMobileMenuOpen(false)

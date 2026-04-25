@@ -20,6 +20,7 @@ import {
   readPlanningMeta,
   type PlanningDesignerKey,
 } from '@/lib/planning-decision-spec'
+import { ACTION_PILL_BASE, ICON_BUTTON_BASE, PUSHED_CHIP_CLASS, STATUS_CHIP_BASE } from '@/components/design-system/tokens'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 
 const cellBase = `align-middle border-b border-ds-line/30 text-[13px] text-ds-ink min-h-[36px] px-2 py-1`
@@ -29,15 +30,15 @@ const inp =
   'h-7 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[13px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
 
 const batchBtnApprove =
-  'rounded bg-sky-800/90 px-1.5 py-px text-[10px] font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
+  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-transparent bg-sky-800/90 px-1.5 py-px text-[10px] text-white hover:bg-sky-700 disabled:cursor-not-allowed`
 const batchBtnHold =
-  'rounded bg-ds-warning/20 px-1.5 py-px text-[10px] font-medium text-ds-warning hover:bg-ds-warning/30 disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
+  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-transparent bg-ds-warning/20 px-1.5 py-px text-[10px] text-ds-warning hover:bg-ds-warning/30 disabled:cursor-not-allowed`
 const batchBtnArtwork =
-  'rounded bg-violet-800/90 px-1.5 py-px text-[10px] font-medium text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
+  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-transparent bg-violet-800/90 px-1.5 py-px text-[10px] text-white hover:bg-violet-700 disabled:cursor-not-allowed`
 const batchBtnProduction =
-  'rounded bg-emerald-800/90 px-1.5 py-px text-[10px] font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
+  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-transparent bg-emerald-800/90 px-1.5 py-px text-[10px] text-white hover:bg-emerald-700 disabled:cursor-not-allowed`
 const batchBtnResume =
-  'rounded border border-ds-line/60 bg-ds-elevated/90 px-1.5 py-px text-[10px] text-ds-ink hover:bg-ds-elevated disabled:cursor-not-allowed disabled:opacity-40 shrink-0'
+  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-ds-line/60 bg-ds-elevated/90 px-1.5 py-px text-[10px] text-ds-ink hover:bg-ds-elevated disabled:cursor-not-allowed`
 
 function firstSpecCoreForGroup(
   rows: PlanningGridLine[],
@@ -51,6 +52,19 @@ function firstSpecCoreForGroup(
       unknown
     >,
   )
+}
+
+function timeAgoShort(dateLike: unknown): string | null {
+  if (typeof dateLike !== 'string' || !dateLike) return null
+  const ms = Date.now() - new Date(dateLike).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  const sec = Math.floor(ms / 1000)
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  return `${Math.floor(hr / 24)}d ago`
 }
 
 export type PlanningGridLine = {
@@ -295,6 +309,7 @@ function coalescePackageRows(sorted: PlanningGridLine[]): PlanningGridLine[] {
 export function PlanningDecisionGrid({
   rows,
   ledgerView,
+  recentlyPushedIds = new Set<string>(),
   planningSelection,
   setPlanningSelection,
   onRowBackgroundClick,
@@ -309,6 +324,7 @@ export function PlanningDecisionGrid({
 }: {
   rows: PlanningGridLine[]
   ledgerView: 'pending' | 'processed'
+  recentlyPushedIds?: Set<string>
   planningSelection: Set<string>
   setPlanningSelection: React.Dispatch<React.SetStateAction<Set<string>>>
   onRowBackgroundClick: (lineId: string) => void
@@ -386,10 +402,10 @@ export function PlanningDecisionGrid({
   const viewRows = useMemo(() => {
     return rows.filter((r) => {
       const pending = r.planningStatus === 'pending'
-      if (ledgerView === 'pending') return pending
+      if (ledgerView === 'pending') return pending || recentlyPushedIds.has(r.id)
       return !pending
     })
-  }, [rows, ledgerView])
+  }, [rows, ledgerView, recentlyPushedIds])
 
   const filtered = useMemo(() => {
     const match = (hay: string, needle: string) =>
@@ -418,8 +434,17 @@ export function PlanningDecisionGrid({
 
   const sorted = useMemo(() => {
     const base = sortLines(filtered, sortKey, sortDir)
-    return coalescePackageRows(base)
-  }, [filtered, sortKey, sortDir])
+    const bucketed =
+      ledgerView === 'pending'
+        ? [...base].sort((a, b) => {
+            const aPushed = recentlyPushedIds.has(a.id) && a.planningStatus !== 'pending' ? 1 : 0
+            const bPushed = recentlyPushedIds.has(b.id) && b.planningStatus !== 'pending' ? 1 : 0
+            if (aPushed !== bPushed) return aPushed - bPushed
+            return 0
+          })
+        : base
+    return coalescePackageRows(bucketed)
+  }, [filtered, sortKey, sortDir, ledgerView, recentlyPushedIds])
 
   // Reset to page 0 when filters/sort/view change
   const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize))
@@ -454,6 +479,32 @@ export function PlanningDecisionGrid({
   }
 
   const isProcessedRow = (r: PlanningGridLine) => r.planningStatus !== 'pending'
+  const selectableRowIds = useMemo(
+    () => paginated.filter((r) => !isProcessedRow(r)).map((r) => r.id),
+    [paginated],
+  )
+  const allPageSelected =
+    selectableRowIds.length > 0 && selectableRowIds.every((id) => planningSelection.has(id))
+  const somePageSelected = selectableRowIds.some((id) => planningSelection.has(id))
+
+  const recallGroupToPlanning = async (groupRows: PlanningGridLine[]) => {
+    if (!groupRows.length) return
+    let successCount = 0
+    let failCount = 0
+    for (const row of groupRows) {
+      try {
+        await onRecallLine(row.id)
+        successCount += 1
+      } catch {
+        failCount += 1
+      }
+    }
+    if (failCount > 0) {
+      toast.error(`Recalled ${successCount}/${groupRows.length} item(s)`)
+      return
+    }
+    toast.success(`Recalled ${successCount} item${successCount === 1 ? '' : 's'} to planning`)
+  }
 
   const renderBatchDecisionControls = (
     lineIds: string[],
@@ -783,6 +834,26 @@ export function PlanningDecisionGrid({
               >
                 <div className="flex flex-col items-center gap-0.5">
                   <span>#</span>
+                  {selectableRowIds.length > 0 ? (
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 accent-ds-brand"
+                      checked={allPageSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = somePageSelected && !allPageSelected
+                      }}
+                      onChange={() => {
+                        setPlanningSelection((prev) => {
+                          const next = new Set(prev)
+                          if (allPageSelected) selectableRowIds.forEach((id) => next.delete(id))
+                          else selectableRowIds.forEach((id) => next.add(id))
+                          return next
+                        })
+                      }}
+                      title={allPageSelected ? 'Deselect all rows on this page' : 'Select all rows on this page'}
+                      aria-label={allPageSelected ? 'Deselect all rows on this page' : 'Select all rows on this page'}
+                    />
+                  ) : null}
                   {planningSelection.size > 0 ? (
                     <span
                       className="rounded border border-ds-brand/35 bg-ds-brand/10 px-1 py-0 text-[9px] font-medium text-ds-brand"
@@ -895,12 +966,20 @@ export function PlanningDecisionGrid({
                 const someGroupSel = groupRows.some((r) => planningSelection.has(r.id))
                 const allSizes = Array.from(new Set(groupRows.map((r) => String(r.cartonSize ?? '').trim())))
                 const sizeDisplay = allSizes.length === 1 ? allSizes[0]! : 'Mixed'
+                const groupProcessed = groupRows.every((r) => isProcessedRow(r))
+                const groupPushedInPending =
+                  ledgerView === 'pending' &&
+                  groupRows.every((r) => recentlyPushedIds.has(r.id) && r.planningStatus !== 'pending')
 
                 return (
                   <Fragment key={`group:${groupId}`}>
                     <tr
                       className={`border-l-[3px] border-ds-brand transition-colors ${
-                        someGroupSel ? 'bg-ds-brand/12' : 'bg-ds-brand/6 hover:bg-ds-brand/10'
+                        groupPushedInPending
+                          ? 'bg-ds-success/12 hover:bg-ds-success/16'
+                          : someGroupSel
+                            ? 'bg-ds-brand/12'
+                            : 'bg-ds-brand/6 hover:bg-ds-brand/10'
                       }`}
                     >
                       {/* # + group checkbox */}
@@ -909,20 +988,34 @@ export function PlanningDecisionGrid({
                       >
                         <div className="flex flex-col items-center gap-0.5">
                           <span className="text-[9px] font-bold text-ds-brand">{pIdx + 1}</span>
-                          <input
-                            type="checkbox"
-                            className="h-3.5 w-3.5 accent-ds-brand"
-                            checked={allGroupSel}
-                            ref={(el) => { if (el) el.indeterminate = someGroupSel && !allGroupSel }}
-                            onChange={() => {
-                              setPlanningSelection((prev) => {
-                                const next = new Set(prev)
-                                if (allGroupSel) groupRows.forEach((r) => next.delete(r.id))
-                                else groupRows.forEach((r) => next.add(r.id))
-                                return next
-                              })
-                            }}
-                          />
+                          {groupProcessed ? (
+                            <button
+                              type="button"
+                              title="Recall full group from AW — returns all group lines to pending planning"
+                              className={`${ICON_BUTTON_BASE} h-7 w-7 rounded-ds-sm border border-ds-success/40 bg-ds-success/10 text-ds-ink duration-200 hover:border-ds-success/60 hover:bg-ds-success/15`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void recallGroupToPlanning(groupRows)
+                              }}
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                            </button>
+                          ) : (
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5 accent-ds-brand"
+                              checked={allGroupSel}
+                              ref={(el) => { if (el) el.indeterminate = someGroupSel && !allGroupSel }}
+                              onChange={() => {
+                                setPlanningSelection((prev) => {
+                                  const next = new Set(prev)
+                                  if (allGroupSel) groupRows.forEach((r) => next.delete(r.id))
+                                  else groupRows.forEach((r) => next.add(r.id))
+                                  return next
+                                })
+                              }}
+                            />
+                          )}
                         </div>
                       </td>
 
@@ -992,7 +1085,7 @@ export function PlanningDecisionGrid({
                       <td className={`${cellBase} min-w-0 align-middle overflow-visible`}>
                         <div className="flex min-w-0 flex-col items-end gap-0.5" onClick={(e) => e.stopPropagation()}>
                           <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-                            <span className={`inline-flex shrink-0 rounded border px-1 py-px text-[9px] font-bold leading-none ${BATCH_STATUS_BADGE_CLASS[bStatus0]}`}>
+                            <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus0]}`}>
                               {BATCH_STATUS_LABEL[bStatus0]}
                             </span>
                             <span className="text-[9px] text-ds-ink-faint">{(planCore0.masterSetId ?? '').slice(0, 10)}</span>
@@ -1028,9 +1121,17 @@ export function PlanningDecisionGrid({
                 const brd = boardLabel(r)
                 const upsNum = typeof pm.ups === 'number' && Number.isFinite(pm.ups) && pm.ups >= 1 ? pm.ups : null
                 const designerLabelSub = designerHandoffLabel(spec, planCore)
+                const subPushedInPending =
+                  ledgerView === 'pending' &&
+                  recentlyPushedIds.has(r.id) &&
+                  r.planningStatus !== 'pending'
                 return (
                   <Fragment key={`sub:${r.id}`}>
-                    <tr className="border-l-[3px] border-ds-brand/40 bg-ds-brand/3 hover:bg-ds-brand/6 transition-colors">
+                    <tr
+                      className={`border-l-[3px] border-ds-brand/40 transition-colors ${
+                        subPushedInPending ? 'bg-ds-success/10 hover:bg-ds-success/15' : 'bg-ds-brand/3 hover:bg-ds-brand/6'
+                      }`}
+                    >
                       <td
                         className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 border-b border-ds-line/20 border-r border-ds-brand/20 bg-ds-brand/5 px-0 text-center`}
                       >
@@ -1114,6 +1215,16 @@ export function PlanningDecisionGrid({
               const upsNum = typeof pm.ups === 'number' && Number.isFinite(pm.ups) && pm.ups >= 1 ? pm.ups : null
               const upsFinal = upsNum != null
               const recallHighlight = highlightedRowId === r.id
+              const pushedInPending =
+                ledgerView === 'pending' &&
+                recentlyPushedIds.has(r.id) &&
+                r.planningStatus !== 'pending'
+              const pushedTimeLabel = pushedInPending
+                ? timeAgoShort(
+                    ((r.specOverrides || {}) as Record<string, unknown>).planningMakeProcessingAt ??
+                      ((r.specOverrides || {}) as Record<string, unknown>).awQueueHandoffAt,
+                  )
+                : null
               const rowActionFeedback = actionFeedbackByLineId[r.id]
               const prev = idx > 0 ? sorted[idx - 1] : null
               const prevSpec = prev ? ((prev.specOverrides || {}) as Record<string, unknown>) : null
@@ -1129,6 +1240,8 @@ export function PlanningDecisionGrid({
                     className={`${dataTable.tr.body} ${dataTable.tr.hover} ${
                       recallHighlight
                         ? 'bg-ds-success/15 ring-1 ring-inset ring-ds-success/35'
+                        : pushedInPending
+                          ? 'bg-ds-success/12'
                         : rowSel
                           ? dataTable.tr.selected
                           : sameBatchAsPrev
@@ -1140,7 +1253,11 @@ export function PlanningDecisionGrid({
                   >
                     <td
                       className={`${dataTable.th} sticky left-0 z-10 w-10 min-w-0 max-w-10 border-b border-ds-line/30 border-r border-ds-line/50 px-0 text-center ${
-                        recallHighlight ? 'bg-ds-success/15' : 'bg-ds-elevated'
+                        recallHighlight
+                          ? 'bg-ds-success/15'
+                          : pushedInPending
+                            ? 'bg-ds-success/12'
+                            : 'bg-ds-elevated'
                       }`}
                     >
                       <div className="flex flex-col items-center gap-0.5">
@@ -1149,7 +1266,7 @@ export function PlanningDecisionGrid({
                           <button
                             type="button"
                             title="Recall from AW — returns line to pending planning"
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-ds-sm border border-ds-success/40 bg-ds-success/10 text-ds-ink transition duration-200 hover:border-ds-success/60 hover:bg-ds-success/15"
+                            className={`${ICON_BUTTON_BASE} h-7 w-7 rounded-ds-sm border border-ds-success/40 bg-ds-success/10 text-ds-ink duration-200 hover:border-ds-success/60 hover:bg-ds-success/15`}
                             onClick={(e) => {
                               e.stopPropagation()
                               void onRecallLine(r.id)
@@ -1300,11 +1417,7 @@ export function PlanningDecisionGrid({
                       <div className="flex min-w-0 flex-col items-end gap-0.5" onClick={(e) => e.stopPropagation()}>
                         {/* Row 1: status badge · type · PO · quick meta */}
                         <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-                          <span
-                            className={`inline-flex shrink-0 rounded border px-1 py-px text-[9px] font-bold leading-none ${
-                              BATCH_STATUS_BADGE_CLASS[bStatus]
-                            }`}
-                          >
+                          <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus]}`}>
                             {BATCH_STATUS_LABEL[bStatus]}
                           </span>
                           <span className={`text-[9px] font-medium ${batchTypeClass}`}>
@@ -1329,6 +1442,11 @@ export function PlanningDecisionGrid({
                           ) : null}
                           {isReadyForArtwork ? (
                             <span className="text-[9px] font-semibold text-ds-success">✓ AW ready</span>
+                          ) : null}
+                          {pushedTimeLabel ? (
+                            <span className={PUSHED_CHIP_CLASS}>
+                              Pushed {pushedTimeLabel}
+                            </span>
                           ) : null}
                           {rowActionFeedback ? (
                             <span

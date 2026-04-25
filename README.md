@@ -16,6 +16,9 @@ Solves two critical operational problems:
 - **Notifications**: Wati (WhatsApp Business)
 - **Deploy**: Vercel
 
+### UI Conventions
+- Shared chip/action/icon token usage guide: **[docs/ui-token-conventions.md](./docs/ui-token-conventions.md)**
+
 ---
 
 ## STEP 1 — Prerequisites (Install Once)

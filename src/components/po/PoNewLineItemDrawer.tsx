@@ -76,11 +76,14 @@ function computeChargeableQty(quantity: string, wastagePct: string) {
 }
 
 const labelSec =
-  'ds-typo-label mb-1.5 block font-semibold uppercase tracking-wider text-ds-ink-faint'
+  'ds-typo-label mb-1.5 block font-semibold uppercase tracking-wider text-ds-ink-muted'
 const labelKey = 'ds-typo-label mb-1.5 block text-[13px] font-semibold text-ds-ink'
+
+const inputReadable = '[&::placeholder]:text-ds-ink-muted/90 [&::placeholder]:opacity-100 text-ds-ink'
 
 const comboboxControl = 'border-ds-line/80 bg-ds-elevated/50'
 const comboboxInput = 'text-[15px] text-ds-ink'
+const comboboxOptionReadable = 'text-[13px]'
 
 export function PoNewLineItemDrawer({
   isOpen,
@@ -222,6 +225,7 @@ export function PoNewLineItemDrawer({
                     onChange={(v) => updateLine(lineIndex, { boardGrade: v ?? '' })}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
+                    optionClassName={comboboxOptionReadable}
                     className="w-full"
                   />
                 </div>
@@ -239,7 +243,7 @@ export function PoNewLineItemDrawer({
                   }
                   className={`w-full ${
                     line.ghostFromMaster.gsm ? inputClsGhost : inputCls
-                  } ${poMono}`}
+                  } ${poMono} ${inputReadable}`}
                 />
               </div>
               <div>
@@ -252,6 +256,7 @@ export function PoNewLineItemDrawer({
                     onChange={(v) => updateLine(lineIndex, { paperType: v ?? '' })}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
+                    optionClassName={comboboxOptionReadable}
                     className="w-full"
                   />
                 </div>
@@ -269,6 +274,7 @@ export function PoNewLineItemDrawer({
                     onChange={(v) => updateLine(lineIndex, { coatingType: v ?? '' })}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
+                    optionClassName={comboboxOptionReadable}
                     className="w-full"
                   />
                 </div>
@@ -283,6 +289,7 @@ export function PoNewLineItemDrawer({
                     onChange={(v) => updateLine(lineIndex, { embossingLeafing: v ?? '' })}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
+                    optionClassName={comboboxOptionReadable}
                     className="w-full"
                   />
                 </div>
@@ -335,7 +342,7 @@ export function PoNewLineItemDrawer({
                     min={1}
                     value={line.quantity}
                     onChange={(e) => updateLine(lineIndex, { quantity: e.target.value })}
-                    className={`w-full !text-base !font-semibold tabular-nums !text-ds-ink ${inputCls} ${poMono}`}
+                    className={`w-full !text-base !font-semibold tabular-nums !text-ds-ink ${inputCls} ${poMono} ${inputReadable}`}
                   />
                 </div>
                 <div>
@@ -355,7 +362,7 @@ export function PoNewLineItemDrawer({
                     }
                     className={`w-full !text-base !font-semibold tabular-nums ${
                       line.ghostFromMaster.rate ? `${inputClsGhost} !text-ds-ink-muted` : `${inputCls} !text-ds-ink`
-                    } ${poMono} ${fieldErrors[`line${lineIndex}_rate`] ? inputErr : ''}`}
+                    } ${poMono} ${inputReadable} ${fieldErrors[`line${lineIndex}_rate`] ? inputErr : ''}`}
                     title={line.ghostFromMaster.rate ? 'From Product Master — edit to override' : undefined}
                   />
                 </div>
@@ -369,7 +376,7 @@ export function PoNewLineItemDrawer({
                     step={0.5}
                     value={line.wastagePct}
                     onChange={(e) => updateLine(lineIndex, { wastagePct: e.target.value })}
-                    className={`w-full text-sm text-ds-ink-muted ${inputCls} ${poMono}`}
+                    className={`w-full text-sm text-ds-ink-muted ${inputCls} ${poMono} ${inputReadable}`}
                   />
                   {chQty > 0 && (Number(line.wastagePct) || 0) > 0 ? (
                     <p className="mt-1.5 text-[10px] text-ds-ink-faint">
@@ -388,7 +395,7 @@ export function PoNewLineItemDrawer({
                     max={28}
                     value={line.gstPct}
                     onChange={(e) => updateLine(lineIndex, { gstPct: e.target.value })}
-                    className={`w-full text-sm text-ds-ink-muted ${inputCls} ${poMono}`}
+                    className={`w-full text-sm text-ds-ink-muted ${inputCls} ${poMono} ${inputReadable}`}
                   />
                 </div>
               </div>
@@ -422,7 +429,7 @@ export function PoNewLineItemDrawer({
                   <select
                     value={line.backPrint}
                     onChange={(e) => updateLine(lineIndex, { backPrint: e.target.value })}
-                    className={`w-full text-sm text-ds-ink-muted ${inputCls}`}
+                    className={`w-full text-sm text-ds-ink-muted ${inputCls} ${inputReadable}`}
                   >
                     <option value="No">No</option>
                     <option value="Yes">Yes</option>
@@ -434,7 +441,7 @@ export function PoNewLineItemDrawer({
                     type="text"
                     value={line.artworkCode}
                     onChange={(e) => updateLine(lineIndex, { artworkCode: e.target.value })}
-                    className={`w-full font-mono text-xs text-ds-ink-muted ${inputCls}`}
+                    className={`w-full font-mono text-xs text-ds-ink-muted ${inputCls} ${inputReadable}`}
                   />
                 </div>
                 <div>
@@ -443,7 +450,7 @@ export function PoNewLineItemDrawer({
                     rows={3}
                     value={line.remarks}
                     onChange={(e) => updateLine(lineIndex, { remarks: e.target.value })}
-                    className={`w-full min-h-[5rem] resize-y text-sm text-ds-ink ${inputCls}`}
+                    className={`w-full min-h-[5rem] resize-y text-sm text-ds-ink ${inputCls} ${inputReadable}`}
                   />
                 </div>
               </div>

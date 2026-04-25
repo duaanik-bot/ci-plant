@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { CornerDownLeft, History, Package, Search } from 'lucide-react'
 import type {
@@ -377,6 +377,10 @@ function CommandPaletteModal({
 export function CommandPaletteProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false)
   const [paletteQuery, setPaletteQuery] = useState('')
+  const pathname = usePathname()
+  const hotkeyDisabled =
+    pathname === '/orders/planning' ||
+    pathname === '/orders/designing'
   const value = useMemo(
     () => ({
       open: () => setOpen(true),
@@ -387,6 +391,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   )
 
   useEffect(() => {
+    if (hotkeyDisabled) return
     const onKey = (e: KeyboardEvent) => {
       const isK = e.key === 'k' || e.key === 'K'
       if ((e.metaKey || e.ctrlKey) && isK) {
@@ -396,7 +401,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [hotkeyDisabled])
 
   return (
     <CommandPaletteContext.Provider value={value}>

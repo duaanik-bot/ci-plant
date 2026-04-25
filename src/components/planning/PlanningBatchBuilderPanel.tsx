@@ -10,6 +10,7 @@ import {
 } from '@/components/planning/PlanningDecisionGrid'
 import {
   generateMasterSetId,
+  PLANNING_DESIGNERS,
   mergePlanningMetaDesigner,
   mergePlanningMetaUps,
   readPlanningCore,
@@ -162,6 +163,7 @@ type Props = {
   onMakeProcessingBatch: (lineIds: string[], opts?: { suppressToast?: boolean }) => Promise<boolean>
   onRemoveFromSelection: (lineId: string) => void
   onClearSelection: () => void
+  onRestoreSelection: (lineIds: string[]) => void
   onClose: () => void
 }
 
@@ -175,11 +177,15 @@ export function PlanningBatchBuilderPanel({
   onMakeProcessingBatch,
   onRemoveFromSelection,
   onClearSelection,
+  onRestoreSelection,
   onClose,
 }: Props) {
   const compatRows = useMemo(() => buildCompatibilityRows(lines), [lines])
   const hasAnyMixed = compatRows.some((r) => r.mixed)
   const [designer, setDesigner] = useState('')
+  const [sheetLengthMm, setSheetLengthMm] = useState('')
+  const [sheetWidthMm, setSheetWidthMm] = useState('')
+  const [specialRemarks, setSpecialRemarks] = useState('')
   const [sendingToArtwork, setSendingToArtwork] = useState(false)
   const [makingProcessing, setMakingProcessing] = useState(false)
 
@@ -192,6 +198,24 @@ export function PlanningBatchBuilderPanel({
       if (md) choices.add(md)
     }
     setDesigner(choices.size === 1 ? Array.from(choices)[0]! : '')
+  }, [lines])
+
+  useEffect(() => {
+    const lenVals = new Set<string>()
+    const widVals = new Set<string>()
+    const remarkVals = new Set<string>()
+    for (const li of lines) {
+      const spec = (li.specOverrides || {}) as Record<string, unknown>
+      const l = Number(spec.sheetLengthMm)
+      const w = Number(spec.sheetWidthMm)
+      const sr = typeof spec.specialRemarks === 'string' ? spec.specialRemarks.trim() : ''
+      if (Number.isFinite(l) && l > 0) lenVals.add(String(Math.floor(l)))
+      if (Number.isFinite(w) && w > 0) widVals.add(String(Math.floor(w)))
+      if (sr) remarkVals.add(sr)
+    }
+    setSheetLengthMm(lenVals.size === 1 ? Array.from(lenVals)[0]! : '')
+    setSheetWidthMm(widVals.size === 1 ? Array.from(widVals)[0]! : '')
+    setSpecialRemarks(remarkVals.size === 1 ? Array.from(remarkVals)[0]! : '')
   }, [lines])
 
   const totalQty = useMemo(
@@ -241,6 +265,31 @@ export function PlanningBatchBuilderPanel({
     }
   }
 
+  const applyDrawerLevelFieldsToBatch = async () => {
+    const lengthVal = sheetLengthMm.trim()
+    const widthVal = sheetWidthMm.trim()
+    const remarksVal = specialRemarks.trim()
+    for (const li of lines) {
+      const spec = (li.specOverrides || {}) as Record<string, unknown>
+      const next = { ...spec } as Record<string, unknown>
+      const l = lengthVal === '' ? null : parseInt(lengthVal, 10)
+      const w = widthVal === '' ? null : parseInt(widthVal, 10)
+      if (Number.isFinite(l) && (l as number) > 0) next.sheetLengthMm = l as number
+      else delete next.sheetLengthMm
+      if (Number.isFinite(w) && (w as number) > 0) next.sheetWidthMm = w as number
+      else delete next.sheetWidthMm
+      if (remarksVal) next.specialRemarks = remarksVal
+      else delete next.specialRemarks
+
+      const patch: PlanningLineFieldPatch = {
+        specOverrides: next,
+        remarks: remarksVal || null,
+      }
+      updateRow(li.id, { specOverrides: next, remarks: remarksVal || null })
+      await onSaveLine(li.id, patch)
+    }
+  }
+
   const handleSendToArtwork = async () => {
     if (lines.length === 0) return
     setSendingToArtwork(true)
@@ -248,6 +297,7 @@ export function PlanningBatchBuilderPanel({
       await ensureBatchPackageTag()
       const designerName = designer.trim()
       if (designerName) await applyDesignerToBatch(designerName)
+      await applyDrawerLevelFieldsToBatch()
       const withLatest = lines.map((li) => {
         const spec = (li.specOverrides || {}) as Record<string, unknown>
         const meta = readPlanningMeta(spec)
@@ -279,6 +329,7 @@ export function PlanningBatchBuilderPanel({
     try {
       const designerName = designer.trim()
       if (designerName) await applyDesignerToBatch(designerName)
+      await applyDrawerLevelFieldsToBatch()
       const withLatest = lines.map((li) => {
         const spec = (li.specOverrides || {}) as Record<string, unknown>
         const meta = readPlanningMeta(spec)
@@ -320,9 +371,17 @@ export function PlanningBatchBuilderPanel({
           <button
             type="button"
             onClick={async () => {
+              const previous = lines.map((l) => l.id)
               await ensureBatchPackageTag()
+              await applyDrawerLevelFieldsToBatch()
               onCreateBatch()
               toast.success('Group tagged as one package')
+              toast.message('Applied to selected group', {
+                action: {
+                  label: 'Undo',
+                  onClick: () => onRestoreSelection(previous),
+                },
+              })
             }}
             className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-ds-warning px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-warning/90"
           >
@@ -347,7 +406,16 @@ export function PlanningBatchBuilderPanel({
           </button>
           <button
             type="button"
-            onClick={onClearSelection}
+            onClick={() => {
+              const previous = lines.map((l) => l.id)
+              onClearSelection()
+              toast.message('Selection cleared', {
+                action: {
+                  label: 'Undo',
+                  onClick: () => onRestoreSelection(previous),
+                },
+              })
+            }}
             className="w-full rounded-lg border border-input bg-background py-2 text-xs text-muted-foreground transition-colors hover:bg-accent/10"
           >
             Clear selection
@@ -386,16 +454,71 @@ export function PlanningBatchBuilderPanel({
           </label>
           <select
             id="batch-designer"
-            className="ds-input h-8 w-full text-[13px]"
+            className="h-9 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-[13px] font-medium text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
             value={designer}
             onChange={(e) => {
               void applyDesignerToBatch(e.target.value)
             }}
           >
-            <option value="">Select Designer</option>
-            <option value="Avneet Singh">Avneet Singh</option>
-            <option value="Shamsher Inder">Shamsher Inder</option>
+            <option value="">Select designer…</option>
+            <option value={PLANNING_DESIGNERS.avneet_singh}>{PLANNING_DESIGNERS.avneet_singh}</option>
+            <option value={PLANNING_DESIGNERS.shamsher_inder}>{PLANNING_DESIGNERS.shamsher_inder}</option>
           </select>
+          <p className={`mt-1 text-[10px] text-ds-ink-faint ${mono}`}>Designer is applied across all selected jobs.</p>
+        </div>
+
+        <div className="rounded-md border border-ds-line/40 bg-ds-elevated/20 px-3 py-2">
+          <p className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            Drawer-level carry forward
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div>
+              <label htmlFor="batch-sheet-length" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+                Sheet length (mm)
+              </label>
+              <input
+                id="batch-sheet-length"
+                type="number"
+                min={1}
+                step={1}
+                value={sheetLengthMm}
+                onChange={(e) => setSheetLengthMm(e.target.value)}
+                placeholder="e.g. 720"
+                className="h-9 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+              />
+            </div>
+            <div>
+              <label htmlFor="batch-sheet-width" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+                Sheet width (mm)
+              </label>
+              <input
+                id="batch-sheet-width"
+                type="number"
+                min={1}
+                step={1}
+                value={sheetWidthMm}
+                onChange={(e) => setSheetWidthMm(e.target.value)}
+                placeholder="e.g. 1020"
+                className="h-9 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+              />
+            </div>
+          </div>
+          <div className="mt-2">
+            <label htmlFor="batch-special-remarks" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              Special remarks (carry forward)
+            </label>
+            <textarea
+              id="batch-special-remarks"
+              value={specialRemarks}
+              onChange={(e) => setSpecialRemarks(e.target.value)}
+              placeholder="Enter special manufacturing/planning remarks..."
+              rows={3}
+              className="w-full resize-y rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 py-1.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+            />
+          </div>
+          <p className={`mt-1 text-[10px] text-ds-ink-faint ${mono}`}>
+            Saved to selected lines on Create group / Send to Artwork / Make Processing.
+          </p>
         </div>
 
         <div>
@@ -480,7 +603,14 @@ export function PlanningBatchBuilderPanel({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation()
+                      const previous = lines.map((l) => l.id)
                       onRemoveFromSelection(r.id)
+                      toast.message('Removed from selection', {
+                        action: {
+                          label: 'Undo',
+                          onClick: () => onRestoreSelection(previous),
+                        },
+                      })
                     }}
                     className="shrink-0 rounded p-0.5 text-ds-ink-faint transition-colors hover:bg-accent/20 hover:text-rose-300"
                     title="Remove from selection"

@@ -368,6 +368,8 @@ export default function PlanningPage() {
   const [savingPlanningHandoff, setSavingPlanningHandoff] = useState(false)
   const [batchActionBusy, setBatchActionBusy] = useState(false)
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set())
+  const [recentlyPushedIds, setRecentlyPushedIds] = useState<Set<string>>(new Set())
+  const [planningSearchQuery, setPlanningSearchQuery] = useState('')
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -548,6 +550,45 @@ export default function PlanningPage() {
     )
   }
 
+  const moduleFilteredRows = useMemo(() => {
+    const q = planningSearchQuery.trim().toLowerCase()
+    if (q.length < 2) return rows
+    return rows.filter((r) => {
+      const carton = String(r.cartonName || '').toLowerCase()
+      const po = String(r.po?.poNumber || '').toLowerCase()
+      return carton.includes(q) || po.includes(q)
+    })
+  }, [rows, planningSearchQuery])
+
+  const planningFilterChips = useMemo(() => {
+    const chips: Array<{ key: string; label: string; onClear?: () => void }> = []
+    if (planningSearchQuery.trim()) {
+      chips.push({ key: 'search', label: `Search: ${planningSearchQuery.trim()}`, onClear: () => setPlanningSearchQuery('') })
+    }
+    if (customerId) {
+      const customer = customerSearch.lastUsed.find((c) => c.id === customerId)
+      chips.push({ key: 'customer', label: `Customer: ${customer?.name || customerId}`, onClear: () => applyCustomer(null) })
+    }
+    chips.push({ key: 'view', label: `View: ${ledgerView === 'pending' ? 'Pending' : 'Processed'}` })
+    return chips
+  }, [planningSearchQuery, customerId, customerSearch.lastUsed, ledgerView])
+
+  const markRecentlyPushed = useCallback((lineIds: string[]) => {
+    if (lineIds.length === 0) return
+    setRecentlyPushedIds((prev) => {
+      const next = new Set(prev)
+      lineIds.forEach((id) => next.add(id))
+      return next
+    })
+    window.setTimeout(() => {
+      setRecentlyPushedIds((prev) => {
+        const next = new Set(prev)
+        lineIds.forEach((id) => next.delete(id))
+        return next
+      })
+    }, 60_000)
+  }, [])
+
   const linkLineIdsAsMixSet = useCallback(
     (ids: string[]) => {
       if (ids.length < 2) {
@@ -583,7 +624,7 @@ export default function PlanningPage() {
   }, [planningSelection, linkLineIdsAsMixSet])
 
   const suggestableLines = useMemo((): SuggestableLine[] => {
-    const view = rows.filter((r) => {
+    const view = moduleFilteredRows.filter((r) => {
       const pending = r.planningStatus === 'pending'
       return ledgerView === 'pending' ? pending : !pending
     })
@@ -605,7 +646,7 @@ export default function PlanningPage() {
             .map(({ r }) => r)
         : view
     return ordered.map(lineToSuggestable)
-  }, [rows, ledgerView])
+  }, [moduleFilteredRows, ledgerView])
 
   const applyBatchDecision = useCallback(
     async (
@@ -686,6 +727,7 @@ export default function PlanningPage() {
         } else if (!opts?.suppressToast) {
           toast.success('Group updated')
         }
+        if (action === 'send_to_artwork') markRecentlyPushed(lineIds)
         await fetchRows()
         return true
       } catch (e) {
@@ -695,7 +737,7 @@ export default function PlanningPage() {
         setBatchActionBusy(false)
       }
     },
-    [rows, fetchRows],
+    [rows, fetchRows, markRecentlyPushed],
   )
 
   const savePlanningHandoff = useCallback(async () => {
@@ -867,6 +909,7 @@ export default function PlanningPage() {
           return false
         }
         if (!opts?.suppressToast) toast.success(`Sent ${ids.length} line(s) to AW queue`)
+        markRecentlyPushed(ids)
         setPlanningSelection(new Set())
         await fetchRows()
         return true
@@ -874,7 +917,7 @@ export default function PlanningPage() {
         setMakeProcessingBusy(false)
       }
     },
-    [rows, fetchRows],
+    [rows, fetchRows, markRecentlyPushed],
   )
 
   const handleMakeProcessing = useCallback(async () => {
@@ -1161,6 +1204,27 @@ export default function PlanningPage() {
           </div>
           <div className="flex w-full min-w-0 max-w-xl flex-1 flex-wrap items-end gap-3 text-sm">
             <div className="min-w-[240px] flex-1">
+              <label className={`mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>
+                Search in planning
+              </label>
+              <input
+                type="text"
+                value={planningSearchQuery}
+                onChange={(e) => setPlanningSearchQuery(e.target.value)}
+                placeholder="Search carton or PO #"
+                className="h-9 w-full rounded-md border border-ds-line/60 bg-ds-elevated/40 px-2.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+              />
+              {planningSearchQuery.trim().length >= 2 ? (
+                <button
+                  type="button"
+                  onClick={() => setPlanningSearchQuery('')}
+                  className="mt-1 text-[10px] text-ds-ink-faint transition hover:text-ds-ink"
+                >
+                  Clear search
+                </button>
+              ) : null}
+            </div>
+            <div className="min-w-[240px] flex-1">
               <MasterSearchSelect
                 label="Customer (API filter)"
                 query={customerSearch.query}
@@ -1193,14 +1257,47 @@ export default function PlanningPage() {
         </div>
       </ActionBar>
 
+      <div className="shrink-0 border-b border-ds-line/40 bg-ds-elevated/20 px-3 py-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Applied filters</span>
+            {planningFilterChips.map((chip) => (
+              <span
+                key={chip.key}
+                className="inline-flex items-center gap-1 rounded border border-ds-line/60 bg-ds-main/50 px-2 py-0.5 text-[11px] text-ds-ink"
+              >
+                {chip.label}
+                {chip.onClear ? (
+                  <button
+                    type="button"
+                    onClick={chip.onClear}
+                    className="text-ds-ink-faint hover:text-ds-ink"
+                    title={`Clear ${chip.key} filter`}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </span>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-muted">
+            <span className="font-semibold text-ds-ink-faint">Row states:</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-warning" /> Priority</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Pushed</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-brand" /> Selected</span>
+          </div>
+        </div>
+      </div>
+
       {/* ── Main workspace: grid (left) + summary panel (right) ── */}
       <div className="flex min-h-0 flex-1 gap-0 overflow-hidden">
         {/* Grid — takes all remaining width */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-1 pb-0.5 pt-0.5">
           <ErrorBoundary moduleName="Planning Grid">
             <PlanningDecisionGrid
-              rows={rows as PlanningGridLine[]}
+              rows={moduleFilteredRows as PlanningGridLine[]}
               ledgerView={ledgerView}
+              recentlyPushedIds={recentlyPushedIds}
               planningSelection={planningSelection}
               setPlanningSelection={setPlanningSelection}
               onRowBackgroundClick={(id) => {
@@ -1271,6 +1368,7 @@ export default function PlanningPage() {
             })
           }
           onClearSelection={() => setPlanningSelection(new Set())}
+          onRestoreSelection={(lineIds) => setPlanningSelection(new Set(lineIds))}
         />
         <PlanningPoSummaryDrawer
           open={poSummaryDrawerId != null}
