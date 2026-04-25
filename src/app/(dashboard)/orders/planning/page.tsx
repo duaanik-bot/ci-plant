@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { CircleHelp, Download } from 'lucide-react'
+import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
@@ -27,6 +27,7 @@ import {
 import { PlanningBatchBuilderPanel } from '@/components/planning/PlanningBatchBuilderPanel'
 import { ActionBar, PageHeader } from '@/components/design-system'
 import { Button } from '@/components/design-system/Button'
+import { RowStateLegend } from '@/components/ui/RowStateLegend'
 import { PlanningJobDetailDrawer } from '@/components/planning/PlanningJobDetailDrawer'
 import { PlanningSuggestedBatchesPanel } from '@/components/planning/PlanningSuggestedBatchesPanel'
 import { PlanningPoSummaryDrawer } from '@/components/planning/PlanningPoSummaryDrawer'
@@ -977,7 +978,7 @@ export default function PlanningPage() {
           description={
             <p className={`text-[13px] font-medium text-ds-ink-muted ${mono}`}>
               {rows.length} line(s) · Σ qty{' '}
-              <span className="font-semibold text-ds-success tabular-nums">
+              <span className="ds-typo-kpi text-ds-success text-base md:text-lg">
                 {totalQty.toLocaleString('en-IN')}
               </span>
             </p>
@@ -1065,7 +1066,7 @@ export default function PlanningPage() {
         <div className="grid grid-cols-1 gap-2 text-[13px] sm:grid-cols-3 sm:gap-4">
           <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
             <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Queue Σ qty</p>
-            <p className={`text-lg font-semibold text-ds-ink ${mono}`}>{totalQty.toLocaleString('en-IN')}</p>
+            <p className={`ds-typo-kpi text-ds-ink ${mono}`}>{totalQty.toLocaleString('en-IN')}</p>
           </div>
           <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
             <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Top blocker</p>
@@ -1073,7 +1074,7 @@ export default function PlanningPage() {
           </div>
           <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
             <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Ready to schedule</p>
-            <p className={`text-lg font-semibold text-ds-success ${mono}`}>{readyToScheduleCount}</p>
+            <p className={`ds-typo-kpi text-ds-success ${mono}`}>{readyToScheduleCount}</p>
           </div>
         </div>
 
@@ -1292,19 +1293,10 @@ export default function PlanningPage() {
               </button>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-muted">
-            <span className="font-semibold text-ds-ink-faint">Row states:</span>
-            <span
-              className="inline-flex items-center text-ds-ink-faint"
-              title="Priority rows are pinned. Pushed rows are sent onward and moved to end while remaining interactive."
-              aria-label="Row state help"
-            >
-              <CircleHelp className="h-3.5 w-3.5" />
-            </span>
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-warning" /> Priority</span>
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Pushed</span>
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-brand" /> Selected</span>
-          </div>
+          <RowStateLegend
+            includeSelected
+            helperText="Priority rows are pinned. Pushed rows are sent onward and moved to end while remaining interactive."
+          />
         </div>
       </div>
 

@@ -11,6 +11,7 @@ Use this quick checklist when changing queue table UI in:
 - Status chips keep shared token geometry (`STATUS_CHIP_BASE`).
 - Pushed badge uses `PUSHED_CHIP_CLASS`.
 - Badge text size/weight remains aligned (`text-[9px]` style family).
+- Shared row-state legend uses `RowStateLegend` component and helper tooltip text remains meaningful.
 
 ## Action controls
 
@@ -31,6 +32,12 @@ Use this quick checklist when changing queue table UI in:
 - Empty-state wording is consistent:
   - No filtered rows: `No rows match current view or filters. Clear filters to see all rows.`
   - No queue items: `No rows in this queue yet.`
+
+## Contrast and readability
+
+- High contrast mode (`ci-high-contrast`) remains readable and does not break layout.
+- Focus rings are clearly visible on dark surfaces.
+- Numeric KPI emphasis uses `ds-typo-kpi` for key totals.
 
 ## Time labels
 

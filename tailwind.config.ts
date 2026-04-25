@@ -88,7 +88,7 @@ const config: Config = {
         },
         /** Plate Hub — process magenta (matches industry CMYK “M” on dark UI) */
         plateMagenta: '#FF00FF',
-        /** COLOUR IMPRESSIONS SaaS — premium dark skin (indigo accent, soft surfaces) */
+        /** COLOUR IMPRESSIONS SaaS — premium dark skin (high-contrast cyan accent, soft surfaces) */
         ds: {
           main: '#0A0F1C',
           card: '#111827',
@@ -97,9 +97,10 @@ const config: Config = {
           lineStrong: '#2A3344',
           ink: '#E5E7EB',
           'ink-muted': '#9CA3AF',
-          'ink-faint': '#6B7280',
-          brand: '#6366F1',
-          'brand-hover': '#4F46E5',
+          'ink-faint': '#8EA0B8',
+          kpi: '#7DD3FC',
+          brand: '#38BDF8',
+          'brand-hover': '#0EA5E9',
           success: '#3FCF8E',
           warning: '#EAB308',
           error: '#F87171',

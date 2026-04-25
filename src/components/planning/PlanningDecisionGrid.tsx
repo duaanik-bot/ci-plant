@@ -1044,7 +1044,7 @@ export function PlanningDecisionGrid({
                       {/* Qty — combined */}
                       <td className={`${cellBase} min-w-0 text-center`}>
                         <div className="flex flex-col items-center">
-                          <span className="text-[14px] font-bold tabular-nums text-ds-brand">
+                          <span className="ds-typo-kpi text-[14px]">
                             {totalGroupQty.toLocaleString('en-IN')}
                           </span>
                           <span className="text-[9px] text-ds-ink-faint">combined</span>

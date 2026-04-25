@@ -14,6 +14,12 @@ import { SidebarNav } from './SidebarNav'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { AppLayout } from '@/components/design-system/AppLayout'
+import {
+  applyAccentPreset,
+  applyHighContrast,
+  getStoredAccentPreset,
+  getStoredHighContrast,
+} from '@/lib/accent-theme'
 
 export function DashboardShell({
   children,
@@ -39,6 +45,11 @@ export function DashboardShell({
   useEffect(() => {
     if (status === 'unauthenticated') router.replace('/login')
   }, [status, router])
+
+  useEffect(() => {
+    applyAccentPreset(getStoredAccentPreset())
+    applyHighContrast(getStoredHighContrast())
+  }, [])
 
   if (status === 'loading') {
     return (

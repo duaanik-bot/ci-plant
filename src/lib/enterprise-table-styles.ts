@@ -21,7 +21,7 @@ export const enterpriseTrClass =
 
 /** Selected / active row — left brand rail (use on `<tr>`) */
 export const enterpriseTrSelectedClass =
-  'dark:bg-ds-elevated/35 dark:shadow-[inset_3px_0_0_0_#6366F1] dark:ring-1 dark:ring-inset dark:ring-ds-brand/15'
+  'dark:bg-ds-elevated/35 dark:shadow-[inset_3px_0_0_0_#38BDF8] dark:ring-1 dark:ring-inset dark:ring-ds-brand/15'
 
 /** Header cell */
 export const enterpriseThClass =

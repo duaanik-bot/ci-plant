@@ -6,7 +6,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
-  CircleHelp,
   ChevronDown,
   ChevronUp,
   FileDown,
@@ -44,6 +43,7 @@ import {
   STATUS_CHIP_BASE,
 } from '@/components/design-system/tokens'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
+import { RowStateLegend } from '@/components/ui/RowStateLegend'
 import { AwGroupEditDrawer } from '@/components/designing/AwGroupEditDrawer'
 
 type SpecOverrides = {
@@ -914,19 +914,7 @@ export default function DesigningQueuePage() {
                 </button>
               ) : null}
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-muted">
-              <span className="font-semibold text-ds-ink-faint">Row states:</span>
-              <span
-                className="inline-flex items-center text-ds-ink-faint"
-                title="Priority rows are pinned. Pushed rows are finalized to Plate Hub and moved to end."
-                aria-label="Row state help"
-              >
-                <CircleHelp className="h-3.5 w-3.5" />
-              </span>
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-warning" /> Priority</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Pushed</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-elevated ring-1 ring-ds-line/50" /> Normal</span>
-            </div>
+            <RowStateLegend helperText="Priority rows are pinned. Pushed rows are finalized to Plate Hub and moved to end." />
           </div>
         </div>
 

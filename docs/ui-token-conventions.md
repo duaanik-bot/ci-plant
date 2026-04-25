@@ -16,6 +16,7 @@ Import tokens from:
 - `ACTION_PILL_NEUTRAL` - Neutral variant for action pills.
 - `ICON_BUTTON_BASE` - Base style for icon-only buttons.
 - `ICON_BUTTON_TIGHT` - Tighter icon button variant for dense rows.
+- `ds-typo-kpi` (from `globals.css`) - High-contrast numeric KPI style.
 
 ## Usage rules
 
@@ -23,6 +24,7 @@ Import tokens from:
 - Keep semantic/state colors local (`hover:*`, success/warning variants), but keep geometry/typography in tokens.
 - For any new table row action/status chip, start from these tokens first.
 - If a new reusable pattern appears in more than one module, add a token in `design-system/tokens.ts` rather than copying class strings.
+- Reuse `RowStateLegend` (`@/components/ui/RowStateLegend`) instead of repeating row-state legend markup.
 
 ## Validation
 

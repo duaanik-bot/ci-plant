@@ -9,7 +9,7 @@
     @apply transition-[border-color,box-shadow,transform] duration-150 ease-out;
   }
   .ds-focus:focus-visible {
-    @apply border-ds-brand/80 outline-none ring-2 ring-ds-brand/20;
+    @apply border-ds-brand/85 outline-none ring-2 ring-ds-brand/45;
   }
   .ds-input {
     @apply w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/60 px-3 py-2.5 text-[15px] text-ds-ink shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out placeholder:text-ds-ink-faint;
@@ -19,7 +19,7 @@
     @apply tabular-nums tracking-tight text-ds-ink;
   }
   .ds-input:focus {
-    @apply border-ds-brand/55 outline-none ring-0 shadow-[0_0_0_3px_rgba(99,102,241,0.2),0_0_18px_rgba(99,102,241,0.14)];
+    @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(56,189,248,0.30),0_0_18px_rgba(56,189,248,0.18)];
   }
   .ds-typo-label {
     @apply text-[12px] font-medium leading-snug text-ds-ink-muted;
@@ -32,6 +32,9 @@
   }
   .ds-typo-total {
     @apply text-[20px] font-bold leading-tight text-ds-success tabular-nums md:text-[22px];
+  }
+  .ds-typo-kpi {
+    @apply text-[20px] font-bold leading-tight text-ds-kpi tabular-nums md:text-[22px];
   }
 }
 
@@ -70,7 +73,7 @@
     --foreground: 210 20% 93%;
     --card: 217 33% 17%;
     --card-foreground: 210 20% 93%;
-    --primary: 239 84% 67%;
+    --primary: 199 89% 60%;
     --primary-foreground: 0 0% 100%;
     --secondary: 220 32% 14%;
     --secondary-foreground: 210 20% 93%;
@@ -82,7 +85,14 @@
     --destructive-foreground: 210 40% 98%;
     --border: 220 22% 16%;
     --input: 220 22% 16%;
-    --ring: 239 84% 67%;
+    --ring: 199 89% 60%;
+  }
+
+  .ci-high-contrast {
+    --ds-text-secondary: #c5d2e5;
+    --ds-text-muted: #b3c4dc;
+    --ds-border-subtle: #2a3a52;
+    --ds-border-strong: #3b4e6a;
   }
 }
 
@@ -95,16 +105,25 @@
     background-color: var(--ds-bg-main);
     background-image: var(--ds-gradient-app-top);
   }
+
+  .ci-high-contrast .ds-input {
+    @apply border-ds-lineStrong/70 placeholder:text-ds-ink-muted;
+  }
+
+  .ci-high-contrast .ds-focus:focus-visible,
+  .ci-high-contrast .ds-input:focus {
+    @apply ring-ds-brand/60;
+  }
 }
 
 /* Die Hub — custody floor tool actively issued to press */
 @keyframes hub-tool-in-use-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.28);
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.28);
   }
   50% {
-    box-shadow: 0 0 14px 3px rgba(99, 102, 241, 0.2);
+    box-shadow: 0 0 14px 3px rgba(56, 189, 248, 0.2);
   }
 }
 
@@ -131,11 +150,11 @@
 /* PO line — one-shot row tint when hub tooling status finishes syncing for that row */
 @keyframes po-tooling-row-sync-pulse {
   0% {
-    box-shadow: inset 3px 0 0 0 rgba(99, 102, 241, 0.55);
-    background-color: rgba(99, 102, 241, 0.07);
+    box-shadow: inset 3px 0 0 0 rgba(56, 189, 248, 0.55);
+    background-color: rgba(56, 189, 248, 0.08);
   }
   100% {
-    box-shadow: inset 3px 0 0 0 rgba(99, 102, 241, 0);
+    box-shadow: inset 3px 0 0 0 rgba(56, 189, 248, 0);
     background-color: transparent;
   }
 }

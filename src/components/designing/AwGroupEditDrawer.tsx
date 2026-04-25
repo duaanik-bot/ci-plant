@@ -157,6 +157,8 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
   const [pushPlates, setPushPlates] = useState(false)
   const [pushDie, setPushDie] = useState(false)
   const [pushEmboss, setPushEmboss] = useState(false)
+  const [groupSheetLengthMm, setGroupSheetLengthMm] = useState('')
+  const [groupSheetWidthMm, setGroupSheetWidthMm] = useState('')
 
   useEffect(() => {
     setGroupArtworkCode(inferredArtworkCode)
@@ -169,6 +171,17 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
     setPushPlates(false)
     setPushDie(false)
     setPushEmboss(false)
+    const lenVals = new Set<string>()
+    const widVals = new Set<string>()
+    for (const r of rows) {
+      const spec = (r.specOverrides || {}) as Record<string, unknown>
+      const l = Number(spec.sheetLengthMm)
+      const w = Number(spec.sheetWidthMm)
+      if (Number.isFinite(l) && l > 0) lenVals.add(String(Math.floor(l)))
+      if (Number.isFinite(w) && w > 0) widVals.add(String(Math.floor(w)))
+    }
+    setGroupSheetLengthMm(lenVals.size === 1 ? Array.from(lenVals)[0]! : '')
+    setGroupSheetWidthMm(widVals.size === 1 ? Array.from(widVals)[0]! : '')
     setDirty(false)
     setLastSavedAt(null)
   }, [rows, inferredArtworkCode, inferredSetNumber, isOpen])
@@ -306,6 +319,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
     for (const r of rows) {
       try {
         const specBase = (r.specOverrides || {}) as Record<string, unknown>
+        const st = itemStates[r.id]
         const dc = parseDesignerCommand(specBase.designerCommand)
         const nextDesignerCommand: Record<string, unknown> = { ...dc }
         if (pushPlates) nextDesignerCommand.plateHubDispatchAt = nowIso
@@ -317,10 +331,17 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
           nextDesignerCommand.embossLastIntent = 'emboss_hub'
           nextDesignerCommand.embossLastIntentAt = nowIso
         }
+        const upsNum = st?.ups?.trim() ? parseInt(st.ups.trim(), 10) : null
+        const lengthNum = groupSheetLengthMm.trim() ? parseInt(groupSheetLengthMm.trim(), 10) : null
+        const widthNum = groupSheetWidthMm.trim() ? parseInt(groupSheetWidthMm.trim(), 10) : null
         const specOverrides = {
           ...specBase,
           customerApprovalPharma: groupCustomerApproval,
           shadeCardQaTextApproval: groupQaTextApproval,
+          ups: Number.isFinite(upsNum) && (upsNum as number) >= 1 ? upsNum : null,
+          numberOfUps: Number.isFinite(upsNum) && (upsNum as number) >= 1 ? upsNum : null,
+          sheetLengthMm: Number.isFinite(lengthNum) && (lengthNum as number) > 0 ? lengthNum : null,
+          sheetWidthMm: Number.isFinite(widthNum) && (widthNum as number) > 0 ? widthNum : null,
           designerCommand: nextDesignerCommand,
         }
         const res = await fetch(`/api/planning/po-lines/${r.id}`, {
@@ -355,6 +376,21 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
   }
 
   const userById = Object.fromEntries(users.map((u) => [u.id, u]))
+  const specSummary = useMemo(() => {
+    const pick = (vals: string[]) => {
+      const cleaned = vals.map((v) => (v || '').trim()).filter(Boolean)
+      if (!cleaned.length) return '—'
+      const uniq = Array.from(new Set(cleaned))
+      return uniq.length === 1 ? uniq[0]! : 'Mixed'
+    }
+    return {
+      paper: pick(rows.map((r) => String(r.paperType ?? ''))),
+      coating: pick(rows.map((r) => String(r.coatingType ?? ''))),
+      gsm: pick(rows.map((r) => (r.gsm != null ? String(r.gsm) : ''))),
+      size: pick(rows.map((r) => String(r.cartonSize ?? ''))),
+      emboss: pick(rows.map((r) => String(r.embossingLeafing ?? 'No emboss'))),
+    }
+  }, [rows])
 
   return (
     <SlideOverPanel
@@ -433,6 +469,62 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               </div>
             </div>
           </div>
+          <div className="mt-3 rounded border border-ds-line/35 bg-ds-elevated/20 px-2.5 py-2">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">Planning specs (unified view)</p>
+            <p className="text-[11px] text-ds-ink-muted">
+              Paper: {specSummary.paper} · Coating: {specSummary.coating} · GSM: {specSummary.gsm} · Size: {specSummary.size} · Emboss: {specSummary.emboss}
+            </p>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">Sheet length (mm)</label>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={groupSheetLengthMm}
+                onChange={(e) => {
+                  setGroupSheetLengthMm(e.target.value)
+                  setDirty(true)
+                }}
+                placeholder="From planning"
+                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">Sheet width (mm)</label>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={groupSheetWidthMm}
+                onChange={(e) => {
+                  setGroupSheetWidthMm(e.target.value)
+                  setDirty(true)
+                }}
+                placeholder="From planning"
+                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+              />
+            </div>
+          </div>
+          <div className="mt-3 rounded border border-ds-line/35 bg-ds-elevated/20 px-2.5 py-2">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">UPS by product (editable)</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {rows.map((r) => (
+                <label key={`ups-unified-${r.id}`} className="flex items-center justify-between gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 px-2 py-1.5">
+                  <span className="truncate text-[11px] text-ds-ink-muted" title={r.cartonName}>{r.cartonName}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={itemStates[r.id]?.ups ?? ''}
+                    onChange={(e) => updateItem(r.id, { ups: e.target.value })}
+                    className={`w-[5.5rem] rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2 py-1 text-[12px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
           <div className="mt-3 flex flex-wrap items-center gap-4">
             <label className="flex cursor-pointer items-center gap-2 select-none">
               <input
@@ -490,10 +582,13 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                   {r.cartonName.length > 16 ? r.cartonName.slice(0, 15) + '…' : r.cartonName}
                 </span>
                 <span className="text-[10px] text-ds-ink-faint">{r.po.poNumber}</span>
-                <span className={`mt-1 text-[18px] font-bold leading-none text-ds-brand ${mono}`}>
+                <span className={`mt-1 ds-typo-kpi ${mono}`}>
                   {r.quantity.toLocaleString('en-IN')}
                 </span>
                 <span className="text-[9px] text-ds-ink-faint">pcs</span>
+                <span className={`mt-1 text-[10px] font-semibold text-emerald-300 ${mono}`}>
+                  UPS ×{itemStates[r.id]?.ups?.trim() || '—'}
+                </span>
               </div>
             ))}
           </div>

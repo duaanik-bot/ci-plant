@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { Search, AlertTriangle, CircleHelp, FileDown, Pencil, Star, Trash2, X } from 'lucide-react'
+import { Search, AlertTriangle, FileDown, Pencil, Star, Trash2, X } from 'lucide-react'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { CommandPaletteTriggerIcon } from '@/components/command-palette/CommandPalette'
 import { PoDrawerSpotlightLines } from '@/components/orders/PoDrawerSpotlightLines'
@@ -26,6 +26,7 @@ import {
 import { formatShortTimeAgo } from '@/lib/time-ago'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 import { ActionBar, PageHeader } from '@/components/design-system'
+import { RowStateLegend } from '@/components/ui/RowStateLegend'
 
 type LineItem = {
   id: string
@@ -735,18 +736,8 @@ export default function PurchaseOrdersPage() {
           </div>
         </div>
       </ActionBar>
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-3 py-1.5 text-[11px] text-ds-ink-muted">
-        <span className="font-semibold text-ds-ink-faint">Row states:</span>
-        <span
-          className="inline-flex items-center text-ds-ink-faint"
-          title="Priority rows are pinned. Pushed rows are sent to planning and moved to end while staying interactive."
-          aria-label="Row state help"
-        >
-          <CircleHelp className="h-3.5 w-3.5" />
-        </span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-warning" /> Priority</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Pushed</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-elevated ring-1 ring-ds-line/50" /> Normal</span>
+      <div className="mb-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-3 py-1.5">
+        <RowStateLegend helperText="Priority rows are pinned. Pushed rows are sent to planning and moved to end while staying interactive." />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
@@ -754,7 +745,7 @@ export default function PurchaseOrdersPage() {
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
             Total active POs
           </div>
-          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-ds-ink ${poMono}`}>
+          <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
             {kpiLoading ? '—' : (kpi?.totalActivePosCount ?? 0).toLocaleString('en-IN')}
           </div>
           <div className="text-[10px] text-ds-ink-faint mt-0.5">
@@ -765,7 +756,7 @@ export default function PurchaseOrdersPage() {
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
             Pending line items
           </div>
-          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-ds-ink ${poMono}`}>
+          <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
             {kpiLoading ? '—' : (kpi?.pendingItemsSum ?? 0).toLocaleString('en-IN')}
           </div>
           <div className="text-[10px] text-ds-ink-faint mt-0.5">
@@ -776,7 +767,7 @@ export default function PurchaseOrdersPage() {
           <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/90">
             Live order book
           </div>
-          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-emerald-300 ${poMono}`}>
+          <div className={`mt-0.5 ds-typo-kpi text-emerald-300 ${poMono}`}>
             {kpiLoading ? '—' : formatRupee(kpi?.liveOrderValue ?? 0)}
           </div>
           <div className="text-[10px] text-emerald-700/80 mt-0.5">
@@ -787,7 +778,7 @@ export default function PurchaseOrdersPage() {
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-warning/90">
             System velocity
           </div>
-          <div className={`mt-0.5 text-xl md:text-2xl font-semibold text-ds-warning ${poMono}`}>
+          <div className={`mt-0.5 ds-typo-kpi text-ds-warning ${poMono}`}>
             {kpiLoading
               ? '—'
               : `${(kpi?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
