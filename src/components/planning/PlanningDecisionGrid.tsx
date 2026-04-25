@@ -955,16 +955,15 @@ export function PlanningDecisionGrid({
                 const allSizes = Array.from(new Set(groupRows.map((r) => String(r.cartonSize ?? '').trim())))
                 const sizeDisplay = allSizes.length === 1 ? allSizes[0]! : 'Mixed'
                 const groupProcessed = groupRows.every((r) => isProcessedRow(r))
-                const groupPushedInPending =
-                  ledgerView === 'pending' &&
-                  groupRows.every((r) => recentlyPushedIds.has(r.id) && r.planningStatus !== 'pending')
+                const groupCompleted = groupRows.every((r) => r.planningStatus !== 'pending')
 
                 return (
                   <Fragment key={`group:${groupId}`}>
                     <tr
+                      onClick={() => onRowBackgroundClick(firstRow.id)}
                       className={`border-l-[3px] border-ds-brand transition-colors ${
-                        groupPushedInPending
-                          ? 'bg-ds-success/12 hover:bg-ds-success/16'
+                        groupCompleted
+                          ? 'bg-emerald-500/20 hover:bg-emerald-500/24'
                           : someGroupSel
                             ? 'bg-ds-brand/12'
                             : 'bg-ds-brand/6 hover:bg-ds-brand/10'
@@ -1021,7 +1020,9 @@ export function PlanningDecisionGrid({
                               key={r.id}
                               type="button"
                               onClick={(e) => { e.stopPropagation(); onRowBackgroundClick(r.id) }}
-                              className="line-clamp-1 text-left text-[12px] font-semibold text-ds-ink transition-colors hover:text-ds-brand"
+                              className={`line-clamp-1 text-left text-[12px] font-semibold transition-colors hover:text-ds-brand ${
+                                groupCompleted ? 'text-emerald-300' : 'text-ds-ink'
+                              }`}
                               title={r.cartonName}
                             >
                               {r.cartonName}
@@ -1109,15 +1110,13 @@ export function PlanningDecisionGrid({
                 const brd = boardLabel(r)
                 const upsNum = typeof pm.ups === 'number' && Number.isFinite(pm.ups) && pm.ups >= 1 ? pm.ups : null
                 const designerLabelSub = designerHandoffLabel(spec, planCore)
-                const subPushedInPending =
-                  ledgerView === 'pending' &&
-                  recentlyPushedIds.has(r.id) &&
-                  r.planningStatus !== 'pending'
+                const subCompleted = r.planningStatus !== 'pending'
                 return (
                   <Fragment key={`sub:${r.id}`}>
                     <tr
+                      onClick={() => onRowBackgroundClick(r.id)}
                       className={`border-l-[3px] border-ds-brand/40 transition-colors ${
-                        subPushedInPending ? 'bg-ds-success/10 hover:bg-ds-success/15' : 'bg-ds-brand/3 hover:bg-ds-brand/6'
+                        subCompleted ? 'bg-emerald-500/20 hover:bg-emerald-500/24' : 'bg-ds-brand/3 hover:bg-ds-brand/6'
                       }`}
                     >
                       <td
@@ -1135,7 +1134,9 @@ export function PlanningDecisionGrid({
                           className="group flex min-w-0 flex-col items-start text-left"
                           title="Open item spec drawer"
                         >
-                          <span className="line-clamp-1 text-[12px] font-semibold text-ds-ink transition-colors group-hover:text-ds-brand">
+                          <span className={`line-clamp-1 text-[12px] font-semibold transition-colors group-hover:text-ds-brand ${
+                            subCompleted ? 'text-emerald-300' : 'text-ds-ink'
+                          }`}>
                             {r.cartonName}
                           </span>
                           <span className="text-[9px] text-ds-ink-faint">{r.po.poNumber}</span>
@@ -1203,11 +1204,8 @@ export function PlanningDecisionGrid({
               const upsNum = typeof pm.ups === 'number' && Number.isFinite(pm.ups) && pm.ups >= 1 ? pm.ups : null
               const upsFinal = upsNum != null
               const recallHighlight = highlightedRowId === r.id
-              const pushedInPending =
-                ledgerView === 'pending' &&
-                recentlyPushedIds.has(r.id) &&
-                r.planningStatus !== 'pending'
-              const pushedTimeLabel = pushedInPending
+              const completedRow = r.planningStatus !== 'pending'
+              const pushedTimeLabel = completedRow
                 ? formatShortTimeAgo(
                     ((r.specOverrides || {}) as Record<string, unknown>).planningMakeProcessingAt ??
                       ((r.specOverrides || {}) as Record<string, unknown>).awQueueHandoffAt,
@@ -1225,11 +1223,12 @@ export function PlanningDecisionGrid({
               return (
                 <Fragment key={r.id}>
                   <tr
+                    onClick={() => onRowBackgroundClick(r.id)}
                     className={`${dataTable.tr.body} ${dataTable.tr.hover} ${
                       recallHighlight
                         ? 'bg-ds-success/15 ring-1 ring-inset ring-ds-success/35'
-                        : pushedInPending
-                          ? 'bg-ds-success/12'
+                        : completedRow
+                          ? 'bg-emerald-500/20'
                         : rowSel
                           ? dataTable.tr.selected
                           : sameBatchAsPrev
@@ -1243,8 +1242,8 @@ export function PlanningDecisionGrid({
                       className={`${dataTable.th} sticky left-0 z-10 w-10 min-w-0 max-w-10 border-b border-ds-line/30 border-r border-ds-line/50 px-0 text-center ${
                         recallHighlight
                           ? 'bg-ds-success/15'
-                          : pushedInPending
-                            ? 'bg-ds-success/12'
+                          : completedRow
+                            ? 'bg-emerald-500/20'
                             : 'bg-ds-elevated'
                       }`}
                     >
@@ -1292,7 +1291,9 @@ export function PlanningDecisionGrid({
                         }}
                         title="Open product spec drawer"
                       >
-                        <span className="line-clamp-1 text-[13px] font-semibold text-ds-ink group-hover:text-ds-brand transition-colors">
+                        <span className={`line-clamp-1 text-[13px] font-semibold group-hover:text-ds-brand transition-colors ${
+                          completedRow ? 'text-emerald-300' : 'text-ds-ink'
+                        }`}>
                           {r.cartonName}
                         </span>
                         <span className="text-[10px] text-ds-ink-faint">

@@ -188,6 +188,7 @@ export function PlanningBatchBuilderPanel({
   const [specialRemarks, setSpecialRemarks] = useState('')
   const [sendingToArtwork, setSendingToArtwork] = useState(false)
   const [makingProcessing, setMakingProcessing] = useState(false)
+  const [breakSelection, setBreakSelection] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const choices = new Set<string>()
@@ -198,6 +199,10 @@ export function PlanningBatchBuilderPanel({
       if (md) choices.add(md)
     }
     setDesigner(choices.size === 1 ? Array.from(choices)[0]! : '')
+  }, [lines])
+
+  useEffect(() => {
+    setBreakSelection(new Set(lines.map((l) => l.id)))
   }, [lines])
 
   useEffect(() => {
@@ -350,6 +355,95 @@ export function PlanningBatchBuilderPanel({
     }
   }
 
+  const handleBreakGroupAsIs = async () => {
+    const selectedIds = lines.filter((l) => breakSelection.has(l.id)).map((l) => l.id)
+    if (selectedIds.length === 0) {
+      toast.error('Select at least one item to break from group')
+      return
+    }
+
+    const byMaster = new Map<string, PlanningGridLine[]>()
+    for (const li of lines) {
+      const core = readPlanningCore((li.specOverrides || {}) as Record<string, unknown>)
+      const mid = (core.masterSetId || '').trim()
+      if (!mid) continue
+      const bucket = byMaster.get(mid) || []
+      bucket.push(li)
+      byMaster.set(mid, bucket)
+    }
+
+    let changed = 0
+    for (const li of lines) {
+      const spec = (li.specOverrides || {}) as Record<string, unknown>
+      const prevCore = readPlanningCore(spec)
+      const mid = (prevCore.masterSetId || '').trim()
+      const selected = selectedIds.includes(li.id)
+      let nextCore = prevCore
+
+      if (!mid) {
+        if (!selected) continue
+        nextCore = {
+          ...prevCore,
+          layoutType: 'single',
+          masterSetId: null,
+          mixSetMemberIds: null,
+          batchStatus: 'draft',
+          batchHoldReason: null,
+          batchStatusBeforeHold: null,
+        }
+      } else {
+        const groupLines = byMaster.get(mid) || []
+        const groupIds = groupLines.map((g) => g.id)
+        const selectedInGroup = groupIds.filter((id) => selectedIds.includes(id))
+        const remaining = groupIds.filter((id) => !selectedIds.includes(id))
+
+        if (selectedInGroup.length === 0) continue
+
+        if (selectedInGroup.includes(li.id)) {
+          nextCore = {
+            ...prevCore,
+            layoutType: 'single',
+            masterSetId: null,
+            mixSetMemberIds: null,
+            batchStatus: 'draft',
+            batchHoldReason: null,
+            batchStatusBeforeHold: null,
+          }
+        } else if (remaining.length >= 2) {
+          nextCore = {
+            ...prevCore,
+            layoutType: 'gang',
+            masterSetId: mid,
+            mixSetMemberIds: remaining,
+          }
+        } else if (remaining.length === 1 && remaining[0] === li.id) {
+          nextCore = {
+            ...prevCore,
+            layoutType: 'single',
+            masterSetId: null,
+            mixSetMemberIds: null,
+            batchStatus: 'draft',
+            batchHoldReason: null,
+            batchStatusBeforeHold: null,
+          }
+        } else {
+          continue
+        }
+      }
+
+      const next = { ...spec, planningCore: nextCore } as Record<string, unknown>
+      updateRow(li.id, { specOverrides: next })
+      await onSaveLine(li.id, { specOverrides: next })
+      changed += 1
+    }
+
+    if (changed > 0) {
+      toast.success(`Group break applied • ${selectedIds.length} selected item${selectedIds.length > 1 ? 's' : ''}`)
+    } else {
+      toast.info('No grouped items were changed')
+    }
+  }
+
   return (
     <SlideOverPanel
       isOpen={isOpen}
@@ -368,6 +462,14 @@ export function PlanningBatchBuilderPanel({
               </span>
             </p>
           ) : null}
+          <button
+            type="button"
+            onClick={() => void handleBreakGroupAsIs()}
+            disabled={breakSelection.size === 0}
+            className="w-full rounded-lg border border-rose-500/45 bg-rose-500/10 py-2 text-xs font-semibold text-rose-200 transition-colors hover:bg-rose-500/15 disabled:opacity-50"
+          >
+            Break group (as-is) for selected
+          </button>
           <button
             type="button"
             onClick={async () => {
@@ -538,6 +640,24 @@ export function PlanningBatchBuilderPanel({
                   key={r.id}
                   className="group flex items-start justify-between gap-2 rounded-md border border-ds-line/40 bg-background px-2 py-1.5"
                 >
+                  <label className="mt-0.5 inline-flex items-center gap-1.5 text-[10px] text-ds-ink-muted">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 accent-ds-brand"
+                      checked={breakSelection.has(r.id)}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        setBreakSelection((prev) => {
+                          const next = new Set(prev)
+                          if (checked) next.add(r.id)
+                          else next.delete(r.id)
+                          return next
+                        })
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    Break
+                  </label>
                   <div className="min-w-0 flex-1 space-y-1.5">
                     <p className="truncate text-xs font-medium text-foreground" title={r.cartonName}>
                       {r.cartonName}

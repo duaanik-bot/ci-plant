@@ -327,6 +327,11 @@ function isAwPushedRow(r: Row): boolean {
   return !!r.readiness?.prePressFinalized
 }
 
+function canRecallPlanningRow(r: Row, spec: Record<string, unknown>): boolean {
+  const machineAllocated = !!String(spec.machineId || '').trim()
+  return !!r.readiness?.planningForwarded && !machineAllocated && !['in_production', 'closed'].includes(r.planningStatus)
+}
+
 function resolvePlanningDesignerName(
   spec: Record<string, unknown>,
   userById: Record<string, User>,
@@ -422,6 +427,7 @@ export default function DesigningQueuePage() {
   const [finalizingId, setFinalizingId] = useState<string | null>(null)
   const [forwardingId, setForwardingId] = useState<string | null>(null)
   const [recallingPlanningId, setRecallingPlanningId] = useState<string | null>(null)
+  const [recallingGroupId, setRecallingGroupId] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
   const [sortKey, setSortKey] = useState<AuditSortKey | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
@@ -703,6 +709,47 @@ export default function DesigningQueuePage() {
       toast.error(e instanceof Error ? e.message : 'Recall failed')
     } finally {
       setRecallingPlanningId(null)
+    }
+  }
+
+  const recallPlanningGroup = async (groupId: string, groupRows: Row[]) => {
+    const eligible = groupRows.filter((row) =>
+      canRecallPlanningRow(row, ((row.specOverrides || {}) as Record<string, unknown>)),
+    )
+    if (eligible.length === 0) {
+      toast.info('Recall is allowed only before machine allocation / production')
+      return
+    }
+    setRecallingGroupId(groupId)
+    try {
+      let success = 0
+      let failed = 0
+      for (const row of eligible) {
+        try {
+          const res = await fetch(`/api/planning/po-lines/${row.id}/recall-from-aw`, {
+            method: 'POST',
+            cache: 'no-store',
+          })
+          const json = (await res.json()) as { error?: string }
+          if (!res.ok) throw new Error(json.error || 'Recall failed')
+          success += 1
+        } catch {
+          failed += 1
+        }
+      }
+      window.dispatchEvent(new CustomEvent('planning:refresh'))
+      if (success > 0) {
+        toast.success(`Returned to Planning • ${success} item${success > 1 ? 's' : ''}`, {
+          action: {
+            label: 'View Planning',
+            onClick: () => router.push('/orders/planning?view=pending'),
+          },
+        })
+      }
+      if (failed > 0) toast.error(`Recall failed for ${failed} item${failed > 1 ? 's' : ''}`)
+      void load()
+    } finally {
+      setRecallingGroupId(null)
     }
   }
 
@@ -998,13 +1045,16 @@ export default function DesigningQueuePage() {
                         ((spec0.prePressSentToPlateHubAt as string | undefined) || (spec0.prePressFinalizedAt as string | undefined) || firstRow.createdAt),
                       )
                     : null
+                  const groupRecallEligibleCount = groupRows.filter((r) =>
+                    canRecallPlanningRow(r, ((r.specOverrides || {}) as Record<string, unknown>)),
+                  ).length
 
                   return (
                     <Fragment key={`aw-group:${groupId}`}>
                       <tr
                         className={`border-l-[3px] transition-colors ${
                           groupPushed
-                            ? 'border-emerald-500/70 bg-emerald-500/8 hover:bg-emerald-500/12'
+                            ? 'border-emerald-500/70 bg-emerald-500/20 hover:bg-emerald-500/24'
                             : 'border-sky-500/70 bg-sky-500/5 hover:bg-sky-500/8'
                         } ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}
                       >
@@ -1038,7 +1088,13 @@ export default function DesigningQueuePage() {
                         <td className="px-4 py-2 align-middle text-sm leading-snug text-neutral-900 dark:text-ds-ink">
                           <div className="flex min-w-0 flex-col gap-0.5">
                             {groupRows.map((r) => (
-                              <span key={r.id} className="min-w-0 truncate text-[12px]" title={r.cartonName}>{r.cartonName}</span>
+                              <span
+                                key={r.id}
+                                className={`min-w-0 truncate text-[12px] ${groupPushed ? 'text-emerald-300' : ''}`}
+                                title={r.cartonName}
+                              >
+                                {r.cartonName}
+                              </span>
                             ))}
                             <span className="w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-[10px] font-semibold uppercase text-sky-700 dark:text-sky-300">
                               Gang print
@@ -1103,6 +1159,23 @@ export default function DesigningQueuePage() {
                               <Pencil className="h-3 w-3 opacity-80" aria-hidden />
                               Edit group
                             </button>
+                            <button
+                              type="button"
+                              disabled={recallingGroupId === groupId || groupRecallEligibleCount === 0}
+                              onClick={() => void recallPlanningGroup(groupId, groupRows)}
+                              title={
+                                groupRecallEligibleCount > 0
+                                  ? `Recall ${groupRecallEligibleCount} eligible item${groupRecallEligibleCount > 1 ? 's' : ''} to Planning`
+                                  : 'Recall is allowed only before machine allocation / production'
+                              }
+                              className={`rounded border px-2 py-0.5 text-xs disabled:opacity-40 ${
+                                groupRecallEligibleCount > 0
+                                  ? 'border-rose-500/35 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300'
+                                  : 'border-ds-line text-ds-warning hover:bg-ds-warning/10'
+                              }`}
+                            >
+                              {recallingGroupId === groupId ? '…' : `Recall group${groupRecallEligibleCount > 0 ? ` (${groupRecallEligibleCount})` : ''}`}
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1130,7 +1203,7 @@ export default function DesigningQueuePage() {
                             key={`aw-sub:${r.id}`}
                             className={`border-l-[3px] transition-colors ${
                               finalized
-                                ? 'border-emerald-500/35 bg-emerald-500/8 hover:bg-emerald-500/12'
+                                ? 'border-emerald-500/50 bg-emerald-500/20 hover:bg-emerald-500/24'
                                 : 'border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6'
                             }`}
                           >
@@ -1142,7 +1215,7 @@ export default function DesigningQueuePage() {
                             </td>
                             <td className="px-3 py-1.5 align-middle text-xs text-ds-ink-muted">{r.po.customer.name}</td>
                             <td className="px-3 py-1.5 align-middle text-xs font-medium text-ds-ink">
-                              <span className="line-clamp-1">{r.cartonName}</span>
+                              <span className={`line-clamp-1 ${finalized ? 'text-emerald-300' : ''}`}>{r.cartonName}</span>
                             </td>
                             <td className={`px-3 py-1.5 align-middle text-right text-xs ${mono} text-ds-ink`}>{r.quantity.toLocaleString('en-IN')}</td>
                             <td className={`px-3 py-1.5 align-middle text-xs ${mono} text-ds-ink-muted`}>{r.setNumber ?? '—'}</td>
@@ -1197,7 +1270,6 @@ export default function DesigningQueuePage() {
                 const awPo = readAwPoStatus(spec)
                 const rowClosed = awPo === AW_PO_STATUS.CLOSED
                 const batchSeg = batchProgressSegments(spec)
-                const machineAllocated = !!String(spec.machineId || '').trim()
                 const canFinalizeRow =
                   approvalsDone &&
                   !finalized &&
@@ -1205,9 +1277,7 @@ export default function DesigningQueuePage() {
                   !!(r.artworkCode || '').trim() &&
                   !rowClosed
                 const canRecallPlanning =
-                  planningForwarded &&
-                  !machineAllocated &&
-                  !['in_production', 'closed'].includes(r.planningStatus)
+                  canRecallPlanningRow(r, spec)
                 const showRecall = !!r.id
                 const phase = r.readiness?.pipelinePhase ?? 'drafting'
                 const dQ = daysInQueue(r.createdAt)
@@ -1227,7 +1297,7 @@ export default function DesigningQueuePage() {
                       priRow
                         ? `${INDUSTRIAL_PRIORITY_ROW_CLASS} hover:bg-ds-warning/5 dark:hover:bg-ds-warning/12`
                         : finalized
-                          ? 'border-l-2 border-emerald-500/60 bg-emerald-500/8 hover:bg-emerald-500/12'
+                          ? 'border-l-2 border-emerald-500/70 bg-emerald-500/20 hover:bg-emerald-500/24'
                         : 'border-l-2 border-transparent hover:border-ds-warning hover:bg-neutral-50 dark:hover:bg-ds-elevated/50'
                     } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''}`}
                   >
@@ -1311,7 +1381,7 @@ export default function DesigningQueuePage() {
                     </td>
                     <td className="px-4 py-3 align-middle text-sm font-medium leading-snug text-neutral-900 break-words dark:text-ds-ink">
                       <div className="flex min-w-0 flex-col gap-0.5">
-                        <span className="min-w-0">{r.cartonName ?? '—'}</span>
+                        <span className={`min-w-0 ${finalized ? 'text-emerald-300' : ''}`}>{r.cartonName ?? '—'}</span>
                         {readPlanningCore(spec).layoutType === 'gang' ? (
                           <span className="w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
                             Gang print

@@ -839,7 +839,7 @@ export default function PurchaseOrdersPage() {
                     po.isPriority === true
                       ? INDUSTRIAL_PRIORITY_ROW_CLASS
                       : pushedToPlanning
-                        ? 'bg-emerald-500/8 hover:bg-emerald-500/12'
+                        ? 'bg-emerald-500/20 hover:bg-emerald-500/24'
                         : 'hover:bg-accent'
                   }`}
                 >
@@ -866,7 +866,7 @@ export default function PurchaseOrdersPage() {
                   <td className="px-1.5 py-px align-middle">
                     <div className="flex flex-col gap-0.5 min-w-0">
                       <div className="flex flex-wrap items-center gap-1">
-                        <span className={`${poMono} font-bold text-ds-warning`}>{po.poNumber}</span>
+                        <span className={`${poMono} font-bold ${pushedToPlanning ? 'text-emerald-300' : 'text-ds-warning'}`}>{po.poNumber}</span>
                         {po.toolingCritical ? (
                           <span title="Critical tooling on one or more lines">
                             <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" aria-hidden />
@@ -875,7 +875,7 @@ export default function PurchaseOrdersPage() {
                       </div>
                       {po.deepMatchProductName ? (
                         <div
-                          className="text-[10px] text-ds-warning/85 truncate max-w-[14rem]"
+                          className={`text-[10px] truncate max-w-[14rem] ${pushedToPlanning ? 'text-emerald-300/90' : 'text-ds-warning/85'}`}
                           title={`Matched line: ${po.deepMatchProductName}`}
                         >
                           Matched: {po.deepMatchProductName}
