@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { Search, AlertTriangle, FileDown, Pencil, Star, Trash2, X } from 'lucide-react'
+import { Search, AlertTriangle, CircleHelp, FileDown, Pencil, Star, Trash2, X } from 'lucide-react'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { CommandPaletteTriggerIcon } from '@/components/command-palette/CommandPalette'
 import { PoDrawerSpotlightLines } from '@/components/orders/PoDrawerSpotlightLines'
@@ -23,6 +23,7 @@ import {
   PUSHED_CHIP_CLASS,
   STATUS_CHIP_BASE,
 } from '@/components/design-system/tokens'
+import { formatShortTimeAgo } from '@/lib/time-ago'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 import { ActionBar, PageHeader } from '@/components/design-system'
 
@@ -93,17 +94,6 @@ function ageCellClass(days: number): string {
   if (days <= 3) return 'text-emerald-400'
   if (days <= 7) return 'text-ds-warning'
   return 'text-rose-400 animate-po-age-alert'
-}
-
-function shortAgeFromIso(iso: string): string {
-  const delta = Date.now() - new Date(iso).getTime()
-  if (!Number.isFinite(delta) || delta < 0) return 'just now'
-  const mins = Math.floor(delta / 60_000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
 }
 
 function MiniHubColumn({ parts }: { parts: { n: number; c: string }[] }) {
@@ -745,6 +735,19 @@ export default function PurchaseOrdersPage() {
           </div>
         </div>
       </ActionBar>
+      <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-3 py-1.5 text-[11px] text-ds-ink-muted">
+        <span className="font-semibold text-ds-ink-faint">Row states:</span>
+        <span
+          className="inline-flex items-center text-ds-ink-faint"
+          title="Priority rows are pinned. Pushed rows are sent to planning and moved to end while staying interactive."
+          aria-label="Row state help"
+        >
+          <CircleHelp className="h-3.5 w-3.5" />
+        </span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-warning" /> Priority</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Pushed</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-elevated ring-1 ring-ds-line/50" /> Normal</span>
+      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
         <div className="rounded-xl border border-border bg-card/80 px-3 py-2 backdrop-blur-xl shadow-sm">
@@ -921,7 +924,7 @@ export default function PurchaseOrdersPage() {
                       </span>
                       {pushedToPlanning ? (
                         <span className={PUSHED_CHIP_CLASS}>
-                          Pushed {shortAgeFromIso(po.poDate)}
+                          Pushed {formatShortTimeAgo(po.poDate) ?? 'just now'}
                         </span>
                       ) : null}
                     </div>
@@ -983,7 +986,7 @@ export default function PurchaseOrdersPage() {
       </EnterpriseTableShell>
 
       {list.length === 0 && !loading ? (
-        <p className="text-ds-ink-faint text-center py-8 text-sm">No purchase orders found.</p>
+        <p className="text-ds-ink-faint text-center py-8 text-sm">No rows in this queue yet.</p>
       ) : viewRows.length === 0 && listFilterQuery.trim().length >= 2 && !loading ? (
         <p className="text-ds-ink-faint text-center py-8 text-sm max-w-lg mx-auto leading-relaxed">
           {masterProductExists === true ? (
@@ -992,7 +995,7 @@ export default function PurchaseOrdersPage() {
               Orders contain this item.
             </>
           ) : (
-            <>No rows match this search. Clear the filter or try another PO #, customer, or product.</>
+            <>No rows match current view or filters. Clear filters to see all rows.</>
           )}
         </p>
       ) : null}

@@ -24,6 +24,10 @@ Import tokens from:
 - For any new table row action/status chip, start from these tokens first.
 - If a new reusable pattern appears in more than one module, add a token in `design-system/tokens.ts` rather than copying class strings.
 
+## Validation
+
+- Before shipping UI token changes, run: `docs/ui-visual-regression-checklist.md`.
+
 ## Example
 
 ```tsx

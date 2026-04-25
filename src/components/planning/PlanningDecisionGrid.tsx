@@ -20,6 +20,7 @@ import {
   readPlanningMeta,
   type PlanningDesignerKey,
 } from '@/lib/planning-decision-spec'
+import { formatShortTimeAgo } from '@/lib/time-ago'
 import { ACTION_PILL_BASE, ICON_BUTTON_BASE, PUSHED_CHIP_CLASS, STATUS_CHIP_BASE } from '@/components/design-system/tokens'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 
@@ -52,19 +53,6 @@ function firstSpecCoreForGroup(
       unknown
     >,
   )
-}
-
-function timeAgoShort(dateLike: unknown): string | null {
-  if (typeof dateLike !== 'string' || !dateLike) return null
-  const ms = Date.now() - new Date(dateLike).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return null
-  const sec = Math.floor(ms / 1000)
-  if (sec < 60) return `${sec}s ago`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m ago`
-  const hr = Math.floor(min / 60)
-  if (hr < 24) return `${hr}h ago`
-  return `${Math.floor(hr / 24)}d ago`
 }
 
 export type PlanningGridLine = {
@@ -1220,7 +1208,7 @@ export function PlanningDecisionGrid({
                 recentlyPushedIds.has(r.id) &&
                 r.planningStatus !== 'pending'
               const pushedTimeLabel = pushedInPending
-                ? timeAgoShort(
+                ? formatShortTimeAgo(
                     ((r.specOverrides || {}) as Record<string, unknown>).planningMakeProcessingAt ??
                       ((r.specOverrides || {}) as Record<string, unknown>).awQueueHandoffAt,
                   )
@@ -1470,7 +1458,9 @@ export function PlanningDecisionGrid({
             })}
           </tbody>
         </table>
-        {sorted.length === 0 ? <p className={dataTable.empty}>No lines in this view.</p> : null}
+        {sorted.length === 0 ? (
+          <p className={dataTable.empty}>No rows match current view or filters. Clear filters to see all rows.</p>
+        ) : null}
       </div>
 
       {/* ── Pagination bar ── */}

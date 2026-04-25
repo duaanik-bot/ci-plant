@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Download } from 'lucide-react'
+import { CircleHelp, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
@@ -1279,9 +1279,28 @@ export default function PlanningPage() {
                 ) : null}
               </span>
             ))}
+            {planningFilterChips.some((chip) => chip.onClear) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPlanningSearchQuery('')
+                  applyCustomer(null)
+                }}
+                className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] text-ds-ink-faint hover:text-ds-ink"
+              >
+                Clear all
+              </button>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-muted">
             <span className="font-semibold text-ds-ink-faint">Row states:</span>
+            <span
+              className="inline-flex items-center text-ds-ink-faint"
+              title="Priority rows are pinned. Pushed rows are sent onward and moved to end while remaining interactive."
+              aria-label="Row state help"
+            >
+              <CircleHelp className="h-3.5 w-3.5" />
+            </span>
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-warning" /> Priority</span>
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Pushed</span>
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-brand" /> Selected</span>

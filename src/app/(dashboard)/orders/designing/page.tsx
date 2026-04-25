@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
+  CircleHelp,
   ChevronDown,
   ChevronUp,
   FileDown,
@@ -34,6 +35,7 @@ import {
   INDUSTRIAL_PRIORITY_EVENT,
 } from '@/lib/industrial-priority-sync'
 import { PLANNING_DESIGNERS, readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
+import { formatShortTimeAgo } from '@/lib/time-ago'
 import {
   ACTION_PILL_NEUTRAL,
   ICON_BUTTON_BASE,
@@ -156,18 +158,6 @@ function pipelineBadge(phase: Row['readiness']['pipelinePhase']) {
         pulse: false,
       }
   }
-}
-
-function shortAgeFromIso(iso: unknown): string | null {
-  if (typeof iso !== 'string' || !iso) return null
-  const delta = Date.now() - new Date(iso).getTime()
-  if (!Number.isFinite(delta) || delta < 0) return null
-  const mins = Math.floor(delta / 60_000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
 }
 
 function hashHue(name: string): number {
@@ -862,9 +852,30 @@ export default function DesigningQueuePage() {
                   </span>
                 ))
               )}
+              {awFilterChips.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAwSearchQuery('')
+                    setDesignerFilter('all')
+                    setCustomerId('')
+                    setMyJobsOnly(false)
+                  }}
+                  className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] text-ds-ink-faint hover:text-ds-ink"
+                >
+                  Clear all
+                </button>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-muted">
               <span className="font-semibold text-ds-ink-faint">Row states:</span>
+              <span
+                className="inline-flex items-center text-ds-ink-faint"
+                title="Priority rows are pinned. Pushed rows are finalized to Plate Hub and moved to end."
+                aria-label="Row state help"
+              >
+                <CircleHelp className="h-3.5 w-3.5" />
+              </span>
               <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-warning" /> Priority</span>
               <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Pushed</span>
               <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-elevated ring-1 ring-ds-line/50" /> Normal</span>
@@ -983,7 +994,7 @@ export default function DesigningQueuePage() {
                   const badge0 = pipelineBadge(phase0)
                   const groupPushed = groupRows.every((r) => isAwPushedRow(r))
                   const groupPushAge = groupPushed
-                    ? shortAgeFromIso(
+                    ? formatShortTimeAgo(
                         ((spec0.prePressSentToPlateHubAt as string | undefined) || (spec0.prePressFinalizedAt as string | undefined) || firstRow.createdAt),
                       )
                     : null
@@ -1106,7 +1117,7 @@ export default function DesigningQueuePage() {
                         const approvalsDone = !!r.readiness?.approvalsComplete
                         const finalized = !!r.readiness?.prePressFinalized
                         const pushedAge = finalized
-                          ? shortAgeFromIso(
+                          ? formatShortTimeAgo(
                               ((spec.prePressSentToPlateHubAt as string | undefined) || (spec.prePressFinalizedAt as string | undefined) || r.createdAt),
                             )
                           : null
@@ -1202,7 +1213,7 @@ export default function DesigningQueuePage() {
                 const dQ = daysInQueue(r.createdAt)
                 const badge = pipelineBadge(phase)
                 const pushedAge = finalized
-                  ? shortAgeFromIso(
+                  ? formatShortTimeAgo(
                       ((spec.prePressSentToPlateHubAt as string | undefined) || (spec.prePressFinalizedAt as string | undefined) || r.createdAt),
                     )
                   : null
@@ -1451,7 +1462,9 @@ export default function DesigningQueuePage() {
 
         {sortedRows.length === 0 && (
           <p className="py-8 text-center text-sm text-ds-ink-faint">
-            {awSearchQuery.trim().length >= 2 ? 'No rows match filter.' : 'No items in designing queue.'}
+            {awSearchQuery.trim().length >= 2
+              ? 'No rows match current view or filters. Clear filters to see all rows.'
+              : 'No rows in this queue yet.'}
           </p>
         )}
       </div>
