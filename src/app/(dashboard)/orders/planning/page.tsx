@@ -33,7 +33,6 @@ import { PlanningSuggestedBatchesPanel } from '@/components/planning/PlanningSug
 import { PlanningPoSummaryDrawer } from '@/components/planning/PlanningPoSummaryDrawer'
 import { PlanningProductDetailDrawer } from '@/components/planning/PlanningProductDetailDrawer'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import { PlanningSummaryPanel } from '@/components/planning/PlanningSummaryPanel'
 import {
   PlanningDecisionLayerToolbar,
   type PlanningGroupBy,
@@ -1326,20 +1325,6 @@ export default function PlanningPage() {
           </ErrorBoundary>
         </div>
 
-        {/* Summary panel — fixed width, full height, scrolls independently */}
-        <div className="hidden w-[270px] shrink-0 overflow-hidden border-l border-ds-line/50 bg-ds-main/40 xl:flex xl:flex-col">
-          <div className="shrink-0 border-b border-ds-line/50 bg-ds-elevated/10 px-3 py-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-ds-ink-faint">Queue overview</p>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-            <PlanningSummaryPanel
-              rows={rows}
-              blockerData={blockerData}
-              readyToScheduleCount={readyToScheduleCount}
-              totalQty={totalQty}
-            />
-          </div>
-        </div>
       </div>
 
       <footer
