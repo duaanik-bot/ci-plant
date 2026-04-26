@@ -30,16 +30,10 @@ const filterGhost = dataTable.filter.input
 const inp =
   'h-7 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[13px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
 
-const batchBtnApprove =
-  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-transparent bg-sky-800/90 px-1.5 py-px text-[10px] text-white hover:bg-sky-700 disabled:cursor-not-allowed`
-const batchBtnHold =
-  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-transparent bg-ds-warning/20 px-1.5 py-px text-[10px] text-ds-warning hover:bg-ds-warning/30 disabled:cursor-not-allowed`
-const batchBtnArtwork =
-  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-transparent bg-violet-800/90 px-1.5 py-px text-[10px] text-white hover:bg-violet-700 disabled:cursor-not-allowed`
-const batchBtnProduction =
-  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-transparent bg-emerald-800/90 px-1.5 py-px text-[10px] text-white hover:bg-emerald-700 disabled:cursor-not-allowed`
-const batchBtnResume =
-  `${ACTION_PILL_BASE} min-w-0 shrink-0 border-ds-line/60 bg-ds-elevated/90 px-1.5 py-px text-[10px] text-ds-ink hover:bg-ds-elevated disabled:cursor-not-allowed`
+const batchActionSelect =
+  'h-7 min-w-[7.75rem] rounded-full border border-ds-line/60 bg-ds-elevated/90 px-2 text-[11px] font-medium text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30'
+const batchActionApply =
+  `${ACTION_PILL_BASE} min-w-0 rounded-full border-ds-brand/40 bg-ds-brand/15 px-2 py-px text-[11px] text-ds-ink hover:bg-ds-brand/25 disabled:cursor-not-allowed`
 
 function firstSpecCoreForGroup(
   rows: PlanningGridLine[],
@@ -349,6 +343,7 @@ export function PlanningDecisionGrid({
   const [holdReason, setHoldReason] = useState('')
   const [bulkHoldOpen, setBulkHoldOpen] = useState(false)
   const [bulkHoldReason, setBulkHoldReason] = useState('')
+  const [actionChoiceByKey, setActionChoiceByKey] = useState<Record<string, PlanningBatchDecisionAction | ''>>({})
   const [actionFeedbackByLineId, setActionFeedbackByLineId] = useState<
     Record<string, { ok: boolean; text: string }>
   >({})
@@ -600,6 +595,15 @@ export function PlanningDecisionGrid({
     const rowTitleApprove = canApprove
       ? 'Mark group ready (approved for next step)'
       : 'Only available from Draft — click to try or see message'
+    const actionKey = mode === 'row' ? groupKey : `bulk:${groupKey}`
+    const selectedAction = actionChoiceByKey[actionKey] ?? ''
+    const actionOptions: Array<{ value: PlanningBatchDecisionAction; label: string; enabled: boolean }> = [
+      { value: 'approve_batch', label: 'Approve', enabled: canApprove },
+      { value: 'hold_batch', label: 'Hold', enabled: canHold },
+      { value: 'send_to_artwork', label: 'To Artwork', enabled: canSend },
+      { value: 'release_to_production', label: 'To Production', enabled: canRelease },
+      { value: 'resume_from_hold', label: 'Resume', enabled: canResume },
+    ]
 
     return (
       <div
@@ -617,71 +621,43 @@ export function PlanningDecisionGrid({
           </p>
         ) : null}
         <div className="flex min-w-0 flex-nowrap items-center justify-end gap-1 overflow-x-auto">
-          <button
-            type="button"
-            disabled={batchActionBusy}
-            title={mode === 'bulk' ? bulkTitle : rowTitleApprove}
-            className={batchBtnApprove}
-            onClick={(e) => {
-              e.stopPropagation()
-              void runAction('approve_batch')
-            }}
-          >
-            Approve
-          </button>
-          <button
-            type="button"
-            disabled={batchActionBusy}
-            className={batchBtnHold}
-            onClick={(e) => {
-              e.stopPropagation()
-              openHold()
-            }}
-          >
-            Hold
-          </button>
-          <button
-            type="button"
-            disabled={batchActionBusy}
-            title={
-              mode === 'bulk'
-                ? bulkTitle
-                : canSend
-                  ? 'Mark approved for artwork'
-                  : 'Only ready batches can go to artwork — click to try'
-            }
-            className={batchBtnArtwork}
-            onClick={(e) => {
-              e.stopPropagation()
-              void runAction('send_to_artwork')
-            }}
-          >
-            To Artwork
-          </button>
-          <button
-            type="button"
-            disabled={batchActionBusy}
-            title={mode === 'bulk' ? bulkTitle : undefined}
-            className={batchBtnProduction}
-            onClick={(e) => {
-              e.stopPropagation()
-              void runAction('release_to_production')
-            }}
-          >
-            To Production
-          </button>
-          <button
-            type="button"
-            disabled={batchActionBusy}
-            title={mode === 'bulk' ? bulkTitle : undefined}
-            className={batchBtnResume}
-            onClick={(e) => {
-              e.stopPropagation()
-              void runAction('resume_from_hold')
-            }}
-          >
-            Resume
-          </button>
+          <div className="inline-flex items-center gap-1 rounded-full border border-ds-line/50 bg-ds-main/40 p-1">
+            <select
+              value={selectedAction}
+              onChange={(e) =>
+                setActionChoiceByKey((prev) => ({
+                  ...prev,
+                  [actionKey]: e.target.value as PlanningBatchDecisionAction | '',
+                }))
+              }
+              onClick={(e) => e.stopPropagation()}
+              className={batchActionSelect}
+              title={mode === 'bulk' ? bulkTitle : rowTitleApprove}
+            >
+              <option value="">Select action…</option>
+              {actionOptions.map((opt) => (
+                <option key={opt.value} value={opt.value} disabled={!opt.enabled}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={batchActionBusy || !selectedAction}
+              className={batchActionApply}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (!selectedAction) return
+                if (selectedAction === 'hold_batch') {
+                  openHold()
+                  return
+                }
+                void runAction(selectedAction)
+              }}
+            >
+              Apply
+            </button>
+          </div>
         </div>
         {holdIsOpen ? (
           <span className="flex w-full min-w-0 flex-nowrap items-center justify-end gap-1">
