@@ -6,6 +6,8 @@ import { ExternalLink, Layers, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { parseDesignerCommand } from '@/lib/designer-command'
+import { readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
+import { isEmbossingRequired } from '@/lib/emboss-conditions'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -93,28 +95,66 @@ type ItemState = {
   qaTextApproval: boolean
 }
 
+type DownstreamStageResult = {
+  enabled: boolean
+  success: number
+  fail: number
+}
+
+type UnifiedRoutingStatus = {
+  savedAt: string
+  savedCount: number
+  requestedBy: 'save' | 'push_all' | 'push_plate' | 'push_die' | 'push_emboss'
+  plate: DownstreamStageResult
+  die: DownstreamStageResult
+  emboss: DownstreamStageResult
+} | null
+
+function normalizePlateSetNumber(setRaw: string): string | null {
+  const raw = String(setRaw || '').trim()
+  if (!raw) return null
+  if (/^\d+$/.test(raw)) return raw
+  const digits = raw.match(/\d+/g)?.join('') || ''
+  return digits || null
+}
+
+function ensurePlateDesignerCommand(
+  row: Pick<Row, 'embossingLeafing'>,
+  raw: unknown,
+): ReturnType<typeof parseDesignerCommand> {
+  const dc = parseDesignerCommand(raw)
+  return {
+    ...dc,
+    dieSource: dc.dieSource ?? 'new',
+    setType: dc.setType || 'new_set',
+    embossSource: isEmbossingRequired(row.embossingLeafing) ? (dc.embossSource ?? 'new') : dc.embossSource,
+  }
+}
+
 export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRefresh }: Props) {
   const [saving, setSaving] = useState<Set<string>>(new Set())
   const [savingGroup, setSavingGroup] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
   const [itemStates, setItemStates] = useState<Record<string, ItemState>>(() => {
-    const s: Record<string, ItemState> = {}
+    const stateById: Record<string, ItemState> = {}
     for (const r of rows) {
       const spec = r.specOverrides || {}
-      const s = spec as Record<string, unknown>
-      const dc = parseDesignerCommand(s.designerCommand)
+      const specMap = spec as Record<string, unknown>
+      const dc = parseDesignerCommand(specMap.designerCommand)
       const pr = dc.plateRequirement
-      const upsRaw = s.ups ?? s.numberOfUps
-      s[r.id] = {
+      const planningCore = readPlanningCore(specMap)
+      const planningMeta = readPlanningMeta(specMap)
+      const upsRaw = specMap.ups ?? specMap.numberOfUps ?? planningCore.ups ?? planningMeta.ups
+      stateById[r.id] = {
         artworkCode: r.artworkCode ?? '',
         setNumber: r.setNumber ?? '',
         ups: typeof upsRaw === 'number' && Number.isFinite(upsRaw) ? String(Math.floor(upsRaw)) : '',
         specialRemarks:
-          typeof s.specialRemarks === 'string'
-            ? s.specialRemarks
-            : typeof s.prePressRemarks === 'string'
-              ? s.prePressRemarks
+          typeof specMap.specialRemarks === 'string'
+            ? specMap.specialRemarks
+            : typeof specMap.prePressRemarks === 'string'
+              ? specMap.prePressRemarks
               : '',
         standardC: !!pr.standardC,
         standardM: !!pr.standardM,
@@ -131,7 +171,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
         qaTextApproval: !!(spec.shadeCardQaTextApproval),
       }
     }
-    return s
+    return stateById
   })
 
   const totalQty = rows.reduce((s, r) => s + r.quantity, 0)
@@ -154,11 +194,9 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
   const [groupCustomerApproval, setGroupCustomerApproval] = useState(false)
   const [groupQaTextApproval, setGroupQaTextApproval] = useState(false)
   const [unifiedMode, setUnifiedMode] = useState(true)
-  const [pushPlates, setPushPlates] = useState(false)
-  const [pushDie, setPushDie] = useState(false)
-  const [pushEmboss, setPushEmboss] = useState(false)
   const [groupSheetLengthMm, setGroupSheetLengthMm] = useState('')
   const [groupSheetWidthMm, setGroupSheetWidthMm] = useState('')
+  const [unifiedRoutingStatus, setUnifiedRoutingStatus] = useState<UnifiedRoutingStatus>(null)
 
   useEffect(() => {
     setGroupArtworkCode(inferredArtworkCode)
@@ -168,9 +206,6 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
     setGroupCustomerApproval(allCust)
     setGroupQaTextApproval(allQa)
     setUnifiedMode(true)
-    setPushPlates(false)
-    setPushDie(false)
-    setPushEmboss(false)
     const lenVals = new Set<string>()
     const widVals = new Set<string>()
     for (const r of rows) {
@@ -184,6 +219,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
     setGroupSheetWidthMm(widVals.size === 1 ? Array.from(widVals)[0]! : '')
     setDirty(false)
     setLastSavedAt(null)
+    setUnifiedRoutingStatus(null)
   }, [rows, inferredArtworkCode, inferredSetNumber, isOpen])
 
   useEffect(() => {
@@ -310,24 +346,30 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
     }
   }
 
-  async function saveUnifiedGroup() {
+  async function saveUnifiedGroup(mode: 'save' | 'push_all' | 'push_plate' | 'push_die' | 'push_emboss' = 'save') {
     if (!rows.length) return
     setSavingGroup(true)
     const nowIso = new Date().toISOString()
+    const routePlates = mode === 'push_all' || mode === 'push_plate'
+    const routeDie = mode === 'push_all' || mode === 'push_die'
+    const routeEmboss = mode === 'push_all' || mode === 'push_emboss'
     let okCount = 0
     let failCount = 0
+    const resolvedAwCode = groupArtworkCode.trim()
+    const resolvedSetNumber = groupSetNumber.trim()
+    const resolvedPlateSetNumber = normalizePlateSetNumber(resolvedSetNumber)
     for (const r of rows) {
       try {
         const specBase = (r.specOverrides || {}) as Record<string, unknown>
         const st = itemStates[r.id]
         const dc = parseDesignerCommand(specBase.designerCommand)
         const nextDesignerCommand: Record<string, unknown> = { ...dc }
-        if (pushPlates) nextDesignerCommand.plateHubDispatchAt = nowIso
-        if (pushDie) {
+        if (routePlates) nextDesignerCommand.plateHubDispatchAt = nowIso
+        if (routeDie) {
           nextDesignerCommand.dieLastIntent = 'die_hub'
           nextDesignerCommand.dieLastIntentAt = nowIso
         }
-        if (pushEmboss) {
+        if (routeEmboss) {
           nextDesignerCommand.embossLastIntent = 'emboss_hub'
           nextDesignerCommand.embossLastIntentAt = nowIso
         }
@@ -343,13 +385,26 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
           sheetLengthMm: Number.isFinite(lengthNum) && (lengthNum as number) > 0 ? lengthNum : null,
           sheetWidthMm: Number.isFinite(widthNum) && (widthNum as number) > 0 ? widthNum : null,
           designerCommand: nextDesignerCommand,
+          unifiedGroupBody: {
+            ...(typeof specBase.unifiedGroupBody === 'object' && specBase.unifiedGroupBody
+              ? (specBase.unifiedGroupBody as Record<string, unknown>)
+              : {}),
+            savedAt: nowIso,
+            masterSetId: groupId,
+            mode: 'group',
+            pushPlates: !!routePlates,
+            pushDie: !!routeDie,
+            pushEmboss: !!routeEmboss,
+            sheetLengthMm: Number.isFinite(lengthNum) && (lengthNum as number) > 0 ? lengthNum : null,
+            sheetWidthMm: Number.isFinite(widthNum) && (widthNum as number) > 0 ? widthNum : null,
+          },
         }
         const res = await fetch(`/api/planning/po-lines/${r.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            artworkCode: groupArtworkCode.trim() || null,
-            setNumber: groupSetNumber.trim() || null,
+            artworkCode: resolvedAwCode || null,
+            setNumber: resolvedSetNumber || null,
             specOverrides,
           }),
         })
@@ -360,16 +415,122 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
       }
     }
     setSavingGroup(false)
+    let pushPlateSuccess = 0
+    let pushPlateFail = 0
+    let pushDieSuccess = 0
+    let pushDieFail = 0
+    let pushEmbossSuccess = 0
+    let pushEmbossFail = 0
+    const canRouteDownstream = !!resolvedAwCode && !!resolvedSetNumber
+    if (okCount > 0 && (routePlates || routeDie || routeEmboss)) {
+      if (!canRouteDownstream) {
+        toast.error('Unified save completed, but push needs common Set # and Artwork code')
+      }
+      for (const r of rows) {
+        if (!canRouteDownstream) break
+        const st = itemStates[r.id]
+        const spec = (r.specOverrides || {}) as Record<string, unknown>
+        const lengthNum = groupSheetLengthMm.trim() ? parseInt(groupSheetLengthMm.trim(), 10) : null
+        const widthNum = groupSheetWidthMm.trim() ? parseInt(groupSheetWidthMm.trim(), 10) : null
+        const actualSheetSize =
+          Number.isFinite(lengthNum) && Number.isFinite(widthNum) && (lengthNum as number) > 0 && (widthNum as number) > 0
+            ? `${lengthNum}×${widthNum} mm`
+            : ''
+        const upsNum = st?.ups?.trim() ? parseInt(st.ups.trim(), 10) : null
+        if (routePlates) {
+          try {
+            if (!resolvedPlateSetNumber) throw new Error('Set # must contain digits')
+            const designerId = (spec.assignedDesignerId as string | undefined) || null
+            const designerCommand = ensurePlateDesignerCommand(r, spec.designerCommand)
+            const res = await fetch('/api/plate-hub', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                poLineId: r.id,
+                setNumber: resolvedPlateSetNumber,
+                awCode: resolvedAwCode,
+                customerApproval: true,
+                qaTextCheckApproval: true,
+                assignedDesignerId: designerId,
+                designerCommand,
+                status: 'PUSH_TO_PRODUCTION_QUEUE',
+              }),
+            })
+            if (!res.ok && res.status !== 409) throw new Error('Plate push failed')
+            pushPlateSuccess += 1
+          } catch {
+            pushPlateFail += 1
+          }
+        }
+        if (routeDie) {
+          try {
+            const res = await fetch('/api/tooling-hub/dispatch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                toolType: 'DIE',
+                awCode: resolvedAwCode,
+                actualSheetSize,
+                ups: Number.isFinite(upsNum) && (upsNum as number) >= 1 ? upsNum : 1,
+                jobId: r.id,
+                setNumber: resolvedSetNumber,
+                source: 'NEW',
+              }),
+            })
+            if (!res.ok) throw new Error('Die push failed')
+            pushDieSuccess += 1
+          } catch {
+            pushDieFail += 1
+          }
+        }
+        if (routeEmboss) {
+          try {
+            const res = await fetch('/api/tooling-hub/dispatch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                toolType: 'BLOCK',
+                awCode: resolvedAwCode,
+                actualSheetSize,
+                blockType: String(r.embossingLeafing || 'Emboss').trim() || 'Emboss',
+                jobId: r.id,
+                setNumber: resolvedSetNumber,
+                source: 'NEW',
+              }),
+            })
+            if (!res.ok) throw new Error('Emboss push failed')
+            pushEmbossSuccess += 1
+          } catch {
+            pushEmbossFail += 1
+          }
+        }
+      }
+    }
     if (failCount > 0) {
       toast.error(`Unified save: ${okCount}/${rows.length} succeeded`)
     } else {
-      const decisions = [pushPlates ? 'plates' : '', pushDie ? 'die' : '', pushEmboss ? 'emboss' : '']
+      const decisions = [routePlates ? 'plates' : '', routeDie ? 'die' : '', routeEmboss ? 'emboss' : '']
         .filter(Boolean)
         .join(', ')
+      const pushBits = [
+        routePlates ? `plates ${pushPlateSuccess}/${rows.length}${pushPlateFail ? ` (fail ${pushPlateFail})` : ''}` : '',
+        routeDie ? `die ${pushDieSuccess}/${rows.length}${pushDieFail ? ` (fail ${pushDieFail})` : ''}` : '',
+        routeEmboss ? `emboss ${pushEmbossSuccess}/${rows.length}${pushEmbossFail ? ` (fail ${pushEmbossFail})` : ''}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
       toast.success(
-        `Unified group saved for ${okCount} item${okCount === 1 ? '' : 's'}${decisions ? ` · push decisions: ${decisions}` : ''}`,
+        `Unified group saved for ${okCount} item${okCount === 1 ? '' : 's'}${decisions ? ` · push decisions: ${decisions}` : ''}${pushBits ? ` · routed: ${pushBits}` : ''}`,
       )
     }
+    setUnifiedRoutingStatus({
+      savedAt: nowIso,
+      savedCount: okCount,
+      requestedBy: mode,
+      plate: { enabled: routePlates, success: pushPlateSuccess, fail: pushPlateFail },
+      die: { enabled: routeDie, success: pushDieSuccess, fail: pushDieFail },
+      emboss: { enabled: routeEmboss, success: pushEmbossSuccess, fail: pushEmbossFail },
+    })
     setDirty(false)
     setLastSavedAt(new Date())
     onRefresh()
@@ -545,31 +706,88 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               <span className="text-[12px] text-ds-ink-muted">QA text approval (all)</span>
             </label>
           </div>
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <label className="flex cursor-pointer items-center gap-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1.5 text-[12px]">
-              <input type="checkbox" checked={pushPlates} onChange={(e) => setPushPlates(e.target.checked)} className="h-4 w-4 accent-ds-brand" />
-              <span className="text-ds-ink-muted">Decision: push plates</span>
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1.5 text-[12px]">
-              <input type="checkbox" checked={pushDie} onChange={(e) => setPushDie(e.target.checked)} className="h-4 w-4 accent-ds-brand" />
-              <span className="text-ds-ink-muted">Decision: push die</span>
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1.5 text-[12px]">
-              <input type="checkbox" checked={pushEmboss} onChange={(e) => setPushEmboss(e.target.checked)} className="h-4 w-4 accent-ds-brand" />
-              <span className="text-ds-ink-muted">Decision: push emboss</span>
-            </label>
+          <div className="mt-3 rounded border border-ds-line/40 bg-ds-elevated/15 px-2.5 py-2 text-[11px] text-ds-ink-muted">
+            Unified routing action sends this saved group body to Plate, Die, and Emboss together.
           </div>
-          <div className="mt-3 flex justify-end">
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
             <button
               type="button"
               disabled={savingGroup}
-              onClick={() => void saveUnifiedGroup()}
+              onClick={() => void saveUnifiedGroup('push_plate')}
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-emerald-700 transition hover:bg-emerald-500/18 disabled:opacity-40 dark:text-emerald-200"
+            >
+              {savingGroup ? '…' : 'Push plates'}
+            </button>
+            <button
+              type="button"
+              disabled={savingGroup}
+              onClick={() => void saveUnifiedGroup('push_die')}
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-violet-500/35 bg-violet-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-violet-700 transition hover:bg-violet-500/18 disabled:opacity-40 dark:text-violet-300"
+            >
+              {savingGroup ? '…' : 'Push die'}
+            </button>
+            <button
+              type="button"
+              disabled={savingGroup}
+              onClick={() => void saveUnifiedGroup('push_emboss')}
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-orange-500/35 bg-orange-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-orange-700 transition hover:bg-orange-500/18 disabled:opacity-40 dark:text-orange-300"
+            >
+              {savingGroup ? '…' : 'Push emboss'}
+            </button>
+            <button
+              type="button"
+              disabled={savingGroup}
+              onClick={() => void saveUnifiedGroup('push_all')}
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-emerald-500/45 bg-emerald-500/15 px-3 py-1.5 text-[12px] font-semibold text-emerald-700 transition hover:bg-emerald-500/25 disabled:opacity-40 dark:text-emerald-200"
+            >
+              <Layers className="h-3 w-3" aria-hidden />
+              {savingGroup ? 'Pushing unified body…' : 'Push unified body downstream'}
+            </button>
+            <button
+              type="button"
+              disabled={savingGroup}
+              onClick={() => void saveUnifiedGroup('save')}
               className="inline-flex items-center gap-1 rounded-ds-sm border border-sky-500/45 bg-sky-500/15 px-3 py-1.5 text-[12px] font-semibold text-sky-700 transition hover:bg-sky-500/25 disabled:opacity-40 dark:text-sky-200"
             >
               <Pencil className="h-3 w-3" aria-hidden />
               {savingGroup ? 'Saving group…' : 'Save unified group'}
             </button>
           </div>
+          {unifiedRoutingStatus ? (
+            <div className="mt-3 rounded border border-ds-line/40 bg-ds-elevated/20 px-2.5 py-2">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
+                Downstream status
+              </p>
+              <p className="text-[11px] text-ds-ink-muted">
+                Saved: {unifiedRoutingStatus.savedCount}/{rows.length} · Mode:{' '}
+                {unifiedRoutingStatus.requestedBy === 'push_all'
+                  ? 'push unified body'
+                  : unifiedRoutingStatus.requestedBy === 'push_plate'
+                    ? 'push plates'
+                    : unifiedRoutingStatus.requestedBy === 'push_die'
+                      ? 'push die'
+                      : unifiedRoutingStatus.requestedBy === 'push_emboss'
+                        ? 'push emboss'
+                        : 'save only'}{' '}
+                · At:{' '}
+                {new Date(unifiedRoutingStatus.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </p>
+              <p className="mt-1 text-[11px] text-ds-ink-muted">
+                Plate:{' '}
+                {unifiedRoutingStatus.plate.enabled
+                  ? `${unifiedRoutingStatus.plate.success}/${rows.length}${unifiedRoutingStatus.plate.fail ? ` (fail ${unifiedRoutingStatus.plate.fail})` : ''}`
+                  : 'not requested'}{' '}
+                · Die:{' '}
+                {unifiedRoutingStatus.die.enabled
+                  ? `${unifiedRoutingStatus.die.success}/${rows.length}${unifiedRoutingStatus.die.fail ? ` (fail ${unifiedRoutingStatus.die.fail})` : ''}`
+                  : 'not requested'}{' '}
+                · Emboss:{' '}
+                {unifiedRoutingStatus.emboss.enabled
+                  ? `${unifiedRoutingStatus.emboss.success}/${rows.length}${unifiedRoutingStatus.emboss.fail ? ` (fail ${unifiedRoutingStatus.emboss.fail})` : ''}`
+                  : 'not requested'}
+              </p>
+            </div>
+          ) : null}
         </div>
 
         {/* Qty summary bar */}

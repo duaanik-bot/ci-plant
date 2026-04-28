@@ -29,6 +29,7 @@ Import tokens from:
 ## Validation
 
 - Before shipping UI token changes, run: `docs/ui-visual-regression-checklist.md`.
+- For production-ready polish checks, run: `docs/ui-professionalism-checklist.md`.
 
 ## Example
 

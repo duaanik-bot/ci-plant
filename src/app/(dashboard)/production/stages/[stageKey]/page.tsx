@@ -80,6 +80,8 @@ type JobCardSummary = {
   status: string
   customer: { id: string; name: string }
   productName: string | null
+  unifiedBodyId: string | null
+  unifiedBodySize: number | null
   updatedAt: string
   machineId: string | null
   machine: { id: string; machineCode: string; name: string; capacityPerShift: number } | null
@@ -145,6 +147,7 @@ export default function ProductionStagePage() {
   const [profileOperatorId, setProfileOperatorId] = useState<string | null>(null)
   const [pmMachineId, setPmMachineId] = useState<string | null>(null)
   const [incentiveBusy, setIncentiveBusy] = useState(false)
+  const [expandedUnifiedGroups, setExpandedUnifiedGroups] = useState<Set<string>>(new Set())
 
   const stageMeta = PRODUCTION_STAGES.find((s) => s.key === stageKey)
 
@@ -298,6 +301,28 @@ export default function ProductionStagePage() {
     })
     return arr
   }, [rawList, sortBy, sortDir])
+
+  type StageVisualEntry =
+    | { kind: 'single'; row: Payload['jobCards'][number] }
+    | { kind: 'group'; groupId: string; rows: Payload['jobCards'][number][] }
+
+  const stageVisualRows = useMemo((): StageVisualEntry[] => {
+    const out: StageVisualEntry[] = []
+    const seen = new Set<string>()
+    for (const row of list) {
+      const gid = (row.jobCard.unifiedBodyId || '').trim()
+      const gsize = row.jobCard.unifiedBodySize ?? 0
+      if (!gid || gsize <= 1) {
+        out.push({ kind: 'single', row })
+        continue
+      }
+      if (seen.has(gid)) continue
+      seen.add(gid)
+      const members = list.filter((r) => (r.jobCard.unifiedBodyId || '').trim() === gid)
+      out.push({ kind: 'group', groupId: gid, rows: members })
+    }
+    return out
+  }, [list])
 
   function toggleSort(key: SortKey) {
     setSortBy(key)
@@ -508,7 +533,62 @@ export default function ProductionStagePage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-ds-line/30">
-            {list.map((row) => {
+            {stageVisualRows.map((entry) => {
+              if (entry.kind === 'group') {
+                const { groupId, rows } = entry
+                const isExpanded = expandedUnifiedGroups.has(groupId)
+                const first = rows[0]!
+                const reqSheets = rows.reduce((s, r) => s + r.jobCard.requiredSheets, 0)
+                const totalSheets = rows.reduce((s, r) => s + r.jobCard.totalSheets, 0)
+                return (
+                  <tr
+                    key={`unified:${groupId}`}
+                    className="cursor-pointer border-l-2 border-sky-500/70 bg-sky-500/8 hover:bg-sky-500/12"
+                    onClick={() =>
+                      setExpandedUnifiedGroups((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(groupId)) next.delete(groupId)
+                        else next.add(groupId)
+                        return next
+                      })
+                    }
+                  >
+                    <td className="px-4 py-2 font-mono text-sky-700 dark:text-sky-300">
+                      ▼ Unified body ({rows.length})
+                    </td>
+                    <td className="px-4 py-2 text-ds-ink">{first.jobCard.customer.name}</td>
+                    <td className="px-4 py-2 text-ds-ink-muted max-w-[200px] truncate" title={rows.map((r) => r.jobCard.productName || '—').join(' · ')}>
+                      {rows.map((r) => r.jobCard.productName || '—').join(' · ')}
+                    </td>
+                    <td className="px-4 py-2 text-ds-ink-muted">
+                      {first.jobCard.setNumber ?? '—'} / {first.jobCard.batchNumber ?? groupId}
+                    </td>
+                    <td className="px-4 py-2 text-ds-ink-muted">{reqSheets} / {totalSheets}</td>
+                    <td className="px-4 py-2 text-ds-ink-faint text-xs">Unified</td>
+                    <td className="px-4 py-2 text-ds-ink-faint text-xs">—</td>
+                    <td className="px-4 py-2 text-ds-ink-faint text-xs">—</td>
+                    <td className="px-4 py-2 text-ds-ink-faint text-xs">—</td>
+                    <td className="px-4 py-2">
+                      <span className="px-2 py-0.5 rounded text-xs border bg-blue-900/40 text-blue-300 border-blue-600">
+                        Unified in {label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-ds-ink-faint text-xs">{isExpanded ? 'Expanded' : 'Collapsed'}</td>
+                    <td className="px-4 py-2 text-ds-ink-faint text-xs">—</td>
+                    <td className="px-4 py-2 text-ds-ink-faint text-xs">—</td>
+                    <td className="px-4 py-2">
+                      <Link
+                        href={`/production/job-cards/${first.jobCard.id}`}
+                        className="text-ds-warning hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Open first JC
+                      </Link>
+                    </td>
+                  </tr>
+                )
+              }
+              const row = entry.row
               const { stageRecord, jobCard, idleHours } = row
               const pri =
                 jobCard.industrialPriority === true ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''

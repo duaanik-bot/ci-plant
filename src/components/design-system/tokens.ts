@@ -2,7 +2,7 @@ export const STATUS_CHIP_BASE =
   'inline-flex items-center rounded-md border px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide leading-none'
 
 export const PUSHED_CHIP_CLASS =
-  `${STATUS_CHIP_BASE} border-emerald-500/35 bg-emerald-500/10 text-emerald-300`
+  `${STATUS_CHIP_BASE} border-emerald-500/35 bg-emerald-500/12 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300`
 
 export const ACTION_PILL_BASE =
   'inline-flex min-w-[80px] items-center justify-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-40'

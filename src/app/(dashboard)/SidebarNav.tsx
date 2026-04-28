@@ -177,7 +177,6 @@ export function SidebarNav({
         { href: '/rfq', label: 'RFQ Pipeline', icon: FileText },
         { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart },
         { href: '/orders/planning', label: 'Planning', icon: CalendarCheck },
-        { href: '/orders/procurement', label: 'Material Readiness Hub', icon: PackageCheck },
         { href: '/orders/designing', label: 'Artwork Queue', icon: Image },
       ],
     },
@@ -191,7 +190,6 @@ export function SidebarNav({
         { href: '/hub/dies', label: 'Dies', icon: Droplets },
         { href: '/hub/blocks', label: 'Embossing blocks', icon: Package },
         { href: '/hub/shade-card-hub', label: 'Shade Card Hub', icon: Palette },
-        { href: '/hub/shade_cards', label: 'Shade cards (floor)', icon: Palette },
       ],
     },
     {

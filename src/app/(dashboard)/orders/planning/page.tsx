@@ -25,7 +25,7 @@ import {
   type PlanningLineFieldPatch,
 } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningBatchBuilderPanel } from '@/components/planning/PlanningBatchBuilderPanel'
-import { ActionBar, PageHeader } from '@/components/design-system'
+import { BulkActionBar, LaneCounterChips } from '@/components/design-system'
 import { Button } from '@/components/design-system/Button'
 import { RowStateLegend } from '@/components/ui/RowStateLegend'
 import { PlanningJobDetailDrawer } from '@/components/planning/PlanningJobDetailDrawer'
@@ -377,13 +377,13 @@ export default function PlanningPage() {
     if (q.get('view') === 'pending') setLedgerView('pending')
   }, [])
 
-  /** Batch builder (2+ checkboxes) supersedes row detail — one primary slide-over at a time. */
+  /** Batch builder (1+ checkboxes) supersedes row detail — one primary slide-over at a time. */
   useEffect(() => {
-    if (planningSelection.size >= 2) setPlanningDrawerLineId(null)
+    if (planningSelection.size >= 1) setPlanningDrawerLineId(null)
   }, [planningSelection.size])
 
   useEffect(() => {
-    if (planningSelection.size < 2) setBatchBuilderOpen(false)
+    if (planningSelection.size < 1) setBatchBuilderOpen(false)
   }, [planningSelection.size])
 
   const customerSearch = useAutoPopulate<Customer>({
@@ -553,10 +553,45 @@ export default function PlanningPage() {
   const moduleFilteredRows = useMemo(() => {
     const q = planningSearchQuery.trim().toLowerCase()
     if (q.length < 2) return rows
+
     return rows.filter((r) => {
-      const carton = String(r.cartonName || '').toLowerCase()
-      const po = String(r.po?.poNumber || '').toLowerCase()
-      return carton.includes(q) || po.includes(q)
+      const spec = (r.specOverrides || {}) as Record<string, unknown>
+      const core = readPlanningCore(spec)
+      const meta = readPlanningMeta(spec)
+      const board =
+        typeof spec.boardGrade === 'string' && spec.boardGrade.trim()
+          ? spec.boardGrade.trim()
+          : typeof r.materialQueue?.boardType === 'string' && r.materialQueue.boardType.trim()
+            ? r.materialQueue.boardType.trim()
+            : String(r.paperType ?? r.carton?.paperType ?? '')
+      const designerName =
+        typeof spec.planningDesignerDisplayName === 'string' && spec.planningDesignerDisplayName.trim()
+          ? spec.planningDesignerDisplayName.trim()
+          : core.designerKey
+            ? PLANNING_DESIGNERS[core.designerKey as PlanningDesignerKey] ?? ''
+            : typeof meta.designer === 'string'
+              ? meta.designer.trim()
+              : ''
+      const gsm = r.gsm ?? r.carton?.gsm ?? ''
+      const haystack = [
+        r.cartonName,
+        r.po?.poNumber,
+        r.po?.customer?.name,
+        r.cartonSize,
+        String(r.quantity ?? ''),
+        board,
+        String(gsm ?? ''),
+        designerName,
+        r.coatingType,
+        r.otherCoating,
+        r.embossingLeafing,
+        r.paperType,
+        r.remarks,
+      ]
+        .map((v) => String(v ?? '').toLowerCase())
+        .join(' ')
+
+      return haystack.includes(q)
     })
   }, [rows, planningSearchQuery])
 
@@ -968,333 +1003,78 @@ export default function PlanningPage() {
     )
   }
 
+  const pendingCount = moduleFilteredRows.filter((r) => r.planningStatus === 'pending').length
+  const processedCount = moduleFilteredRows.length - pendingCount
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-ds-main text-ds-ink">
-      <div className="shrink-0 space-y-2 border-b border-ds-line/60 bg-ds-main px-3 py-2">
-        <PageHeader
-          className="!pb-2"
-          title="Planning"
-          description={
-            <p className={`text-[13px] font-medium text-ds-ink-muted ${mono}`}>
-              {rows.length} line(s) · Σ qty{' '}
-              <span className="ds-typo-kpi text-ds-success text-base md:text-lg">
-                {totalQty.toLocaleString('en-IN')}
-              </span>
-            </p>
-          }
-          actions={
-            <div className="flex w-full max-w-3xl flex-col gap-2 sm:ml-auto sm:items-end">
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium uppercase tracking-wider text-ds-ink-faint">View</span>
-                  <div className="inline-flex rounded-ds-md border border-ds-line/80 bg-ds-elevated/50 p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setLedgerView('pending')}
-                      className={`rounded-ds-sm px-3 py-1.5 text-[13px] font-medium transition duration-200 ${
-                        ledgerView === 'pending' ? 'bg-ds-brand text-white shadow-sm' : 'text-ds-ink-muted hover:text-ds-ink'
-                      }`}
-                    >
-                      Pending
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLedgerView('processed')}
-                      className={`rounded-ds-sm px-3 py-1.5 text-[13px] font-medium transition duration-200 ${
-                        ledgerView === 'processed' ? 'bg-ds-brand text-white shadow-sm' : 'text-ds-ink-muted hover:text-ds-ink'
-                      }`}
-                    >
-                      Processed
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <Button
-                  type="button"
-                  variant={batchBuilderOpen ? 'secondary' : 'primary'}
-                  onClick={() => setBatchBuilderOpen((o) => !o)}
-                  disabled={planningSelection.size < 2}
-                  className="px-3 py-2 text-[13px]"
-                >
-                  {batchBuilderOpen
-                    ? `Close Group Builder (${planningSelection.size})`
-                    : `Open Group Builder (${planningSelection.size})`}
-                </Button>
+      <div className="shrink-0 border-b border-ds-line/60 bg-ds-main/95 px-4 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`shrink-0 text-[12px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Planning</span>
+          <LaneCounterChips
+            chips={[
+              {
+                key: 'pending',
+                label: 'Pending',
+                count: pendingCount,
+                active: ledgerView === 'pending',
+                onClick: () => setLedgerView('pending'),
+                tone: 'warning',
+              },
+              {
+                key: 'processed',
+                label: 'Processed',
+                count: processedCount,
+                active: ledgerView === 'processed',
+                onClick: () => setLedgerView('processed'),
+                tone: 'success',
+              },
+            ]}
+          />
+          <div className="min-w-[220px] flex-1">
+            <input
+              type="text"
+              value={planningSearchQuery}
+              onChange={(e) => setPlanningSearchQuery(e.target.value)}
+              placeholder="Search in planning (carton / PO #)"
+              className="h-8 w-full rounded-md border border-ds-line/60 bg-ds-elevated/35 px-2.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+            />
+          </div>
+          <BulkActionBar
+            selectedCount={planningSelection.size}
+            className="w-full md:w-auto md:sticky md:bottom-auto md:bg-transparent md:shadow-none md:border-0 md:p-0"
+            left={
+              <Button
+                type="button"
+                variant={batchBuilderOpen ? 'secondary' : 'primary'}
+                onClick={() => setBatchBuilderOpen((o) => !o)}
+                disabled={planningSelection.size === 0}
+                className="h-8 px-2.5 py-0 text-[12px]"
+              >
+                {batchBuilderOpen ? `Close Builder (${planningSelection.size})` : `Builder (${planningSelection.size})`}
+              </Button>
+            }
+            right={
+              <>
                 <Button
                   type="button"
                   onClick={() => void handleMakeProcessing()}
                   disabled={planningSelection.size === 0 || makeProcessingBusy}
-                  className="px-3 py-2 text-[13px]"
+                  className="h-8 px-2.5 py-0 text-[12px]"
                 >
                   {makeProcessingBusy ? 'Processing…' : 'Make processing'}
                 </Button>
-                <Link
-                  href="/hub/dies"
-                  className="inline-flex items-center justify-center gap-2 rounded-ds-sm border border-ds-line bg-ds-elevated/80 px-3 py-2 text-[13px] font-medium text-ds-ink shadow-sm transition duration-200 hover:bg-ds-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-brand/25"
-                >
-                  Dyes
-                </Link>
-                <Link
-                  href="/orders/purchase-orders"
-                  className="rounded-ds-sm border border-ds-line/80 bg-ds-elevated/60 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated"
-                >
-                  POs
-                </Link>
-                <Link
-                  href="/orders/designing"
-                  className="rounded-ds-sm border border-ds-line/80 bg-ds-elevated/60 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated"
-                >
-                  AW queue
-                </Link>
-                <button
+                <Button
                   type="button"
-                  onClick={() => {
-                    downloadPlanningAuditCsv(rows)
-                    toast.success('Audit CSV exported')
-                  }}
-                  className={`inline-flex items-center gap-1.5 rounded-ds-sm border border-ds-line/80 bg-ds-elevated/50 px-2 py-1.5 text-xs text-ds-ink transition duration-200 hover:border-ds-line hover:bg-ds-elevated ${mono}`}
+                  variant="secondary"
+                  onClick={() => void savePlanningHandoff()}
+                  disabled={savingPlanningHandoff}
+                  className="h-8 px-2.5 py-0 text-[12px]"
                 >
-                  <Download className="h-3.5 w-3.5 text-ds-ink-faint" aria-hidden />
-                  Audit
-                </button>
-              </div>
-            </div>
-          }
-        />
-        <div className="grid grid-cols-1 gap-2 text-[13px] sm:grid-cols-3 sm:gap-4">
-          <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
-            <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Queue Σ qty</p>
-            <p className={`ds-typo-kpi text-ds-ink ${mono}`}>{totalQty.toLocaleString('en-IN')}</p>
-          </div>
-          <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
-            <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Top blocker</p>
-            <p className={`line-clamp-2 text-ds-ink-muted ${mono}`}>{topBlockerTile.headline}</p>
-          </div>
-          <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 px-3 py-2">
-            <p className={`text-[10px] uppercase tracking-wider text-ds-ink-faint ${mono}`}>Ready to schedule</p>
-            <p className={`ds-typo-kpi text-ds-success ${mono}`}>{readyToScheduleCount}</p>
-          </div>
-        </div>
-
-        {incomingFromPo.length > 0 ? (
-          <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/20 px-3 py-2">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-ds-ink-muted">Incoming from PO</h2>
-            <div className="max-h-56 overflow-x-hidden overflow-y-auto">
-              <table className="w-full table-fixed border-collapse text-left text-[12px]">
-                <thead>
-                  <tr className="border-b border-ds-line/50 text-[10px] uppercase text-ds-ink-faint">
-                    <th className="py-2 pr-2">PO</th>
-                    <th className="py-2 pr-2">Item</th>
-                    <th className="py-2 pr-2">Qty</th>
-                    <th className="py-2 pr-2">Tooling</th>
-                    <th className="py-2 pr-2">Gate</th>
-                    <th className="py-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {incomingFromPo.map((r) => {
-                    const five = readinessFiveForLine(r)
-                    const busy = incomingBusy === r.id
-                    const tReady = r.planningLedger?.toolingInterlock?.allReady
-                    return (
-                      <tr key={r.id} className="border-b border-ds-line/30">
-                        <td className="py-1.5 pr-2">
-                          <button
-                            type="button"
-                            onClick={() => setPoSummaryDrawerId(r.po.id)}
-                            className={`text-left font-mono text-ds-brand underline-offset-2 transition hover:underline ${mono}`}
-                          >
-                            {r.po.poNumber}
-                          </button>
-                        </td>
-                        <td className="max-w-[8rem] truncate py-1.5 pr-2 text-ds-ink" title={r.cartonName}>
-                          {r.cartonName}
-                        </td>
-                        <td className="py-1.5 pr-2 font-medium tabular-nums text-ds-ink">{r.quantity}</td>
-                        <td className="py-1.5 pr-2 text-[11px] text-ds-ink-muted">
-                          {tReady ? 'Interlock OK' : 'Review'}
-                        </td>
-                        <td className="py-1.5 pr-2 text-[11px]">
-                          {five.allGreen ? (
-                            <span className="text-ds-success">Ready</span>
-                          ) : (
-                            <span className="text-ds-warning">Pending</span>
-                          )}
-                        </td>
-                        <td className="py-1.5">
-                          <div className="flex flex-wrap gap-1">
-                            <Button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void applyIncomingDecision(r.id, 'approve')}
-                              className="h-7 px-2 py-0 text-[11px]"
-                            >
-                              Approve
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={busy}
-                              onClick={() => void applyIncomingDecision(r.id, 'hold')}
-                              className="h-7 px-2 py-0 text-[11px]"
-                            >
-                              Hold
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={busy}
-                              onClick={() => void applyIncomingDecision(r.id, 'artwork')}
-                              className="h-7 px-2 py-0 text-[11px]"
-                            >
-                              Artwork
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="px-0 py-1 space-y-2">
-          <PlanningSuggestedBatchesPanel
-            lines={suggestableLines}
-            dismissedIds={dismissedSuggestionIds}
-            onDismiss={(id) =>
-              setDismissedSuggestionIds((prev) => {
-                const n = new Set(prev)
-                n.add(id)
-                return n
-              })
+                  {savingPlanningHandoff ? 'Saving…' : 'Save'}
+                </Button>
+              </>
             }
-            onAccept={(lineIds) => {
-              linkLineIdsAsMixSet(lineIds)
-            }}
-            onModify={(lineIds) => {
-              setPlanningSelection(new Set(lineIds))
-              toast.info(
-                lineIds.length >= 2
-                  ? 'Selection ready — click Open Group Builder to review and package.'
-                  : 'Select at least two lines, then open Group Builder.',
-                { duration: 5000 },
-              )
-            }}
-          />
-        </div>
-      </div>
-
-      <ActionBar className="shrink-0 border-b border-ds-line/50 bg-ds-main/95 px-3 py-2">
-        <div className="flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="min-w-0 flex-1">
-            <PlanningDecisionLayerToolbar
-              selectionCount={planningSelection.size}
-              onLinkAsMixSet={linkAsMixSet}
-              onSavePlanning={() => void savePlanningHandoff()}
-              groupBy={planningGroupBy}
-              onGroupByChange={setPlanningGroupBy}
-              setIdMode={planningSetIdMode}
-              onSetIdModeChange={setPlanningSetIdMode}
-              saving={savingPlanningHandoff}
-            />
-          </div>
-          <div className="flex w-full min-w-0 max-w-xl flex-1 flex-wrap items-end gap-3 text-sm">
-            <div className="min-w-[240px] flex-1">
-              <label className={`mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>
-                Search in planning
-              </label>
-              <input
-                type="text"
-                value={planningSearchQuery}
-                onChange={(e) => setPlanningSearchQuery(e.target.value)}
-                placeholder="Search carton or PO #"
-                className="h-9 w-full rounded-md border border-ds-line/60 bg-ds-elevated/40 px-2.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
-              />
-              {planningSearchQuery.trim().length >= 2 ? (
-                <button
-                  type="button"
-                  onClick={() => setPlanningSearchQuery('')}
-                  className="mt-1 text-[10px] text-ds-ink-faint transition hover:text-ds-ink"
-                >
-                  Clear search
-                </button>
-              ) : null}
-            </div>
-            <div className="min-w-[240px] flex-1">
-              <MasterSearchSelect
-                label="Customer (API filter)"
-                query={customerSearch.query}
-                onQueryChange={(value) => {
-                  customerSearch.setQuery(value)
-                  setCustomerId('')
-                }}
-                loading={customerSearch.loading}
-                options={customerSearch.options}
-                lastUsed={customerSearch.lastUsed}
-                onSelect={applyCustomer}
-                getOptionLabel={(c) => c.name}
-                getOptionMeta={(c) => c.contactName ?? ''}
-                placeholder="Filter customer…"
-                recentLabel="Recent customers"
-                loadingMessage="Searching…"
-                emptyMessage="No customer found."
-              />
-              {customerId ? (
-                <button
-                  type="button"
-                  onClick={() => applyCustomer(null)}
-                  className="mt-1 text-[10px] text-ds-ink-faint transition hover:text-ds-ink"
-                >
-                  Clear customer
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </ActionBar>
-
-      <div className="shrink-0 border-b border-ds-line/40 bg-ds-elevated/20 px-3 py-1.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Applied filters</span>
-            {planningFilterChips.map((chip) => (
-              <span
-                key={chip.key}
-                className="inline-flex items-center gap-1 rounded border border-ds-line/60 bg-ds-main/50 px-2 py-0.5 text-[11px] text-ds-ink"
-              >
-                {chip.label}
-                {chip.onClear ? (
-                  <button
-                    type="button"
-                    onClick={chip.onClear}
-                    className="text-ds-ink-faint hover:text-ds-ink"
-                    title={`Clear ${chip.key} filter`}
-                  >
-                    ×
-                  </button>
-                ) : null}
-              </span>
-            ))}
-            {planningFilterChips.some((chip) => chip.onClear) ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setPlanningSearchQuery('')
-                  applyCustomer(null)
-                }}
-                className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] text-ds-ink-faint hover:text-ds-ink"
-              >
-                Clear all
-              </button>
-            ) : null}
-          </div>
-          <RowStateLegend
-            includeSelected
-            helperText="Priority rows are pinned. Pushed rows are sent onward and moved to end while remaining interactive."
           />
         </div>
       </div>
@@ -1302,7 +1082,7 @@ export default function PlanningPage() {
       {/* ── Main workspace: grid (left) + summary panel (right) ── */}
       <div className="flex min-h-0 flex-1 gap-0 overflow-hidden">
         {/* Grid — takes all remaining width */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-1 pb-0.5 pt-0.5">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-2 py-1">
           <ErrorBoundary moduleName="Planning Grid">
             <PlanningDecisionGrid
               rows={moduleFilteredRows as PlanningGridLine[]}
@@ -1328,7 +1108,7 @@ export default function PlanningPage() {
       </div>
 
       <footer
-        className={`shrink-0 border-t border-ds-line/50 py-1.5 text-center text-[10px] text-ds-ink-faint ${mono}`}
+        className={`shrink-0 border-t border-ds-line/50 py-2 text-center text-[10px] text-ds-ink-faint ${mono}`}
       >
         Planning workspace
       </footer>
@@ -1348,7 +1128,7 @@ export default function PlanningPage() {
           }
         />
         <PlanningBatchBuilderPanel
-          isOpen={batchBuilderOpen && planningSelection.size >= 2}
+          isOpen={batchBuilderOpen && planningSelection.size >= 1}
           onClose={() => setBatchBuilderOpen(false)}
           lines={selectedGridLines}
           onCreateBatch={linkAsMixSet}

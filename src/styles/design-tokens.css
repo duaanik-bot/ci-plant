@@ -4,26 +4,76 @@
  * Component classes (.ds-input, etc.) live in `globals.css` (must run after @tailwind).
  */
 :root {
-  --ds-bg-main: #0a0f1c;
-  --ds-bg-card: #111827;
-  --ds-bg-elevated: #131a2b;
-  --ds-border-subtle: #1a2332;
-  --ds-border-strong: #2a3344;
-  --ds-text-primary: #e5e7eb;
-  --ds-text-secondary: #9ca3af;
-  --ds-text-muted: #8ea0b8;
-  --ds-kpi: #7dd3fc;
-  --ds-accent: #38bdf8;
-  --ds-accent-hover: #0ea5e9;
-  --ds-success: #3fcf8e;
-  --ds-warning: #eab308;
-  --ds-error: #f87171;
+  /* Light theme (Figma-style neutral surfaces + cyan action accent). */
+  --ds-bg-main: #f4f7fc;
+  --ds-bg-main-rgb: 244 247 252;
+  --ds-bg-card: #ffffff;
+  --ds-bg-card-rgb: 255 255 255;
+  --ds-bg-elevated: #edf2fb;
+  --ds-bg-elevated-rgb: 237 242 251;
+  --ds-border-subtle: #d6deea;
+  --ds-border-subtle-rgb: 214 222 234;
+  --ds-border-strong: #b7c4d8;
+  --ds-border-strong-rgb: 183 196 216;
+  --ds-text-primary: #0f172a;
+  --ds-text-primary-rgb: 15 23 42;
+  --ds-text-secondary: #334155;
+  --ds-text-secondary-rgb: 51 65 85;
+  --ds-text-muted: #64748b;
+  --ds-text-muted-rgb: 100 116 139;
+  --ds-kpi: #0369a1;
+  --ds-kpi-rgb: 3 105 161;
+  --ds-accent: #0ea5e9;
+  --ds-accent-rgb: 14 165 233;
+  --ds-accent-hover: #0284c7;
+  --ds-accent-hover-rgb: 2 132 199;
+  --ds-success: #15803d;
+  --ds-success-rgb: 21 128 61;
+  --ds-warning: #b45309;
+  --ds-warning-rgb: 180 83 9;
+  --ds-error: #dc2626;
+  --ds-error-rgb: 220 38 38;
   --ds-radius-sm: 6px;
   --ds-radius-md: 10px;
   --ds-radius-lg: 12px;
   /* Depth (mirrors tailwind `shadow-ds-depth`) */
-  --ds-shadow-elevated: 0 10px 30px rgba(0, 0, 0, 0.25);
+  --ds-shadow-elevated: 0 8px 24px rgba(15, 23, 42, 0.08);
   /* Subtle top wash on main canvas */
+  --ds-gradient-app-top: linear-gradient(180deg, rgba(14, 165, 233, 0.09) 0%, rgba(255, 255, 255, 0) 42%),
+    radial-gradient(ellipse 100% 52% at 50% 0%, rgba(2, 132, 199, 0.06), transparent 58%);
+  --ds-gradient-drawer: linear-gradient(180deg, rgba(14, 165, 233, 0.05) 0%, rgba(255, 255, 255, 0) 48%);
+}
+
+.dark {
+  --ds-bg-main: #0a0f1c;
+  --ds-bg-main-rgb: 10 15 28;
+  --ds-bg-card: #111827;
+  --ds-bg-card-rgb: 17 24 39;
+  --ds-bg-elevated: #131a2b;
+  --ds-bg-elevated-rgb: 19 26 43;
+  --ds-border-subtle: #1a2332;
+  --ds-border-subtle-rgb: 26 35 50;
+  --ds-border-strong: #2a3344;
+  --ds-border-strong-rgb: 42 51 68;
+  --ds-text-primary: #e5e7eb;
+  --ds-text-primary-rgb: 229 231 235;
+  --ds-text-secondary: #9ca3af;
+  --ds-text-secondary-rgb: 156 163 175;
+  --ds-text-muted: #8ea0b8;
+  --ds-text-muted-rgb: 142 160 184;
+  --ds-kpi: #7dd3fc;
+  --ds-kpi-rgb: 125 211 252;
+  --ds-accent: #38bdf8;
+  --ds-accent-rgb: 56 189 248;
+  --ds-accent-hover: #0ea5e9;
+  --ds-accent-hover-rgb: 14 165 233;
+  --ds-success: #3fcf8e;
+  --ds-success-rgb: 63 207 142;
+  --ds-warning: #eab308;
+  --ds-warning-rgb: 234 179 8;
+  --ds-error: #f87171;
+  --ds-error-rgb: 248 113 113;
+  --ds-shadow-elevated: 0 10px 30px rgba(0, 0, 0, 0.25);
   --ds-gradient-app-top: linear-gradient(180deg, rgba(19, 26, 43, 0.55) 0%, rgba(10, 15, 28, 0) 38%),
     radial-gradient(ellipse 100% 50% at 50% 0%, rgba(56, 189, 248, 0.08), transparent 55%);
   --ds-gradient-drawer: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0) 40%);

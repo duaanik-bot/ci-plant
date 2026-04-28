@@ -25,8 +25,8 @@ import {
 } from '@/components/design-system/tokens'
 import { formatShortTimeAgo } from '@/lib/time-ago'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
-import { ActionBar, PageHeader } from '@/components/design-system'
 import { RowStateLegend } from '@/components/ui/RowStateLegend'
+import { BulkActionBar, LaneCounterChips } from '@/components/design-system'
 
 type LineItem = {
   id: string
@@ -166,19 +166,19 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
   if (po.status === 'closed') {
     return {
       label: 'Dispatched',
-      className: 'bg-ds-warning/8 text-ds-warning ring-1 ring-ds-warning/35',
+      className: 'bg-ds-warning/12 text-amber-800 ring-1 ring-ds-warning/35 dark:bg-ds-warning/8 dark:text-ds-warning',
     }
   }
   if (po.status === 'sent_to_planning') {
     return {
       label: 'In Planning',
-      className: 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-500/40',
+      className: 'bg-cyan-500/14 text-cyan-800 ring-1 ring-cyan-500/40 dark:bg-cyan-500/20 dark:text-cyan-300',
     }
   }
   if (po.status === 'approved') {
     return {
       label: 'Approved',
-      className: 'bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/35',
+      className: 'bg-violet-500/14 text-violet-800 ring-1 ring-violet-500/35 dark:bg-violet-500/20 dark:text-violet-300',
     }
   }
   if (po.status === 'confirmed') {
@@ -186,12 +186,12 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
     if (inProd) {
       return {
         label: 'In production',
-        className: 'bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-500/35',
+        className: 'bg-indigo-500/14 text-indigo-800 ring-1 ring-indigo-500/35 dark:bg-indigo-500/20 dark:text-indigo-400',
       }
     }
     return {
       label: 'Confirmed',
-      className: 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30',
+      className: 'bg-emerald-500/14 text-emerald-800 ring-1 ring-emerald-500/30 dark:bg-emerald-500/20 dark:text-emerald-300',
     }
   }
   return {
@@ -222,12 +222,12 @@ function PoDeepFilterBar({
   filterActive: boolean
 }) {
   return (
-    <div className="flex w-full max-w-2xl mx-auto items-stretch gap-2">
+    <div className="flex w-full items-stretch gap-2">
       <div
-        className={`group min-w-0 flex-1 flex items-center gap-2 rounded-xl border bg-ds-card/50 px-3 py-1.5 sm:px-4 sm:py-2 text-sm backdrop-blur-md transition-all duration-300 ${
+        className={`group flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-ds-card/50 px-3 py-1.5 text-sm backdrop-blur-md transition-all duration-300 ${
           filterActive
-            ? 'border-emerald-500/45 shadow-[0_0_32px_rgba(52,211,153,0.22),0_0_56px_rgba(245,158,11,0.12)] ring-2 ring-emerald-400/35'
-            : 'border-ds-warning/45 shadow-[0_0_14px_rgba(245,158,11,0.12)] ring-1 ring-ds-warning/40'
+            ? 'border-emerald-500/45 shadow-[0_0_16px_rgba(16,185,129,0.12)] ring-2 ring-emerald-500/30 dark:shadow-[0_0_32px_rgba(52,211,153,0.22),0_0_56px_rgba(245,158,11,0.12)] dark:ring-emerald-400/35'
+            : 'border-ds-warning/45 shadow-[0_0_8px_rgba(245,158,11,0.10)] ring-1 ring-ds-warning/35 dark:shadow-[0_0_14px_rgba(245,158,11,0.12)] dark:ring-ds-warning/40'
         }`}
       >
         <Search className="h-4 w-4 text-ds-warning shrink-0" aria-hidden />
@@ -236,6 +236,7 @@ function PoDeepFilterBar({
             <span className="shrink-0 text-emerald-400/90 text-xs sm:text-sm">Filtering:</span>
           ) : null}
           <input
+            id="po-module-search"
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder="PO #, customer, or product on lines…"
@@ -250,7 +251,7 @@ function PoDeepFilterBar({
         <button
           type="button"
           onClick={() => onClear()}
-          className="shrink-0 self-center rounded-xl border border-ds-line/50 bg-ds-card/60 px-2.5 py-2 text-ds-ink-faint backdrop-blur-md hover:border-ds-warning/40 hover:bg-ds-elevated/80 hover:text-ds-warning"
+          className="shrink-0 self-center rounded-md border border-ds-line/50 bg-ds-card/60 px-2.5 py-2 text-ds-ink-faint backdrop-blur-md hover:border-ds-warning/40 hover:bg-ds-elevated/80 hover:text-ds-warning"
           title="Clear list filter"
           aria-label="Clear list filter"
         >
@@ -263,6 +264,18 @@ function PoDeepFilterBar({
 
 export default function PurchaseOrdersPage() {
   const [listFilterQuery, setListFilterQuery] = useState('')
+  const [poDensity, setPoDensity] = useState<'dense' | 'comfortable'>('dense')
+  const [selectedPoId, setSelectedPoId] = useState<string | null>(null)
+  const [selectedPoIds, setSelectedPoIds] = useState<Set<string>>(new Set())
+  const [showColumnMenu, setShowColumnMenu] = useState(false)
+  const [showFilterMenu, setShowFilterMenu] = useState(false)
+  const [visibleCols, setVisibleCols] = useState({
+    age: true,
+    ready: true,
+    lines: true,
+    value: true,
+    status: true,
+  })
   const debouncedListFilter = useDebouncedValue(listFilterQuery, 200)
   const catalogHeavyRef = useRef(false)
   const prevDebouncedFilterRef = useRef('')
@@ -278,6 +291,7 @@ export default function PurchaseOrdersPage() {
   const [customerId, setCustomerId] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [bulkUpdatingStatus, setBulkUpdatingStatus] = useState<string | null>(null)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
   const [priorityBusyId, setPriorityBusyId] = useState<string | null>(null)
@@ -512,8 +526,39 @@ export default function PurchaseOrdersPage() {
 
   const kpi = listFilterQuery.trim().length >= 2 ? filteredExecutiveKpi : metrics
   const kpiLoading = listFilterQuery.trim().length < 2 && metricsLoading
+  const resultSummary = useMemo(() => {
+    const poCount = viewRows.length
+    const lineCount = viewRows.reduce((s, p) => s + p.lineItems.length, 0)
+    const value = viewRows.reduce((s, p) => s + (p.value ?? 0), 0)
+    return `${poCount} POs · ${lineCount} lines · ${formatRupee(value)}`
+  }, [viewRows])
+  const pendingLineItemCount = useMemo(
+    () => viewRows.reduce((s, p) => s + p.lineItems.length, 0),
+    [viewRows],
+  )
+
+  const laneCounts = useMemo(
+    () => ({
+      all: viewRows.length,
+      draft: viewRows.filter((p) => p.status === 'draft').length,
+      confirmed: viewRows.filter((p) => p.status === 'confirmed').length,
+      approved: viewRows.filter((p) => p.status === 'approved').length,
+      inPlanning: viewRows.filter((p) => p.status === 'sent_to_planning').length,
+      closed: viewRows.filter((p) => p.status === 'closed').length,
+    }),
+    [viewRows],
+  )
+
+  const allVisibleSelected = viewRows.length > 0 && viewRows.every((p) => selectedPoIds.has(p.id))
+  const someVisibleSelected = viewRows.some((p) => selectedPoIds.has(p.id))
 
   const [masterProductExists, setMasterProductExists] = useState<boolean | null>(null)
+  const activeFilterCount = useMemo(() => {
+    let c = 0
+    if (status) c += 1
+    if (customerId) c += 1
+    return c
+  }, [status, customerId])
 
   useEffect(() => {
     const q = listFilterQuery.trim()
@@ -537,6 +582,64 @@ export default function PurchaseOrdersPage() {
       cancelled = true
     }
   }, [listFilterQuery, viewRows.length])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return
+      if (e.key === '/') {
+        e.preventDefault()
+        const el = document.getElementById('po-module-search') as HTMLInputElement | null
+        el?.focus()
+        el?.select()
+        return
+      }
+      if (!viewRows.length) return
+      if (e.key.toLowerCase() === 'j') {
+        e.preventDefault()
+        const idx = Math.max(0, viewRows.findIndex((p) => p.id === selectedPoId))
+        const next = viewRows[Math.min(viewRows.length - 1, idx + 1)]?.id ?? viewRows[0]!.id
+        setSelectedPoId(next)
+        return
+      }
+      if (e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        const idx = Math.max(0, viewRows.findIndex((p) => p.id === selectedPoId))
+        const next = viewRows[Math.max(0, idx - 1)]?.id ?? viewRows[0]!.id
+        setSelectedPoId(next)
+        return
+      }
+      if (e.key === 'Enter' && selectedPoId) {
+        e.preventDefault()
+        setDrawerPoId(selectedPoId)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [viewRows, selectedPoId])
+
+  useEffect(() => {
+    if (!showColumnMenu && !showFilterMenu) return
+    const onClickAway = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('[data-po-menu-root]')) return
+      setShowColumnMenu(false)
+      setShowFilterMenu(false)
+    }
+    document.addEventListener('mousedown', onClickAway)
+    return () => document.removeEventListener('mousedown', onClickAway)
+  }, [showColumnMenu, showFilterMenu])
+
+  useEffect(() => {
+    if (!viewRows.length) {
+      setSelectedPoId(null)
+      return
+    }
+    if (!selectedPoId || !viewRows.some((p) => p.id === selectedPoId)) {
+      setSelectedPoId(viewRows[0]!.id)
+    }
+  }, [viewRows, selectedPoId])
 
   async function handleDelete(po: PurchaseOrder, e: React.MouseEvent) {
     e.stopPropagation()
@@ -661,87 +764,278 @@ export default function PurchaseOrdersPage() {
     [drawerPo?.id],
   )
 
+  const bulkUpdateStatus = useCallback(
+    async (newStatus: 'confirmed' | 'approved') => {
+      const targetRows = viewRows.filter((p) => selectedPoIds.has(p.id) && p.status !== newStatus)
+      if (targetRows.length === 0) {
+        toast.info(`No selected rows need status ${newStatus}`)
+        return
+      }
+      setBulkUpdatingStatus(newStatus)
+      let success = 0
+      let failed = 0
+      for (const po of targetRows) {
+        try {
+          const res = await fetch(`/api/purchase-orders/${po.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus, industrialVerification: true }),
+          })
+          const json = await res.json().catch(() => ({}))
+          if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to update status')
+          success += 1
+        } catch {
+          failed += 1
+        }
+      }
+      if (success > 0) {
+        setList((prev) =>
+          prev.map((p) => (targetRows.some((t) => t.id === p.id) ? { ...p, status: newStatus } : p)),
+        )
+        if (drawerPo && targetRows.some((t) => t.id === drawerPo.id)) {
+          setDrawerPo((d) => (d ? { ...d, status: newStatus } : d))
+        }
+        toast.success(`Updated to ${newStatus} • ${success} PO${success > 1 ? 's' : ''}`)
+      }
+      if (failed > 0) {
+        toast.error(`Failed for ${failed} PO${failed > 1 ? 's' : ''}`)
+      }
+      setBulkUpdatingStatus(null)
+      void loadMetrics()
+    },
+    [viewRows, selectedPoIds, drawerPo, loadMetrics],
+  )
+
   if (loading && list.length === 0) {
     return <div className="p-4 text-ds-ink-muted text-sm">Loading purchase orders…</div>
   }
 
   return (
-    <div className="p-3 md:p-4 max-w-[1480px] mx-auto space-y-4 pb-24">
-      <PageHeader
-        className="pb-0"
-        title="Predictive command center · Customer POs"
-        description={
-          <p className="text-[11px] text-ds-ink-faint">
-            Priority pinning · aging & readiness · operator {PO_DASHBOARD_OPERATOR}
-          </p>
-        }
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/orders/designing"
-              className="inline-flex items-center justify-center rounded-ds-sm border border-ds-line bg-ds-elevated/80 px-3 py-1.5 text-xs font-medium text-ds-ink shadow-sm transition duration-200 hover:bg-ds-card"
-            >
-              Prepress →
-            </Link>
-            <Link
-              href="/orders/purchase-orders/new"
-              className="inline-flex items-center justify-center rounded-ds-sm bg-ds-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-ds-brand-hover"
-            >
-              New PO
-            </Link>
-            <span className="md:hidden">
-              <CommandPaletteTriggerIcon />
-            </span>
+    <div className="mx-auto max-w-[1480px] space-y-3 p-3 pb-24 md:p-4">
+      <div className="sticky top-0 z-40 rounded-md border border-ds-line/60 bg-ds-main/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="shrink-0 text-[12px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            Customer POs
+          </span>
+          <div className="min-w-[240px] flex-1">
+            <PoDeepFilterBar
+              value={listFilterQuery}
+              onChange={setListFilterQuery}
+              onClear={() => setListFilterQuery('')}
+              filterActive={listFilterQuery.trim().length >= 2}
+            />
           </div>
+          <span className="rounded border border-ds-line/50 bg-ds-elevated/40 px-2 py-1 text-[11px] text-ds-ink-muted">
+            {resultSummary}
+          </span>
+          <div className="relative" data-po-menu-root>
+            <button
+              type="button"
+              onClick={() => setShowColumnMenu((v) => !v)}
+              className="inline-flex h-8 items-center rounded-md border border-ds-line bg-ds-elevated/80 px-2 text-xs text-ds-ink shadow-sm"
+            >
+              Columns
+            </button>
+            {showColumnMenu ? (
+              <div className="absolute right-0 z-50 mt-1 w-40 rounded-md border border-ds-line bg-ds-card p-2 text-xs shadow-lg">
+                {(
+                  [
+                    ['age', 'Age'],
+                    ['ready', 'Ready'],
+                    ['lines', 'Lines'],
+                    ['value', 'Value'],
+                    ['status', 'Status'],
+                  ] as const
+                ).map(([k, label]) => (
+                  <label key={k} className="flex items-center gap-1.5 py-0.5 text-ds-ink-muted">
+                    <input
+                      type="checkbox"
+                      checked={visibleCols[k]}
+                      onChange={(e) => setVisibleCols((prev) => ({ ...prev, [k]: e.target.checked }))}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="relative" data-po-menu-root>
+            <button
+              type="button"
+              onClick={() => setShowFilterMenu((v) => !v)}
+              className="inline-flex h-8 items-center rounded-md border border-ds-line bg-ds-elevated/80 px-2 text-xs text-ds-ink shadow-sm"
+            >
+              Filters
+              {activeFilterCount > 0 ? (
+                <span className="ml-1 rounded border border-ds-brand/40 bg-ds-brand/15 px-1 text-[10px] font-semibold text-ds-ink">
+                  {activeFilterCount}
+                </span>
+              ) : null}
+            </button>
+            {showFilterMenu ? (
+              <div className="absolute right-0 z-50 mt-1 w-56 rounded-md border border-ds-line/70 bg-ds-main p-2 text-xs shadow-lg">
+                <label className="mb-1 block text-[10px] uppercase tracking-wider text-ds-ink-muted">Status</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
+                  className="mb-2 h-8 w-full rounded-md border border-ds-line/60 bg-background px-2 text-[12px] font-medium text-ds-ink focus:border-ds-brand focus:outline-none"
+                >
+                  <option value="">All statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="approved">Approved</option>
+                  <option value="sent_to_planning">In Planning</option>
+                  <option value="closed">Closed</option>
+                </select>
+                <label className="mb-1 block text-[10px] uppercase tracking-wider text-ds-ink-muted">Customer</label>
+                <select
+                  value={customerId}
+                  onChange={(e) => setCustomerId(e.target.value)}
+                  className="h-8 w-full rounded-md border border-ds-line/60 bg-background px-2 text-[12px] font-medium text-ds-ink focus:border-ds-brand focus:outline-none"
+                >
+                  <option value="">All customers</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+          </div>
+          <div className="inline-flex rounded-md border border-ds-line/70 bg-ds-elevated/40 p-0.5 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setPoDensity('dense')}
+              className={`rounded px-2 py-1 text-[11px] ${poDensity === 'dense' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'}`}
+            >
+              Dense
+            </button>
+            <button
+              type="button"
+              onClick={() => setPoDensity('comfortable')}
+              className={`rounded px-2 py-1 text-[11px] ${poDensity === 'comfortable' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'}`}
+            >
+              Comfortable
+            </button>
+          </div>
+          <Link
+            href="/orders/designing"
+            className="inline-flex h-8 items-center justify-center rounded-md border border-ds-line bg-ds-elevated/80 px-3 text-xs font-medium text-ds-ink shadow-sm transition duration-200 hover:bg-ds-card"
+          >
+            Prepress
+          </Link>
+          <Link
+            href="/orders/purchase-orders/new"
+            className="inline-flex h-8 items-center justify-center rounded-md bg-ds-brand px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-ds-brand-hover"
+          >
+            New PO
+          </Link>
+          <span className="md:hidden">
+            <CommandPaletteTriggerIcon />
+          </span>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          {(['', 'draft', 'confirmed'] as const).map((preset) => (
+            <button
+              key={preset || 'all'}
+              type="button"
+              onClick={() => setStatus(preset)}
+              className={`rounded-md border px-2 py-1 text-[11px] ${
+                status === preset ? 'border-ds-brand/60 bg-ds-brand/15 text-ds-ink' : 'border-ds-line/50 text-ds-ink-faint'
+              }`}
+            >
+              {preset === '' ? 'All' : preset[0].toUpperCase() + preset.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2">
+          <LaneCounterChips
+            chips={[
+              { key: 'all', label: 'All', count: laneCounts.all, active: status === '', onClick: () => setStatus(''), tone: 'brand' },
+              { key: 'draft', label: 'Draft', count: laneCounts.draft, active: status === 'draft', onClick: () => setStatus('draft'), tone: 'warning' },
+              { key: 'confirmed', label: 'Confirmed', count: laneCounts.confirmed, active: status === 'confirmed', onClick: () => setStatus('confirmed'), tone: 'success' },
+              { key: 'approved', label: 'Approved', count: laneCounts.approved, active: status === 'approved', onClick: () => setStatus('approved'), tone: 'info' },
+              { key: 'in_planning', label: 'In Planning', count: laneCounts.inPlanning, active: status === 'sent_to_planning', onClick: () => setStatus('sent_to_planning'), tone: 'brand' },
+              { key: 'closed', label: 'Closed', count: laneCounts.closed, active: status === 'closed', onClick: () => setStatus('closed'), tone: 'danger' },
+            ]}
+          />
+        </div>
+        <div className="mt-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-3 py-1.5">
+          <RowStateLegend helperText="Priority rows are pinned. Pushed rows are sent to planning and moved to end while staying interactive." />
+        </div>
+      </div>
+
+      <BulkActionBar
+        selectedCount={selectedPoIds.size}
+        left={
+          <>
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedPoIds((prev) => {
+                  const next = new Set(prev)
+                  if (allVisibleSelected) viewRows.forEach((p) => next.delete(p.id))
+                  else viewRows.forEach((p) => next.add(p.id))
+                  return next
+                })
+              }
+              className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+            >
+              {allVisibleSelected ? 'Unselect visible' : 'Select visible'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedPoIds(new Set(viewRows.filter((p) => p.status === 'draft').map((p) => p.id)))}
+              className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+            >
+              Select drafts
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedPoIds(new Set())}
+              className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+            >
+              Clear
+            </button>
+          </>
+        }
+        right={
+          <>
+            <button
+              type="button"
+              onClick={() => void bulkUpdateStatus('confirmed')}
+              disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null}
+              className="h-8 rounded-md border border-emerald-500/40 px-2.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-300"
+            >
+              {bulkUpdatingStatus === 'confirmed' ? 'Confirming…' : 'Bulk confirm'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void bulkUpdateStatus('approved')}
+              disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null}
+              className="h-8 rounded-md border border-sky-500/40 px-2.5 text-xs font-semibold text-sky-700 hover:bg-sky-500/10 disabled:opacity-40 dark:text-sky-300"
+            >
+              {bulkUpdatingStatus === 'approved' ? 'Approving…' : 'Bulk approve'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedPoIds.size === 0) return
+                const first = viewRows.find((p) => selectedPoIds.has(p.id))
+                if (first) setDrawerPoId(first.id)
+              }}
+              disabled={selectedPoIds.size === 0}
+              className="h-8 rounded-md border border-ds-brand/40 px-2.5 text-xs font-semibold text-ds-brand disabled:opacity-40"
+            >
+              Open first selected
+            </button>
+          </>
         }
       />
 
-      <ActionBar className="border-b border-ds-line/30 py-0 pb-3 !gap-4">
-        <div className="flex w-full flex-1 flex-col items-stretch justify-center gap-3 md:items-center">
-          <div className="flex w-full justify-center px-1">
-            <div className="w-full max-w-2xl">
-              <PoDeepFilterBar
-                value={listFilterQuery}
-                onChange={setListFilterQuery}
-                onClear={() => setListFilterQuery('')}
-                filterActive={listFilterQuery.trim().length >= 2}
-              />
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs items-center">
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="ds-input rounded-ds-sm px-2 py-1.5 text-foreground"
-            >
-              <option value="">All statuses</option>
-              <option value="draft">Draft</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="approved">Approved</option>
-              <option value="sent_to_planning">In Planning</option>
-              <option value="closed">Closed</option>
-            </select>
-            <select
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              className="ds-input min-w-[160px] rounded-ds-sm px-2 py-1.5 text-foreground"
-            >
-              <option value="">All customers</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </ActionBar>
-      <div className="mb-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-3 py-1.5">
-        <RowStateLegend helperText="Priority rows are pinned. Pushed rows are sent to planning and moved to end while staying interactive." />
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
-        <div className="rounded-xl border border-border bg-card/80 px-3 py-2 backdrop-blur-xl shadow-sm">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 md:gap-3">
+        <div className="rounded-md border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
             Total active POs
           </div>
@@ -752,7 +1046,18 @@ export default function PurchaseOrdersPage() {
             {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
           </div>
         </div>
-        <div className="rounded-xl border border-border bg-card/80 px-3 py-2 backdrop-blur-xl shadow-sm">
+        <div className="rounded-md border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            Pending line count
+          </div>
+          <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
+            {kpiLoading ? '—' : pendingLineItemCount.toLocaleString('en-IN')}
+          </div>
+          <div className="text-[10px] text-ds-ink-faint mt-0.5">
+            {listFilterQuery.trim().length >= 2 ? 'Lines · matching POs' : 'Lines · confirmed POs'}
+          </div>
+        </div>
+        <div className="rounded-md border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
             Pending line items
           </div>
@@ -763,18 +1068,18 @@ export default function PurchaseOrdersPage() {
             {listFilterQuery.trim().length >= 2 ? 'Σ qty · matching POs' : 'Σ qty · confirmed POs'}
           </div>
         </div>
-        <div className="rounded-xl border border-emerald-500/30 bg-ds-main/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_0_28px_rgba(16,185,129,0.14)]">
+        <div className="rounded-md border border-emerald-500/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/90">
             Live order book
           </div>
-          <div className={`mt-0.5 ds-typo-kpi text-emerald-300 ${poMono}`}>
+          <div className={`mt-0.5 ds-typo-kpi text-emerald-700 dark:text-emerald-300 ${poMono}`}>
             {kpiLoading ? '—' : formatRupee(kpi?.liveOrderValue ?? 0)}
           </div>
           <div className="text-[10px] text-emerald-700/80 mt-0.5">
             {listFilterQuery.trim().length >= 2 ? '₹ filtered order book' : '₹ total · confirmed'}
           </div>
         </div>
-        <div className="rounded-xl border border-ds-warning/30 bg-ds-main/35 px-3 py-2 backdrop-blur-xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.07),0_0_26px_rgba(245,158,11,0.12)]">
+        <div className="rounded-md border border-ds-warning/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-warning/90">
             System velocity
           </div>
@@ -790,25 +1095,41 @@ export default function PurchaseOrdersPage() {
       </div>
 
       <EnterpriseTableShell>
-        <table className="w-full min-w-[920px] border-collapse text-left text-sm leading-tight">
+        <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-sm leading-tight">
           <thead className="sticky top-0 z-[30]">
             <tr className="border-b border-border bg-card text-muted-foreground backdrop-blur-md">
-              <th className="w-8 px-1 py-1 font-semibold text-center" aria-label="Priority">
-                ★
+              <th className="w-8 px-1 py-0.5 font-semibold text-center" aria-label="Select">
+                <input
+                  type="checkbox"
+                  aria-label="Select all visible purchase orders"
+                  checked={allVisibleSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = !allVisibleSelected && someVisibleSelected
+                  }}
+                  onChange={() =>
+                    setSelectedPoIds((prev) => {
+                      const next = new Set(prev)
+                      if (allVisibleSelected) viewRows.forEach((p) => next.delete(p.id))
+                      else viewRows.forEach((p) => next.add(p.id))
+                      return next
+                    })
+                  }
+                  className="h-3.5 w-3.5 accent-ds-brand"
+                />
               </th>
-              <th className="px-1.5 py-1 font-semibold">PO #</th>
-              <th className="px-1.5 py-1 font-semibold">Customer</th>
-              <th className="px-1.5 py-1 font-semibold whitespace-nowrap">Date</th>
-              <th className="px-1.5 py-1 font-semibold whitespace-nowrap text-right">Age</th>
-              <th className="px-1.5 py-1 font-semibold">Ready</th>
-              <th className="px-1.5 py-1 font-semibold text-right">Lines</th>
-              <th className="px-1.5 py-1 font-semibold text-right">Value</th>
-              <th className="px-1.5 py-1 font-semibold">Status</th>
-              <th className="px-1.5 py-1 font-semibold text-right">Actions</th>
+              <th className="w-[13rem] px-1.5 py-0.5 font-semibold">PO #</th>
+              <th className="w-[12rem] px-1.5 py-0.5 font-semibold">Customer</th>
+              <th className="w-[6.5rem] px-1.5 py-0.5 font-semibold whitespace-nowrap">Date</th>
+              {visibleCols.age ? <th className="w-[5.5rem] px-1.5 py-0.5 font-semibold whitespace-nowrap text-right">Age</th> : null}
+              {visibleCols.ready ? <th className="w-[7rem] px-1.5 py-0.5 font-semibold">Ready</th> : null}
+              {visibleCols.lines ? <th className="w-[4rem] px-1.5 py-0.5 font-semibold text-right">Lines</th> : null}
+              {visibleCols.value ? <th className="w-[6.75rem] px-1.5 py-0.5 font-semibold text-right">Value</th> : null}
+              {visibleCols.status ? <th className="w-[9rem] px-1.5 py-0.5 font-semibold">Status</th> : null}
+              <th className="w-[10.5rem] px-1.5 py-0.5 font-semibold text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {viewRows.map((po, idx) => {
+            {viewRows.map((po) => {
               const badge = statusBadge(po)
               const ageDays = poAgeCalendarDays(po.poDate)
               const readiness = po.readiness ?? EMPTY_READINESS
@@ -820,21 +1141,43 @@ export default function PurchaseOrdersPage() {
                   role="button"
                   tabIndex={0}
                   onClick={() => setDrawerPoId(po.id)}
+                  onMouseEnter={() => setSelectedPoId(po.id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
                       setDrawerPoId(po.id)
                     }
                   }}
+                  onFocus={() => setSelectedPoId(po.id)}
                   className={`group/po cursor-pointer border-b border-ds-line/50 transition-[background,box-shadow] duration-150 ${
                     po.isPriority === true
                       ? INDUSTRIAL_PRIORITY_ROW_CLASS
                       : pushedToPlanning
-                        ? 'bg-emerald-500/20 hover:bg-emerald-500/24'
+                        ? 'bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
+                        : criticalAge
+                          ? 'bg-amber-500/8 hover:bg-amber-500/12'
+                          : po.status === 'closed'
+                            ? 'bg-ds-elevated/25 hover:bg-ds-elevated/35'
                         : 'hover:bg-accent'
-                  }`}
+                  } ${selectedPoId === po.id ? 'ring-1 ring-inset ring-ds-brand/35' : ''}`}
                 >
-                  <td className="px-0.5 py-px align-middle text-center">
+                  <td className="px-0.5 py-0 align-middle text-center">
+                    <div className="flex items-center justify-center gap-1">
+                    <input
+                      type="checkbox"
+                      aria-label="Select row"
+                      checked={selectedPoIds.has(po.id)}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        setSelectedPoIds((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(po.id)) next.delete(po.id)
+                          else next.add(po.id)
+                          return next
+                        })
+                      }}
+                      className="h-3.5 w-3.5 accent-ds-brand"
+                    />
                     <button
                       type="button"
                       title={po.isPriority === true ? 'Unpin priority' : 'Pin priority'}
@@ -853,11 +1196,17 @@ export default function PurchaseOrdersPage() {
                         strokeWidth={2}
                       />
                     </button>
+                    </div>
                   </td>
-                  <td className="px-1.5 py-px align-middle">
-                    <div className="flex flex-col gap-0.5 min-w-0">
+                  <td className={`w-[13rem] px-1.5 align-middle ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
+                    <div className="flex min-w-0 flex-col gap-0.5">
                       <div className="flex flex-wrap items-center gap-1">
-                        <span className={`${poMono} font-bold ${pushedToPlanning ? 'text-emerald-300' : 'text-ds-warning'}`}>{po.poNumber}</span>
+                        <span
+                          className={`${poMono} min-w-0 break-all text-[11px] font-bold ${pushedToPlanning ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-warning'}`}
+                          title={po.poNumber}
+                        >
+                          {po.poNumber}
+                        </span>
                         {po.toolingCritical ? (
                           <span title="Critical tooling on one or more lines">
                             <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" aria-hidden />
@@ -866,7 +1215,7 @@ export default function PurchaseOrdersPage() {
                       </div>
                       {po.deepMatchProductName ? (
                         <div
-                          className={`text-[10px] truncate max-w-[14rem] ${pushedToPlanning ? 'text-emerald-300/90' : 'text-ds-warning/85'}`}
+                          className={`line-clamp-2 break-words text-[10px] leading-snug ${pushedToPlanning ? 'text-emerald-700/90 dark:text-emerald-300/90' : 'text-ds-warning/85'}`}
                           title={`Matched line: ${po.deepMatchProductName}`}
                         >
                           Matched: {po.deepMatchProductName}
@@ -874,7 +1223,7 @@ export default function PurchaseOrdersPage() {
                       ) : null}
                     </div>
                   </td>
-                  <td className="px-1.5 py-px align-middle">
+                  <td className={`w-[12rem] px-1.5 align-middle ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span
                         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-ds-elevated to-ds-elevated text-[8px] font-bold text-ds-warning ring-1 ring-ds-line/80"
@@ -882,47 +1231,59 @@ export default function PurchaseOrdersPage() {
                       >
                         {customerInitials(po.customer?.name ?? '')}
                       </span>
-                      <span className="truncate text-neutral-700 dark:text-ds-ink text-[10px] md:text-[11px]">{po.customer?.name}</span>
+                      <span className="line-clamp-2 break-words text-[10px] text-neutral-700 dark:text-ds-ink md:text-[11px]" title={po.customer?.name}>
+                        {po.customer?.name}
+                      </span>
                     </div>
                   </td>
-                  <td className={`px-1.5 py-px align-middle whitespace-nowrap text-ds-ink-muted ${poMono}`}>
+                  <td className={`px-1.5 align-middle whitespace-nowrap text-ds-ink-muted ${poMono} ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
                     {new Date(po.poDate).toLocaleDateString('en-IN', {
                       day: '2-digit',
                       month: 'short',
                       year: 'numeric',
                     })}
                   </td>
-                  <td
-                    title={criticalAge ? 'Critical' : undefined}
-                    className={`px-1.5 py-px align-middle text-right whitespace-nowrap ${poMono} font-medium ${ageCellClass(ageDays)}`}
-                  >
-                    {ageDays} {ageDays === 1 ? 'Day' : 'Days'}
-                  </td>
-                  <td className="px-1.5 py-px align-middle">
-                    <ReadinessTriBar r={readiness} />
-                  </td>
-                  <td className={`px-1.5 py-px align-middle text-right ${poMono} text-ds-ink-muted`}>
-                    {po.lineItems.length}
-                  </td>
-                  <td className={`px-1.5 py-px align-middle text-right ${poMono} text-ds-ink`}>
-                    <span className="text-ds-ink-faint text-[9px] mr-0.5">₹</span>
-                    {(po.value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                  </td>
-                  <td className="px-1.5 py-px align-middle">
-                    <div className="flex flex-col items-start gap-0.5">
-                      <span className={`${STATUS_CHIP_BASE} ${badge.className}`}>
-                        {badge.label}
-                      </span>
-                      {pushedToPlanning ? (
-                        <span className={PUSHED_CHIP_CLASS}>
-                          Pushed {formatShortTimeAgo(po.poDate) ?? 'just now'}
+                  {visibleCols.age ? (
+                    <td
+                      title={criticalAge ? 'Critical' : undefined}
+                      className={`px-1.5 align-middle text-right whitespace-nowrap ${poMono} font-medium ${ageCellClass(ageDays)} ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}
+                    >
+                      {ageDays} {ageDays === 1 ? 'Day' : 'Days'}
+                    </td>
+                  ) : null}
+                  {visibleCols.ready ? (
+                    <td className={`px-1.5 align-middle ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
+                      <ReadinessTriBar r={readiness} />
+                    </td>
+                  ) : null}
+                  {visibleCols.lines ? (
+                    <td className={`px-1.5 align-middle text-right ${poMono} text-ds-ink-muted ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
+                      {po.lineItems.length}
+                    </td>
+                  ) : null}
+                  {visibleCols.value ? (
+                    <td className={`px-1.5 align-middle text-right ${poMono} text-ds-ink ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
+                      <span className="mr-0.5 text-[9px] text-ds-ink-faint">₹</span>
+                      {(po.value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </td>
+                  ) : null}
+                  {visibleCols.status ? (
+                    <td className={`px-1.5 align-middle ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
+                      <div className="flex flex-col items-start gap-0.5">
+                        <span className={`${STATUS_CHIP_BASE} ${badge.className}`}>
+                          {badge.label}
                         </span>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className="px-1.5 py-px align-middle text-right">
+                        {pushedToPlanning ? (
+                          <span className={PUSHED_CHIP_CLASS}>
+                            Pushed {formatShortTimeAgo(po.poDate) ?? 'just now'}
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                  ) : null}
+                  <td className={`px-1.5 align-middle text-right ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
                     <div
-                      className="flex flex-wrap items-center justify-end gap-0.5"
+                      className="flex flex-wrap items-center justify-end gap-1 leading-none"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
@@ -931,7 +1292,7 @@ export default function PurchaseOrdersPage() {
                         aria-label="Download PDF"
                         disabled={pdfLoadingId === po.id}
                         onClick={(e) => void downloadPoPdf(po, e)}
-                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted group-hover/po:text-ds-warning hover:bg-ds-elevated/90 hover:text-ds-warning`}
+                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted hover:bg-ds-elevated/90 hover:text-ds-warning`}
                       >
                         <FileDown className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -943,7 +1304,7 @@ export default function PurchaseOrdersPage() {
                           e.stopPropagation()
                           setDrawerPoId(po.id)
                         }}
-                        className="inline-flex items-center justify-center rounded-md border border-transparent bg-transparent px-1.5 py-1 text-ds-ink-muted transition-colors hover:border-ds-warning/45 hover:bg-ds-warning/8 hover:text-ds-warning"
+                        className="inline-flex items-center justify-center rounded-md border border-ds-line/40 bg-ds-card/40 px-1.5 py-1 text-ds-ink-muted hover:border-ds-warning/45 hover:bg-ds-warning/8 hover:text-ds-warning"
                       >
                         <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -963,7 +1324,7 @@ export default function PurchaseOrdersPage() {
                         aria-label="Delete purchase order"
                         onClick={(e) => handleDelete(po, e)}
                         disabled={deletingId === po.id}
-                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted group-hover/po:text-ds-warning hover:bg-red-950/50 hover:text-red-300`}
+                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted hover:bg-red-950/50 hover:text-red-300`}
                       >
                         <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>

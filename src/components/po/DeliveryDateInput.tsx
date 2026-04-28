@@ -51,7 +51,7 @@ export function DeliveryDateInput({
         <button
           type="button"
           onClick={onUseAutoSuggestion}
-          className="mt-1 text-[11px] text-sky-400 hover:text-sky-300 underline"
+          className="mt-1 text-[11px] text-sky-700 hover:text-sky-800 underline dark:text-sky-300 dark:hover:text-sky-200"
         >
           Use auto-suggestion ({suggestedYmd})
         </button>

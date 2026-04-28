@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Pencil } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { toast } from 'sonner'
-import { HubCardDeleteAction } from '@/components/hub/HubCardDeleteAction'
+import { HubCardDeleteAction, postHubSoftDelete } from '@/components/hub/HubCardDeleteAction'
 import { HubPriorityController, HubPriorityRankBadge } from '@/components/hub/HubPriorityController'
 import { HubPriorityReorderAuditFooter } from '@/components/hub/HubPriorityReorderAuditFooter'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
@@ -103,7 +103,15 @@ type TriageRow = {
   linkedCustomerNames?: string[]
   industrialPriority?: boolean
   ledgerEntryAt?: string
+  /** Planning / AW unified gang key (same as production stages). */
+  unifiedBodyId?: string | null
+  /** Total members in the gang from planning (may exceed rows visible in triage). */
+  unifiedBodySize?: number | null
 }
+
+type TriageVisualEntry =
+  | { kind: 'single'; row: TriageRow }
+  | { kind: 'group'; groupId: string; rows: TriageRow[]; totalMembers: number }
 
 type CtpRow = {
   id: string
@@ -132,7 +140,13 @@ type CtpRow = {
   hubOrderVendor?: number | null
   lastReorderedBy?: string | null
   lastReorderedAt?: string | null
+  unifiedBodyId?: string | null
+  unifiedBodySize?: number | null
 }
+
+type CtpVisualEntry =
+  | { kind: 'single'; row: CtpRow }
+  | { kind: 'group'; groupId: string; rows: CtpRow[]; totalMembers: number }
 
 type PlateCard = {
   id: string
@@ -955,6 +969,8 @@ export default function HubPlateDashboard() {
   const [vendorSearch, setVendorSearch] = useState('')
   const [invSearch, setInvSearch] = useState('')
   const [custSearch, setCustSearch] = useState('')
+  const [expandedUnifiedMembers, setExpandedUnifiedMembers] = useState<Set<string>>(new Set())
+  const [unifiedDetailGroupId, setUnifiedDetailGroupId] = useState<string | null>(null)
 
   const [hubView, setHubView] = useState<'board' | 'table'>('board')
   const [ledgerZoneFilter, setLedgerZoneFilter] = useState('')
@@ -1286,6 +1302,31 @@ export default function HubPlateDashboard() {
     }
   }
 
+  async function recallPrepressBatch(requirementIds: string[]) {
+    if (requirementIds.length === 0) return
+    setSaving(true)
+    try {
+      for (const requirementId of requirementIds) {
+        const r = await fetch(`/api/plate-requirements/${requirementId}/recall-prepress`, {
+          method: 'POST',
+        })
+        const t = await r.text()
+        const j = safeJsonParse<{ error?: string; warning?: string }>(t, {})
+        if (!r.ok) {
+          toast.error(j.error ?? 'Recall failed')
+          return
+        }
+        if (j.warning) {
+          toast.warning(j.warning, { duration: 6500 })
+        }
+      }
+      toast.success(`Recalled ${requirementIds.length} requirement(s) to pre-press`)
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function sendBackTriage(requirementId: string) {
     setSaving(true)
     try {
@@ -1372,6 +1413,58 @@ export default function HubPlateDashboard() {
         ),
       }))
       toast.error(e instanceof Error ? e.message : 'Could not update size')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function patchUnifiedBodyPlateSize(rows: TriageRow[], plateSize: HubPlateSize) {
+    const ids = rows.map((r) => r.id).filter((id) => id?.trim())
+    if (ids.length === 0) return
+    setSaving(true)
+    try {
+      for (const requirementId of ids) {
+        const r = await fetch(`/api/plate-requirements/${requirementId}/plate-size`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: safeJsonStringify({ plateSize }),
+        })
+        const t = await r.text()
+        const j = safeJsonParse<{ error?: string }>(t, {})
+        if (!r.ok) {
+          toast.error(j.error ?? 'Could not update unified body size')
+          return
+        }
+      }
+      const mm = HUB_PLATE_SIZE_OPTIONS.find((o) => o.value === plateSize)?.mm ?? plateSize
+      toast.success(`Unified body size set to ${mm}`, { duration: 2000 })
+      await load()
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Could not update unified body size')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteUnifiedBody(rows: TriageRow[]) {
+    const ids = rows.map((r) => r.id).filter((id) => id?.trim())
+    if (ids.length === 0) return
+    const confirmed = window.confirm(
+      `Delete unified body with ${ids.length} member requirement(s)?`,
+    )
+    if (!confirmed) return
+    setSaving(true)
+    try {
+      for (const id of ids) {
+        const res = await postHubSoftDelete('plate_requirement', id)
+        if (!res.ok) {
+          toast.error(res.ok === false ? res.message : 'Delete failed')
+          return
+        }
+      }
+      toast.success('Unified body deleted')
+      await load()
     } finally {
       setSaving(false)
     }
@@ -1579,6 +1672,107 @@ export default function HubPlateDashboard() {
       console.error(e)
       setData(prev)
       toast.error(e instanceof Error ? e.message : 'Mark ready failed')
+    }
+  }
+
+  async function markUnifiedReady(rows: CtpRow[], lane: 'ctp' | 'vendor') {
+    if (rows.length === 0) return
+    const label = lane === 'ctp' ? 'CTP' : 'Vendor'
+    if (!window.confirm(`Move unified set (${rows.length} members) to next station from ${label}?`)) {
+      return
+    }
+    setSaving(true)
+    try {
+      for (const row of rows) {
+        const r = await fetch('/api/plate-hub/mark-plate-ready', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: safeJsonStringify({
+            kind: 'requirement',
+            id: row.id,
+            ...(row.plateSize ? { plateSize: row.plateSize } : {}),
+          }),
+        })
+        const t = await r.text()
+        const j = safeJsonParse<{ error?: string }>(t, {})
+        if (!r.ok) throw new Error(j.error ?? 'Mark ready failed')
+      }
+      toast.success(`Unified set moved (${rows.length} members)`)
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Mark ready failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function markRequirementReceived(row: CtpRow, lane: 'ctp' | 'vendor') {
+    setSaving(true)
+    try {
+      const r = await fetch(`/api/plate-requirements/${row.id}/mark-received`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeJsonStringify({ lane }),
+      })
+      const t = await r.text()
+      const j = safeJsonParse<{ error?: string }>(t, {})
+      if (!r.ok) {
+        toast.error(j.error ?? 'Failed to mark received')
+        return
+      }
+      toast.success('Marked received')
+      await load({ silent: true })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function markUnifiedReceived(rows: CtpRow[], lane: 'ctp' | 'vendor') {
+    if (rows.length === 0) return
+    setSaving(true)
+    try {
+      for (const row of rows) {
+        const r = await fetch(`/api/plate-requirements/${row.id}/mark-received`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: safeJsonStringify({ lane }),
+        })
+        const t = await r.text()
+        const j = safeJsonParse<{ error?: string }>(t, {})
+        if (!r.ok) {
+          toast.error(j.error ?? 'Failed to mark received')
+          return
+        }
+      }
+      toast.success(`Set marked received (${rows.length})`)
+      await load({ silent: true })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function sendUnifiedBack(rows: CtpRow[], lane: 'ctp' | 'vendor') {
+    if (rows.length === 0) return
+    setSaving(true)
+    try {
+      for (const row of rows) {
+        const path =
+          lane === 'ctp'
+            ? `/api/plate-requirements/${row.id}/send-back-triage`
+            : `/api/plate-requirements/${row.id}/vendor-send-back-triage`
+        const r = await fetch(path, { method: 'POST' })
+        const t = await r.text()
+        const j = safeJsonParse<{ error?: string }>(t, {})
+        if (!r.ok) throw new Error(j.error ?? 'Send back failed')
+      }
+      toast.success(`Unified set sent back (${rows.length} members)`)
+      await load({ silent: true })
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Send back failed')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -2058,12 +2252,43 @@ export default function HubPlateDashboard() {
           row.artworkCode,
           row.requirementCode,
           row.poNumber,
+          row.unifiedBodyId,
           ...(row.linkedCustomerNames ?? []),
         ]),
       )
     }
     return sortPlatePrepRows(list)
   }, [data.triage, triageSearch])
+
+  const triageVisualEntries = useMemo<TriageVisualEntry[]>(() => {
+    const byKey = new Map<string, TriageRow[]>()
+    const order: (TriageVisualEntry | string)[] = []
+    for (const r of filteredTriageBoard) {
+      const key = (r.unifiedBodyId ?? '').trim()
+      if (!key) {
+        order.push({ kind: 'single', row: r })
+        continue
+      }
+      if (!byKey.has(key)) {
+        byKey.set(key, [])
+        order.push(key)
+      }
+      byKey.get(key)!.push(r)
+    }
+    return order.map((slot) => {
+      if (typeof slot !== 'string') return slot
+      const rows = byKey.get(slot)!
+      const totalMembers = rows[0]?.unifiedBodySize ?? rows.length
+      return { kind: 'group', groupId: slot, rows, totalMembers }
+    })
+  }, [filteredTriageBoard])
+  const unifiedGroupRowsById = useMemo(() => {
+    const map = new Map<string, TriageRow[]>()
+    for (const entry of triageVisualEntries) {
+      if (entry.kind === 'group') map.set(entry.groupId, entry.rows)
+    }
+    return map
+  }, [triageVisualEntries])
 
   const filteredCtp = useMemo(() => {
     const q = ctpSearch.trim().toLowerCase()
@@ -2079,6 +2304,33 @@ export default function HubPlateDashboard() {
     )
   }, [data.ctpQueue, ctpSearch])
 
+  const ctpVisualEntries = useMemo<CtpVisualEntry[]>(() => {
+    const byKey = new Map<string, CtpRow[]>()
+    const order: (CtpVisualEntry | string)[] = []
+    for (const r of filteredCtp) {
+      const key = (r.unifiedBodyId ?? '').trim()
+      if (!key) {
+        order.push({ kind: 'single', row: r })
+        continue
+      }
+      if (!byKey.has(key)) {
+        byKey.set(key, [])
+        order.push(key)
+      }
+      byKey.get(key)!.push(r)
+    }
+    return order.map((slot) => {
+      if (typeof slot !== 'string') return slot
+      const rows = byKey.get(slot)!
+      return {
+        kind: 'group',
+        groupId: slot,
+        rows,
+        totalMembers: rows[0]?.unifiedBodySize ?? rows.length,
+      }
+    })
+  }, [filteredCtp])
+
   const filteredVendor = useMemo(() => {
     const q = vendorSearch.trim().toLowerCase()
     if (!q) return data.vendorQueue
@@ -2092,6 +2344,33 @@ export default function HubPlateDashboard() {
       ]),
     )
   }, [data.vendorQueue, vendorSearch])
+
+  const vendorVisualEntries = useMemo<CtpVisualEntry[]>(() => {
+    const byKey = new Map<string, CtpRow[]>()
+    const order: (CtpVisualEntry | string)[] = []
+    for (const r of filteredVendor) {
+      const key = (r.unifiedBodyId ?? '').trim()
+      if (!key) {
+        order.push({ kind: 'single', row: r })
+        continue
+      }
+      if (!byKey.has(key)) {
+        byKey.set(key, [])
+        order.push(key)
+      }
+      byKey.get(key)!.push(r)
+    }
+    return order.map((slot) => {
+      if (typeof slot !== 'string') return slot
+      const rows = byKey.get(slot)!
+      return {
+        kind: 'group',
+        groupId: slot,
+        rows,
+        totalMembers: rows[0]?.unifiedBodySize ?? rows.length,
+      }
+    })
+  }, [filteredVendor])
 
   const filteredCustody = useMemo(() => {
     const q = custSearch.trim().toLowerCase()
@@ -2166,6 +2445,13 @@ export default function HubPlateDashboard() {
     setTriagePlateSizePick('SIZE_560_670')
   }
 
+  function dispatchUnifiedTriage(
+    rows: TriageRow[],
+    channel: 'inhouse_ctp' | 'outside_vendor',
+  ) {
+    void patchTriageBatchForRows(rows, channel)
+  }
+
   async function patchTriage(
     id: string,
     channel: 'inhouse_ctp' | 'outside_vendor' | 'stock_available',
@@ -2196,6 +2482,55 @@ export default function HubPlateDashboard() {
         return
       }
       toast.success('Updated')
+      setStockModal(null)
+      setStockBatchPick({})
+      setTriageSizeModal(null)
+      await load()
+    } catch (e) {
+      console.error(e)
+      toast.error(
+        e instanceof Error && e.message
+          ? e.message
+          : 'Triage update failed — check connection or try again.',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function patchTriageBatchForRows(
+    rows: TriageRow[],
+    channel: 'inhouse_ctp' | 'outside_vendor',
+  ) {
+    const fallbackSize =
+      (rows.find((r) => r.plateSize ?? r.cartonMasterPlateSize)?.plateSize ??
+        rows.find((r) => r.plateSize ?? r.cartonMasterPlateSize)?.cartonMasterPlateSize ??
+        'SIZE_560_670') as HubPlateSize
+    const items = rows.map((r) => ({
+      id: r.id,
+      plateSize: (r.plateSize ?? r.cartonMasterPlateSize ?? fallbackSize) as HubPlateSize,
+    }))
+    if (items.some((x) => !x.id?.trim())) {
+      toast.error('Missing requirement id')
+      return
+    }
+    setSaving(true)
+    try {
+      for (const { id, plateSize } of items) {
+        const body: Record<string, unknown> = { channel, plateSize }
+        const r = await fetch(`/api/plate-requirements/${id}/triage`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: safeJsonStringify(body),
+        })
+        const t = await r.text()
+        const j = safeJsonParse<{ error?: string }>(t, {})
+        if (!r.ok) {
+          toast.error(j.error ?? 'Triage update failed')
+          return
+        }
+      }
+      toast.success(`Unified body moved (${rows.length} members)`)
       setStockModal(null)
       setStockBatchPick({})
       setTriageSizeModal(null)
@@ -2435,169 +2770,442 @@ export default function HubPlateDashboard() {
               </label>
               <pre className="sr-only">Designer queue — AW / job codes</pre>
               <div className="space-y-3">
-                {filteredTriageBoard.length === 0 ? (
+                {triageVisualEntries.length === 0 ? (
                   <p className="text-neutral-500 text-sm">No jobs awaiting triage.</p>
                 ) : (
                   <AnimatePresence initial={false}>
-                    {filteredTriageBoard.map((row) => (
-                      <motion.div
-                        key={row.id}
-                        layout
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0, scale: 0.98 }}
-                        transition={{ duration: 0.2 }}
-                        className={`relative flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 ${
-                          row.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
-                        }`}
-                      >
-                        <HubCardDeleteAction
-                          asset="plate_requirement"
-                          recordId={row.id}
-                          disabled={saving}
-                          triggerClassName="absolute right-[2.35rem] top-1.5 z-20"
-                          onDeleted={() => removePlateHubEntity('requirement', row.id)}
-                        />
-                      <PlateCountBadge
-                        count={hubPlateBadgeCount({
-                          totalPlates: row.newPlatesNeeded,
-                          plateColours: row.plateColours,
-                        })}
-                      />
-                      <div className="flex-1 min-w-0 flex flex-col space-y-2 pr-10 lg:pr-11">
-                        <p className="font-mono text-ds-warning text-sm">{row.requirementCode}</p>
-                        <PlateHubStageDays lastStatusUpdatedAt={row.lastStatusUpdatedAt} />
-                        <div className="min-w-0 w-full pr-8">
-                          <HubCartonAuditTitle
-                            onOpenAudit={() =>
-                              setJobAudit({
-                                entity: 'requirement',
-                                id: row.id,
-                                zoneLabel: 'Incoming triage',
-                                cartonName: row.cartonName,
-                                artworkCode: row.artworkCode,
-                                displayCode: row.requirementCode,
-                                poLineId: row.poLineId,
-                                plateSize: row.plateSize ?? row.cartonMasterPlateSize ?? null,
-                                plateColours: row.plateColours,
-                                coloursRequired: Math.max(
-                                  row.plateColours.length,
-                                  row.newPlatesNeeded,
-                                ),
-                                platesInRackCount:
-                                  triageRackStockById.get(row.id)?.matchCount ?? null,
-                                statusLabel: row.status.replace(/_/g, ' '),
-                              })
-                            }
+                    {triageVisualEntries.map((entry) => {
+                      if (entry.kind === 'group') {
+                        const { groupId, rows, totalMembers } = entry
+                        const mergedColours = Array.from(
+                          new Set(rows.flatMap((r) => r.plateColours)),
+                        )
+                        const sumPlates = rows.reduce((s, r) => s + r.newPlatesNeeded, 0)
+                        const anyIndustrial = rows.some((r) => r.industrialPriority)
+                        const recallDisabled =
+                          saving || rows.some((r) => r.status === 'plates_ready')
+                        const recallTitle = rows.some((r) => r.status === 'plates_ready')
+                          ? 'Plates already marked ready on one member — cannot bulk recall'
+                          : 'Send all members back to designer queue'
+                        const latestAt = rows
+                          .map((r) => r.lastStatusUpdatedAt)
+                          .filter((x): x is string => Boolean(x))
+                          .sort()
+                          .at(-1)
+                        const membersExpanded = expandedUnifiedMembers.has(groupId)
+                        const firstWithPo = rows.find((r) => r.purchaseOrderId && r.poNumber)
+                        const awLabels = Array.from(
+                          new Set(
+                            rows
+                              .map((r) => (r.artworkCode ?? '').trim())
+                              .filter(Boolean),
+                          ),
+                        )
+                        const anyMissingPo = rows.some((r) => r.poLinkHint === 'missing_row')
+                        const anyManualPo = rows.some((r) => r.poLinkHint === 'manual')
+                        return (
+                          <motion.div
+                            key={`unified:${groupId}`}
+                            layout
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.2 }}
+                            className={`relative flex flex-col gap-1.5 rounded-lg border border-sky-500/70 bg-sky-500/8 dark:bg-sky-950/20 p-2.5 overflow-hidden transition-colors hover:border-sky-500 ${
+                              anyIndustrial ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
+                            }`}
                           >
-                            {row.cartonName}
-                          </HubCartonAuditTitle>
-                        </div>
-                        <HubJobCardMetaLine>
-                          Plates required:{' '}
-                          <span className="text-foreground font-semibold tabular-nums">
-                            {row.newPlatesNeeded}
-                          </span>
-                          {' · '}AW: {row.artworkCode?.trim() || '—'}
-                          {row.purchaseOrderId && row.poNumber ? (
-                            <>
-                              {' · '}
-                              <Link
-                                href={`/orders/purchase-orders/${row.purchaseOrderId}`}
-                                className="text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline font-medium"
+                            <div className="flex min-w-0 items-center gap-2">
+                              <PlateCountBadge
+                                count={hubPlateBadgeCount({
+                                  totalPlates: sumPlates,
+                                  plateColours: mergedColours,
+                                })}
+                              />
+                              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                                <span className="font-mono text-xs font-bold text-ds-ink">
+                                  Set {groupId} ({rows.length}/{totalMembers})
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setUnifiedDetailGroupId(groupId)}
+                                  className="rounded border border-sky-500/40 px-1.5 py-0.5 text-[10px] font-mono text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
+                                  title="Open unified set details"
+                                >
+                                  Set #{groupId}
+                                </button>
+                                <span className="rounded border border-ds-line/50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ds-ink-muted">
+                                  Grouped set
+                                </span>
+                                <div className="ml-auto flex shrink-0 flex-wrap gap-1">
+                                  <button
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => dispatchUnifiedTriage(rows, 'inhouse_ctp')}
+                                    className="rounded-md bg-ds-warning px-2 py-1 text-[11px] font-semibold text-primary-foreground hover:bg-ds-warning disabled:opacity-50"
+                                  >
+                                    In-house CTP
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => dispatchUnifiedTriage(rows, 'outside_vendor')}
+                                    className="rounded-md border border-ds-line/50 px-2 py-1 text-[11px] text-neutral-400 hover:bg-ds-card disabled:opacity-50"
+                                  >
+                                    Send to vendor
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={recallDisabled}
+                                    title={recallTitle}
+                                    onClick={() => void recallPrepressBatch(rows.map((r) => r.id))}
+                                    className="rounded-md border border-rose-700/80 bg-rose-950/80 px-2 py-1 text-[11px] font-medium text-rose-100 hover:bg-rose-900 disabled:opacity-40"
+                                  >
+                                    Recall
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => void deleteUnifiedBody(rows)}
+                                    className="rounded-md border border-rose-700/80 bg-rose-950/80 px-1.5 py-0.5 text-[11px] font-medium text-rose-100 hover:bg-rose-900 disabled:opacity-40"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex min-w-0 flex-1 flex-col space-y-1.5">
+                              {rows.length < totalMembers ? (
+                                <p className="text-[11px] text-ds-ink-muted">
+                                  {totalMembers - rows.length} member(s) already downstream or not
+                                  on this board.
+                                </p>
+                              ) : null}
+                              {latestAt ? <PlateHubStageDays lastStatusUpdatedAt={latestAt} /> : null}
+                              <div className="pr-6">
+                                <div className="flex items-center gap-1.5 text-[11px] text-ds-ink-muted">
+                                  <span className="truncate leading-tight">
+                                    Names: {rows.map((m) => m.cartonName).join(' · ')}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="shrink-0 rounded border border-ds-line/50 px-1 py-0.5 text-[10px] font-medium text-ds-ink hover:bg-ds-card"
+                                    onClick={() =>
+                                      setExpandedUnifiedMembers((prev) => {
+                                        const next = new Set(prev)
+                                        if (next.has(groupId)) next.delete(groupId)
+                                        else next.add(groupId)
+                                        return next
+                                      })
+                                    }
+                                  >
+                                    {membersExpanded ? 'Hide members' : 'View members'}
+                                  </button>
+                                </div>
+                                {membersExpanded ? (
+                                  <div className="mt-1 flex min-w-0 w-full flex-wrap gap-1">
+                                    {rows.map((member) => (
+                                      <HubCartonAuditTitle
+                                        key={member.id}
+                                        className="max-w-[min(100%,12rem)] text-[11px]"
+                                        onOpenAudit={() =>
+                                          setJobAudit({
+                                            entity: 'requirement',
+                                            id: member.id,
+                                            zoneLabel: 'Incoming triage (unified body)',
+                                            cartonName: member.cartonName,
+                                            artworkCode: member.artworkCode,
+                                            displayCode: member.requirementCode,
+                                            poLineId: member.poLineId,
+                                            plateSize:
+                                              member.plateSize ??
+                                              member.cartonMasterPlateSize ??
+                                              null,
+                                            plateColours: member.plateColours,
+                                            coloursRequired: Math.max(
+                                              member.plateColours.length,
+                                              member.newPlatesNeeded,
+                                            ),
+                                            platesInRackCount:
+                                              triageRackStockById.get(member.id)?.matchCount ??
+                                              null,
+                                            statusLabel: member.status.replace(/_/g, ' '),
+                                          })
+                                        }
+                                      >
+                                        <span className="font-mono text-ds-warning">
+                                          {member.requirementCode}
+                                        </span>{' '}
+                                        <span className="text-ds-ink">{member.cartonName}</span>
+                                      </HubCartonAuditTitle>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <HubJobCardMetaLine>
+                                Plates required:{' '}
+                                <span className="text-foreground font-semibold tabular-nums">
+                                  {sumPlates}
+                                </span>
+                                {' · '}AW: {awLabels.length ? awLabels.join(' · ') : '—'}
+                                {firstWithPo?.purchaseOrderId && firstWithPo.poNumber ? (
+                                  <>
+                                    {' · '}
+                                    <Link
+                                      href={`/orders/purchase-orders/${firstWithPo.purchaseOrderId}`}
+                                      className="font-medium text-sky-400 underline-offset-2 hover:text-sky-300 hover:underline"
+                                    >
+                                      PO {firstWithPo.poNumber}
+                                    </Link>
+                                  </>
+                                ) : anyMissingPo ? (
+                                  <>
+                                    {' · '}
+                                    <span
+                                      className="inline-flex cursor-help select-none items-center text-ds-warning"
+                                      title="Linked PO line not found on at least one member"
+                                      aria-label="PO link broken"
+                                    >
+                                      ⚠️
+                                    </span>
+                                  </>
+                                ) : anyManualPo ? (
+                                  <>
+                                    {' · '}
+                                    <span
+                                      className="inline-flex cursor-help select-none items-center text-neutral-500"
+                                      title="No PO link on at least one member"
+                                      aria-label="No PO link"
+                                    >
+                                      ⚠️
+                                    </span>
+                                  </>
+                                ) : null}
+                              </HubJobCardMetaLine>
+                              <div className="space-y-1 border-t border-ds-line/30 pt-1.5">
+                                <span className="text-[11px] font-medium text-ds-ink-muted">
+                                  Unified plate size (single sheet body):
+                                </span>
+                                <select
+                                  disabled={saving}
+                                  value={(rows[0]?.plateSize ?? rows[0]?.cartonMasterPlateSize ?? 'SIZE_560_670') as HubPlateSize}
+                                  onChange={(e) =>
+                                    void patchUnifiedBodyPlateSize(
+                                      rows,
+                                      e.target.value as HubPlateSize,
+                                    )
+                                  }
+                                  className="rounded-md border border-ds-line/50 bg-background px-2 py-1 text-[11px] font-medium text-ds-ink focus-visible:border-ds-warning/70 focus-visible:outline-none disabled:opacity-50"
+                                >
+                                  {HUB_PLATE_SIZE_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value} className="bg-ds-card text-ds-ink">
+                                      {opt.mm}
+                                    </option>
+                                  ))}
+                                </select>
+                                <TriageInventoryStockLine
+                                  stock={(() => {
+                                    const matchCount = rows.reduce(
+                                      (sum, member) =>
+                                        sum + (triageRackStockById.get(member.id)?.matchCount ?? 0),
+                                      0,
+                                    )
+                                    const labels = Array.from(
+                                      new Set(
+                                        rows.flatMap(
+                                          (member) => triageRackStockById.get(member.id)?.labels ?? [],
+                                        ),
+                                      ),
+                                    )
+                                    const locs = Array.from(
+                                      new Set(
+                                        rows
+                                          .map(
+                                            (member) =>
+                                              triageRackStockById.get(member.id)?.locationLabel ?? null,
+                                          )
+                                          .filter((x): x is string => Boolean(x)),
+                                      ),
+                                    )
+                                    const locationLabel =
+                                      locs.length === 0
+                                        ? null
+                                        : locs.length === 1
+                                          ? locs[0]
+                                          : `${locs[0]} +${locs.length - 1}`
+                                    return { matchCount, labels, locationLabel }
+                                  })()}
+                                />
+                              </div>
+                              <div>
+                                <ColourChannelsRow labels={mergedColours} />
+                              </div>
+                              {latestAt ? <HubLastActionFooter at={latestAt} /> : null}
+                            </div>
+                          </motion.div>
+                        )
+                      }
+                      const row = entry.row
+                      return (
+                        <motion.div
+                          key={row.id}
+                          layout
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0, scale: 0.98 }}
+                          transition={{ duration: 0.2 }}
+                          className={`relative flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3 rounded-lg border border-gray-800 bg-background p-3 overflow-hidden transition-colors hover:border-blue-500/50 ${
+                            row.industrialPriority ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''
+                          }`}
+                        >
+                          <HubCardDeleteAction
+                            asset="plate_requirement"
+                            recordId={row.id}
+                            disabled={saving}
+                            triggerClassName="absolute right-[2.35rem] top-1.5 z-20"
+                            onDeleted={() => removePlateHubEntity('requirement', row.id)}
+                          />
+                          <PlateCountBadge
+                            count={hubPlateBadgeCount({
+                              totalPlates: row.newPlatesNeeded,
+                              plateColours: row.plateColours,
+                            })}
+                          />
+                          <div className="flex-1 min-w-0 flex flex-col space-y-2 pr-10 lg:pr-11">
+                            <p className="font-mono text-ds-warning text-sm">{row.requirementCode}</p>
+                            <PlateHubStageDays lastStatusUpdatedAt={row.lastStatusUpdatedAt} />
+                            <div className="min-w-0 w-full pr-8">
+                              <HubCartonAuditTitle
+                                onOpenAudit={() =>
+                                  setJobAudit({
+                                    entity: 'requirement',
+                                    id: row.id,
+                                    zoneLabel: 'Incoming triage',
+                                    cartonName: row.cartonName,
+                                    artworkCode: row.artworkCode,
+                                    displayCode: row.requirementCode,
+                                    poLineId: row.poLineId,
+                                    plateSize: row.plateSize ?? row.cartonMasterPlateSize ?? null,
+                                    plateColours: row.plateColours,
+                                    coloursRequired: Math.max(
+                                      row.plateColours.length,
+                                      row.newPlatesNeeded,
+                                    ),
+                                    platesInRackCount:
+                                      triageRackStockById.get(row.id)?.matchCount ?? null,
+                                    statusLabel: row.status.replace(/_/g, ' '),
+                                  })
+                                }
                               >
-                                PO {row.poNumber}
-                              </Link>
-                            </>
-                          ) : row.poLinkHint === 'missing_row' ? (
-                            <>
-                              {' · '}
-                              <span
-                                className="inline-flex items-center text-ds-warning cursor-help select-none"
-                                title="Linked PO line not found — may be deleted or archived"
-                                aria-label="PO link broken"
-                              >
-                                ⚠️
+                                {row.cartonName}
+                              </HubCartonAuditTitle>
+                            </div>
+                            <HubJobCardMetaLine>
+                              Plates required:{' '}
+                              <span className="text-foreground font-semibold tabular-nums">
+                                {row.newPlatesNeeded}
                               </span>
-                            </>
-                          ) : row.poLinkHint === 'manual' ? (
-                            <>
-                              {' · '}
-                              <span
-                                className="inline-flex items-center text-neutral-500 cursor-help select-none"
-                                title="No PO link - Manual Job"
-                                aria-label="No PO link"
-                              >
-                                ⚠️
-                              </span>
-                            </>
-                          ) : null}
-                        </HubJobCardMetaLine>
-                        <TriageInlinePlateSize
-                          row={row}
-                          disabled={saving}
-                          onSizeChange={(id, ps) => void patchIncomingTriagePlateSize(id, ps)}
-                        />
-                        <div>
-                          <ColourChannelsRow labels={row.plateColours} />
-                        </div>
-                        <TriageInventoryStockLine
-                          stock={
-                            triageRackStockById.get(row.id) ?? {
-                              matchCount: 0,
-                              labels: [],
-                              locationLabel: null,
-                            }
-                          }
-                        />
-                        {row.lastStatusUpdatedAt ? (
-                          <HubLastActionFooter at={row.lastStatusUpdatedAt} />
-                        ) : null}
-                      </div>
-                      <div className="flex flex-wrap gap-2 shrink-0">
-                        <button
-                          type="button"
-                          disabled={saving}
-                          onClick={() => dispatchTriageToProduction(row, 'inhouse_ctp')}
-                          className="px-3 py-2 rounded-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-semibold disabled:opacity-50"
-                        >
-                          In-house CTP
-                        </button>
-                        <button
-                          type="button"
-                          disabled={saving}
-                          onClick={() => {
-                            setStockModal(row)
-                            setStockBatchPick({})
-                          }}
-                          className="px-3 py-2 rounded-md border border-ds-line/50 bg-ds-card hover:bg-ds-elevated text-sm font-medium"
-                        >
-                          Take from stock
-                        </button>
-                        <button
-                          type="button"
-                          disabled={saving}
-                          onClick={() => dispatchTriageToProduction(row, 'outside_vendor')}
-                          className="px-3 py-2 rounded-md border border-ds-line/50 text-neutral-400 hover:bg-ds-card text-sm"
-                        >
-                          Send to vendor
-                        </button>
-                        <button
-                          type="button"
-                          disabled={saving || row.status === 'plates_ready'}
-                          title={
-                            row.status === 'plates_ready'
-                              ? 'Plates already marked ready — cannot recall'
-                              : 'Send job back to designer queue'
-                          }
-                          onClick={() => void recallPrepress(row.id)}
-                          className="px-3 py-2 rounded-md border border-rose-700/80 bg-rose-950/80 text-rose-100 hover:bg-rose-900 text-sm font-medium disabled:opacity-40"
-                        >
-                          Recall to Pre-Press
-                        </button>
-                      </div>
-                    </motion.div>
-                    ))}
+                              {' · '}AW: {row.artworkCode?.trim() || '—'}
+                              {row.purchaseOrderId && row.poNumber ? (
+                                <>
+                                  {' · '}
+                                  <Link
+                                    href={`/orders/purchase-orders/${row.purchaseOrderId}`}
+                                    className="text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline font-medium"
+                                  >
+                                    PO {row.poNumber}
+                                  </Link>
+                                </>
+                              ) : row.poLinkHint === 'missing_row' ? (
+                                <>
+                                  {' · '}
+                                  <span
+                                    className="inline-flex items-center text-ds-warning cursor-help select-none"
+                                    title="Linked PO line not found — may be deleted or archived"
+                                    aria-label="PO link broken"
+                                  >
+                                    ⚠️
+                                  </span>
+                                </>
+                              ) : row.poLinkHint === 'manual' ? (
+                                <>
+                                  {' · '}
+                                  <span
+                                    className="inline-flex items-center text-neutral-500 cursor-help select-none"
+                                    title="No PO link - Manual Job"
+                                    aria-label="No PO link"
+                                  >
+                                    ⚠️
+                                  </span>
+                                </>
+                              ) : null}
+                            </HubJobCardMetaLine>
+                            <TriageInlinePlateSize
+                              row={row}
+                              disabled={saving}
+                              onSizeChange={(id, ps) => void patchIncomingTriagePlateSize(id, ps)}
+                            />
+                            <div>
+                              <ColourChannelsRow labels={row.plateColours} />
+                            </div>
+                            <TriageInventoryStockLine
+                              stock={
+                                triageRackStockById.get(row.id) ?? {
+                                  matchCount: 0,
+                                  labels: [],
+                                  locationLabel: null,
+                                }
+                              }
+                            />
+                            {row.lastStatusUpdatedAt ? (
+                              <HubLastActionFooter at={row.lastStatusUpdatedAt} />
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap gap-2 shrink-0">
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => dispatchTriageToProduction(row, 'inhouse_ctp')}
+                              className="px-3 py-2 rounded-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-semibold disabled:opacity-50"
+                            >
+                              In-house CTP
+                            </button>
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => {
+                                setStockModal(row)
+                                setStockBatchPick({})
+                              }}
+                              className="px-3 py-2 rounded-md border border-ds-line/50 bg-ds-card hover:bg-ds-elevated text-sm font-medium"
+                            >
+                              Take from stock
+                            </button>
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => dispatchTriageToProduction(row, 'outside_vendor')}
+                              className="px-3 py-2 rounded-md border border-ds-line/50 text-neutral-400 hover:bg-ds-card text-sm"
+                            >
+                              Send to vendor
+                            </button>
+                            <button
+                              type="button"
+                              disabled={saving || row.status === 'plates_ready'}
+                              title={
+                                row.status === 'plates_ready'
+                                  ? 'Plates already marked ready — cannot recall'
+                                  : 'Send job back to designer queue'
+                              }
+                              onClick={() => void recallPrepress(row.id)}
+                              className="px-3 py-2 rounded-md border border-rose-700/80 bg-rose-950/80 text-rose-100 hover:bg-rose-900 text-sm font-medium disabled:opacity-40"
+                            >
+                              Recall to Pre-Press
+                            </button>
+                          </div>
+                        </motion.div>
+                      )
+                    })}
                   </AnimatePresence>
                 )}
               </div>
@@ -2635,12 +3243,93 @@ export default function HubPlateDashboard() {
                   className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
-                  {filteredCtp.length === 0 ? (
+                  {ctpVisualEntries.length === 0 ? (
                     <li className="text-neutral-500 text-sm">Empty.</li>
                   ) : (
                     <AnimatePresence initial={false}>
-                    {filteredCtp.map((job) => {
+                    {ctpVisualEntries.map((entry) => {
+                      if (entry.kind === 'group') {
+                        const { groupId, rows, totalMembers } = entry
+                        const mergedColours = Array.from(new Set(rows.flatMap((r) => r.plateColours)))
+                        const unifiedPlateCount = Math.max(mergedColours.length, 1)
+                        const unifiedNameLine = rows.map((r) => r.cartonName).join(' · ')
+                        const isReceived = rows.every((r) => r.status === 'ctp_received')
+                        return (
+                          <motion.li
+                            key={`ctp-unified:${groupId}`}
+                            layout
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.2 }}
+                            className="relative flex flex-col gap-1.5 rounded-lg border border-sky-500/70 bg-sky-500/8 p-2.5 overflow-hidden"
+                          >
+                            <PlateCountBadge
+                              count={hubPlateBadgeCount({
+                                totalPlates: unifiedPlateCount,
+                                plateColours: mergedColours,
+                              })}
+                            />
+                            <div className="flex items-center gap-1.5">
+                              <p
+                                className="font-mono text-ds-ink text-xs font-bold min-w-0 truncate"
+                                title={unifiedNameLine}
+                              >
+                                {unifiedNameLine}
+                              </p>
+                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-[10px] text-ds-ink-muted">
+                                CTP
+                              </span>
+                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-[10px] text-ds-ink-muted">
+                                Set {groupId}
+                              </span>
+                            </div>
+                            <HubJobCardMetaLine>
+                              AW: {Array.from(new Set(rows.map((r) => r.artworkCode?.trim() || '—'))).join(' · ')}
+                              {' · '}Members: {rows.length}/{totalMembers}
+                            </HubJobCardMetaLine>
+                            <ShopfloorQueueColourStrip job={{ ...rows[0], plateColours: mergedColours }} />
+                            <div className="flex gap-1.5">
+                              {isReceived ? (
+                                <span className="flex-1 inline-flex items-center justify-center rounded border border-ds-line/50 bg-ds-card px-2 py-1.5 text-xs font-semibold text-ds-ink-muted">
+                                  Received
+                                </span>
+                              ) : (
+                                <span className="flex-1 inline-flex items-center justify-center rounded border border-ds-line/50 bg-ds-card px-2 py-1.5 text-xs font-semibold text-ds-ink-muted">
+                                  Sent
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                className="flex-1 px-2 py-1.5 rounded border border-ds-line/50 bg-ds-card text-ds-ink hover:bg-ds-elevated text-xs font-semibold"
+                                onClick={() => void markUnifiedReceived(rows, 'ctp')}
+                                disabled={saving || isReceived}
+                              >
+                                Receive
+                              </button>
+                              <button
+                                type="button"
+                                className="flex-1 px-2 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-primary-foreground text-xs font-semibold"
+                                onClick={() => void markUnifiedReady(rows, 'ctp')}
+                                disabled={saving || !isReceived}
+                              >
+                                Mark unified ready
+                              </button>
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => void sendUnifiedBack(rows, 'ctp')}
+                                className="flex-1 px-2 py-1.5 rounded border border-ds-warning/50 bg-ds-card text-ds-ink hover:bg-ds-elevated text-xs font-semibold"
+                              >
+                                Send set back
+                              </button>
+                            </div>
+                          </motion.li>
+                        )
+                      }
+                      const job = entry.row
                       const ctpPos = plateQueueColumnPos(data.ctpQueue, job.id)
+                      const isReceived = job.status === 'ctp_received'
                       return (
                       <motion.li
                         key={job.id}
@@ -2737,10 +3426,28 @@ export default function HubPlateDashboard() {
                           <span className="capitalize">{job.status.replace(/_/g, ' ')}</span>
                         </HubJobCardMetaLine>
                         <div className="flex flex-col gap-2">
+                          {isReceived ? (
+                            <span className="w-full inline-flex items-center justify-center rounded border border-ds-line/50 bg-ds-card px-2 py-1.5 text-xs font-semibold text-ds-ink-muted">
+                              Received
+                            </span>
+                          ) : (
+                            <span className="w-full inline-flex items-center justify-center rounded border border-ds-line/50 bg-ds-card px-2 py-1.5 text-xs font-semibold text-ds-ink-muted">
+                              Sent
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            className="w-full px-2 py-1.5 rounded border border-ds-line/50 bg-ds-card text-ds-ink hover:bg-ds-elevated text-xs font-semibold disabled:opacity-50"
+                            onClick={() => void markRequirementReceived(job, 'ctp')}
+                            disabled={saving || isReceived}
+                          >
+                            Receive
+                          </button>
                           <button
                             type="button"
                             className="w-full px-2 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-primary-foreground text-xs font-semibold"
                             onClick={() => void markPlateReadyRequirement(job, 'ctp')}
+                            disabled={saving || !isReceived}
                           >
                             Mark plate ready
                           </button>
@@ -2810,12 +3517,93 @@ export default function HubPlateDashboard() {
                   className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
-                  {filteredVendor.length === 0 ? (
+                  {vendorVisualEntries.length === 0 ? (
                     <li className="text-neutral-500 text-sm">None at vendor.</li>
                   ) : (
                     <AnimatePresence initial={false}>
-                    {filteredVendor.map((job) => {
+                    {vendorVisualEntries.map((entry) => {
+                      if (entry.kind === 'group') {
+                        const { groupId, rows, totalMembers } = entry
+                        const mergedColours = Array.from(new Set(rows.flatMap((r) => r.plateColours)))
+                        const unifiedPlateCount = Math.max(mergedColours.length, 1)
+                        const unifiedNameLine = rows.map((r) => r.cartonName).join(' · ')
+                        const isReceived = rows.every((r) => r.status === 'vendor_received')
+                        return (
+                          <motion.li
+                            key={`vendor-unified:${groupId}`}
+                            layout
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.2 }}
+                            className="relative flex flex-col gap-1.5 rounded-lg border border-sky-500/70 bg-sky-500/8 p-2.5 overflow-hidden"
+                          >
+                            <PlateCountBadge
+                              count={hubPlateBadgeCount({
+                                totalPlates: unifiedPlateCount,
+                                plateColours: mergedColours,
+                              })}
+                            />
+                            <div className="flex items-center gap-1.5">
+                              <p
+                                className="font-mono text-ds-ink text-xs font-bold min-w-0 truncate"
+                                title={unifiedNameLine}
+                              >
+                                {unifiedNameLine}
+                              </p>
+                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-[10px] text-ds-ink-muted">
+                                Vendor
+                              </span>
+                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-[10px] text-ds-ink-muted">
+                                Set {groupId}
+                              </span>
+                            </div>
+                            <HubJobCardMetaLine>
+                              AW: {Array.from(new Set(rows.map((r) => r.artworkCode?.trim() || '—'))).join(' · ')}
+                              {' · '}Members: {rows.length}/{totalMembers}
+                            </HubJobCardMetaLine>
+                            <ShopfloorQueueColourStrip job={{ ...rows[0], plateColours: mergedColours }} />
+                            <div className="flex gap-1.5">
+                              {isReceived ? (
+                                <span className="flex-1 inline-flex items-center justify-center rounded border border-ds-line/50 bg-ds-card px-2 py-1.5 text-xs font-semibold text-ds-ink-muted">
+                                  Received
+                                </span>
+                              ) : (
+                                <span className="flex-1 inline-flex items-center justify-center rounded border border-ds-line/50 bg-ds-card px-2 py-1.5 text-xs font-semibold text-ds-ink-muted">
+                                  Sent
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                className="flex-1 px-2 py-1.5 rounded border border-ds-line/50 bg-ds-card text-ds-ink hover:bg-ds-elevated text-xs font-semibold"
+                                onClick={() => void markUnifiedReceived(rows, 'vendor')}
+                                disabled={saving || isReceived}
+                              >
+                                Receive
+                              </button>
+                              <button
+                                type="button"
+                                className="flex-1 px-2 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-primary-foreground text-xs font-semibold"
+                                onClick={() => void markUnifiedReady(rows, 'vendor')}
+                                disabled={saving || !isReceived}
+                              >
+                                Receive unified set
+                              </button>
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => void sendUnifiedBack(rows, 'vendor')}
+                                className="flex-1 px-2 py-1.5 rounded border border-ds-warning/50 bg-ds-card text-ds-ink hover:bg-ds-elevated text-xs font-semibold"
+                              >
+                                Send set back
+                              </button>
+                            </div>
+                          </motion.li>
+                        )
+                      }
+                      const job = entry.row
                       const vendorPos = plateQueueColumnPos(data.vendorQueue, job.id)
+                      const isReceived = job.status === 'vendor_received'
                       return (
                       <motion.li
                         key={job.id}
@@ -2912,10 +3700,28 @@ export default function HubPlateDashboard() {
                           <span className="capitalize">{job.status.replace(/_/g, ' ')}</span>
                         </HubJobCardMetaLine>
                         <div className="flex flex-col gap-2">
+                          {isReceived ? (
+                            <span className="w-full inline-flex items-center justify-center rounded border border-ds-line/50 bg-ds-card px-2 py-1.5 text-xs font-semibold text-ds-ink-muted">
+                              Received
+                            </span>
+                          ) : (
+                            <span className="w-full inline-flex items-center justify-center rounded border border-ds-line/50 bg-ds-card px-2 py-1.5 text-xs font-semibold text-ds-ink-muted">
+                              Sent
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            className="w-full px-2 py-1.5 rounded border border-ds-line/50 bg-ds-card text-ds-ink hover:bg-ds-elevated text-xs font-semibold disabled:opacity-50"
+                            onClick={() => void markRequirementReceived(job, 'vendor')}
+                            disabled={saving || isReceived}
+                          >
+                            Receive
+                          </button>
                           <button
                             type="button"
                             className="w-full px-2 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-primary-foreground text-xs font-semibold"
                             onClick={() => void markPlateReadyRequirement(job, 'vendor')}
+                            disabled={saving || !isReceived}
                           >
                             Receive &amp; Mark Ready
                           </button>
@@ -4064,6 +4870,61 @@ export default function HubPlateDashboard() {
         mergePatch={mergeQueueJobPatch}
         savingDisabled={saving}
       />
+
+      {unifiedDetailGroupId && unifiedGroupRowsById.get(unifiedDetailGroupId) ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-background/70">
+          <div className="h-full w-full max-w-xl border-l border-ds-line/50 bg-ds-main p-4 shadow-2xl overflow-y-auto">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">
+                  Set details
+                </h3>
+                <p className="text-xs font-mono text-sky-700 dark:text-sky-300">
+                  Set #{unifiedDetailGroupId}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-ink hover:bg-ds-card"
+                onClick={() => setUnifiedDetailGroupId(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-2">
+              {(unifiedGroupRowsById.get(unifiedDetailGroupId) ?? []).map((member) => (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() =>
+                    setJobAudit({
+                      entity: 'requirement',
+                      id: member.id,
+                      zoneLabel: 'Incoming triage (grouped set)',
+                      cartonName: member.cartonName,
+                      artworkCode: member.artworkCode,
+                      displayCode: member.requirementCode,
+                      poLineId: member.poLineId,
+                      plateSize: member.plateSize ?? member.cartonMasterPlateSize ?? null,
+                      plateColours: member.plateColours,
+                      coloursRequired: Math.max(member.plateColours.length, member.newPlatesNeeded),
+                      platesInRackCount: triageRackStockById.get(member.id)?.matchCount ?? null,
+                      statusLabel: member.status.replace(/_/g, ' '),
+                    })
+                  }
+                  className="w-full rounded border border-ds-line/40 bg-background px-3 py-2 text-left hover:bg-ds-card"
+                >
+                  <p className="text-xs font-mono text-ds-warning">{member.requirementCode}</p>
+                  <p className="text-sm font-semibold text-ds-ink truncate">{member.cartonName}</p>
+                  <p className="text-[11px] text-ds-ink-muted">
+                    AW: {member.artworkCode?.trim() || '—'} · Plates: {member.newPlatesNeeded}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Scrap & damage — per channel */}
       {scrapModal && (

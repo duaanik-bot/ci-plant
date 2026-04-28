@@ -21,6 +21,40 @@ import { extractPoLineIdFromCartonLabel } from '@/lib/plate-requirement-po-link'
 
 export const dynamic = 'force-dynamic'
 
+/** Same unified-body key as production stages / planning gang (read-only). */
+function deriveUnifiedBodyFromSpec(specUnknown: unknown): {
+  unifiedBodyId: string | null
+  unifiedBodySize: number | null
+} {
+  const spec =
+    specUnknown && typeof specUnknown === 'object'
+      ? (specUnknown as Record<string, unknown>)
+      : null
+  if (!spec) return { unifiedBodyId: null, unifiedBodySize: null }
+  const unifiedBody =
+    spec.unifiedGroupBody && typeof spec.unifiedGroupBody === 'object'
+      ? (spec.unifiedGroupBody as Record<string, unknown>)
+      : null
+  const planningCore =
+    spec.planningCore && typeof spec.planningCore === 'object'
+      ? (spec.planningCore as Record<string, unknown>)
+      : null
+  const key =
+    (typeof unifiedBody?.masterSetId === 'string' && unifiedBody.masterSetId.trim()) ||
+    (typeof planningCore?.masterSetId === 'string' && planningCore.masterSetId.trim()) ||
+    ''
+  const layoutType =
+    typeof planningCore?.layoutType === 'string' ? planningCore.layoutType.trim() : ''
+  const memberIds = Array.isArray(planningCore?.mixSetMemberIds)
+    ? (planningCore.mixSetMemberIds as unknown[])
+    : []
+  const memberCount = memberIds.length
+  const isUnifiedGang = Boolean(key && (layoutType === 'gang' || memberCount > 1))
+  if (!isUnifiedGang) return { unifiedBodyId: null, unifiedBodySize: null }
+  const totalMembers = Math.max(memberCount, 1)
+  return { unifiedBodyId: key, unifiedBodySize: totalMembers }
+}
+
 const MAX_ORDER = Number.MAX_SAFE_INTEGER
 
 function sortCtpQueueRows<T extends { hubOrderCtp: number | null; createdAt: Date }>(rows: T[]): T[] {
@@ -252,14 +286,18 @@ export async function GET() {
         orderBy: { createdAt: 'asc' },
       }),
       db.plateRequirement.findMany({
-        where: { hubSoftDeletedAt: null, status: 'ctp_internal_queue', triageChannel: 'inhouse_ctp' },
+        where: {
+          hubSoftDeletedAt: null,
+          status: { in: ['ctp_internal_queue', 'ctp_received'] },
+          triageChannel: 'inhouse_ctp',
+        },
         orderBy: { createdAt: 'asc' },
       }),
       db.plateRequirement.findMany({
         where: {
           hubSoftDeletedAt: null,
           triageChannel: 'outside_vendor',
-          status: 'awaiting_vendor_delivery',
+          status: { in: ['awaiting_vendor_delivery', 'vendor_received'] },
         },
         orderBy: { createdAt: 'asc' },
       }),
@@ -325,6 +363,7 @@ export async function GET() {
               id: true,
               cartonId: true,
               directorPriority: true,
+              specOverrides: true,
               po: {
                 select: {
                   id: true,
@@ -391,6 +430,20 @@ export async function GET() {
       cartonMasterPlateByPoLineId.set(line.id, cartonPlateById.get(line.cartonId) ?? null)
     }
 
+    const unifiedBodyByPoLineId = new Map<
+      string,
+      { unifiedBodyId: string | null; unifiedBodySize: number | null }
+    >()
+    const unifiedTotalByKey = new Map<string, number>()
+    for (const line of linesForIntel) {
+      const u = deriveUnifiedBodyFromSpec(line.specOverrides)
+      unifiedBodyByPoLineId.set(line.id, u)
+      if (u.unifiedBodyId && u.unifiedBodySize != null) {
+        const prev = unifiedTotalByKey.get(u.unifiedBodyId) ?? 0
+        unifiedTotalByKey.set(u.unifiedBodyId, Math.max(prev, u.unifiedBodySize))
+      }
+    }
+
     const triage = triageRows.map((r) => {
       const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
       const poKey = r.poLineId?.trim()
@@ -403,6 +456,16 @@ export async function GET() {
         : effectivePoLineId
           ? 'missing_row'
           : 'manual'
+      const gang =
+        effectivePoLineId != null
+          ? (unifiedBodyByPoLineId.get(effectivePoLineId) ?? {
+              unifiedBodyId: null,
+              unifiedBodySize: null,
+            })
+          : { unifiedBodyId: null, unifiedBodySize: null }
+      const gangKey = gang.unifiedBodyId
+      const gangTotal =
+        gangKey != null ? (unifiedTotalByKey.get(gangKey) ?? gang.unifiedBodySize ?? 1) : null
       return {
         id: r.id,
         poLineId: r.poLineId,
@@ -425,13 +488,25 @@ export async function GET() {
         cartonMasterPlateSize: effectivePoLineId
           ? cartonMasterPlateByPoLineId.get(effectivePoLineId) ?? null
           : null,
+        unifiedBodyId: gangKey,
+        unifiedBodySize: gangTotal,
       }
     })
 
     const ctpQueue = ctpRowsOrdered.map((r) => {
       const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
-      const lid = r.poLineId?.trim()
+      const lid = r.poLineId?.trim() || extractPoLineIdFromCartonLabel(r.cartonName)
       const intel = lid ? lineIntelByLineId.get(lid) : undefined
+      const gang =
+        lid != null
+          ? (unifiedBodyByPoLineId.get(lid) ?? {
+              unifiedBodyId: null,
+              unifiedBodySize: null,
+            })
+          : { unifiedBodyId: null, unifiedBodySize: null }
+      const gangKey = gang.unifiedBodyId
+      const gangTotal =
+        gangKey != null ? (unifiedTotalByKey.get(gangKey) ?? gang.unifiedBodySize ?? 1) : null
       return {
         id: r.id,
         poLineId: r.poLineId,
@@ -457,13 +532,25 @@ export async function GET() {
         hubOrderCtp: r.hubOrderCtp ?? null,
         lastReorderedBy: r.lastReorderedBy?.trim() ?? null,
         lastReorderedAt: r.lastReorderedAt?.toISOString() ?? null,
+        unifiedBodyId: gangKey,
+        unifiedBodySize: gangTotal,
       }
     })
 
     const vendorQueue = vendorRowsOrdered.map((r) => {
       const activeNeeded = activeColourRowsFromJson(r.coloursNeeded)
-      const lid = r.poLineId?.trim()
+      const lid = r.poLineId?.trim() || extractPoLineIdFromCartonLabel(r.cartonName)
       const intel = lid ? lineIntelByLineId.get(lid) : undefined
+      const gang =
+        lid != null
+          ? (unifiedBodyByPoLineId.get(lid) ?? {
+              unifiedBodyId: null,
+              unifiedBodySize: null,
+            })
+          : { unifiedBodyId: null, unifiedBodySize: null }
+      const gangKey = gang.unifiedBodyId
+      const gangTotal =
+        gangKey != null ? (unifiedTotalByKey.get(gangKey) ?? gang.unifiedBodySize ?? 1) : null
       return {
         id: r.id,
         poLineId: r.poLineId,
@@ -489,6 +576,8 @@ export async function GET() {
         hubOrderVendor: r.hubOrderVendor ?? null,
         lastReorderedBy: r.lastReorderedBy?.trim() ?? null,
         lastReorderedAt: r.lastReorderedAt?.toISOString() ?? null,
+        unifiedBodyId: gangKey,
+        unifiedBodySize: gangTotal,
       }
     })
 

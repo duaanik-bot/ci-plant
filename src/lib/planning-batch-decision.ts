@@ -26,10 +26,14 @@ export const BATCH_STATUS_LABEL: Record<PlanningBatchStatus, string> = {
 /** Tailwind classes for compact badges (ds tokens). */
 export const BATCH_STATUS_BADGE_CLASS: Record<PlanningBatchStatus, string> = {
   draft: 'bg-ds-elevated text-ds-ink border-ds-line/50',
-  ready: 'bg-ds-brand/20 text-ds-ink border-ds-brand/40',
-  hold: 'bg-ds-error/15 text-ds-ink border-ds-error/30',
-  approved_for_artwork: 'bg-violet-500/20 text-violet-200 border-violet-500/35',
-  released_to_production: 'bg-ds-success/15 text-ds-ink border-ds-success/30',
+  ready:
+    'bg-ds-brand/15 text-ds-brand border-ds-brand/40 dark:bg-ds-brand/20 dark:text-ds-ink',
+  hold:
+    'bg-ds-error/12 text-ds-error border-ds-error/30 dark:bg-ds-error/15 dark:text-ds-ink',
+  approved_for_artwork:
+    'bg-violet-500/15 text-violet-700 border-violet-500/35 dark:bg-violet-500/20 dark:text-violet-200',
+  released_to_production:
+    'bg-ds-success/12 text-ds-success border-ds-success/30 dark:bg-ds-success/15 dark:text-ds-ink',
 }
 
 export function effectiveBatchStatus(core: PlanningCore): PlanningBatchStatus {

@@ -847,9 +847,9 @@ export default function EditPurchaseOrderPage() {
   }
 
   const inputCls =
-    'ds-input w-full min-w-0 [color-scheme:dark] border-ds-line/80 bg-ds-elevated/80 text-[15px] text-ds-ink placeholder:text-ds-ink-faint'
+    'ds-input w-full min-w-0 border-ds-line/80 bg-ds-elevated/60 dark:bg-ds-elevated/80 text-[15px] text-ds-ink placeholder:text-ds-ink-faint'
   const inputClsGhost =
-    'ds-input w-full min-w-0 [color-scheme:dark] !border-ds-line/50 !bg-ds-elevated/50 !text-ds-ink-muted placeholder:text-ds-ink-faint'
+    'ds-input w-full min-w-0 !border-ds-line/50 !bg-ds-elevated/40 dark:!bg-ds-elevated/60 !text-ds-ink-muted placeholder:text-ds-ink-faint'
   const inputErr = 'ring-1 ring-ds-error/40 !border-ds-error/60'
   const lineCellPad = `${dataTable.td.base} align-middle min-h-[52px]`
   const poMono = 'po-mono-metric'
@@ -860,14 +860,14 @@ export default function EditPurchaseOrderPage() {
 
   if (loading) {
     return (
-      <div className="min-h-[40vh] bg-[#0B0F1A] p-4 text-ds-ink-muted">Loading…</div>
+      <div className="min-h-[40vh] bg-background p-4 text-ds-ink-muted">Loading…</div>
     )
   }
 
   return (
     <form
       onSubmit={handleSave}
-      className="min-h-screen bg-[#0B0F1A] px-3 py-3 sm:px-4 space-y-3 pb-36 max-w-[1920px] mx-auto w-full"
+      className="min-h-screen bg-background px-3 py-3 sm:px-4 space-y-3 pb-36 max-w-[1920px] mx-auto w-full"
     >
       {/* Director's glass — metadata */}
       <div className="rounded-xl border border-border/40 bg-card/30 px-3 py-3 backdrop-blur-md sm:px-4">
@@ -886,7 +886,7 @@ export default function EditPurchaseOrderPage() {
                   return next
                 })
               }}
-              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-ds-warning focus:border-blue-500 focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-red-500/60' : ''} ${poSentToPlanning ? 'cursor-not-allowed opacity-80' : ''}`}
+              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-ds-warning focus:border-ds-brand focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-red-500/60' : ''} ${poSentToPlanning ? 'cursor-not-allowed opacity-80' : ''}`}
             />
             {fieldErrors.poNumber ? (
               <span className="mt-0.5 block text-xs text-red-400">{fieldErrors.poNumber}</span>
@@ -899,7 +899,7 @@ export default function EditPurchaseOrderPage() {
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
                 disabled={poSentToPlanning}
-                className="mt-1 w-full min-w-[10rem] rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 sm:text-right enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
+                className="mt-1 w-full min-w-[10rem] rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40 sm:text-right enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
               >
                 <option value="draft">Draft</option>
                 <option value="confirmed">Confirmed</option>
@@ -979,7 +979,7 @@ export default function EditPurchaseOrderPage() {
                 emptyMessage="No customer found."
                 recentLabel="Recent customers"
                 loadingMessage="Searching customers..."
-                inputClassName="min-w-0 w-full border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
+                inputClassName="min-w-0 w-full border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:ring-1 focus:ring-ds-brand/40"
               />
             </div>
             {selectedCustomer ? (
@@ -994,7 +994,7 @@ export default function EditPurchaseOrderPage() {
               type="date"
               value={poDate}
               onChange={(e) => setPoDate(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
             />
           </div>
           <div>
@@ -1003,7 +1003,7 @@ export default function EditPurchaseOrderPage() {
               type="date"
               value={deliveryRequiredBy}
               onChange={(e) => setDeliveryRequiredBy(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
             />
           </div>
         </div>
@@ -1015,7 +1015,7 @@ export default function EditPurchaseOrderPage() {
               type="text"
               value={paymentTerms}
               onChange={(e) => setPaymentTerms(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
               placeholder="e.g. 30 days"
             />
           </div>
@@ -1027,7 +1027,7 @@ export default function EditPurchaseOrderPage() {
               type="text"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-[#111827]/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
             />
         </div>
       </div>

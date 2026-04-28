@@ -69,20 +69,49 @@ export async function GET(
       ? await db.poLineItem.findMany({
           where: { jobCardNumber: { in: uniqJcNumbers } },
           select: {
+            id: true,
             jobCardNumber: true,
             cartonName: true,
             directorPriority: true,
+            specOverrides: true,
             po: { select: { isPriority: true } },
           },
         })
       : []
   const productNameByJc = new Map<number, string>()
   const priorityByJc = new Map<number, boolean>()
+  const unifiedBodyKeyByJc = new Map<number, string | null>()
+  const unifiedCounts = new Map<string, number>()
   poLines.forEach((l) => {
     if (l.jobCardNumber != null) {
       productNameByJc.set(l.jobCardNumber, l.cartonName)
       if (l.directorPriority || l.po.isPriority) {
         priorityByJc.set(l.jobCardNumber, true)
+      }
+      const spec = (l.specOverrides as Record<string, unknown> | null) || {}
+      const planningCore =
+        spec.planningCore && typeof spec.planningCore === 'object'
+          ? (spec.planningCore as Record<string, unknown>)
+          : null
+      const unifiedBody =
+        spec.unifiedGroupBody && typeof spec.unifiedGroupBody === 'object'
+          ? (spec.unifiedGroupBody as Record<string, unknown>)
+          : null
+      const key =
+        (typeof unifiedBody?.masterSetId === 'string' && unifiedBody.masterSetId.trim()) ||
+        (typeof planningCore?.masterSetId === 'string' && planningCore.masterSetId.trim()) ||
+        ''
+      const layoutType =
+        typeof planningCore?.layoutType === 'string' ? planningCore.layoutType.trim() : ''
+      const memberIds = Array.isArray(planningCore?.mixSetMemberIds)
+        ? planningCore?.mixSetMemberIds
+        : []
+      const isUnifiedGang = !!key && (layoutType === 'gang' || memberIds.length > 1)
+      if (isUnifiedGang) {
+        unifiedBodyKeyByJc.set(l.jobCardNumber, key)
+        unifiedCounts.set(key, (unifiedCounts.get(key) || 0) + 1)
+      } else if (!unifiedBodyKeyByJc.has(l.jobCardNumber)) {
+        unifiedBodyKeyByJc.set(l.jobCardNumber, null)
       }
     }
   })
@@ -255,6 +284,17 @@ export async function GET(
               jc.jobCardNumber != null && priorityByJc.get(jc.jobCardNumber) === true,
             productName:
               jc.jobCardNumber != null ? productNameByJc.get(jc.jobCardNumber) ?? null : null,
+            unifiedBodyId:
+              jc.jobCardNumber != null
+                ? (unifiedBodyKeyByJc.get(jc.jobCardNumber) ?? null)
+                : null,
+            unifiedBodySize:
+              jc.jobCardNumber != null
+                ? (() => {
+                    const key = unifiedBodyKeyByJc.get(jc.jobCardNumber)
+                    return key ? (unifiedCounts.get(key) ?? null) : null
+                  })()
+                : null,
             yield: yieldByJobId.get(jc.id) ?? null,
             oee: oeeByStageId.get(r.id) ?? null,
             shiftOperator: jc.shiftOperator ?? null,

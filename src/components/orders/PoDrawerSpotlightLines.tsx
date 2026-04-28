@@ -80,7 +80,7 @@ export function PoDrawerSpotlightLines({
                         : li.cartonName}
                     </span>
                     {isSpotlight ? (
-                      <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-orange-400/95 ring-1 ring-orange-500/35 bg-orange-500/10">
+                      <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-orange-700/95 ring-1 ring-orange-500/35 bg-orange-500/10 dark:text-orange-300/95">
                         Match found
                       </span>
                     ) : null}

@@ -72,7 +72,7 @@ export function PlanningProductDetailDrawer({
         aria-modal="true"
         aria-label="Product detail"
       >
-        <div className="flex items-start justify-between gap-2 border-b border-[#334155] bg-[#0F172A] px-4 py-3">
+        <div className="flex items-start justify-between gap-2 border-b border-[#334155] bg-[#0F172A] px-4 py-4">
           <div className="min-w-0">
             <p className="text-xs font-medium text-ds-ink-faint">Product master</p>
             <h2 className="pr-2 text-sm font-semibold text-ds-ink">{name}</h2>
@@ -87,12 +87,12 @@ export function PlanningProductDetailDrawer({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3 text-[13px]">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-[13px]">
           {err ? <p className="text-sm text-rose-400">{err}</p> : null}
           {loading ? <p className="text-ds-ink-faint">Loading…</p> : null}
           {!loading && data && (
             <>
-              <div className="space-y-1.5 rounded border border-[#334155] bg-[#0F172A]/50 p-3 text-ds-ink">
+              <div className="space-y-2 rounded border border-[#334155] bg-[#0F172A]/50 p-4 text-ds-ink">
                 <p className="text-xs font-medium uppercase tracking-wider text-ds-ink-faint">Master specs</p>
                 <p>
                   <span className="text-ds-ink-faint">GSM:</span>{' '}
@@ -114,14 +114,14 @@ export function PlanningProductDetailDrawer({
               </div>
 
               <div>
-                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
                   Grain direction
                 </p>
                 <p className="whitespace-pre-wrap text-ds-ink-muted">{String(data.grainDirectionNote ?? '—')}</p>
               </div>
 
               <div>
-                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
                   Hub readiness (live)
                 </p>
                 <ul className="space-y-1 text-ds-ink">
@@ -156,7 +156,7 @@ export function PlanningProductDetailDrawer({
                   {(data.lastRuns ?? []).map((r) => (
                     <li
                       key={r?.jobCardNumber}
-                      className="rounded border border-[#334155] bg-[#0F172A]/50 px-2 py-1.5 text-ds-ink-muted"
+                      className="rounded border border-[#334155] bg-[#0F172A]/50 px-3 py-2 text-ds-ink-muted"
                     >
                       <p className={`${mono} text-ds-warning`}>JC #{r?.jobCardNumber ?? '—'}</p>
                       <p className="text-xs text-ds-ink-faint">

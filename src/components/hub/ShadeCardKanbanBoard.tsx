@@ -38,6 +38,8 @@ import type { ShadeCardSpotlightRow } from '@/components/hub/ShadeCardSpotlightD
 
 const DROP_IN_STOCK = 'kanban-drop-in-stock'
 const DROP_ON_FLOOR = 'kanban-drop-on-floor'
+const SHADE_ISSUE_OPERATOR_KEY = 'shade-hub-issue-operator'
+const SHADE_RECEIVE_OPERATOR_KEY = 'shade-hub-receive-operator'
 
 const SHADE_HUB_MAX_ORDER = Number.MAX_SAFE_INTEGER
 
@@ -193,6 +195,8 @@ function DraggableKanbanCard({
   columnId,
   columnRows,
   onPriorityRefresh,
+  onQuickIssue,
+  onQuickReceive,
 }: {
   row: ShadeCardSpotlightRow
   monoClass: string
@@ -201,6 +205,8 @@ function DraggableKanbanCard({
   columnId: ShadeKanbanColumnId
   columnRows: ShadeCardSpotlightRow[]
   onPriorityRefresh: () => void
+  onQuickIssue: () => void
+  onQuickReceive: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: row.id,
@@ -251,6 +257,31 @@ function DraggableKanbanCard({
           lastReorderedBy={row.lastReorderedBy}
           lastReorderedAt={row.lastReorderedAt}
         />
+        <div className="mt-1 flex flex-wrap items-center gap-1 leading-none">
+          {row.custodyStatus === 'in_stock' ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onQuickIssue()
+              }}
+              className="h-6 rounded-md border border-sky-500/40 bg-sky-500/8 px-2 text-[10px] font-medium text-sky-700 dark:text-sky-300"
+            >
+              Issue
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onQuickReceive()
+              }}
+              className="h-6 rounded-md border border-emerald-500/40 bg-emerald-500/8 px-2 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+            >
+              Receive
+            </button>
+          )}
+        </div>
       </div>
       <div
         className="absolute bottom-0.5 right-0.5 z-20"
@@ -348,6 +379,12 @@ export function ShadeCardKanbanBoard({
         const [mRes, uRes] = await Promise.all([fetch('/api/machines'), fetch('/api/users')])
         setMachines(safeJsonParseArray<MachineOpt>(await mRes.text(), []))
         setUsers(safeJsonParseArray<UserOpt>(await uRes.text(), []))
+        try {
+          const savedIssue = localStorage.getItem(SHADE_ISSUE_OPERATOR_KEY)
+          const savedReceive = localStorage.getItem(SHADE_RECEIVE_OPERATOR_KEY)
+          if (savedIssue) setOperatorId(savedIssue)
+          if (savedReceive) setReceiveOperatorId(savedReceive)
+        } catch {}
       } catch {
         /* ignore */
       }
@@ -455,6 +492,7 @@ export function ShadeCardKanbanBoard({
         return
       }
       toast.success(j.duplicate ? 'Duplicate suppressed' : 'Issued to floor')
+      try { localStorage.setItem(SHADE_ISSUE_OPERATOR_KEY, operatorId) } catch {}
       setIssueOpen(false)
       onDataChange()
     } catch {
@@ -489,6 +527,7 @@ export function ShadeCardKanbanBoard({
       if (j.damageReport) {
         toast.warning('Damage report logged — end condition below checkout baseline (see spotlight timeline).')
       }
+      try { localStorage.setItem(SHADE_RECEIVE_OPERATOR_KEY, receiveOperatorId) } catch {}
       setReceiveOpen(false)
       onDataChange()
     } catch {
@@ -550,6 +589,13 @@ export function ShadeCardKanbanBoard({
                     columnId={col.id}
                     columnRows={grouped[col.id]}
                     onPriorityRefresh={onDataChange}
+                    onQuickIssue={() => openIssue(row)}
+                    onQuickReceive={() => {
+                      setReceiveRow(row)
+                      setReceiveOperatorSearch('')
+                      setReceiveEndCondition('mint')
+                      setReceiveOpen(true)
+                    }}
                   />
                 ))}
               </AnimatePresence>

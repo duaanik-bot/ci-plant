@@ -355,12 +355,6 @@ export async function GET(req: NextRequest) {
           href: '/orders/purchase-orders',
         },
         {
-          id: 'biz-procurement',
-          title: 'Material Readiness Hub',
-          subtitle: 'Vendor material POs',
-          href: '/orders/procurement',
-        },
-        {
           id: 'biz-oee',
           title: 'OEE live dashboard',
           subtitle: 'Press efficiency',

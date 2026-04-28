@@ -41,9 +41,11 @@ export async function POST(req: NextRequest) {
       if (!row) return NextResponse.json({ error: 'Requirement not found' }, { status: 404 })
 
       const okCtp =
-        row.triageChannel === 'inhouse_ctp' && row.status === 'ctp_internal_queue'
+        row.triageChannel === 'inhouse_ctp' &&
+        (row.status === 'ctp_internal_queue' || row.status === 'ctp_received')
       const okVendor =
-        row.triageChannel === 'outside_vendor' && row.status === 'awaiting_vendor_delivery'
+        row.triageChannel === 'outside_vendor' &&
+        (row.status === 'awaiting_vendor_delivery' || row.status === 'vendor_received')
       if (!okCtp && !okVendor) {
         return NextResponse.json(
           { error: 'Requirement is not in CTP queue or vendor lane' },

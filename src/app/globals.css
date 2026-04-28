@@ -19,7 +19,7 @@
     @apply tabular-nums tracking-tight text-ds-ink;
   }
   .ds-input:focus {
-    @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(56,189,248,0.30),0_0_18px_rgba(56,189,248,0.18)];
+    @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(14,165,233,0.22),0_0_14px_rgba(14,165,233,0.12)];
   }
   .ds-typo-label {
     @apply text-[12px] font-medium leading-snug text-ds-ink-muted;
@@ -86,6 +86,10 @@
     --border: 220 22% 16%;
     --input: 220 22% 16%;
     --ring: 199 89% 60%;
+  }
+
+  .dark .ds-input:focus {
+    @apply shadow-[0_0_0_3px_rgba(56,189,248,0.30),0_0_18px_rgba(56,189,248,0.18)];
   }
 
   .ci-high-contrast {

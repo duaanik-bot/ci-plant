@@ -18,6 +18,8 @@ Solves two critical operational problems:
 
 ### UI Conventions
 - Shared chip/action/icon token usage guide: **[docs/ui-token-conventions.md](./docs/ui-token-conventions.md)**
+- Visual regression checklist: **[docs/ui-visual-regression-checklist.md](./docs/ui-visual-regression-checklist.md)**
+- UI professionalism/release-quality checklist: **[docs/ui-professionalism-checklist.md](./docs/ui-professionalism-checklist.md)**
 
 ---
 
