@@ -35,6 +35,7 @@ import {
 } from '@/lib/industrial-priority-sync'
 import { PLANNING_DESIGNERS, readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
 import { formatShortTimeAgo } from '@/lib/time-ago'
+import { isEmbossingRequired } from '@/lib/emboss-conditions'
 import {
   ACTION_PILL_NEUTRAL,
   ICON_BUTTON_BASE,
@@ -42,6 +43,7 @@ import {
   PUSHED_CHIP_CLASS,
   STATUS_CHIP_BASE,
 } from '@/components/design-system/tokens'
+import { BulkActionBar, LaneCounterChips } from '@/components/design-system'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 import { RowStateLegend } from '@/components/ui/RowStateLegend'
 import { AwGroupEditDrawer } from '@/components/designing/AwGroupEditDrawer'
@@ -136,19 +138,19 @@ function pipelineBadge(phase: Row['readiness']['pipelinePhase']) {
     case 'finalized':
       return {
         label: 'Finalized',
-        className: `${base} bg-emerald-500/20 text-emerald-200 ring-emerald-500/35`,
+        className: `${base} bg-emerald-500/15 text-emerald-700 ring-emerald-500/35 dark:bg-emerald-500/20 dark:text-emerald-200`,
         pulse: false,
       }
     case 'revision':
       return {
         label: 'Revision required',
-        className: `${base} bg-rose-500/20 text-rose-200 ring-rose-500/35`,
+        className: `${base} bg-rose-500/12 text-rose-700 ring-rose-500/30 dark:bg-rose-500/20 dark:text-rose-200`,
         pulse: false,
       }
     case 'awaiting_client':
       return {
         label: 'Awaiting client',
-        className: `${base} bg-blue-500/20 text-blue-200 ring-blue-500/35`,
+        className: `${base} bg-blue-500/12 text-blue-700 ring-blue-500/30 dark:bg-blue-500/20 dark:text-blue-200`,
         pulse: true,
       }
     default:
@@ -332,6 +334,74 @@ function canRecallPlanningRow(r: Row, spec: Record<string, unknown>): boolean {
   return !!r.readiness?.planningForwarded && !machineAllocated && !['in_production', 'closed'].includes(r.planningStatus)
 }
 
+function canFinalizePlateHubRow(r: Row): boolean {
+  const setN = (r.setNumber || '').trim()
+  const aw = (r.artworkCode || '').trim()
+  const normalizedSetN = normalizePlateSetNumber(setN)
+  if (!normalizedSetN || !aw) return false
+  if (r.readiness?.prePressFinalized) return false
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  return readAwPoStatus(spec) !== AW_PO_STATUS.CLOSED
+}
+
+function plateHubDisabledReason(r: Row): string {
+  const setN = (r.setNumber || '').trim()
+  const aw = (r.artworkCode || '').trim()
+  const normalizedSetN = normalizePlateSetNumber(setN)
+  if (!normalizedSetN) return 'Add Set # (digits) to push to Plate Hub'
+  if (!aw) return 'Add Artwork Code to push to Plate Hub'
+  if (r.readiness?.prePressFinalized) return 'Already pushed to Plate Hub'
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  if (readAwPoStatus(spec) === AW_PO_STATUS.CLOSED) return 'PO line is closed'
+  return 'Push to Plate Hub'
+}
+
+function normalizePlateSetNumber(setRaw: string): string | null {
+  const raw = String(setRaw || '').trim()
+  if (!raw) return null
+  if (/^\d+$/.test(raw)) return raw
+  const digits = raw.match(/\d+/g)?.join('') || ''
+  return digits || null
+}
+
+function ensurePlateDesignerCommand(
+  row: Pick<Row, 'embossingLeafing'>,
+  raw: unknown,
+): ReturnType<typeof parseDesignerCommand> {
+  const dc = parseDesignerCommand(raw)
+  return {
+    ...dc,
+    dieSource: dc.dieSource ?? 'new',
+    setType: dc.setType || 'new_set',
+    embossSource: isEmbossingRequired(row.embossingLeafing) ? (dc.embossSource ?? 'new') : dc.embossSource,
+  }
+}
+
+function canPushToolingHubRow(r: Row): boolean {
+  const setN = (r.setNumber || '').trim()
+  const aw = (r.artworkCode || '').trim()
+  if (!setN || !aw) return false
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  if (readAwPoStatus(spec) === AW_PO_STATUS.CLOSED) return false
+  const planningCore = readPlanningCore(spec)
+  const len = Number(spec.sheetLengthMm)
+  const wid = Number(spec.sheetWidthMm)
+  const hasSheet =
+    (Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0) ||
+    (typeof planningCore.actualSheetSizeLabel === 'string' && planningCore.actualSheetSizeLabel.trim().length > 0)
+  return hasSheet
+}
+
+function hasToolingSheetSize(spec: Record<string, unknown>): boolean {
+  const planningCore = readPlanningCore(spec)
+  const len = Number(spec.sheetLengthMm)
+  const wid = Number(spec.sheetWidthMm)
+  return (
+    (Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0) ||
+    (typeof planningCore.actualSheetSizeLabel === 'string' && planningCore.actualSheetSizeLabel.trim().length > 0)
+  )
+}
+
 function resolvePlanningDesignerName(
   spec: Record<string, unknown>,
   userById: Record<string, User>,
@@ -425,6 +495,7 @@ export default function DesigningQueuePage() {
   const [loading, setLoading] = useState(true)
   const [customerId, setCustomerId] = useState('')
   const [finalizingId, setFinalizingId] = useState<string | null>(null)
+  const [finalizingGroupId, setFinalizingGroupId] = useState<string | null>(null)
   const [forwardingId, setForwardingId] = useState<string | null>(null)
   const [recallingPlanningId, setRecallingPlanningId] = useState<string | null>(null)
   const [recallingGroupId, setRecallingGroupId] = useState<string | null>(null)
@@ -436,6 +507,11 @@ export default function DesigningQueuePage() {
   const [designerFilter, setDesignerFilter] = useState<DesignerFilterValue>('all')
   const [expandedAwGroups, setExpandedAwGroups] = useState<Set<string>>(new Set())
   const [activeGroupEdit, setActiveGroupEdit] = useState<{ groupId: string; rows: Row[] } | null>(null)
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set())
+  const [bulkPushing, setBulkPushing] = useState(false)
+  const [bulkToolingPushing, setBulkToolingPushing] = useState<null | 'DIE' | 'BLOCK'>(null)
+  const [rowDensity, setRowDensity] = useState<'comfortable' | 'dense'>('comfortable')
+  const [focusedRowId, setFocusedRowId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -636,6 +712,57 @@ export default function DesigningQueuePage() {
     return result
   }, [sortedRows, expandedAwGroups])
 
+  const rowsById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows])
+
+  const selectableRowIds = useMemo(() => {
+    const ids: string[] = []
+    for (const entry of sortedVisualRows) {
+      if (entry.kind === 'single') ids.push(entry.row.id)
+      if (entry.kind === 'group') ids.push(...entry.rows.map((r) => r.id))
+    }
+    return Array.from(new Set(ids))
+  }, [sortedVisualRows])
+
+  const selectablePlateEligibleRowIds = useMemo(
+    () => selectableRowIds.filter((id) => {
+      const row = rowsById.get(id)
+      return !!row && canFinalizePlateHubRow(row)
+    }),
+    [selectableRowIds, rowsById],
+  )
+  const selectableDieEligibleRowIds = useMemo(
+    () => selectableRowIds.filter((id) => {
+      const row = rowsById.get(id)
+      return !!row && canPushToolingHubRow(row)
+    }),
+    [selectableRowIds, rowsById],
+  )
+  const selectableEmbossEligibleRowIds = useMemo(
+    () => selectableRowIds.filter((id) => {
+      const row = rowsById.get(id)
+      return !!row && canPushToolingHubRow(row)
+    }),
+    [selectableRowIds, rowsById],
+  )
+
+  const allSelectableChecked =
+    selectableRowIds.length > 0 && selectableRowIds.every((id) => selectedRowIds.has(id))
+  const someSelectableChecked = selectableRowIds.some((id) => selectedRowIds.has(id))
+  const selectedRows = useMemo(
+    () => Array.from(selectedRowIds).map((id) => rowsById.get(id)).filter((r): r is Row => !!r),
+    [selectedRowIds, rowsById],
+  )
+  const selectedPlateEligibleCount = useMemo(
+    () => selectedRows.filter((r) => canFinalizePlateHubRow(r)).length,
+    [selectedRows],
+  )
+  const selectedToolingEligibleCount = useMemo(
+    () => selectedRows.filter((r) => canPushToolingHubRow(r)).length,
+    [selectedRows],
+  )
+  const blockedSelectedCount = Math.max(selectedRows.length - selectedPlateEligibleCount, 0)
+  const keyboardRows = useMemo(() => sortedRows, [sortedRows])
+
   const togglePoPriority = async (r: Row, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -753,11 +880,54 @@ export default function DesigningQueuePage() {
     }
   }
 
+  useEffect(() => {
+    if (keyboardRows.length === 0) return
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const tag = (target?.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable) return
+      if (e.key === 'j' || e.key === 'k') {
+        e.preventDefault()
+        const currentIdx = keyboardRows.findIndex((r) => r.id === focusedRowId)
+        const nextIdx =
+          e.key === 'j'
+            ? Math.min(currentIdx < 0 ? 0 : currentIdx + 1, keyboardRows.length - 1)
+            : Math.max(currentIdx < 0 ? 0 : currentIdx - 1, 0)
+        setFocusedRowId(keyboardRows[nextIdx]?.id ?? null)
+      }
+      const active = focusedRowId ? rowsById.get(focusedRowId) : null
+      if (!active) return
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        router.push(`/orders/designing/${active.id}`)
+      } else if (e.key.toLowerCase() === 'p' && canFinalizePlateHubRow(active)) {
+        e.preventDefault()
+        void finalizeFromList(active)
+      } else if (e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        void pushToolingFromList(active, 'DIE')
+      } else if (e.key.toLowerCase() === 'e') {
+        e.preventDefault()
+        void pushToolingFromList(active, 'BLOCK')
+      } else if (e.key.toLowerCase() === 'r') {
+        e.preventDefault()
+        void recallPlanning(active)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [keyboardRows, focusedRowId, rowsById, router])
+
   const finalizeFromList = async (r: Row) => {
     const setN = (r.setNumber || '').trim()
+    const normalizedSetN = normalizePlateSetNumber(setN)
     const aw = (r.artworkCode || '').trim()
-    if (!setN || !/^\d+$/.test(setN)) {
-      toast.error('Set # must be filled (numeric) on the edit screen')
+    if (!setN) {
+      toast.error('Set # must be filled on the edit screen')
+      return
+    }
+    if (!normalizedSetN) {
+      toast.error('Set # must contain digits for Plate Hub push')
       return
     }
     if (!aw) {
@@ -765,12 +935,8 @@ export default function DesigningQueuePage() {
       return
     }
     const spec = r.specOverrides || {}
-    if (!spec.customerApprovalPharma || !spec.shadeCardQaTextApproval) {
-      toast.error('Both approvals must be checked')
-      return
-    }
     const designerId = (spec.assignedDesignerId as string | undefined) || null
-    const designerCommand = parseDesignerCommand(spec.designerCommand)
+    const designerCommand = ensurePlateDesignerCommand(r, spec.designerCommand)
     setFinalizingId(r.id)
     try {
       const res = await fetch('/api/plate-hub', {
@@ -778,7 +944,7 @@ export default function DesigningQueuePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           poLineId: r.id,
-          setNumber: setN,
+          setNumber: normalizedSetN,
           awCode: aw,
           customerApproval: true,
           qaTextCheckApproval: true,
@@ -803,6 +969,274 @@ export default function DesigningQueuePage() {
     }
   }
 
+  const pushToolingFromList = async (r: Row, tool: 'DIE' | 'BLOCK') => {
+    const setN = (r.setNumber || '').trim()
+    const aw = (r.artworkCode || '').trim()
+    if (!setN || !aw) {
+      toast.error('Set # and Artwork code are required')
+      return
+    }
+    const spec = (r.specOverrides || {}) as Record<string, unknown>
+    const planningCore = readPlanningCore(spec)
+    const planningMeta = readPlanningMeta(spec)
+    const len = Number(spec.sheetLengthMm)
+    const wid = Number(spec.sheetWidthMm)
+    const actualSheetSize =
+      Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0
+        ? `${Math.floor(len)}×${Math.floor(wid)} mm`
+        : typeof planningCore.actualSheetSizeLabel === 'string' && planningCore.actualSheetSizeLabel.trim()
+          ? planningCore.actualSheetSizeLabel.trim()
+          : ''
+    const upsRaw = spec.ups ?? spec.numberOfUps ?? planningCore.ups ?? planningMeta.ups
+    const ups = typeof upsRaw === 'number' && Number.isFinite(upsRaw) && upsRaw >= 1 ? Math.floor(upsRaw) : 1
+    if (!actualSheetSize) {
+      toast.error('Sheet size is required before tooling push')
+      return
+    }
+    setFinalizingId(r.id)
+    try {
+      const body =
+        tool === 'DIE'
+          ? {
+              toolType: 'DIE',
+              awCode: aw,
+              actualSheetSize,
+              ups,
+              jobId: r.id,
+              setNumber: setN,
+              source: 'NEW',
+            }
+          : {
+              toolType: 'BLOCK',
+              awCode: aw,
+              actualSheetSize,
+              blockType: String(r.embossingLeafing || 'Emboss').trim() || 'Emboss',
+              jobId: r.id,
+              setNumber: setN,
+              source: 'NEW',
+            }
+      const res = await fetch('/api/tooling-hub/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) throw new Error(json.error || 'Tooling dispatch failed')
+      toast.success(tool === 'DIE' ? 'Pushed to Die Hub triage' : 'Pushed to Embossing Hub triage')
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Tooling dispatch failed')
+    } finally {
+      setFinalizingId(null)
+    }
+  }
+
+  const bulkPushSelectedToPlateHub = async () => {
+    const picked = Array.from(selectedRowIds)
+      .map((id) => rowsById.get(id))
+      .filter((r): r is Row => !!r)
+    if (picked.length === 0) {
+      toast.info('Select at least one row')
+      return
+    }
+    const eligible = picked.filter((r) => canFinalizePlateHubRow(r))
+    if (eligible.length === 0) {
+      toast.info('No eligible selected rows for Plate Hub push')
+      return
+    }
+    setBulkPushing(true)
+    try {
+      let success = 0
+      let failed = 0
+      for (const row of eligible) {
+        try {
+          const setN = (row.setNumber || '').trim()
+          const normalizedSetN = normalizePlateSetNumber(setN)
+          if (!normalizedSetN) throw new Error('Set # must contain digits')
+          const aw = (row.artworkCode || '').trim()
+          const spec = row.specOverrides || {}
+          const designerId = (spec.assignedDesignerId as string | undefined) || null
+          const designerCommand = ensurePlateDesignerCommand(row, spec.designerCommand)
+          const res = await fetch('/api/plate-hub', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              poLineId: row.id,
+              setNumber: normalizedSetN,
+              awCode: aw,
+              customerApproval: true,
+              qaTextCheckApproval: true,
+              assignedDesignerId: designerId,
+              designerCommand,
+              status: 'PUSH_TO_PRODUCTION_QUEUE',
+            }),
+          })
+          const json = (await res.json()) as { error?: string }
+          if (res.status === 409) {
+            success += 1
+            continue
+          }
+          if (!res.ok) throw new Error(json.error || 'Finalize failed')
+          success += 1
+        } catch {
+          failed += 1
+        }
+      }
+      if (success > 0) toast.success(`Bulk pushed to Plate Hub • ${success} item${success > 1 ? 's' : ''}`)
+      if (failed > 0) toast.error(`Bulk push failed for ${failed} item${failed > 1 ? 's' : ''}`)
+      setSelectedRowIds(new Set())
+      await load()
+    } finally {
+      setBulkPushing(false)
+    }
+  }
+
+  const bulkPushSelectedToToolingHub = async (tool: 'DIE' | 'BLOCK') => {
+    const picked = Array.from(selectedRowIds)
+      .map((id) => rowsById.get(id))
+      .filter((r): r is Row => !!r)
+    if (picked.length === 0) {
+      toast.info('Select at least one row')
+      return
+    }
+    const eligible = picked.filter((r) => canPushToolingHubRow(r))
+    if (eligible.length === 0) {
+      toast.info(tool === 'DIE' ? 'No eligible selected rows for Die Hub push' : 'No eligible selected rows for Emboss Hub push')
+      return
+    }
+    setBulkToolingPushing(tool)
+    try {
+      let success = 0
+      let failed = 0
+      for (const row of eligible) {
+        try {
+          const setN = (row.setNumber || '').trim()
+          const normalizedSetN = normalizePlateSetNumber(setN)
+          if (!normalizedSetN) throw new Error('Set # must contain digits')
+          const aw = (row.artworkCode || '').trim()
+          const spec = (row.specOverrides || {}) as Record<string, unknown>
+          const planningCore = readPlanningCore(spec)
+          const planningMeta = readPlanningMeta(spec)
+          const len = Number(spec.sheetLengthMm)
+          const wid = Number(spec.sheetWidthMm)
+          const actualSheetSize =
+            Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0
+              ? `${Math.floor(len)}×${Math.floor(wid)} mm`
+              : typeof planningCore.actualSheetSizeLabel === 'string' && planningCore.actualSheetSizeLabel.trim()
+                ? planningCore.actualSheetSizeLabel.trim()
+                : ''
+          if (!actualSheetSize) throw new Error('Sheet size is required')
+          const upsRaw = spec.ups ?? spec.numberOfUps ?? planningCore.ups ?? planningMeta.ups
+          const ups = typeof upsRaw === 'number' && Number.isFinite(upsRaw) && upsRaw >= 1 ? Math.floor(upsRaw) : 1
+          const body =
+            tool === 'DIE'
+              ? {
+                  toolType: 'DIE',
+                  awCode: aw,
+                  actualSheetSize,
+                  ups,
+                  jobId: row.id,
+                  setNumber: setN,
+                  source: 'NEW',
+                }
+              : {
+                  toolType: 'BLOCK',
+                  awCode: aw,
+                  actualSheetSize,
+                  blockType: String(row.embossingLeafing || 'Emboss').trim() || 'Emboss',
+                  jobId: row.id,
+                  setNumber: setN,
+                  source: 'NEW',
+                }
+          const res = await fetch('/api/tooling-hub/dispatch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+          const json = (await res.json().catch(() => ({}))) as { error?: string }
+          if (!res.ok) throw new Error(json.error || 'Dispatch failed')
+          success += 1
+        } catch {
+          failed += 1
+        }
+      }
+      if (success > 0) {
+        toast.success(
+          tool === 'DIE'
+            ? `Bulk pushed to Die Hub • ${success} item${success > 1 ? 's' : ''}`
+            : `Bulk pushed to Emboss Hub • ${success} item${success > 1 ? 's' : ''}`,
+        )
+      }
+      if (failed > 0) {
+        toast.error(
+          tool === 'DIE'
+            ? `Bulk Die push failed for ${failed} item${failed > 1 ? 's' : ''}`
+            : `Bulk Emboss push failed for ${failed} item${failed > 1 ? 's' : ''}`,
+        )
+      }
+      setSelectedRowIds(new Set())
+      await load()
+    } finally {
+      setBulkToolingPushing(null)
+    }
+  }
+
+  const finalizeGroupFromList = async (groupId: string, groupRows: Row[]) => {
+    const eligible = groupRows.filter((row) => canFinalizePlateHubRow(row))
+    if (eligible.length === 0) {
+      toast.info('No eligible items in this gang for Plate Hub push')
+      return
+    }
+    setFinalizingGroupId(groupId)
+    try {
+      let success = 0
+      let failed = 0
+      for (const row of eligible) {
+        try {
+          const setN = (row.setNumber || '').trim()
+          const normalizedSetN = normalizePlateSetNumber(setN)
+          if (!normalizedSetN) throw new Error('Set # must contain digits')
+          const aw = (row.artworkCode || '').trim()
+          const spec = row.specOverrides || {}
+          const designerId = (spec.assignedDesignerId as string | undefined) || null
+          const designerCommand = ensurePlateDesignerCommand(row, spec.designerCommand)
+          const res = await fetch('/api/plate-hub', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              poLineId: row.id,
+              setNumber: normalizedSetN,
+              awCode: aw,
+              customerApproval: true,
+              qaTextCheckApproval: true,
+              assignedDesignerId: designerId,
+              designerCommand,
+              status: 'PUSH_TO_PRODUCTION_QUEUE',
+            }),
+          })
+          const json = (await res.json()) as { error?: string }
+          if (res.status === 409) {
+            success += 1
+            continue
+          }
+          if (!res.ok) throw new Error(json.error || 'Finalize failed')
+          success += 1
+        } catch {
+          failed += 1
+        }
+      }
+      if (success > 0) {
+        toast.success(`Pushed to Plate Hub • ${success} item${success > 1 ? 's' : ''}`)
+      }
+      if (failed > 0) {
+        toast.error(`Plate Hub push failed for ${failed} item${failed > 1 ? 's' : ''}`)
+      }
+      await load()
+    } finally {
+      setFinalizingGroupId(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className={`min-h-[40vh] p-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted ${mono}`}>Loading…</div>
@@ -818,7 +1252,7 @@ export default function DesigningQueuePage() {
       <div className="mx-auto max-w-[1600px] space-y-3 px-2 py-3 pb-10 sm:px-3">
         <div className="rounded-lg border border-border bg-card px-2 py-1.5 sm:px-3">
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-ds-ink-faint dark:text-ds-ink-muted">
-            <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-300/90">
+            <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-700/90 dark:text-emerald-300/90">
               Customer PO ✓
             </span>
             <span>→</span>
@@ -826,7 +1260,7 @@ export default function DesigningQueuePage() {
               Planning decision
             </span>
             <span>→</span>
-            <span className="rounded border border-sky-500/35 bg-sky-500/10 px-1.5 py-0.5 text-sky-200/95">
+            <span className="rounded border border-sky-500/35 bg-sky-500/10 px-1.5 py-0.5 text-sky-700/95 dark:text-sky-200/95">
               AW queue
             </span>
             <span>→</span>
@@ -918,31 +1352,61 @@ export default function DesigningQueuePage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Visual audit station</h1>
-            <p className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">
-              Pre-press audit · <span className="text-ds-ink-faint dark:text-ds-ink-faint">{PREPRESS_AUDIT_LEAD}</span> · Ready:{' '}
+        <LaneCounterChips
+          chips={[
+            { key: 'all', label: 'All', count: rows.length, active: sortKey == null, onClick: () => setSortKey(null), tone: 'brand' },
+            {
+              key: 'floor',
+              label: 'On-Floor',
+              count: rows.filter((r) => r.readiness?.pipelinePhase === 'awaiting_client').length,
+              active: false,
+              tone: 'info',
+            },
+            {
+              key: 'revision',
+              label: 'Revision',
+              count: rows.filter((r) => r.readiness?.pipelinePhase === 'revision').length,
+              active: false,
+              tone: 'warning',
+            },
+            {
+              key: 'finalized',
+              label: 'Finalized',
+              count: rows.filter((r) => !!r.readiness?.prePressFinalized).length,
+              active: false,
+              tone: 'success',
+            },
+          ]}
+        />
+
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ds-line/40 bg-ds-elevated/10 px-2.5 py-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="text-sm font-semibold text-neutral-900 dark:text-ds-ink">Visual audit station</h1>
+            <span className="rounded border border-ds-warning/40 bg-ds-warning/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ds-warning">
+              AW v2
+            </span>
+            <span className="text-xs text-ds-ink-faint dark:text-ds-ink-muted">
+              Lead: <span className="text-ds-ink-faint dark:text-ds-ink-faint">{PREPRESS_AUDIT_LEAD}</span> · Ready:{' '}
               <span className="font-semibold text-neutral-900 dark:text-ds-warning">{readyCount}</span> / {rows.length}
-            </p>
+            </span>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
               href="/orders/purchase-orders"
-              className="rounded-lg border border-border bg-card px-2.5 py-1 text-sm text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-ds-warning/40"
+              className="rounded-lg border border-border bg-card px-2 py-0.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-ds-warning/40"
             >
               POs
             </Link>
             <Link
               href="/hub/plates"
-              className="rounded-lg border border-border bg-card px-2.5 py-1 text-sm text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-ds-warning/40"
+              className="rounded-lg border border-border bg-card px-2 py-0.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-ds-warning/40"
             >
               Plate Hub
             </Link>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-sm -mt-0.5">
           <select
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
@@ -967,12 +1431,153 @@ export default function DesigningQueuePage() {
           >
             My jobs
           </button>
+          <div className="ml-auto inline-flex items-center rounded border border-ds-line/50 bg-card p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setRowDensity('dense')}
+              className={`rounded px-2 py-0.5 ${rowDensity === 'dense' ? 'bg-ds-warning/15 text-ds-warning' : 'text-ds-ink-faint'}`}
+            >
+              Dense
+            </button>
+            <button
+              type="button"
+              onClick={() => setRowDensity('comfortable')}
+              className={`rounded px-2 py-0.5 ${rowDensity === 'comfortable' ? 'bg-ds-warning/15 text-ds-warning' : 'text-ds-ink-faint'}`}
+            >
+              Comfortable
+            </button>
+          </div>
         </div>
 
+        <div className="sticky top-0 z-20 rounded-md border border-ds-line/40 bg-background/95 px-2.5 py-1 backdrop-blur">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-faint">
+            <span>Plate eligible: <span className="font-semibold text-emerald-700 dark:text-emerald-300">{selectedPlateEligibleCount}</span></span>
+            <span>Tooling eligible: <span className="font-semibold text-violet-700 dark:text-violet-300">{selectedToolingEligibleCount}</span></span>
+            <span>Blocked: <span className="font-semibold text-orange-700 dark:text-orange-300">{blockedSelectedCount}</span></span>
+            {selectedRows.length > 0 && blockedSelectedCount > 0 ? (
+              <span className="text-orange-700 dark:text-orange-300">
+                Missing usually: Set # digits, AW code, sheet size, or row already pushed/closed.
+              </span>
+            ) : null}
+            <span className="ml-auto">Keys: J/K row · Enter edit · P plate · D die · E emboss · R recall</span>
+          </div>
+        </div>
+
+        <BulkActionBar
+          selectedCount={selectedRowIds.size}
+          left={
+            <>
+              <span className="inline-flex h-8 items-center rounded-md border border-ds-line/50 bg-ds-elevated/20 px-2.5 text-[11px] text-ds-ink-faint">
+                Eligibility: Plate = Set # + AW · Die/Emboss = Set # + AW + sheet size
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectablePlateEligibleRowIds.length === 0) {
+                    toast.info('No plate-eligible rows in current view')
+                    return
+                  }
+                  setSelectedRowIds(new Set(selectablePlateEligibleRowIds))
+                }}
+                disabled={bulkPushing || bulkToolingPushing != null}
+                className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink transition-colors hover:bg-ds-elevated/40 disabled:opacity-40"
+              >
+                Select Plate eligible{selectablePlateEligibleRowIds.length > 0 ? ` (${selectablePlateEligibleRowIds.length})` : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectableDieEligibleRowIds.length === 0) {
+                    toast.info('No die-eligible rows in current view')
+                    return
+                  }
+                  setSelectedRowIds(new Set(selectableDieEligibleRowIds))
+                }}
+                disabled={bulkPushing || bulkToolingPushing != null}
+                className="h-8 rounded-md border border-violet-500/35 px-2.5 text-xs font-medium text-violet-700 transition-colors hover:bg-violet-500/10 disabled:opacity-40 dark:text-violet-300"
+              >
+                Select Die eligible{selectableDieEligibleRowIds.length > 0 ? ` (${selectableDieEligibleRowIds.length})` : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectableEmbossEligibleRowIds.length === 0) {
+                    toast.info('No emboss-eligible rows in current view')
+                    return
+                  }
+                  setSelectedRowIds(new Set(selectableEmbossEligibleRowIds))
+                }}
+                disabled={bulkPushing || bulkToolingPushing != null}
+                className="h-8 rounded-md border border-orange-500/35 px-2.5 text-xs font-medium text-orange-700 transition-colors hover:bg-orange-500/10 disabled:opacity-40 dark:text-orange-300"
+              >
+                Select Emboss eligible{selectableEmbossEligibleRowIds.length > 0 ? ` (${selectableEmbossEligibleRowIds.length})` : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedRowIds(new Set())}
+                disabled={bulkPushing || bulkToolingPushing != null || selectedRowIds.size === 0}
+                className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink transition-colors hover:bg-ds-elevated/40 disabled:opacity-40"
+              >
+                Clear selection
+              </button>
+            </>
+          }
+          right={
+            <>
+              <button
+                type="button"
+                onClick={() => void bulkPushSelectedToPlateHub()}
+                disabled={bulkPushing || bulkToolingPushing != null || selectedRowIds.size === 0}
+                className="h-8 rounded-md border border-emerald-500/40 px-2.5 text-xs font-semibold text-emerald-800 transition-colors hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-200"
+              >
+                {bulkPushing ? 'Pushing…' : `Bulk Plate Hub${selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ''}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => void bulkPushSelectedToToolingHub('DIE')}
+                disabled={bulkPushing || bulkToolingPushing != null || selectedRowIds.size === 0}
+                className="h-8 rounded-md border border-violet-500/40 px-2.5 text-xs font-semibold text-violet-700 transition-colors hover:bg-violet-500/10 disabled:opacity-40 dark:text-violet-300"
+              >
+                {bulkToolingPushing === 'DIE'
+                  ? 'Pushing…'
+                  : `Bulk Die Hub${selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ''}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => void bulkPushSelectedToToolingHub('BLOCK')}
+                disabled={bulkPushing || bulkToolingPushing != null || selectedRowIds.size === 0}
+                className="h-8 rounded-md border border-orange-500/40 px-2.5 text-xs font-semibold text-orange-700 transition-colors hover:bg-orange-500/10 disabled:opacity-40 dark:text-orange-300"
+              >
+                {bulkToolingPushing === 'BLOCK'
+                  ? 'Pushing…'
+                  : `Bulk Emboss Hub${selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ''}`}
+              </button>
+            </>
+          }
+        />
         <EnterpriseTableShell>
-          <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-sm">
+          <table className={`w-full min-w-[1100px] table-fixed border-collapse text-left ${rowDensity === 'dense' ? 'text-xs' : 'text-sm'}`}>
             <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
+                <th className="w-10 px-2 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all visible rows"
+                    checked={allSelectableChecked}
+                    ref={(el) => {
+                      if (el) el.indeterminate = !allSelectableChecked && someSelectableChecked
+                    }}
+                    onChange={() => {
+                      setSelectedRowIds((prev) => {
+                        const next = new Set(prev)
+                        if (allSelectableChecked) selectableRowIds.forEach((id) => next.delete(id))
+                        else selectableRowIds.forEach((id) => next.add(id))
+                        return next
+                      })
+                    }}
+                    className="h-3.5 w-3.5 accent-ds-brand"
+                  />
+                </th>
                 <th className="w-[52px] px-4 py-3">Preview</th>
                 <SortHeader
                   label="PO #"
@@ -1033,6 +1638,11 @@ export default function DesigningQueuePage() {
                         ((spec0.prePressSentToPlateHubAt as string | undefined) || (spec0.prePressFinalizedAt as string | undefined) || firstRow.createdAt),
                       )
                     : null
+                  const groupFinalizeEligibleCount = groupRows.filter((r) => canFinalizePlateHubRow(r)).length
+                  const groupMissingSheetCount = groupRows.filter((r) => {
+                    const rs = (r.specOverrides || {}) as Record<string, unknown>
+                    return !hasToolingSheetSize(rs)
+                  }).length
                   const groupRecallEligibleCount = groupRows.filter((r) =>
                     canRecallPlanningRow(r, ((r.specOverrides || {}) as Record<string, unknown>)),
                   ).length
@@ -1042,10 +1652,33 @@ export default function DesigningQueuePage() {
                       <tr
                         className={`border-l-[3px] transition-colors ${
                           groupPushed
-                            ? 'border-emerald-500/70 bg-emerald-500/20 hover:bg-emerald-500/24'
+                            ? 'border-emerald-500/70 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
                             : 'border-sky-500/70 bg-sky-500/5 hover:bg-sky-500/8'
                         } ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}
                       >
+                        <td className="px-2 py-2 align-middle text-center">
+                          <input
+                            type="checkbox"
+                            aria-label="Select gang rows"
+                            checked={groupRows.every((r) => selectedRowIds.has(r.id))}
+                            ref={(el) => {
+                              if (!el) return
+                              const all = groupRows.every((r) => selectedRowIds.has(r.id))
+                              const some = groupRows.some((r) => selectedRowIds.has(r.id))
+                              el.indeterminate = !all && some
+                            }}
+                            onChange={() => {
+                              const all = groupRows.every((r) => selectedRowIds.has(r.id))
+                              setSelectedRowIds((prev) => {
+                                const next = new Set(prev)
+                                if (all) groupRows.forEach((r) => next.delete(r.id))
+                                else groupRows.forEach((r) => next.add(r.id))
+                                return next
+                              })
+                            }}
+                            className="h-3.5 w-3.5 accent-ds-brand"
+                          />
+                        </td>
                         {/* Preview — first item's preview */}
                         <td className="px-4 py-2 align-middle">
                           <ArtworkPreviewCell
@@ -1069,7 +1702,7 @@ export default function DesigningQueuePage() {
                         <td className="px-4 py-2 align-middle text-sm font-medium leading-tight text-neutral-700 dark:text-ds-ink-muted">
                           <div className="flex min-w-0 items-center gap-1.5">
                             <CustomerAvatar name={firstRow.po.customer.name} logoUrl={firstRow.po.customer.logoUrl} />
-                            <span className="min-w-0 overflow-hidden text-ellipsis">{firstRow.po.customer.name}</span>
+                            <span className="min-w-0 break-words whitespace-normal">{firstRow.po.customer.name}</span>
                           </div>
                         </td>
                         {/* Carton — all items */}
@@ -1078,7 +1711,7 @@ export default function DesigningQueuePage() {
                             {groupRows.map((r) => (
                               <span
                                 key={r.id}
-                                className={`min-w-0 truncate text-[12px] ${groupPushed ? 'text-emerald-300' : ''}`}
+                                className={`min-w-0 truncate text-[12px] ${groupPushed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
                                 title={r.cartonName}
                               >
                                 {r.cartonName}
@@ -1147,6 +1780,30 @@ export default function DesigningQueuePage() {
                               <Pencil className="h-3 w-3 opacity-80" aria-hidden />
                               Edit group
                             </button>
+                            {groupMissingSheetCount > 0 ? (
+                              <span className="rounded border border-orange-500/35 bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300">
+                                Missing sheet size ({groupMissingSheetCount})
+                              </span>
+                            ) : null}
+                            <button
+                              type="button"
+                              disabled={finalizingGroupId === groupId || groupFinalizeEligibleCount === 0}
+                              onClick={() => void finalizeGroupFromList(groupId, groupRows)}
+                              title={
+                                groupFinalizeEligibleCount > 0
+                                  ? `Push ${groupFinalizeEligibleCount} eligible item${groupFinalizeEligibleCount > 1 ? 's' : ''} to Plate Hub`
+                                  : 'No eligible items in this gang for Plate Hub push'
+                              }
+                              className={`rounded border px-2 py-0.5 text-xs disabled:opacity-40 ${
+                                groupFinalizeEligibleCount > 0
+                                  ? 'border-emerald-500/40 text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-200'
+                                  : 'border-ds-line text-ds-warning hover:bg-ds-warning/10'
+                              }`}
+                            >
+                              {finalizingGroupId === groupId
+                                ? '…'
+                                : `Plate Hub group${groupFinalizeEligibleCount > 0 ? ` (${groupFinalizeEligibleCount})` : ''}`}
+                            </button>
                             <button
                               type="button"
                               disabled={recallingGroupId === groupId || groupRecallEligibleCount === 0}
@@ -1175,7 +1832,6 @@ export default function DesigningQueuePage() {
                         const phase = r.readiness?.pipelinePhase ?? 'drafting'
                         const badge = pipelineBadge(phase)
                         const dQ = daysInQueue(r.createdAt)
-                        const approvalsDone = !!r.readiness?.approvalsComplete
                         const finalized = !!r.readiness?.prePressFinalized
                         const pushedAge = finalized
                           ? formatShortTimeAgo(
@@ -1184,26 +1840,44 @@ export default function DesigningQueuePage() {
                           : null
                         const awPo = readAwPoStatus(spec)
                         const rowClosed = awPo === AW_PO_STATUS.CLOSED
-                        const canFinalizeRow = approvalsDone && !finalized && !!(r.setNumber || '').trim() && !!(r.artworkCode || '').trim() && !rowClosed
+                        const missingSheetSize = !hasToolingSheetSize(spec)
+                        const canFinalizeRow = canFinalizePlateHubRow(r)
+                        const plateReason = plateHubDisabledReason(r)
 
                         return (
                           <tr
                             key={`aw-sub:${r.id}`}
                             className={`border-l-[3px] transition-colors ${
                               finalized
-                                ? 'border-emerald-500/50 bg-emerald-500/20 hover:bg-emerald-500/24'
+                                ? 'border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
                                 : 'border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6'
-                            }`}
+                            } ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                           >
+                            <td className="px-2 py-1.5 align-middle text-center">
+                              <input
+                                type="checkbox"
+                                aria-label="Select row"
+                                checked={selectedRowIds.has(r.id)}
+                                onChange={() => {
+                                  setSelectedRowIds((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(r.id)) next.delete(r.id)
+                                    else next.add(r.id)
+                                    return next
+                                  })
+                                }}
+                                className="h-3.5 w-3.5 accent-ds-brand"
+                              />
+                            </td>
                             <td className="px-3 py-1.5 align-middle">
                               <span className="text-[10px] text-sky-500/60">↳{si + 1}</span>
                             </td>
                             <td className={`px-3 py-1.5 align-middle text-xs font-medium ${mono} text-ds-warning`}>
                               {r.po.poNumber}
                             </td>
-                            <td className="px-3 py-1.5 align-middle text-xs text-ds-ink-muted">{r.po.customer.name}</td>
+                            <td className="px-3 py-1.5 align-middle text-xs text-ds-ink-muted break-words whitespace-normal">{r.po.customer.name}</td>
                             <td className="px-3 py-1.5 align-middle text-xs font-medium text-ds-ink">
-                              <span className={`line-clamp-1 ${finalized ? 'text-emerald-300' : ''}`}>{r.cartonName}</span>
+                              <span className={`line-clamp-1 ${finalized ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{r.cartonName}</span>
                             </td>
                             <td className={`px-3 py-1.5 align-middle text-right text-xs ${mono} text-ds-ink`}>{r.quantity.toLocaleString('en-IN')}</td>
                             <td className={`px-3 py-1.5 align-middle text-xs ${mono} text-ds-ink-muted`}>{r.setNumber ?? '—'}</td>
@@ -1223,20 +1897,54 @@ export default function DesigningQueuePage() {
                             <td className={`px-3 py-1.5 align-middle text-right text-xs ${mono} ${ageClass(dQ)}`}>{dQ}d</td>
                             <td className="px-3 py-1.5 align-middle">
                               <div className="flex flex-wrap items-center gap-1">
-                                <Link
-                                  href={`/orders/designing/${r.id}`}
-                                  className={`${ACTION_PILL_NEUTRAL} min-w-0 px-1.5 hover:border-ds-warning/50`}
+                                <button
+                                  type="button"
+                                  disabled={finalizingId === r.id || !canFinalizeRow || rowClosed}
+                                  onClick={() => void finalizeFromList(r)}
+                                  title={canFinalizeRow && !rowClosed ? 'Push to Plate Hub' : plateReason}
+                                  className={`rounded border px-1.5 py-0.5 text-xs disabled:opacity-40 ${
+                                    canFinalizeRow && !rowClosed
+                                      ? 'border-emerald-500/45 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/15 dark:text-emerald-200'
+                                      : 'border-ds-line text-ds-ink-faint hover:bg-ds-warning/10'
+                                  }`}
                                 >
-                                  <Pencil className="h-3 w-3 opacity-70" aria-hidden />
-                                  Edit
-                                </Link>
-                                {canFinalizeRow && (
-                                  <button type="button" disabled={finalizingId === r.id} onClick={() => void finalizeFromList(r)}
-                                    className="rounded border border-emerald-500/40 px-1.5 py-0.5 text-xs text-emerald-800 hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-200"
-                                  >
-                                    {finalizingId === r.id ? '…' : 'Plate Hub'}
-                                  </button>
-                                )}
+                                  {finalizingId === r.id ? '…' : 'Plate Hub'}
+                                </button>
+                                <details className="group relative">
+                                  <summary className={`${ACTION_PILL_NEUTRAL} cursor-pointer list-none select-none`}>
+                                    More
+                                  </summary>
+                                  <div className="absolute right-0 z-20 mt-1 min-w-[150px] rounded border border-ds-line/60 bg-background p-1 shadow-lg">
+                                    <Link
+                                      href={`/orders/designing/${r.id}`}
+                                      className="flex w-full items-center gap-1 rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-card"
+                                    >
+                                      <Pencil className="h-3 w-3 opacity-70" aria-hidden />
+                                      Edit
+                                    </Link>
+                                    <button
+                                      type="button"
+                                      disabled={finalizingId === r.id || rowClosed}
+                                      onClick={() => void pushToolingFromList(r, 'DIE')}
+                                      className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-violet-700 hover:bg-violet-500/10 disabled:opacity-40 dark:text-violet-300"
+                                    >
+                                      {finalizingId === r.id ? '…' : 'Die Hub'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={finalizingId === r.id || rowClosed}
+                                      onClick={() => void pushToolingFromList(r, 'BLOCK')}
+                                      className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-orange-700 hover:bg-orange-500/10 disabled:opacity-40 dark:text-orange-300"
+                                    >
+                                      {finalizingId === r.id ? '…' : 'Emboss Hub'}
+                                    </button>
+                                  </div>
+                                </details>
+                                {missingSheetSize ? (
+                                  <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
+                                    Sheet size missing
+                                  </span>
+                                ) : null}
                               </div>
                             </td>
                           </tr>
@@ -1251,19 +1959,15 @@ export default function DesigningQueuePage() {
                 const r = entry.kind === 'single' ? entry.row : entry.row
                 const rowSpec = (r.specOverrides || {}) as Record<string, unknown>
                 const designerName = resolvePlanningDesignerName(rowSpec, userById) || '—'
-                const approvalsDone = !!r.readiness?.approvalsComplete
                 const finalized = !!r.readiness?.prePressFinalized
                 const planningForwarded = !!r.readiness?.planningForwarded
                 const spec = (r.specOverrides || {}) as Record<string, unknown>
                 const awPo = readAwPoStatus(spec)
                 const rowClosed = awPo === AW_PO_STATUS.CLOSED
+                const missingSheetSize = !hasToolingSheetSize(spec)
                 const batchSeg = batchProgressSegments(spec)
-                const canFinalizeRow =
-                  approvalsDone &&
-                  !finalized &&
-                  !!(r.setNumber || '').trim() &&
-                  !!(r.artworkCode || '').trim() &&
-                  !rowClosed
+                const canFinalizeRow = canFinalizePlateHubRow(r)
+                const plateReason = plateHubDisabledReason(r)
                 const canRecallPlanning =
                   canRecallPlanningRow(r, spec)
                 const showRecall = !!r.id
@@ -1285,10 +1989,26 @@ export default function DesigningQueuePage() {
                       priRow
                         ? `${INDUSTRIAL_PRIORITY_ROW_CLASS} hover:bg-ds-warning/5 dark:hover:bg-ds-warning/12`
                         : finalized
-                          ? 'border-l-2 border-emerald-500/70 bg-emerald-500/20 hover:bg-emerald-500/24'
+                          ? 'border-l-2 border-emerald-500/70 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
                         : 'border-l-2 border-transparent hover:border-ds-warning hover:bg-neutral-50 dark:hover:bg-ds-elevated/50'
-                    } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''}`}
+                    } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''} ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                   >
+                    <td className="px-2 py-3 align-middle text-center">
+                      <input
+                        type="checkbox"
+                        aria-label="Select row"
+                        checked={selectedRowIds.has(r.id)}
+                        onChange={() => {
+                          setSelectedRowIds((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(r.id)) next.delete(r.id)
+                            else next.add(r.id)
+                            return next
+                          })
+                        }}
+                        className="h-3.5 w-3.5 accent-ds-brand"
+                      />
+                    </td>
                     <td className="px-4 py-3 align-middle">
                       <ArtworkPreviewCell
                         url={previewUrl}
@@ -1364,12 +2084,12 @@ export default function DesigningQueuePage() {
                           name={r.po?.customer?.name ?? '—'}
                           logoUrl={r.po?.customer?.logoUrl}
                         />
-                        <span className="min-w-0 overflow-hidden text-ellipsis">{r.po?.customer?.name ?? '—'}</span>
+                        <span className="min-w-0 break-words whitespace-normal">{r.po?.customer?.name ?? '—'}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3 align-middle text-sm font-medium leading-snug text-neutral-900 break-words dark:text-ds-ink">
                       <div className="flex min-w-0 flex-col gap-0.5">
-                        <span className={`min-w-0 ${finalized ? 'text-emerald-300' : ''}`}>{r.cartonName ?? '—'}</span>
+                        <span className={`min-w-0 ${finalized ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{r.cartonName ?? '—'}</span>
                         {readPlanningCore(spec).layoutType === 'gang' ? (
                           <span className="w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
                             Gang print
@@ -1425,33 +2145,74 @@ export default function DesigningQueuePage() {
                     </td>
                     <td className="px-4 py-3 align-middle">
                       <div className="flex flex-wrap items-center gap-1">
-                        <Link
-                          href={`/orders/designing/${r.id}`}
-                          className={`${ACTION_PILL_NEUTRAL} hover:border-ds-warning/50 hover:bg-ds-warning/8`}
+                        <button
+                          type="button"
+                          disabled={finalizingId === r.id || rowClosed || !canFinalizeRow}
+                          onClick={() => void finalizeFromList(r)}
+                          title={canFinalizeRow && !rowClosed ? 'Push to Plate Hub' : plateReason}
+                          className={`${ACTION_PILL_NEUTRAL} ${
+                            canFinalizeRow && !rowClosed
+                              ? 'border-emerald-500/45 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/15 dark:text-emerald-200'
+                              : 'border-ds-line text-ds-ink-faint hover:bg-ds-warning/10'
+                          }`}
                         >
-                          <Pencil className="h-3 w-3 opacity-70" aria-hidden />
-                          Edit
-                        </Link>
-                        {approvalsDone && !planningForwarded && (
-                          <button
-                            type="button"
-                            disabled={forwardingId === r.id || rowClosed}
-                            onClick={() => void forwardPlanning(r)}
-                            className={`${ACTION_PILL_NEUTRAL} hover:border-violet-400/50 hover:bg-violet-500/10`}
-                          >
-                            {forwardingId === r.id ? '…' : 'Forward'}
-                          </button>
-                        )}
-                        {canFinalizeRow && (
-                          <button
-                            type="button"
-                            disabled={finalizingId === r.id || rowClosed}
-                            onClick={() => void finalizeFromList(r)}
-                            className={`${ACTION_PILL_NEUTRAL} border-emerald-500/40 text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-200`}
-                          >
-                            {finalizingId === r.id ? '…' : 'Plate Hub'}
-                          </button>
-                        )}
+                          {finalizingId === r.id ? '…' : 'Plate Hub'}
+                        </button>
+                        <details className="group relative">
+                          <summary className={`${ACTION_PILL_NEUTRAL} cursor-pointer list-none select-none`}>
+                            More
+                          </summary>
+                          <div className="absolute right-0 z-20 mt-1 min-w-[170px] rounded border border-ds-line/60 bg-background p-1 shadow-lg">
+                            <Link
+                              href={`/orders/designing/${r.id}`}
+                              className="flex w-full items-center gap-1 rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-card"
+                            >
+                              <Pencil className="h-3 w-3 opacity-70" aria-hidden />
+                              Edit
+                            </Link>
+                            {!planningForwarded && (
+                              <button
+                                type="button"
+                                disabled={forwardingId === r.id || rowClosed}
+                                onClick={() => void forwardPlanning(r)}
+                                className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-ds-ink hover:bg-violet-500/10 disabled:opacity-40"
+                              >
+                                {forwardingId === r.id ? '…' : 'Forward'}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={finalizingId === r.id || rowClosed}
+                              onClick={() => void pushToolingFromList(r, 'DIE')}
+                              className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-violet-700 hover:bg-violet-500/10 disabled:opacity-40 dark:text-violet-300"
+                            >
+                              {finalizingId === r.id ? '…' : 'Die Hub'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={finalizingId === r.id || rowClosed}
+                              onClick={() => void pushToolingFromList(r, 'BLOCK')}
+                              className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-orange-700 hover:bg-orange-500/10 disabled:opacity-40 dark:text-orange-300"
+                            >
+                              {finalizingId === r.id ? '…' : 'Emboss Hub'}
+                            </button>
+                            {showRecall && (
+                              <button
+                                type="button"
+                                disabled={recallingPlanningId === r.id}
+                                onClick={() => void recallPlanning(r)}
+                                className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-rose-700 hover:bg-rose-500/10 disabled:opacity-40 dark:text-rose-300"
+                              >
+                                {recallingPlanningId === r.id ? '…' : 'Recall'}
+                              </button>
+                            )}
+                          </div>
+                        </details>
+                        {missingSheetSize ? (
+                          <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
+                            Sheet size missing
+                          </span>
+                        ) : null}
                         {finalized && (
                           <Link
                             href="/hub/plates"
@@ -1467,25 +2228,6 @@ export default function DesigningQueuePage() {
                           >
                             Planning
                           </Link>
-                        )}
-                        {showRecall && (
-                          <button
-                            type="button"
-                            disabled={recallingPlanningId === r.id}
-                            onClick={() => void recallPlanning(r)}
-                            title={
-                              canRecallPlanning
-                                ? 'Recall to Planning'
-                                : 'Recall is allowed only before machine allocation / production'
-                            }
-                            className={`${ACTION_PILL_NEUTRAL} ${
-                              canRecallPlanning
-                                ? 'border-rose-500/35 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300'
-                                : 'border-ds-line text-ds-warning hover:bg-ds-warning/10'
-                            }`}
-                          >
-                            {recallingPlanningId === r.id ? '…' : 'Recall'}
-                          </button>
                         )}
                         <a
                           href={`/api/designing/po-lines/${r.id}/job-spec-pdf`}
