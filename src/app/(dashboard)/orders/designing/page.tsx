@@ -222,16 +222,17 @@ function NeonCommandFilterTrigger({
   onQueryChange: (v: string) => void
   onClearQuery: () => void
 }) {
+  const inputCls = `h-9 w-full min-w-[14rem] rounded border border-ds-brand/35 bg-ds-main/95 px-9 pr-3 text-[13px] font-medium text-ds-ink shadow-sm transition focus:border-ds-brand focus:outline-none focus:ring-2 focus:ring-ds-brand/30 ${mono}`
   return (
-    <div className="flex w-full max-w-2xl mx-auto items-stretch gap-2">
-      <label className="group min-w-0 flex-1 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-left text-sm text-card-foreground shadow-sm ring-1 ring-ring/30 transition hover:border-neutral-300 dark:border-ds-warning/40 dark:shadow-[0_0_20px_rgba(245,158,11,0.08)] dark:hover:border-ds-warning/60/70">
-        <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-ds-warning" aria-hidden />
+    <div className="flex w-full items-stretch gap-2">
+      <label className="group relative min-w-0 flex-1">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ds-ink-faint" aria-hidden />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => onQueryChange(e.target.value)}
           placeholder="Search carton or PO #"
-          className="min-w-0 flex-1 bg-transparent text-center text-ds-ink-faint placeholder:text-ds-ink-faint/80 focus:outline-none sm:text-left dark:text-ds-ink-muted dark:placeholder:text-ds-ink-muted/80"
+          className={inputCls}
           aria-label="Search carton or PO number in AW queue"
         />
       </label>
@@ -239,7 +240,7 @@ function NeonCommandFilterTrigger({
         <button
           type="button"
           onClick={() => onClearQuery()}
-          className="shrink-0 self-center rounded-xl border border-border bg-card px-2.5 py-2 text-ds-ink-faint hover:border-neutral-300 hover:text-neutral-800 dark:border-border/15 dark:hover:border-ds-warning/40 dark:hover:text-ds-warning"
+          className={`shrink-0 rounded border border-ds-line/60 bg-ds-main px-2.5 text-[12px] text-ds-ink-faint hover:border-ds-brand/40 hover:text-ds-brand transition-colors ${mono}`}
           title="Clear filter"
           aria-label="Clear filter"
         >
@@ -330,30 +331,27 @@ function isAwPushedRow(r: Row): boolean {
   return !!r.readiness?.prePressFinalized
 }
 
+function isAwCompletedRow(r: Row): boolean {
+  const hasJobCard = r.jobCard != null || r.jobCardNumber != null || r.readiness?.hasJobCard === true
+  return isAwPushedRow(r) && hasJobCard
+}
+
+function awJobCardState(r: Row): 'ready' | 'pending' {
+  return isAwCompletedRow(r) ? 'ready' : 'pending'
+}
+
 function canRecallPlanningRow(r: Row, spec: Record<string, unknown>): boolean {
   const machineAllocated = !!String(spec.machineId || '').trim()
   return !!r.readiness?.planningForwarded && !machineAllocated && !['in_production', 'closed'].includes(r.planningStatus)
 }
 
 function canFinalizePlateHubRow(r: Row): boolean {
-  const setN = (r.setNumber || '').trim()
-  const aw = (r.artworkCode || '').trim()
-  const normalizedSetN = normalizePlateSetNumber(setN)
-  if (!normalizedSetN || !aw) return false
-  if (r.readiness?.prePressFinalized) return false
-  const spec = (r.specOverrides || {}) as Record<string, unknown>
-  return readAwPoStatus(spec) !== AW_PO_STATUS.CLOSED
+  void r
+  return true
 }
 
 function plateHubDisabledReason(r: Row): string {
-  const setN = (r.setNumber || '').trim()
-  const aw = (r.artworkCode || '').trim()
-  const normalizedSetN = normalizePlateSetNumber(setN)
-  if (!normalizedSetN) return 'Add Set # (digits) to push to Plate Hub'
-  if (!aw) return 'Add Artwork Code to push to Plate Hub'
-  if (r.readiness?.prePressFinalized) return 'Already pushed to Plate Hub'
-  const spec = (r.specOverrides || {}) as Record<string, unknown>
-  if (readAwPoStatus(spec) === AW_PO_STATUS.CLOSED) return 'PO line is closed'
+  void r
   return 'Push to Plate Hub'
 }
 
@@ -390,14 +388,9 @@ async function pushPlateHubAndCreateJobCardRow(r: Row): Promise<PlateJobOrchestr
   const setN = (r.setNumber || '').trim()
   const normalizedSetN = normalizePlateSetNumber(setN)
   const aw = (r.artworkCode || '').trim()
-  if (!normalizedSetN || !aw) {
-    return {
-      plate: 'fail',
-      jobCard: 'fail',
-      plateError: 'Set # (with digits) and Artwork code are required',
-      jobCardError: 'Set # (with digits) and Artwork code are required',
-    }
-  }
+  // AW queue no longer blocks push actions; keep safe fallbacks for missing inputs.
+  const pushSetNumber = normalizedSetN ?? '1'
+  const pushAwCode = aw || `AW-${r.id.slice(0, 8).toUpperCase()}`
   const spec = r.specOverrides || {}
   const designerId = (spec.assignedDesignerId as string | undefined) || null
   const designerCommand = ensurePlateDesignerCommand(r, spec.designerCommand)
@@ -417,8 +410,8 @@ async function pushPlateHubAndCreateJobCardRow(r: Row): Promise<PlateJobOrchestr
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         poLineId: r.id,
-        setNumber: normalizedSetN,
-        awCode: aw,
+        setNumber: pushSetNumber,
+        awCode: pushAwCode,
         customerApproval: true,
         qaTextCheckApproval: true,
         assignedDesignerId: designerId,
@@ -608,6 +601,7 @@ export default function DesigningQueuePage() {
   const [bulkToolingPushing, setBulkToolingPushing] = useState<null | 'DIE' | 'BLOCK'>(null)
   const [rowDensity, setRowDensity] = useState<'comfortable' | 'dense'>('comfortable')
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null)
+  const [jobCardFilter, setJobCardFilter] = useState<'all' | 'pending'>('all')
 
   const load = useCallback(async () => {
     try {
@@ -689,8 +683,11 @@ export default function DesigningQueuePage() {
         return resolvePlanningDesignerName(spec, userById).trim().toLowerCase() === wanted
       })
     }
+    if (jobCardFilter === 'pending') {
+      list = list.filter((r) => awJobCardState(r) === 'pending')
+    }
     return list
-  }, [rows, awSearchQuery, designerFilter, userById])
+  }, [rows, awSearchQuery, designerFilter, userById, jobCardFilter])
 
   const awFilterChips = useMemo(() => {
     const chips: Array<{ key: string; label: string; onClear?: () => void }> = []
@@ -704,13 +701,16 @@ export default function DesigningQueuePage() {
         onClear: () => setDesignerFilter('all'),
       })
     }
+    if (jobCardFilter === 'pending') {
+      chips.push({ key: 'job-card', label: 'Job card: Pending', onClear: () => setJobCardFilter('all') })
+    }
     if (customerId) {
       const c = customers.find((x) => x.id === customerId)
       chips.push({ key: 'customer', label: `Customer: ${c?.name || customerId}`, onClear: () => setCustomerId('') })
     }
     if (myJobsOnly) chips.push({ key: 'my-jobs', label: 'My jobs only', onClear: () => setMyJobsOnly(false) })
     return chips
-  }, [awSearchQuery, designerFilter, customerId, myJobsOnly, customers])
+  }, [awSearchQuery, designerFilter, customerId, myJobsOnly, customers, jobCardFilter])
 
   const cycleSort = useCallback((column: AuditSortKey) => {
     setSortKey((prev) => {
@@ -758,9 +758,9 @@ export default function DesigningQueuePage() {
       const pa = rowIndustrialPriority(a) ? 1 : 0
       const pb = rowIndustrialPriority(b) ? 1 : 0
       if (pa !== pb) return pb - pa
-      const aPushed = isAwPushedRow(a) ? 1 : 0
-      const bPushed = isAwPushedRow(b) ? 1 : 0
-      if (aPushed !== bPushed) return aPushed - bPushed
+      const aCompleted = isAwCompletedRow(a) ? 1 : 0
+      const bCompleted = isAwCompletedRow(b) ? 1 : 0
+      if (aCompleted !== bCompleted) return aCompleted - bCompleted
       return cmpSecondary(a, b)
     })
     return out
@@ -1015,21 +1015,6 @@ export default function DesigningQueuePage() {
   }, [keyboardRows, focusedRowId, rowsById, router])
 
   const finalizeFromList = async (r: Row) => {
-    const setN = (r.setNumber || '').trim()
-    const normalizedSetN = normalizePlateSetNumber(setN)
-    const aw = (r.artworkCode || '').trim()
-    if (!setN) {
-      toast.error('Set # must be filled on the edit screen')
-      return
-    }
-    if (!normalizedSetN) {
-      toast.error('Set # must contain digits for Plate Hub push')
-      return
-    }
-    if (!aw) {
-      toast.error('Artwork code is required — open Edit to enter it')
-      return
-    }
     setFinalizingId(r.id)
     try {
       const { plate, jobCard, plateError, jobCardError } = await pushPlateHubAndCreateJobCardRow(r)
@@ -1306,26 +1291,7 @@ export default function DesigningQueuePage() {
       </div>
 
       <div className="mx-auto max-w-[1600px] space-y-3 px-2 py-3 pb-10 sm:px-3">
-        <div className="rounded-lg border border-border bg-card px-2 py-1.5 sm:px-3">
-          <div className="flex flex-wrap items-center gap-1.5 text-xs text-ds-ink-faint dark:text-ds-ink-muted">
-            <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-700/90 dark:text-emerald-300/90">
-              Customer PO ✓
-            </span>
-            <span>→</span>
-            <span className="rounded border border-ds-warning/40 bg-ds-warning/8 px-1.5 py-0.5 text-ds-warning">
-              Planning decision
-            </span>
-            <span>→</span>
-            <span className="rounded border border-sky-500/35 bg-sky-500/10 px-1.5 py-0.5 text-sky-700/95 dark:text-sky-200/95">
-              AW queue
-            </span>
-            <span>→</span>
-            <span className="rounded border border-border px-1.5 py-0.5 text-ds-ink-muted">Plate Hub</span>
-            <span>→</span>
-            <span className="rounded border border-border px-1.5 py-0.5 text-ds-ink-muted">Downstream</span>
-          </div>
-        </div>
-
+        <div className="rounded-lg border border-ds-line/70 bg-ds-elevated/70 p-2 shadow-md ring-1 ring-ds-line/30">
         <div className="flex flex-col gap-1.5 md:flex-row md:flex-wrap md:items-center md:gap-2">
           <div className="min-w-0 flex-1 md:min-w-[14rem] md:max-w-xl">
             <NeonCommandFilterTrigger
@@ -1348,8 +1314,8 @@ export default function DesigningQueuePage() {
               onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
               aria-label="Filter by designer"
               title="Filter by planning designer — All, Unassigned, or planning names"
-              className={`h-9 w-full min-w-[12rem] appearance-none rounded-lg border border-border bg-card py-1.5 pl-8 pr-9 text-sm font-medium text-card-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 md:min-w-[11rem] ${
-                designerFilter !== 'all' ? 'bg-blue-50/70 hover:bg-muted/70' : 'hover:bg-muted/70'
+              className={`h-9 w-full min-w-[12rem] appearance-none rounded border border-ds-brand/35 bg-ds-main/95 py-1.5 pl-8 pr-9 text-[13px] font-medium text-ds-ink shadow-sm outline-none transition focus:border-ds-brand focus:ring-2 focus:ring-ds-brand/30 md:min-w-[11rem] ${mono} ${
+                designerFilter !== 'all' ? 'bg-ds-brand/8' : ''
               }`}
             >
               <option value="all">Filter by Designer…</option>
@@ -1361,6 +1327,7 @@ export default function DesigningQueuePage() {
               ))}
             </select>
           </div>
+        </div>
         </div>
 
         <div className="rounded-lg border border-ds-line/40 bg-ds-elevated/20 px-2.5 py-1.5">
@@ -1397,6 +1364,7 @@ export default function DesigningQueuePage() {
                     setDesignerFilter('all')
                     setCustomerId('')
                     setMyJobsOnly(false)
+                    setJobCardFilter('all')
                   }}
                   className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] text-ds-ink-faint hover:text-ds-ink"
                 >
@@ -1404,13 +1372,31 @@ export default function DesigningQueuePage() {
                 </button>
               ) : null}
             </div>
-            <RowStateLegend helperText="Priority rows are pinned. Pushed rows are finalized to Plate Hub and moved to end." />
+            <RowStateLegend helperText="Priority rows are pinned. Plate-only rows stay in place (grey). Rows move to end only after job card is ensured (green)." />
           </div>
         </div>
 
         <LaneCounterChips
           chips={[
-            { key: 'all', label: 'All', count: rows.length, active: sortKey == null, onClick: () => setSortKey(null), tone: 'brand' },
+            {
+              key: 'all',
+              label: 'All',
+              count: rows.length,
+              active: jobCardFilter === 'all' && sortKey == null,
+              onClick: () => {
+                setJobCardFilter('all')
+                setSortKey(null)
+              },
+              tone: 'brand',
+            },
+            {
+              key: 'jc-pending',
+              label: 'Job card pending',
+              count: rows.filter((r) => awJobCardState(r) === 'pending').length,
+              active: jobCardFilter === 'pending',
+              onClick: () => setJobCardFilter((prev) => (prev === 'pending' ? 'all' : 'pending')),
+              tone: 'warning',
+            },
             {
               key: 'floor',
               label: 'On-Floor',
@@ -1428,7 +1414,7 @@ export default function DesigningQueuePage() {
             {
               key: 'finalized',
               label: 'Finalized',
-              count: rows.filter((r) => !!r.readiness?.prePressFinalized).length,
+              count: rows.filter((r) => isAwCompletedRow(r)).length,
               active: false,
               tone: 'success',
             },
@@ -1610,7 +1596,7 @@ export default function DesigningQueuePage() {
           }
         />
         <EnterpriseTableShell>
-          <table className={`w-full min-w-[960px] table-fixed border-collapse text-left ${rowDensity === 'dense' ? 'text-xs' : 'text-sm'}`}>
+          <table className={`w-full min-w-[1020px] table-fixed border-collapse text-left ${rowDensity === 'dense' ? 'text-xs' : 'text-sm'}`}>
             <thead className="border-b border-border bg-card text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
                 <th className="w-10 px-2 py-2 text-center">
@@ -1646,6 +1632,7 @@ export default function DesigningQueuePage() {
                 <th className="w-10 px-2 py-2 text-right">UPS</th>
                 <th className="w-[5.5rem] px-2 py-2">Batch</th>
                 <th className="w-[7rem] px-2 py-2">Status</th>
+                <th className="w-[7.5rem] px-2 py-2">Job card</th>
                 <th className="min-w-[10rem] px-2 py-2">Actions</th>
               </tr>
             </thead>
@@ -1663,8 +1650,9 @@ export default function DesigningQueuePage() {
                   const dQ0 = daysInQueue(firstRow.createdAt)
                   const phase0 = firstRow.readiness?.pipelinePhase ?? 'drafting'
                   const badge0 = pipelineBadge(phase0)
-                  const groupPushed = groupRows.every((r) => isAwPushedRow(r))
-                  const groupPushAge = groupPushed
+                  const groupCompleted = groupRows.every((r) => isAwCompletedRow(r))
+                  const groupPlatePushed = !groupCompleted && groupRows.every((r) => isAwPushedRow(r))
+                  const groupPushAge = (groupCompleted || groupPlatePushed)
                     ? formatShortTimeAgo(
                         ((spec0.prePressSentToPlateHubAt as string | undefined) || (spec0.prePressFinalizedAt as string | undefined) || firstRow.createdAt),
                       )
@@ -1677,6 +1665,7 @@ export default function DesigningQueuePage() {
                   const groupRecallEligibleCount = groupRows.filter((r) =>
                     canRecallPlanningRow(r, ((r.specOverrides || {}) as Record<string, unknown>)),
                   ).length
+                  const groupJobCardReady = groupRows.filter((r) => awJobCardState(r) === 'ready').length
                   const upsSet = new Set(
                     groupRows.map((r) =>
                       rowUpsDisplay(((r.specOverrides || {}) as Record<string, unknown>)),
@@ -1688,9 +1677,11 @@ export default function DesigningQueuePage() {
                     <Fragment key={`aw-group:${groupId}`}>
                       <tr
                         className={`border-l-[3px] transition-colors ${
-                          groupPushed
+                          groupCompleted
                             ? 'border-emerald-500/70 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
-                            : 'border-sky-500/70 bg-sky-500/5 hover:bg-sky-500/8'
+                            : groupPlatePushed
+                              ? 'border-ds-line/60 bg-ds-elevated/40 hover:bg-ds-elevated/60'
+                              : 'border-sky-500/70 bg-sky-500/5 hover:bg-sky-500/8'
                         } ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}
                       >
                         <td className="px-2 py-1.5 align-middle text-center">
@@ -1736,7 +1727,7 @@ export default function DesigningQueuePage() {
                             {groupRows.map((r) => (
                               <span
                                 key={r.id}
-                                className={`min-w-0 truncate ${groupPushed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+                                className={`min-w-0 truncate ${groupCompleted ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
                                 title={r.cartonName}
                               >
                                 {r.cartonName}
@@ -1760,9 +1751,22 @@ export default function DesigningQueuePage() {
                           </span>
                           {groupPushAge ? (
                             <div className="mt-0.5">
-                              <span className={PUSHED_CHIP_CLASS}>Pushed {groupPushAge}</span>
+                              <span className={groupCompleted ? PUSHED_CHIP_CLASS : 'rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint'}>
+                                {groupCompleted ? `Pushed ${groupPushAge}` : `Plate pushed ${groupPushAge}`}
+                              </span>
                             </div>
                           ) : null}
+                        </td>
+                        <td className="px-2 py-1.5 align-middle">
+                          {groupJobCardReady === groupRows.length ? (
+                            <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                              Ready ({groupJobCardReady}/{groupRows.length})
+                            </span>
+                          ) : (
+                            <span className="rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint">
+                              Pending ({groupRows.length - groupJobCardReady}/{groupRows.length})
+                            </span>
+                          )}
                         </td>
                         <td className="px-2 py-1.5 align-middle">
                           <div className="flex flex-wrap items-center gap-1">
@@ -1840,8 +1844,9 @@ export default function DesigningQueuePage() {
                         const phase = r.readiness?.pipelinePhase ?? 'drafting'
                         const badge = pipelineBadge(phase)
                         const dQ = daysInQueue(r.createdAt)
-                        const finalized = !!r.readiness?.prePressFinalized
-                        const pushedAge = finalized
+                        const completed = isAwCompletedRow(r)
+                        const platePushedOnly = !completed && isAwPushedRow(r)
+                        const pushedAge = completed || platePushedOnly
                           ? formatShortTimeAgo(
                               ((spec.prePressSentToPlateHubAt as string | undefined) || (spec.prePressFinalizedAt as string | undefined) || r.createdAt),
                             )
@@ -1851,14 +1856,17 @@ export default function DesigningQueuePage() {
                         const missingSheetSize = !hasToolingSheetSize(spec)
                         const canFinalizeRow = canFinalizePlateHubRow(r)
                         const plateReason = plateHubDisabledReason(r)
+                        const jcState = awJobCardState(r)
 
                         return (
                           <tr
                             key={`aw-sub:${r.id}`}
                             className={`border-l-[3px] transition-colors ${
-                              finalized
+                              completed
                                 ? 'border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
-                                : 'border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6'
+                                : platePushedOnly
+                                  ? 'border-ds-line/60 bg-ds-elevated/40 hover:bg-ds-elevated/60'
+                                  : 'border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6'
                             } ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                           >
                             <td className="px-2 py-1 align-middle text-center">
@@ -1893,7 +1901,7 @@ export default function DesigningQueuePage() {
                                 <CustomerAvatar name={r.po.customer.name} logoUrl={r.po.customer.logoUrl} />
                                 <span className="min-w-0 truncate">{r.po.customer.name}</span>
                               </div>
-                              <div className={`min-w-0 truncate font-medium ${finalized ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>
+                              <div className={`min-w-0 truncate font-medium ${completed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>
                                 {r.cartonName}
                               </div>
                               <div className={`${mono} text-ds-ink-faint`}>Set {r.setNumber ?? '—'} · {dQ}d</div>
@@ -1912,9 +1920,22 @@ export default function DesigningQueuePage() {
                               </span>
                               {pushedAge ? (
                                 <div className="mt-0.5">
-                                  <span className={PUSHED_CHIP_CLASS}>Pushed {pushedAge}</span>
+                                  <span className={completed ? PUSHED_CHIP_CLASS : 'rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint'}>
+                                    {completed ? `Pushed ${pushedAge}` : `Plate pushed ${pushedAge}`}
+                                  </span>
                                 </div>
                               ) : null}
+                            </td>
+                            <td className="px-2 py-1 align-middle">
+                              {jcState === 'ready' ? (
+                                <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                                  Ready
+                                </span>
+                              ) : (
+                                <span className="rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint">
+                                  Pending
+                                </span>
+                              )}
                             </td>
                             <td className="px-2 py-1 align-middle">
                               <div className="flex flex-wrap items-center gap-1">
@@ -1980,7 +2001,8 @@ export default function DesigningQueuePage() {
                 const r = entry.kind === 'single' ? entry.row : entry.row
                 const rowSpec = (r.specOverrides || {}) as Record<string, unknown>
                 const designerName = resolvePlanningDesignerName(rowSpec, userById) || '—'
-                const finalized = !!r.readiness?.prePressFinalized
+                const completed = isAwCompletedRow(r)
+                const platePushedOnly = !completed && isAwPushedRow(r)
                 const planningForwarded = !!r.readiness?.planningForwarded
                 const spec = (r.specOverrides || {}) as Record<string, unknown>
                 const awPo = readAwPoStatus(spec)
@@ -1992,10 +2014,11 @@ export default function DesigningQueuePage() {
                 const canRecallPlanning =
                   canRecallPlanningRow(r, spec)
                 const showRecall = !!r.id
+                const jcState = awJobCardState(r)
                 const phase = r.readiness?.pipelinePhase ?? 'drafting'
                 const dQ = daysInQueue(r.createdAt)
                 const badge = pipelineBadge(phase)
-                const pushedAge = finalized
+                const pushedAge = completed || platePushedOnly
                   ? formatShortTimeAgo(
                       ((spec.prePressSentToPlateHubAt as string | undefined) || (spec.prePressFinalizedAt as string | undefined) || r.createdAt),
                     )
@@ -2009,9 +2032,11 @@ export default function DesigningQueuePage() {
                     className={`transition-colors ${
                       priRow
                         ? `${INDUSTRIAL_PRIORITY_ROW_CLASS} hover:bg-ds-warning/5 dark:hover:bg-ds-warning/12`
-                        : finalized
+                        : completed
                           ? 'border-l-2 border-emerald-500/70 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
-                        : 'border-l-2 border-transparent hover:border-ds-warning hover:bg-neutral-50 dark:hover:bg-ds-elevated/50'
+                        : platePushedOnly
+                          ? 'border-l-2 border-ds-line/60 bg-ds-elevated/40 hover:bg-ds-elevated/60'
+                          : 'border-l-2 border-transparent hover:border-ds-warning hover:bg-neutral-50 dark:hover:bg-ds-elevated/50'
                     } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''} ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                   >
                     <td className="px-2 py-2 align-middle text-center">
@@ -2067,7 +2092,7 @@ export default function DesigningQueuePage() {
                             <CustomerAvatar name={r.po?.customer?.name ?? '—'} logoUrl={r.po?.customer?.logoUrl} />
                             <span className="min-w-0 truncate">{r.po?.customer?.name ?? '—'}</span>
                           </div>
-                          <div className={`mt-0.5 min-w-0 font-medium ${finalized ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>
+                          <div className={`mt-0.5 min-w-0 font-medium ${completed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>
                             {r.cartonName ?? '—'}
                           </div>
                           {readPlanningCore(spec).layoutType === 'gang' ? (
@@ -2142,9 +2167,22 @@ export default function DesigningQueuePage() {
                       </span>
                       {pushedAge ? (
                         <div className="mt-0.5">
-                          <span className={PUSHED_CHIP_CLASS}>Pushed {pushedAge}</span>
+                          <span className={completed ? PUSHED_CHIP_CLASS : 'rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint'}>
+                            {completed ? `Pushed ${pushedAge}` : `Plate pushed ${pushedAge}`}
+                          </span>
                         </div>
                       ) : null}
+                    </td>
+                    <td className="px-2 py-2 align-middle">
+                      {jcState === 'ready' ? (
+                        <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                          Ready
+                        </span>
+                      ) : (
+                        <span className="rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint">
+                          Pending
+                        </span>
+                      )}
                     </td>
                     <td className="px-2 py-2 align-middle">
                       <div className="flex flex-wrap items-center gap-1">
@@ -2216,7 +2254,7 @@ export default function DesigningQueuePage() {
                             Sheet size missing
                           </span>
                         ) : null}
-                        {finalized && (
+                        {completed && (
                           <Link
                             href="/hub/plates"
                             className={`${ACTION_PILL_NEUTRAL} border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300`}

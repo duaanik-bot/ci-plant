@@ -36,7 +36,6 @@ import {
 import {
   AwQueueDirectorStrip,
   PlateHubReadinessSparkline,
-  type AwRibbonStep,
 } from '@/components/designing/AwQueueDirectorStrip'
 import { readOrchestration } from '@/lib/orchestration-spec'
 import { AW_PO_STATUS, readAwPoStatus } from '@/lib/aw-queue-spec'
@@ -600,6 +599,8 @@ export default function DesigningDetailPage() {
   const [batchQtyInput, setBatchQtyInput] = useState('')
   /** When false, spec + tooling inputs are read-only (director lock). Default unlocked. */
   const [editSpecsEnabled, setEditSpecsEnabled] = useState(true)
+  const [showCommandPanel, setShowCommandPanel] = useState(false)
+  const [showToolingSection, setShowToolingSection] = useState(false)
   const [masterSpecSheet, setMasterSpecSheet] = useState<string | null>(null)
   const [lastUsedFromHistory, setLastUsedFromHistory] = useState<{
     aw: string
@@ -1787,48 +1788,6 @@ export default function DesigningDetailPage() {
     return !!a && !!b && a !== b
   }, [jobType, masterSpecSheet, actualSheetSizeInput])
 
-  const ribbonSteps = useMemo((): AwRibbonStep[] => {
-    const ln = data?.line
-    if (!ln) return []
-    const artworkDone = customerApproval && qaTextApproval
-    const needEmb = isEmbossingRequired(ln.embossingLeafing)
-    const dieHubDone =
-      !!designerCommand.dieSource &&
-      (!!dieDispatchedToHub || !!dieReserveSent) &&
-      (!needEmb || (!!designerCommand.embossSource && (!!embossDispatchedToHub || !!embossReserveSent)))
-    const planningDone =
-      !!orch.planningForwardedAt ||
-      orch.planningFlowStatus === 'forwarded' ||
-      orch.planningFlowStatus === 'in_progress'
-    const labels = ['Artwork', 'Die Hub', 'Plate Hub', 'Planning'] as const
-    const doneFlags = [artworkDone, dieHubDone, plateHubSent, planningDone]
-    const allDone = doneFlags.every(Boolean)
-    const firstIncomplete = doneFlags.findIndex((d) => !d)
-    return labels.map((label, i) => ({
-      id: `ribbon-${i}`,
-      label,
-      status: allDone
-        ? 'done'
-        : doneFlags[i]
-          ? 'done'
-          : firstIncomplete === i
-            ? 'current'
-            : 'pending',
-    }))
-  }, [
-    data?.line,
-    customerApproval,
-    qaTextApproval,
-    designerCommand.dieSource,
-    designerCommand.embossSource,
-    dieDispatchedToHub,
-    dieReserveSent,
-    embossDispatchedToHub,
-    embossReserveSent,
-    plateHubSent,
-    orch,
-  ])
-
   const plateHubLiveLabel = useMemo(() => {
     const s = (orch.plateFlowStatus || 'idle').toLowerCase()
     if (s === 'burning_complete' || s === 'ready_inventory') return 'Plate burnt / ready'
@@ -2019,20 +1978,42 @@ export default function DesigningDetailPage() {
         showRecallJob={plateHubSent}
         recallBusy={recallBusy}
         onConfirmRecall={() => void handleRecallJob()}
-        ribbonSteps={ribbonSteps}
       />
 
-      <AwQueueCommandPanel
-        poLineId={poLineId}
-        spec={(line.specOverrides || {}) as Record<string, unknown>}
-        jobType={jobType}
-        jobCardId={data.jobCard?.id ?? null}
-        customerName={line.po.customer.name}
-        productName={line.cartonName}
-        poNumber={line.po.poNumber}
-        planningStatus={line.planningStatus}
-        onReload={() => void reloadLine()}
-      />
+      <section className="max-w-7xl mx-auto w-full px-3">
+        <div className="rounded-lg border border-ds-line/40 bg-card px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${techMono}`}>
+                Workflow assistant
+              </p>
+              <p className="text-[11px] text-ds-ink-muted">
+                Push mode, material handshake, and lifecycle controls.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowCommandPanel((v) => !v)}
+              className="rounded border border-ds-line/60 bg-ds-main px-2.5 py-1 text-[11px] text-ds-ink hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+            >
+              {showCommandPanel ? 'Hide panel' : 'Show panel'}
+            </button>
+          </div>
+        </div>
+      </section>
+      {showCommandPanel ? (
+        <AwQueueCommandPanel
+          poLineId={poLineId}
+          spec={(line.specOverrides || {}) as Record<string, unknown>}
+          jobType={jobType}
+          jobCardId={data.jobCard?.id ?? null}
+          customerName={line.po.customer.name}
+          productName={line.cartonName}
+          poNumber={line.po.poNumber}
+          planningStatus={line.planningStatus}
+          onReload={() => void reloadLine()}
+        />
+      ) : null}
 
       <div className="flex-1 p-3 max-w-7xl mx-auto w-full space-y-1 pb-6 bg-background">
           <section
@@ -2433,9 +2414,41 @@ export default function DesigningDetailPage() {
             plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-ds-line/40',
           )}
         >
-          <h2 className="text-sm font-semibold text-ds-ink border-b border-ds-line/40 pb-2">
-            Section 2 — Tooling (die · emboss · plate requirement)
-          </h2>
+          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-ds-line/40 pb-2">
+            <div>
+              <h2 className="text-sm font-semibold text-ds-ink">
+                Section 2 — Tooling (die · emboss · plate requirement)
+              </h2>
+              <p className="text-[11px] text-ds-ink-faint mt-0.5">
+                Simplified view: expand only when you need tooling or plate details.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowToolingSection((v) => !v)}
+              className="rounded border border-ds-line/60 bg-ds-main px-2.5 py-1 text-[11px] text-ds-ink hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+            >
+              {showToolingSection ? 'Hide details' : 'Show details'}
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2 text-[11px]">
+            <span className="rounded border border-ds-line/50 bg-ds-main/60 px-2 py-0.5 text-ds-ink-muted">
+              Die: {designerCommand.dieSource ? designerCommand.dieSource.toUpperCase() : 'NOT SET'}
+            </span>
+            <span className="rounded border border-ds-line/50 bg-ds-main/60 px-2 py-0.5 text-ds-ink-muted">
+              Emboss: {embossRequired ? (designerCommand.embossSource ? designerCommand.embossSource.toUpperCase() : 'NOT SET') : 'N/A'}
+            </span>
+            <span className="rounded border border-cyan-600/55 bg-cyan-950/35 px-2 py-0.5 text-cyan-100">
+              Total plates: {totalPlatesLive}
+            </span>
+            {!showToolingSection ? (
+              <span className="rounded border border-ds-brand/35 bg-ds-brand/10 px-2 py-0.5 text-ds-brand">
+                Simplified mode: details hidden
+              </span>
+            ) : null}
+          </div>
+          {showToolingSection ? (
+          <>
 
           <div className="grid md:grid-cols-2 gap-3">
             <div className="space-y-3 rounded-lg border border-ds-line/40 bg-card p-3">
@@ -2498,7 +2511,7 @@ export default function DesigningDetailPage() {
                 <div className="flex flex-wrap gap-2 justify-start items-center">
                   <button
                     type="button"
-                    disabled={savingDesignerCommand || designerCommand.dieSource === 'old' || specLocked}
+                      disabled={savingDesignerCommand || specLocked}
                     onClick={() => void dieSendToVendor()}
                     className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                   >
@@ -2583,7 +2596,7 @@ export default function DesigningDetailPage() {
                   <div className="flex flex-wrap gap-2 justify-start items-center">
                     <button
                       type="button"
-                      disabled={savingDesignerCommand || designerCommand.embossSource === 'old' || specLocked}
+                      disabled={savingDesignerCommand || specLocked}
                       onClick={() => void embossSendToVendor()}
                       className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
@@ -2877,6 +2890,8 @@ export default function DesigningDetailPage() {
               ) : null}
             </div>
           </div>
+          </>
+          ) : null}
         </section>
 
         <section className="rounded-xl bg-card border border-ds-line/40 px-3 py-2">

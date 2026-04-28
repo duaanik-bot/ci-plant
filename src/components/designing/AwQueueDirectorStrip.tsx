@@ -13,7 +13,6 @@ type Props = {
   showRecallJob: boolean
   recallBusy: boolean
   onConfirmRecall: () => void | Promise<void>
-  ribbonSteps: AwRibbonStep[]
 }
 
 export function AwQueueDirectorStrip({
@@ -22,14 +21,12 @@ export function AwQueueDirectorStrip({
   showRecallJob,
   recallBusy,
   onConfirmRecall,
-  ribbonSteps,
 }: Props) {
   const [recallOpen, setRecallOpen] = useState(false)
 
   return (
-    <div className="border-b border-ds-line/40 bg-background px-3 py-2">
-      <div className="max-w-7xl mx-auto w-full flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="border-b border-ds-line/40 bg-background px-3 py-1.5">
+      <div className="max-w-7xl mx-auto w-full flex flex-wrap items-center gap-2">
           <label className="inline-flex items-center gap-2 rounded-md border border-ds-line/40 bg-background px-2.5 py-1.5 text-[11px] font-semibold text-ds-ink cursor-pointer select-none">
             <input
               type="checkbox"
@@ -94,28 +91,6 @@ export function AwQueueDirectorStrip({
               </SlideOverPanel>
             </>
           ) : null}
-        </div>
-
-        <nav
-          className="flex flex-wrap items-center gap-x-1 gap-y-1 text-[10px] sm:text-[11px] font-medium text-ds-ink-faint"
-          aria-label="Hub pipeline"
-        >
-          {ribbonSteps.map((step, i) => (
-            <span key={step.id} className="inline-flex items-center gap-1">
-              {i > 0 ? <span className="text-neutral-700 px-0.5" aria-hidden>→</span> : null}
-              <span
-                className={clsx(
-                  'rounded px-1.5 py-0.5 border',
-                  step.status === 'done' && 'border-emerald-500/50 text-emerald-400/95 bg-emerald-950/30',
-                  step.status === 'current' && 'border-ds-warning/60 text-ds-warning bg-ds-warning/10',
-                  step.status === 'pending' && 'border-ds-line/40 text-ds-ink-faint',
-                )}
-              >
-                {step.label}
-              </span>
-            </span>
-          ))}
-        </nav>
       </div>
     </div>
   )
