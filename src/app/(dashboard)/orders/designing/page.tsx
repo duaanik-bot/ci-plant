@@ -332,8 +332,8 @@ function isAwPushedRow(r: Row): boolean {
 }
 
 function isAwCompletedRow(r: Row): boolean {
-  const hasJobCard = r.jobCard != null || r.jobCardNumber != null || r.readiness?.hasJobCard === true
-  return isAwPushedRow(r) && hasJobCard
+  const hasLinkedJobCard = !!r.jobCard?.id
+  return isAwPushedRow(r) && hasLinkedJobCard
 }
 
 function awJobCardState(r: Row): 'ready' | 'pending' {
