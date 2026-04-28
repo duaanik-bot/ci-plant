@@ -356,9 +356,9 @@ export async function GET(req: NextRequest) {
         },
         {
           id: 'biz-oee',
-          title: 'OEE live dashboard',
-          subtitle: 'Press efficiency',
-          href: '/oee',
+          title: 'Live production stages',
+          subtitle: 'Production stage-wise job cards',
+          href: '/production/stages',
         },
       ]
     : []

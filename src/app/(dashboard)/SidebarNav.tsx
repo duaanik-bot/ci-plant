@@ -13,8 +13,6 @@ import {
   AlertTriangle,
   Factory,
   Layers,
-  Tablet,
-  Gauge,
   Warehouse,
   RefreshCw,
   FileStack,
@@ -37,6 +35,8 @@ import {
   Palette,
   ChevronDown,
   ChevronRight,
+  LayoutGrid,
+  Scissors,
 } from 'lucide-react'
 
 const STORAGE_KEY = 'ci-plant-sidebar-sections'
@@ -198,7 +198,7 @@ export function SidebarNav({
       borderColor: 'border-l-orange-500',
       links: [
         { href: '/production/job-cards', label: 'Job Cards', icon: FileStack },
-        { href: '/production/stages', label: 'Production Stages', icon: Cpu },
+        { href: '/production/print-planning', label: 'Print Planning', icon: LayoutGrid },
       ],
     },
     {
@@ -207,9 +207,7 @@ export function SidebarNav({
       borderColor: 'border-l-rose-500',
       links: [
         { href: '/production/stages', label: 'Live Production', icon: Factory },
-        { href: '/workflow', label: 'Job Tracking', icon: RefreshCw },
-        { href: '/shopfloor', label: 'Shop Floor Tablet', icon: Tablet },
-        { href: '/oee', label: 'OEE Live', icon: Gauge },
+        { href: '/production/cutting-queue', label: 'Cutting queue', icon: Scissors },
       ],
     },
     {

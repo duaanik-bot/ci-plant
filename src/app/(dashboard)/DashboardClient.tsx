@@ -5,7 +5,6 @@ import Link from 'next/link'
 import {
   Briefcase,
   Factory,
-  Gauge,
   ClipboardCheck,
   Truck,
   Circle,
@@ -91,7 +90,7 @@ const STAT_CARDS: {
 }[] = [
   { key: 'activeJobs', label: 'Active Jobs', href: '/jobs', icon: Briefcase, format: (v) => String(v) },
   { key: 'runningPresses', label: 'Running Presses', href: '/production/stages', icon: Factory, format: (v) => String(v) },
-  { key: 'avgOee', label: 'OEE Today %', href: '/oee', icon: Gauge, format: (v) => `${v}%` },
+  { key: 'avgOee', label: 'OEE Today %', href: '/production/stages', icon: Factory, format: (v) => `${v}%` },
   { key: 'pendingApprovals', label: 'Pending Approvals', href: '/stores/approve-excess', icon: ClipboardCheck, format: (v) => String(v) },
   { key: 'dispatchDue', label: 'Dispatch Due', href: '/billing', icon: Truck, format: (v) => String(v) },
 ]

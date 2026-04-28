@@ -106,6 +106,7 @@ type Row = {
   }
   directorPriority?: boolean
   directorHold?: boolean
+  materialQueue?: { totalSheets: number } | null
 }
 
 type Customer = { id: string; name: string; logoUrl?: string | null }
@@ -377,6 +378,83 @@ function ensurePlateDesignerCommand(
   }
 }
 
+type PlateJobOrchestrationResult = {
+  plate: 'ok' | 'duplicate' | 'fail'
+  jobCard: 'ok' | 'fail'
+  plateError?: string
+  jobCardError?: string
+}
+
+/** Plate Hub triage + job card creation in parallel (no dependency between legs). */
+async function pushPlateHubAndCreateJobCardRow(r: Row): Promise<PlateJobOrchestrationResult> {
+  const setN = (r.setNumber || '').trim()
+  const normalizedSetN = normalizePlateSetNumber(setN)
+  const aw = (r.artworkCode || '').trim()
+  if (!normalizedSetN || !aw) {
+    return {
+      plate: 'fail',
+      jobCard: 'fail',
+      plateError: 'Set # (with digits) and Artwork code are required',
+      jobCardError: 'Set # (with digits) and Artwork code are required',
+    }
+  }
+  const spec = r.specOverrides || {}
+  const designerId = (spec.assignedDesignerId as string | undefined) || null
+  const designerCommand = ensurePlateDesignerCommand(r, spec.designerCommand)
+  const mqSheets = r.materialQueue?.totalSheets
+  const requiredSheets = Math.max(
+    1,
+    Math.ceil(
+      mqSheets != null && mqSheets > 0
+        ? mqSheets
+        : Math.max(1, Number(r.quantity) || 0) / 4,
+    ),
+  )
+
+  const [plateRes, jcRes] = await Promise.all([
+    fetch('/api/plate-hub', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        poLineId: r.id,
+        setNumber: normalizedSetN,
+        awCode: aw,
+        customerApproval: true,
+        qaTextCheckApproval: true,
+        assignedDesignerId: designerId,
+        designerCommand,
+        status: 'PUSH_TO_PRODUCTION_QUEUE',
+      }),
+    }),
+    fetch('/api/job-cards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        poLineItemId: r.id,
+        requiredSheets,
+        wastageSheets: 0,
+        idempotentIfExists: true,
+        orchestrationSource: 'aw_orchestration',
+      }),
+    }),
+  ])
+
+  const plateJson = (await plateRes.json().catch(() => ({}))) as { error?: string }
+  let plate: PlateJobOrchestrationResult['plate'] = 'fail'
+  if (plateRes.ok) plate = 'ok'
+  else if (plateRes.status === 409) plate = 'duplicate'
+  else plate = 'fail'
+  const plateError = plate === 'fail' ? plateJson.error || `Plate Hub (${plateRes.status})` : undefined
+
+  const jcJson = (await jcRes.json().catch(() => ({}))) as { error?: string; idempotent?: boolean }
+  let jobCard: PlateJobOrchestrationResult['jobCard'] = 'fail'
+  if (jcRes.ok && (jcRes.status === 201 || jcRes.status === 200)) jobCard = 'ok'
+  else jobCard = 'fail'
+  const jobCardError = jobCard === 'fail' ? jcJson.error || `Job card (${jcRes.status})` : undefined
+
+  return { plate, jobCard, plateError, jobCardError }
+}
+
 function canPushToolingHubRow(r: Row): boolean {
   const setN = (r.setNumber || '').trim()
   const aw = (r.artworkCode || '').trim()
@@ -418,6 +496,24 @@ function resolvePlanningDesignerName(
   return ''
 }
 
+function rowUpsDisplay(spec: Record<string, unknown>): string {
+  const core = readPlanningCore(spec)
+  const meta = readPlanningMeta(spec)
+  const raw = spec.ups ?? spec.numberOfUps ?? core.ups ?? meta.ups
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) return String(Math.floor(raw))
+  return '—'
+}
+
+function rowBatchTypeDisplay(spec: Record<string, unknown>): string {
+  const coreRaw = readPlanningCore(spec) as Record<string, unknown>
+  const meta = readPlanningMeta(spec)
+  const b =
+    (typeof coreRaw.batchType === 'string' && coreRaw.batchType.trim()) ||
+    (typeof spec.batchType === 'string' && spec.batchType.trim()) ||
+    (typeof meta.batchMode === 'string' && meta.batchMode.trim())
+  return b || '—'
+}
+
 function SortHeader({
   label,
   column,
@@ -435,7 +531,7 @@ function SortHeader({
 }) {
   const active = activeKey === column
   return (
-    <th className={`px-4 py-3 ${className}`}>
+    <th className={`px-3 py-2 ${className}`}>
       <button
         type="button"
         onClick={() => onSort(column)}
@@ -934,34 +1030,30 @@ export default function DesigningQueuePage() {
       toast.error('Artwork code is required — open Edit to enter it')
       return
     }
-    const spec = r.specOverrides || {}
-    const designerId = (spec.assignedDesignerId as string | undefined) || null
-    const designerCommand = ensurePlateDesignerCommand(r, spec.designerCommand)
     setFinalizingId(r.id)
     try {
-      const res = await fetch('/api/plate-hub', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          poLineId: r.id,
-          setNumber: normalizedSetN,
-          awCode: aw,
-          customerApproval: true,
-          qaTextCheckApproval: true,
-          assignedDesignerId: designerId,
-          designerCommand,
-          status: 'PUSH_TO_PRODUCTION_QUEUE',
-        }),
-      })
-      const json = (await res.json()) as { error?: string; requirementCode?: string }
-      if (res.status === 409) {
-        toast.info(json.error || 'Already finalized')
-        router.refresh()
-        return
+      const { plate, jobCard, plateError, jobCardError } = await pushPlateHubAndCreateJobCardRow(r)
+      const plateOk = plate === 'ok' || plate === 'duplicate'
+      const jcOk = jobCard === 'ok'
+      if (plateOk && jcOk) {
+        toast.success(
+          plate === 'duplicate'
+            ? 'Plate Hub already had this line — job card ensured (created or already exists)'
+            : 'Plate Hub + job card: routed to CTP triage and production',
+        )
+      } else if (plateOk && !jcOk) {
+        toast.error(jobCardError || 'Job card step failed', {
+          description: 'Plate Hub / CTP side completed or was already sent — fix job card issue and retry',
+        })
+      } else if (!plateOk && jcOk) {
+        toast.warning(plateError || 'Plate Hub step failed', {
+          description: 'Job card was created — review Plate Hub push and retry if needed',
+        })
+      } else {
+        toast.error(plateError || jobCardError || 'Plate Hub and job card both failed')
       }
-      if (!res.ok) throw new Error(json.error || 'Finalize failed')
-      toast.success('Data successfully routed to Tooling Hubs')
       await load()
+      router.refresh()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Finalize failed')
     } finally {
@@ -1050,40 +1142,25 @@ export default function DesigningQueuePage() {
       let failed = 0
       for (const row of eligible) {
         try {
-          const setN = (row.setNumber || '').trim()
-          const normalizedSetN = normalizePlateSetNumber(setN)
-          if (!normalizedSetN) throw new Error('Set # must contain digits')
-          const aw = (row.artworkCode || '').trim()
-          const spec = row.specOverrides || {}
-          const designerId = (spec.assignedDesignerId as string | undefined) || null
-          const designerCommand = ensurePlateDesignerCommand(row, spec.designerCommand)
-          const res = await fetch('/api/plate-hub', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              poLineId: row.id,
-              setNumber: normalizedSetN,
-              awCode: aw,
-              customerApproval: true,
-              qaTextCheckApproval: true,
-              assignedDesignerId: designerId,
-              designerCommand,
-              status: 'PUSH_TO_PRODUCTION_QUEUE',
-            }),
-          })
-          const json = (await res.json()) as { error?: string }
-          if (res.status === 409) {
-            success += 1
-            continue
-          }
-          if (!res.ok) throw new Error(json.error || 'Finalize failed')
-          success += 1
+          const { plate, jobCard } = await pushPlateHubAndCreateJobCardRow(row)
+          const plateOk = plate === 'ok' || plate === 'duplicate'
+          const jcOk = jobCard === 'ok'
+          if (plateOk && jcOk) success += 1
+          else failed += 1
         } catch {
           failed += 1
         }
       }
-      if (success > 0) toast.success(`Bulk pushed to Plate Hub • ${success} item${success > 1 ? 's' : ''}`)
-      if (failed > 0) toast.error(`Bulk push failed for ${failed} item${failed > 1 ? 's' : ''}`)
+      if (success > 0) {
+        toast.success(
+          `Bulk Plate Hub + job cards • ${success} line${success > 1 ? 's' : ''} (CTP + job card OK)`,
+        )
+      }
+      if (failed > 0) {
+        toast.error(
+          `Bulk orchestration incomplete for ${failed} line${failed > 1 ? 's' : ''} — open a row for details`,
+        )
+      }
       setSelectedRowIds(new Set())
       await load()
     } finally {
@@ -1193,40 +1270,19 @@ export default function DesigningQueuePage() {
       let failed = 0
       for (const row of eligible) {
         try {
-          const setN = (row.setNumber || '').trim()
-          const normalizedSetN = normalizePlateSetNumber(setN)
-          if (!normalizedSetN) throw new Error('Set # must contain digits')
-          const aw = (row.artworkCode || '').trim()
-          const spec = row.specOverrides || {}
-          const designerId = (spec.assignedDesignerId as string | undefined) || null
-          const designerCommand = ensurePlateDesignerCommand(row, spec.designerCommand)
-          const res = await fetch('/api/plate-hub', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              poLineId: row.id,
-              setNumber: normalizedSetN,
-              awCode: aw,
-              customerApproval: true,
-              qaTextCheckApproval: true,
-              assignedDesignerId: designerId,
-              designerCommand,
-              status: 'PUSH_TO_PRODUCTION_QUEUE',
-            }),
-          })
-          const json = (await res.json()) as { error?: string }
-          if (res.status === 409) {
-            success += 1
-            continue
-          }
-          if (!res.ok) throw new Error(json.error || 'Finalize failed')
-          success += 1
+          const { plate, jobCard } = await pushPlateHubAndCreateJobCardRow(row)
+          const plateOk = plate === 'ok' || plate === 'duplicate'
+          const jcOk = jobCard === 'ok'
+          if (plateOk && jcOk) success += 1
+          else failed += 1
         } catch {
           failed += 1
         }
       }
       if (success > 0) {
-        toast.success(`Pushed to Plate Hub • ${success} item${success > 1 ? 's' : ''}`)
+        toast.success(
+          `Plate Hub + job cards • ${success} line${success > 1 ? 's' : ''} (gang / selection)`,
+        )
       }
       if (failed > 0) {
         toast.error(`Plate Hub push failed for ${failed} item${failed > 1 ? 's' : ''}`)
@@ -1270,15 +1326,15 @@ export default function DesigningQueuePage() {
           </div>
         </div>
 
-        <div className="py-1 flex flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-2">
-          <div className="min-w-0 flex-1">
+        <div className="flex flex-col gap-1.5 md:flex-row md:flex-wrap md:items-center md:gap-2">
+          <div className="min-w-0 flex-1 md:min-w-[14rem] md:max-w-xl">
             <NeonCommandFilterTrigger
               searchQuery={awSearchQuery}
               onQueryChange={setAwSearchQuery}
               onClearQuery={() => setAwSearchQuery('')}
             />
           </div>
-          <div className="relative flex shrink-0 items-center self-stretch sm:self-auto">
+          <div className="relative flex min-h-[36px] shrink-0 items-center md:min-w-[11rem]">
             <User
               className="pointer-events-none absolute left-2.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2 text-ds-ink-faint"
               aria-hidden
@@ -1292,7 +1348,7 @@ export default function DesigningQueuePage() {
               onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
               aria-label="Filter by designer"
               title="Filter by planning designer — All, Unassigned, or planning names"
-              className={`h-full min-h-[42px] w-full min-w-[12rem] appearance-none rounded-xl border border-border bg-card py-2 pl-8 pr-9 text-sm font-medium text-card-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 sm:min-w-[13.5rem] sm:min-h-0 ${
+              className={`h-9 w-full min-w-[12rem] appearance-none rounded-lg border border-border bg-card py-1.5 pl-8 pr-9 text-sm font-medium text-card-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 md:min-w-[11rem] ${
                 designerFilter !== 'all' ? 'bg-blue-50/70 hover:bg-muted/70' : 'hover:bg-muted/70'
               }`}
             >
@@ -1379,38 +1435,36 @@ export default function DesigningQueuePage() {
           ]}
         />
 
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ds-line/40 bg-ds-elevated/10 px-2.5 py-1.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="text-sm font-semibold text-neutral-900 dark:text-ds-ink">Visual audit station</h1>
-            <span className="rounded border border-ds-warning/40 bg-ds-warning/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ds-warning">
-              AW v2
+        <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-lg border border-ds-line/40 bg-ds-elevated/10 px-2 py-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-ds-ink-muted">
+            <span className="font-semibold text-ds-ink">AW queue</span>
+            <span className="text-ds-ink-faint">·</span>
+            <span>
+              Ready <span className="font-semibold text-ds-warning">{readyCount}</span>/{rows.length}
             </span>
-            <span className="text-xs text-ds-ink-faint dark:text-ds-ink-muted">
-              Lead: <span className="text-ds-ink-faint dark:text-ds-ink-faint">{PREPRESS_AUDIT_LEAD}</span> · Ready:{' '}
-              <span className="font-semibold text-neutral-900 dark:text-ds-warning">{readyCount}</span> / {rows.length}
-            </span>
+            <span className="hidden sm:inline text-ds-ink-faint">· {PREPRESS_AUDIT_LEAD}</span>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1">
             <Link
               href="/orders/purchase-orders"
-              className="rounded-lg border border-border bg-card px-2 py-0.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-ds-warning/40"
+              className="rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-card-foreground hover:bg-muted/70"
             >
               POs
             </Link>
             <Link
               href="/hub/plates"
-              className="rounded-lg border border-border bg-card px-2 py-0.5 text-xs text-card-foreground shadow-sm hover:bg-muted/70 dark:hover:border-ds-warning/40"
+              className="rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-card-foreground hover:bg-muted/70"
             >
               Plate Hub
             </Link>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-sm -mt-0.5">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
           <select
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
-            className={`min-w-[160px] rounded border border-border bg-card px-2 py-1.5 text-card-foreground ${mono}`}
+            className={`h-9 min-w-[8rem] max-w-[14rem] rounded-lg border border-border bg-card px-2 py-1 text-xs text-card-foreground ${mono}`}
           >
             <option value="">All customers</option>
             {customers.map((c) => (
@@ -1422,7 +1476,7 @@ export default function DesigningQueuePage() {
           <button
             type="button"
             onClick={() => setMyJobsOnly((o) => !o)}
-            className={`rounded border px-2.5 py-1.5 text-sm font-medium transition-colors ${mono} ${
+            className={`h-9 rounded-lg border px-2.5 text-xs font-medium transition-colors ${mono} ${
               myJobsOnly
                 ? 'border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200'
                 : 'border-border bg-card text-ds-ink-faint hover:border-neutral-300 dark:text-ds-ink-muted dark:hover:border-ds-line/60'
@@ -1556,10 +1610,10 @@ export default function DesigningQueuePage() {
           }
         />
         <EnterpriseTableShell>
-          <table className={`w-full min-w-[1100px] table-fixed border-collapse text-left ${rowDensity === 'dense' ? 'text-xs' : 'text-sm'}`}>
-            <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
+          <table className={`w-full min-w-[960px] table-fixed border-collapse text-left ${rowDensity === 'dense' ? 'text-xs' : 'text-sm'}`}>
+            <thead className="border-b border-border bg-card text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
-                <th className="w-10 px-2 py-3 text-center">
+                <th className="w-10 px-2 py-2 text-center">
                   <input
                     type="checkbox"
                     aria-label="Select all visible rows"
@@ -1578,44 +1632,21 @@ export default function DesigningQueuePage() {
                     className="h-3.5 w-3.5 accent-ds-brand"
                   />
                 </th>
-                <th className="w-[52px] px-4 py-3">Preview</th>
-                <SortHeader
-                  label="PO #"
-                  column="po"
-                  activeKey={sortKey}
-                  dir={sortDir}
-                  onSort={cycleSort}
-                  className="w-[6.25rem]"
-                />
-                <SortHeader
-                  label="Customer"
-                  column="customer"
-                  activeKey={sortKey}
-                  dir={sortDir}
-                  onSort={cycleSort}
-                  className="w-[6.5rem]"
-                />
-                <th className="min-w-[9rem] px-4 py-3">Carton</th>
+                <th className="w-[48px] px-2 py-2">Prv</th>
+                <th className="min-w-[10rem] px-2 py-2">Carton / PO / Customer</th>
                 <SortHeader
                   label="Qty"
                   column="qty"
                   activeKey={sortKey}
                   dir={sortDir}
                   onSort={cycleSort}
-                  className="w-10 text-right [&_button]:justify-end [&_button]:w-full"
+                  className="w-11 text-right [&_button]:justify-end [&_button]:w-full"
                 />
-                <th className="w-9 px-4 py-3">Set</th>
-                <th className="w-[5rem] px-4 py-3">Designer</th>
-                <th className="w-[8.5rem] px-4 py-3">Pipeline</th>
-                <SortHeader
-                  label="Days"
-                  column="days"
-                  activeKey={sortKey}
-                  dir={sortDir}
-                  onSort={cycleSort}
-                  className="w-14 text-right [&_button]:justify-end [&_button]:w-full"
-                />
-                <th className="min-w-[11rem] px-4 py-3">Actions</th>
+                <th className="w-[4.5rem] px-2 py-2">Designer</th>
+                <th className="w-10 px-2 py-2 text-right">UPS</th>
+                <th className="w-[5.5rem] px-2 py-2">Batch</th>
+                <th className="w-[7rem] px-2 py-2">Status</th>
+                <th className="min-w-[10rem] px-2 py-2">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200 bg-card dark:divide-ds-line/30">
@@ -1646,6 +1677,12 @@ export default function DesigningQueuePage() {
                   const groupRecallEligibleCount = groupRows.filter((r) =>
                     canRecallPlanningRow(r, ((r.specOverrides || {}) as Record<string, unknown>)),
                   ).length
+                  const upsSet = new Set(
+                    groupRows.map((r) =>
+                      rowUpsDisplay(((r.specOverrides || {}) as Record<string, unknown>)),
+                    ),
+                  )
+                  const groupUpsLabel = upsSet.size <= 1 ? Array.from(upsSet)[0] ?? '—' : 'Mix'
 
                   return (
                     <Fragment key={`aw-group:${groupId}`}>
@@ -1656,7 +1693,7 @@ export default function DesigningQueuePage() {
                             : 'border-sky-500/70 bg-sky-500/5 hover:bg-sky-500/8'
                         } ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}
                       >
-                        <td className="px-2 py-2 align-middle text-center">
+                        <td className="px-2 py-1.5 align-middle text-center">
                           <input
                             type="checkbox"
                             aria-label="Select gang rows"
@@ -1679,84 +1716,55 @@ export default function DesigningQueuePage() {
                             className="h-3.5 w-3.5 accent-ds-brand"
                           />
                         </td>
-                        {/* Preview — first item's preview */}
-                        <td className="px-4 py-2 align-middle">
+                        <td className="px-2 py-1.5 align-middle">
                           <ArtworkPreviewCell
                             url={firstRow.artworkPreviewUrl ?? null}
                             alt={firstRow.cartonName}
                             onOpenLightbox={(src) => setLightbox({ src, alt: `${firstRow.po.poNumber} · ${firstRow.cartonName}` })}
                           />
                         </td>
-                        {/* PO / priority */}
-                        <td className={`px-4 py-2 align-middle text-sm font-medium ${mono} text-neutral-900 dark:text-ds-warning`}>
-                          <div className="flex flex-col gap-0.5 leading-tight">
-                            <span className="inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-bold text-sky-600 dark:text-sky-300">
-                              <Layers className="h-3 w-3 shrink-0" aria-hidden /> GANG · {groupRows.length} items
-                            </span>
-                            {groupRows.map((r) => (
-                              <span key={r.id} className={`truncate text-[11px] ${mono} text-ds-warning`}>{r.po.poNumber}</span>
-                            ))}
+                        <td className="px-2 py-1.5 align-middle text-xs leading-snug text-neutral-900 dark:text-ds-ink">
+                          <div className="mb-0.5 inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1 py-0.5 text-[9px] font-bold uppercase text-sky-600 dark:text-sky-300">
+                            <Layers className="h-3 w-3 shrink-0" aria-hidden /> Gang · {groupRows.length}
                           </div>
-                        </td>
-                        {/* Customer */}
-                        <td className="px-4 py-2 align-middle text-sm font-medium leading-tight text-neutral-700 dark:text-ds-ink-muted">
-                          <div className="flex min-w-0 items-center gap-1.5">
+                          <div className="flex min-w-0 items-center gap-1 text-[10px] text-ds-ink-muted">
                             <CustomerAvatar name={firstRow.po.customer.name} logoUrl={firstRow.po.customer.logoUrl} />
-                            <span className="min-w-0 break-words whitespace-normal">{firstRow.po.customer.name}</span>
+                            <span className="min-w-0 truncate">{firstRow.po.customer.name}</span>
+                            <span className={`shrink-0 ${mono} text-ds-warning`}>{firstRow.po.poNumber}</span>
                           </div>
-                        </td>
-                        {/* Carton — all items */}
-                        <td className="px-4 py-2 align-middle text-sm leading-snug text-neutral-900 dark:text-ds-ink">
-                          <div className="flex min-w-0 flex-col gap-0.5">
+                          <div className="mt-0.5 flex min-w-0 flex-col gap-0.5">
                             {groupRows.map((r) => (
                               <span
                                 key={r.id}
-                                className={`min-w-0 truncate text-[12px] ${groupPushed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+                                className={`min-w-0 truncate ${groupPushed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
                                 title={r.cartonName}
                               >
                                 {r.cartonName}
                               </span>
                             ))}
-                            <span className="w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-[10px] font-semibold uppercase text-sky-700 dark:text-sky-300">
-                              Gang print
-                            </span>
+                          </div>
+                          <div className={`mt-0.5 text-[10px] ${mono} text-ds-ink-faint`}>
+                            Set {firstRow.setNumber ?? '—'} · {dQ0}d
                           </div>
                         </td>
-                        {/* Qty — combined */}
-                        <td className={`px-4 py-2 align-middle text-right text-sm font-bold ${mono} text-ds-brand`}>
-                          <div className="flex flex-col items-end">
-                            <span>{totalQty.toLocaleString('en-IN')}</span>
-                            <span className="text-[9px] font-normal text-ds-ink-faint">combined</span>
-                          </div>
+                        <td className={`px-2 py-1.5 align-middle text-right text-xs font-bold ${mono} text-ds-brand`}>
+                          {totalQty.toLocaleString('en-IN')}
                         </td>
-                        {/* Set */}
-                        <td className={`px-4 py-2 align-middle text-sm ${mono} text-ds-ink-muted`}>
-                          {firstRow.setNumber ?? '—'}
-                        </td>
-                        {/* Designer */}
-                        <td className="px-4 py-2 align-middle text-xs text-ds-ink-faint">
-                          {designerName0}
-                        </td>
-                        {/* Pipeline */}
-                        <td className="px-4 py-2 align-middle">
-                          <span className={`${badge0.className} ${badge0.pulse ? 'animate-pulse' : ''}`}>
+                        <td className="px-2 py-1.5 align-middle text-[10px] text-ds-ink-faint">{designerName0}</td>
+                        <td className={`px-2 py-1.5 align-middle text-right text-xs ${mono} text-ds-ink`}>{groupUpsLabel}</td>
+                        <td className="px-2 py-1.5 align-middle text-[10px] text-ds-ink-muted">Gang</td>
+                        <td className="px-2 py-1.5 align-middle">
+                          <span className={`${badge0.className} text-[10px] ${badge0.pulse ? 'animate-pulse' : ''}`}>
                             <Layers className="h-3 w-3 shrink-0" aria-hidden />
                             {badge0.label}
                           </span>
                           {groupPushAge ? (
                             <div className="mt-0.5">
-                              <span className={PUSHED_CHIP_CLASS}>
-                                Pushed {groupPushAge}
-                              </span>
+                              <span className={PUSHED_CHIP_CLASS}>Pushed {groupPushAge}</span>
                             </div>
                           ) : null}
                         </td>
-                        {/* Days */}
-                        <td className={`px-4 py-2 align-middle text-right text-sm ${mono} ${ageClass(dQ0)}`}>
-                          {dQ0}d
-                        </td>
-                        {/* Actions */}
-                        <td className="px-4 py-2 align-middle">
+                        <td className="px-2 py-1.5 align-middle">
                           <div className="flex flex-wrap items-center gap-1">
                             <button
                               type="button"
@@ -1853,7 +1861,7 @@ export default function DesigningQueuePage() {
                                 : 'border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6'
                             } ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                           >
-                            <td className="px-2 py-1.5 align-middle text-center">
+                            <td className="px-2 py-1 align-middle text-center">
                               <input
                                 type="checkbox"
                                 aria-label="Select row"
@@ -1869,33 +1877,46 @@ export default function DesigningQueuePage() {
                                 className="h-3.5 w-3.5 accent-ds-brand"
                               />
                             </td>
-                            <td className="px-3 py-1.5 align-middle">
-                              <span className="text-[10px] text-sky-500/60">↳{si + 1}</span>
+                            <td className="px-2 py-1 align-middle">
+                              <ArtworkPreviewCell
+                                url={r.artworkPreviewUrl ?? null}
+                                alt={r.cartonName}
+                                onOpenLightbox={(src) =>
+                                  setLightbox({ src, alt: `${r.po.poNumber} · ${r.cartonName}` })
+                                }
+                              />
                             </td>
-                            <td className={`px-3 py-1.5 align-middle text-xs font-medium ${mono} text-ds-warning`}>
-                              {r.po.poNumber}
+                            <td className="px-2 py-1 align-middle text-[10px] leading-snug text-ds-ink">
+                              <span className="text-sky-500/70">↳{si + 1}</span>{' '}
+                              <span className={`${mono} text-ds-warning`}>{r.po.poNumber}</span>
+                              <div className="flex min-w-0 items-center gap-1 text-ds-ink-muted">
+                                <CustomerAvatar name={r.po.customer.name} logoUrl={r.po.customer.logoUrl} />
+                                <span className="min-w-0 truncate">{r.po.customer.name}</span>
+                              </div>
+                              <div className={`min-w-0 truncate font-medium ${finalized ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>
+                                {r.cartonName}
+                              </div>
+                              <div className={`${mono} text-ds-ink-faint`}>Set {r.setNumber ?? '—'} · {dQ}d</div>
                             </td>
-                            <td className="px-3 py-1.5 align-middle text-xs text-ds-ink-muted break-words whitespace-normal">{r.po.customer.name}</td>
-                            <td className="px-3 py-1.5 align-middle text-xs font-medium text-ds-ink">
-                              <span className={`line-clamp-1 ${finalized ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{r.cartonName}</span>
+                            <td className={`px-2 py-1 align-middle text-right text-xs ${mono} text-ds-ink`}>
+                              {r.quantity.toLocaleString('en-IN')}
                             </td>
-                            <td className={`px-3 py-1.5 align-middle text-right text-xs ${mono} text-ds-ink`}>{r.quantity.toLocaleString('en-IN')}</td>
-                            <td className={`px-3 py-1.5 align-middle text-xs ${mono} text-ds-ink-muted`}>{r.setNumber ?? '—'}</td>
-                            <td className="px-3 py-1.5 align-middle text-xs text-ds-ink-faint">{designerName}</td>
-                            <td className="px-3 py-1.5 align-middle">
+                            <td className="px-2 py-1 align-middle text-[10px] text-ds-ink-faint">{designerName}</td>
+                            <td className={`px-2 py-1 align-middle text-right text-xs ${mono}`}>{rowUpsDisplay(spec)}</td>
+                            <td className="px-2 py-1 align-middle text-[10px] text-ds-ink-muted">
+                              {rowBatchTypeDisplay(spec)}
+                            </td>
+                            <td className="px-2 py-1 align-middle">
                               <span className={`${badge.className} text-[10px] py-0 ${badge.pulse ? 'animate-pulse' : ''}`}>
                                 {badge.label}
                               </span>
                               {pushedAge ? (
                                 <div className="mt-0.5">
-                                  <span className={PUSHED_CHIP_CLASS}>
-                                    Pushed {pushedAge}
-                                  </span>
+                                  <span className={PUSHED_CHIP_CLASS}>Pushed {pushedAge}</span>
                                 </div>
                               ) : null}
                             </td>
-                            <td className={`px-3 py-1.5 align-middle text-right text-xs ${mono} ${ageClass(dQ)}`}>{dQ}d</td>
-                            <td className="px-3 py-1.5 align-middle">
+                            <td className="px-2 py-1 align-middle">
                               <div className="flex flex-wrap items-center gap-1">
                                 <button
                                   type="button"
@@ -1993,7 +2014,7 @@ export default function DesigningQueuePage() {
                         : 'border-l-2 border-transparent hover:border-ds-warning hover:bg-neutral-50 dark:hover:bg-ds-elevated/50'
                     } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''} ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                   >
-                    <td className="px-2 py-3 align-middle text-center">
+                    <td className="px-2 py-2 align-middle text-center">
                       <input
                         type="checkbox"
                         aria-label="Select row"
@@ -2009,7 +2030,7 @@ export default function DesigningQueuePage() {
                         className="h-3.5 w-3.5 accent-ds-brand"
                       />
                     </td>
-                    <td className="px-4 py-3 align-middle">
+                    <td className="px-2 py-2 align-middle">
                       <ArtworkPreviewCell
                         url={previewUrl}
                         alt={r.cartonName}
@@ -2018,105 +2039,94 @@ export default function DesigningQueuePage() {
                         }
                       />
                     </td>
-                    <td
-                      className={`px-4 py-3 align-middle text-sm font-medium ${mono} whitespace-nowrap text-neutral-900 dark:text-ds-warning`}
-                    >
-                      <div className="flex flex-col gap-0.5 leading-tight">
-                        <div className="flex min-w-0 items-start gap-0.5">
-                          <button
-                            type="button"
-                            title={
-                              r.po.isPriority === true ? 'Clear PO priority (pin)' : 'Mark PO priority (pin to top)'
-                            }
-                            aria-pressed={r.po.isPriority === true}
-                            aria-label={
-                              r.po.isPriority === true ? 'Clear PO priority' : 'Mark PO priority'
-                            }
-                            disabled={priorityBusyPoId === r.po.id}
-                            onClick={(e) => void togglePoPriority(r, e)}
-                            className={`mt-0.5 shrink-0 ${ICON_BUTTON_TIGHT} text-ds-ink-faint hover:bg-neutral-100 hover:text-ds-warning dark:hover:bg-card/5 dark:hover:text-ds-warning`}
-                          >
-                            <Star
-                              className={`h-3.5 w-3.5 ${
-                                r.po.isPriority === true
-                                  ? INDUSTRIAL_PRIORITY_STAR_ICON_CLASS
-                                  : 'text-ds-ink-faint'
-                              }`}
-                              strokeWidth={2}
-                            />
-                          </button>
-                          <span className="min-w-0 overflow-hidden text-ellipsis break-all">{r.po?.poNumber ?? '—'}</span>
-                        </div>
-                        {totalContractBatches(spec) > 0 ? (
-                          <div
-                            className="mt-0.5 flex h-1 w-full max-w-[6rem] overflow-hidden rounded-full bg-ds-elevated ring-1 ring-ds-line/50"
-                            title="Batch progress"
-                          >
-                            <div
-                              className="h-full bg-emerald-600/90"
-                              style={{ width: `${Math.round(batchSeg.shippedPct * 100)}%` }}
-                            />
-                            <div
-                              className="h-full bg-ds-warning/90"
-                              style={{ width: `${Math.round(batchSeg.inProductionPct * 100)}%` }}
-                            />
-                            <div
-                              className="h-full bg-ds-line/30"
-                              style={{ width: `${Math.round(batchSeg.remainingPct * 100)}%` }}
-                            />
+                    <td className="px-2 py-2 align-middle text-xs leading-snug text-neutral-900 dark:text-ds-ink">
+                      <div className="flex min-w-0 items-start gap-1">
+                        <button
+                          type="button"
+                          title={
+                            r.po.isPriority === true ? 'Clear PO priority (pin)' : 'Mark PO priority (pin to top)'
+                          }
+                          aria-pressed={r.po.isPriority === true}
+                          aria-label={r.po.isPriority === true ? 'Clear PO priority' : 'Mark PO priority'}
+                          disabled={priorityBusyPoId === r.po.id}
+                          onClick={(e) => void togglePoPriority(r, e)}
+                          className={`mt-0.5 shrink-0 ${ICON_BUTTON_TIGHT} text-ds-ink-faint hover:bg-neutral-100 hover:text-ds-warning dark:hover:bg-card/5 dark:hover:text-ds-warning`}
+                        >
+                          <Star
+                            className={`h-3 w-3 ${
+                              r.po.isPriority === true
+                                ? INDUSTRIAL_PRIORITY_STAR_ICON_CLASS
+                                : 'text-ds-ink-faint'
+                            }`}
+                            strokeWidth={2}
+                          />
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <div className={`truncate ${mono} text-ds-warning`}>{r.po?.poNumber ?? '—'}</div>
+                          <div className="flex min-w-0 items-center gap-1 text-[10px] text-ds-ink-muted">
+                            <CustomerAvatar name={r.po?.customer?.name ?? '—'} logoUrl={r.po?.customer?.logoUrl} />
+                            <span className="min-w-0 truncate">{r.po?.customer?.name ?? '—'}</span>
                           </div>
-                        ) : null}
-                        {r.directorPriority ? (
-                          <span className="w-fit rounded bg-ds-warning/15 px-1 text-xs font-bold uppercase text-ds-warning ring-1 ring-ds-warning/35 dark:text-ds-warning">
-                            Priority
-                          </span>
-                        ) : null}
-                        {r.directorHold ? (
-                          <span className="w-fit rounded bg-ds-elevated/30 px-1 text-xs text-ds-ink-faint dark:text-ds-ink-muted">
-                            Hold
-                          </span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 align-middle text-sm font-medium leading-tight text-neutral-700 break-words dark:text-ds-ink-muted">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <CustomerAvatar
-                          name={r.po?.customer?.name ?? '—'}
-                          logoUrl={r.po?.customer?.logoUrl}
-                        />
-                        <span className="min-w-0 break-words whitespace-normal">{r.po?.customer?.name ?? '—'}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 align-middle text-sm font-medium leading-snug text-neutral-900 break-words dark:text-ds-ink">
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <span className={`min-w-0 ${finalized ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>{r.cartonName ?? '—'}</span>
-                        {readPlanningCore(spec).layoutType === 'gang' ? (
-                          <span className="w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
-                            Gang print
-                          </span>
-                        ) : readPlanningCore(spec).savedAt ? (
-                          <span className="w-fit rounded border border-neutral-300 px-1 py-0.5 text-xs text-ds-ink-faint dark:border-ds-line/60 dark:text-ds-ink-faint">
-                            Single product
-                          </span>
-                        ) : null}
+                          <div className={`mt-0.5 min-w-0 font-medium ${finalized ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>
+                            {r.cartonName ?? '—'}
+                          </div>
+                          {readPlanningCore(spec).layoutType === 'gang' ? (
+                            <span className="mt-0.5 inline-block w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-700 dark:text-sky-300">
+                              Gang print
+                            </span>
+                          ) : readPlanningCore(spec).savedAt ? (
+                            <span className="mt-0.5 inline-block w-fit rounded border border-neutral-300 px-1 py-0.5 text-[9px] text-ds-ink-faint dark:border-ds-line/60">
+                              Single
+                            </span>
+                          ) : null}
+                          {totalContractBatches(spec) > 0 ? (
+                            <div
+                              className="mt-1 flex h-1 w-full max-w-[7rem] overflow-hidden rounded-full bg-ds-elevated ring-1 ring-ds-line/50"
+                              title="Batch progress"
+                            >
+                              <div
+                                className="h-full bg-emerald-600/90"
+                                style={{ width: `${Math.round(batchSeg.shippedPct * 100)}%` }}
+                              />
+                              <div
+                                className="h-full bg-ds-warning/90"
+                                style={{ width: `${Math.round(batchSeg.inProductionPct * 100)}%` }}
+                              />
+                              <div
+                                className="h-full bg-ds-line/30"
+                                style={{ width: `${Math.round(batchSeg.remainingPct * 100)}%` }}
+                              />
+                            </div>
+                          ) : null}
+                          {r.directorPriority ? (
+                            <span className="mt-0.5 inline-block w-fit rounded bg-ds-warning/15 px-1 text-[9px] font-bold uppercase text-ds-warning ring-1 ring-ds-warning/35">
+                              Priority
+                            </span>
+                          ) : null}
+                          {r.directorHold ? (
+                            <span className="mt-0.5 inline-block w-fit rounded bg-ds-elevated/30 px-1 text-[9px] text-ds-ink-faint">
+                              Hold
+                            </span>
+                          ) : null}
+                          <div className={`mt-0.5 text-[10px] ${mono} text-ds-ink-faint`}>
+                            Set {r.setNumber ?? '—'} · {dQ}d queue
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td
-                      className={`px-4 py-3 align-middle text-right text-sm font-medium ${mono} whitespace-nowrap text-neutral-900 dark:text-ds-ink`}
+                      className={`px-2 py-2 align-middle text-right text-xs font-semibold ${mono} text-neutral-900 dark:text-ds-ink`}
                     >
                       {r.quantity}
                     </td>
-                    <td
-                      className={`px-4 py-3 align-middle text-sm font-medium ${mono} whitespace-nowrap overflow-hidden text-ellipsis text-neutral-900 dark:text-ds-ink-muted`}
-                    >
-                      {r.setNumber ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 align-middle text-xs leading-tight text-ds-ink-faint dark:text-ds-ink-muted">
+                    <td className="px-2 py-2 align-middle text-[10px] leading-tight text-ds-ink-faint dark:text-ds-ink-muted">
                       {designerName}
                     </td>
-                    <td className="px-4 py-3 align-middle">
+                    <td className={`px-2 py-2 align-middle text-right text-xs ${mono} text-ds-ink`}>{rowUpsDisplay(spec)}</td>
+                    <td className="px-2 py-2 align-middle text-[10px] text-ds-ink-muted">{rowBatchTypeDisplay(spec)}</td>
+                    <td className="px-2 py-2 align-middle">
                       <span
-                        className={`${badge.className} ${badge.pulse ? 'animate-pulse motion-reduce:animate-none' : ''}`}
+                        className={`${badge.className} text-[10px] ${badge.pulse ? 'animate-pulse motion-reduce:animate-none' : ''}`}
                         title={
                           (r.readiness?.artworkStatusLabel ?? '') +
                           (planningForwarded ? ' · Plate Hub: forwarded to planning' : ' · Plate Hub: pending')
@@ -2132,18 +2142,11 @@ export default function DesigningQueuePage() {
                       </span>
                       {pushedAge ? (
                         <div className="mt-0.5">
-                          <span className={PUSHED_CHIP_CLASS}>
-                            Pushed {pushedAge}
-                          </span>
+                          <span className={PUSHED_CHIP_CLASS}>Pushed {pushedAge}</span>
                         </div>
                       ) : null}
                     </td>
-                    <td
-                      className={`px-4 py-3 align-middle text-right text-sm font-medium ${mono} whitespace-nowrap ${ageClass(dQ)}`}
-                    >
-                      {dQ}d
-                    </td>
-                    <td className="px-4 py-3 align-middle">
+                    <td className="px-2 py-2 align-middle">
                       <div className="flex flex-wrap items-center gap-1">
                         <button
                           type="button"

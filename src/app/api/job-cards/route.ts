@@ -6,6 +6,10 @@ import { computeJobYieldMetricsForCard } from '@/lib/production-yield'
 import { z } from 'zod'
 import { jobCardSchema } from '@/lib/validations'
 import { applyAllocatedStockToJobCard, get_allocated_stock_dims } from '@/lib/allocated-stock-dims'
+import {
+  postPressRoutingFromPoLine,
+  postPressRoutingSchema,
+} from '@/lib/job-card-routing-spec'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +50,11 @@ const createSchema = z.object({
   wastageSheets: z.number().int().min(0).default(0),
   assignedOperator: z.string().optional(),
   batchNumber: z.string().optional(),
+  machineId: z.string().uuid().optional().nullable(),
+  /** When true and a job card already exists for the line, return 200 with existing row (parallel orchestration). */
+  idempotentIfExists: z.boolean().optional(),
+  postPressRouting: postPressRoutingSchema.optional(),
+  orchestrationSource: z.string().max(64).optional(),
 })
 
 export async function GET(req: NextRequest) {
@@ -77,7 +86,9 @@ export async function GET(req: NextRequest) {
   else if (segment === 'awaiting_setup') where.status = 'design_ready'
   else if (segment === 'qa_hold') where.status = 'final_qc'
   else if (segment === 'completed') where.status = { in: ['closed', 'qa_released'] }
-  else if (status) where.status = status
+  else if (segment === 'print_planning') {
+    where.status = { notIn: ['closed', 'qa_released'] }
+  } else if (status) where.status = status
 
   let idFilter: number[] | null = null
   if (q) {
@@ -125,6 +136,16 @@ export async function GET(req: NextRequest) {
       artworkCode: string | null
       dyeNumber: number | null
       shadeCode: string | null
+      planningStatus: string | null
+      materialQueue: {
+        boardType: string
+        gsm: number
+        ups: number
+        totalSheets: number
+      } | null
+      upsFromSpec: number | null
+      designerName: string | null
+      batchType: string | null
     }
   >()
   type PoLineYield = NonNullable<Parameters<typeof computeJobYieldMetricsForCard>[2]>
@@ -145,7 +166,12 @@ export async function GET(req: NextRequest) {
         gsm: true,
         dimLengthMm: true,
         dimWidthMm: true,
+        specOverrides: true,
+        planningStatus: true,
         po: { select: { isPriority: true, poNumber: true } },
+        materialQueue: {
+          select: { boardType: true, gsm: true, ups: true, totalSheets: true },
+        },
         carton: {
           select: {
             artworkCode: true,
@@ -166,6 +192,28 @@ export async function GET(req: NextRequest) {
         (l.artworkCode && String(l.artworkCode).trim()) ||
         (l.carton?.artworkCode && String(l.carton.artworkCode).trim()) ||
         null
+      const spec = (l.specOverrides && typeof l.specOverrides === 'object'
+        ? (l.specOverrides as Record<string, unknown>)
+        : {}) as Record<string, unknown>
+      const core = spec.planningCore as Record<string, unknown> | undefined
+      const upsFromSpec =
+        typeof spec.upsPerSheet === 'number'
+          ? spec.upsPerSheet
+          : typeof core?.upsPerSheet === 'number'
+            ? (core.upsPerSheet as number)
+            : null
+      const designerName =
+        typeof spec.assignedDesignerName === 'string'
+          ? spec.assignedDesignerName
+          : typeof spec.designerName === 'string'
+            ? (spec.designerName as string)
+            : null
+      const batchType =
+        typeof core?.batchType === 'string'
+          ? (core.batchType as string)
+          : typeof spec.batchType === 'string'
+            ? (spec.batchType as string)
+            : null
       poLineByJcNumber.set(l.jobCardNumber, {
         id: l.id,
         cartonName: l.cartonName,
@@ -176,6 +224,11 @@ export async function GET(req: NextRequest) {
         artworkCode: aw,
         dyeNumber: l.dieMaster?.dyeNumber ?? null,
         shadeCode: l.shadeCard?.shadeCode ?? null,
+        planningStatus: l.planningStatus,
+        materialQueue: l.materialQueue,
+        upsFromSpec,
+        designerName,
+        batchType,
       })
       if (yieldMetrics) {
         poLineForYield.set(l.jobCardNumber, {
@@ -214,6 +267,7 @@ export async function POST(req: NextRequest) {
     ...body,
     requiredSheets: body.requiredSheets != null ? Number(body.requiredSheets) : undefined,
     wastageSheets: body.wastageSheets != null ? Number(body.wastageSheets) : 0,
+    idempotentIfExists: body.idempotentIfExists === true,
   })
   if (!parsed.success) {
     const fields: Record<string, string> = {}
@@ -224,8 +278,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
   }
 
-  const { poLineItemId, requiredSheets, wastageSheets, assignedOperator, batchNumber } =
-    parsed.data
+  const {
+    poLineItemId,
+    requiredSheets,
+    wastageSheets,
+    assignedOperator,
+    batchNumber,
+    machineId: bodyMachineId,
+    idempotentIfExists,
+    postPressRouting: bodyPostPress,
+    orchestrationSource,
+  } = parsed.data
 
   const shared = jobCardSchema.safeParse({
     customerId: 'resolved-later',
@@ -244,15 +307,72 @@ export async function POST(req: NextRequest) {
 
   const li = await db.poLineItem.findUnique({
     where: { id: poLineItemId },
-    include: { po: { include: { customer: true } } },
+    include: {
+      po: { include: { customer: true } },
+      carton: {
+        select: {
+          embossingLeafing: true,
+          coatingType: true,
+          laminateType: true,
+          foilType: true,
+          embossBlockId: true,
+        },
+      },
+    },
   })
   if (!li) return NextResponse.json({ error: 'PO line item not found' }, { status: 404 })
   if (li.jobCardNumber) {
+    if (idempotentIfExists) {
+      const existing = await db.productionJobCard.findFirst({
+        where: { jobCardNumber: li.jobCardNumber },
+        include: {
+          customer: { select: { id: true, name: true } },
+          machine: { select: { id: true, machineCode: true } },
+          stages: true,
+        },
+      })
+      if (existing) {
+        return NextResponse.json({ ...existing, idempotent: true as const }, { status: 200 })
+      }
+    }
     return NextResponse.json(
       { error: `Job card already created for this line (JC# ${li.jobCardNumber})` },
       { status: 400 }
     )
   }
+
+  let resolvedMachineId: string | null = bodyMachineId ?? null
+  if (resolvedMachineId) {
+    const m = await db.machine.findUnique({
+      where: { id: resolvedMachineId },
+      select: { id: true },
+    })
+    if (!m) {
+      return NextResponse.json({ error: 'Invalid machineId', fields: { machineId: 'Machine not found' } }, { status: 400 })
+    }
+  }
+
+  const baseRouting = postPressRoutingFromPoLine({
+    embossingLeafing: li.embossingLeafing,
+    coatingType: li.coatingType,
+    carton: li.carton,
+  })
+  const overrideParsed =
+    bodyPostPress != null ? postPressRoutingSchema.partial().safeParse(bodyPostPress) : null
+  const fromBody = overrideParsed?.success ? overrideParsed.data : {}
+  const defaultPrintPlan = {
+    lane: 'triage' as const,
+    machineId: null as string | null,
+    order: 0,
+    updatedAt: new Date().toISOString(),
+  }
+  const mergedRouting = {
+    ...baseRouting,
+    ...fromBody,
+    printPlan: fromBody.printPlan ?? defaultPrintPlan,
+  }
+
+  const embossBlockId = li.carton?.embossBlockId ?? null
 
   const totalSheets = requiredSheets + wastageSheets
 
@@ -261,6 +381,7 @@ export async function POST(req: NextRequest) {
       data: {
         customerId: li.po.customerId,
         setNumber: li.setNumber || null,
+        machineId: resolvedMachineId,
         assignedOperator: assignedOperator || null,
         requiredSheets,
         wastageSheets,
@@ -273,6 +394,8 @@ export async function POST(req: NextRequest) {
         coaGenerated: false,
         batchNumber: batchNumber || null,
         status: 'design_ready',
+        postPressRouting: mergedRouting as object,
+        embossBlockId,
       },
     })
 
@@ -315,7 +438,11 @@ export async function POST(req: NextRequest) {
     action: 'INSERT',
     tableName: 'production_job_cards',
     recordId: created.id,
-    newValue: { jobCardNumber: created.jobCardNumber, poLineItemId },
+    newValue: {
+      jobCardNumber: created.jobCardNumber,
+      poLineItemId,
+      ...(orchestrationSource ? { orchestrationSource } : {}),
+    },
   })
 
   const spec =

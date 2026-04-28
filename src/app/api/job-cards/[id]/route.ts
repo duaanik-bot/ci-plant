@@ -10,8 +10,23 @@ import { persistProductionOeeLedger } from '@/lib/production-oee'
 import { incrementEmbossStrikesOnJobClose } from '@/lib/production-emboss-strikes'
 import { z } from 'zod'
 import { computeBoardMaterialForJobCard } from '@/lib/job-card-board-material'
+import { postPressRoutingSchema } from '@/lib/job-card-routing-spec'
 
 export const dynamic = 'force-dynamic'
+
+function auditTimelineSummary(nv: unknown): string {
+  if (!nv || typeof nv !== 'object') return 'Update'
+  const o = nv as Record<string, unknown>
+  if (o.jobCardNumber != null && o.poLineItemId != null) {
+    return `Job card #${String(o.jobCardNumber)} created`
+  }
+  if (o.orchestrationSource === 'aw_orchestration') return 'AW orchestration · job card'
+  if (o.cuttingQueueEnqueuedAt != null) return 'Cutting queue enqueue'
+  if (o.postPressRouting != null || o.machineId !== undefined) return 'Print plan / machine update'
+  if (o.status != null) return `Status → ${String(o.status)}`
+  const keys = Object.keys(o).slice(0, 5)
+  return keys.length ? keys.join(', ') : 'Update'
+}
 
 function fmtMm(d: unknown): string {
   const n = Number(d)
@@ -38,18 +53,11 @@ const stageUpdateSchema = z.object({
   excessSheets: z.number().int().min(0).optional().nullable(),
 })
 
-const postPressRoutingSchema = z.object({
-  chemicalCoating: z.boolean().optional(),
-  lamination: z.boolean().optional(),
-  spotUv: z.boolean().optional(),
-  leafing: z.boolean().optional(),
-  embossing: z.boolean().optional(),
-})
-
 const updateSchema = z.object({
   assignedOperator: z.string().optional().nullable(),
   shiftOperatorUserId: z.string().uuid().optional().nullable(),
   batchNumber: z.string().optional().nullable(),
+  machineId: z.string().uuid().optional().nullable(),
   requiredSheets: z.number().int().positive().optional(),
   wastageSheets: z.number().int().min(0).optional(),
   sheetsIssued: z.number().int().min(0).optional(),
@@ -262,7 +270,54 @@ export async function GET(
       : null,
   )
 
-  return NextResponse.json({ ...jc, poLine, productionBible, boardMaterial })
+  const wantTimeline = req.nextUrl.searchParams.get('auditTimeline') === '1'
+  let auditTimeline:
+    | {
+        id: string
+        at: string
+        action: string
+        tableName: string
+        userName: string | null
+        summary: string
+      }[]
+    | undefined
+  if (wantTimeline) {
+    const or: Array<{ tableName: string; recordId: string }> = [
+      { tableName: 'production_job_cards', recordId: id },
+    ]
+    if (poLine?.id) {
+      or.push({ tableName: 'po_line_items', recordId: poLine.id })
+    }
+    const logs = await db.auditLog.findMany({
+      where: { OR: or },
+      orderBy: { timestamp: 'asc' },
+      take: 120,
+      select: {
+        id: true,
+        timestamp: true,
+        action: true,
+        tableName: true,
+        newValue: true,
+        user: { select: { name: true } },
+      },
+    })
+    auditTimeline = logs.map((l) => ({
+      id: String(l.id),
+      at: l.timestamp.toISOString(),
+      action: l.action,
+      tableName: l.tableName,
+      userName: l.user?.name ?? null,
+      summary: auditTimelineSummary(l.newValue),
+    }))
+  }
+
+  return NextResponse.json({
+    ...jc,
+    poLine,
+    productionBible,
+    boardMaterial,
+    ...(auditTimeline != null ? { auditTimeline } : {}),
+  })
 }
 
 export async function PUT(
@@ -307,6 +362,28 @@ export async function PUT(
   const totalSheets = requiredSheets + wastageSheets
   const isClosing = data.status === 'closed' && existing.status !== 'closed'
 
+  if (data.machineId !== undefined && data.machineId !== null && data.machineId !== '') {
+    const m = await db.machine.findUnique({ where: { id: data.machineId }, select: { id: true } })
+    if (!m) {
+      return NextResponse.json(
+        { error: 'Invalid machineId', fields: { machineId: 'Machine not found' } },
+        { status: 400 },
+      )
+    }
+  }
+
+  let mergedPostPress: object | undefined
+  if (data.postPressRouting !== undefined) {
+    const prev =
+      existing.postPressRouting && typeof existing.postPressRouting === 'object'
+        ? (existing.postPressRouting as Record<string, unknown>)
+        : {}
+    const incoming = data.postPressRouting === null ? {} : (data.postPressRouting as Record<string, unknown>)
+    const combined = { ...prev, ...incoming }
+    const checked = postPressRoutingSchema.safeParse(combined)
+    mergedPostPress = (checked.success ? checked.data : combined) as object
+  }
+
   const requestsRelease =
     (data.qaReleased === true && !existing.qaReleased) ||
     (data.status === 'qa_released' && existing.status !== 'qa_released') ||
@@ -332,6 +409,7 @@ export async function PUT(
           ? { shiftOperatorUserId: data.shiftOperatorUserId }
           : {}),
         ...(data.batchNumber !== undefined ? { batchNumber: data.batchNumber } : {}),
+        ...(data.machineId !== undefined ? { machineId: data.machineId } : {}),
         ...(data.requiredSheets !== undefined ? { requiredSheets: data.requiredSheets } : {}),
         ...(data.wastageSheets !== undefined ? { wastageSheets: data.wastageSheets } : {}),
         totalSheets,
@@ -343,9 +421,7 @@ export async function PUT(
         ...(data.finalQcPass !== undefined ? { finalQcPass: data.finalQcPass } : {}),
         ...(data.qaReleased !== undefined ? { qaReleased: data.qaReleased } : {}),
         ...(data.status !== undefined ? { status: data.status } : {}),
-        ...(data.postPressRouting !== undefined
-          ? { postPressRouting: data.postPressRouting as object }
-          : {}),
+        ...(mergedPostPress !== undefined ? { postPressRouting: mergedPostPress } : {}),
       },
     })
 

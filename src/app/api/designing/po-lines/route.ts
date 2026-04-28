@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
           customer: { select: { id: true, name: true, logoUrl: true } },
         },
       },
+      materialQueue: { select: { totalSheets: true } },
     },
   })
 

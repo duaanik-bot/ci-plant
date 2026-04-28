@@ -72,6 +72,12 @@ export type PostPressRouting = {
   spotUv?: boolean
   leafing?: boolean
   embossing?: boolean
+  printPlan?: {
+    lane: 'triage' | 'machine'
+    machineId?: string | null
+    order: number
+    updatedAt?: string
+  }
 }
 
 type ProductionBible = {
@@ -109,6 +115,15 @@ type ProductionBible = {
   } | null
 }
 
+type AuditTimelineEntry = {
+  id: string
+  at: string
+  action: string
+  tableName: string
+  userName: string | null
+  summary: string
+}
+
 type JobCard = {
   id: string
   jobCardNumber: number
@@ -136,6 +151,7 @@ type JobCard = {
   issuedStockDisplay?: string | null
   inventoryLocationPointer?: string | null
   grainFitStatus?: string
+  auditTimeline?: AuditTimelineEntry[]
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -245,6 +261,8 @@ export default function JobCardDetailPage() {
     maxImpressions: number
     active: boolean
   } | null | 'unavailable'>(null)
+  const [enqueueingCut, setEnqueueingCut] = useState(false)
+
   const [dieStoreCheck, setDieStoreCheck] = useState<{
     status: 'available' | 'needs_attention' | 'end_of_life' | 'not_available'
     message: string
@@ -254,7 +272,7 @@ export default function JobCardDetailPage() {
   } | null>(null)
 
   useEffect(() => {
-    fetch(`/api/job-cards/${id}`)
+    fetch(`/api/job-cards/${id}?auditTimeline=1`)
       .then((r) => r.json())
       .then((data) => {
         if (!data || data.error) throw new Error(data.error || 'Failed to load')
@@ -441,12 +459,29 @@ export default function JobCardDetailPage() {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Save failed')
       toast.success('Updated')
-      const refreshed = await fetch(`/api/job-cards/${jc.id}`).then((r) => r.json())
+      const refreshed = await fetch(`/api/job-cards/${jc.id}?auditTimeline=1`).then((r) => r.json())
       setJc(refreshed)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function enqueueCutting() {
+    if (!jc) return
+    setEnqueueingCut(true)
+    try {
+      const res = await fetch(`/api/job-cards/${jc.id}/enqueue-cutting-queue`, { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed')
+      toast.success(json.idempotent ? 'Already on cutting queue' : 'Enqueued for cutting')
+      const refreshed = await fetch(`/api/job-cards/${jc.id}?auditTimeline=1`).then((r) => r.json())
+      setJc(refreshed)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setEnqueueingCut(false)
     }
   }
 
@@ -538,6 +573,14 @@ export default function JobCardDetailPage() {
               >
                 Issue sheets
               </Link>
+              <button
+                type="button"
+                disabled={enqueueingCut}
+                onClick={() => void enqueueCutting()}
+                className="px-3 py-1.5 rounded-lg border border-border/50 text-sm disabled:opacity-50"
+              >
+                {enqueueingCut ? '…' : 'Enqueue cutting'}
+              </button>
             </div>
           </div>
 
@@ -629,6 +672,36 @@ export default function JobCardDetailPage() {
             ) : null}
           </div>
         </div>
+
+        {jc.auditTimeline && jc.auditTimeline.length > 0 ? (
+          <div className="rounded-xl border border-border/40 bg-card p-4">
+            <h2 className="text-sm font-semibold text-ds-warning mb-2">Activity timeline</h2>
+            <p className="text-[10px] text-ds-ink-faint mb-3">
+              Milestones from audit logs (job card + PO line). Oldest first.
+            </p>
+            <ul className={`space-y-2 text-xs ${mono}`}>
+              {jc.auditTimeline.map((ev) => (
+                <li
+                  key={ev.id}
+                  className="flex flex-wrap gap-x-2 gap-y-0.5 border-b border-border/20 pb-2 last:border-0 last:pb-0"
+                >
+                  <span className="text-ds-ink-faint shrink-0">
+                    {new Date(ev.at).toLocaleString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  <span className="text-ds-warning">{ev.action}</span>
+                  <span className="text-ds-ink-muted">{ev.tableName}</span>
+                  {ev.userName ? <span className="text-ds-ink">· {ev.userName}</span> : null}
+                  <span className="text-ds-ink w-full sm:w-auto">{ev.summary}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* Tooling kit — coordinates */}
