@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, ArrowDownAZ, ArrowUpAZ, Printer, Star } from 'lucide-react'
+import { ArrowRight, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
 import {
@@ -51,83 +51,36 @@ type JobCardRow = {
 
 type MachineOpt = { id: string; machineCode: string; name: string }
 
-type HubBadgeKind = 'running' | 'setup' | 'halt' | 'completed' | 'qa_hold'
+type BoardReadiness = 'ready' | 'waiting' | 'not_ready'
+type UiStatus = 'pending' | 'ready' | 'pushed'
 
-function hubBadge(row: JobCardRow): { label: string; kind: HubBadgeKind } {
-  const s = row.status
-  if (s === 'closed' || s === 'qa_released') return { label: 'Completed', kind: 'completed' }
-  if (s === 'design_ready') return { label: 'Setup', kind: 'setup' }
-  if (s === 'final_qc') return { label: 'QA Hold', kind: 'qa_hold' }
-  if (s === 'in_progress') {
-    if (row.openDowntime) return { label: 'Halt', kind: 'halt' }
-    return { label: 'Running', kind: 'running' }
-  }
-  return { label: s.replace(/_/g, ' '), kind: 'setup' }
+function getBoardReadiness(row: JobCardRow): BoardReadiness {
+  if (row.requiredSheets > 0 && row.sheetsIssued >= row.requiredSheets) return 'ready'
+  if (row.sheetsIssued > 0) return 'waiting'
+  return 'not_ready'
 }
 
-function HubStatusBadge({ kind, label }: { kind: HubBadgeKind; label: string }) {
-  const base = 'inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border'
-  switch (kind) {
-    case 'running':
-      return (
-        <span
-          className={clsx(
-            base,
-            'bg-emerald-500/15 text-emerald-400 border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.15)] animate-pulse',
-          )}
-        >
-          {label}
-        </span>
-      )
-    case 'setup':
-      return (
-        <span className={clsx(base, 'bg-ds-warning/15 text-ds-warning border-ds-warning/30')}>{label}</span>
-      )
-    case 'halt':
-      return (
-        <span className={clsx(base, 'bg-rose-700/20 text-rose-400 border-rose-600/50')}>
-          <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
-          {label}
-        </span>
-      )
-    case 'qa_hold':
-      return (
-        <span className={clsx(base, 'bg-fuchsia-950/40 text-fuchsia-300 border-fuchsia-700/40')}>{label}</span>
-      )
-    case 'completed':
-    default:
-      return (
-        <span className={clsx(base, 'bg-ds-elevated/80 text-ds-ink-muted border-ds-line/50')}>{label}</span>
-      )
-  }
+function boardReadinessMeta(r: BoardReadiness): { label: string; tooltip: string; dot: string } {
+  if (r === 'ready') return { label: 'Ready', tooltip: 'Board available', dot: 'bg-emerald-500' }
+  if (r === 'waiting') return { label: 'Waiting', tooltip: 'Board in procurement', dot: 'bg-amber-400' }
+  return { label: 'Not Ready', tooltip: 'Board missing', dot: 'bg-rose-500' }
 }
 
-type SortKey = 'machine' | 'operator' | 'status' | 'po' | 'yield' | null
-type SortDir = 'asc' | 'desc'
-
-const SEGMENTS = [
-  { id: '', label: 'All active' },
-  { id: 'in_production', label: 'In production' },
-  { id: 'awaiting_setup', label: 'Awaiting setup' },
-  { id: 'qa_hold', label: 'QA hold' },
-  { id: 'completed', label: 'Completed' },
-] as const
+function getUiStatus(row: JobCardRow): UiStatus {
+  if (row.status === 'closed' || row.status === 'qa_released') return 'pushed'
+  if (row.status === 'in_progress' || row.status === 'final_qc') return 'ready'
+  return 'pending'
+}
 
 export default function JobCardsPage() {
   const [list, setList] = useState<JobCardRow[]>([])
   const [machines, setMachines] = useState<MachineOpt[]>([])
   const [loading, setLoading] = useState(true)
   const [lastSync, setLastSync] = useState<string | null>(null)
-
-  const [segment, setSegment] = useState<string>('')
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
-  const [priorityOnly, setPriorityOnly] = useState(false)
-  const [machineId, setMachineId] = useState('')
-  const [operatorId, setOperatorId] = useState('')
-
-  const [sortKey, setSortKey] = useState<SortKey>(null)
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [statusFilter, setStatusFilter] = useState<'all' | UiStatus>('all')
+  const [readinessFilter, setReadinessFilter] = useState<'all' | BoardReadiness>('all')
 
   const [auditRow, setAuditRow] = useState<JobCardRow | null>(null)
 
@@ -135,11 +88,7 @@ export default function JobCardsPage() {
     try {
       const params = new URLSearchParams()
       params.set('yieldMetrics', '1')
-      if (segment) params.set('segment', segment)
       if (q.trim()) params.set('q', q.trim())
-      if (priorityOnly) params.set('priorityOnly', '1')
-      if (machineId) params.set('machineId', machineId)
-      if (operatorId) params.set('operatorId', operatorId)
 
       const jcRes = await fetch(`/api/job-cards?${params}`)
       const jcJson = await jcRes.json()
@@ -150,7 +99,7 @@ export default function JobCardsPage() {
     } finally {
       setLoading(false)
     }
-  }, [segment, q, priorityOnly, machineId, operatorId])
+  }, [q])
 
   useEffect(() => {
     fetch('/api/machines')
@@ -179,96 +128,29 @@ export default function JobCardsPage() {
     return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
   }, [])
 
-  const operatorOptions = useMemo(() => {
-    const m = new Map<string, string>()
-    list.forEach((j) => {
-      if (j.shiftOperator) m.set(j.shiftOperator.id, j.shiftOperator.name)
-    })
-    return Array.from(m.entries())
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }, [list])
-
   const sortedList = useMemo(() => {
     const copy = [...list]
-    const dir = sortDir === 'asc' ? 1 : -1
-    const cmp = (x: string, y: string) => x.localeCompare(y) * dir
-
     copy.sort((a, b) => {
       const pa = a.poLine?.industrialPriority === true ? 1 : 0
       const pb = b.poLine?.industrialPriority === true ? 1 : 0
       if (pa !== pb) return pb - pa
-
-      if (sortKey === 'machine') {
-        const ma = a.machine?.machineCode ?? '\uffff'
-        const mb = b.machine?.machineCode ?? '\uffff'
-        const c = cmp(ma, mb)
-        if (c !== 0) return c
-      } else if (sortKey === 'operator') {
-        const oa = a.shiftOperator?.name ?? a.assignedOperator ?? '\uffff'
-        const ob = b.shiftOperator?.name ?? b.assignedOperator ?? '\uffff'
-        const c = cmp(oa, ob)
-        if (c !== 0) return c
-      } else if (sortKey === 'status') {
-        const sa = hubBadge(a).label
-        const sb = hubBadge(b).label
-        const c = cmp(sa, sb)
-        if (c !== 0) return c
-      } else if (sortKey === 'po') {
-        const pa2 = a.poLine?.poNumber ?? '\uffff'
-        const pb2 = b.poLine?.poNumber ?? '\uffff'
-        const c = cmp(pa2, pb2)
-        if (c !== 0) return c
-      } else if (sortKey === 'yield') {
-        const ya = a.yield?.yieldPercent ?? -1
-        const yb = b.yield?.yieldPercent ?? -1
-        if (ya !== yb) return (ya - yb) * dir
-      }
-
-      return b.jobCardNumber - a.jobCardNumber
+      const rank: Record<UiStatus, number> = { pending: 0, ready: 1, pushed: 2 }
+      const d = rank[getUiStatus(a)] - rank[getUiStatus(b)]
+      if (d !== 0) return d
+      return a.jobCardNumber - b.jobCardNumber
     })
     return copy
-  }, [list, sortKey, sortDir])
+  }, [list])
 
-  function toggleSort(key: SortKey) {
-    if (sortKey !== key) {
-      setSortKey(key)
-      setSortDir('asc')
-      return
-    }
-    setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-  }
-
-  function SortHeader({
-    label,
-    k,
-    className,
-  }: {
-    label: string
-    k: SortKey
-    className?: string
-  }) {
-    const active = sortKey === k
-    return (
-      <button
-        type="button"
-        onClick={() => toggleSort(k)}
-        className={clsx(
-          'inline-flex items-center gap-1 text-left text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted hover:text-ds-ink',
-          className,
-        )}
-      >
-        {label}
-        {active ? (
-          sortDir === 'asc' ? (
-            <ArrowUpAZ className="h-3.5 w-3.5" />
-          ) : (
-            <ArrowDownAZ className="h-3.5 w-3.5" />
-          )
-        ) : null}
-      </button>
-    )
-  }
+  const visibleList = useMemo(() => {
+    return sortedList.filter((jc) => {
+      const st = getUiStatus(jc)
+      const br = getBoardReadiness(jc)
+      if (statusFilter !== 'all' && st !== statusFilter) return false
+      if (readinessFilter !== 'all' && br !== readinessFilter) return false
+      return true
+    })
+  }, [readinessFilter, sortedList, statusFilter])
 
   if (loading && list.length === 0) {
     return (
@@ -311,124 +193,76 @@ export default function JobCardsPage() {
         <div className="flex flex-wrap gap-2 items-center">
           <input
             type="search"
-            placeholder="Search PO, customer, AW code…"
+            placeholder="Search customer…"
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             className="min-w-[220px] flex-1 max-w-md px-3 py-2 rounded-lg bg-ds-main border border-ds-line/50 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:outline-none focus:ring-1 focus:ring-ds-warning/35"
           />
-          <label className="flex items-center gap-2 text-xs text-ds-ink-muted cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={priorityOnly}
-              onChange={(e) => setPriorityOnly(e.target.checked)}
-              className="rounded border-ds-line/60 bg-ds-main"
-            />
-            Director: priority only
-          </label>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {SEGMENTS.map((s) => (
-            <button
-              key={s.id || 'all'}
-              type="button"
-              onClick={() => setSegment(s.id)}
-              className={clsx(
-                'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
-                segment === s.id
-                  ? 'bg-ds-warning/8 text-ds-warning border-ds-warning/50'
-                  : 'bg-ds-main text-ds-ink-muted border-ds-line/40 hover:border-ds-line/60',
-              )}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-ds-ink-faint shrink-0">Machine</span>
             <select
-              value={machineId}
-              onChange={(e) => setMachineId(e.target.value)}
-              className="px-2 py-1.5 rounded-md bg-ds-main border border-ds-line/50 text-ds-ink max-w-[160px]"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | UiStatus)}
+              className="px-2 py-2 rounded-md bg-ds-main border border-ds-line/50 text-ds-ink text-sm"
             >
-              <option value="">All</option>
-              {machines.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.machineCode}
-                </option>
-              ))}
+              <option value="all">All status</option>
+              <option value="pending">Pending</option>
+              <option value="ready">Ready</option>
+              <option value="pushed">Pushed to Planning</option>
+            </select>
+            <select
+              value={readinessFilter}
+              onChange={(e) => setReadinessFilter(e.target.value as 'all' | BoardReadiness)}
+              className="px-2 py-2 rounded-md bg-ds-main border border-ds-line/50 text-ds-ink text-sm"
+            >
+              <option value="all">All board readiness</option>
+              <option value="ready">Ready</option>
+              <option value="waiting">Waiting</option>
+              <option value="not_ready">Not Ready</option>
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-ds-ink-faint shrink-0">Operator</span>
-            <select
-              value={operatorId}
-              onChange={(e) => setOperatorId(e.target.value)}
-              className="px-2 py-1.5 rounded-md bg-ds-main border border-ds-line/50 text-ds-ink max-w-[180px]"
-            >
-              <option value="">All</option>
-              {operatorOptions.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
       </div>
 
-      <div className="flex-1 overflow-x-auto px-2 pb-4">
-        <table className="w-full text-sm min-w-[960px] border-collapse">
+      {visibleList.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="text-center">
+            <h2 className="text-xl font-semibold text-ds-ink">No Job Cards Yet</h2>
+            <p className="mt-1 text-sm text-ds-ink-faint">Jobs pushed from AW Queue will appear here</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-x-auto px-2 pb-4">
+          <table className="w-full text-sm min-w-[960px] border-collapse">
           <thead>
             <tr className="border-b border-ds-line/40 text-left">
               <th className="py-2 pl-2 pr-1 w-8" aria-label="Priority" />
-              <th className="py-2 px-2">
-                <SortHeader k="po" label="PO #" />
-              </th>
-              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
-                Client
-              </th>
               <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
                 Product
               </th>
-              <th className="py-2 px-2">
-                <SortHeader k="machine" label="Machine" />
+              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
+                Qty
+              </th>
+              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
+                Board readiness
               </th>
               <th className="py-2 px-2">
-                <SortHeader k="operator" label="Operator" />
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
+                  Status
+                </span>
               </th>
-              <th className="py-2 px-2">
-                <SortHeader k="status" label="Status" />
-              </th>
-              <th className="py-2 px-2 text-right">
-                <SortHeader k="yield" label="Live yield %" className="justify-end w-full" />
-              </th>
-              <th className="py-2 px-2 text-right text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
-                Card
-              </th>
+              <th className="py-2 px-2 text-right text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">Open</th>
             </tr>
           </thead>
           <tbody>
-            {sortedList.map((jc) => {
-              const badge = hubBadge(jc)
-              const op = jc.shiftOperator?.name ?? jc.assignedOperator ?? '—'
+            {visibleList.map((jc) => {
+              const st = getUiStatus(jc)
+              const br = getBoardReadiness(jc)
+              const brMeta = boardReadinessMeta(br)
               return (
                 <tr
                   key={jc.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setAuditRow(jc)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      setAuditRow(jc)
-                    }
-                  }}
                   className={clsx(
-                    'border-b border-ds-card/90 cursor-pointer hover:bg-ds-main/80 transition-colors',
+                    'h-14 border-b border-ds-card/90 transition-all duration-150 hover:bg-ds-main/70 hover:shadow-sm',
                     jc.poLine?.industrialPriority === true ? INDUSTRIAL_PRIORITY_ROW_CLASS : '',
+                    st === 'pushed' ? 'bg-emerald-500/10' : '',
                   )}
                 >
                   <td className="py-2 pl-2 pr-0 align-middle">
@@ -441,73 +275,61 @@ export default function JobCardsPage() {
                       <span className="inline-block w-4" />
                     )}
                   </td>
-                  <td className={`py-2 px-2 align-middle ${mono} text-ds-warning`}>
+                  <td className="py-2 px-2 align-middle">
                     <div className="flex flex-col gap-0.5">
-                      <span>{jc.poLine?.poNumber ?? '—'}</span>
-                      {jc.poLine?.artworkCode ? (
-                        <span className="text-[10px] text-ds-ink-faint">{jc.poLine.artworkCode}</span>
-                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => setAuditRow(jc)}
+                        className="w-fit font-semibold text-ds-ink hover:text-ds-warning"
+                      >
+                        {jc.poLine?.cartonName ?? '—'}
+                      </button>
+                      <span className="text-[11px] text-ds-ink-faint truncate" title={jc.customer?.name}>{jc.customer?.name ?? '—'}</span>
+                      <span className={`text-[10px] text-ds-ink-faint ${mono}`}>
+                        {jc.poLine?.poNumber ?? '—'} • {jc.poLine?.artworkCode ?? '—'}
+                      </span>
                     </div>
                   </td>
-                  <td className="py-2 px-2 text-ds-ink-muted align-middle max-w-[140px] truncate" title={jc.customer?.name}>
-                    {jc.customer?.name}
-                  </td>
-                  <td className="py-2 px-2 text-ds-ink-muted align-middle max-w-[200px]">
-                    <div className="truncate" title={jc.poLine?.cartonName ?? ''}>
-                      {jc.poLine?.cartonName ?? '—'}
-                    </div>
-                  </td>
-                  <td className={`py-2 px-2 align-middle ${mono} text-ds-ink`}>
-                    {jc.machine?.machineCode ?? '—'}
-                  </td>
-                  <td className={`py-2 px-2 align-middle ${mono} text-ds-ink-muted max-w-[120px] truncate`} title={op}>
-                    {op}
+                  <td className={`py-2 px-2 align-middle ${mono} text-ds-ink text-right`}>
+                    {jc.poLine?.quantity?.toLocaleString('en-IN') ?? '—'}
                   </td>
                   <td className="py-2 px-2 align-middle">
-                    <HubStatusBadge kind={badge.kind} label={badge.label} />
+                    <span
+                      className="inline-flex items-center gap-1.5 rounded border border-ds-line/50 bg-ds-main px-2 py-0.5 text-[11px]"
+                      title={brMeta.tooltip}
+                    >
+                      <span className={clsx('h-2 w-2 rounded-full', brMeta.dot)} />
+                      {brMeta.label}
+                    </span>
                   </td>
-                  <td className={`py-2 px-2 align-middle text-right ${mono}`}>
-                    {jc.yield?.yieldPercent != null ? (
-                      <span
-                        className={clsx(
-                          jc.yield.yieldPercent < 92 ? 'text-rose-400' : 'text-emerald-400',
-                        )}
-                      >
-                        {jc.yield.yieldPercent}%
-                      </span>
-                    ) : (
-                      <span className="text-ds-ink-faint">—</span>
-                    )}
+                  <td className="py-2 px-2 align-middle">
+                    <span
+                      className={clsx(
+                        'inline-flex items-center rounded border px-2 py-0.5 text-[11px]',
+                        st === 'pending' && 'border-ds-line/60 bg-ds-main text-ds-ink-muted',
+                        st === 'ready' && 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+                        st === 'pushed' && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+                      )}
+                    >
+                      {st === 'pending' ? 'Pending' : st === 'ready' ? 'Ready' : 'Pushed to Planning'}
+                    </span>
                   </td>
-                  <td className="py-2 px-2 align-middle text-right" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex justify-end gap-1">
-                      <a
-                        href={`/api/job-cards/${jc.id}/card-pdf`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1.5 rounded-md text-ds-ink-muted hover:text-ds-warning hover:bg-ds-card"
-                        title="Print official card"
-                        aria-label="Print official card"
-                      >
-                        <Printer className="h-4 w-4" />
-                      </a>
-                      <Link
-                        href={`/production/job-cards/${jc.id}`}
-                        className="text-[11px] text-ds-warning/90 hover:underline px-1 py-1.5"
-                      >
-                        Open
-                      </Link>
-                    </div>
+                  <td className="py-2 px-2 align-middle text-right">
+                    <Link
+                      href={`/production/job-cards/${jc.id}`}
+                      className="inline-flex items-center justify-center rounded border border-ds-line/60 bg-ds-main p-1 text-ds-ink-muted hover:text-ds-warning"
+                      aria-label={`Open full edit for job card ${jc.jobCardNumber}`}
+                    >
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
                   </td>
                 </tr>
               )
             })}
           </tbody>
-        </table>
-        {sortedList.length === 0 && (
-          <p className="text-center text-ds-ink-faint text-sm py-12">No job cards match these filters.</p>
-        )}
-      </div>
+          </table>
+        </div>
+      )}
 
       <footer className="mt-auto border-t border-ds-line/40 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-ds-ink-faint">
         <span>

@@ -1892,7 +1892,6 @@ export default function DesigningQueuePage() {
                         const canFinalizeRow = canFinalizePlateHubRow(r)
                         const canRecallPlanning = canRecallPlanningRow(r, spec)
                         const jcState = awJobCardState(r)
-                        const embossEnabled = isEmbossingRequired(r.embossingLeafing)
 
                         return (
                           <tr
