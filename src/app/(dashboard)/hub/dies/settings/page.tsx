@@ -160,7 +160,7 @@ export default function DieHubSettingsPage() {
                   <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-background/30">
                     <div>
                       <p className="text-sm font-medium text-ds-ink">{o.name}</p>
-                      <p className="text-[11px] text-neutral-500">
+                      <p className="text-xs text-neutral-500">
                         {o.isActive ? (
                           <span className="text-emerald-500 font-semibold">Active</span>
                         ) : (

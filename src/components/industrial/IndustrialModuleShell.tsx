@@ -26,7 +26,7 @@ export function IndustrialModuleShell({
       <div className="mx-auto max-w-[1800px] space-y-4 p-3 md:p-4 pb-24">
         <header className="space-y-1">
           <h1 className="text-lg md:text-xl font-bold tracking-tight text-ds-warning">{title}</h1>
-          {subtitle ? <p className="text-[11px] text-ds-ink-faint">{subtitle}</p> : null}
+          {subtitle ? <p className="text-xs text-ds-ink-faint">{subtitle}</p> : null}
         </header>
         {kpiRow ? (
           <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-8">

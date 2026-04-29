@@ -210,7 +210,7 @@ export default function EditSupplierPage() {
             placeholder="0 = advance, 30 = Net 30"
             className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground font-mono tabular-nums"
           />
-          <p className="mt-1 text-[11px] text-ds-ink-faint">
+          <p className="mt-1 text-xs text-ds-ink-faint">
             Drives projected payment date from GRN receipt (calendar days).
           </p>
         </div>

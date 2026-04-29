@@ -332,7 +332,7 @@ export function ToolingHubLedgerTable({
                     data-hub-emboss-id={r.kind === 'emboss' ? r.id : undefined}
                     className={`${enterpriseTrClass} border-b border-neutral-200 dark:border-ds-line/40 ${priorityRowDie}`}
                   >
-                    <td className="px-4 py-3 font-designing-queue text-[11px] tabular-nums text-ds-ink-faint dark:text-ds-ink-muted">
+                    <td className="px-4 py-3 font-designing-queue text-xs tabular-nums text-ds-ink-faint dark:text-ds-ink-muted">
                       {rank}
                     </td>
                     <td className="px-4 py-3 min-w-0">
@@ -351,7 +351,7 @@ export function ToolingHubLedgerTable({
                     <td className="px-4 py-3 text-right font-designing-queue text-sm font-semibold tabular-nums text-neutral-900 whitespace-nowrap dark:text-ds-ink-muted">
                       {r.kind === 'die' ? (r.ups ?? '—') : '—'}
                     </td>
-                    <td className="px-4 py-3 max-w-[140px] min-w-0 text-[11px] text-neutral-700 dark:text-ds-ink-muted">
+                    <td className="px-4 py-3 max-w-[140px] min-w-0 text-xs text-neutral-700 dark:text-ds-ink-muted">
                       {r.kind === 'die' ? (
                         <div className="flex flex-col gap-1">
                           <div className="flex flex-wrap items-center gap-1">
@@ -394,7 +394,7 @@ export function ToolingHubLedgerTable({
                               matches: r.typeMismatchMatches ?? [],
                             })
                           }
-                          className="text-red-400 hover:text-red-300 font-bold text-[11px] uppercase tracking-wide"
+                          className="text-red-400 hover:text-red-300 font-bold text-xs uppercase tracking-wide"
                         >
                           Type mismatch
                         </button>
@@ -408,7 +408,7 @@ export function ToolingHubLedgerTable({
                               matches: r.similarMatches ?? [],
                             })
                           }
-                          className="text-ds-warning hover:text-ds-warning font-bold text-[11px] uppercase tracking-wide"
+                          className="text-ds-warning hover:text-ds-warning font-bold text-xs uppercase tracking-wide"
                         >
                           Similar
                         </button>
@@ -416,7 +416,7 @@ export function ToolingHubLedgerTable({
                         <span className="text-ds-ink-faint dark:text-ds-ink-faint">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-designing-queue text-[11px] tabular-nums text-ds-ink-faint whitespace-nowrap dark:text-ds-ink-muted">
+                    <td className="px-4 py-3 font-designing-queue text-xs tabular-nums text-ds-ink-faint whitespace-nowrap dark:text-ds-ink-muted">
                       {r.kind === 'die' ? formatDom(r.dateOfManufacturing) : '—'}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
@@ -435,7 +435,7 @@ export function ToolingHubLedgerTable({
                         <span className="text-ds-ink-faint dark:text-ds-ink-faint">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-designing-queue text-[11px] tabular-nums text-ds-ink-faint whitespace-nowrap dark:text-ds-ink-muted">
+                    <td className="px-4 py-3 font-designing-queue text-xs tabular-nums text-ds-ink-faint whitespace-nowrap dark:text-ds-ink-muted">
                       {timeInZone}
                     </td>
                     <td className="px-4 py-3 max-w-[200px] text-sm leading-snug text-ds-ink-faint dark:text-ds-ink-faint">

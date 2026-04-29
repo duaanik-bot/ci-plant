@@ -14,7 +14,7 @@ export function RowStateLegend({
   helperText,
 }: RowStateLegendProps) {
   return (
-    <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-muted">
+    <div className="flex flex-wrap items-center gap-2 text-xs text-ds-ink-muted">
       <span className="font-semibold text-ds-ink-faint">Row states:</span>
       <span
         className="inline-flex items-center text-ds-ink-faint"

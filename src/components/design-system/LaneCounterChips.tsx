@@ -46,7 +46,7 @@ export function LaneCounterChips({
             key={chip.key}
             type="button"
             onClick={chip.onClick}
-            className={`rounded border px-2 py-0.5 text-[11px] transition-colors ${toneClass(tone, active)}`}
+            className={`rounded border px-2 py-0.5 text-xs transition-colors ${toneClass(tone, active)}`}
           >
             {chip.label} ({chip.count})
           </button>

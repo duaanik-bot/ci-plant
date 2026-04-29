@@ -119,7 +119,7 @@ export function DieTriageCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono text-[10px] text-ds-warning/90 truncate">{r.displayCode}</span>
+          <span className="font-mono text-xs text-ds-warning/90 truncate">{r.displayCode}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <HubCardDeleteAction
@@ -133,7 +133,7 @@ export function DieTriageCard({
             type="button"
             disabled={saving}
             title="Undo last hub action"
-            className="text-[10px] font-bold uppercase tracking-wide text-ds-warning border border-ds-warning/30 rounded px-1.5 py-0.5 hover:bg-ds-warning/10 disabled:opacity-50 whitespace-nowrap"
+            className="text-xs font-bold uppercase tracking-wide text-ds-warning border border-ds-warning/30 rounded px-1.5 py-0.5 hover:bg-ds-warning/10 disabled:opacity-50 whitespace-nowrap"
             onClick={onReverse}
           >
             ↺ Reverse
@@ -142,7 +142,7 @@ export function DieTriageCard({
             <button
               type="button"
               onClick={onSimilarClick}
-              className="text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-600/60 rounded px-1.5 py-0.5 hover:bg-red-950/40"
+              className="text-xs font-bold uppercase tracking-wider text-red-400 border border-red-600/60 rounded px-1.5 py-0.5 hover:bg-red-950/40"
             >
               Type mismatch
             </button>
@@ -150,7 +150,7 @@ export function DieTriageCard({
             <button
               type="button"
               onClick={onSimilarClick}
-              className="text-[9px] font-bold uppercase tracking-wider text-ds-warning border border-ds-warning/50 rounded px-1.5 py-0.5 hover:bg-ds-warning/10"
+              className="text-xs font-bold uppercase tracking-wider text-ds-warning border border-ds-warning/50 rounded px-1.5 py-0.5 hover:bg-ds-warning/10"
             >
               Similar
             </button>
@@ -158,17 +158,17 @@ export function DieTriageCard({
           {hubColumnPriority ? <HubPriorityRankBadge rank={hubColumnPriority.rank} /> : null}
         </div>
       </div>
-      <p className="text-[11px] text-neutral-500 truncate mt-1" title={r.title}>
+      <p className="text-xs text-neutral-500 truncate mt-1" title={r.title}>
         {r.title}
       </p>
       {onHold ? (
-        <p className="mt-1 text-[10px] text-yellow-200/90 leading-snug">
+        <p className="mt-1 text-xs text-yellow-200/90 leading-snug">
           <span className="font-bold uppercase tracking-wide text-yellow-400">On hold</span>
           {r.hubTriageHoldReason ? `: ${r.hubTriageHoldReason}` : null}
         </p>
       ) : null}
       {r.hubConditionPoor ? (
-        <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-red-400 border border-red-700/60 rounded px-1.5 py-0.5 w-fit">
+        <p className="mt-1 text-xs font-bold uppercase tracking-wider text-red-400 border border-red-700/60 rounded px-1.5 py-0.5 w-fit">
           Poor condition
         </p>
       ) : null}
@@ -182,7 +182,7 @@ export function DieTriageCard({
       {specs}
 
       <div className="mt-2 space-y-2">
-        <p className="text-[9px] font-semibold uppercase tracking-wider text-neutral-500">Command center</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Command center</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <button
             type="button"
@@ -203,7 +203,7 @@ export function DieTriageCard({
         </div>
 
         <div className={`rounded-md border border-ds-line/50 bg-ds-main/80 p-2 ${triageLocked ? 'opacity-50 pointer-events-none' : ''}`}>
-          <p className="text-[10px] font-semibold text-neutral-500 mb-1">Manual link (any rack die)</p>
+          <p className="text-xs font-semibold text-neutral-500 mb-1">Manual link (any rack die)</p>
           <input
             value={manualQ}
             onChange={(e) => setManualQ(e.target.value)}
@@ -232,7 +232,7 @@ export function DieTriageCard({
                     }}
                   >
                     <span className="font-mono text-ds-warning">{it.displayCode}</span>
-                    <span className="block text-[10px] text-neutral-500 leading-tight">{it.subtitle}</span>
+                    <span className="block text-xs text-neutral-500 leading-tight">{it.subtitle}</span>
                   </button>
                 </li>
               ))}
@@ -252,7 +252,7 @@ export function DieTriageCard({
             </button>
           ) : (
             <>
-              <label className="block text-[10px] text-neutral-500">
+              <label className="block text-xs text-neutral-500">
                 Hold reason (logged)
                 <textarea
                   value={holdReasonDraft}
@@ -275,7 +275,7 @@ export function DieTriageCard({
         </div>
       </div>
 
-      <p className="mt-1.5 text-[10px] leading-tight text-neutral-500">
+      <p className="mt-1.5 text-xs leading-tight text-neutral-500">
         Time in triage: {hubQueueAgeLabel(r.lastStatusUpdatedAt)}
       </p>
       <HubPriorityReorderAuditFooter

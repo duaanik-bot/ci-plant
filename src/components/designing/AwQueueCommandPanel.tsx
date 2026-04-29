@@ -185,7 +185,7 @@ export function AwQueueCommandPanel({
             closed ? 'border-ds-line/50 bg-ds-main/50 opacity-80' : 'border-ds-line/40 bg-background',
           )}
         >
-          <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+          <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             <span className="text-ds-ink-faint font-sans">Client</span>
             <span className="text-ds-ink font-medium truncate max-w-[14rem]">{customerName}</span>
             <span className="text-ds-ink-faint hidden sm:inline">·</span>
@@ -199,7 +199,7 @@ export function AwQueueCommandPanel({
             <span className={`text-ds-ink-muted ${mono}`}>{planningStatus}</span>
             <span
               className={clsx(
-                'rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ring-1',
+                'rounded px-1.5 py-0.5 text-xs font-bold uppercase ring-1',
                 awPo === AW_PO_STATUS.OPEN && 'bg-emerald-950/40 text-emerald-300 ring-emerald-500/40',
                 awPo === AW_PO_STATUS.CLOSED && 'bg-ds-elevated text-ds-ink-muted ring-ds-line/50',
                 awPo === AW_PO_STATUS.REOPENED && 'bg-orange-950/50 text-orange-200 ring-orange-500/50',
@@ -208,7 +208,7 @@ export function AwQueueCommandPanel({
               PO {awPo}
             </span>
             {partialStatus === 'partially_sent' ? (
-              <span className="rounded bg-ds-warning/10 px-1.5 py-0.5 text-[10px] font-semibold text-ds-warning ring-1 ring-ds-warning/40">
+              <span className="rounded bg-ds-warning/10 px-1.5 py-0.5 text-xs font-semibold text-ds-warning ring-1 ring-ds-warning/40">
                 Partially sent
               </span>
             ) : null}
@@ -218,7 +218,7 @@ export function AwQueueCommandPanel({
               type="button"
               disabled={!!busy || closed}
               onClick={() => void postLifecycle('manual_close')}
-              className="rounded-md bg-ds-line/30 px-2.5 py-1 text-[10px] font-semibold text-foreground hover:bg-ds-line/40 disabled:opacity-40"
+              className="rounded-md bg-ds-line/30 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-ds-line/40 disabled:opacity-40"
             >
               {busy === 'manual_close' ? '…' : 'Manual close'}
             </button>
@@ -226,7 +226,7 @@ export function AwQueueCommandPanel({
               type="button"
               disabled={!!busy || jobType !== 'repeat' || awPo !== AW_PO_STATUS.CLOSED}
               onClick={() => void postLifecycle('force_reopen')}
-              className="rounded-md bg-orange-600 px-2.5 py-1 text-[10px] font-semibold text-foreground hover:bg-orange-500 disabled:opacity-40"
+              className="rounded-md bg-orange-600 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-orange-500 disabled:opacity-40"
             >
               {busy === 'force_reopen' ? '…' : 'Force reopen'}
             </button>
@@ -235,10 +235,10 @@ export function AwQueueCommandPanel({
 
         <div className="space-y-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-ds-ink-faint">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">
               Batch progress
             </span>
-            <span className={`text-[10px] text-ds-ink-faint ${mono}`}>
+            <span className={`text-xs text-ds-ink-faint ${mono}`}>
               {totalB > 0 ? `${runB} / ${totalB} runs · ${balance} remaining` : 'Set contract total to track'}
             </span>
           </div>
@@ -263,14 +263,14 @@ export function AwQueueCommandPanel({
 
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="rounded-lg border border-ds-line/40 bg-background p-2 space-y-2">
-            <p className="text-[10px] font-semibold uppercase text-ds-ink-faint">Push mode</p>
+            <p className="text-xs font-semibold uppercase text-ds-ink-faint">Push mode</p>
             <div className="inline-flex rounded-lg border border-ds-line/50 overflow-hidden">
               <button
                 type="button"
                 disabled={!!busy || closed}
                 onClick={() => void persistSpecPatch({ awPushMode: AW_PUSH_MODE.ONE_GO })}
                 className={clsx(
-                  'px-3 py-1.5 text-[11px] font-medium',
+                  'px-3 py-1.5 text-xs font-medium',
                   pushMode === AW_PUSH_MODE.ONE_GO
                     ? 'bg-ds-warning text-primary-foreground'
                     : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card',
@@ -283,7 +283,7 @@ export function AwQueueCommandPanel({
                 disabled={!!busy || closed}
                 onClick={() => void persistSpecPatch({ awPushMode: AW_PUSH_MODE.PARTIAL })}
                 className={clsx(
-                  'px-3 py-1.5 text-[11px] font-medium border-l border-ds-line/50',
+                  'px-3 py-1.5 text-xs font-medium border-l border-ds-line/50',
                   pushMode === AW_PUSH_MODE.PARTIAL
                     ? 'bg-ds-warning text-primary-foreground'
                     : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card',
@@ -293,7 +293,7 @@ export function AwQueueCommandPanel({
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <label className="block text-[10px] text-ds-ink-faint">
+              <label className="block text-xs text-ds-ink-faint">
                 Total contract batches
                 <input
                   type="number"
@@ -309,7 +309,7 @@ export function AwQueueCommandPanel({
                   }}
                 />
               </label>
-              <label className="block text-[10px] text-ds-ink-faint">
+              <label className="block text-xs text-ds-ink-faint">
                 In production (batches)
                 <input
                   type="number"
@@ -331,7 +331,7 @@ export function AwQueueCommandPanel({
                 type="button"
                 disabled={!!busy || closed}
                 onClick={() => void logPartialPush()}
-                className="w-full rounded border border-ds-warning/50 bg-ds-warning/10 py-1.5 text-[11px] font-semibold text-ds-ink hover:bg-ds-warning/10 disabled:opacity-40"
+                className="w-full rounded border border-ds-warning/50 bg-ds-warning/10 py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-warning/10 disabled:opacity-40"
               >
                 {busy === 'partial' ? 'Logging…' : 'Log partial push'}
               </button>
@@ -339,7 +339,7 @@ export function AwQueueCommandPanel({
             <button
               type="button"
               onClick={() => setLedgerOpen(true)}
-              className="inline-flex w-full items-center justify-center gap-1 rounded border border-ds-line/50 py-1 text-[10px] text-ds-ink-muted hover:bg-ds-card"
+              className="inline-flex w-full items-center justify-center gap-1 rounded border border-ds-line/50 py-1 text-xs text-ds-ink-muted hover:bg-ds-card"
             >
               Push history ({ledger.length})
               <ChevronDown className="h-3 w-3" />
@@ -354,15 +354,15 @@ export function AwQueueCommandPanel({
               footer={
                 <button
                   type="button"
-                  className="w-full rounded-ds-sm border border-ds-line/50 py-2 text-[11px] text-ds-ink-muted transition hover:bg-ds-elevated"
+                  className="w-full rounded-ds-sm border border-ds-line/50 py-2 text-xs text-ds-ink-muted transition hover:bg-ds-elevated"
                   onClick={() => setLedgerOpen(false)}
                 >
                   Close
                 </button>
               }
             >
-              <p className="text-[11px] text-ds-ink-faint">Timestamp · batches · job card · operator</p>
-              <ul className="mt-2 max-h-[50vh] overflow-auto divide-y divide-ds-line/30 text-[10px] sm:max-h-[min(60vh,28rem)]">
+              <p className="text-xs text-ds-ink-faint">Timestamp · batches · job card · operator</p>
+              <ul className="mt-2 max-h-[50vh] overflow-auto divide-y divide-ds-line/30 text-xs sm:max-h-[min(60vh,28rem)]">
                 {ledger.length === 0 ? (
                   <li className="py-4 text-ds-ink-faint">No entries yet.</li>
                 ) : (
@@ -390,12 +390,12 @@ export function AwQueueCommandPanel({
           </div>
 
           <div className="rounded-lg border border-ds-line/40 bg-background p-2 space-y-2">
-            <p className="text-[10px] font-semibold uppercase text-ds-ink-faint flex items-center gap-1">
+            <p className="text-xs font-semibold uppercase text-ds-ink-faint flex items-center gap-1">
               <Package className="h-3 w-3" aria-hidden />
               Material handshake
             </p>
             {inv ? (
-              <div className="space-y-1 text-[10px] text-ds-ink-muted leading-snug">
+              <div className="space-y-1 text-xs text-ds-ink-muted leading-snug">
                 <div>
                   <span className="text-ds-ink-faint">Target</span>{' '}
                   <span className={`text-ds-ink ${mono}`}>{inv.targetSheetSize ?? '—'}</span>
@@ -413,18 +413,18 @@ export function AwQueueCommandPanel({
                   type="button"
                   disabled={!!busy || closed || !jobCardId}
                   onClick={() => void applyInventoryToJobCard()}
-                  className="mt-1 w-full rounded border border-cyan-700/60 bg-cyan-950/30 py-1 text-[11px] font-semibold text-cyan-100 hover:bg-cyan-950/50 disabled:opacity-40"
+                  className="mt-1 w-full rounded border border-cyan-700/60 bg-cyan-950/30 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-950/50 disabled:opacity-40"
                 >
                   {busy === 'inv' ? 'Applying…' : 'Apply to job card'}
                 </button>
               </div>
             ) : (
-              <p className="text-[10px] text-ds-ink-faint">Loading inventory match…</p>
+              <p className="text-xs text-ds-ink-faint">Loading inventory match…</p>
             )}
           </div>
         </div>
 
-        <p className="text-center text-[10px] text-ds-ink-faint font-designing-queue">
+        <p className="text-center text-xs text-ds-ink-faint font-designing-queue">
           PO Lifecycle Managed — Tracking balance:{' '}
           <span className="text-ds-ink-muted">{balance}</span> batches.
         </p>

@@ -14,7 +14,7 @@ export function HubPriorityRankBadge({ rank }: { rank: number }) {
   if (rank < 1) return null
   return (
     <span
-      className="shrink-0 rounded border border-ds-warning/50 bg-ds-card/80 px-1.5 py-0.5 text-[10px] font-bold text-ds-warning/90 font-designing-queue tabular-nums"
+      className="shrink-0 rounded border border-ds-warning/50 bg-ds-card/80 px-1.5 py-0.5 text-xs font-bold text-ds-warning/90 font-designing-queue tabular-nums"
       title="Column priority"
     >
       #{rank}

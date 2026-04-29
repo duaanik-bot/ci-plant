@@ -1840,7 +1840,7 @@ export default function DesigningDetailPage() {
             <p className="text-xs sm:text-sm text-ds-ink-muted">
               {line.po.customer.name} | PO {line.po.poNumber} | Qty {line.quantity}
             </p>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] leading-tight">
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs leading-tight">
               <div className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-border/50 bg-background px-1.5 py-0.5">
                 <span className={`text-ds-ink ${techMono}`}>
                   <span className="text-ds-ink-faint font-sans font-normal mr-1">AW</span>
@@ -1984,17 +1984,17 @@ export default function DesigningDetailPage() {
         <div className="rounded-lg border border-ds-line/40 bg-card px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${techMono}`}>
+              <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${techMono}`}>
                 Workflow assistant
               </p>
-              <p className="text-[11px] text-ds-ink-muted">
+              <p className="text-xs text-ds-ink-muted">
                 Push mode, material handshake, and lifecycle controls.
               </p>
             </div>
             <button
               type="button"
               onClick={() => setShowCommandPanel((v) => !v)}
-              className="rounded border border-ds-line/60 bg-ds-main px-2.5 py-1 text-[11px] text-ds-ink hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+              className="rounded border border-ds-line/60 bg-ds-main px-2.5 py-1 text-xs text-ds-ink hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
             >
               {showCommandPanel ? 'Hide panel' : 'Show panel'}
             </button>
@@ -2027,7 +2027,7 @@ export default function DesigningDetailPage() {
                 Section 1 — Identification &amp; spec
               </h2>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] text-ds-ink-faint shrink-0">Job type</span>
+                <span className="text-xs text-ds-ink-faint shrink-0">Job type</span>
                 <div className="inline-flex rounded-lg border border-border/50 overflow-hidden">
                   <button
                     type="button"
@@ -2055,7 +2055,7 @@ export default function DesigningDetailPage() {
                   </button>
                 </div>
               </div>
-              <div className="text-[11px] text-ds-ink-faint leading-snug md:text-right">
+              <div className="text-xs text-ds-ink-faint leading-snug md:text-right">
                 <span>
                   Smart Match reads <strong className="text-ds-ink-muted">Product Master</strong> when{' '}
                   <strong className="text-ds-ink-muted">Set #</strong> or <strong className="text-ds-ink-muted">product selection</strong>{' '}
@@ -2065,7 +2065,7 @@ export default function DesigningDetailPage() {
             </div>
             {!effectiveArtworkId && artworkCodeInput.trim() ? (
               <div
-                className={`mb-3 flex items-start gap-2 border-l-2 pl-2 py-0.5 text-[11px] leading-snug ${
+                className={`mb-3 flex items-start gap-2 border-l-2 pl-2 py-0.5 text-xs leading-snug ${
                   section1ManualHubOk
                     ? 'border-ds-warning/80 text-ds-ink-muted'
                     : 'border-rose-500/80 text-ds-ink-muted'
@@ -2092,7 +2092,7 @@ export default function DesigningDetailPage() {
               </div>
             ) : null}
             <div className="flex flex-wrap items-center gap-2 mb-2">
-              <span className="text-[11px] text-ds-ink-faint shrink-0">Pre-batch Printed</span>
+              <span className="text-xs text-ds-ink-faint shrink-0">Pre-batch Printed</span>
               <div className="inline-flex rounded-lg border border-border/50 overflow-hidden">
                 <button
                   type="button"
@@ -2125,7 +2125,7 @@ export default function DesigningDetailPage() {
                     <button
                       type="button"
                       disabled={specLocked}
-                      className="rounded-md border border-ds-line/50 bg-ds-main px-2.5 py-1.5 text-[11px] font-semibold text-ds-ink hover:bg-ds-card disabled:opacity-50"
+                      className="rounded-md border border-ds-line/50 bg-ds-main px-2.5 py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-card disabled:opacity-50"
                     >
                       Batch details…
                     </button>
@@ -2141,13 +2141,13 @@ export default function DesigningDetailPage() {
                       <Dialog.Title className="text-sm font-semibold text-ds-ink">
                         Pharma pre-batch
                       </Dialog.Title>
-                      <Dialog.Description className="mt-1 text-[11px] text-ds-ink-faint">
+                      <Dialog.Description className="mt-1 text-xs text-ds-ink-faint">
                         Batch coding fields (compact drawer).
                       </Dialog.Description>
                       <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
                         <label className="block text-xs text-ds-ink-muted">
                           Batch details / format{' '}
-                          <span className="text-ds-ink-faint font-mono text-[10px]">batch_details_format</span>
+                          <span className="text-ds-ink-faint font-mono text-xs">batch_details_format</span>
                           <input
                             type="text"
                             value={batchDetailsInput}
@@ -2160,7 +2160,7 @@ export default function DesigningDetailPage() {
                         </label>
                         <label className="block text-xs text-ds-ink-muted">
                           Batch block size{' '}
-                          <span className="text-ds-ink-faint font-mono text-[10px]">batch_block_size</span>
+                          <span className="text-ds-ink-faint font-mono text-xs">batch_block_size</span>
                           <input
                             type="text"
                             value={batchSizeInput}
@@ -2173,7 +2173,7 @@ export default function DesigningDetailPage() {
                         </label>
                         <label className="block text-xs text-ds-ink-muted">
                           Batch total qty{' '}
-                          <span className="text-ds-ink-faint font-mono text-[10px]">batch_total_qty</span>
+                          <span className="text-ds-ink-faint font-mono text-xs">batch_total_qty</span>
                           <input
                             type="text"
                             inputMode="numeric"
@@ -2222,10 +2222,10 @@ export default function DesigningDetailPage() {
                   aria-invalid={showNewProductSetHint}
                 />
                 {jobType === 'repeat' && lastUsedFromHistory?.setNumber ? (
-                  <p className="mt-0.5 text-[10px] text-neutral-700/90 font-designing-queue">Last used: {lastUsedFromHistory.setNumber}</p>
+                  <p className="mt-0.5 text-xs text-neutral-700/90 font-designing-queue">Last used: {lastUsedFromHistory.setNumber}</p>
                 ) : null}
                 {showNewProductSetHint ? (
-                  <p className="mt-1 text-[11px] text-ds-warning">
+                  <p className="mt-1 text-xs text-ds-warning">
                     New product — enter a set # (no plate history for this carton / artwork).
                   </p>
                 ) : null}
@@ -2253,7 +2253,7 @@ export default function DesigningDetailPage() {
                   placeholder="Manual artwork / revision code"
                 />
                 {jobType === 'repeat' && lastUsedFromHistory?.aw ? (
-                  <p className="mt-0.5 text-[10px] text-neutral-700/80 font-designing-queue">Last used: {lastUsedFromHistory.aw}</p>
+                  <p className="mt-0.5 text-xs text-neutral-700/80 font-designing-queue">Last used: {lastUsedFromHistory.aw}</p>
                 ) : null}
               </label>
               <label className="block text-xs text-ds-ink-muted min-w-0">
@@ -2286,12 +2286,12 @@ export default function DesigningDetailPage() {
                   />
                 </div>
                 {jobType === 'repeat' && lastUsedFromHistory?.sheet ? (
-                  <p className="mt-0.5 text-[10px] text-neutral-700 font-designing-queue">
+                  <p className="mt-0.5 text-xs text-neutral-700 font-designing-queue">
                     Last used: {lastUsedFromHistory.sheet}
                   </p>
                 ) : null}
                 {sheetMasterMismatch ? (
-                  <p className="mt-0.5 text-[10px] text-ds-warning/90">Differs from product master sheet.</p>
+                  <p className="mt-0.5 text-xs text-ds-warning/90">Differs from product master sheet.</p>
                 ) : null}
               </label>
               <label className="block text-xs text-ds-ink-muted min-w-0">
@@ -2318,7 +2318,7 @@ export default function DesigningDetailPage() {
                   autoComplete="off"
                 />
                 {jobType === 'repeat' && lastUsedFromHistory?.ups ? (
-                  <p className="mt-0.5 text-[10px] text-neutral-700 font-designing-queue">
+                  <p className="mt-0.5 text-xs text-neutral-700 font-designing-queue">
                     Last used: {lastUsedFromHistory.ups}
                   </p>
                 ) : null}
@@ -2335,7 +2335,7 @@ export default function DesigningDetailPage() {
               </button>
               {artworkCodeInput.trim() ? (
                 <p
-                  className={`text-[10px] ${effectiveArtworkId ? 'text-emerald-500/80' : section1ManualHubOk ? 'text-ds-warning/85' : 'text-rose-400/85'}`}
+                  className={`text-xs ${effectiveArtworkId ? 'text-emerald-500/80' : section1ManualHubOk ? 'text-ds-warning/85' : 'text-rose-400/85'}`}
                 >
                   {effectiveArtworkId
                     ? 'Artwork linked for die / emboss / send-all dispatch.'
@@ -2355,7 +2355,7 @@ export default function DesigningDetailPage() {
                     type="button"
                     disabled={specLocked}
                     onClick={() => void openSmartMatch()}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-sky-500/55 bg-sky-950/35 text-sky-100 text-[10px] font-semibold hover:bg-sky-950/60 shrink-0 disabled:opacity-40"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-sky-500/55 bg-sky-950/35 text-sky-100 text-xs font-semibold hover:bg-sky-950/60 shrink-0 disabled:opacity-40"
                     title="Match dies within ±1 mm on L×W×H"
                   >
                     <Search className="h-3 w-3 shrink-0" aria-hidden />
@@ -2364,7 +2364,7 @@ export default function DesigningDetailPage() {
                 }
               />
               {line.cartonId && !line.dieMasterId && !line.carton?.dieMasterId ? (
-                <div className="sm:col-span-3 flex items-start gap-2 border-l-2 border-ds-warning/50 pl-2 py-0.5 text-[11px] text-ds-warning">
+                <div className="sm:col-span-3 flex items-start gap-2 border-l-2 border-ds-warning/50 pl-2 py-0.5 text-xs text-ds-warning">
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-ds-warning mt-0.5" aria-hidden />
                   <span>
                     Unlinked tooling — no die master on this line or product master. Use Smart Match or link from
@@ -2419,19 +2419,19 @@ export default function DesigningDetailPage() {
               <h2 className="text-sm font-semibold text-ds-ink">
                 Section 2 — Tooling (die · emboss · plate requirement)
               </h2>
-              <p className="text-[11px] text-ds-ink-faint mt-0.5">
+              <p className="text-xs text-ds-ink-faint mt-0.5">
                 Simplified view: expand only when you need tooling or plate details.
               </p>
             </div>
             <button
               type="button"
               onClick={() => setShowToolingSection((v) => !v)}
-              className="rounded border border-ds-line/60 bg-ds-main px-2.5 py-1 text-[11px] text-ds-ink hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+              className="rounded border border-ds-line/60 bg-ds-main px-2.5 py-1 text-xs text-ds-ink hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
             >
               {showToolingSection ? 'Hide details' : 'Show details'}
             </button>
           </div>
-          <div className="flex flex-wrap gap-2 text-[11px]">
+          <div className="flex flex-wrap gap-2 text-xs">
             <span className="rounded border border-ds-line/50 bg-ds-main/60 px-2 py-0.5 text-ds-ink-muted">
               Die: {designerCommand.dieSource ? designerCommand.dieSource.toUpperCase() : 'NOT SET'}
             </span>
@@ -2456,7 +2456,7 @@ export default function DesigningDetailPage() {
                 Die inventory
               </h3>
               {designerCommand.dieSource ? (
-                <p className="text-[10px] text-ds-ink-faint leading-snug">
+                <p className="text-xs text-ds-ink-faint leading-snug">
                   <span className="font-semibold text-ds-ink-muted">Live handshake</span>
                   {' · '}
                   Hub status:{' '}
@@ -2474,10 +2474,10 @@ export default function DesigningDetailPage() {
               />
               {line.dieMaster && designerCommand.dieSource === 'old' ? (
                 <div className="rounded-md border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
-                  <p className="text-[10px] uppercase tracking-wide text-ds-warning font-semibold">
+                  <p className="text-xs uppercase tracking-wide text-ds-warning font-semibold">
                     Tooling handshake — die
                   </p>
-                  <p className={`text-[11px] text-ds-ink leading-relaxed break-all ${techMono}`}>
+                  <p className={`text-xs text-ds-ink leading-relaxed break-all ${techMono}`}>
                     Asset ID: {line.dieMaster.id} · Rack: {line.dieMaster.location?.trim() || '—'}
                   </p>
                   {dieReserveSent ? (
@@ -2500,7 +2500,7 @@ export default function DesigningDetailPage() {
                       type="button"
                       disabled={specLocked}
                       onClick={() => void recallDieFromHub()}
-                      className="w-full px-2 py-1.5 rounded-md border border-ds-warning/50 bg-ds-warning/10 text-ds-ink text-[11px] font-semibold hover:bg-ds-warning/10 disabled:opacity-50"
+                      className="w-full px-2 py-1.5 rounded-md border border-ds-warning/50 bg-ds-warning/10 text-ds-ink text-xs font-semibold hover:bg-ds-warning/10 disabled:opacity-50"
                     >
                       Recall from Hub
                     </button>
@@ -2522,7 +2522,7 @@ export default function DesigningDetailPage() {
                       <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                       <span>
                         Sent ·{' '}
-                        <span className="font-mono tabular-nums text-[10px] text-emerald-500">
+                        <span className="font-mono tabular-nums text-xs text-emerald-500">
                           {formatHubSentAt(designerCommand.dieLastIntentAt)}
                         </span>
                       </span>
@@ -2544,7 +2544,7 @@ export default function DesigningDetailPage() {
                   )}
                 </div>
               ) : (
-                <span className="text-[11px] text-ds-ink-faint">Select New or Old to show actions.</span>
+                <span className="text-xs text-ds-ink-faint">Select New or Old to show actions.</span>
               )}
             </div>
 
@@ -2562,10 +2562,10 @@ export default function DesigningDetailPage() {
                 />
                 {line.carton?.embossBlock && designerCommand.embossSource === 'old' ? (
                   <div className="rounded-md border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
-                    <p className="text-[10px] uppercase tracking-wide text-ds-warning font-semibold">
+                    <p className="text-xs uppercase tracking-wide text-ds-warning font-semibold">
                       Tooling handshake — emboss block
                     </p>
-                    <p className={`text-[11px] text-ds-ink leading-relaxed break-all ${techMono}`}>
+                    <p className={`text-xs text-ds-ink leading-relaxed break-all ${techMono}`}>
                       Asset ID: {line.carton.embossBlock.id} · Rack:{' '}
                       {line.carton.embossBlock.storageLocation?.trim() || '—'}
                     </p>
@@ -2587,7 +2587,7 @@ export default function DesigningDetailPage() {
                   </div>
                 ) : null}
                 {designerCommand.embossSource && !effectiveArtworkId && embossManualSpecsComplete ? (
-                  <p className="flex items-start gap-1.5 text-[11px] text-ds-ink-faint leading-snug" role="status">
+                  <p className="flex items-start gap-1.5 text-xs text-ds-ink-faint leading-snug" role="status">
                     <AlertTriangle className="h-3 w-3 shrink-0 text-ds-warning/90 mt-0.5" aria-hidden />
                     Manual emboss: artwork optional; push uses sheet + dimensions + block type from spec.
                   </p>
@@ -2607,7 +2607,7 @@ export default function DesigningDetailPage() {
                         <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                         <span>
                           Sent ·{' '}
-                          <span className="font-mono tabular-nums text-[10px] text-emerald-500">
+                          <span className="font-mono tabular-nums text-xs text-emerald-500">
                             {formatHubSentAt(designerCommand.embossLastIntentAt)}
                           </span>
                         </span>
@@ -2629,11 +2629,11 @@ export default function DesigningDetailPage() {
                     )}
                   </div>
                 ) : (
-                  <span className="text-[11px] text-ds-ink-faint">Select New or Old to show actions.</span>
+                  <span className="text-xs text-ds-ink-faint">Select New or Old to show actions.</span>
                 )}
               </div>
             ) : (
-              <div className="rounded-lg border border-ds-line/40 bg-card p-3 text-[11px] text-ds-ink-faint">
+              <div className="rounded-lg border border-ds-line/40 bg-card p-3 text-xs text-ds-ink-faint">
                 Emboss tooling not required for this carton (no embossing on spec).
               </div>
             )}
@@ -2645,13 +2645,13 @@ export default function DesigningDetailPage() {
                 Plate hub — requirement
               </h3>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 rounded-md border border-cyan-600/55 bg-cyan-950/35 px-2 py-0.5 text-[11px] font-semibold text-cyan-100">
+                <span className="inline-flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 rounded-md border border-cyan-600/55 bg-cyan-950/35 px-2 py-0.5 text-xs font-semibold text-cyan-100">
                   <span>
                     Total plates:{' '}
                     <span className="font-mono tabular-nums text-cyan-50">{totalPlatesLive}</span>
                   </span>
                   <span className="hidden sm:inline text-cyan-600/80">·</span>
-                  <span className="font-mono tabular-nums text-[10px] font-normal text-cyan-200/80">
+                  <span className="font-mono tabular-nums text-xs font-normal text-cyan-200/80">
                     Sheet {actualSheetSizeInput.trim() || '—'} · UPS {numberOfUpsInput.trim() || '—'}
                   </span>
                 </span>
@@ -2666,7 +2666,7 @@ export default function DesigningDetailPage() {
                         : 'POST /api/plate-hub with current Pantone and plate configuration'
                   }
                   onClick={() => void submitPlateHubFinalize(false)}
-                  className={`inline-flex items-center rounded-md px-2.5 py-0.5 text-[11px] font-semibold disabled:opacity-45 disabled:cursor-not-allowed ${
+                  className={`inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-semibold disabled:opacity-45 disabled:cursor-not-allowed ${
                     plateHubSent
                       ? 'border border-emerald-500 bg-emerald-950/50 text-emerald-500'
                       : 'border border-emerald-500/70 bg-emerald-700 hover:bg-emerald-600 text-primary-foreground'
@@ -2676,7 +2676,7 @@ export default function DesigningDetailPage() {
                 </button>
                 {plateHubSent ? (
                   <span
-                    className="text-[10px] text-emerald-400/90 font-designing-queue max-w-[8rem] truncate"
+                    className="text-xs text-emerald-400/90 font-designing-queue max-w-[8rem] truncate"
                     title="Plate hub orchestration"
                   >
                     {plateHubLiveLabel}
@@ -2684,7 +2684,7 @@ export default function DesigningDetailPage() {
                 ) : null}
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-[10px] text-ds-ink-faint mb-1">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-ds-ink-faint mb-1">
               <span className="shrink-0 font-semibold text-ds-ink-faint">Plate readiness</span>
               <PlateHubReadinessSparkline plateFlowStatus={orch.plateFlowStatus} />
               <span className="text-ds-ink-faint hidden sm:inline">·</span>
@@ -2711,7 +2711,7 @@ export default function DesigningDetailPage() {
                 Pantone
               </label>
               {designerCommand.plateRequirement.pantoneEnabled ? (
-                <label className="block text-[11px] text-ds-ink-muted">
+                <label className="block text-xs text-ds-ink-muted">
                   Number of Pantones
                   <input
                     type="number"
@@ -2734,7 +2734,7 @@ export default function DesigningDetailPage() {
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-[11px] text-ds-ink-muted shrink-0">Standard</span>
+              <span className="text-xs text-ds-ink-muted shrink-0">Standard</span>
               {(
                 [
                   ['standardC', 'C', 'border-cyan-500/70 bg-cyan-950/40 text-cyan-50'],
@@ -2761,7 +2761,7 @@ export default function DesigningDetailPage() {
                   />
                   {lab}
                   {historyDesignerCommand?.plateRequirement[key] ? (
-                    <span className="text-[10px] text-emerald-300/90">Prev</span>
+                    <span className="text-xs text-emerald-300/90">Prev</span>
                   ) : null}
                 </label>
               ))}
@@ -2776,7 +2776,7 @@ export default function DesigningDetailPage() {
               ).map(([key, lab]) => {
                 const pHex = pantoneHexApprox(designerCommand.plateRequirement[key])
                 return (
-                <label key={key} className="block text-[11px] text-ds-ink-muted">
+                <label key={key} className="block text-xs text-ds-ink-muted">
                   {lab} (Pantone code)
                   <input
                     type="text"
@@ -2801,13 +2801,13 @@ export default function DesigningDetailPage() {
                     }
                   />
                   {historyDesignerCommand?.plateRequirement[key] ? (
-                    <span className="text-[10px] text-emerald-400/90">Previously used</span>
+                    <span className="text-xs text-emerald-400/90">Previously used</span>
                   ) : null}
                 </label>
                 )
               })}
             </div>
-            <label className="block text-[11px] text-ds-ink-muted">
+            <label className="block text-xs text-ds-ink-muted">
               Special colour / effect note
               <input
                 type="text"
@@ -2839,7 +2839,7 @@ export default function DesigningDetailPage() {
                 />
                 Drip-off plate
                 {historyDesignerCommand?.plateRequirement.dripOffPlate ? (
-                  <span className="text-[10px] text-emerald-400/90">Previously used</span>
+                  <span className="text-xs text-emerald-400/90">Previously used</span>
                 ) : null}
               </label>
               <label className="flex items-center gap-2 text-xs text-ds-ink cursor-pointer">
@@ -2857,17 +2857,17 @@ export default function DesigningDetailPage() {
                 />
                 Spot UV plate
                 {historyDesignerCommand?.plateRequirement.spotUvPlate ? (
-                  <span className="text-[10px] text-emerald-400/90">Previously used</span>
+                  <span className="text-xs text-emerald-400/90">Previously used</span>
                 ) : null}
               </label>
             </div>
             {historyDesignerCommand ? (
-              <p className="text-[11px] text-ds-ink-faint border-t border-ds-line/40 pt-2">
+              <p className="text-xs text-ds-ink-faint border-t border-ds-line/40 pt-2">
                 Previous AW match summary: {formatPlateHistorySummary(historyDesignerCommand)}
               </p>
             ) : null}
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
-              <label className="text-[11px] text-ds-ink-muted shrink-0">Set type</label>
+              <label className="text-xs text-ds-ink-muted shrink-0">Set type</label>
               <select
                 value={designerCommand.setType}
                 disabled={specLocked}
@@ -2886,7 +2886,7 @@ export default function DesigningDetailPage() {
               </select>
               {historyDesignerCommand?.setType &&
               historyDesignerCommand.setType === designerCommand.setType ? (
-                <span className="text-[10px] text-emerald-400/90">Previously used</span>
+                <span className="text-xs text-emerald-400/90">Previously used</span>
               ) : null}
             </div>
           </div>
@@ -2896,7 +2896,7 @@ export default function DesigningDetailPage() {
 
         <section className="rounded-xl bg-card border border-ds-line/40 px-3 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="text-[11px] font-semibold text-ds-ink shrink-0">Post-press routing</span>
+            <span className="text-xs font-semibold text-ds-ink shrink-0">Post-press routing</span>
             <div className="flex flex-wrap gap-1.5 text-xs">
               <RouteBadge label="Chemical coating" active={routing.needsChemicalCoating} />
               <RouteBadge label="Lamination" active={routing.needsLamination} />
@@ -2917,7 +2917,7 @@ export default function DesigningDetailPage() {
           onSelect={(row) => void linkDieFromSmartMatch(row)}
         />
 
-        <p className="text-center text-[10px] text-ds-ink-faint pt-3 mt-1 border-t border-ds-line/40 font-designing-queue tracking-tight">
+        <p className="text-center text-xs text-ds-ink-faint pt-3 mt-1 border-t border-ds-line/40 font-designing-queue tracking-tight">
           Smart Match Active - Verification against Master Rev. 2026.
         </p>
       </div>
@@ -2956,7 +2956,7 @@ function ToolSourceRow({
           >
             {k === 'new' ? 'New' : 'Old'}
             {historyValue === k ? (
-              <span className="ml-1.5 text-[10px] font-normal text-emerald-300/95">Previously used</span>
+              <span className="ml-1.5 text-xs font-normal text-emerald-300/95">Previously used</span>
             ) : null}
           </button>
         ))}

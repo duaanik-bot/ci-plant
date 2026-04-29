@@ -335,7 +335,7 @@ export default function DashboardClient() {
                       )
                     )}
                   </div>
-                  <p className="text-[11px] text-ds-ink-muted mt-1">
+                  <p className="text-xs text-ds-ink-muted mt-1">
                     Stage {job.currentStageNumber ?? '—'}/{WORKFLOW_STAGE_COUNT}
                     {job.currentStageName ? ` · ${job.currentStageName}` : ''}
                   </p>
@@ -380,7 +380,7 @@ export default function DashboardClient() {
                   >
                     {a.title}
                   </p>
-                  <p className="text-[11px] text-ds-ink-muted truncate mt-0.5">{a.description}</p>
+                  <p className="text-xs text-ds-ink-muted truncate mt-0.5">{a.description}</p>
                 </Link>
               )
             })}

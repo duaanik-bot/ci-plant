@@ -187,7 +187,7 @@ function SortableJobCard({
         <Link
           href={`/orders/purchase-orders/${line.po.id}`}
           onClick={(e) => e.stopPropagation()}
-          className={`text-[9px] text-ds-warning/90 hover:underline truncate ${mono}`}
+          className={`text-xs text-ds-warning/90 hover:underline truncate ${mono}`}
         >
           PO {line.po.poNumber}
         </Link>
@@ -196,12 +196,12 @@ function SortableJobCard({
         ) : null}
       </div>
       {line.jobCard ? (
-        <div className={`text-[8px] text-sky-400/90 ${mono}`}>JC #{line.jobCard.jobCardNumber}</div>
+        <div className={`text-xs text-sky-400/90 ${mono}`}>JC #{line.jobCard.jobCardNumber}</div>
       ) : null}
-      <p className="text-[9px] text-ds-ink-muted truncate leading-tight mt-0.5" title={line.cartonName}>
+      <p className="text-xs text-ds-ink-muted truncate leading-tight mt-0.5" title={line.cartonName}>
         {line.cartonName}
       </p>
-      <p className={`text-[8px] text-ds-ink-faint ${mono}`}>{formatDurationHMM(hours)}</p>
+      <p className={`text-xs text-ds-ink-faint ${mono}`}>{formatDurationHMM(hours)}</p>
 
       <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded-sm bg-ds-elevated gap-px" title="Group segments (PO)">
         {segments.map((seg) => {
@@ -225,7 +225,7 @@ function SortableJobCard({
             e.stopPropagation()
             onHandshake()
           }}
-          className="text-[8px] text-sky-400/90 hover:text-sky-300"
+          className="text-xs text-sky-400/90 hover:text-sky-300"
         >
           Handshake
         </button>
@@ -235,7 +235,7 @@ function SortableJobCard({
             e.stopPropagation()
             onRecall()
           }}
-          className="text-[8px] text-rose-400/90 hover:text-rose-300"
+          className="text-xs text-rose-400/90 hover:text-rose-300"
         >
           Recall
         </button>
@@ -421,7 +421,7 @@ export function ProductionScheduleBoard({
         >
           <div className="flex flex-col lg:flex-row gap-3">
             <aside className="w-full lg:w-52 shrink-0 rounded border border-ds-line/40 bg-background p-2">
-              <p className={`text-[10px] font-semibold uppercase text-ds-ink-faint mb-2 ${mono}`}>
+              <p className={`text-xs font-semibold uppercase text-ds-ink-faint mb-2 ${mono}`}>
                 Ready sidebar
               </p>
               <ScheduleCell id="sidebar">
@@ -474,7 +474,7 @@ export function ProductionScheduleBoard({
                 {SHIFTS.map((s) => (
                   <div
                     key={s}
-                    className={`border border-ds-line/40 bg-ds-main/80 px-1 py-1 text-center ${mono} text-[10px] text-ds-ink-muted`}
+                    className={`border border-ds-line/40 bg-ds-main/80 px-1 py-1 text-center ${mono} text-xs text-ds-ink-muted`}
                   >
                     Shift {s}
                   </div>
@@ -483,7 +483,7 @@ export function ProductionScheduleBoard({
                 {machines.map((m) => (
                   <Fragment key={m.id}>
                     <div
-                      className={`border border-ds-line/40 bg-background px-2 py-2 flex items-center ${mono} text-[10px] text-ds-warning/95 font-semibold`}
+                      className={`border border-ds-line/40 bg-background px-2 py-2 flex items-center ${mono} text-xs text-ds-warning/95 font-semibold`}
                     >
                       {m.machineCode}
                     </div>
@@ -536,10 +536,10 @@ export function ProductionScheduleBoard({
           <DragOverlay>
             {activeLine ? (
               <div
-                className={`rounded border border-ds-warning/60 bg-ds-card px-2 py-1 shadow-xl max-w-[11rem] ${mono} text-[10px] text-ds-ink`}
+                className={`rounded border border-ds-warning/60 bg-ds-card px-2 py-1 shadow-xl max-w-[11rem] ${mono} text-xs text-ds-ink`}
               >
                 PO {activeLine.po.poNumber}
-                <div className="text-[9px] text-ds-ink-faint truncate">{activeLine.cartonName}</div>
+                <div className="text-xs text-ds-ink-faint truncate">{activeLine.cartonName}</div>
               </div>
             ) : null}
           </DragOverlay>

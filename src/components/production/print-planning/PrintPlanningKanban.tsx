@@ -152,8 +152,8 @@ function Lane({
           isOver ? 'bg-ds-warning/10' : 'bg-ds-main/50'
         }`}
       >
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-ds-warning">{title}</p>
-        {subtitle ? <p className="text-[9px] text-ds-ink-faint truncate">{subtitle}</p> : null}
+        <p className="text-xs font-semibold uppercase tracking-wide text-ds-warning">{title}</p>
+        {subtitle ? <p className="text-xs text-ds-ink-faint truncate">{subtitle}</p> : null}
       </div>
       <div ref={setNodeRef} className="min-h-[12rem] flex-1 p-1.5">
         {children}
@@ -199,7 +199,7 @@ function SortableCard({
         <Link
           href={`/production/job-cards/${jc.id}`}
           onClick={(e) => e.stopPropagation()}
-          className={`text-[9px] text-sky-400/90 hover:underline ${mono}`}
+          className={`text-xs text-sky-400/90 hover:underline ${mono}`}
         >
           JC #{jc.jobCardNumber}
         </Link>
@@ -207,14 +207,14 @@ function SortableCard({
           <Star className={`h-3 w-3 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`} aria-label="Priority" />
         ) : null}
       </div>
-      <p className="text-[9px] text-ds-ink-muted truncate leading-tight mt-0.5" title={po?.cartonName ?? ''}>
+      <p className="text-xs text-ds-ink-muted truncate leading-tight mt-0.5" title={po?.cartonName ?? ''}>
         {po?.cartonName ?? '—'}
       </p>
-      <p className={`text-[8px] text-ds-ink-faint ${mono} mt-0.5`}>
+      <p className={`text-xs text-ds-ink-faint ${mono} mt-0.5`}>
         {po?.poNumber ?? '—'} · Qty {po?.quantity ?? '—'}
         {po?.upsFromSpec != null ? ` · UPS ${po.upsFromSpec}` : ''}
       </p>
-      <p className="text-[8px] text-ds-ink-faint truncate">{jc.customer.name}</p>
+      <p className="text-xs text-ds-ink-faint truncate">{jc.customer.name}</p>
     </div>
   )
 }
@@ -509,10 +509,10 @@ export function PrintPlanningKanban() {
       <DragOverlay>
         {activeCard ? (
           <div
-            className={`rounded border border-ds-warning/60 bg-ds-card px-2 py-1 shadow-xl max-w-[12rem] ${mono} text-[10px]`}
+            className={`rounded border border-ds-warning/60 bg-ds-card px-2 py-1 shadow-xl max-w-[12rem] ${mono} text-xs`}
           >
             JC #{activeCard.jobCardNumber}
-            <div className="text-[9px] text-ds-ink-faint truncate">
+            <div className="text-xs text-ds-ink-faint truncate">
               {activeCard.poLine?.cartonName ?? '—'}
             </div>
           </div>
@@ -525,7 +525,7 @@ export function PrintPlanningKanban() {
           <aside className="fixed right-0 top-0 z-50 h-screen w-full max-w-md overflow-y-auto border-l border-ds-line/40 bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <div>
-                <p className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>Print planning log</p>
+                <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>Print planning log</p>
                 <h2 className={`text-sm font-semibold text-ds-warning ${mono}`}>
                   {detail?.jobCardNumber ? `JC #${detail.jobCardNumber}` : 'Job card'}
                 </h2>
@@ -544,7 +544,7 @@ export function PrintPlanningKanban() {
             ) : detail ? (
               <div className="space-y-3 p-4 text-xs">
                 <section className="rounded-lg border border-ds-line/40 p-3">
-                  <p className={`mb-2 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Snapshot</p>
+                  <p className={`mb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Snapshot</p>
                   <div className="space-y-1">
                     <p><span className="text-ds-ink-faint">Carton:</span> {detail.poLine?.cartonName ?? '—'}</p>
                     <p><span className="text-ds-ink-faint">Qty:</span> {detail.poLine?.quantity ?? '—'}</p>
@@ -556,7 +556,7 @@ export function PrintPlanningKanban() {
                 </section>
 
                 <section className="rounded-lg border border-ds-line/40 p-3">
-                  <p className={`mb-2 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Stage log</p>
+                  <p className={`mb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Stage log</p>
                   <ul className="space-y-1">
                     {(detail.stages ?? []).map((s) => (
                       <li key={s.id} className="flex items-center justify-between gap-2 rounded border border-ds-line/30 px-2 py-1">
@@ -569,7 +569,7 @@ export function PrintPlanningKanban() {
                 </section>
 
                 <section className="rounded-lg border border-ds-line/40 p-3">
-                  <p className={`mb-2 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Audit timeline</p>
+                  <p className={`mb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Audit timeline</p>
                   <ul className="space-y-2">
                     {(detail.auditTimeline ?? []).map((ev) => (
                       <li key={ev.id} className="rounded border border-ds-line/30 px-2 py-1">

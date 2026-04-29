@@ -103,76 +103,60 @@ export function JobCardDrawer({
 }) {
   const isValid = !!data.sheetSize && data.boardReady && data.toolingReady
   return (
-    <div className="fixed right-0 top-0 h-full w-[38%] min-w-[420px] max-w-[640px] bg-[var(--bg-card)] border-l border-[var(--border)] shadow-xl flex flex-col z-[60] transition-transform duration-200">
-      <div className="p-4 border-b border-[var(--border)]">
+    <div className="fixed right-0 top-0 z-[60] flex h-full w-[min(100%,clamp(420px,38vw,640px))] flex-col border-l border-ds-line bg-ds-card shadow-xl transition-transform duration-150">
+      <div className="border-b border-ds-line px-4 py-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold text-ds-ink">{data.product}</h2>
-            <p className="text-sm text-[var(--text-secondary)]">
-              {data.customer} • {data.po}
-            </p>
+            <h2 className="truncate text-base font-semibold text-ds-ink">{data.product}</h2>
+            <p className="truncate text-xs text-ds-ink-faint">{data.customer} · {data.po}</p>
           </div>
-          <span className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] text-ds-ink-faint">
-            {data.statusLabel}
-          </span>
+          <span className="rounded border border-ds-line/60 px-2 py-0.5 text-xs text-ds-ink-faint">{data.statusLabel}</span>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        <div>
-          <h3 className="text-sm text-[var(--text-secondary)] mb-2">Job Summary</h3>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>Qty: {data.qty}</div>
-            <div>Size: {data.size}</div>
-            <div>UPS: {data.ups}</div>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        <CardSection
+          title="Job Summary"
+          subtitle="Read-only job details with editable sheet size if missing."
+        >
+          <div className="grid grid-cols-2 gap-3 text-xs text-ds-ink">
+            <div><span className="text-ds-ink-faint">Qty</span><div className="mt-0.5">{data.qty}</div></div>
+            <div><span className="text-ds-ink-faint">Size</span><div className="mt-0.5">{data.size}</div></div>
+            <div><span className="text-ds-ink-faint">UPS</span><div className="mt-0.5">{data.ups}</div></div>
             <div>
-              Sheet Size:
+              <label className="text-ds-ink-faint">Sheet size</label>
               <input
                 value={data.sheetSize || ''}
                 onChange={(e) => data.setSheetSize(e.target.value)}
                 disabled={data.isReleased}
-                className="ml-2 px-2 py-1 border border-[var(--border)] rounded bg-ds-main text-ds-ink disabled:opacity-50"
+                placeholder="L x W mm"
+                className="mt-0.5 w-full rounded border border-ds-line bg-ds-main px-2 py-1 text-xs text-ds-ink disabled:opacity-50"
               />
             </div>
           </div>
-        </div>
+        </CardSection>
 
-        <div>
-          <h3 className="text-sm text-[var(--text-secondary)] mb-2">Board Readiness</h3>
-          <div className="text-sm mb-2 text-ds-ink-faint">
-            {data.boardType} · {data.gsm}
-          </div>
-          <span
-            className={`px-2 py-1 rounded text-xs ${
-              data.boardReady
-                ? 'bg-green-500/10 text-green-400'
-                : data.boardWaiting
-                  ? 'bg-yellow-500/10 text-yellow-400'
-                  : 'bg-rose-500/10 text-rose-400'
-            }`}
-          >
+        <CardSection title="Board Readiness">
+          <div className="mb-2 text-xs text-ds-ink-faint">{data.boardType} · {data.gsm}</div>
+          <span className={`rounded px-2 py-1 text-xs ${data.boardReady ? 'bg-emerald-500/10 text-emerald-300' : data.boardWaiting ? 'bg-ds-warning/10 text-ds-warning' : 'bg-rose-500/10 text-rose-300'}`}>
             {data.boardReady ? 'Ready' : data.boardWaiting ? 'Waiting' : 'Not Ready'}
           </span>
-        </div>
+        </CardSection>
 
-        <div>
-          <h3 className="text-sm text-[var(--text-secondary)] mb-2">Tooling</h3>
-          <div className="space-y-1 text-sm">
+        <CardSection title="Tooling Status">
+          <div className="space-y-1.5 text-xs text-ds-ink">
             <div>Plate: {data.plate ? 'Linked' : 'Missing'}</div>
             <div>Die: {data.die ? 'Linked' : 'Missing'}</div>
-            {data.embossRequired && (
-              <div>Emboss: {data.emboss ? 'Linked' : 'Missing'}</div>
-            )}
+            {data.embossRequired ? <div>Emboss: {data.emboss ? 'Linked' : 'Missing'}</div> : null}
           </div>
-        </div>
+        </CardSection>
 
-        <div>
-          <h3 className="text-sm text-[var(--text-secondary)] mb-2">Execution</h3>
+        <CardSection title="Execution Setup">
           <select
             value={data.machineId}
             onChange={(e) => data.setMachineId(e.target.value)}
             disabled={data.isReleased}
-            className="w-full px-3 py-2 border border-[var(--border)] rounded bg-ds-main text-ds-ink disabled:opacity-50"
+            className="w-full rounded border border-ds-line bg-ds-main px-3 py-2 text-sm text-ds-ink disabled:opacity-50"
           >
             <option value="">Select Machine</option>
             {data.machineOptions.map((m) => (
@@ -181,24 +165,23 @@ export function JobCardDrawer({
               </option>
             ))}
           </select>
-        </div>
+        </CardSection>
       </div>
 
-      <div className="p-4 border-t border-[var(--border)] flex justify-between">
-        <button onClick={onClose} className="text-ds-ink-muted">
+      <div className="flex items-center justify-between border-t border-ds-line px-4 py-3">
+        <button onClick={onClose} className="text-sm text-ds-ink-muted">
           Close
         </button>
-
         <div className="flex gap-2">
-          <button onClick={onSave} disabled={data.isReleased} className="text-ds-ink disabled:opacity-40">
-            Save
+          <button onClick={onSave} disabled={data.isReleased} className="rounded border border-ds-line px-3 py-1.5 text-sm text-ds-ink disabled:opacity-40">
+            Save Draft
           </button>
           <button
             onClick={onRelease}
             disabled={!isValid || data.isReleased}
-            className="bg-[var(--accent)] text-white px-4 py-2 rounded disabled:opacity-40"
+            className="rounded bg-ds-brand px-4 py-1.5 text-sm text-white disabled:opacity-40"
           >
-            Release
+            Release to Production
           </button>
         </div>
       </div>
@@ -238,7 +221,13 @@ export function JobCardHubAuditDrawer({
     setLoading(true)
     Promise.all([fetch(`/api/job-cards/${jobCardId}`), fetch('/api/machines')])
       .then(async ([detailRes, machinesRes]) => {
-        const detail = (await detailRes.json().catch(() => ({}))) as DrawerPayload & { error?: string }
+        const rawDetail = (await detailRes.json().catch(() => ({}))) as
+          | (DrawerPayload & { error?: string })
+          | null
+        const detail =
+          rawDetail && typeof rawDetail === 'object'
+            ? rawDetail
+            : ({ error: 'Failed to load job card' } as { error: string })
         const m = (await machinesRes.json().catch(() => [])) as MachineOpt[]
         if (cancelled) return
         if (!detailRes.ok || detail.error) {

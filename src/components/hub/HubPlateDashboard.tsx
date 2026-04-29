@@ -68,7 +68,7 @@ function ZoneCapacitySubheader({
   plateCount: number
 }) {
   return (
-    <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold tabular-nums leading-tight shrink-0">
+    <p className="text-xs uppercase tracking-wider text-neutral-500 font-semibold tabular-nums leading-tight shrink-0">
       {jobCount} jobs · {plateCount} total plates
     </p>
   )
@@ -262,7 +262,7 @@ function PlateHubStageDays({ lastStatusUpdatedAt }: { lastStatusUpdatedAt?: stri
   const critical = h >= 24
   return (
     <p
-      className={`text-[10px] font-semibold tabular-nums mt-0.5 ${
+      className={`text-xs font-semibold tabular-nums mt-0.5 ${
         critical ? 'text-rose-400 animate-industrial-age-pulse' : 'text-neutral-500'
       }`}
     >
@@ -376,7 +376,7 @@ function CustodySourcePill({ source }: { source: CustodyCard['custodySource'] })
         : 'border-ds-warning/45 bg-ds-warning/12 text-ds-warning'
   return (
     <span
-      className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold shrink-0 ${tone}`}
+      className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold shrink-0 ${tone}`}
     >
       {sourceBadgeLabel(source)}
     </span>
@@ -385,7 +385,7 @@ function CustodySourcePill({ source }: { source: CustodyCard['custodySource'] })
 
 function HubJobCardMetaLine({ children }: { children: ReactNode }) {
   return (
-    <p className="text-[11px] font-medium text-gray-300 opacity-90 whitespace-normal break-words leading-snug">
+    <p className="text-xs font-medium text-gray-300 opacity-90 whitespace-normal break-words leading-snug">
       {children}
     </p>
   )
@@ -402,7 +402,7 @@ function HubStarLedgerSection({
   if (!rows.length) return null
   return (
     <div className="rounded-md bg-gray-900/40 px-2 py-1.5 border border-gray-800/60">
-      <p className="text-[9px] font-semibold uppercase tracking-wide text-neutral-500 mb-0.5">
+      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-0.5">
         Star ledger
       </p>
       <PlateStarLedger labels={labels} cycleData={cycleData} />
@@ -421,7 +421,7 @@ function PlateCountBadge({ count }: { count: number }) {
   const n = Math.max(0, Math.min(99, count))
   return (
     <div
-      className="pointer-events-none absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-ds-warning bg-ds-main text-[11px] font-extrabold text-ds-warning shadow-[0_0_10px_rgba(245,158,11,0.3)] tabular-nums z-10"
+      className="pointer-events-none absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-ds-warning bg-ds-main text-xs font-extrabold text-ds-warning shadow-[0_0_10px_rgba(245,158,11,0.3)] tabular-nums z-10"
       aria-label={`${n} plates`}
     >
       {n}
@@ -586,7 +586,7 @@ function AdjustPlatesModal({
           )}
         </div>
         <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-1">
             Reason (optional)
           </label>
           <textarea
@@ -597,7 +597,7 @@ function AdjustPlatesModal({
             className="w-full px-2.5 py-1.5 rounded-md bg-background border border-ds-line/50 text-foreground text-xs placeholder:text-neutral-600 resize-y min-h-[2.5rem]"
           />
         </div>
-        <p className="text-[11px] text-neutral-500 leading-snug">
+        <p className="text-xs text-neutral-500 leading-snug">
           {selectedCount < 1 ? (
             <span className="text-ds-warning">
               At least one colour must stay selected. If none are needed, close this dialog and use{' '}
@@ -800,7 +800,7 @@ function HubPlateSizeSegmented({
           type="button"
           role="radio"
           aria-checked={value === opt.value}
-          className={`flex-1 px-1.5 py-1.5 text-center text-[10px] font-bold border rounded-md transition-colors ${
+          className={`flex-1 px-1.5 py-1.5 text-center text-xs font-bold border rounded-md transition-colors ${
             value === opt.value ? on : off
           }`}
           onClick={() => onChange(opt.value)}
@@ -816,7 +816,7 @@ function HubLastActionFooter({ at }: { at: string | null | undefined }) {
   const line = hubLastActionLine(at)
   if (!line) return null
   return (
-    <p className="mt-2 pt-2 border-t border-gray-800/70 text-[10px] text-gray-500 italic leading-tight">
+    <p className="mt-2 pt-2 border-t border-gray-800/70 text-xs text-gray-500 italic leading-tight">
       {line}
     </p>
   )
@@ -857,7 +857,7 @@ function JobCardStatusBadge({
         : 'border-sky-600/60 bg-sky-950/50 text-sky-200'
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold shrink-0 ${tone}`}
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold shrink-0 ${tone}`}
     >
       Status: {hub.badgeLabel}
     </span>
@@ -2669,7 +2669,7 @@ export default function HubPlateDashboard() {
         ) : hubView === 'table' ? (
           <div className="space-y-4">
             <div
-              className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-2 text-[10px] uppercase tracking-wider text-neutral-500 font-semibold tabular-nums"
+              className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-2 text-xs uppercase tracking-wider text-neutral-500 font-semibold tabular-nums"
               role="status"
             >
               <span className="text-neutral-400">
@@ -2684,7 +2684,7 @@ export default function HubPlateDashboard() {
             <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end lg:justify-between">
               <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end flex-1 min-w-0">
                 <label className="block flex-1 min-w-[200px]">
-                  <span className="text-[10px] uppercase tracking-wide text-neutral-500 font-semibold">
+                  <span className="text-xs uppercase tracking-wide text-neutral-500 font-semibold">
                     Search (all columns)
                   </span>
                   <input
@@ -2695,7 +2695,7 @@ export default function HubPlateDashboard() {
                   />
                 </label>
                 <label className="block min-w-[180px]">
-                  <span className="text-[10px] uppercase tracking-wide text-neutral-500 font-semibold">
+                  <span className="text-xs uppercase tracking-wide text-neutral-500 font-semibold">
                     Zone
                   </span>
                   <select
@@ -2711,7 +2711,7 @@ export default function HubPlateDashboard() {
                   </select>
                 </label>
                 <label className="block min-w-[160px]">
-                  <span className="text-[10px] uppercase tracking-wide text-neutral-500 font-semibold">
+                  <span className="text-xs uppercase tracking-wide text-neutral-500 font-semibold">
                     Plate size
                   </span>
                   <select
@@ -2829,12 +2829,12 @@ export default function HubPlateDashboard() {
                                 <button
                                   type="button"
                                   onClick={() => setUnifiedDetailGroupId(groupId)}
-                                  className="rounded border border-sky-500/40 px-1.5 py-0.5 text-[10px] font-mono text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
+                                  className="rounded border border-sky-500/40 px-1.5 py-0.5 text-xs font-mono text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
                                   title="Open unified set details"
                                 >
                                   Set #{groupId}
                                 </button>
-                                <span className="rounded border border-ds-line/50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ds-ink-muted">
+                                <span className="rounded border border-ds-line/50 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-ds-ink-muted">
                                   Grouped set
                                 </span>
                                 <div className="ml-auto flex shrink-0 flex-wrap gap-1">
@@ -2842,7 +2842,7 @@ export default function HubPlateDashboard() {
                                     type="button"
                                     disabled={saving}
                                     onClick={() => dispatchUnifiedTriage(rows, 'inhouse_ctp')}
-                                    className="rounded-md bg-ds-warning px-2 py-1 text-[11px] font-semibold text-primary-foreground hover:bg-ds-warning disabled:opacity-50"
+                                    className="rounded-md bg-ds-warning px-2 py-1 text-xs font-semibold text-primary-foreground hover:bg-ds-warning disabled:opacity-50"
                                   >
                                     In-house CTP
                                   </button>
@@ -2850,7 +2850,7 @@ export default function HubPlateDashboard() {
                                     type="button"
                                     disabled={saving}
                                     onClick={() => dispatchUnifiedTriage(rows, 'outside_vendor')}
-                                    className="rounded-md border border-ds-line/50 px-2 py-1 text-[11px] text-neutral-400 hover:bg-ds-card disabled:opacity-50"
+                                    className="rounded-md border border-ds-line/50 px-2 py-1 text-xs text-neutral-400 hover:bg-ds-card disabled:opacity-50"
                                   >
                                     Send to vendor
                                   </button>
@@ -2859,7 +2859,7 @@ export default function HubPlateDashboard() {
                                     disabled={recallDisabled}
                                     title={recallTitle}
                                     onClick={() => void recallPrepressBatch(rows.map((r) => r.id))}
-                                    className="rounded-md border border-rose-700/80 bg-rose-950/80 px-2 py-1 text-[11px] font-medium text-rose-100 hover:bg-rose-900 disabled:opacity-40"
+                                    className="rounded-md border border-rose-700/80 bg-rose-950/80 px-2 py-1 text-xs font-medium text-rose-100 hover:bg-rose-900 disabled:opacity-40"
                                   >
                                     Recall
                                   </button>
@@ -2867,7 +2867,7 @@ export default function HubPlateDashboard() {
                                     type="button"
                                     disabled={saving}
                                     onClick={() => void deleteUnifiedBody(rows)}
-                                    className="rounded-md border border-rose-700/80 bg-rose-950/80 px-1.5 py-0.5 text-[11px] font-medium text-rose-100 hover:bg-rose-900 disabled:opacity-40"
+                                    className="rounded-md border border-rose-700/80 bg-rose-950/80 px-1.5 py-0.5 text-xs font-medium text-rose-100 hover:bg-rose-900 disabled:opacity-40"
                                   >
                                     Delete
                                   </button>
@@ -2876,20 +2876,20 @@ export default function HubPlateDashboard() {
                             </div>
                             <div className="flex min-w-0 flex-1 flex-col space-y-1.5">
                               {rows.length < totalMembers ? (
-                                <p className="text-[11px] text-ds-ink-muted">
+                                <p className="text-xs text-ds-ink-muted">
                                   {totalMembers - rows.length} member(s) already downstream or not
                                   on this board.
                                 </p>
                               ) : null}
                               {latestAt ? <PlateHubStageDays lastStatusUpdatedAt={latestAt} /> : null}
                               <div className="pr-6">
-                                <div className="flex items-center gap-1.5 text-[11px] text-ds-ink-muted">
+                                <div className="flex items-center gap-1.5 text-xs text-ds-ink-muted">
                                   <span className="truncate leading-tight">
                                     Names: {rows.map((m) => m.cartonName).join(' · ')}
                                   </span>
                                   <button
                                     type="button"
-                                    className="shrink-0 rounded border border-ds-line/50 px-1 py-0.5 text-[10px] font-medium text-ds-ink hover:bg-ds-card"
+                                    className="shrink-0 rounded border border-ds-line/50 px-1 py-0.5 text-xs font-medium text-ds-ink hover:bg-ds-card"
                                     onClick={() =>
                                       setExpandedUnifiedMembers((prev) => {
                                         const next = new Set(prev)
@@ -2907,7 +2907,7 @@ export default function HubPlateDashboard() {
                                     {rows.map((member) => (
                                       <HubCartonAuditTitle
                                         key={member.id}
-                                        className="max-w-[min(100%,12rem)] text-[11px]"
+                                        className="max-w-[min(100%,12rem)] text-xs"
                                         onOpenAudit={() =>
                                           setJobAudit({
                                             entity: 'requirement',
@@ -2983,7 +2983,7 @@ export default function HubPlateDashboard() {
                                 ) : null}
                               </HubJobCardMetaLine>
                               <div className="space-y-1 border-t border-ds-line/30 pt-1.5">
-                                <span className="text-[11px] font-medium text-ds-ink-muted">
+                                <span className="text-xs font-medium text-ds-ink-muted">
                                   Unified plate size (single sheet body):
                                 </span>
                                 <select
@@ -2995,7 +2995,7 @@ export default function HubPlateDashboard() {
                                       e.target.value as HubPlateSize,
                                     )
                                   }
-                                  className="rounded-md border border-ds-line/50 bg-background px-2 py-1 text-[11px] font-medium text-ds-ink focus-visible:border-ds-warning/70 focus-visible:outline-none disabled:opacity-50"
+                                  className="rounded-md border border-ds-line/50 bg-background px-2 py-1 text-xs font-medium text-ds-ink focus-visible:border-ds-warning/70 focus-visible:outline-none disabled:opacity-50"
                                 >
                                   {HUB_PLATE_SIZE_OPTIONS.map((opt) => (
                                     <option key={opt.value} value={opt.value} className="bg-ds-card text-ds-ink">
@@ -3277,10 +3277,10 @@ export default function HubPlateDashboard() {
                               >
                                 {unifiedNameLine}
                               </p>
-                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-[10px] text-ds-ink-muted">
+                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-xs text-ds-ink-muted">
                                 CTP
                               </span>
-                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-[10px] text-ds-ink-muted">
+                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-xs text-ds-ink-muted">
                                 Set {groupId}
                               </span>
                             </div>
@@ -3509,7 +3509,7 @@ export default function HubPlateDashboard() {
                     + Manual Vendor PO
                   </button>
                 </div>
-                <p className="text-[11px] text-neutral-500 mb-2">Awaiting delivery · two-way decisions</p>
+                <p className="text-xs text-neutral-500 mb-2">Awaiting delivery · two-way decisions</p>
                 <input
                   value={vendorSearch}
                   onChange={(e) => setVendorSearch(e.target.value)}
@@ -3551,10 +3551,10 @@ export default function HubPlateDashboard() {
                               >
                                 {unifiedNameLine}
                               </p>
-                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-[10px] text-ds-ink-muted">
+                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-xs text-ds-ink-muted">
                                 Vendor
                               </span>
-                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-[10px] text-ds-ink-muted">
+                              <span className="rounded border border-ds-line/50 px-1 py-0.5 text-xs text-ds-ink-muted">
                                 Set {groupId}
                               </span>
                             </div>
@@ -3890,7 +3890,7 @@ export default function HubPlateDashboard() {
                           <div className="flex flex-col gap-2">
                             <button
                               type="button"
-                              className="w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-[11px] font-semibold hover:bg-rose-950/70"
+                              className="w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-xs font-semibold hover:bg-rose-950/70"
                               onClick={() =>
                                 setScrapModal({
                                   plateStoreId: p.id,
@@ -3904,7 +3904,7 @@ export default function HubPlateDashboard() {
                             </button>
                             <button
                               type="button"
-                              className="w-full py-1.5 rounded border border-ds-line/50 bg-ds-card text-ds-ink text-[11px] font-semibold hover:bg-ds-elevated"
+                              className="w-full py-1.5 rounded border border-ds-line/50 bg-ds-card text-ds-ink text-xs font-semibold hover:bg-ds-elevated"
                               onClick={() => setRemakePlate(p)}
                             >
                               Partial remake (CTP / vendor)
@@ -3937,7 +3937,7 @@ export default function HubPlateDashboard() {
                     plateCount={custodyZoneMetrics.plateCount}
                   />
                 </div>
-                <p className="text-[11px] text-neutral-500 mb-2">Staging · plates marked ready</p>
+                <p className="text-xs text-neutral-500 mb-2">Staging · plates marked ready</p>
                 <input
                   value={custSearch}
                   onChange={(e) => setCustSearch(e.target.value)}
@@ -4051,7 +4051,7 @@ export default function HubPlateDashboard() {
                         <div className="flex flex-col gap-2">
                           <button
                             type="button"
-                            className={`w-full py-1.5 rounded text-foreground text-[11px] font-bold shadow-sm ${
+                            className={`w-full py-1.5 rounded text-foreground text-xs font-bold shadow-sm ${
                               c.jobCardHub?.key === 'printed'
                                 ? 'bg-emerald-500 hover:bg-emerald-400 ring-2 ring-emerald-300/40'
                                 : 'bg-emerald-700 hover:bg-emerald-600'
@@ -4073,7 +4073,7 @@ export default function HubPlateDashboard() {
                           </button>
                           <button
                             type="button"
-                            className="w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-[11px] font-semibold hover:bg-rose-950/70"
+                            className="w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-xs font-semibold hover:bg-rose-950/70"
                             onClick={() => {
                               if (c.kind !== 'plate') {
                                 toast.error(
@@ -4114,7 +4114,7 @@ export default function HubPlateDashboard() {
                 </ul>
               </section>
             </div>
-            <p className="mt-4 text-center text-[9px] text-neutral-500 font-[family-name:var(--font-designing-queue)] tracking-tight px-2">
+            <p className="mt-4 text-center text-xs text-neutral-500 font-[family-name:var(--font-designing-queue)] tracking-tight px-2">
               Audit Trail Synchronized - Accountability Layer Active.
             </p>
           </>
@@ -4162,7 +4162,7 @@ export default function HubPlateDashboard() {
                         <span className="font-medium block break-words whitespace-normal text-sm text-blue-400">
                           {hit.cartonName}
                         </span>
-                        <span className="text-[11px] text-neutral-500">
+                        <span className="text-xs text-neutral-500">
                           {hit.customer.name}
                           {hit.artworkCode ? ` · ${hit.artworkCode}` : ''}
                           {hit.ups != null && hit.ups > 0 ? ` · UPS ${hit.ups}` : ''}
@@ -4174,11 +4174,11 @@ export default function HubPlateDashboard() {
               ) : null}
             </div>
             {addSelectedCarton ? (
-              <p className="text-[11px] text-emerald-400/90">
+              <p className="text-xs text-emerald-400/90">
                 Linked: {addSelectedCarton.customer.name}
               </p>
             ) : (
-              <p className="text-[11px] text-neutral-500">Pick a row above to link carton + customer.</p>
+              <p className="text-xs text-neutral-500">Pick a row above to link carton + customer.</p>
             )}
             </div>
             <div className="p-4 pt-3 space-y-3 overflow-y-auto flex-1 min-h-0">
@@ -4220,7 +4220,7 @@ export default function HubPlateDashboard() {
             </div>
             <label className="block text-sm text-neutral-400">
               Output number
-              <span className="block text-[11px] text-neutral-500 font-normal mt-0.5">
+              <span className="block text-xs text-neutral-500 font-normal mt-0.5">
                 Also used as set / output reference in custody workflows.
               </span>
               <input
@@ -4361,7 +4361,7 @@ export default function HubPlateDashboard() {
               </p>
             ) : (
               <div className="overflow-auto rounded-lg border border-ds-line/40 min-h-0">
-                <table className="w-full text-[11px] border-collapse">
+                <table className="w-full text-xs border-collapse">
                   <thead className="sticky top-0 bg-ds-main z-[1]">
                     <tr className="text-left text-neutral-500 border-b border-ds-line/40">
                       <th className="py-1 px-1 w-8 font-semibold uppercase tracking-wide">Sel</th>
@@ -4459,7 +4459,7 @@ export default function HubPlateDashboard() {
               </div>
             )}
             <div className="rounded-lg border border-ds-line/50 bg-background/50 px-2 py-1.5 shrink-0">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-1">
                 Fulfillment status
               </p>
               <div className="flex flex-wrap items-center gap-1">
@@ -4600,7 +4600,7 @@ export default function HubPlateDashboard() {
                           <span className="font-medium block break-words whitespace-normal text-sm text-blue-400">
                             {hit.cartonName}
                           </span>
-                          <span className="text-[11px] text-neutral-500">
+                          <span className="text-xs text-neutral-500">
                             {hit.customer.name}
                             {hit.artworkCode ? ` · ${hit.artworkCode}` : ''}
                           </span>
@@ -4611,11 +4611,11 @@ export default function HubPlateDashboard() {
                 ) : null}
               </div>
               {mCtpSelected ? (
-                <p className="text-[11px] text-emerald-400/90 mt-2">
+                <p className="text-xs text-emerald-400/90 mt-2">
                   Linked: {mCtpSelected.customer.name}
                 </p>
               ) : (
-                <p className="text-[11px] text-neutral-500 mt-2">Pick a carton from search results.</p>
+                <p className="text-xs text-neutral-500 mt-2">Pick a carton from search results.</p>
               )}
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
@@ -4754,7 +4754,7 @@ export default function HubPlateDashboard() {
                           <span className="font-medium block break-words whitespace-normal text-sm text-blue-400">
                             {hit.cartonName}
                           </span>
-                          <span className="text-[11px] text-neutral-500">
+                          <span className="text-xs text-neutral-500">
                             {hit.customer.name}
                             {hit.artworkCode ? ` · ${hit.artworkCode}` : ''}
                           </span>
@@ -4765,11 +4765,11 @@ export default function HubPlateDashboard() {
                 ) : null}
               </div>
               {mvSelected ? (
-                <p className="text-[11px] text-emerald-400/90 mt-2">
+                <p className="text-xs text-emerald-400/90 mt-2">
                   Linked: {mvSelected.customer.name}
                 </p>
               ) : (
-                <p className="text-[11px] text-neutral-500 mt-2">Pick a carton from search results.</p>
+                <p className="text-xs text-neutral-500 mt-2">Pick a carton from search results.</p>
               )}
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
@@ -4916,7 +4916,7 @@ export default function HubPlateDashboard() {
                 >
                   <p className="text-xs font-mono text-ds-warning">{member.requirementCode}</p>
                   <p className="text-sm font-semibold text-ds-ink truncate">{member.cartonName}</p>
-                  <p className="text-[11px] text-ds-ink-muted">
+                  <p className="text-xs text-ds-ink-muted">
                     AW: {member.artworkCode?.trim() || '—'} · Plates: {member.newPlatesNeeded}
                   </p>
                 </button>
@@ -5076,7 +5076,7 @@ export default function HubPlateDashboard() {
                       })
                     )}
                   </div>
-                  <p className="text-[11px] text-neutral-500 mt-2 leading-snug">
+                  <p className="text-xs text-neutral-500 mt-2 leading-snug">
                     Any plate left unchecked is flagged for the scrap / damage workflow automatically.
                   </p>
                 </div>
@@ -5117,7 +5117,7 @@ export default function HubPlateDashboard() {
                   <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
                     Verify plate dimensions
                   </p>
-                  <p className="text-[11px] text-neutral-500 leading-snug">
+                  <p className="text-xs text-neutral-500 leading-snug">
                     Current:{' '}
                     <span className="text-neutral-400">
                       {HUB_PLATE_SIZE_OPTIONS.find((o) => o.value === returnSizeOriginal)?.mm ??
@@ -5159,7 +5159,7 @@ export default function HubPlateDashboard() {
                           </label>
                         ))}
                       </fieldset>
-                      <label className="block text-[11px] text-neutral-500">
+                      <label className="block text-xs text-neutral-500">
                         Remarks (optional)
                         <input
                           type="text"
@@ -5177,7 +5177,7 @@ export default function HubPlateDashboard() {
                   <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
                     Step 2 — Confirm plate origin (for analytics)
                   </p>
-                  <p className="text-[11px] text-neutral-500 mb-3">
+                  <p className="text-xs text-neutral-500 mb-3">
                     Default follows custody source; override if needed for reporting accuracy.
                   </p>
                   <fieldset className="space-y-2 rounded-lg border border-ds-line/50 bg-background/40 p-3">

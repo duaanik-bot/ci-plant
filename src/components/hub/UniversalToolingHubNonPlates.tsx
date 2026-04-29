@@ -32,7 +32,7 @@ function VendorPill({ stage, active }: { stage: VendorPipelineStage; active: Ven
   const current = i === ai
   return (
     <span
-      className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-medium border ${
+      className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium border ${
         current
           ? 'bg-ds-warning/18 border-ds-warning text-primary-foreground'
           : done
@@ -272,7 +272,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
   }
 
   const toggleBtn = (active: boolean) =>
-    `px-3 py-1.5 text-[11px] font-semibold rounded-md border transition-colors ${
+    `px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${
       active
         ? 'bg-ds-warning/18 border-ds-warning text-primary-foreground'
         : 'bg-ds-elevated/90 border-ds-line/60 text-ds-ink-muted hover:bg-ds-elevated'
@@ -284,7 +284,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold tracking-tight text-cyan-400">Universal Tooling Hub</h1>
-            <p className="text-[11px] text-ds-ink-faint">{title} · live workboard</p>
+            <p className="text-xs text-ds-ink-faint">{title} · live workboard</p>
           </div>
           <Link
             href="/masters/dies"
@@ -304,7 +304,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
           ) : null}
           <div>
             <h2 className="text-sm font-semibold text-ds-warning uppercase tracking-wide">1 · Incoming triage</h2>
-            <p className="text-[10px] text-ds-ink-faint mt-0.5">Staging from pre-press · choose flow</p>
+            <p className="text-xs text-ds-ink-faint mt-0.5">Staging from pre-press · choose flow</p>
           </div>
           <div
             className="inline-flex rounded-lg border border-ds-line/60 bg-ds-card/80 p-0.5 gap-0.5"
@@ -324,7 +324,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
           </div>
 
           {triageMode === 'retrieve' ? (
-            <p className="text-[11px] text-ds-ink-muted rounded-lg border border-ds-line/50 bg-ds-card/60 p-3">
+            <p className="text-xs text-ds-ink-muted rounded-lg border border-ds-line/50 bg-ds-card/60 p-3">
               No jobs in staging for retrieval. Use{' '}
               <span className="text-cyan-300">column 3 · Live inventory</span> to locate the physical asset and book it
               out to the floor.
@@ -371,7 +371,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                           </td>
                           {toolType === 'dies' ? (
                             <>
-                              <td className="p-2 text-[11px] whitespace-nowrap">
+                              <td className="p-2 text-xs whitespace-nowrap">
                                 {[r.lengthMm, r.widthMm, r.heightMm].every((x) => x == null)
                                   ? '—'
                                   : `${r.lengthMm ?? '—'} × ${r.widthMm ?? '—'} × ${r.heightMm ?? '—'}`}
@@ -383,7 +383,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                           {toolType === 'shade_cards' ? (
                             <>
                               <td className="p-2 whitespace-nowrap">{r.approvalDate || '—'}</td>
-                              <td className="p-2 font-mono text-[11px]">{r.masterArtworkRef || '—'}</td>
+                              <td className="p-2 font-mono text-xs">{r.masterArtworkRef || '—'}</td>
                             </>
                           ) : null}
                           <td className="p-2">
@@ -398,7 +398,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                               <button
                                 type="button"
                                 onClick={() => void sharpen(r.id)}
-                                className="px-2 py-0.5 rounded bg-ds-warning/20 hover:bg-ds-warning/30 text-[10px] font-semibold text-balance"
+                                className="px-2 py-0.5 rounded bg-ds-warning/20 hover:bg-ds-warning/30 text-xs font-semibold text-balance"
                               >
                                 Sharpening
                               </button>
@@ -434,7 +434,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                     key={c}
                     type="button"
                     onClick={() => setBlockCond(c)}
-                    className={`px-2 py-1 rounded text-[11px] border ${
+                    className={`px-2 py-1 rounded text-xs border ${
                       blockCond === c
                         ? 'bg-violet-700 border-violet-500 text-primary-foreground'
                         : 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted'
@@ -461,7 +461,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
           className="min-h-0 overflow-y-auto p-4 border-b xl:border-b-0 border-ds-line/40 scroll-mt-28"
         >
           <h2 className="text-sm font-semibold text-ds-warning uppercase tracking-wide mb-2">2 · Procurement</h2>
-          <p className="text-[11px] text-ds-ink-faint mb-3">Vendor orders and physical sample gates.</p>
+          <p className="text-xs text-ds-ink-faint mb-3">Vendor orders and physical sample gates.</p>
           <div className="space-y-2">
             {rows.length === 0 ? (
               <p className="text-sm text-ds-ink-faint">No open requirements.</p>
@@ -469,7 +469,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
               rows.map((r) => (
                 <div
                   key={`proc-${r.id}`}
-                  className="rounded-lg border border-ds-line/50 bg-ds-card/80 p-3 text-[11px] space-y-2"
+                  className="rounded-lg border border-ds-line/50 bg-ds-card/80 p-3 text-xs space-y-2"
                 >
                   <div className="font-mono text-cyan-300">{r.code}</div>
                   <div className="text-ds-ink font-medium">{r.title}</div>
@@ -488,7 +488,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
             )}
           </div>
           {toolType === 'dies' ? (
-            <p className="mt-4 text-[11px] text-ds-ink-faint">
+            <p className="mt-4 text-xs text-ds-ink-faint">
               No in-house die-making — use <span className="text-ds-warning">Send to vendor</span> for procurement.
             </p>
           ) : null}
@@ -502,7 +502,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
           <h2 className="text-sm font-semibold text-ds-warning uppercase tracking-wide mb-2">
             3 · Live inventory (rack)
           </h2>
-          <label className="block text-[11px] text-ds-ink-muted mb-2">
+          <label className="block text-xs text-ds-ink-muted mb-2">
             Search
             <input
               value={invSearch}
@@ -522,11 +522,11 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                   className="rounded-lg border border-ds-line/60 bg-ds-card overflow-hidden flex flex-col"
                 >
                   <div className="aspect-square relative bg-gradient-to-br from-ds-warning/20 to-violet-900/40 flex items-center justify-center">
-                    <span className="text-[10px] text-ds-ink-faint px-1 text-center text-balance">
+                    <span className="text-xs text-ds-ink-faint px-1 text-center text-balance">
                       {s.previewUrl ? 'Image URL configured' : 'Colour preview'}
                     </span>
                   </div>
-                  <div className="p-2 text-[10px] space-y-0.5">
+                  <div className="p-2 text-xs space-y-0.5">
                     <div className="font-mono text-cyan-300">{s.ref}</div>
                     <div className="text-ds-ink-muted">Slot {s.slot}</div>
                     <div className="text-emerald-400/90">{s.holder}</div>
@@ -542,7 +542,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
               ))}
             </div>
           ) : toolType === 'blocks' ? (
-            <ul className="space-y-1.5 text-[11px]">
+            <ul className="space-y-1.5 text-xs">
               {inventoryFiltered.length === 0 ? (
                 <li className="text-ds-ink-faint">No blocks match search.</li>
               ) : (
@@ -572,14 +572,14 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
         <section className="min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-ds-warning uppercase tracking-wide">4 · Custody (floor)</h2>
           {toolType === 'shade_cards' ? (
-            <p className="text-[11px] text-ds-ink-faint">Machine custody and ink-lab checkouts.</p>
+            <p className="text-xs text-ds-ink-faint">Machine custody and ink-lab checkouts.</p>
           ) : (
-            <p className="text-[11px] text-ds-ink-faint">
+            <p className="text-xs text-ds-ink-faint">
               Return to rack logs impression wear — use <span className="text-emerald-400">Return to rack</span> below.
             </p>
           )}
           <div className="rounded-xl border border-ds-line/50 overflow-hidden">
-            <table className="w-full text-left text-[11px]">
+            <table className="w-full text-left text-xs">
               <thead className="bg-ds-elevated/80 text-ds-ink-muted uppercase">
                 <tr>
                   <th className="p-2 w-8">
@@ -647,18 +647,18 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-background/60 p-4">
           <div className="bg-ds-card border border-ds-line/60 rounded-xl p-4 max-w-md w-full shadow-xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-2">Return to rack</h3>
-            <p className="text-[11px] text-ds-ink-faint mb-3">
+            <p className="text-xs text-ds-ink-faint mb-3">
               Applies to all selected rows. Job card and artwork IDs are mandatory for audit.
             </p>
             <div className="block text-ds-ink-muted mb-3 text-sm">
-              <span className="block text-[11px] mb-1">Condition</span>
+              <span className="block text-xs mb-1">Condition</span>
               <div className="flex flex-wrap gap-1.5">
                 {(['Good', 'Damaged', 'Needs Repair'] as const).map((c) => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setReturnToolCondition(c)}
-                    className={`px-2 py-1 rounded text-[11px] border ${
+                    className={`px-2 py-1 rounded text-xs border ${
                       returnToolCondition === c
                         ? 'bg-emerald-800 border-emerald-500 text-primary-foreground'
                         : 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted'

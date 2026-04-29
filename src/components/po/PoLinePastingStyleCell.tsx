@@ -24,9 +24,9 @@ export type PoLinePastingStyleCellProps = {
 
 function badgeClassForLine(style: string): string {
   if (style === 'BSO') {
-    return 'inline-flex items-center justify-center rounded-md bg-violet-600/75 px-2 py-1 text-[11px] font-bold text-primary-foreground shadow-sm ring-1 ring-inset ring-violet-300/40 transition-opacity hover:bg-violet-600/90'
+    return 'inline-flex items-center justify-center rounded-md bg-violet-600/75 px-2 py-1 text-xs font-bold text-primary-foreground shadow-sm ring-1 ring-inset ring-violet-300/40 transition-opacity hover:bg-violet-600/90'
   }
-  return 'inline-flex items-center justify-center rounded-md bg-indigo-600/75 px-2 py-1 text-[11px] font-bold text-primary-foreground shadow-sm ring-1 ring-inset ring-indigo-300/40 transition-opacity hover:bg-indigo-600/90'
+  return 'inline-flex items-center justify-center rounded-md bg-indigo-600/75 px-2 py-1 text-xs font-bold text-primary-foreground shadow-sm ring-1 ring-inset ring-indigo-300/40 transition-opacity hover:bg-indigo-600/90'
 }
 
 export function PoLinePastingStyleCell({
@@ -72,7 +72,7 @@ export function PoLinePastingStyleCell({
             </option>
           ))}
         </select>
-        {pasteErr ? <p className="text-[10px] text-red-400 mt-0.5">{pasteErr}</p> : null}
+        {pasteErr ? <p className="text-xs text-red-400 mt-0.5">{pasteErr}</p> : null}
       </div>
     )
   }
@@ -82,10 +82,10 @@ export function PoLinePastingStyleCell({
       pastingStyle === 'BSO' ? PastingStyle.BSO : PastingStyle.LOCK_BOTTOM
     return (
       <div ref={wrapRef} className="group/pasteWarn relative min-w-[9rem]">
-        <p className="mb-1 text-[10px] text-ds-ink-faint">Choose a style, then use Save to master.</p>
+        <p className="mb-1 text-xs text-ds-ink-faint">Choose a style, then use Save to master.</p>
         <div
           id={`paste-warn-${lineIndex}`}
-          className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[14rem] rounded-ds-sm border border-ds-line bg-ds-card px-2.5 py-2 text-[10px] font-medium leading-snug text-ds-ink-muted shadow-xl group-hover/pasteWarn:block"
+          className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[14rem] rounded-ds-sm border border-ds-line bg-ds-card px-2.5 py-2 text-xs font-medium leading-snug text-ds-ink-muted shadow-xl group-hover/pasteWarn:block"
           role="tooltip"
         >
           Lock Bottom or BSO, then save to product master. Edits here still apply to this PO.
@@ -98,10 +98,10 @@ export function PoLinePastingStyleCell({
           aria-expanded={open}
           aria-describedby={`paste-warn-${lineIndex}`}
         >
-          <span className="text-[12px] font-medium leading-tight text-ds-ink">
+          <span className="text-xs font-medium leading-tight text-ds-ink">
             {pastingStyleLabel(displayStyle)}
           </span>
-          <span className="shrink-0 text-[10px] text-ds-ink-faint" aria-hidden>
+          <span className="shrink-0 text-xs text-ds-ink-faint" aria-hidden>
             {open ? '▴' : '▾'}
           </span>
         </button>
@@ -123,7 +123,7 @@ export function PoLinePastingStyleCell({
             <option value={PastingStyle.BSO}>{pastingStyleLabel(PastingStyle.BSO)}</option>
           </select>
         ) : null}
-        {pasteErr ? <p className="text-[10px] text-ds-error mt-0.5">{pasteErr}</p> : null}
+        {pasteErr ? <p className="text-xs text-ds-error mt-0.5">{pasteErr}</p> : null}
       </div>
     )
   }
@@ -133,7 +133,7 @@ export function PoLinePastingStyleCell({
     return (
       <div className={`min-w-[7rem] text-xs text-ds-ink-muted ${ghostFromMaster ? 'opacity-90' : ''}`}>
         Loading…
-        {pasteErr ? <p className="text-[10px] text-red-400 mt-0.5">{pasteErr}</p> : null}
+        {pasteErr ? <p className="text-xs text-red-400 mt-0.5">{pasteErr}</p> : null}
       </div>
     )
   }
@@ -146,7 +146,7 @@ export function PoLinePastingStyleCell({
       >
         {pastingStyleLabel(linkedStyle)}
       </Link>
-      {pasteErr ? <p className="text-[10px] text-red-400 mt-0.5">{pasteErr}</p> : null}
+      {pasteErr ? <p className="text-xs text-red-400 mt-0.5">{pasteErr}</p> : null}
     </div>
   )
 }

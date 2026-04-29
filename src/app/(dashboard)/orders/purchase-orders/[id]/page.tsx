@@ -254,11 +254,11 @@ function CartonLookupField({
           const suggestedName = cartonQuery.trim()
           if (suggestedName) onCreate(suggestedName)
         }}
-        inputClassName="min-w-0 w-full max-w-full px-1.5 py-0.5 text-[11px]"
+        inputClassName="min-w-0 w-full max-w-full px-1.5 py-0.5 text-xs"
         dropdownClassName="min-w-[280px]"
       />
       {!line.cartonId && line.cartonName.trim() ? (
-        <span className="mt-1 inline-block text-[10px] text-ds-warning">Unsaved carton name</span>
+        <span className="mt-1 inline-block text-xs text-ds-warning">Unsaved carton name</span>
       ) : null}
     </div>
   )
@@ -847,16 +847,16 @@ export default function EditPurchaseOrderPage() {
   }
 
   const inputCls =
-    'ds-input w-full min-w-0 border-ds-line/80 bg-ds-elevated/60 dark:bg-ds-elevated/80 text-[15px] text-ds-ink placeholder:text-ds-ink-faint'
+    'ds-input w-full min-w-0 border-ds-line/80 bg-ds-elevated/60 dark:bg-ds-elevated/80 text-sm text-ds-ink placeholder:text-ds-ink-faint'
   const inputClsGhost =
     'ds-input w-full min-w-0 !border-ds-line/50 !bg-ds-elevated/40 dark:!bg-ds-elevated/60 !text-ds-ink-muted placeholder:text-ds-ink-faint'
   const inputErr = 'ring-1 ring-ds-error/40 !border-ds-error/60'
   const lineCellPad = `${dataTable.td.base} align-middle min-h-[52px]`
   const poMono = 'po-mono-metric'
-  const tableInputPrimary = 'text-[15px] font-semibold text-ds-ink tabular-nums'
-  const tableInputSecondary = 'text-[12px] font-medium text-ds-ink-muted'
-  const thPrimary = 'text-left text-[12px] font-semibold tracking-tight text-ds-ink'
-  const thSecondary = 'text-left text-[12px] font-medium uppercase tracking-wider text-ds-ink-muted'
+  const tableInputPrimary = 'text-sm font-semibold text-ds-ink tabular-nums'
+  const tableInputSecondary = 'text-sm font-medium text-ds-ink-muted'
+  const thPrimary = 'text-left text-sm font-semibold tracking-tight text-ds-ink'
+  const thSecondary = 'text-left text-sm font-medium uppercase tracking-wider text-ds-ink-muted'
 
   if (loading) {
     return (
@@ -911,12 +911,12 @@ export default function EditPurchaseOrderPage() {
             {!poSentToPlanning ? (
               <div className="flex w-full min-w-0 flex-col items-stretch gap-1.5 sm:max-w-xs sm:items-end">
                 {!releaseStatusOk ? (
-                  <p className="text-right text-[10px] text-ds-warning/90 sm:max-w-[16rem]">
+                  <p className="text-right text-xs text-ds-warning/90 sm:max-w-[16rem]">
                     Set status to Confirmed or Approved to release to Planning.
                   </p>
                 ) : null}
                 {releaseStatusOk && !productionKitLoading && productionKit && !productionKit.allOk ? (
-                  <label className="flex cursor-pointer items-center justify-end gap-2 text-[10px] text-ds-warning">
+                  <label className="flex cursor-pointer items-center justify-end gap-2 text-xs text-ds-warning">
                     <input
                       type="checkbox"
                       className="h-3.5 w-3.5 rounded border-ds-line/50"
@@ -927,10 +927,10 @@ export default function EditPurchaseOrderPage() {
                   </label>
                 ) : null}
                 {releaseStatusOk && validLines.length > 0 && !allLinesProductLinked ? (
-                  <p className="text-right text-[10px] text-ds-warning/90">Link every line to a master product to release.</p>
+                  <p className="text-right text-xs text-ds-warning/90">Link every line to a master product to release.</p>
                 ) : null}
                 {releaseStatusOk && (!deliveryRequiredBy.trim() || !poDate.trim()) ? (
-                  <p className="text-right text-[10px] text-ds-warning/90">PO date and delivery date are required.</p>
+                  <p className="text-right text-xs text-ds-warning/90">PO date and delivery date are required.</p>
                 ) : null}
                 <button
                   type="button"
@@ -942,7 +942,7 @@ export default function EditPurchaseOrderPage() {
                 </button>
               </div>
             ) : (
-              <p className="text-right text-[10px] leading-snug text-emerald-400/90">
+              <p className="text-right text-xs leading-snug text-emerald-400/90">
                 In Planning — lines are read-only.{' '}
                 <Link href="/orders/planning" className="font-semibold text-ds-warning underline underline-offset-2">
                   Open queue
@@ -983,7 +983,7 @@ export default function EditPurchaseOrderPage() {
               />
             </div>
             {selectedCustomer ? (
-              <p className="mt-1 text-[10px] text-ds-ink-faint">
+              <p className="mt-1 text-xs text-ds-ink-faint">
                 {[selectedCustomer.contactName, selectedCustomer.contactPhone].filter(Boolean).join(' · ')}
               </p>
             ) : null}
@@ -1056,7 +1056,7 @@ export default function EditPurchaseOrderPage() {
                 <thead className={dataTable.thead}>
                   <tr>
                     <th
-                      className={`${dataTable.th} w-[40%] sticky left-0 z-40 min-h-[48px] border-r border-ds-line/50 bg-ds-elevated/95 shadow-[2px_0_8px_rgba(0,0,0,0.2)] pr-2 text-left text-[12px] font-semibold text-ds-ink`}
+                      className={`${dataTable.th} w-[40%] sticky left-0 z-40 min-h-[48px] border-r border-ds-line/50 bg-ds-elevated/95 shadow-[2px_0_8px_rgba(0,0,0,0.2)] pr-2 text-left text-xs font-semibold text-ds-ink`}
                     >
                       Carton
                     </th>
@@ -1065,7 +1065,7 @@ export default function EditPurchaseOrderPage() {
                     <th className={`${lineCellPad} ${thPrimary} w-[18%] text-right ${poMono}`}>Rate</th>
                     <th className={`${lineCellPad} ${thPrimary} w-[16%] text-right ${poMono}`}>Amount</th>
                     <th
-                      className={`${lineCellPad} w-[6%] text-right text-[12px] font-normal text-ds-ink-faint`}
+                      className={`${lineCellPad} w-[6%] text-right text-xs font-normal text-ds-ink-faint`}
                       aria-label="Row actions"
                     />
                   </tr>
@@ -1282,7 +1282,7 @@ export default function EditPurchaseOrderPage() {
       >
         <div className="mx-auto flex max-w-[1920px] flex-col gap-2 px-3 py-2.5 sm:px-4">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="text-[9px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            <span className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
               Supply
             </span>
             <div className="flex h-1.5 min-w-[120px] flex-1 max-w-md flex-row overflow-hidden rounded-full bg-ds-elevated ring-1 ring-ds-line/50">
@@ -1309,13 +1309,13 @@ export default function EditPurchaseOrderPage() {
                 </>
               ) : null}
             </div>
-            <span className="text-[10px] tabular-nums text-ds-ink-faint">
+            <span className="text-xs tabular-nums text-ds-ink-faint">
               {supplyMaterialCounts.grey}/{supplyMaterialCounts.blue}/{supplyMaterialCounts.green}
             </span>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-1 text-[11px] text-ds-ink-muted">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-1 text-xs text-ds-ink-muted">
               <span>
                 Qty <span className={`${poMono} font-semibold text-ds-ink`}>{totalQty}</span>
               </span>
@@ -1332,7 +1332,7 @@ export default function EditPurchaseOrderPage() {
                 </span>
               </span>
               <span className="flex items-baseline gap-1.5 text-ds-ink-muted">
-                <span className="text-[11px] font-medium uppercase tracking-wide">Grand total</span>
+                <span className="text-xs font-medium uppercase tracking-wide">Grand total</span>
                 <span
                   className={`${poMono} text-[1.2rem] font-bold leading-none text-[#f97316] sm:text-[1.35rem]`}
                 >

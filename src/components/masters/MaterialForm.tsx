@@ -303,7 +303,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
             <div>
               <label className="block text-ds-ink-muted mb-1">Sheet weight (g)</label>
               <input type="text" readOnly value={sheetWeight > 0 ? `${sheetWeight} g` : '—'} className={`${cls} opacity-60 cursor-not-allowed`} />
-              <p className="text-[10px] text-ds-ink-faint mt-0.5">= L x W x GSM / 1,000,000</p>
+              <p className="text-xs text-ds-ink-faint mt-0.5">= L x W x GSM / 1,000,000</p>
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Grain direction</label>

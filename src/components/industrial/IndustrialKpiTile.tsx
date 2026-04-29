@@ -28,22 +28,22 @@ export function IndustrialKpiTile({
   if (onClick) {
     return (
       <button type="button" className={cls} onClick={onClick}>
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
         <div className={`mt-0.5 text-xl md:text-2xl font-semibold tabular-nums ${valueClassName}`}>
           {value}
         </div>
-        {hint ? <div className="text-[10px] text-ds-ink-faint mt-0.5">{hint}</div> : null}
+        {hint ? <div className="text-xs text-ds-ink-faint mt-0.5">{hint}</div> : null}
       </button>
     )
   }
 
   return (
     <div className={cls}>
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
+      <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
       <div className={`mt-0.5 text-xl md:text-2xl font-semibold tabular-nums ${valueClassName}`}>
         {value}
       </div>
-      {hint ? <div className="text-[10px] text-ds-ink-faint mt-0.5">{hint}</div> : null}
+      {hint ? <div className="text-xs text-ds-ink-faint mt-0.5">{hint}</div> : null}
     </div>
   )
 }

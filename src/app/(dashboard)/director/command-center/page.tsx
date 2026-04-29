@@ -105,7 +105,7 @@ function RevenueSparkline({ series }: { series: { day: string; value: number }[]
   const h = 52
   const pad = 4
   if (!series.length) {
-    return <div className={`h-[52px] rounded bg-ds-main ring-1 ring-ring/30 ${mono} text-[10px] text-ds-ink-faint flex items-center justify-center`}>No data</div>
+    return <div className={`h-[52px] rounded bg-ds-main ring-1 ring-ring/30 ${mono} text-xs text-ds-ink-faint flex items-center justify-center`}>No data</div>
   }
   const vals = series.map((d) => d.value)
   const max = Math.max(...vals, 1)
@@ -178,7 +178,7 @@ function StageDistributionStack({
           )
         )}
       </div>
-      <div className={`mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-ds-ink-faint ${mono}`}>
+      <div className={`mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ds-ink-faint ${mono}`}>
         {parts.map((p) => (
           <span key={p.key} className="inline-flex items-center gap-1">
             <span className={`inline-block h-2 w-2 shrink-0 rounded-sm ${p.c}`} />
@@ -203,7 +203,7 @@ function FiveStageBar({ bars }: { bars: DirectorLifeBars }) {
     <div className="flex gap-1 min-w-[11rem]">
       {cols.map(({ key, label }) => (
         <div key={key} className="min-w-0 flex-1" title={label}>
-          <div className="text-[6px] uppercase text-ds-ink-faint text-center mb-px">{label}</div>
+          <div className="text-xs uppercase text-ds-ink-faint text-center mb-px">{label}</div>
           <MicroBar parts={bars[key]} />
         </div>
       ))}
@@ -330,10 +330,10 @@ export default function DirectorCommandCenterPage() {
             <h1 className="text-lg md:text-xl font-bold text-ds-warning tracking-tight">
               Director Command Center
             </h1>
-            <p className="text-[11px] text-ds-ink-faint">
+            <p className="text-xs text-ds-ink-faint">
               Business vitals · pipeline · priority overrides (audit logged)
             </p>
-            <p className="mt-1 text-[10px] text-ds-ink-faint">
+            <p className="mt-1 text-xs text-ds-ink-faint">
               <kbd className="rounded border border-ds-line/50 bg-ds-main px-1 py-px font-director-cc text-ds-ink-muted">
                 ⌘K
               </kbd>{' '}
@@ -374,21 +374,21 @@ export default function DirectorCommandCenterPage() {
 
         <section aria-label="Business vitals" className="grid gap-3 lg:grid-cols-3">
           <div className="rounded-xl border border-ds-warning/30 bg-card p-3 shadow-[inset_0_1px_0_0_rgba(251,191,36,0.12)]">
-            <h2 className="text-[10px] font-bold uppercase tracking-widest text-ds-warning/95">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-ds-warning/95">
               Zone 1 · Sales
             </h2>
             <div className="mt-2 grid gap-2">
               <div className="rounded-lg border border-ds-warning/20 bg-ds-main/80 px-3 py-2">
-                <div className="text-[9px] font-semibold uppercase text-ds-warning/80">
+                <div className="text-xs font-semibold uppercase text-ds-warning/80">
                   Live order book
                 </div>
                 <div className={`text-base font-semibold text-ds-ink ${mono}`}>
                   {vitalsLoading ? '—' : formatRupee(vitals?.sales.liveOrderBookValue ?? 0)}
                 </div>
-                <div className="text-[9px] text-ds-ink-faint">Active customer PO lines (draft + confirmed)</div>
+                <div className="text-xs text-ds-ink-faint">Active customer PO lines (draft + confirmed)</div>
               </div>
               <div className="rounded-lg border border-ds-warning/20 bg-ds-main/80 px-3 py-2">
-                <div className="text-[9px] font-semibold uppercase text-ds-warning/80">
+                <div className="text-xs font-semibold uppercase text-ds-warning/80">
                   Revenue dispatched (MTD)
                 </div>
                 <div className={`text-base font-semibold text-ds-ink ${mono}`}>
@@ -396,7 +396,7 @@ export default function DirectorCommandCenterPage() {
                     ? '—'
                     : formatRupee(vitals?.sales.revenueDispatchedMtdValue ?? 0)}
                 </div>
-                <div className="text-[9px] text-ds-ink-faint">
+                <div className="text-xs text-ds-ink-faint">
                   Closed PO ₹ this month (until gate passes carry ₹). Gate passes MTD:{' '}
                   <span className={mono}>
                     {vitalsLoading
@@ -411,21 +411,21 @@ export default function DirectorCommandCenterPage() {
           </div>
 
           <div className="rounded-xl border border-sky-500/40 bg-card p-3 shadow-[inset_0_1px_0_0_rgba(56,189,248,0.12)]">
-            <h2 className="text-[10px] font-bold uppercase tracking-widest text-sky-300">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-sky-300">
               Zone 2 · Procurement
             </h2>
             <div className="mt-2 grid gap-2">
               <div className="rounded-lg border border-sky-500/25 bg-ds-main/80 px-3 py-2">
-                <div className="text-[9px] font-semibold uppercase text-sky-400/90">
+                <div className="text-xs font-semibold uppercase text-sky-400/90">
                   Open material spend
                 </div>
                 <div className={`text-base font-semibold text-sky-100 ${mono}`}>
                   {vitalsLoading ? '—' : formatRupee(vitals?.procurement.openMaterialSpend ?? 0)}
                 </div>
-                <div className="text-[9px] text-ds-ink-faint">Open vendor material POs (₹ est.)</div>
+                <div className="text-xs text-ds-ink-faint">Open vendor material POs (₹ est.)</div>
               </div>
               <div className="rounded-lg border border-sky-500/25 bg-ds-main/80 px-3 py-2">
-                <div className="text-[9px] font-semibold uppercase text-sky-400/90">
+                <div className="text-xs font-semibold uppercase text-sky-400/90">
                   Incoming tonnage (7d)
                 </div>
                 <div className={`text-base font-semibold text-sky-100 ${mono}`}>
@@ -433,7 +433,7 @@ export default function DirectorCommandCenterPage() {
                     ? '—'
                     : `${((vitals?.procurement.incomingBoardKg7d ?? 0) / 1000).toLocaleString('en-IN', { maximumFractionDigits: 2 })} t`}
                 </div>
-                <div className={`text-[9px] text-ds-ink-faint ${mono}`}>
+                <div className={`text-xs text-ds-ink-faint ${mono}`}>
                   {(vitals?.procurement.incomingBoardKg7d ?? 0).toLocaleString('en-IN', {
                     maximumFractionDigits: 0,
                   })}{' '}
@@ -444,12 +444,12 @@ export default function DirectorCommandCenterPage() {
           </div>
 
           <div className="rounded-xl border border-emerald-500/40 bg-card p-3 shadow-[inset_0_1px_0_0_rgba(52,211,153,0.12)]">
-            <h2 className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-300">
               Zone 3 · Production
             </h2>
             <div className="mt-2 grid gap-2">
               <div className="rounded-lg border border-emerald-500/25 bg-ds-main/80 px-3 py-2">
-                <div className="text-[9px] font-semibold uppercase text-emerald-400/90">
+                <div className="text-xs font-semibold uppercase text-emerald-400/90">
                   Factory OEE
                 </div>
                 <div className={`text-base font-semibold text-emerald-100 ${mono}`}>
@@ -457,10 +457,10 @@ export default function DirectorCommandCenterPage() {
                     ? '—'
                     : `${(vitals?.production.factoryOeePct ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })}%`}
                 </div>
-                <div className="text-[9px] text-ds-ink-faint">CI-01 · CI-02 · CI-03 average (today)</div>
+                <div className="text-xs text-ds-ink-faint">CI-01 · CI-02 · CI-03 average (today)</div>
               </div>
               <div className="rounded-lg border border-emerald-500/25 bg-ds-main/80 px-3 py-2">
-                <div className="text-[9px] font-semibold uppercase text-emerald-400/90">
+                <div className="text-xs font-semibold uppercase text-emerald-400/90">
                   Late order alert
                 </div>
                 <div className={`text-base font-semibold text-emerald-100 ${mono}`}>
@@ -468,7 +468,7 @@ export default function DirectorCommandCenterPage() {
                     ? '—'
                     : (vitals?.production.lateOrdersPastDue ?? 0).toLocaleString('en-IN')}
                 </div>
-                <div className="text-[9px] text-ds-ink-faint">Customer POs past &quot;delivery required by&quot;</div>
+                <div className="text-xs text-ds-ink-faint">Customer POs past &quot;delivery required by&quot;</div>
               </div>
             </div>
           </div>
@@ -476,10 +476,10 @@ export default function DirectorCommandCenterPage() {
 
         <div className="grid gap-3 md:grid-cols-2">
           <div className="rounded-xl border border-border/40 bg-card px-3 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
+            <div className="text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
               Revenue trend (30 days)
             </div>
-            <p className="mt-0.5 text-[9px] text-ds-ink-faint">
+            <p className="mt-0.5 text-xs text-ds-ink-faint">
               Sales volume (₹) from customer POs closed each day — sparkline for directional view.
             </p>
             <div className="mt-2">
@@ -487,10 +487,10 @@ export default function DirectorCommandCenterPage() {
             </div>
           </div>
           <div className="rounded-xl border border-border/40 bg-card px-3 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
+            <div className="text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
               Stage distribution
             </div>
-            <p className="mt-0.5 text-[9px] text-ds-ink-faint">
+            <p className="mt-0.5 text-xs text-ds-ink-faint">
               Job volume by pipeline stage (sample of open lines).
             </p>
             <div className="mt-3">
@@ -511,34 +511,34 @@ export default function DirectorCommandCenterPage() {
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           <div className="rounded-xl border border-border/40 bg-card px-3 py-2">
-            <div className="text-[10px] font-semibold uppercase text-ds-ink-faint">Total WIP value</div>
+            <div className="text-xs font-semibold uppercase text-ds-ink-faint">Total WIP value</div>
             <div className={`text-lg font-semibold text-emerald-300 ${mono}`}>
               {loading ? '—' : formatRupee(metrics?.totalWipValue ?? 0)}
             </div>
-            <div className="text-[9px] text-ds-ink-faint">Tooling · Material · Printing</div>
+            <div className="text-xs text-ds-ink-faint">Tooling · Material · Printing</div>
           </div>
           <div className="rounded-xl border border-ds-warning/25 bg-card px-3 py-2">
-            <div className="text-[10px] font-semibold uppercase text-ds-warning/80">Priority jobs</div>
+            <div className="text-xs font-semibold uppercase text-ds-warning/80">Priority jobs</div>
             <div className={`text-lg font-semibold text-ds-warning ${mono}`}>
               {loading ? '—' : (metrics?.priorityJobs ?? 0).toLocaleString('en-IN')}
             </div>
-            <div className="text-[9px] text-ds-ink-faint">Director star</div>
+            <div className="text-xs text-ds-ink-faint">Director star</div>
           </div>
           <div className="rounded-xl border border-rose-500/25 bg-card px-3 py-2">
-            <div className="text-[10px] font-semibold uppercase text-rose-400/90">Bottlenecks</div>
+            <div className="text-xs font-semibold uppercase text-rose-400/90">Bottlenecks</div>
             <div className={`text-lg font-semibold text-rose-200 ${mono}`}>
               {loading ? '—' : (metrics?.systemBottlenecks ?? 0).toLocaleString('en-IN')}
             </div>
-            <div className="text-[9px] text-ds-ink-faint">&gt; 48h in stage</div>
+            <div className="text-xs text-ds-ink-faint">&gt; 48h in stage</div>
           </div>
           <div className="rounded-xl border border-sky-500/25 bg-card px-3 py-2">
-            <div className="text-[10px] font-semibold uppercase text-sky-400/90">Velocity</div>
+            <div className="text-xs font-semibold uppercase text-sky-400/90">Velocity</div>
             <div className={`text-lg font-semibold text-sky-200 ${mono}`}>
               {loading
                 ? '—'
                 : `${(metrics?.velocityDaysAvg30d ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
             </div>
-            <div className="text-[9px] text-ds-ink-faint">
+            <div className="text-xs text-ds-ink-faint">
               PO → dispatch · 30d · n={metrics?.velocitySampleCount ?? 0}
             </div>
           </div>
@@ -546,7 +546,7 @@ export default function DirectorCommandCenterPage() {
 
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
           <div className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-ds-line/40 bg-card">
-            <table className="w-full min-w-[1100px] border-collapse text-left text-[10px]">
+            <table className="w-full min-w-[1100px] border-collapse text-left text-xs">
               <thead className="sticky top-0 z-30 border-b border-ds-line/40 bg-card text-ds-ink-faint backdrop-blur-md">
             <tr>
               <th className="px-1 py-1 w-8">★</th>
@@ -630,7 +630,7 @@ export default function DirectorCommandCenterPage() {
                     <div className="text-ds-ink-faint">
                       <span className={mono}>{r.po.poNumber}</span> · {r.po.customer.name}
                     </div>
-                    <div className="text-[9px] text-ds-ink-faint">
+                    <div className="text-xs text-ds-ink-faint">
                       Stage: {r.stageKeyDerived}
                       {r.directorPriority ? (
                         <span className="ml-1 text-ds-warning font-bold">DIRECTOR PRIORITY</span>
@@ -660,7 +660,7 @@ export default function DirectorCommandCenterPage() {
                         void patchLine(r.id, { directorBroadcastNote: next || null })
                       }}
                       placeholder="Floor note…"
-                      className="w-full min-w-[7rem] rounded border border-ds-line/40 bg-card px-1 py-0.5 text-[10px] text-ds-ink placeholder:text-neutral-700 focus:border-ds-warning/50 focus:outline-none"
+                      className="w-full min-w-[7rem] rounded border border-ds-line/40 bg-card px-1 py-0.5 text-xs text-ds-ink placeholder:text-neutral-700 focus:border-ds-warning/50 focus:outline-none"
                     />
                   </td>
                 </tr>
@@ -675,16 +675,16 @@ export default function DirectorCommandCenterPage() {
             aria-label="Director action feed"
           >
             <div className="rounded-xl border border-rose-500/30 bg-card px-3 py-2">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-rose-300">
+              <div className="text-xs font-bold uppercase tracking-widest text-rose-300">
                 Alert center
               </div>
-              <p className="text-[9px] text-ds-ink-faint">Critical issues for review.</p>
+              <p className="text-xs text-ds-ink-faint">Critical issues for review.</p>
             </div>
             <div className="max-h-[min(70vh,520px)] space-y-2 overflow-y-auto rounded-xl border border-border/40 bg-card p-2">
               {vitalsLoading ? (
-                <p className={`px-2 py-4 text-center text-[11px] text-ds-ink-faint ${mono}`}>Loading alerts…</p>
+                <p className={`px-2 py-4 text-center text-xs text-ds-ink-faint ${mono}`}>Loading alerts…</p>
               ) : alerts.length === 0 ? (
-                <p className={`px-2 py-4 text-center text-[11px] text-ds-ink-faint ${mono}`}>
+                <p className={`px-2 py-4 text-center text-xs text-ds-ink-faint ${mono}`}>
                   No critical alerts.
                 </p>
               ) : (
@@ -698,7 +698,7 @@ export default function DirectorCommandCenterPage() {
                   return (
                     <div
                       key={a.id}
-                      className={`rounded-lg border px-2.5 py-2 text-[11px] leading-snug ${border}`}
+                      className={`rounded-lg border px-2.5 py-2 text-xs leading-snug ${border}`}
                     >
                       <div className="font-semibold text-ds-ink">{a.title}</div>
                       <div className={`mt-1 text-ds-ink-faint ${mono}`}>{a.detail}</div>
@@ -803,10 +803,10 @@ function DrawerBody({
       ) : null}
 
       <div>
-        <div className="text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint mb-2">
+        <div className="text-xs font-bold uppercase tracking-wider text-ds-ink-faint mb-2">
           Command Center audit
         </div>
-        <ul className="max-h-48 overflow-y-auto space-y-2 text-[11px] border-t border-ds-line/40 pt-2">
+        <ul className="max-h-48 overflow-y-auto space-y-2 text-xs border-t border-ds-line/40 pt-2">
           {audit.length === 0 ? (
             <li className="text-ds-ink-faint">No director actions yet.</li>
           ) : (
@@ -814,7 +814,7 @@ function DrawerBody({
               const nv = a.newValue as { summary?: string } | null
               return (
                 <li key={a.id} className="border-b border-ds-card pb-1">
-                  <div className="text-ds-ink-faint text-[10px]">
+                  <div className="text-ds-ink-faint text-xs">
                     {new Date(a.timestamp).toLocaleString('en-IN')}
                   </div>
                   <div className="text-ds-ink-muted">{nv?.summary ?? 'Update'}</div>

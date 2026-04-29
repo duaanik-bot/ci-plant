@@ -271,11 +271,11 @@ function InventoryPageContent() {
               <p className={`text-2xl text-red-200 ${ledgerMono}`}>
                 {fmtVal(paperLedger?.staleCapitalInr ?? 0)}
               </p>
-              <p className="text-[11px] text-ds-ink-faint mt-1">₹ value of sheets on hand &gt; 60 days</p>
+              <p className="text-xs text-ds-ink-faint mt-1">₹ value of sheets on hand &gt; 60 days</p>
             </div>
           </div>
 
-          <label className="block mb-3 text-[11px] text-ds-ink-faint uppercase tracking-wide">
+          <label className="block mb-3 text-xs text-ds-ink-faint uppercase tracking-wide">
             Deep search — Customer PO #
             <input
               type="text"
@@ -370,7 +370,7 @@ function InventoryPageContent() {
                             title={ageLabel(row.ageBucket)}
                           />
                           {row.ageDays}d
-                          <span className="text-[10px] text-ds-ink-faint">({ageLabel(row.ageBucket)})</span>
+                          <span className="text-xs text-ds-ink-faint">({ageLabel(row.ageBucket)})</span>
                         </span>
                       </td>
                       <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmtVal(row.valueInr)}</td>
@@ -400,7 +400,7 @@ function InventoryPageContent() {
         {drawerRow ? (
           <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-ds-ink-muted ${ledgerMono}`}>
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-ds-ink-faint font-semibold">Lot / batch</p>
+              <p className="text-xs uppercase tracking-wide text-ds-ink-faint font-semibold">Lot / batch</p>
               <p className="text-sm font-semibold text-ds-ink mt-0.5">{drawerRow.lotNumber ?? drawerRow.id.slice(0, 8)}</p>
               <p className="text-ds-ink-faint">
                 {drawerRow.gsm} gsm · {(drawerRow.boardGrade ?? '').trim() || drawerRow.paperType}
@@ -415,12 +415,12 @@ function InventoryPageContent() {
 
             {drawerRow.totalIssuedToFloor > 0 && (
               <div className="rounded-lg border border-ds-warning/40 bg-ds-warning/8 p-3 space-y-1">
-                <p className="text-[10px] uppercase text-ds-warning/90 font-semibold">Fragmented balance</p>
+                <p className="text-xs uppercase text-ds-warning/90 font-semibold">Fragmented balance</p>
                 <p className="text-ds-ink-muted">
                   Already issued to floor:{' '}
                   <span className="text-ds-warning">{drawerRow.totalIssuedToFloor.toLocaleString('en-IN')}</span> sh
                 </p>
-                <p className="text-ds-ink-faint text-[10px]">
+                <p className="text-ds-ink-faint text-xs">
                   Original batch (est.):{' '}
                   {(drawerRow.qtySheets + drawerRow.totalIssuedToFloor).toLocaleString('en-IN')} sh cumulative
                 </p>
@@ -428,14 +428,14 @@ function InventoryPageContent() {
             )}
 
             {drawerRow.suggestBalanceWriteOff && (
-              <div className="rounded-lg border border-rose-700/50 bg-rose-950/30 p-3 text-rose-200 text-[11px]">
+              <div className="rounded-lg border border-rose-700/50 bg-rose-950/30 p-3 text-rose-200 text-xs">
                 Remaining est. weight is under 50 kg — consider a <strong>balance write-off</strong> to keep inventory
                 clean.
               </div>
             )}
 
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-cyan-500/90 font-semibold mb-2">
+              <p className="text-xs uppercase tracking-wide text-cyan-500/90 font-semibold mb-2">
                 Material genealogy
               </p>
               {genealogyLoading ? (
@@ -443,7 +443,7 @@ function InventoryPageContent() {
               ) : genealogy?.steps?.length ? (
                 <ol className="space-y-2 border-l border-ds-line/50 pl-3">
                   {genealogy.steps.map((s, i) => (
-                    <li key={`${s.stage}-${i}`} className="text-[11px]">
+                    <li key={`${s.stage}-${i}`} className="text-xs">
                       <span className="text-ds-ink-faint">{s.stage}</span>
                       <div className="text-ds-ink font-medium">{s.mono ?? s.label}</div>
                       <div className="text-ds-ink-faint">{s.detail}</div>
@@ -457,31 +457,31 @@ function InventoryPageContent() {
 
             {drawerRow.linkedCustomerPos.length > 0 && (
               <div>
-                <p className="text-[10px] uppercase text-ds-ink-faint mb-1">Linked customer PO #</p>
+                <p className="text-xs uppercase text-ds-ink-faint mb-1">Linked customer PO #</p>
                 <p className="text-ds-ink">{drawerRow.linkedCustomerPos.join(' · ')}</p>
               </div>
             )}
 
             <div className="rounded-lg border border-ds-line/50 bg-background p-3 space-y-3 ring-1 ring-ring/5">
-              <p className="text-[10px] uppercase tracking-wide text-ds-warning/90 font-semibold">Issue to floor</p>
-              <p className="text-[10px] text-ds-ink-faint">
+              <p className="text-xs uppercase tracking-wide text-ds-warning/90 font-semibold">Issue to floor</p>
+              <p className="text-xs text-ds-ink-faint">
                 Moves sheets from main warehouse to <strong className="text-ds-ink-muted">FLOOR</strong> stock (new split
                 row). Operator: {operatorLabel}
               </p>
-              <label className="block text-[10px] text-ds-ink-faint">
+              <label className="block text-xs text-ds-ink-faint">
                 Link to production job (optional)
                 <input
                   type="text"
                   value={jobSearch}
                   onChange={(e) => setJobSearch(e.target.value)}
                   placeholder="Search JC# or customer…"
-                  className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-[11px] text-foreground"
+                  className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-foreground"
                 />
               </label>
               <select
                 value={issueJobCardId}
                 onChange={(e) => setIssueJobCardId(e.target.value)}
-                className="w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-[11px] text-foreground"
+                className="w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs text-foreground"
               >
                 <option value="">— Select job card —</option>
                 {filteredJobCards.map((j) => (
@@ -490,7 +490,7 @@ function InventoryPageContent() {
                   </option>
                 ))}
               </select>
-              <label className="block text-[10px] text-ds-ink-faint">
+              <label className="block text-xs text-ds-ink-faint">
                 Quantity (sheets)
                 <input
                   type="number"
@@ -498,10 +498,10 @@ function InventoryPageContent() {
                   max={drawerRow.qtySheets}
                   value={issueQty}
                   onChange={(e) => setIssueQty(e.target.value)}
-                  className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-[11px] text-foreground"
+                  className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-foreground"
                 />
               </label>
-              <label className="flex items-center gap-2 text-[11px] text-ds-ink-muted">
+              <label className="flex items-center gap-2 text-xs text-ds-ink-muted">
                 <input
                   type="checkbox"
                   checked={issueHighPri}
@@ -514,7 +514,7 @@ function InventoryPageContent() {
                 type="button"
                 disabled={issueSubmitting}
                 onClick={() => void submitIssueToFloor()}
-                className="w-full rounded-md bg-ds-warning hover:bg-ds-warning py-2 text-[12px] font-semibold text-primary-foreground disabled:opacity-50"
+                className="w-full rounded-md bg-ds-warning hover:bg-ds-warning py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {issueSubmitting ? 'Saving…' : 'Save — issue to floor'}
               </button>

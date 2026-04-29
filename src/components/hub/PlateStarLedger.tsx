@@ -21,7 +21,7 @@ export function PlateStarLedger({
 
   return (
     <div
-      className={`text-[10px] font-mono leading-tight text-neutral-500 space-y-0.5 ${className}`}
+      className={`text-xs font-mono leading-tight text-neutral-500 space-y-0.5 ${className}`}
       aria-label="Usage cycles by colour"
     >
       {rows.map((r, idx) => {
@@ -32,7 +32,7 @@ export function PlateStarLedger({
           <div key={`${r.key}-${idx}`} className="flex flex-wrap items-center gap-x-0.5 gap-y-0">
             <PlateHubColourSwatch short={r.short} label={r.label} size="sm" className="mr-0.5" />
             {Array.from({ length: shown }, (_, i) => (
-              <span key={i} className="text-yellow-500 text-[9px] leading-none" aria-hidden>
+              <span key={i} className="text-yellow-500 text-xs leading-none" aria-hidden>
                 ★
               </span>
             ))}

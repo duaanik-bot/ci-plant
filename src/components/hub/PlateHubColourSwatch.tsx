@@ -20,7 +20,7 @@ const ACTIVE_CLASSES: Record<PlateHubSwatchKind, string> = {
 
 const SIZE_CLASSES = {
   md: 'w-6 h-6 text-xs',
-  sm: 'w-5 h-5 text-[10px]',
+  sm: 'w-5 h-5 text-xs',
 } as const
 
 export function PlateHubColourSwatch({

@@ -365,13 +365,13 @@ export function ShadeCardSpotlightDrawer({
             {row ? (
               <div className="space-y-4 text-sm text-neutral-400">
                 <div className="rounded-xl border border-ds-line/40 bg-ds-main/70 px-3 py-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 font-sans">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     Total cumulative runs
                   </p>
                   <p className={`mt-1 text-2xl font-bold text-ds-warning tabular-nums ${mono}`}>
                     {issueEventCount}
                   </p>
-                  <p className={`mt-0.5 text-[10px] text-neutral-600 ${mono}`}>
+                  <p className={`mt-0.5 text-xs text-neutral-600 ${mono}`}>
                     Issued-to-floor handshakes (ledger count)
                   </p>
                 </div>
@@ -402,13 +402,13 @@ export function ShadeCardSpotlightDrawer({
                     ) : (
                       <p className="mt-0.5 truncate text-sm text-foreground">{productTitle}</p>
                     )}
-                    <p className={`mt-1 text-[10px] text-neutral-500 ${mono}`}>
+                    <p className={`mt-1 text-xs text-neutral-500 ${mono}`}>
                       <span className="text-neutral-500">{awLine}</span>
                       <span className="text-neutral-700"> | </span>
                       <span className="text-ds-warning/90">{row.shadeCode}</span>
                     </p>
                     {row.mfgDate ? (
-                      <p className={`mt-1 text-[10px] text-neutral-500 ${mono}`}>
+                      <p className={`mt-1 text-xs text-neutral-500 ${mono}`}>
                         MFG {row.mfgDate}
                         {row.currentAgeMonths != null ? (
                           <>
@@ -431,7 +431,7 @@ export function ShadeCardSpotlightDrawer({
                         ) : null}
                       </p>
                     ) : null}
-                    <p className="mt-1 text-[10px] text-neutral-500" title="ΔE Limit Enforced < 2.0">
+                    <p className="mt-1 text-xs text-neutral-500" title="ΔE Limit Enforced < 2.0">
                       ΔE{' '}
                       <span className={row.deltaEAlert ? 'text-red-400 font-semibold' : 'text-emerald-400'}>
                         {row.deltaEReading != null ? row.deltaEReading : '—'}
@@ -442,25 +442,25 @@ export function ShadeCardSpotlightDrawer({
                 </div>
 
                 <section className="rounded-xl border border-ds-line/40 bg-ds-main/40 px-3 py-3 space-y-2">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 font-sans">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     LAB values
                   </h3>
                   <div className={`grid grid-cols-3 gap-2 text-center ${mono}`}>
                     <div className="rounded-lg border border-ds-line/40 bg-background px-2 py-2">
-                      <p className="text-[9px] uppercase text-neutral-500">L*</p>
+                      <p className="text-xs uppercase text-neutral-500">L*</p>
                       <p className="text-base font-semibold text-ds-ink tabular-nums">{labL.trim() || '—'}</p>
                     </div>
                     <div className="rounded-lg border border-ds-line/40 bg-background px-2 py-2">
-                      <p className="text-[9px] uppercase text-neutral-500">a*</p>
+                      <p className="text-xs uppercase text-neutral-500">a*</p>
                       <p className="text-base font-semibold text-ds-ink tabular-nums">{labA.trim() || '—'}</p>
                     </div>
                     <div className="rounded-lg border border-ds-line/40 bg-background px-2 py-2">
-                      <p className="text-[9px] uppercase text-neutral-500">b*</p>
+                      <p className="text-xs uppercase text-neutral-500">b*</p>
                       <p className="text-base font-semibold text-ds-ink tabular-nums">{labB.trim() || '—'}</p>
                     </div>
                   </div>
                   <div className={`grid grid-cols-3 gap-2 pt-1 ${mono}`}>
-                    <label className="block text-[9px] text-neutral-500 font-sans">
+                    <label className="block text-xs text-neutral-500 font-sans">
                       Edit L*
                       <input
                         value={labL}
@@ -469,7 +469,7 @@ export function ShadeCardSpotlightDrawer({
                         inputMode="decimal"
                       />
                     </label>
-                    <label className="block text-[9px] text-neutral-500 font-sans">
+                    <label className="block text-xs text-neutral-500 font-sans">
                       Edit a*
                       <input
                         value={labA}
@@ -478,7 +478,7 @@ export function ShadeCardSpotlightDrawer({
                         inputMode="decimal"
                       />
                     </label>
-                    <label className="block text-[9px] text-neutral-500 font-sans">
+                    <label className="block text-xs text-neutral-500 font-sans">
                       Edit b*
                       <input
                         value={labB}
@@ -492,7 +492,7 @@ export function ShadeCardSpotlightDrawer({
 
                 {proofUrl ? (
                   <section>
-                    <h3 className="mb-1 text-[10px] uppercase tracking-wider text-neutral-500 font-sans">
+                    <h3 className="mb-1 text-xs uppercase tracking-wider text-neutral-500 font-sans">
                       Digital proof (client-signed)
                     </h3>
                     <div className="overflow-hidden rounded-lg border border-ds-line/40 bg-ds-main/50">
@@ -522,10 +522,10 @@ export function ShadeCardSpotlightDrawer({
                 ) : null}
 
                 <section>
-                  <h3 className="mb-2 text-[10px] uppercase tracking-wider text-neutral-500 font-sans">
+                  <h3 className="mb-2 text-xs uppercase tracking-wider text-neutral-500 font-sans">
                     Usage ledger (handshake)
                   </h3>
-                  <p className={`text-[10px] text-neutral-600 font-sans mb-2 ${mono}`}>
+                  <p className={`text-xs text-neutral-600 font-sans mb-2 ${mono}`}>
                     [Timestamp] | [Operator] | [Job #] | [Resulting ΔE]
                   </p>
                   {usageLoading ? (
@@ -537,7 +537,7 @@ export function ShadeCardSpotlightDrawer({
                       {handshakeLedger.map((e) => (
                         <li
                           key={e.id}
-                          className={`text-[10px] leading-relaxed text-neutral-400 border-b border-ds-line/30 pb-2 last:border-0 last:pb-0 ${mono}`}
+                          className={`text-xs leading-relaxed text-neutral-400 border-b border-ds-line/30 pb-2 last:border-0 last:pb-0 ${mono}`}
                           title={usageLabel(e.actionType)}
                         >
                           {handshakeLedgerPipeLine(e)}
@@ -548,10 +548,10 @@ export function ShadeCardSpotlightDrawer({
                 </section>
 
                 <section className="rounded-xl border border-ds-line/40 bg-ds-main/40 px-3 py-3 space-y-3">
-                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 font-sans">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     Substrate &amp; ink
                   </h3>
-                  <label className="block text-[10px] text-neutral-500 font-sans">
+                  <label className="block text-xs text-neutral-500 font-sans">
                     Substrate type
                     <select
                       value={substrate}
@@ -566,7 +566,7 @@ export function ShadeCardSpotlightDrawer({
                       ))}
                     </select>
                   </label>
-                  <label className="block text-[10px] text-neutral-500 font-sans">
+                  <label className="block text-xs text-neutral-500 font-sans">
                     Ink recipe (PMS / lab mix)
                     <textarea
                       value={inkRecipeNotes}
@@ -579,7 +579,7 @@ export function ShadeCardSpotlightDrawer({
                 </section>
 
                 <section>
-                  <h3 className="mb-1 text-[10px] uppercase tracking-wider text-neutral-500 font-sans">Spectro summary</h3>
+                  <h3 className="mb-1 text-xs uppercase tracking-wider text-neutral-500 font-sans">Spectro summary</h3>
                   <p className="min-h-[4rem] whitespace-pre-wrap rounded-lg border border-ds-line/40 bg-ds-main/50 px-2 py-2 text-xs text-neutral-500">
                     {row.spectroReportSummary ?? 'No spectro report on file.'}
                   </p>
@@ -597,8 +597,8 @@ export function ShadeCardSpotlightDrawer({
                 ) : null}
 
                 <div className="space-y-2 border-t border-ds-line/40 pt-3">
-                  <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-sans">Record verification</p>
-                  <label className="block text-[10px] text-neutral-500 font-sans">
+                  <p className="text-xs uppercase tracking-wider text-neutral-500 font-sans">Record verification</p>
+                  <label className="block text-xs text-neutral-500 font-sans">
                     Last verified date
                     <input
                       type="date"
@@ -607,7 +607,7 @@ export function ShadeCardSpotlightDrawer({
                       className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                     />
                   </label>
-                  <label className="block text-[10px] text-neutral-500 font-sans">
+                  <label className="block text-xs text-neutral-500 font-sans">
                     ΔE reading
                     <input
                       value={deltaE}
@@ -616,7 +616,7 @@ export function ShadeCardSpotlightDrawer({
                       inputMode="decimal"
                     />
                   </label>
-                  <label className="block text-[10px] text-neutral-500 font-sans">
+                  <label className="block text-xs text-neutral-500 font-sans">
                     Approval URL (legacy / mirror)
                     <input
                       value={attach}
@@ -624,7 +624,7 @@ export function ShadeCardSpotlightDrawer({
                       className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                     />
                   </label>
-                  <label className="block text-[10px] text-neutral-500 font-sans">
+                  <label className="block text-xs text-neutral-500 font-sans">
                     Ink recipe link (PMS / lab)
                     <input
                       value={inkLink}
@@ -633,7 +633,7 @@ export function ShadeCardSpotlightDrawer({
                       placeholder="https://…"
                     />
                   </label>
-                  <label className="block text-[10px] text-neutral-500 font-sans">
+                  <label className="block text-xs text-neutral-500 font-sans">
                     Customer approval document (signed scan)
                     <input
                       value={custDoc}
@@ -642,7 +642,7 @@ export function ShadeCardSpotlightDrawer({
                       placeholder="https://…"
                     />
                   </label>
-                  <label className="block text-[10px] text-neutral-500 font-sans">
+                  <label className="block text-xs text-neutral-500 font-sans">
                     Spectro summary
                     <textarea
                       value={spectro}
@@ -651,7 +651,7 @@ export function ShadeCardSpotlightDrawer({
                       className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
                     />
                   </label>
-                  <label className="block text-[10px] text-neutral-500 font-sans">
+                  <label className="block text-xs text-neutral-500 font-sans">
                     Swatch hex (#RRGGBB)
                     <input
                       value={hex}
@@ -670,7 +670,7 @@ export function ShadeCardSpotlightDrawer({
                   </button>
                 </div>
 
-                <p className="pt-1 text-center text-[10px] text-neutral-600 font-sans">
+                <p className="pt-1 text-center text-xs text-neutral-600 font-sans">
                   Custody Handshake Verified - 100% Audit Traceability Active.
                 </p>
               </div>

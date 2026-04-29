@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 
 const shell = 'border-l border-[#334155] bg-[#1E293B] shadow-[-10px_0_40px_rgba(0,0,0,0.25)]'
-const mono = 'font-designing-queue tabular-nums text-[13px] font-semibold'
+const mono = 'font-designing-queue tabular-nums text-sm font-semibold'
 
 type Insight = {
   master?: Record<string, unknown>
@@ -87,7 +87,7 @@ export function PlanningProductDetailDrawer({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-[13px]">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-sm">
           {err ? <p className="text-sm text-rose-400">{err}</p> : null}
           {loading ? <p className="text-ds-ink-faint">Loading…</p> : null}
           {!loading && data && (

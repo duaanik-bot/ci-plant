@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowRight, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
@@ -73,14 +74,26 @@ function getUiStatus(row: JobCardRow): UiStatus {
 }
 
 export default function JobCardsPage() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const [list, setList] = useState<JobCardRow[]>([])
   const [machines, setMachines] = useState<MachineOpt[]>([])
   const [loading, setLoading] = useState(true)
   const [lastSync, setLastSync] = useState<string | null>(null)
-  const [qInput, setQInput] = useState('')
-  const [q, setQ] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | UiStatus>('all')
-  const [readinessFilter, setReadinessFilter] = useState<'all' | BoardReadiness>('all')
+  const initialQ = searchParams.get('q') ?? ''
+  const initialStatus = (searchParams.get('status') as 'all' | UiStatus) ?? 'all'
+  const initialReadiness = (searchParams.get('readiness') as 'all' | BoardReadiness) ?? 'all'
+  const [qInput, setQInput] = useState(initialQ)
+  const [q, setQ] = useState(initialQ)
+  const [statusFilter, setStatusFilter] = useState<'all' | UiStatus>(
+    initialStatus === 'pending' || initialStatus === 'ready' || initialStatus === 'pushed' ? initialStatus : 'all',
+  )
+  const [readinessFilter, setReadinessFilter] = useState<'all' | BoardReadiness>(
+    initialReadiness === 'ready' || initialReadiness === 'waiting' || initialReadiness === 'not_ready'
+      ? initialReadiness
+      : 'all',
+  )
 
   const [auditRow, setAuditRow] = useState<JobCardRow | null>(null)
 
@@ -152,6 +165,22 @@ export default function JobCardsPage() {
     })
   }, [readinessFilter, sortedList, statusFilter])
 
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (qInput.trim()) params.set('q', qInput.trim())
+    if (statusFilter !== 'all') params.set('status', statusFilter)
+    if (readinessFilter !== 'all') params.set('readiness', readinessFilter)
+    const next = params.toString()
+    const current = searchParams.toString()
+    if (next !== current) {
+      router.replace(next ? `${pathname}?${next}` : pathname)
+    }
+  }, [pathname, qInput, readinessFilter, router, searchParams, statusFilter])
+
+  useEffect(() => {
+    window.sessionStorage.setItem('job-card-visible-order', visibleList.map((r) => r.id).join(','))
+  }, [visibleList])
+
   if (loading && list.length === 0) {
     return (
       <div className="min-h-[40vh] flex items-center justify-center bg-background text-ds-ink-faint text-sm">
@@ -165,7 +194,7 @@ export default function JobCardsPage() {
       <div className="border-b border-ds-line/40 px-4 py-3 flex flex-wrap items-center gap-3">
         <div>
           <h1 className="text-lg font-bold text-ds-warning tracking-tight">Job Card Hub</h1>
-          <p className="text-[11px] text-ds-ink-faint mt-0.5">High-density ledger · live audit</p>
+          <p className="text-xs text-ds-ink-faint mt-0.5">High-density ledger · live audit</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 ml-auto">
           <Link
@@ -234,21 +263,21 @@ export default function JobCardsPage() {
           <thead>
             <tr className="border-b border-ds-line/40 text-left">
               <th className="py-2 pl-2 pr-1 w-8" aria-label="Priority" />
-              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
+              <th className="py-2 px-2 text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">
                 Product
               </th>
-              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
+              <th className="py-2 px-2 text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">
                 Qty
               </th>
-              <th className="py-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
+              <th className="py-2 px-2 text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">
                 Board readiness
               </th>
               <th className="py-2 px-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">
+                <span className="text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">
                   Status
                 </span>
               </th>
-              <th className="py-2 px-2 text-right text-[11px] font-semibold uppercase tracking-wide text-ds-ink-muted">Open</th>
+              <th className="py-2 px-2 text-right text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">Open</th>
             </tr>
           </thead>
           <tbody>
@@ -284,8 +313,8 @@ export default function JobCardsPage() {
                       >
                         {jc.poLine?.cartonName ?? '—'}
                       </button>
-                      <span className="text-[11px] text-ds-ink-faint truncate" title={jc.customer?.name}>{jc.customer?.name ?? '—'}</span>
-                      <span className={`text-[10px] text-ds-ink-faint ${mono}`}>
+                      <span className="text-sm text-ds-ink-faint truncate" title={jc.customer?.name}>{jc.customer?.name ?? '—'}</span>
+                      <span className={`text-sm text-ds-ink-faint ${mono}`}>
                         {jc.poLine?.poNumber ?? '—'} • {jc.poLine?.artworkCode ?? '—'}
                       </span>
                     </div>
@@ -295,7 +324,7 @@ export default function JobCardsPage() {
                   </td>
                   <td className="py-2 px-2 align-middle">
                     <span
-                      className="inline-flex items-center gap-1.5 rounded border border-ds-line/50 bg-ds-main px-2 py-0.5 text-[11px]"
+                      className="inline-flex items-center gap-1.5 rounded border border-ds-line/50 bg-ds-main px-2 py-0.5 text-sm"
                       title={brMeta.tooltip}
                     >
                       <span className={clsx('h-2 w-2 rounded-full', brMeta.dot)} />
@@ -305,7 +334,7 @@ export default function JobCardsPage() {
                   <td className="py-2 px-2 align-middle">
                     <span
                       className={clsx(
-                        'inline-flex items-center rounded border px-2 py-0.5 text-[11px]',
+                        'inline-flex items-center rounded border px-2 py-0.5 text-sm',
                         st === 'pending' && 'border-ds-line/60 bg-ds-main text-ds-ink-muted',
                         st === 'ready' && 'border-amber-400/40 bg-amber-400/10 text-amber-300',
                         st === 'pushed' && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
@@ -316,7 +345,9 @@ export default function JobCardsPage() {
                   </td>
                   <td className="py-2 px-2 align-middle text-right">
                     <Link
-                      href={`/production/job-cards/${jc.id}`}
+                      href={`/production/job-cards/${jc.id}?returnTo=${encodeURIComponent(
+                        `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`,
+                      )}`}
                       className="inline-flex items-center justify-center rounded border border-ds-line/60 bg-ds-main p-1 text-ds-ink-muted hover:text-ds-warning"
                       aria-label={`Open full edit for job card ${jc.jobCardNumber}`}
                     >
@@ -331,7 +362,7 @@ export default function JobCardsPage() {
         </div>
       )}
 
-      <footer className="mt-auto border-t border-ds-line/40 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-ds-ink-faint">
+      <footer className="mt-auto border-t border-ds-line/40 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ds-ink-faint">
         <span>
           Live Data Stream Verified - Last Sync:{' '}
           <span className={clsx(mono, 'text-ds-ink-muted')}>{lastSync ?? '—'}</span>.

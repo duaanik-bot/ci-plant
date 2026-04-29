@@ -40,7 +40,7 @@ export function AgeTickerCell({
 
   return (
     <span
-      className={`tabular-nums text-[11px] font-medium ${
+      className={`tabular-nums text-xs font-medium ${
         critical ? 'text-rose-400 animate-industrial-age-pulse' : 'text-ds-ink-muted'
       }`}
       title={critical ? 'Threshold exceeded — review' : undefined}

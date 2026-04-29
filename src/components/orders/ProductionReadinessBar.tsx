@@ -3,7 +3,7 @@
 import type { KitSegmentState, ProductionKitForLine } from '@/lib/production-kit-status'
 
 const techMono =
-  'font-[family-name:var(--font-designing-queue),ui-monospace,monospace] tabular-nums text-[10px] sm:text-[11px]'
+  'font-[family-name:var(--font-designing-queue),ui-monospace,monospace] tabular-nums text-xs sm:text-xs'
 
 function mergeSegments(lines: ProductionKitForLine[]): KitSegmentState[] {
   const keys: Array<'die' | 'block' | 'shade'> = ['die', 'block', 'shade']
@@ -39,7 +39,7 @@ export function ProductionReadinessBar({
 }) {
   if (loading) {
     return (
-      <div className="rounded-xl border border-ds-line/40 bg-background px-3 py-3 text-[11px] text-neutral-500 animate-pulse">
+      <div className="rounded-xl border border-ds-line/40 bg-background px-3 py-3 text-xs text-neutral-500 animate-pulse">
         Loading production readiness…
       </div>
     )
@@ -47,7 +47,7 @@ export function ProductionReadinessBar({
 
   if (lines.length === 0) {
     return (
-      <div className="rounded-xl border border-ds-line/40 bg-background px-3 py-3 text-[11px] text-neutral-500">
+      <div className="rounded-xl border border-ds-line/40 bg-background px-3 py-3 text-xs text-neutral-500">
         Add line items to evaluate production readiness (die, block, shade links).
       </div>
     )
@@ -62,11 +62,11 @@ export function ProductionReadinessBar({
     <div className="rounded-xl border border-ds-line/40 bg-background px-3 py-3 text-ds-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Production readiness</p>
-          <p className="text-[11px] text-neutral-500 mt-0.5">Die · emboss block · shade card (worst line wins)</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Production readiness</p>
+          <p className="text-xs text-neutral-500 mt-0.5">Die · emboss block · shade card (worst line wins)</p>
         </div>
         <span
-          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+          className={`rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${
             loading
               ? 'bg-ds-card text-neutral-500'
               : allOk && !anyRose
@@ -90,7 +90,7 @@ export function ProductionReadinessBar({
         ))}
       </div>
 
-      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-neutral-500">
+      <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-neutral-500">
         {merged.map((s) => (
           <div key={s.key} className="min-w-0">
             <div className="font-semibold text-neutral-500">{s.label}</div>

@@ -189,7 +189,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
 
               {lastUsed.length > 0 ? (
                 <>
-                  <div className="border-b border-ds-line/40 px-3 py-2 text-[11px] uppercase tracking-wide text-ds-ink-faint">
+                  <div className="border-b border-ds-line/40 px-3 py-2 text-xs uppercase tracking-wide text-ds-ink-faint">
                     {recentLabel}
                   </div>
                   {lastUsed.map((item) => (
@@ -204,7 +204,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                       }`}
                     >
                       <span>{getOptionLabel(item)}</span>
-                      <span className="text-[11px] text-ds-ink-faint">Recent</span>
+                      <span className="text-xs text-ds-ink-faint">Recent</span>
                     </button>
                   ))}
                 </>
@@ -213,7 +213,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
               {browseDeduped.length > 0 ? (
                 <>
                   <div
-                    className={`px-3 py-2 text-[11px] uppercase tracking-wide text-ds-ink-faint ${
+                    className={`px-3 py-2 text-xs uppercase tracking-wide text-ds-ink-faint ${
                       lastUsed.length > 0 ? 'border-t border-ds-line/40' : 'border-b border-ds-line/40'
                     }`}
                   >

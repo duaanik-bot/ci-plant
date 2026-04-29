@@ -4,6 +4,12 @@
  * Component classes (.ds-input, etc.) live in `globals.css` (must run after @tailwind).
  */
 :root {
+  /* Typography system */
+  --font-heading: 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-label: 'Inter', system-ui, sans-serif;
+  --font-small: 'Inter', system-ui, sans-serif;
+
   /* Light theme (Figma-style neutral surfaces + cyan action accent). */
   --ds-bg-main: #f4f7fc;
   --ds-bg-main-rgb: 244 247 252;
@@ -42,6 +48,11 @@
   --ds-gradient-app-top: linear-gradient(180deg, rgba(14, 165, 233, 0.09) 0%, rgba(255, 255, 255, 0) 42%),
     radial-gradient(ellipse 100% 52% at 50% 0%, rgba(2, 132, 199, 0.06), transparent 58%);
   --ds-gradient-drawer: linear-gradient(180deg, rgba(14, 165, 233, 0.05) 0%, rgba(255, 255, 255, 0) 48%);
+
+  /* Semantic text aliases (requested system) */
+  --text-primary: var(--ds-text-primary);
+  --text-secondary: var(--ds-text-secondary);
+  --text-muted: var(--ds-text-muted);
 }
 
 .dark {
@@ -77,4 +88,8 @@
   --ds-gradient-app-top: linear-gradient(180deg, rgba(19, 26, 43, 0.55) 0%, rgba(10, 15, 28, 0) 38%),
     radial-gradient(ellipse 100% 50% at 50% 0%, rgba(56, 189, 248, 0.08), transparent 55%);
   --ds-gradient-drawer: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0) 40%);
+
+  --text-primary: var(--ds-text-primary);
+  --text-secondary: var(--ds-text-secondary);
+  --text-muted: var(--ds-text-muted);
 }

@@ -68,7 +68,7 @@ function MachineCard({
       <p className="text-ds-ink-muted text-xs truncate">{m.name}</p>
       <p className="text-sm mt-1">{m.currentJob ? m.currentJob.jobNumber : 'Idle'}</p>
       {m.pmHealth.hasSchedule ? (
-        <div className={`flex items-center gap-2 mt-2 ${mono} text-[10px] text-neutral-500`}>
+        <div className={`flex items-center gap-2 mt-2 ${mono} text-xs text-neutral-500`}>
           <MachineHealthMeter
             healthPct={m.pmHealth.healthPct}
             hasSchedule
@@ -209,7 +209,7 @@ export default function MachineFlowPage() {
       <div className="mt-8 overflow-x-auto rounded-xl border border-ds-line/40 bg-background ring-1 ring-ring/5">
         <h2 className="text-sm font-semibold text-ds-ink-muted mb-2 px-4 pt-4">Machine ledger — changeover & PM health</h2>
         <table className={`w-full text-sm ${mono}`}>
-          <thead className="bg-ds-main text-left text-neutral-500 text-[10px] uppercase tracking-wider">
+          <thead className="bg-ds-main text-left text-neutral-500 text-xs uppercase tracking-wider">
             <tr>
               <th className="px-4 py-2">Machine</th>
               <th className="px-4 py-2">Health</th>

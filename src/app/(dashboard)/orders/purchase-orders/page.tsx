@@ -814,7 +814,7 @@ export default function PurchaseOrdersPage() {
     <div className="mx-auto max-w-[1480px] space-y-3 p-3 pb-24 md:p-4">
       <div className="sticky top-0 z-40 rounded-md border border-ds-line/60 bg-ds-main/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="shrink-0 text-[12px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Customer POs
           </span>
           <div className="min-w-[240px] flex-1">
@@ -825,7 +825,7 @@ export default function PurchaseOrdersPage() {
               filterActive={listFilterQuery.trim().length >= 2}
             />
           </div>
-          <span className="rounded border border-ds-line/50 bg-ds-elevated/40 px-2 py-1 text-[11px] text-ds-ink-muted">
+          <span className="rounded border border-ds-line/50 bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink-muted">
             {resultSummary}
           </span>
           <div className="relative" data-po-menu-root>
@@ -867,18 +867,18 @@ export default function PurchaseOrdersPage() {
             >
               Filters
               {activeFilterCount > 0 ? (
-                <span className="ml-1 rounded border border-ds-brand/40 bg-ds-brand/15 px-1 text-[10px] font-semibold text-ds-ink">
+                <span className="ml-1 rounded border border-ds-brand/40 bg-ds-brand/15 px-1 text-xs font-semibold text-ds-ink">
                   {activeFilterCount}
                 </span>
               ) : null}
             </button>
             {showFilterMenu ? (
               <div className="absolute right-0 z-50 mt-1 w-56 rounded-md border border-ds-line/70 bg-ds-main p-2 text-xs shadow-lg">
-                <label className="mb-1 block text-[10px] uppercase tracking-wider text-ds-ink-muted">Status</label>
+                <label className="mb-1 block text-xs uppercase tracking-wider text-ds-ink-muted">Status</label>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
-                  className="mb-2 h-8 w-full rounded-md border border-ds-line/60 bg-background px-2 text-[12px] font-medium text-ds-ink focus:border-ds-brand focus:outline-none"
+                  className="mb-2 h-8 w-full rounded-md border border-ds-line/60 bg-background px-2 text-xs font-medium text-ds-ink focus:border-ds-brand focus:outline-none"
                 >
                   <option value="">All statuses</option>
                   <option value="draft">Draft</option>
@@ -887,11 +887,11 @@ export default function PurchaseOrdersPage() {
                   <option value="sent_to_planning">In Planning</option>
                   <option value="closed">Closed</option>
                 </select>
-                <label className="mb-1 block text-[10px] uppercase tracking-wider text-ds-ink-muted">Customer</label>
+                <label className="mb-1 block text-xs uppercase tracking-wider text-ds-ink-muted">Customer</label>
                 <select
                   value={customerId}
                   onChange={(e) => setCustomerId(e.target.value)}
-                  className="h-8 w-full rounded-md border border-ds-line/60 bg-background px-2 text-[12px] font-medium text-ds-ink focus:border-ds-brand focus:outline-none"
+                  className="h-8 w-full rounded-md border border-ds-line/60 bg-background px-2 text-xs font-medium text-ds-ink focus:border-ds-brand focus:outline-none"
                 >
                   <option value="">All customers</option>
                   {customers.map((c) => (
@@ -907,14 +907,14 @@ export default function PurchaseOrdersPage() {
             <button
               type="button"
               onClick={() => setPoDensity('dense')}
-              className={`rounded px-2 py-1 text-[11px] ${poDensity === 'dense' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'}`}
+              className={`rounded px-2 py-1 text-xs ${poDensity === 'dense' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'}`}
             >
               Dense
             </button>
             <button
               type="button"
               onClick={() => setPoDensity('comfortable')}
-              className={`rounded px-2 py-1 text-[11px] ${poDensity === 'comfortable' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'}`}
+              className={`rounded px-2 py-1 text-xs ${poDensity === 'comfortable' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'}`}
             >
               Comfortable
             </button>
@@ -941,7 +941,7 @@ export default function PurchaseOrdersPage() {
               key={preset || 'all'}
               type="button"
               onClick={() => setStatus(preset)}
-              className={`rounded-md border px-2 py-1 text-[11px] ${
+              className={`rounded-md border px-2 py-1 text-xs ${
                 status === preset ? 'border-ds-brand/60 bg-ds-brand/15 text-ds-ink' : 'border-ds-line/50 text-ds-ink-faint'
               }`}
             >
@@ -1036,51 +1036,51 @@ export default function PurchaseOrdersPage() {
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 md:gap-3">
         <div className="rounded-md border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+          <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Total active POs
           </div>
           <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
             {kpiLoading ? '—' : (kpi?.totalActivePosCount ?? 0).toLocaleString('en-IN')}
           </div>
-          <div className="text-[10px] text-ds-ink-faint mt-0.5">
+          <div className="text-xs text-ds-ink-faint mt-0.5">
             {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
           </div>
         </div>
         <div className="rounded-md border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+          <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Pending line count
           </div>
           <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
             {kpiLoading ? '—' : pendingLineItemCount.toLocaleString('en-IN')}
           </div>
-          <div className="text-[10px] text-ds-ink-faint mt-0.5">
+          <div className="text-xs text-ds-ink-faint mt-0.5">
             {listFilterQuery.trim().length >= 2 ? 'Lines · matching POs' : 'Lines · confirmed POs'}
           </div>
         </div>
         <div className="rounded-md border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+          <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Pending line items
           </div>
           <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
             {kpiLoading ? '—' : (kpi?.pendingItemsSum ?? 0).toLocaleString('en-IN')}
           </div>
-          <div className="text-[10px] text-ds-ink-faint mt-0.5">
+          <div className="text-xs text-ds-ink-faint mt-0.5">
             {listFilterQuery.trim().length >= 2 ? 'Σ qty · matching POs' : 'Σ qty · confirmed POs'}
           </div>
         </div>
         <div className="rounded-md border border-emerald-500/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500/90">
+          <div className="text-xs font-semibold uppercase tracking-wider text-emerald-500/90">
             Live order book
           </div>
           <div className={`mt-0.5 ds-typo-kpi text-emerald-700 dark:text-emerald-300 ${poMono}`}>
             {kpiLoading ? '—' : formatRupee(kpi?.liveOrderValue ?? 0)}
           </div>
-          <div className="text-[10px] text-emerald-700/80 mt-0.5">
+          <div className="text-xs text-emerald-700/80 mt-0.5">
             {listFilterQuery.trim().length >= 2 ? '₹ filtered order book' : '₹ total · confirmed'}
           </div>
         </div>
         <div className="rounded-md border border-ds-warning/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-warning/90">
+          <div className="text-xs font-semibold uppercase tracking-wider text-ds-warning/90">
             System velocity
           </div>
           <div className={`mt-0.5 ds-typo-kpi text-ds-warning ${poMono}`}>
@@ -1088,7 +1088,7 @@ export default function PurchaseOrdersPage() {
               ? '—'
               : `${(kpi?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
           </div>
-          <div className="text-[10px] text-ds-warning mt-0.5">
+          <div className="text-xs text-ds-warning mt-0.5">
             {listFilterQuery.trim().length >= 2 ? 'Avg. age · matching POs' : 'Avg. age · confirmed'}
           </div>
         </div>
@@ -1202,7 +1202,7 @@ export default function PurchaseOrdersPage() {
                     <div className="flex min-w-0 flex-col gap-0.5">
                       <div className="flex flex-wrap items-center gap-1">
                         <span
-                          className={`${poMono} min-w-0 break-all text-[11px] font-bold ${pushedToPlanning ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-warning'}`}
+                          className={`${poMono} min-w-0 break-all text-xs font-bold ${pushedToPlanning ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-warning'}`}
                           title={po.poNumber}
                         >
                           {po.poNumber}
@@ -1215,7 +1215,7 @@ export default function PurchaseOrdersPage() {
                       </div>
                       {po.deepMatchProductName ? (
                         <div
-                          className={`line-clamp-2 break-words text-[10px] leading-snug ${pushedToPlanning ? 'text-emerald-700/90 dark:text-emerald-300/90' : 'text-ds-warning/85'}`}
+                          className={`line-clamp-2 break-words text-xs leading-snug ${pushedToPlanning ? 'text-emerald-700/90 dark:text-emerald-300/90' : 'text-ds-warning/85'}`}
                           title={`Matched line: ${po.deepMatchProductName}`}
                         >
                           Matched: {po.deepMatchProductName}
@@ -1226,12 +1226,12 @@ export default function PurchaseOrdersPage() {
                   <td className={`w-[12rem] px-1.5 align-middle ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-ds-elevated to-ds-elevated text-[8px] font-bold text-ds-warning ring-1 ring-ds-line/80"
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-ds-elevated to-ds-elevated text-xs font-bold text-ds-warning ring-1 ring-ds-line/80"
                         aria-hidden
                       >
                         {customerInitials(po.customer?.name ?? '')}
                       </span>
-                      <span className="line-clamp-2 break-words text-[10px] text-neutral-700 dark:text-ds-ink md:text-[11px]" title={po.customer?.name}>
+                      <span className="line-clamp-2 break-words text-xs text-neutral-700 dark:text-ds-ink md:text-xs" title={po.customer?.name}>
                         {po.customer?.name}
                       </span>
                     </div>
@@ -1263,7 +1263,7 @@ export default function PurchaseOrdersPage() {
                   ) : null}
                   {visibleCols.value ? (
                     <td className={`px-1.5 align-middle text-right ${poMono} text-ds-ink ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
-                      <span className="mr-0.5 text-[9px] text-ds-ink-faint">₹</span>
+                      <span className="mr-0.5 text-xs text-ds-ink-faint">₹</span>
                       {(po.value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </td>
                   ) : null}
@@ -1313,7 +1313,7 @@ export default function PurchaseOrdersPage() {
                           type="button"
                           onClick={(e) => handleConfirm(po, e)}
                           disabled={confirmingId === po.id}
-                        className={`${ACTION_PILL_BASE} min-w-0 border-transparent bg-emerald-600 px-1.5 py-px text-[9px] text-primary-foreground hover:bg-emerald-700`}
+                        className={`${ACTION_PILL_BASE} min-w-0 border-transparent bg-emerald-600 px-1.5 py-px text-xs text-primary-foreground hover:bg-emerald-700`}
                         >
                           {confirmingId === po.id ? '…' : 'Confirm'}
                         </button>
@@ -1363,7 +1363,7 @@ export default function PurchaseOrdersPage() {
           <p className="text-ds-ink-faint text-sm">Loading…</p>
         ) : (
           <div className="space-y-4 text-sm text-foreground">
-            <p className="text-[10px] text-ds-ink-faint leading-snug">
+            <p className="text-xs text-ds-ink-faint leading-snug">
               Default operator / metadata:{' '}
               <span className="text-ds-ink-muted font-medium">{PO_DASHBOARD_OPERATOR}</span>
             </p>
@@ -1373,13 +1373,13 @@ export default function PurchaseOrdersPage() {
                 <div className="font-medium text-ds-ink">{drawerPo.customer?.name}</div>
               </div>
               <div className={`text-right ${poMono} text-ds-warning`}>
-                <div className="text-[10px] text-ds-ink-faint uppercase">Value</div>
+                <div className="text-xs text-ds-ink-faint uppercase">Value</div>
                 {formatRupee(drawerPo.value)}
               </div>
             </div>
 
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
+              <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
                 Tooling readiness
               </div>
               <div className="flex h-2 w-full overflow-hidden rounded-full bg-ds-card ring-1 ring-ds-line/40">
@@ -1402,7 +1402,7 @@ export default function PurchaseOrdersPage() {
                   <div className="h-full flex-1 bg-ds-elevated/80" />
                 )}
               </div>
-              <div className="mt-1 text-[10px] text-ds-ink-faint tabular-nums">
+              <div className="mt-1 text-xs text-ds-ink-faint tabular-nums">
                 Green {toolingBar.g} · Yellow {toolingBar.y} · Red {toolingBar.r}{' '}
                 <span className="text-ds-ink-faint">/ {toolingBar.total} lines</span>
               </div>
@@ -1417,14 +1417,14 @@ export default function PurchaseOrdersPage() {
                 poMono={poMono}
               />
               {listFilterQuery.trim().length >= 2 ? (
-                <p className="mt-2 text-[9px] text-ds-ink-faint leading-snug">
+                <p className="mt-2 text-xs text-ds-ink-faint leading-snug">
                   Deep Audit Performed by Anik Dua.
                 </p>
               ) : null}
             </div>
 
             <div className="space-y-2 border-t border-ds-line/40 pt-3">
-              <label className="block text-[10px] uppercase tracking-wider text-ds-ink-faint">PO status</label>
+              <label className="block text-xs uppercase tracking-wider text-ds-ink-faint">PO status</label>
               <select
                 value={drawerPo.status}
                 disabled={updatingId === drawerPo.id}
@@ -1441,7 +1441,7 @@ export default function PurchaseOrdersPage() {
 
             <Link
               href={`/orders/purchase-orders/${drawerPo.id}`}
-              className="block w-full text-center text-[11px] text-ds-ink-faint hover:text-ds-warning underline-offset-2 hover:underline"
+              className="block w-full text-center text-xs text-ds-ink-faint hover:text-ds-warning underline-offset-2 hover:underline"
             >
               Open full-page editor (advanced)
             </Link>

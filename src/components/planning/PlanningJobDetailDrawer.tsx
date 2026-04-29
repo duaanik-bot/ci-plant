@@ -250,7 +250,7 @@ export function PlanningJobDetailDrawer({
       title={<span className="truncate text-ds-ink" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
         <div className="space-y-2">
-          <p className="text-[12px] text-ds-ink-faint">
+          <p className="text-xs text-ds-ink-faint">
             {line.po.poNumber} · {line.planningStatus} · {line.po.customer.name}
           </p>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -264,12 +264,12 @@ export function PlanningJobDetailDrawer({
               </Badge>
             ) : null}
             {line.directorPriority ? (
-              <Badge tone="brand" className="text-[10px]">
+              <Badge tone="brand" className="text-xs">
                 Line priority
               </Badge>
             ) : null}
             {line.directorHold ? (
-              <Badge tone="warning" className="text-[10px]">
+              <Badge tone="warning" className="text-xs">
                 On hold
               </Badge>
             ) : null}
@@ -277,7 +277,7 @@ export function PlanningJobDetailDrawer({
               <button
                 type="button"
                 onClick={onViewProductDetail}
-                className="text-[10px] font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
+                className="text-xs font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
               >
                 Product sheet
               </button>
@@ -463,7 +463,7 @@ export function PlanningJobDetailDrawer({
           <div id="placement-ref">
             <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div>
-                <label htmlFor="single-sheet-length" className="block text-[12px] font-medium text-ds-ink-muted">
+                <label htmlFor="single-sheet-length" className="block text-xs font-medium text-ds-ink-muted">
                   Sheet length (mm)
                 </label>
                 <input
@@ -493,7 +493,7 @@ export function PlanningJobDetailDrawer({
                 />
               </div>
               <div>
-                <label htmlFor="single-sheet-width" className="block text-[12px] font-medium text-ds-ink-muted">
+                <label htmlFor="single-sheet-width" className="block text-xs font-medium text-ds-ink-muted">
                   Sheet width (mm)
                 </label>
                 <input
@@ -524,7 +524,7 @@ export function PlanningJobDetailDrawer({
               </div>
             </div>
             <div id="fix-ups-render" className="space-y-1.5">
-            <label htmlFor="ups-input" id="label" className="block text-[12px] font-medium text-ds-ink-muted">
+            <label htmlFor="ups-input" id="label" className="block text-xs font-medium text-ds-ink-muted">
               Ups (per plate/output)
             </label>
             <div id="fix-ups-save">
@@ -561,7 +561,7 @@ export function PlanningJobDetailDrawer({
                 }}
               />
             </div>
-            <p id="helper" className="text-[11px] text-ds-ink-faint">
+            <p id="helper" className="text-xs text-ds-ink-faint">
               No. of repeats of this product in one gang layout
             </p>
             </div>
@@ -591,8 +591,8 @@ export function PlanningJobDetailDrawer({
               />
             </div>
             <div className="rounded-ds-md border border-ds-success/30 bg-ds-success/5 p-4 md:p-5">
-              <p className="text-[12px] font-medium text-ds-ink-muted">Line amount (ex-GST)</p>
-              <p className="mt-2 text-2xl font-bold leading-tight text-ds-success tabular-nums md:text-[26px]">
+              <p className="text-xs font-medium text-ds-ink-muted">Line amount (ex-GST)</p>
+              <p className="mt-2 text-2xl font-bold leading-tight text-ds-success tabular-nums md:text-2xl">
                 ₹ {amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
@@ -613,7 +613,7 @@ export function PlanningJobDetailDrawer({
               </Button>
               {splitOpen ? (
                 <div className="mt-2 space-y-2 rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3">
-                  <p className="text-[10px] leading-snug text-ds-ink-faint">Notional split — coordinate with Accounts for PO changes.</p>
+                  <p className="text-xs leading-snug text-ds-ink-faint">Notional split — coordinate with Accounts for PO changes.</p>
                   <label className="ds-typo-label block">First job qty</label>
                   <input
                     type="number"

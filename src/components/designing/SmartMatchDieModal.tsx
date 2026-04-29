@@ -58,7 +58,7 @@ export function SmartMatchDieModal({
             <h2 id="smart-match-title" className="text-sm font-semibold text-ds-warning">
               Smart Match — Die inventory
             </h2>
-            <p className="text-[11px] text-ds-ink-faint mt-0.5 font-mono tabular-nums">
+            <p className="text-xs text-ds-ink-faint mt-0.5 font-mono tabular-nums">
               Target L×W×H: <span className="text-ds-ink">{targetDims}</span> mm · ±{toleranceMm}{' '}
               mm · {rows.length} match{rows.length === 1 ? '' : 'es'}
             </p>
@@ -76,7 +76,7 @@ export function SmartMatchDieModal({
           {rows.length === 0 ? (
             <p className="p-6 text-center text-sm text-ds-ink-faint">No dies within tolerance.</p>
           ) : (
-            <table className="w-full text-left text-[11px] border-collapse">
+            <table className="w-full text-left text-xs border-collapse">
               <thead className="sticky top-0 bg-ds-main/95 border-b border-border/10 text-ds-ink-faint uppercase tracking-wide">
                 <tr>
                   <th className="px-2 py-1.5 font-semibold">Serial #</th>
@@ -102,7 +102,7 @@ export function SmartMatchDieModal({
                     </td>
                     <td className="px-2 py-1">
                       <span
-                        className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${badgeClass(r.conditionBadge)}`}
+                        className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${badgeClass(r.conditionBadge)}`}
                       >
                         {r.condition}
                       </span>
@@ -119,7 +119,7 @@ export function SmartMatchDieModal({
                         type="button"
                         disabled={busyId === r.id}
                         onClick={() => onSelect(r)}
-                        className="px-2 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-primary-foreground text-[10px] font-semibold"
+                        className="px-2 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-primary-foreground text-xs font-semibold"
                       >
                         {busyId === r.id ? '…' : 'Link'}
                       </button>

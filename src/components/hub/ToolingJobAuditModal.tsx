@@ -213,9 +213,9 @@ export function ToolingJobAuditModal({
               Current specs
             </h3>
             <div className="rounded-lg border border-ds-line/40 bg-background/50 p-3 space-y-2">
-              <p className="text-[10px] text-neutral-500 uppercase">Units</p>
+              <p className="text-xs text-neutral-500 uppercase">Units</p>
               <p className="text-sm text-ds-ink font-medium tabular-nums">{context.units}</p>
-              <p className="text-[10px] text-neutral-500 uppercase">Specification</p>
+              <p className="text-xs text-neutral-500 uppercase">Specification</p>
               <p className="text-sm text-ds-ink leading-snug">{context.specSummary}</p>
             </div>
           </section>
@@ -238,25 +238,25 @@ export function ToolingJobAuditModal({
                     <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-ds-warning ring-4 ring-ds-main" />
                     {context.tool === 'die' ? (
                       <div className="rounded-lg border border-ds-line/40 bg-background/40 p-2.5 space-y-1.5">
-                        <p className="text-[11px] text-neutral-500 font-mono tabular-nums">{e.timeLabel}</p>
+                        <p className="text-xs text-neutral-500 font-mono tabular-nums">{e.timeLabel}</p>
                         <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-1 text-xs">
                           <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Operator</dt>
                           <dd className="text-ds-ink">
                             {(e.operatorName ?? e.performedBy)?.trim() || '—'}
                           </dd>
                           <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Action</dt>
-                          <dd className="text-ds-ink font-mono text-[11px]">
+                          <dd className="text-ds-ink font-mono text-xs">
                             {e.hubAction?.trim() || e.actionType?.trim() || '—'}
                           </dd>
                           <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Condition</dt>
                           <dd className="text-ds-ink">{e.condition?.trim() || '—'}</dd>
                           <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Timestamp</dt>
-                          <dd className="text-neutral-500 font-mono text-[10px] break-all">
+                          <dd className="text-neutral-500 font-mono text-xs break-all">
                             {e.createdAt ?? '—'}
                           </dd>
                         </dl>
                         {e.summaryLine ? (
-                          <p className="text-[11px] text-neutral-500 leading-snug pt-1 border-t border-ds-line/50">
+                          <p className="text-xs text-neutral-500 leading-snug pt-1 border-t border-ds-line/50">
                             {e.summaryLine}
                           </p>
                         ) : null}
@@ -265,11 +265,11 @@ export function ToolingJobAuditModal({
                       <p className="text-sm text-ds-ink leading-snug font-medium">{e.summaryLine}</p>
                     ) : (
                       <>
-                        <p className="text-[11px] text-neutral-500 font-mono">{e.timeLabel}</p>
+                        <p className="text-xs text-neutral-500 font-mono">{e.timeLabel}</p>
                         <p className="text-sm font-bold text-ds-ink mt-0.5">{e.action}</p>
                         <p className="text-xs text-neutral-500 mt-1 leading-snug">{e.detail}</p>
                         {e.performedBy ? (
-                          <p className="text-[10px] text-neutral-600 mt-1">By {e.performedBy}</p>
+                          <p className="text-xs text-neutral-600 mt-1">By {e.performedBy}</p>
                         ) : null}
                       </>
                     )}
@@ -283,7 +283,7 @@ export function ToolingJobAuditModal({
               <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
                 Usage history
               </h3>
-              <p className="text-[11px] text-neutral-500 mb-2 leading-snug">
+              <p className="text-xs text-neutral-500 mb-2 leading-snug">
                 Returns to rack with the press that was last issued (from hub events).
               </p>
               {loading ? (
@@ -296,7 +296,7 @@ export function ToolingJobAuditModal({
                 <div className="overflow-x-auto rounded-lg border border-ds-line/40">
                   <table className="w-full text-left text-xs border-collapse min-w-[420px]">
                     <thead>
-                      <tr className="border-b border-ds-line/40 text-[10px] uppercase tracking-wide text-neutral-500">
+                      <tr className="border-b border-ds-line/40 text-xs uppercase tracking-wide text-neutral-500">
                         <th className="px-2 py-2 font-semibold whitespace-nowrap">Date</th>
                         <th className="px-2 py-2 font-semibold">Operator</th>
                         <th className="px-2 py-2 font-semibold">Machine</th>

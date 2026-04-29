@@ -268,9 +268,9 @@ function CommandPaletteModal({
             aria-controls="command-palette-results"
           />
           {loading || debouncePending ? (
-            <span className="text-[10px] text-ds-ink-faint tabular-nums">Searching…</span>
+            <span className="text-xs text-ds-ink-faint tabular-nums">Searching…</span>
           ) : (
-            <span className="flex items-center gap-0.5 text-[10px] text-ds-ink-faint">
+            <span className="flex items-center gap-0.5 text-xs text-ds-ink-faint">
               <CornerDownLeft className="h-3 w-3" aria-hidden />
               go
             </span>
@@ -296,7 +296,7 @@ function CommandPaletteModal({
           ) : null}
           {displayGroups.map((g) => (
             <div key={g.id} className="mb-3">
-              <div className="sticky top-0 z-10 bg-card px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+              <div className="sticky top-0 z-10 bg-card px-2 py-1 text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">
                 [ {g.label} ]
               </div>
               <ul className="space-y-0.5">
@@ -331,13 +331,13 @@ function CommandPaletteModal({
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span
-                              className={`truncate font-medium ${r.titleMono ? 'font-designing-queue text-[13px] tabular-nums tracking-tight' : ''}`}
+                              className={`truncate font-medium ${r.titleMono ? 'font-designing-queue text-sm tabular-nums tracking-tight' : ''}`}
                             >
                               {r.title}
                             </span>
                             {r.statusBadge ? (
                               <span
-                                className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${r.statusBadge.className}`}
+                                className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${r.statusBadge.className}`}
                               >
                                 {r.statusBadge.text}
                               </span>
@@ -350,7 +350,7 @@ function CommandPaletteModal({
                           </div>
                           {r.subtitle ? (
                             <div
-                              className={`truncate text-[11px] text-ds-ink-faint ${r.subtitleMono ? 'font-designing-queue tabular-nums tracking-tight' : ''}`}
+                              className={`truncate text-xs text-ds-ink-faint ${r.subtitleMono ? 'font-designing-queue tabular-nums tracking-tight' : ''}`}
                             >
                               {r.subtitle}
                             </div>
@@ -364,7 +364,7 @@ function CommandPaletteModal({
             </div>
           ))}
         </div>
-        <div className="border-t border-border px-3 py-1.5 text-[10px] text-muted-foreground">
+        <div className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
           <span className="text-ds-ink-faint">Navigator: </span>
           <span className="text-[#f97316]/90">Anik Dua</span>
           <span className="text-ds-ink-faint"> · audits navigation</span>
@@ -434,7 +434,7 @@ export function CommandPaletteTrigger() {
     >
       <Search className="h-4 w-4 shrink-0 text-ds-ink-faint" aria-hidden />
       <span className="flex-1 truncate">Search POs, dies, products, jobs…</span>
-      <kbd className="hidden sm:inline rounded border border-ds-line/60 bg-ds-main/80 px-1.5 py-0.5 text-[10px] font-mono text-ds-ink-faint">
+      <kbd className="hidden sm:inline rounded border border-ds-line/60 bg-ds-main/80 px-1.5 py-0.5 text-xs font-mono text-ds-ink-faint">
         {kbdHint}
       </kbd>
     </button>

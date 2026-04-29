@@ -306,7 +306,7 @@ export function SidebarNav({
               )}
             </button>
             {section.subtitle && (
-              <p className="mb-1 mt-0 px-1 text-[10px] text-ds-ink-faint">{section.subtitle}</p>
+              <p className="mb-1 mt-0 px-1 text-xs text-ds-ink-faint">{section.subtitle}</p>
             )}
             {isOpen && (
               <div className="space-y-0.5">

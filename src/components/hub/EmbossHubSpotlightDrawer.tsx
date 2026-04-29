@@ -79,7 +79,7 @@ export function EmbossHubSpotlightDrawer({
         ) : data && b ? (
           <>
             <section className="rounded-xl border border-ds-line/40 bg-ds-main/80 px-3 py-3 space-y-2">
-              <p className="text-neutral-500 text-[10px] uppercase tracking-wider font-sans">Rich identity</p>
+              <p className="text-neutral-500 text-xs uppercase tracking-wider font-sans">Rich identity</p>
               {b.linkedProductId ? (
                 <Link
                   href={`/masters/cartons/${b.linkedProductId}`}
@@ -97,7 +97,7 @@ export function EmbossHubSpotlightDrawer({
                 <span className="text-ds-ink-faint font-sans">Ver: </span>
                 <span className="text-ds-ink">{b.versionDisplay}</span>
               </p>
-              <p className="text-[10px] text-neutral-500 font-sans">
+              <p className="text-xs text-neutral-500 font-sans">
                 {b.materialSpec}
                 {b.reliefDepthMm != null ? (
                   <>
@@ -109,7 +109,7 @@ export function EmbossHubSpotlightDrawer({
             </section>
 
             <section className="rounded-xl border border-ds-line/40 bg-ds-main/80 px-3 py-3 space-y-2">
-              <p className="text-neutral-500 text-[10px] uppercase tracking-wider font-sans">Current mount</p>
+              <p className="text-neutral-500 text-xs uppercase tracking-wider font-sans">Current mount</p>
               {b.currentMachine ? (
                 <Link
                   href={`/production/machine-flow?highlightMachineId=${encodeURIComponent(b.currentMachine.id)}`}
@@ -121,18 +121,18 @@ export function EmbossHubSpotlightDrawer({
                 <p className="text-neutral-500 font-sans">Not issued to a press</p>
               )}
               {b.issuedAt ? (
-                <p className="text-[10px] text-neutral-500 font-sans">
+                <p className="text-xs text-neutral-500 font-sans">
                   Issued {formatAt(b.issuedAt)}
                 </p>
               ) : null}
-              <p className={`text-[10px] text-neutral-500 pt-1 font-sans`}>
+              <p className={`text-xs text-neutral-500 pt-1 font-sans`}>
                 Cumulative strikes (master):{' '}
                 <span className={`text-orange-300 ${mono}`}>{b.cumulativeStrikes.toLocaleString()}</span>
               </p>
             </section>
 
             <section>
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-3 font-sans">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-3 font-sans">
                 Usage history
               </h3>
               {data.timeline.length === 0 ? (
@@ -145,7 +145,7 @@ export function EmbossHubSpotlightDrawer({
                         className="absolute -start-[21px] top-1.5 flex h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-ring"
                         aria-hidden
                       />
-                      <p className="text-[10px] text-neutral-500 font-sans">{formatAt(e.atIso)}</p>
+                      <p className="text-xs text-neutral-500 font-sans">{formatAt(e.atIso)}</p>
                       <p className="text-sm text-ds-ink font-semibold font-sans">{e.actionLabel}</p>
                       <div className="mt-1 space-y-0.5 text-xs text-neutral-500">
                         {e.jobCardId && e.jobDisplay ? (
@@ -171,7 +171,7 @@ export function EmbossHubSpotlightDrawer({
                           </p>
                         ) : null}
                         {e.operatorName ? (
-                          <p className="text-[10px] text-neutral-500 font-sans">Operator: {e.operatorName}</p>
+                          <p className="text-xs text-neutral-500 font-sans">Operator: {e.operatorName}</p>
                         ) : null}
                       </div>
                     </li>

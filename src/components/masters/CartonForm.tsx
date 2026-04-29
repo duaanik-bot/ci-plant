@@ -567,7 +567,7 @@ export default function CartonForm({ mode, initialData }: Props) {
                   }}
                   placeholder='Type at least 2 characters...'
                 />
-                {customerState.loading && <p className='absolute right-3 top-9 text-[11px] text-ds-ink-muted'>Searching...</p>}
+                {customerState.loading && <p className='absolute right-3 top-9 text-xs text-ds-ink-muted'>Searching...</p>}
                 {customerState.open && !shouldHideCustomerSuggestions && (
                   <div className='absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-ds-line/50 bg-ds-card shadow-lg'>
                     {customerState.loading ? (
@@ -652,7 +652,7 @@ export default function CartonForm({ mode, initialData }: Props) {
                     </option>
                   ))}
                 </select>
-                <p className='mt-1 text-[10px] text-ds-ink-faint'>
+                <p className='mt-1 text-xs text-ds-ink-faint'>
                   PO and Die Hub use this record for type and L×W×H.
                 </p>
               </div>
@@ -670,7 +670,7 @@ export default function CartonForm({ mode, initialData }: Props) {
                     </option>
                   ))}
                 </select>
-                <p className='mt-1 text-[10px] text-ds-ink-faint'>
+                <p className='mt-1 text-xs text-ds-ink-faint'>
                   Links PO production readiness to Ink Kitchen + approval doc on the shade master.
                 </p>
               </div>

@@ -117,12 +117,12 @@ export function JobAuditModal({
               <p className="text-sm font-bold leading-snug tracking-tight text-blue-400 mt-1 break-words whitespace-normal">
                 {context.cartonName}
               </p>
-              <p className="text-[11px] font-medium text-gray-300 opacity-90 mt-0.5 break-words whitespace-normal leading-snug">
+              <p className="text-xs font-medium text-gray-300 opacity-90 mt-0.5 break-words whitespace-normal leading-snug">
                 AW: {context.artworkCode?.trim() || '—'} · {context.displayCode}
               </p>
               {context.poLineId ? (
                 <p
-                  className="text-[11px] font-medium text-gray-300 opacity-90 font-mono mt-0.5 break-all whitespace-normal"
+                  className="text-xs font-medium text-gray-300 opacity-90 font-mono mt-0.5 break-all whitespace-normal"
                   title={context.poLineId}
                 >
                   PO line: {context.poLineId}
@@ -146,28 +146,28 @@ export function JobAuditModal({
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-ds-line/40 bg-background/50 p-3">
               <div>
-                <p className="text-[10px] text-neutral-500 uppercase">Plate size</p>
+                <p className="text-xs text-neutral-500 uppercase">Plate size</p>
                 <p className="text-sm text-ds-ink font-medium">{sizeMm}</p>
               </div>
               <div>
-                <p className="text-[10px] text-neutral-500 uppercase">Zone</p>
+                <p className="text-xs text-neutral-500 uppercase">Zone</p>
                 <p className="text-sm text-ds-ink font-medium">{context.zoneLabel}</p>
               </div>
               <div>
-                <p className="text-[10px] text-neutral-500 uppercase">Colours required</p>
+                <p className="text-xs text-neutral-500 uppercase">Colours required</p>
                 <p className="text-sm text-ds-ink font-medium tabular-nums">{context.coloursRequired}</p>
               </div>
               <div>
-                <p className="text-[10px] text-neutral-500 uppercase">In rack / matched</p>
+                <p className="text-xs text-neutral-500 uppercase">In rack / matched</p>
                 <p className="text-sm text-ds-ink font-medium tabular-nums">{inRack}</p>
               </div>
               <div className="sm:col-span-2">
-                <p className="text-[10px] text-neutral-500 uppercase mb-1">Colour channels</p>
+                <p className="text-xs text-neutral-500 uppercase mb-1">Colour channels</p>
                 <PlateHubColourSwatchStrip labels={context.plateColours} />
               </div>
               {context.statusLabel ? (
                 <div className="sm:col-span-2">
-                  <p className="text-[10px] text-neutral-500 uppercase">Status</p>
+                  <p className="text-xs text-neutral-500 uppercase">Status</p>
                   <p className="text-sm text-ds-ink capitalize">{context.statusLabel}</p>
                 </div>
               ) : null}
@@ -189,11 +189,11 @@ export function JobAuditModal({
                 {entries.map((e, i) => (
                   <li key={e.id ?? `${e.timeLabel}-${i}`} className="relative">
                     <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-ds-warning ring-4 ring-ds-main" />
-                    <p className="text-[11px] text-neutral-500 font-mono">{e.timeLabel}</p>
+                    <p className="text-xs text-neutral-500 font-mono">{e.timeLabel}</p>
                     <p className="text-sm font-bold text-ds-ink mt-0.5">{e.action}</p>
                     <p className="text-xs text-neutral-500 mt-1 leading-snug">{e.detail}</p>
                     {e.performedBy ? (
-                      <p className="text-[10px] text-neutral-600 mt-1">By {e.performedBy}</p>
+                      <p className="text-xs text-neutral-600 mt-1">By {e.performedBy}</p>
                     ) : null}
                   </li>
                 ))}

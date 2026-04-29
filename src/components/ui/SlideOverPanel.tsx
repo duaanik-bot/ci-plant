@@ -88,7 +88,7 @@ export function SlideOverPanel({
             <div className="min-w-0 flex-1">
               <h2 className="ds-typo-heading min-w-0 pr-2">{title}</h2>
               {headerMeta ? (
-                <div className="mt-1.5 text-[13px] leading-snug text-ds-ink-muted">{headerMeta}</div>
+                <div className="mt-1.5 text-sm leading-snug text-ds-ink-muted">{headerMeta}</div>
               ) : null}
             </div>
             <button

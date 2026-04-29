@@ -201,7 +201,7 @@ function CustomerAvatar({
   }
   return (
     <span
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold tabular-nums ring-1 ring-ring/15"
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums ring-1 ring-ring/15"
       style={{
         backgroundColor: `hsl(${hue} 42% 28%)`,
         color: `hsl(${hue} 25% 94%)`,
@@ -320,7 +320,7 @@ function NeonCommandFilterTrigger({
   onQueryChange: (v: string) => void
   onClearQuery: () => void
 }) {
-  const inputCls = `h-9 w-full min-w-[14rem] rounded border border-ds-brand/35 bg-ds-main/95 px-9 pr-3 text-[13px] font-medium text-ds-ink shadow-sm transition focus:border-ds-brand focus:outline-none focus:ring-2 focus:ring-ds-brand/30 ${mono}`
+  const inputCls = `h-9 w-full min-w-[14rem] rounded border border-ds-brand/35 bg-ds-main/95 px-9 pr-3 text-sm font-medium text-ds-ink shadow-sm transition focus:border-ds-brand focus:outline-none focus:ring-2 focus:ring-ds-brand/30 ${mono}`
   return (
     <div className="flex w-full items-stretch gap-2">
       <label className="group relative min-w-0 flex-1">
@@ -338,7 +338,7 @@ function NeonCommandFilterTrigger({
         <button
           type="button"
           onClick={() => onClearQuery()}
-          className={`shrink-0 rounded border border-ds-line/60 bg-ds-main px-2.5 text-[12px] text-ds-ink-faint hover:border-ds-brand/40 hover:text-ds-brand transition-colors ${mono}`}
+          className={`shrink-0 rounded border border-ds-line/60 bg-ds-main px-2.5 text-xs text-ds-ink-faint hover:border-ds-brand/40 hover:text-ds-brand transition-colors ${mono}`}
           title="Clear filter"
           aria-label="Clear filter"
         >
@@ -1434,7 +1434,7 @@ export default function DesigningQueuePage() {
               onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
               aria-label="Filter by designer"
               title="Filter by planning designer — All, Unassigned, or planning names"
-              className={`h-9 w-full min-w-[12rem] appearance-none rounded border border-ds-brand/35 bg-ds-main/95 py-1.5 pl-8 pr-9 text-[13px] font-medium text-ds-ink shadow-sm outline-none transition focus:border-ds-brand focus:ring-2 focus:ring-ds-brand/30 md:min-w-[11rem] ${mono} ${
+              className={`h-9 w-full min-w-[12rem] appearance-none rounded border border-ds-brand/35 bg-ds-main/95 py-1.5 pl-8 pr-9 text-sm font-medium text-ds-ink shadow-sm outline-none transition focus:border-ds-brand focus:ring-2 focus:ring-ds-brand/30 md:min-w-[11rem] ${mono} ${
                 designerFilter !== 'all' ? 'bg-ds-brand/8' : ''
               }`}
             >
@@ -1453,14 +1453,14 @@ export default function DesigningQueuePage() {
         <div className="rounded-lg border border-ds-line/40 bg-ds-elevated/20 px-2.5 py-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Applied filters</span>
+              <span className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Applied filters</span>
               {awFilterChips.length === 0 ? (
-                <span className="text-[11px] text-ds-ink-faint">None</span>
+                <span className="text-xs text-ds-ink-faint">None</span>
               ) : (
                 awFilterChips.map((chip) => (
                   <span
                     key={chip.key}
-                    className="inline-flex items-center gap-1 rounded border border-ds-line/60 bg-ds-main/50 px-2 py-0.5 text-[11px] text-ds-ink"
+                    className="inline-flex items-center gap-1 rounded border border-ds-line/60 bg-ds-main/50 px-2 py-0.5 text-xs text-ds-ink"
                   >
                     {chip.label}
                     {chip.onClear ? (
@@ -1486,7 +1486,7 @@ export default function DesigningQueuePage() {
                     setMyJobsOnly(false)
                     setJobCardFilter('all')
                   }}
-                  className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] text-ds-ink-faint hover:text-ds-ink"
+                  className="rounded border border-ds-line/60 px-2 py-0.5 text-xs text-ds-ink-faint hover:text-ds-ink"
                 >
                   Clear all
                 </button>
@@ -1542,7 +1542,7 @@ export default function DesigningQueuePage() {
         />
 
         <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-ds-line/40 bg-ds-elevated/10 px-2 py-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-ds-ink-muted">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-ds-ink-muted">
             <span className="font-semibold text-ds-ink">AW queue</span>
             <span className="text-ds-ink-faint">·</span>
             <span>
@@ -1628,7 +1628,7 @@ export default function DesigningQueuePage() {
         />
         <EnterpriseTableShell>
           <table className="w-full min-w-[1020px] table-fixed border-collapse text-left text-xs">
-            <thead className="border-b border-border bg-card text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
+            <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
                 <th className="w-10 px-2 py-2 text-center">
                   <input
@@ -1749,10 +1749,10 @@ export default function DesigningQueuePage() {
                           />
                         </td>
                         <td className="px-2 py-1.5 align-middle text-xs leading-snug text-neutral-900 dark:text-ds-ink">
-                          <div className="mb-0.5 inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1 py-0.5 text-[9px] font-bold uppercase text-sky-600 dark:text-sky-300">
+                          <div className="mb-0.5 inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1 py-0.5 text-xs font-bold uppercase text-sky-600 dark:text-sky-300">
                             <Layers className="h-3 w-3 shrink-0" aria-hidden /> Gang · {groupRows.length}
                           </div>
-                          <div className="flex min-w-0 items-center gap-1 text-[10px] text-ds-ink-muted">
+                          <div className="flex min-w-0 items-center gap-1 text-xs text-ds-ink-muted">
                             <CustomerAvatar name={firstRow.po.customer.name} logoUrl={firstRow.po.customer.logoUrl} />
                             <span className="min-w-0 truncate">{firstRow.po.customer.name}</span>
                             <span className={`shrink-0 ${mono} text-ds-warning`}>{firstRow.po.poNumber}</span>
@@ -1768,24 +1768,24 @@ export default function DesigningQueuePage() {
                               </span>
                             ))}
                           </div>
-                          <div className={`mt-0.5 text-[10px] ${mono} text-ds-ink-faint`}>
+                          <div className={`mt-0.5 text-xs ${mono} text-ds-ink-faint`}>
                             Set {firstRow.setNumber ?? '—'} · {dQ0}d
                           </div>
                         </td>
                         <td className={`px-2 py-1.5 align-middle text-right text-xs font-bold ${mono} text-ds-brand`}>
                           {totalQty.toLocaleString('en-IN')}
                         </td>
-                        <td className="px-2 py-1.5 align-middle text-[10px] text-ds-ink-faint">{designerName0}</td>
+                        <td className="px-2 py-1.5 align-middle text-xs text-ds-ink-faint">{designerName0}</td>
                         <td className={`px-2 py-1.5 align-middle text-right text-xs ${mono} text-ds-ink`}>{groupUpsLabel}</td>
-                        <td className="px-2 py-1.5 align-middle text-[10px] text-ds-ink-muted">Gang</td>
+                        <td className="px-2 py-1.5 align-middle text-xs text-ds-ink-muted">Gang</td>
                         <td className="px-2 py-1.5 align-middle">
-                          <span className={`${badge0.className} text-[10px] ${badge0.pulse ? 'animate-pulse' : ''}`}>
+                          <span className={`${badge0.className} text-xs ${badge0.pulse ? 'animate-pulse' : ''}`}>
                             <Layers className="h-3 w-3 shrink-0" aria-hidden />
                             {badge0.label}
                           </span>
                           {groupPushAge ? (
                             <div className="mt-0.5">
-                              <span className={groupCompleted ? PUSHED_CHIP_CLASS : 'rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint'}>
+                              <span className={groupCompleted ? PUSHED_CHIP_CLASS : 'rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-xs text-ds-ink-faint'}>
                                 {groupCompleted ? `Pushed ${groupPushAge}` : `Plate pushed ${groupPushAge}`}
                               </span>
                             </div>
@@ -1793,11 +1793,11 @@ export default function DesigningQueuePage() {
                         </td>
                         <td className="px-2 py-1.5 align-middle">
                           {groupJobCardReady === groupRows.length ? (
-                            <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                            <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
                               Ready ({groupJobCardReady}/{groupRows.length})
                             </span>
                           ) : (
-                            <span className="rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint">
+                            <span className="rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-xs text-ds-ink-faint">
                               Pending ({groupRows.length - groupJobCardReady}/{groupRows.length})
                             </span>
                           )}
@@ -1931,7 +1931,7 @@ export default function DesigningQueuePage() {
                                 }
                               />
                             </td>
-                            <td className="px-2 py-1 align-middle text-[10px] leading-snug text-ds-ink">
+                            <td className="px-2 py-1 align-middle text-xs leading-snug text-ds-ink">
                               <span className="text-sky-500/70">↳{si + 1}</span>{' '}
                               <span className={`${mono} text-ds-warning`}>{r.po.poNumber}</span>
                               <div className="flex min-w-0 items-center gap-1 text-ds-ink-muted">
@@ -1946,20 +1946,20 @@ export default function DesigningQueuePage() {
                             <td className={`px-2 py-1 align-middle text-right text-xs ${mono} text-ds-ink`}>
                               {r.quantity.toLocaleString('en-IN')}
                             </td>
-                            <td className="px-2 py-1 align-middle text-[10px] text-ds-ink-faint">{designerName}</td>
+                            <td className="px-2 py-1 align-middle text-xs text-ds-ink-faint">{designerName}</td>
                             <td className={`px-2 py-1 align-middle text-right text-xs ${mono}`}>{rowUpsDisplay(spec)}</td>
-                            <td className="px-2 py-1 align-middle text-[10px] text-ds-ink-muted">
+                            <td className="px-2 py-1 align-middle text-xs text-ds-ink-muted">
                               {rowBatchTypeDisplay(spec)}
                             </td>
                             <td className="px-2 py-1 align-middle">
                               <div className="flex flex-wrap items-center gap-1">
                                 {phase === 'awaiting_client' ? (
-                                  <span className="rounded border border-sky-500/45 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">
+                                  <span className="rounded border border-sky-500/45 bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-700 dark:text-sky-300">
                                     Awaiting client
                                   </span>
                                 ) : null}
                                 {missingSheetSize ? (
-                                  <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-700 dark:text-orange-300">
+                                  <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
                                     Sheet size missing
                                   </span>
                                 ) : null}
@@ -1967,11 +1967,11 @@ export default function DesigningQueuePage() {
                             </td>
                             <td className="px-2 py-1 align-middle">
                               {jcState === 'ready' ? (
-                                <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                                <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
                                   Ready
                                 </span>
                               ) : (
-                                <span className="text-[10px] text-ds-ink-faint">—</span>
+                                <span className="text-xs text-ds-ink-faint">—</span>
                               )}
                             </td>
                             <td className="px-2 py-1 align-middle">
@@ -2085,7 +2085,7 @@ export default function DesigningQueuePage() {
                         </button>
                         <div className="min-w-0 flex-1">
                           <div className={`truncate ${mono} text-ds-warning`}>{r.po?.poNumber ?? '—'}</div>
-                          <div className="flex min-w-0 items-center gap-1 text-[10px] text-ds-ink-muted">
+                          <div className="flex min-w-0 items-center gap-1 text-xs text-ds-ink-muted">
                             <CustomerAvatar name={r.po?.customer?.name ?? '—'} logoUrl={r.po?.customer?.logoUrl} />
                             <span className="min-w-0 truncate">{r.po?.customer?.name ?? '—'}</span>
                           </div>
@@ -2093,11 +2093,11 @@ export default function DesigningQueuePage() {
                             {r.cartonName ?? '—'}
                           </div>
                           {readPlanningCore(spec).layoutType === 'gang' ? (
-                            <span className="mt-0.5 inline-block w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-700 dark:text-sky-300">
+                            <span className="mt-0.5 inline-block w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-xs font-semibold uppercase text-sky-700 dark:text-sky-300">
                               Gang print
                             </span>
                           ) : readPlanningCore(spec).savedAt ? (
-                            <span className="mt-0.5 inline-block w-fit rounded border border-neutral-300 px-1 py-0.5 text-[9px] text-ds-ink-faint dark:border-ds-line/60">
+                            <span className="mt-0.5 inline-block w-fit rounded border border-neutral-300 px-1 py-0.5 text-xs text-ds-ink-faint dark:border-ds-line/60">
                               Single
                             </span>
                           ) : null}
@@ -2121,16 +2121,16 @@ export default function DesigningQueuePage() {
                             </div>
                           ) : null}
                           {r.directorPriority ? (
-                            <span className="mt-0.5 inline-block w-fit rounded bg-ds-warning/15 px-1 text-[9px] font-bold uppercase text-ds-warning ring-1 ring-ds-warning/35">
+                            <span className="mt-0.5 inline-block w-fit rounded bg-ds-warning/15 px-1 text-xs font-bold uppercase text-ds-warning ring-1 ring-ds-warning/35">
                               Priority
                             </span>
                           ) : null}
                           {r.directorHold ? (
-                            <span className="mt-0.5 inline-block w-fit rounded bg-ds-elevated/30 px-1 text-[9px] text-ds-ink-faint">
+                            <span className="mt-0.5 inline-block w-fit rounded bg-ds-elevated/30 px-1 text-xs text-ds-ink-faint">
                               Hold
                             </span>
                           ) : null}
-                          <div className={`mt-0.5 text-[10px] ${mono} text-ds-ink-faint`}>
+                          <div className={`mt-0.5 text-xs ${mono} text-ds-ink-faint`}>
                             Set {r.setNumber ?? '—'} · {dQ}d queue
                           </div>
                         </div>
@@ -2141,20 +2141,20 @@ export default function DesigningQueuePage() {
                     >
                       {r.quantity}
                     </td>
-                    <td className="px-2 py-2 align-middle text-[10px] leading-tight text-ds-ink-faint dark:text-ds-ink-muted">
+                    <td className="px-2 py-2 align-middle text-xs leading-tight text-ds-ink-faint dark:text-ds-ink-muted">
                       {designerName}
                     </td>
                     <td className={`px-2 py-2 align-middle text-right text-xs ${mono} text-ds-ink`}>{rowUpsDisplay(spec)}</td>
-                    <td className="px-2 py-2 align-middle text-[10px] text-ds-ink-muted">{rowBatchTypeDisplay(spec)}</td>
+                    <td className="px-2 py-2 align-middle text-xs text-ds-ink-muted">{rowBatchTypeDisplay(spec)}</td>
                     <td className="px-2 py-2 align-middle">
                       <div className="flex flex-wrap items-center gap-1">
                         {phase === 'awaiting_client' ? (
-                          <span className="rounded border border-sky-500/45 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">
+                          <span className="rounded border border-sky-500/45 bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-700 dark:text-sky-300">
                             Awaiting client
                           </span>
                         ) : null}
                         {missingSheetSize ? (
-                          <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-700 dark:text-orange-300">
+                          <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
                             Sheet size missing
                           </span>
                         ) : null}
@@ -2162,11 +2162,11 @@ export default function DesigningQueuePage() {
                     </td>
                     <td className="px-2 py-2 align-middle">
                       {jcState === 'ready' ? (
-                        <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                        <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
                           Ready
                         </span>
                       ) : (
-                        <span className="text-[10px] text-ds-ink-faint">—</span>
+                        <span className="text-xs text-ds-ink-faint">—</span>
                       )}
                     </td>
                     <td className="px-2 py-2 align-middle">

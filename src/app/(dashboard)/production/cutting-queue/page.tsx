@@ -175,7 +175,7 @@ export default function CuttingQueuePage() {
     <div className="min-h-screen bg-background text-ds-ink pb-10">
       <div className="mx-auto max-w-7xl px-3 py-3 space-y-3">
         <div className="sticky top-0 z-20 border-b border-ds-line/30 bg-background/95 py-1.5 backdrop-blur">
-          <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>
+          <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>
             Production execution · Cutting
           </p>
           <h1 className={`text-lg font-semibold text-ds-warning ${mono}`}>Cutting queue</h1>
@@ -185,22 +185,22 @@ export default function CuttingQueuePage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <span className={`rounded border border-ds-line/40 bg-ds-main/40 px-2 py-0.5 text-[10px] ${mono}`}>
+          <span className={`rounded border border-ds-line/40 bg-ds-main/40 px-2 py-0.5 text-xs ${mono}`}>
             Pending: {counters.pending}
           </span>
-          <span className={`rounded border border-ds-warning/40 bg-ds-warning/10 px-2 py-0.5 text-[10px] ${mono}`}>
+          <span className={`rounded border border-ds-warning/40 bg-ds-warning/10 px-2 py-0.5 text-xs ${mono}`}>
             Assigned: {counters.assigned}
           </span>
-          <span className={`rounded border border-sky-600/40 bg-sky-500/10 px-2 py-0.5 text-[10px] ${mono}`}>
+          <span className={`rounded border border-sky-600/40 bg-sky-500/10 px-2 py-0.5 text-xs ${mono}`}>
             Running: {counters.running}
           </span>
-          <span className={`rounded border border-emerald-600/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] ${mono}`}>
+          <span className={`rounded border border-emerald-600/40 bg-emerald-500/10 px-2 py-0.5 text-xs ${mono}`}>
             Completed: {counters.completed}
           </span>
         </div>
 
         <div className="rounded-xl border border-border/40 bg-card overflow-hidden">
-          <div className={`px-3 py-2 border-b border-border/40 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>
+          <div className={`px-3 py-2 border-b border-border/40 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>
             Cutting jobs
           </div>
           {loading ? (
@@ -211,8 +211,8 @@ export default function CuttingQueuePage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className={`w-full text-[11px] ${mono}`}>
-                <thead className="text-ds-ink-faint text-[10px] font-semibold uppercase tracking-wider bg-ds-main/40">
+              <table className={`w-full text-xs ${mono}`}>
+                <thead className="text-ds-ink-faint text-xs font-semibold uppercase tracking-wider bg-ds-main/40">
                   <tr className="border-b border-border/40">
                     <th className="text-left py-2 px-3">Carton Name</th>
                     <th className="text-left py-2 px-3">Carton</th>
@@ -255,7 +255,7 @@ export default function CuttingQueuePage() {
                         <td className="py-1.5 px-3">{r.poLine?.cartonSize ?? '—'}</td>
                         <td className="py-1.5 px-3">{r.poLine?.dyeNumber != null ? `#${r.poLine.dyeNumber}` : 'Required'}</td>
                         <td className="py-1.5 px-3">
-                          <span className={`rounded px-1.5 py-0.5 border text-[9px] uppercase tracking-wide ${statusTone(status)}`}>
+                          <span className={`rounded px-1.5 py-0.5 border text-xs uppercase tracking-wide ${statusTone(status)}`}>
                             {status}
                           </span>
                         </td>
@@ -264,28 +264,28 @@ export default function CuttingQueuePage() {
                           <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
-                              className="rounded border border-ds-line/50 px-1.5 py-px text-[9px] text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
                               onClick={() => setActiveJobId(r.id)}
                             >
                               Assign
                             </button>
                             <button
                               type="button"
-                              className="rounded border border-ds-line/50 px-1.5 py-px text-[9px] text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
                               onClick={() => updateMeta(r.id, { status: 'running' })}
                             >
                               Start
                             </button>
                             <button
                               type="button"
-                              className="rounded border border-ds-line/50 px-1.5 py-px text-[9px] text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
                               onClick={() => updateMeta(r.id, { status: 'assigned' })}
                             >
                               Hold
                             </button>
                             <button
                               type="button"
-                              className="rounded border border-ds-line/50 px-1.5 py-px text-[9px] text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
                               onClick={() => updateMeta(r.id, { status: 'completed' })}
                             >
                               Complete
@@ -311,7 +311,7 @@ export default function CuttingQueuePage() {
           <aside className="fixed right-0 top-0 h-screen w-full max-w-md border-l border-ds-line/40 bg-card shadow-2xl z-50 overflow-y-auto">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-2.5">
               <div>
-                <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Cutting decision</p>
+                <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Cutting decision</p>
                 <h2 className={`text-xs font-semibold text-ds-warning ${mono}`}>
                   JC #{activeRow.jobCardNumber}
                 </h2>
@@ -327,7 +327,7 @@ export default function CuttingQueuePage() {
 
             <div className="space-y-3 p-4 text-xs">
               <section className="rounded-lg border border-ds-line/40 p-2.5">
-                <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Job Snapshot</p>
+                <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Job Snapshot</p>
                 <div className="space-y-1">
                   <p><span className="text-ds-ink-faint">Carton:</span> {activeRow.poLine?.cartonName ?? '—'}</p>
                   <p><span className="text-ds-ink-faint">Qty:</span> {activeRow.poLine?.quantity ?? '—'}</p>
@@ -337,7 +337,7 @@ export default function CuttingQueuePage() {
               </section>
 
               <section className="rounded-lg border border-ds-line/40 p-2.5">
-                <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Cutting Decisions</p>
+                <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Cutting Decisions</p>
                 <div className="space-y-2">
                   <label className="block">
                     <span className="text-ds-ink-faint">Assign Operator</span>
@@ -395,13 +395,13 @@ export default function CuttingQueuePage() {
               </section>
 
               <section className="rounded-lg border border-ds-line/40 p-2.5">
-                <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Tooling Info</p>
+                <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Tooling Info</p>
                 <p><span className="text-ds-ink-faint">Die Number:</span> {activeRow.poLine?.dyeNumber != null ? `#${activeRow.poLine.dyeNumber}` : '—'}</p>
                 <p><span className="text-ds-ink-faint">Die Status:</span> {activeRow.poLine?.dyeNumber != null ? 'Available' : 'Required'}</p>
               </section>
 
               <section className="rounded-lg border border-ds-line/40 p-2.5">
-                <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Execution Controls</p>
+                <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Execution Controls</p>
                 <div className="flex gap-2">
                   <button
                     type="button"

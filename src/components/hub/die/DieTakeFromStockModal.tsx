@@ -87,7 +87,7 @@ export function DieTakeFromStockModal({
       >
         <div className="shrink-0">
           <h3 className="ci-hub-modal-title">Take from stock</h3>
-          <p className="text-ds-ink-muted text-[11px] leading-snug mt-2">
+          <p className="text-ds-ink-muted text-xs leading-snug mt-2">
             Matching dies share the same L×W×H as triage job{' '}
             <span className="text-ds-warning font-mono">{triageCode || '…'}</span>. Pull one into
             custody floor (<span className="text-ds-warning">Source: Rack</span>). The triage
@@ -107,7 +107,7 @@ export function DieTakeFromStockModal({
           </p>
         ) : (
           <div className="overflow-auto rounded-lg border border-ds-line/40 min-h-0">
-            <table className="w-full text-[11px] border-collapse">
+            <table className="w-full text-xs border-collapse">
               <thead className="sticky top-0 bg-ds-main z-[1]">
                 <tr className="text-left text-neutral-500 border-b border-ds-line/40">
                   <th className="py-1.5 px-2 w-10 font-semibold uppercase tracking-wide">Sel</th>

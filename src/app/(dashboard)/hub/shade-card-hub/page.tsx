@@ -358,7 +358,7 @@ export default function ShadeCardHubPage() {
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-bold text-ds-warning tracking-tight font-sans">Shade Card Hub</h1>
-            <p className="text-[11px] text-neutral-500 mt-0.5 font-sans">
+            <p className="text-xs text-neutral-500 mt-0.5">
               Live product sync (12s refresh) · 30.44 d/mo age · custody logged in spotlight
             </p>
           </div>
@@ -367,7 +367,7 @@ export default function ShadeCardHubPage() {
               className={`rounded-lg border border-orange-900/40 bg-ds-main px-3 py-2 ${mono}`}
               title="ΔE Limit Enforced < 2.0"
             >
-              <p className="text-[9px] uppercase tracking-wider text-neutral-500">Fading Standards</p>
+              <p className="text-xs uppercase tracking-wider text-neutral-500">Fading Standards</p>
               <p className="text-xl font-bold text-orange-400 tabular-nums leading-tight">{fadingStandardsCount}</p>
             </div>
             <button
@@ -432,13 +432,13 @@ export default function ShadeCardHubPage() {
           <button
             type="button"
             onClick={() => setMobileCompact((v) => !v)}
-            className="rounded border border-ds-line/50 px-2 py-0.5 text-[11px] text-ds-ink-muted"
+            className="rounded border border-ds-line/50 px-2 py-0.5 text-xs text-ds-ink-muted"
           >
             Mobile compact: {mobileCompact ? 'On' : 'Off'}
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-muted">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ds-ink-muted">
           <span className="rounded border border-ds-line/50 bg-ds-main/50 px-2 py-0.5">
             Fresh = Green
           </span>
@@ -551,11 +551,11 @@ export default function ShadeCardHubPage() {
               transition={{ duration: 0.22, ease: 'easeOut' }}
               className={`overflow-x-auto rounded-xl border border-ds-line/40 bg-background ${mono}`}
             >
-          <p className="px-3 py-2 text-[10px] uppercase tracking-wider text-neutral-600 border-b border-ds-line/30 font-sans">
+          <p className="px-3 py-2 text-xs uppercase tracking-wider text-neutral-600 border-b border-ds-line/30">
             Audit ledger
           </p>
           <table className="w-full text-left text-xs bg-background">
-            <thead className="bg-background border-b border-ds-line/30 text-[10px] uppercase tracking-wider text-neutral-500">
+            <thead className="bg-background border-b border-ds-line/30 text-xs uppercase tracking-wider text-neutral-500">
               <tr>
                 <th className="px-2 h-[40px] align-middle w-8">
                   <input
@@ -677,14 +677,14 @@ export default function ShadeCardHubPage() {
                                 className="block min-w-0 rounded hover:bg-ds-card/50 -m-0.5 p-0.5"
                                 onClick={(e) => e.stopPropagation()}
                               >
-                                <p className="font-bold text-emerald-400 truncate leading-tight text-[11px]">
+                                <p className="font-bold text-emerald-400 truncate leading-tight text-xs">
                                   {clientName}
                                 </p>
                                 <p className={`${mobileCompact ? 'line-clamp-1' : 'truncate'} text-sm text-foreground`}>{productName}</p>
                               </Link>
                             ) : (
                               <>
-                                <p className="font-bold text-emerald-400 truncate leading-tight text-[11px]">
+                                <p className="font-bold text-emerald-400 truncate leading-tight text-xs">
                                   {clientName}
                                 </p>
                                 <p className={`${mobileCompact ? 'line-clamp-1' : 'truncate'} text-sm text-foreground`}>{productName}</p>
@@ -695,7 +695,7 @@ export default function ShadeCardHubPage() {
                       </td>
                       <td className={`px-3 align-middle text-neutral-400 ${mono}`}>
                         <div className="leading-tight">
-                          <span className="whitespace-nowrap block text-[11px] text-ds-warning/90">{r.shadeCode}</span>
+                          <span className="whitespace-nowrap block text-xs text-ds-warning/90">{r.shadeCode}</span>
                           <span className="whitespace-nowrap text-neutral-500">{aw}</span>
                         </div>
                       </td>
@@ -706,21 +706,21 @@ export default function ShadeCardHubPage() {
                           <span className={`inline-flex items-center gap-1 ${mono}`}>
                             {approaching ? (
                               <span
-                                className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full border border-ds-warning/60 bg-ds-warning/8 px-0.5 text-[9px] font-black text-ds-warning animate-pulse"
+                                className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full border border-ds-warning/60 bg-ds-warning/8 px-0.5 text-xs font-black text-ds-warning animate-pulse"
                                 title="11–12 months: hard expiry window — open spotlight for audit trail."
                               >
                                 !
                               </span>
                             ) : null}
                             {tier === 'fresh' ? (
-                              <span className="text-[10px] font-medium text-emerald-500">{ageLabel}</span>
+                              <span className="text-xs font-medium text-emerald-500">{ageLabel}</span>
                             ) : tier === 'reverify' ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-ds-warning">
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-ds-warning">
                                 <RefreshCw className="h-3 w-3 shrink-0 animate-pulse" aria-hidden />
                                 {ageLabel}
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-rose-500">
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-rose-500">
                                 <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
                                 {ageLabel}
                               </span>
@@ -730,7 +730,7 @@ export default function ShadeCardHubPage() {
                       </td>
                       <td className="px-3 align-middle font-sans">
                         <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-medium border ${statusBadge.cls}`}
+                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium border ${statusBadge.cls}`}
                         >
                           {statusBadge.label}
                         </span>
@@ -739,23 +739,23 @@ export default function ShadeCardHubPage() {
                         {r.custodyStatus === 'on_floor' &&
                         (r.issuedOperator?.trim() || r.currentHolder?.trim()) ? (
                           <span
-                            className={`inline-flex max-w-full truncate rounded-md border border-sky-400/80 bg-ds-main px-2 py-0.5 text-[9px] font-semibold text-sky-100 ${mono}`}
+                            className={`inline-flex max-w-full truncate rounded-md border border-sky-400/80 bg-ds-main px-2 py-0.5 text-xs font-semibold text-sky-100 ${mono}`}
                             title="Current holder on floor"
                           >
                             {r.issuedOperator?.trim() || '—'} @ {r.currentHolder?.trim() || '—'}
                           </span>
                         ) : (
-                          <span className={`text-neutral-600 text-[10px] ${mono}`}>—</span>
+                          <span className={`text-neutral-600 text-xs ${mono}`}>—</span>
                         )}
                       </td>
                       <td className="px-3 align-middle min-w-[6rem]">
-                        <span className={`text-[10px] text-neutral-500 ${mono}`}>
+                        <span className={`text-xs text-neutral-500 ${mono}`}>
                           {shortTimeAgo(r.updatedAt)}
                         </span>
                         {hoveredRowId === r.id && usagePreview[r.id] && usagePreview[r.id].length > 0 ? (
                           <div className="mt-1 space-y-0.5">
                             {usagePreview[r.id].map((ev) => (
-                              <p key={ev.id} className={`text-[9px] text-ds-ink-faint ${mono}`}>
+                              <p key={ev.id} className={`text-xs text-ds-ink-faint ${mono}`}>
                                 {ev.actionType === SHADE_CARD_ACTION.ISSUED ? 'Issued' : 'Received'} · {shortTimeAgo(ev.createdAt)}
                               </p>
                             ))}
@@ -768,7 +768,7 @@ export default function ShadeCardHubPage() {
                             <button
                               type="button"
                               onClick={() => openIssueForRows([r])}
-                              className="h-6 rounded-md border border-sky-500/40 bg-sky-500/8 px-2 text-[10px] font-medium text-sky-700 dark:text-sky-300"
+                              className="h-6 rounded-md border border-sky-500/40 bg-sky-500/8 px-2 text-xs font-medium text-sky-700 dark:text-sky-300"
                             >
                               Issue
                             </button>
@@ -776,7 +776,7 @@ export default function ShadeCardHubPage() {
                             <button
                               type="button"
                               onClick={() => openReceiveForRows([r])}
-                              className="h-6 rounded-md border border-emerald-500/40 bg-emerald-500/8 px-2 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+                              className="h-6 rounded-md border border-emerald-500/40 bg-emerald-500/8 px-2 text-xs font-medium text-emerald-700 dark:text-emerald-300"
                             >
                               Receive
                             </button>
@@ -785,7 +785,7 @@ export default function ShadeCardHubPage() {
                             <button
                               type="button"
                               onClick={() => setSpotlight(r)}
-                              className="h-6 rounded-md border border-ds-warning/40 bg-ds-warning/8 px-2 text-[10px] font-medium text-ds-warning"
+                              className="h-6 rounded-md border border-ds-warning/40 bg-ds-warning/8 px-2 text-xs font-medium text-ds-warning"
                             >
                               Schedule reverify
                             </button>
@@ -849,7 +849,7 @@ export default function ShadeCardHubPage() {
                     onCardClick={(r) => setSpotlight(r)}
                     onDataChange={() => void load({ silent: true })}
                   />
-                  <p className={`text-[10px] text-neutral-600 mt-2 font-sans ${mono}`}>
+                  <p className={`text-xs text-neutral-600 mt-2 ${mono}`}>
                     Click card for spotlight. Drag the grip (left) to <strong className="text-neutral-500">On-Floor</strong> or{' '}
                     <strong className="text-neutral-500">In-Stock</strong> to run issue / receive.
                   </p>
@@ -860,7 +860,7 @@ export default function ShadeCardHubPage() {
         </AnimatePresence>
 
         <p
-          className={`text-center text-[9px] text-neutral-500 pt-4 border-t border-ds-line/30 font-[family-name:var(--font-designing-queue)] tracking-tight`}
+          className="text-center text-xs text-neutral-500 pt-4 border-t border-ds-line/30 tracking-tight"
         >
           Audit Trail Synchronized - Accountability Layer Active.
         </p>

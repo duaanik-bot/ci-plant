@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 
 const shell = 'border-l border-[#334155] bg-[#1E293B] shadow-[-10px_0_40px_rgba(0,0,0,0.25)]'
-const mono = 'font-designing-queue tabular-nums text-[13px] font-semibold'
+const mono = 'font-designing-queue tabular-nums text-sm font-semibold'
 
 type LineRow = { id: string; cartonName: string; quantity: number; rate: number | null; gstPct: number }
 
@@ -89,7 +89,7 @@ export function PlanningPoSummaryDrawer({
           {loading ? <p className="text-sm text-ds-ink-faint">Loading…</p> : null}
           {!loading && data && (
             <>
-              <div className="grid gap-3 text-[13px] text-ds-ink">
+              <div className="grid gap-3 text-sm text-ds-ink">
                 <p>
                   <span className="text-ds-ink-faint">Status / payment:</span>{' '}
                   <span className="text-emerald-400">{String(data.status ?? '—')}</span>
@@ -113,7 +113,7 @@ export function PlanningPoSummaryDrawer({
                   PO line items
                 </p>
                 <div className="overflow-hidden rounded border border-[#334155]">
-                  <table className="w-full text-left text-[13px]">
+                  <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="border-b border-[#334155] bg-[#0F172A] text-ds-ink-muted">
                         <th className="px-2 py-2 font-medium">Product</th>

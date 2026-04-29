@@ -212,7 +212,7 @@ export function DirectorWorkspaceSidebar({
             <KindIcon kind={kind} />
             {!collapsed ? (
               <>
-                <span className={`min-w-0 flex-1 truncate text-[11px] font-medium text-ds-ink ${monoClass}`}>
+                <span className={`min-w-0 flex-1 truncate text-xs font-medium text-ds-ink ${monoClass}`}>
                   {entry.title}
                 </span>
                 <StatusDotEl tone={dotTone} />
@@ -224,7 +224,7 @@ export function DirectorWorkspaceSidebar({
         </div>
         {!collapsed ? (
           <div
-            className="pointer-events-none absolute left-full top-1/2 z-[60] ml-2 w-max max-w-[240px] -translate-y-1/2 rounded border border-ds-line/50 bg-ds-main/95 px-2 py-1.5 text-[10px] leading-snug text-ds-ink opacity-0 shadow-xl backdrop-blur-md ring-1 ring-ring/20 transition-opacity duration-150 group-hover:opacity-100"
+            className="pointer-events-none absolute left-full top-1/2 z-[60] ml-2 w-max max-w-[240px] -translate-y-1/2 rounded border border-ds-line/50 bg-ds-main/95 px-2 py-1.5 text-xs leading-snug text-ds-ink opacity-0 shadow-xl backdrop-blur-md ring-1 ring-ring/20 transition-opacity duration-150 group-hover:opacity-100"
             role="tooltip"
           >
             {tip}
@@ -254,7 +254,7 @@ export function DirectorWorkspaceSidebar({
     >
       <div className="flex items-center justify-between gap-1 border-b border-ds-line/50 px-2 py-2">
         {!collapsed ? (
-          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-ds-ink-faint">
+          <span className="text-xs font-bold uppercase tracking-[0.18em] text-ds-ink-faint">
             Workspace
           </span>
         ) : (
@@ -279,7 +279,7 @@ export function DirectorWorkspaceSidebar({
         {pins.length > 0 ? (
           <div className="mb-3">
             {!collapsed ? (
-              <div className="mb-1.5 px-1 text-[9px] font-bold uppercase tracking-wider text-[#f97316]/90">
+              <div className="mb-1.5 px-1 text-xs font-bold uppercase tracking-wider text-[#f97316]/90">
                 Favorites
               </div>
             ) : null}
@@ -290,7 +290,7 @@ export function DirectorWorkspaceSidebar({
         {recentFiltered.length > 0 ? (
           <div>
             {!collapsed ? (
-              <div className="mb-1.5 px-1 text-[9px] font-bold uppercase tracking-wider text-ds-ink-faint">
+              <div className="mb-1.5 px-1 text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
                 Recent
               </div>
             ) : null}
@@ -301,14 +301,14 @@ export function DirectorWorkspaceSidebar({
         ) : null}
 
         {pins.length === 0 && recentFiltered.length === 0 && !collapsed ? (
-          <p className={`px-1 py-4 text-center text-[10px] leading-relaxed text-ds-ink-faint ${monoClass}`}>
+          <p className={`px-1 py-4 text-center text-xs leading-relaxed text-ds-ink-faint ${monoClass}`}>
             Use global search (⌘K). Items appear here automatically.
           </p>
         ) : null}
       </div>
 
       <div className="border-t border-ds-line/50 px-2 py-1.5">
-        <p className={`text-[9px] text-ds-ink-faint ${monoClass}`}>
+        <p className={`text-xs text-ds-ink-faint ${monoClass}`}>
           <span className="text-[#f97316]/90">Anik Dua</span>
           {!collapsed ? <span> · quick access</span> : null}
         </p>

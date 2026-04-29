@@ -674,7 +674,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               className={`rounded-lg border border-orange-900/40 bg-ds-main px-3 py-2 ${shadeMono}`}
               title="ΔE Limit Enforced < 2.0"
             >
-              <p className="text-[9px] uppercase tracking-wider text-neutral-500">Fading Standards</p>
+              <p className="text-xs uppercase tracking-wider text-neutral-500">Fading Standards</p>
               <p className="text-xl font-bold text-orange-400 tabular-nums leading-tight">{shadeFadingStandardsCount}</p>
             </div>
           ) : null}
@@ -883,7 +883,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       ) : (
         <EnterpriseTableShell className="bg-card ring-border">
           <table className={`w-full border-collapse bg-card text-left text-sm leading-tight text-card-foreground ${shadeMono}`}>
-            <thead className="bg-card border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
+            <thead className="bg-card border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-2 h-[44px] align-middle whitespace-nowrap">MFG / entry</th>
                 <th className="px-2 h-[44px] align-middle min-w-[10rem] font-sans">Client / product</th>
@@ -945,32 +945,32 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                             className="min-w-0 flex-1 block rounded hover:bg-ds-card/50 -m-0.5 p-0.5"
                           >
                             <p className="font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
-                            <p className="text-[14px] text-foreground truncate leading-snug font-sans">{productName}</p>
+                            <p className="text-sm text-foreground truncate leading-snug font-sans">{productName}</p>
                           </Link>
                         ) : (
                           <div className="min-w-0">
                             <p className="font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
-                            <p className="text-[14px] text-foreground truncate leading-snug font-sans">{productName}</p>
+                            <p className="text-sm text-foreground truncate leading-snug font-sans">{productName}</p>
                           </div>
                         )}
                       </div>
                     </td>
                     <td className={`px-2 align-middle text-neutral-400 ${shadeMono}`}>
                       <div className="leading-tight">
-                        <p className="text-[11px] text-ds-warning/95 whitespace-nowrap">{s.shadeCode}</p>
-                        <p className="text-[10px] text-neutral-500 whitespace-nowrap">{awCode}</p>
+                        <p className="text-xs text-ds-warning/95 whitespace-nowrap">{s.shadeCode}</p>
+                        <p className="text-xs text-neutral-500 whitespace-nowrap">{awCode}</p>
                       </div>
                     </td>
                     <td className="px-2 align-middle whitespace-nowrap">
                       {months == null ? (
                         <span className="text-neutral-600">—</span>
                       ) : tier === 'fresh' ? (
-                        <span className={`text-[10px] font-medium text-emerald-500 ${shadeMono}`}>{ageLabel} mo</span>
+                        <span className={`text-xs font-medium text-emerald-500 ${shadeMono}`}>{ageLabel} mo</span>
                       ) : tier === 'reverify' ? (
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-medium text-ds-warning ${shadeMono}`}>
+                        <span className={`inline-flex items-center gap-1 text-xs font-medium text-ds-warning ${shadeMono}`}>
                           {shadeCardIsApproachingHardExpiry(months) ? (
                             <span
-                              className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full border border-ds-warning/60 bg-ds-warning/8 px-0.5 text-[9px] font-black text-ds-warning animate-pulse"
+                              className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full border border-ds-warning/60 bg-ds-warning/8 px-0.5 text-xs font-black text-ds-warning animate-pulse"
                               title="Approaching 12-month expiry. Prepare replacement."
                             >
                               !
@@ -980,7 +980,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                           {ageLabel} mo
                         </span>
                       ) : (
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-medium text-rose-500 ${shadeMono}`}>
+                        <span className={`inline-flex items-center gap-1 text-xs font-medium text-rose-500 ${shadeMono}`}>
                           <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
                           EXPIRED · {ageLabel} mo
                         </span>
@@ -989,7 +989,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                     <td className="px-2 align-middle">
                       <div className="flex flex-wrap gap-1">
                         <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-medium border font-sans ${
+                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium border font-sans ${
                             tier === 'expired'
                               ? 'bg-rose-950/80 text-rose-100 border-rose-500/40'
                               : 'bg-ds-elevated text-ds-ink border-ds-line/50'
@@ -998,7 +998,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                           {label}
                         </span>
                         <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-medium bg-ds-elevated text-neutral-400 border border-ds-line/50 ${shadeMono}`}
+                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-ds-elevated text-neutral-400 border border-ds-line/50 ${shadeMono}`}
                         >
                           {loc}
                         </span>
@@ -1165,7 +1165,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               </select>
             </label>
             {toolType === 'shade_cards' ? (
-              <p className="text-[10px] text-ds-ink-faint font-sans">
+              <p className="text-xs text-ds-ink-faint font-sans">
                 Sets custody to <span className="text-ds-ink-muted">On-Floor</span> and location to the machine code.
               </p>
             ) : null}
@@ -1376,10 +1376,10 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
             {addProductId ? (
               <p className="text-xs text-neutral-500 font-sans rounded-lg border border-ds-line/40 bg-ds-main/80 px-2 py-1.5">
                 Selected: <span className="text-ds-ink">{addSelectedLabel}</span>
-                <span className={`block mt-0.5 text-[10px] text-neutral-600 ${shadeMono}`}>ID: {addProductId}</span>
+                <span className={`block mt-0.5 text-xs text-neutral-600 ${shadeMono}`}>ID: {addProductId}</span>
               </p>
             ) : (
-              <p className="text-[10px] text-neutral-600 font-sans">Pick a row above to link Product Master.</p>
+              <p className="text-xs text-neutral-600 font-sans">Pick a row above to link Product Master.</p>
             )}
             <label className="block text-neutral-400 font-sans">
               Substrate type <span className="text-rose-400">*</span>
@@ -1457,7 +1457,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 className="mt-1 w-full px-2 py-2 rounded-lg bg-ds-main border border-ds-line/50 text-ds-ink resize-y font-sans"
               />
             </label>
-            <p className="text-[10px] text-neutral-600 font-sans border-t border-ds-line/30 pt-2">
+            <p className="text-xs text-neutral-600 font-sans border-t border-ds-line/30 pt-2">
               Color Integrity Audit Enabled - 12 Month Limit Enforced.
             </p>
             <div className="flex justify-end gap-2 pt-1">
@@ -1515,7 +1515,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       )}
 
       {toolType === 'shade_cards' ? (
-        <p className="text-center text-[10px] text-neutral-600 pt-6 border-t border-ds-line/30 font-sans">
+        <p className="text-center text-xs text-neutral-600 pt-6 border-t border-ds-line/30 font-sans">
           Color Integrity Audit Enabled - 12 Month Limit Enforced.
         </p>
       ) : null}

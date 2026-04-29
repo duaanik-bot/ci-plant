@@ -379,7 +379,7 @@ function CartonLookupField({
         dropdownClassName="min-w-[320px]"
       />
       {!line.cartonId && line.cartonName.trim() ? (
-        <span className="mt-1 inline-block text-[10px] text-ds-warning">Unsaved carton name</span>
+        <span className="mt-1 inline-block text-xs text-ds-warning">Unsaved carton name</span>
       ) : null}
     </div>
   )
@@ -1047,16 +1047,16 @@ export default function NewPurchaseOrderPage() {
   }
 
   const inputCls =
-    'ds-input w-full min-w-0 [color-scheme:dark] border-ds-line/80 bg-ds-elevated/80 text-[15px] text-ds-ink placeholder:text-ds-ink-faint'
+    'ds-input w-full min-w-0 [color-scheme:dark] border-ds-line/80 bg-ds-elevated/80 text-sm text-ds-ink placeholder:text-ds-ink-faint'
   const inputClsGhost =
     'ds-input w-full min-w-0 [color-scheme:dark] !border-ds-line/50 !bg-ds-elevated/50 !text-ds-ink-muted placeholder:text-ds-ink-faint'
   const inputErr = 'ring-1 ring-ds-error/40 !border-ds-error/60'
   const lineCellPad = `${dataTable.td.base} align-middle min-h-[52px]`
   const poMono = 'po-mono-metric'
-  const tableInputPrimary = 'text-[15px] font-semibold text-ds-ink tabular-nums'
-  const tableInputSecondary = 'text-[12px] font-medium text-ds-ink-muted'
-  const thPrimary = 'text-left text-[12px] font-semibold tracking-tight text-ds-ink'
-  const thSecondary = 'text-left text-[12px] font-medium uppercase tracking-wider text-ds-ink-muted'
+  const tableInputPrimary = 'text-sm font-semibold text-ds-ink tabular-nums'
+  const tableInputSecondary = 'text-sm font-medium text-ds-ink-muted'
+  const thPrimary = 'text-left text-sm font-semibold tracking-tight text-ds-ink'
+  const thSecondary = 'text-left text-sm font-medium uppercase tracking-wider text-ds-ink-muted'
 
   return (
     <form
@@ -1141,14 +1141,14 @@ export default function NewPurchaseOrderPage() {
               }
             />
             {selectedCustomer ? (
-              <p className="mt-1 text-[11px] text-ds-ink-faint">
+              <p className="mt-1 text-xs text-ds-ink-faint">
                 {[selectedCustomer.contactName, selectedCustomer.contactPhone].filter(Boolean).join(' · ')}
               </p>
             ) : null}
           </div>
           <div>
             <label className="ds-typo-label mb-1.5 block">PO number</label>
-            <p className="rounded-ds-sm border border-ds-line/60 bg-ds-elevated/50 px-3 py-2.5 text-[15px] leading-normal text-ds-ink">
+            <p className="rounded-ds-sm border border-ds-line/60 bg-ds-elevated/50 px-3 py-2.5 text-sm leading-normal text-ds-ink">
               {customPoNumber.trim() || <span className="text-ds-ink-faint">Auto on save (CI-PO-YYYY-####)</span>}
             </p>
           </div>
@@ -1255,7 +1255,7 @@ export default function NewPurchaseOrderPage() {
             <thead className={dataTable.thead}>
               <tr>
                 <th
-                  className={`${dataTable.th} w-[40%] sticky left-0 z-40 min-h-[48px] border-r border-ds-line/50 bg-ds-elevated/95 shadow-[2px_0_8px_rgba(0,0,0,0.2)] pr-2 text-left text-[12px] font-semibold text-ds-ink`}
+                  className={`${dataTable.th} w-[40%] sticky left-0 z-40 min-h-[48px] border-r border-ds-line/50 bg-ds-elevated/95 shadow-[2px_0_8px_rgba(0,0,0,0.2)] pr-2 text-left text-xs font-semibold text-ds-ink`}
                 >
                   Carton
                 </th>
@@ -1263,7 +1263,7 @@ export default function NewPurchaseOrderPage() {
                 <th className={`${lineCellPad} ${thPrimary} w-[9%] text-center ${poMono}`}>Qty *</th>
                 <th className={`${lineCellPad} ${thPrimary} w-[18%] text-right ${poMono}`}>Rate</th>
                 <th className={`${lineCellPad} ${thPrimary} w-[16%] text-right ${poMono}`}>Amount</th>
-                <th className={`${lineCellPad} w-[6%] text-right text-[12px] font-normal text-ds-ink-faint`} aria-label="Row actions" />
+                <th className={`${lineCellPad} w-[6%] text-right text-xs font-normal text-ds-ink-faint`} aria-label="Row actions" />
               </tr>
             </thead>
             <tbody>
@@ -1428,22 +1428,22 @@ export default function NewPurchaseOrderPage() {
         aria-live="polite"
         aria-label="Purchase order financial summary"
       >
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3.5 text-xs sm:text-[13px]">
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3.5 text-xs sm:text-sm">
           <span className="ds-typo-label font-semibold uppercase tracking-wider">Summary</span>
           <div className="flex flex-wrap items-baseline justify-end gap-x-6 gap-y-1.5 text-ds-ink-muted">
             <span>
               Total qty{' '}
-              <span className={cn(poMono, 'text-[14px] font-semibold text-ds-ink')}>{totalQty}</span>
+              <span className={cn(poMono, 'text-sm font-semibold text-ds-ink')}>{totalQty}</span>
             </span>
             <span>
               Subtotal{' '}
-              <span className={cn(poMono, 'text-[14px] font-semibold text-ds-ink')}>
+              <span className={cn(poMono, 'text-sm font-semibold text-ds-ink')}>
                 ₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>
             <span>
               GST{' '}
-              <span className={cn(poMono, 'text-[14px] font-semibold text-ds-ink')}>
+              <span className={cn(poMono, 'text-sm font-semibold text-ds-ink')}>
                 ₹ {totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>

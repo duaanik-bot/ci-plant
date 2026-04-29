@@ -95,7 +95,7 @@ function AgeRing({ pct, monoClass, tier }: { pct: number; monoClass: string; tie
           strokeLinecap="round"
         />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-neutral-400">
+      <span className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-neutral-400">
         {pct.toFixed(0)}%
       </span>
     </div>
@@ -138,7 +138,7 @@ function KanbanCardInner({
       }`}
     >
       <div className="flex items-start justify-between gap-1">
-        <p className="text-[11px] font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
+        <p className="text-xs font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
         <div className="flex items-center gap-1 shrink-0">
           {row.industrialPriority ? (
             <Star
@@ -157,14 +157,14 @@ function KanbanCardInner({
       />
       <div className="mt-2 flex items-center justify-between gap-2">
         <AgeRing pct={pct} monoClass={monoClass} tier={tier} />
-        <div className={`text-[9px] text-neutral-500 text-right leading-tight ${monoClass}`}>
+        <div className={`text-xs text-neutral-500 text-right leading-tight ${monoClass}`}>
           {months != null ? `${months.toFixed(2)} mo` : '—'}
         </div>
       </div>
       <div className={`mt-2 flex items-center justify-between gap-2 border-t border-ds-line/50 pt-2 ${monoClass}`}>
-        <span className="text-[10px] text-neutral-500 truncate">{loc}</span>
+        <span className="text-xs text-neutral-500 truncate">{loc}</span>
         <span
-          className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium ${
+          className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
             tier === 'expired'
               ? 'bg-rose-950/90 text-rose-200 border border-rose-500/40'
               : tier === 'reverify'
@@ -265,7 +265,7 @@ function DraggableKanbanCard({
                 e.stopPropagation()
                 onQuickIssue()
               }}
-              className="h-6 rounded-md border border-sky-500/40 bg-sky-500/8 px-2 text-[10px] font-medium text-sky-700 dark:text-sky-300"
+              className="h-6 rounded-md border border-sky-500/40 bg-sky-500/8 px-2 text-xs font-medium text-sky-700 dark:text-sky-300"
             >
               Issue
             </button>
@@ -276,7 +276,7 @@ function DraggableKanbanCard({
                 e.stopPropagation()
                 onQuickReceive()
               }}
-              className="h-6 rounded-md border border-emerald-500/40 bg-emerald-500/8 px-2 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+              className="h-6 rounded-md border border-emerald-500/40 bg-emerald-500/8 px-2 text-xs font-medium text-emerald-700 dark:text-emerald-300"
             >
               Receive
             </button>
@@ -321,7 +321,7 @@ function KanbanColumn({
   return (
     <div className="flex min-w-[220px] max-w-[280px] flex-1 flex-col rounded-xl border border-ds-line/40 bg-background/40">
       <div className={`border-b border-ds-line/40 px-2 py-2 ${monoClass}`}>
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+        <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
           {col.title}{' '}
           <span className="text-neutral-600 font-normal">({count})</span>
         </p>

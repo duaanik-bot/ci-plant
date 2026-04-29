@@ -318,7 +318,7 @@ export default function DispatchTrackingPage() {
                 Confirm POD
               </button>
             </div>
-            <p className="text-[11px] text-ds-ink-faint mt-2">
+            <p className="text-xs text-ds-ink-faint mt-2">
               If &quot;Create draft bill&quot; is checked, a draft bill (customer + one line from job) will be created when you confirm POD.
             </p>
           </div>

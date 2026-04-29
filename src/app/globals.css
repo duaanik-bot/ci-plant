@@ -23,12 +23,15 @@
   }
   .ds-typo-label {
     @apply text-[12px] font-medium leading-snug text-ds-ink-muted;
+    font-family: var(--font-label);
   }
   .ds-typo-input {
     @apply text-[15px] leading-normal text-ds-ink;
+    font-family: var(--font-body);
   }
   .ds-typo-heading {
     @apply text-base font-semibold leading-tight text-ds-ink md:text-[18px];
+    font-family: var(--font-heading);
   }
   .ds-typo-total {
     @apply text-[20px] font-bold leading-tight text-ds-success tabular-nums md:text-[22px];
@@ -104,10 +107,79 @@
   * {
     @apply border-ds-line/20;
   }
+  :root {
+    --font-designing-queue: var(--font-body);
+  }
   body {
     @apply min-h-screen text-ds-ink antialiased;
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-primary);
     background-color: var(--ds-bg-main);
     background-image: var(--ds-gradient-app-top);
+  }
+
+  h1 {
+    font-family: var(--font-heading);
+    font-size: 22px;
+    line-height: 1.25;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    font-size: 18px;
+    line-height: 1.3;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  label {
+    font-family: var(--font-label);
+    font-size: 12px;
+    line-height: 1.35;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.35;
+  }
+
+  button {
+    font-weight: 500;
+  }
+
+  table {
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  th {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  td {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-primary);
+  }
+
+  small {
+    font-family: var(--font-small);
+    font-size: 11px;
+    color: color-mix(in srgb, var(--text-secondary) 68%, transparent);
   }
 
   .ci-high-contrast .ds-input {
@@ -167,11 +239,9 @@
   animation: po-tooling-row-sync-pulse 0.65s ease-out 1;
 }
 
-/* Tabular metrics — JetBrains Mono if available */
+/* Tabular metrics — unified Inter stack with tabular numerals */
 .po-mono-metric {
-  font-family:
-    ui-monospace, 'JetBrains Mono', 'SFMono-Regular', 'Menlo', Monaco, Consolas, 'Liberation Mono',
-    'Courier New', monospace;
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }

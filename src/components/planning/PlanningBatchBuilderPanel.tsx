@@ -455,7 +455,7 @@ export function PlanningBatchBuilderPanel({
       footer={
         <div className="space-y-2">
           {hasAnyMixed ? (
-            <p className={`flex gap-1.5 text-[11px] leading-snug text-ds-warning ${mono}`}>
+            <p className={`flex gap-1.5 text-xs leading-snug text-ds-warning ${mono}`}>
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
               <span>
                 Mixed configurations detected. This group may require mixed tooling and additional setup.
@@ -535,8 +535,8 @@ export function PlanningBatchBuilderPanel({
         </div>
 
         <div className="rounded-md border border-ds-line/40 bg-ds-elevated/25 px-3 py-3 text-xs">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">Compatibility</p>
-          <p className={`mt-1 text-[10px] text-ds-ink-muted ${mono}`}>
+          <p className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">Compatibility</p>
+          <p className={`mt-1 text-xs text-ds-ink-muted ${mono}`}>
             All parameters for the selected jobs — Match means a single value; Mixed means variation (advisory only).
           </p>
           <ul className="mt-2 space-y-1.5">
@@ -552,12 +552,12 @@ export function PlanningBatchBuilderPanel({
         </div>
 
         <div className="rounded-md border border-ds-line/40 bg-ds-elevated/20 px-3 py-3">
-          <label htmlFor="batch-designer" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+          <label htmlFor="batch-designer" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Designer assignment
           </label>
           <select
             id="batch-designer"
-            className="h-10 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-3 text-[14px] leading-6 font-medium text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+            className="h-10 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-3 text-sm leading-6 font-medium text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
             value={designer}
             onChange={(e) => {
               void applyDesignerToBatch(e.target.value)
@@ -567,16 +567,16 @@ export function PlanningBatchBuilderPanel({
             <option value={PLANNING_DESIGNERS.avneet_singh}>{PLANNING_DESIGNERS.avneet_singh}</option>
             <option value={PLANNING_DESIGNERS.shamsher_inder}>{PLANNING_DESIGNERS.shamsher_inder}</option>
           </select>
-          <p className={`mt-1 text-[10px] text-ds-ink-faint ${mono}`}>Designer is applied across all selected jobs.</p>
+          <p className={`mt-1 text-xs text-ds-ink-faint ${mono}`}>Designer is applied across all selected jobs.</p>
         </div>
 
         <div className="rounded-md border border-ds-line/40 bg-ds-elevated/20 px-3 py-3">
-          <p className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+          <p className="mb-2 block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Drawer-level carry forward
           </p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
-              <label htmlFor="batch-sheet-length" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              <label htmlFor="batch-sheet-length" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
                 Sheet length (mm)
               </label>
               <input
@@ -587,11 +587,11 @@ export function PlanningBatchBuilderPanel({
                 value={sheetLengthMm}
                 onChange={(e) => setSheetLengthMm(e.target.value)}
                 placeholder="e.g. 720"
-                className="h-8 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+                className="h-8 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
               />
             </div>
             <div>
-              <label htmlFor="batch-sheet-width" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              <label htmlFor="batch-sheet-width" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
                 Sheet width (mm)
               </label>
               <input
@@ -602,12 +602,12 @@ export function PlanningBatchBuilderPanel({
                 value={sheetWidthMm}
                 onChange={(e) => setSheetWidthMm(e.target.value)}
                 placeholder="e.g. 1020"
-                className="h-8 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+                className="h-8 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
               />
             </div>
           </div>
           <div className="mt-2">
-            <label htmlFor="batch-special-remarks" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            <label htmlFor="batch-special-remarks" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
               Special remarks (carry forward)
             </label>
             <textarea
@@ -616,16 +616,16 @@ export function PlanningBatchBuilderPanel({
               onChange={(e) => setSpecialRemarks(e.target.value)}
               placeholder="Enter special manufacturing/planning remarks..."
               rows={3}
-              className="w-full resize-y rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 py-2 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+              className="w-full resize-y rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 py-2 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
             />
           </div>
-          <p className={`mt-1 text-[10px] text-ds-ink-faint ${mono}`}>
+          <p className={`mt-1 text-xs text-ds-ink-faint ${mono}`}>
             Saved to selected lines on Create group / Send to Artwork / Make Processing.
           </p>
         </div>
 
         <div>
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">Selected jobs</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">Selected jobs</p>
           <ul className="max-h-[min(40vh,20rem)] space-y-2 overflow-y-auto overflow-x-hidden pr-0.5">
             {lines.map((r) => {
               const spec = (r.specOverrides || {}) as Record<string, unknown>
@@ -641,7 +641,7 @@ export function PlanningBatchBuilderPanel({
                   key={r.id}
                   className="group flex items-start justify-between gap-2 rounded-md border border-ds-line/40 bg-background px-3 py-2"
                 >
-                  <label className="mt-0.5 inline-flex items-center gap-1.5 text-[10px] text-ds-ink-muted">
+                  <label className="mt-0.5 inline-flex items-center gap-1.5 text-xs text-ds-ink-muted">
                     <input
                       type="checkbox"
                       className="h-3.5 w-3.5 accent-ds-brand"
@@ -663,12 +663,12 @@ export function PlanningBatchBuilderPanel({
                     <p className="truncate text-xs font-medium text-foreground" title={r.cartonName}>
                       {r.cartonName}
                     </p>
-                    <p className={`truncate text-[10px] text-ds-ink-faint ${mono}`}>
+                    <p className={`truncate text-xs text-ds-ink-faint ${mono}`}>
                       {r.po.poNumber} · {r.quantity.toLocaleString('en-IN')} · {boardLabel(r)}
                     </p>
                     <div id={r.id === lines[0]?.id ? 'placement-ref' : undefined}>
                       <div id={r.id === lines[0]?.id ? 'fix-ups-render' : undefined}>
-                      <label htmlFor={`ups-input-${r.id}`} id={r.id === lines[0]?.id ? 'label' : undefined} className="block text-[11px] font-medium text-ds-ink-muted">
+                      <label htmlFor={`ups-input-${r.id}`} id={r.id === lines[0]?.id ? 'label' : undefined} className="block text-xs font-medium text-ds-ink-muted">
                         Ups (per plate/output)
                       </label>
                       <div id={r.id === lines[0]?.id ? 'fix-ups-save' : undefined}>
@@ -705,14 +705,14 @@ export function PlanningBatchBuilderPanel({
                         }}
                       />
                       </div>
-                      <p id={r.id === lines[0]?.id ? 'helper' : undefined} className="text-[10px] text-ds-ink-faint">
+                      <p id={r.id === lines[0]?.id ? 'helper' : undefined} className="text-xs text-ds-ink-faint">
                         No. of repeats of this product in one gang layout
                       </p>
                       </div>
                     </div>
                     {hasBatch ? (
                       <span
-                        className={`mt-0.5 inline-block rounded border px-1 py-0.5 text-[8px] font-bold ${
+                        className={`mt-0.5 inline-block rounded border px-1 py-0.5 text-xs font-bold ${
                           BATCH_STATUS_BADGE_CLASS[b]
                         }`}
                       >

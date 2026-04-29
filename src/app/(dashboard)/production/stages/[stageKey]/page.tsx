@@ -505,7 +505,7 @@ export default function ProductionStagePage() {
           <p className={`${mono} text-sm font-semibold text-rose-100 tracking-tight`}>
             RISK: Running priority job on overdue machine.
           </p>
-          <p className="text-[11px] text-rose-200/80 mt-1">
+          <p className="text-xs text-rose-200/80 mt-1">
             Director priority is queued on a press below 50% maintenance health. Reassign or complete PM before
             production commitment.
           </p>
@@ -805,7 +805,7 @@ export default function ProductionStagePage() {
                 </div>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-wider text-ds-ink-faint mb-1">
+                <p className="text-xs uppercase tracking-wider text-ds-ink-faint mb-1">
                   Live speedometer (sheets/h)
                 </p>
                 <div className="h-3 w-full rounded-full bg-ds-card border border-ds-line/40 overflow-hidden">
@@ -860,7 +860,7 @@ export default function ProductionStagePage() {
                   {spotlight.jobCard.incentiveLedger.oeePct}%
                 </p>
                 {spotlight.jobCard.incentiveLedger.incentiveVerifiedAt ? (
-                  <p className="text-emerald-600 text-[10px]">Performance incentive verified</p>
+                  <p className="text-emerald-600 text-xs">Performance incentive verified</p>
                 ) : (
                   <button
                     type="button"

@@ -26,7 +26,7 @@ export function BulkActionBar({
             type="button"
             onClick={onSelectedClick}
             disabled={selectedCount === 0}
-            className={`ml-auto rounded-md border px-2 py-1 text-[11px] transition ${
+            className={`ml-auto rounded-md border px-2 py-1 text-xs transition ${
               selectedCount === 0
                 ? 'cursor-not-allowed border-ds-line/30 bg-ds-main/30 text-ds-ink-faint'
                 : selectedActive
@@ -38,7 +38,7 @@ export function BulkActionBar({
             Selected: {selectedCount}
           </button>
         ) : (
-          <span className="ml-auto rounded-md border border-ds-line/40 bg-ds-main/50 px-2 py-1 text-[11px]">
+          <span className="ml-auto rounded-md border border-ds-line/40 bg-ds-main/50 px-2 py-1 text-xs">
             Selected: {selectedCount}
           </span>
         )}

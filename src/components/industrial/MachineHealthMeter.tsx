@@ -49,7 +49,7 @@ export function MachineHealthMeter({
         />
       </svg>
       <span
-        className={`absolute inset-0 flex items-center justify-center text-[10px] ${mono} ${
+        className={`absolute inset-0 flex items-center justify-center text-xs ${mono} ${
           !hasSchedule ? 'text-neutral-600' : low ? 'text-red-300' : healthPct > 80 ? 'text-emerald-400' : 'text-ds-warning'
         }`}
       >

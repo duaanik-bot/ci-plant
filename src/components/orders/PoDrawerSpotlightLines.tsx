@@ -38,10 +38,10 @@ export function PoDrawerSpotlightLines({
 
   return (
     <>
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
+      <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
         Line items
       </div>
-      <div className="mb-2 grid grid-cols-[1fr_auto_auto] gap-x-2 text-[9px] font-semibold uppercase tracking-wide text-ds-ink-faint border-b border-ds-line/40 pb-1">
+      <div className="mb-2 grid grid-cols-[1fr_auto_auto] gap-x-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint border-b border-ds-line/40 pb-1">
         <span>Carton</span>
         <span className="text-right">Qty</span>
         <span className="text-right">₹</span>
@@ -80,22 +80,22 @@ export function PoDrawerSpotlightLines({
                         : li.cartonName}
                     </span>
                     {isSpotlight ? (
-                      <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-orange-700/95 ring-1 ring-orange-500/35 bg-orange-500/10 dark:text-orange-300/95">
+                      <span className="shrink-0 rounded px-1 py-px text-xs font-semibold uppercase tracking-wide text-orange-700/95 ring-1 ring-orange-500/35 bg-orange-500/10 dark:text-orange-300/95">
                         Match found
                       </span>
                     ) : null}
                   </div>
-                  <span className={`${poMono} text-ds-ink-muted text-[11px] text-right tabular-nums`}>
+                  <span className={`${poMono} text-ds-ink-muted text-xs text-right tabular-nums`}>
                     {li.quantity}
                   </span>
-                  <span className={`${poMono} text-ds-ink text-[11px] text-right tabular-nums`}>
+                  <span className={`${poMono} text-ds-ink text-xs text-right tabular-nums`}>
                     {li.rate != null
                       ? (Number(li.rate) * li.quantity).toLocaleString('en-IN', {
                           maximumFractionDigits: 0,
                         })
                       : '—'}
                   </span>
-                  <div className={`col-span-3 ${poMono} text-ds-ink-faint text-[10px]`}>
+                  <div className={`col-span-3 ${poMono} text-ds-ink-faint text-xs`}>
                     {li.rate != null
                       ? `₹${Number(li.rate).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ea`
                       : ''}

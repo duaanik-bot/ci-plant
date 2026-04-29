@@ -52,7 +52,7 @@ function SectionTitle({ icon: Icon, label }: { icon: React.ElementType; label: s
   return (
     <div className="mb-2 flex items-center gap-1.5">
       <Icon className="h-3.5 w-3.5 shrink-0 text-ds-ink-faint" aria-hidden />
-      <span className="text-[10px] font-bold uppercase tracking-widest text-ds-ink-faint">{label}</span>
+      <span className="text-xs font-bold uppercase tracking-widest text-ds-ink-faint">{label}</span>
     </div>
   )
 }
@@ -137,11 +137,11 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
                 <div className="mb-0.5 flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <span className={`h-2 w-2 rounded-full shrink-0 ${meta.dot}`} />
-                    <span className="text-[12px] text-ds-ink-muted">{meta.label}</span>
+                    <span className="text-xs text-ds-ink-muted">{meta.label}</span>
                   </div>
-                  <span className={`text-[12px] font-semibold ${mono} ${meta.text}`}>
+                  <span className={`text-xs font-semibold ${mono} ${meta.text}`}>
                     {d.count}
-                    <span className="ml-1 text-[10px] font-normal text-ds-ink-faint">
+                    <span className="ml-1 text-xs font-normal text-ds-ink-faint">
                       ({d.qty.toLocaleString('en-IN')} pcs)
                     </span>
                   </span>
@@ -151,7 +151,7 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
             )
           })}
           {totalRows === 0 && (
-            <p className="text-[12px] text-ds-ink-faint">No lines in queue</p>
+            <p className="text-xs text-ds-ink-faint">No lines in queue</p>
           )}
         </div>
       </div>
@@ -161,31 +161,31 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
         <SectionTitle icon={CheckCircle2} label="Readiness" />
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-ds-sm border border-ds-success/20 bg-ds-success/5 px-2.5 py-2 text-center">
-            <p className={`text-[22px] font-bold leading-none text-ds-success ${mono}`}>
+            <p className={`text-2xl font-bold leading-none text-ds-success ${mono}`}>
               {readyToScheduleCount}
             </p>
-            <p className="mt-0.5 text-[10px] text-ds-ink-faint">Ready to schedule</p>
+            <p className="mt-0.5 text-xs text-ds-ink-faint">Ready to schedule</p>
           </div>
           <div className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-2 text-center">
-            <p className={`text-[22px] font-bold leading-none text-ds-ink ${mono}`}>
+            <p className={`text-2xl font-bold leading-none text-ds-ink ${mono}`}>
               {totalRows - readyToScheduleCount - (statusCounts['closed']?.count || 0)}
             </p>
-            <p className="mt-0.5 text-[10px] text-ds-ink-faint">Needs attention</p>
+            <p className="mt-0.5 text-xs text-ds-ink-faint">Needs attention</p>
           </div>
           {priorityCount > 0 && (
             <div className="rounded-ds-sm border border-yellow-500/30 bg-yellow-500/5 px-2.5 py-2 text-center">
-              <p className={`text-[22px] font-bold leading-none text-yellow-400 ${mono}`}>
+              <p className={`text-2xl font-bold leading-none text-yellow-400 ${mono}`}>
                 {priorityCount}
               </p>
-              <p className="mt-0.5 text-[10px] text-ds-ink-faint">Director priority</p>
+              <p className="mt-0.5 text-xs text-ds-ink-faint">Director priority</p>
             </div>
           )}
           {holdCount > 0 && (
             <div className="rounded-ds-sm border border-ds-error/20 bg-ds-error/5 px-2.5 py-2 text-center">
-              <p className={`text-[22px] font-bold leading-none text-ds-error ${mono}`}>
+              <p className={`text-2xl font-bold leading-none text-ds-error ${mono}`}>
                 {holdCount}
               </p>
-              <p className="mt-0.5 text-[10px] text-ds-ink-faint">On director hold</p>
+              <p className="mt-0.5 text-xs text-ds-ink-faint">On director hold</p>
             </div>
           )}
         </div>
@@ -199,14 +199,14 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
             {topBlockers.map((b, i) => (
               <div key={b.label} className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-1.5">
-                  <span className={`text-[10px] font-bold ${mono} text-ds-ink-faint`}>
+                  <span className={`text-xs font-bold ${mono} text-ds-ink-faint`}>
                     {i + 1}.
                   </span>
-                  <span className="truncate text-[12px] text-ds-ink-muted">{b.label}</span>
+                  <span className="truncate text-xs text-ds-ink-muted">{b.label}</span>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <MiniBar value={b.count} max={topBlockers[0]?.count || 1} color="bg-ds-error/60" />
-                  <span className={`min-w-[1.5rem] text-right text-[12px] font-semibold text-ds-error ${mono}`}>
+                  <span className={`min-w-[1.5rem] text-right text-xs font-semibold text-ds-error ${mono}`}>
                     {b.count}
                   </span>
                 </div>
@@ -230,9 +230,9 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
                   <div className="mb-0.5 flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <span className={`h-2 w-2 rounded-full shrink-0 ${meta.dot}`} />
-                      <span className="text-[12px] text-ds-ink-muted">{meta.label}</span>
+                      <span className="text-xs text-ds-ink-muted">{meta.label}</span>
                     </div>
-                    <span className={`text-[12px] font-semibold ${mono} text-ds-ink`}>{n}</span>
+                    <span className={`text-xs font-semibold ${mono} text-ds-ink`}>{n}</span>
                   </div>
                   <MiniBar value={n} max={totalBatch} color={meta.dot} />
                 </div>
@@ -252,8 +252,8 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
               return (
                 <div key={name}>
                   <div className="mb-0.5 flex items-center justify-between">
-                    <span className="truncate text-[12px] text-ds-ink-muted">{name}</span>
-                    <span className={`ml-1 shrink-0 text-[12px] font-semibold text-ds-brand ${mono}`}>{count}</span>
+                    <span className="truncate text-xs text-ds-ink-muted">{name}</span>
+                    <span className={`ml-1 shrink-0 text-xs font-semibold text-ds-brand ${mono}`}>{count}</span>
                   </div>
                   <MiniBar value={count} max={total} color="bg-ds-brand/60" />
                 </div>
@@ -262,8 +262,8 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
             {unassignedCount > 0 && (
               <div>
                 <div className="mb-0.5 flex items-center justify-between">
-                  <span className="text-[12px] text-ds-ink-faint">Unassigned</span>
-                  <span className={`text-[12px] font-semibold text-ds-ink-faint ${mono}`}>
+                  <span className="text-xs text-ds-ink-faint">Unassigned</span>
+                  <span className={`text-xs font-semibold text-ds-ink-faint ${mono}`}>
                     {unassignedCount}
                   </span>
                 </div>
@@ -289,9 +289,9 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
               <div key={st} className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <span className={`h-2 w-2 rounded-full shrink-0 ${meta.dot}`} />
-                  <span className="text-[12px] text-ds-ink-muted">{meta.label}</span>
+                  <span className="text-xs text-ds-ink-muted">{meta.label}</span>
                 </div>
-                <span className={`text-[12px] font-semibold text-ds-ink ${mono}`}>
+                <span className={`text-xs font-semibold text-ds-ink ${mono}`}>
                   {d.qty.toLocaleString('en-IN')}
                 </span>
               </div>
@@ -299,8 +299,8 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
           })}
           <div className="mt-1.5 border-t border-ds-line/40 pt-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-[12px] font-semibold text-ds-ink">Total</span>
-              <span className={`text-[14px] font-bold text-ds-success ${mono}`}>
+              <span className="text-xs font-semibold text-ds-ink">Total</span>
+              <span className={`text-sm font-bold text-ds-success ${mono}`}>
                 {totalQty.toLocaleString('en-IN')}
               </span>
             </div>

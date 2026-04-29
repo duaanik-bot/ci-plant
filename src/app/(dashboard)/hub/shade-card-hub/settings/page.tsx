@@ -162,7 +162,7 @@ export default function ShadeCardHubSettingsPage() {
                   <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 bg-background/30 px-3 py-2">
                     <div>
                       <p className="text-sm font-medium text-ds-ink">{o.name}</p>
-                      <p className="text-[11px] text-neutral-500">
+                      <p className="text-xs text-neutral-500">
                         {o.isActive ? (
                           <span className="font-semibold text-emerald-500">Active</span>
                         ) : (

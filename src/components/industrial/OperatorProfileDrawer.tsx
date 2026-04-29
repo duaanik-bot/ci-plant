@@ -82,7 +82,7 @@ export function OperatorProfileDrawer({
           </div>
 
           <section>
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
               Waste profile
             </h3>
             <p>
@@ -93,7 +93,7 @@ export function OperatorProfileDrawer({
           </section>
 
           <section>
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
               Machine history (run best)
             </h3>
             {profile.machineHistory.length === 0 ? (
@@ -118,7 +118,7 @@ export function OperatorProfileDrawer({
           </section>
 
           <section>
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
               Downtime signature
             </h3>
             {profile.downtimeSignature.length === 0 ? (

@@ -560,7 +560,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
       widthClass="w-[min(100%,clamp(560px,55vw,860px))]"
       title={
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-bold text-sky-700 dark:text-sky-300">
+          <span className="inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-xs font-bold text-sky-700 dark:text-sky-300">
             <Layers className="h-3 w-3 shrink-0" aria-hidden />
             GANG
           </span>
@@ -568,7 +568,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
         </div>
       }
       headerMeta={
-        <div className="flex flex-wrap items-center gap-3 text-[12px]">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
           <span className="text-ds-ink-faint">
             Group: <span className={`${mono} text-ds-ink-muted`}>{groupId.slice(0, 8)}</span>
           </span>
@@ -583,13 +583,13 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
       <div className="flex flex-col gap-4">
         {/* Unified group body controls */}
         <div className="rounded-ds-md border border-sky-500/35 bg-sky-500/8 p-3">
-          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-sky-700 dark:text-sky-300">
+          <p className="mb-2 text-xs font-bold uppercase tracking-widest text-sky-700 dark:text-sky-300">
             Unified group body
           </p>
           <div className="mb-2 flex items-center justify-between rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1.5">
-            <span className="text-[12px] text-ds-ink-muted">Use unified editing (recommended)</span>
+            <span className="text-xs text-ds-ink-muted">Use unified editing (recommended)</span>
             <label className="flex cursor-pointer items-center gap-2">
-              <span className="text-[11px] text-ds-ink-faint">{unifiedMode ? 'On' : 'Off'}</span>
+              <span className="text-xs text-ds-ink-faint">{unifiedMode ? 'On' : 'Off'}</span>
               <input
                 type="checkbox"
                 checked={unifiedMode}
@@ -600,29 +600,29 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
-              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">Set # (common)</label>
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">Set # (common)</label>
               <input
                 type="text"
                 value={groupSetNumber}
                 onChange={(e) => setGroupSetNumber(e.target.value)}
                 placeholder="e.g. 1"
-                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">Artwork code (auto-filled)</label>
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">Artwork code (auto-filled)</label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={groupArtworkCode}
                   onChange={(e) => setGroupArtworkCode(e.target.value)}
                   placeholder="e.g. AW-2024-001"
-                  className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                  className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
                 />
                 <button
                   type="button"
                   onClick={() => setGroupArtworkCode(inferredArtworkCode)}
-                  className="shrink-0 rounded-ds-sm border border-ds-line/60 bg-ds-elevated/20 px-2 py-1 text-[11px] text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand"
+                  className="shrink-0 rounded-ds-sm border border-ds-line/60 bg-ds-elevated/20 px-2 py-1 text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand"
                   title="Auto-fill from existing group values"
                 >
                   Autofetch
@@ -631,14 +631,14 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
             </div>
           </div>
           <div className="mt-3 rounded border border-ds-line/35 bg-ds-elevated/20 px-2.5 py-2">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">Planning specs (unified view)</p>
-            <p className="text-[11px] text-ds-ink-muted">
+            <p className="mb-1 text-xs font-bold uppercase tracking-wider text-ds-ink-faint">Planning specs (unified view)</p>
+            <p className="text-xs text-ds-ink-muted">
               Paper: {specSummary.paper} · Coating: {specSummary.coating} · GSM: {specSummary.gsm} · Size: {specSummary.size} · Emboss: {specSummary.emboss}
             </p>
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">Sheet length (mm)</label>
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">Sheet length (mm)</label>
               <input
                 type="number"
                 min={1}
@@ -649,11 +649,11 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                   setDirty(true)
                 }}
                 placeholder="From planning"
-                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
               />
             </div>
             <div>
-              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">Sheet width (mm)</label>
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">Sheet width (mm)</label>
               <input
                 type="number"
                 min={1}
@@ -664,23 +664,23 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                   setDirty(true)
                 }}
                 placeholder="From planning"
-                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
               />
             </div>
           </div>
           <div className="mt-3 rounded border border-ds-line/35 bg-ds-elevated/20 px-2.5 py-2">
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">UPS by product (editable)</p>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-ds-ink-faint">UPS by product (editable)</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {rows.map((r) => (
                 <label key={`ups-unified-${r.id}`} className="flex items-center justify-between gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 px-2 py-1.5">
-                  <span className="truncate text-[11px] text-ds-ink-muted" title={r.cartonName}>{r.cartonName}</span>
+                  <span className="truncate text-xs text-ds-ink-muted" title={r.cartonName}>{r.cartonName}</span>
                   <input
                     type="number"
                     min={1}
                     step={1}
                     value={itemStates[r.id]?.ups ?? ''}
                     onChange={(e) => updateItem(r.id, { ups: e.target.value })}
-                    className={`w-[5.5rem] rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2 py-1 text-[12px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                    className={`w-[5.5rem] rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2 py-1 text-xs text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
                   />
                 </label>
               ))}
@@ -694,7 +694,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                 onChange={(e) => setGroupCustomerApproval(e.target.checked)}
                 className="h-4 w-4 rounded border-ds-line accent-ds-brand"
               />
-              <span className="text-[12px] text-ds-ink-muted">Customer approval (all)</span>
+              <span className="text-xs text-ds-ink-muted">Customer approval (all)</span>
             </label>
             <label className="flex cursor-pointer items-center gap-2 select-none">
               <input
@@ -703,10 +703,10 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                 onChange={(e) => setGroupQaTextApproval(e.target.checked)}
                 className="h-4 w-4 rounded border-ds-line accent-ds-brand"
               />
-              <span className="text-[12px] text-ds-ink-muted">QA text approval (all)</span>
+              <span className="text-xs text-ds-ink-muted">QA text approval (all)</span>
             </label>
           </div>
-          <div className="mt-3 rounded border border-ds-line/40 bg-ds-elevated/15 px-2.5 py-2 text-[11px] text-ds-ink-muted">
+          <div className="mt-3 rounded border border-ds-line/40 bg-ds-elevated/15 px-2.5 py-2 text-xs text-ds-ink-muted">
             Unified routing action sends this saved group body to Plate, Die, and Emboss together.
           </div>
           <div className="mt-3 flex flex-wrap justify-end gap-2">
@@ -714,7 +714,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               type="button"
               disabled={savingGroup}
               onClick={() => void saveUnifiedGroup('push_plate')}
-              className="inline-flex items-center gap-1 rounded-ds-sm border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-emerald-700 transition hover:bg-emerald-500/18 disabled:opacity-40 dark:text-emerald-200"
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/18 disabled:opacity-40 dark:text-emerald-200"
             >
               {savingGroup ? '…' : 'Push plates'}
             </button>
@@ -722,7 +722,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               type="button"
               disabled={savingGroup}
               onClick={() => void saveUnifiedGroup('push_die')}
-              className="inline-flex items-center gap-1 rounded-ds-sm border border-violet-500/35 bg-violet-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-violet-700 transition hover:bg-violet-500/18 disabled:opacity-40 dark:text-violet-300"
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-violet-500/35 bg-violet-500/10 px-2.5 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-500/18 disabled:opacity-40 dark:text-violet-300"
             >
               {savingGroup ? '…' : 'Push die'}
             </button>
@@ -730,7 +730,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               type="button"
               disabled={savingGroup}
               onClick={() => void saveUnifiedGroup('push_emboss')}
-              className="inline-flex items-center gap-1 rounded-ds-sm border border-orange-500/35 bg-orange-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-orange-700 transition hover:bg-orange-500/18 disabled:opacity-40 dark:text-orange-300"
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-orange-500/35 bg-orange-500/10 px-2.5 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-500/18 disabled:opacity-40 dark:text-orange-300"
             >
               {savingGroup ? '…' : 'Push emboss'}
             </button>
@@ -738,7 +738,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               type="button"
               disabled={savingGroup}
               onClick={() => void saveUnifiedGroup('push_all')}
-              className="inline-flex items-center gap-1 rounded-ds-sm border border-emerald-500/45 bg-emerald-500/15 px-3 py-1.5 text-[12px] font-semibold text-emerald-700 transition hover:bg-emerald-500/25 disabled:opacity-40 dark:text-emerald-200"
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-emerald-500/45 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/25 disabled:opacity-40 dark:text-emerald-200"
             >
               <Layers className="h-3 w-3" aria-hidden />
               {savingGroup ? 'Pushing unified body…' : 'Push unified body downstream'}
@@ -747,7 +747,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               type="button"
               disabled={savingGroup}
               onClick={() => void saveUnifiedGroup('save')}
-              className="inline-flex items-center gap-1 rounded-ds-sm border border-sky-500/45 bg-sky-500/15 px-3 py-1.5 text-[12px] font-semibold text-sky-700 transition hover:bg-sky-500/25 disabled:opacity-40 dark:text-sky-200"
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-sky-500/45 bg-sky-500/15 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-500/25 disabled:opacity-40 dark:text-sky-200"
             >
               <Pencil className="h-3 w-3" aria-hidden />
               {savingGroup ? 'Saving group…' : 'Save unified group'}
@@ -755,10 +755,10 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
           </div>
           {unifiedRoutingStatus ? (
             <div className="mt-3 rounded border border-ds-line/40 bg-ds-elevated/20 px-2.5 py-2">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
                 Downstream status
               </p>
-              <p className="text-[11px] text-ds-ink-muted">
+              <p className="text-xs text-ds-ink-muted">
                 Saved: {unifiedRoutingStatus.savedCount}/{rows.length} · Mode:{' '}
                 {unifiedRoutingStatus.requestedBy === 'push_all'
                   ? 'push unified body'
@@ -772,7 +772,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                 · At:{' '}
                 {new Date(unifiedRoutingStatus.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>
-              <p className="mt-1 text-[11px] text-ds-ink-muted">
+              <p className="mt-1 text-xs text-ds-ink-muted">
                 Plate:{' '}
                 {unifiedRoutingStatus.plate.enabled
                   ? `${unifiedRoutingStatus.plate.success}/${rows.length}${unifiedRoutingStatus.plate.fail ? ` (fail ${unifiedRoutingStatus.plate.fail})` : ''}`
@@ -792,19 +792,19 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
 
         {/* Qty summary bar */}
         <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/20 p-3">
-          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-ds-ink-faint">Quantity breakdown</p>
+          <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ds-ink-faint">Quantity breakdown</p>
           <div className="flex flex-wrap gap-2">
             {rows.map((r) => (
               <div key={r.id} className="flex flex-col rounded-ds-sm border border-ds-line/40 bg-ds-elevated/30 px-3 py-2 text-center min-w-[110px]">
-                <span className="truncate text-[11px] font-medium text-ds-ink-muted" title={r.cartonName}>
+                <span className="truncate text-xs font-medium text-ds-ink-muted" title={r.cartonName}>
                   {r.cartonName.length > 16 ? r.cartonName.slice(0, 15) + '…' : r.cartonName}
                 </span>
-                <span className="text-[10px] text-ds-ink-faint">{r.po.poNumber}</span>
+                <span className="text-xs text-ds-ink-faint">{r.po.poNumber}</span>
                 <span className={`mt-1 ds-typo-kpi ${mono}`}>
                   {r.quantity.toLocaleString('en-IN')}
                 </span>
-                <span className="text-[9px] text-ds-ink-faint">pcs</span>
-                <span className={`mt-1 text-[10px] font-semibold text-emerald-300 ${mono}`}>
+                <span className="text-xs text-ds-ink-faint">pcs</span>
+                <span className={`mt-1 text-xs font-semibold text-emerald-300 ${mono}`}>
                   UPS ×{itemStates[r.id]?.ups?.trim() || '—'}
                 </span>
               </div>
@@ -814,21 +814,21 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
 
         {/* Per-item edit panels */}
         <div className="flex flex-col gap-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-ds-ink-faint">Individual job details</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-ds-ink-faint">Individual job details</p>
           <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-ds-line/35 bg-ds-elevated/15 px-2 py-1.5">
-            <p className="text-[11px] text-ds-ink-muted">
+            <p className="text-xs text-ds-ink-muted">
               Batch tools: apply one item's UPS/colours/remarks to all.
             </p>
             <button
               type="button"
               onClick={applyFieldsToAllFromFirst}
-              className="rounded border border-ds-brand/35 bg-ds-brand/10 px-2 py-1 text-[11px] font-medium text-ds-brand hover:bg-ds-brand/20"
+              className="rounded border border-ds-brand/35 bg-ds-brand/10 px-2 py-1 text-xs font-medium text-ds-brand hover:bg-ds-brand/20"
             >
               Copy from item 1 → all
             </button>
           </div>
           {unifiedMode ? (
-            <p className="rounded border border-sky-500/30 bg-sky-500/8 px-2 py-1 text-[11px] text-sky-700 dark:text-sky-300">
+            <p className="rounded border border-sky-500/30 bg-sky-500/8 px-2 py-1 text-xs text-sky-700 dark:text-sky-300">
               Unified mode is on: Set # and Artwork code are managed from the top unified section.
             </p>
           ) : null}
@@ -868,23 +868,23 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                 {/* Item header */}
                 <div className="flex items-center justify-between gap-3 border-b border-ds-line/30 bg-ds-elevated/30 px-3 py-2">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-[10px] font-bold text-sky-700 dark:text-sky-300 ${mono}`}>
+                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-xs font-bold text-sky-700 dark:text-sky-300 ${mono}`}>
                       {idx + 1}
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate text-[13px] font-semibold text-ds-ink" title={r.cartonName}>
+                      <p className="truncate text-sm font-semibold text-ds-ink" title={r.cartonName}>
                         {r.cartonName}
                       </p>
-                      <p className={`text-[11px] text-ds-warning ${mono}`}>{r.po.poNumber} · {r.po.customer.name}</p>
+                      <p className={`text-xs text-ds-warning ${mono}`}>{r.po.poNumber} · {r.po.customer.name}</p>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <div className="flex items-center gap-1">
                       <span className={`h-2 w-2 rounded-full ${pipelineDot(phase)}`} />
-                      <span className="text-[11px] text-ds-ink-faint">{pipelineLabel(phase)}</span>
+                      <span className="text-xs text-ds-ink-faint">{pipelineLabel(phase)}</span>
                     </div>
                     {finalized && (
-                      <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
                         Finalized
                       </span>
                     )}
@@ -892,7 +892,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                       href={`/orders/designing/${r.id}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 rounded border border-ds-line/50 bg-ds-elevated/20 px-2 py-0.5 text-[11px] text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
+                      className="inline-flex items-center gap-1 rounded border border-ds-line/50 bg-ds-elevated/20 px-2 py-0.5 text-xs text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
                       title="Open full edit page"
                     >
                       <ExternalLink className="h-3 w-3" aria-hidden />
@@ -903,23 +903,23 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
 
                 {/* Editable fields */}
                 <div className="px-3 py-3">
-                  <div className="mb-2 rounded border border-ds-line/30 bg-ds-elevated/20 px-2 py-1.5 text-[11px] text-ds-ink-muted">
+                  <div className="mb-2 rounded border border-ds-line/30 bg-ds-elevated/20 px-2 py-1.5 text-xs text-ds-ink-muted">
                     Spec: {(r.paperType || '—').trim?.() || r.paperType || '—'} · {(r.coatingType || '—').trim?.() || r.coatingType || '—'} · GSM {r.gsm ?? '—'} · Size {r.cartonSize ?? '—'} · {(r.embossingLeafing || 'No emboss').trim?.() || r.embossingLeafing || 'No emboss'}
                   </div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     {/* Qty — read-only */}
                     <div>
-                      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
+                      <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
                         Qty
                       </label>
-                      <div className={`rounded-ds-sm border border-ds-line/30 bg-ds-elevated/40 px-2.5 py-1.5 text-[13px] font-bold text-ds-brand ${mono}`}>
+                      <div className={`rounded-ds-sm border border-ds-line/30 bg-ds-elevated/40 px-2.5 py-1.5 text-sm font-bold text-ds-brand ${mono}`}>
                         {r.quantity.toLocaleString('en-IN')}
                       </div>
                     </div>
 
                     {/* Set # */}
                     <div>
-                      <label htmlFor={`set-${r.id}`} className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
+                      <label htmlFor={`set-${r.id}`} className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
                         Set #
                       </label>
                       <input
@@ -929,7 +929,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                         onChange={(e) => updateItem(r.id, { setNumber: e.target.value })}
                         placeholder="e.g. 1"
                         disabled={unifiedMode}
-                        className={`w-full rounded-ds-sm border border-ds-line/50 px-2.5 py-1.5 text-[13px] outline-none transition ${
+                        className={`w-full rounded-ds-sm border border-ds-line/50 px-2.5 py-1.5 text-sm outline-none transition ${
                           unifiedMode
                             ? 'cursor-not-allowed bg-ds-elevated/10 text-ds-ink-faint opacity-70'
                             : 'bg-ds-elevated/30 text-ds-ink focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30'
@@ -939,7 +939,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
 
                     {/* Artwork code */}
                     <div className="col-span-2">
-                      <label htmlFor={`aw-${r.id}`} className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
+                      <label htmlFor={`aw-${r.id}`} className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
                         Artwork code
                       </label>
                       <input
@@ -949,7 +949,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                         onChange={(e) => updateItem(r.id, { artworkCode: e.target.value })}
                         placeholder="e.g. AW-2024-001"
                         disabled={unifiedMode}
-                        className={`w-full rounded-ds-sm border border-ds-line/50 px-2.5 py-1.5 text-[13px] outline-none transition ${
+                        className={`w-full rounded-ds-sm border border-ds-line/50 px-2.5 py-1.5 text-sm outline-none transition ${
                           unifiedMode
                             ? 'cursor-not-allowed bg-ds-elevated/10 text-ds-ink-faint opacity-70'
                             : 'bg-ds-elevated/30 text-ds-ink focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30'
@@ -959,7 +959,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
 
                     {/* UPS from planning */}
                     <div>
-                      <label htmlFor={`ups-${r.id}`} className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
+                      <label htmlFor={`ups-${r.id}`} className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
                         UPS (planning)
                       </label>
                       <input
@@ -970,14 +970,14 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                         value={st.ups}
                         onChange={(e) => updateItem(r.id, { ups: e.target.value })}
                         placeholder="e.g. 2"
-                        className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                        className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
                       />
                     </div>
                   </div>
 
                   {/* Colour controls aligned with Full edit */}
                   <div className="mt-3 rounded border border-ds-line/35 bg-ds-elevated/20 p-2.5">
-                    <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">Colours (as full edit)</p>
+                    <p className="mb-2 text-xs font-bold uppercase tracking-wider text-ds-ink-faint">Colours (as full edit)</p>
                     <div className="mb-2 flex flex-wrap gap-3">
                       {[
                         ['standardC', 'C'],
@@ -985,7 +985,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                         ['standardY', 'Y'],
                         ['standardK', 'K'],
                       ].map(([key, label]) => (
-                        <label key={key} className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ds-ink-muted">
+                        <label key={key} className="flex cursor-pointer items-center gap-1.5 text-xs text-ds-ink-muted">
                           <input
                             type="checkbox"
                             checked={st[key as keyof ItemState] as boolean}
@@ -997,7 +997,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                       ))}
                     </div>
                     <div className="mb-2 flex items-center gap-3">
-                      <label className="flex cursor-pointer items-center gap-2 text-[12px] text-ds-ink-muted">
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-ds-ink-muted">
                         <input
                           type="checkbox"
                           checked={st.pantoneEnabled}
@@ -1014,7 +1014,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                           value={st.numberOfPantones}
                           onChange={(e) => updateItem(r.id, { numberOfPantones: e.target.value })}
                           placeholder="No."
-                          className={`h-8 w-20 rounded border border-ds-line/50 bg-ds-elevated/30 px-2 text-[12px] text-ds-ink ${mono}`}
+                          className={`h-8 w-20 rounded border border-ds-line/50 bg-ds-elevated/30 px-2 text-xs text-ds-ink ${mono}`}
                         />
                       ) : null}
                     </div>
@@ -1027,13 +1027,13 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                             value={st[k]}
                             onChange={(e) => updateItem(r.id, { [k]: e.target.value } as Partial<ItemState>)}
                             placeholder={`P${i + 1}`}
-                            className={`h-8 w-full rounded border border-ds-line/50 bg-ds-elevated/30 px-2 text-[12px] text-ds-ink ${mono}`}
+                            className={`h-8 w-full rounded border border-ds-line/50 bg-ds-elevated/30 px-2 text-xs text-ds-ink ${mono}`}
                           />
                         ))}
                       </div>
                     ) : null}
                     <div className="mt-2 flex flex-wrap gap-3">
-                      <label className="flex cursor-pointer items-center gap-2 text-[12px] text-ds-ink-muted">
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-ds-ink-muted">
                         <input
                           type="checkbox"
                           checked={st.dripOffPlate}
@@ -1042,7 +1042,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                         />
                         Drip-off plate
                       </label>
-                      <label className="flex cursor-pointer items-center gap-2 text-[12px] text-ds-ink-muted">
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-ds-ink-muted">
                         <input
                           type="checkbox"
                           checked={st.spotUvPlate}
@@ -1055,7 +1055,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                   </div>
 
                   <div className="mt-3">
-                    <label htmlFor={`remarks-${r.id}`} className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-ds-ink-faint">
+                    <label htmlFor={`remarks-${r.id}`} className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
                       Special remarks
                     </label>
                     <textarea
@@ -1064,7 +1064,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                       onChange={(e) => updateItem(r.id, { specialRemarks: e.target.value })}
                       rows={2}
                       placeholder="Enter special remarks to carry forward"
-                      className="w-full resize-y rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-[12px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+                      className="w-full resize-y rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-xs text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
                     />
                   </div>
 
@@ -1077,7 +1077,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                         onChange={(e) => updateItem(r.id, { customerApproval: e.target.checked })}
                         className="h-4 w-4 rounded border-ds-line accent-ds-brand"
                       />
-                      <span className="text-[12px] text-ds-ink-muted">Customer approval (pharma)</span>
+                      <span className="text-xs text-ds-ink-muted">Customer approval (pharma)</span>
                     </label>
                     <label className="flex cursor-pointer items-center gap-2 select-none">
                       <input
@@ -1086,15 +1086,15 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                         onChange={(e) => updateItem(r.id, { qaTextApproval: e.target.checked })}
                         className="h-4 w-4 rounded border-ds-line accent-ds-brand"
                       />
-                      <span className="text-[12px] text-ds-ink-muted">QA text / shade card approval</span>
+                      <span className="text-xs text-ds-ink-muted">QA text / shade card approval</span>
                     </label>
                     <div className="ml-auto flex items-center gap-2">
-                      <span className="text-[11px] text-ds-ink-faint">Designer: {designerName}</span>
+                      <span className="text-xs text-ds-ink-faint">Designer: {designerName}</span>
                       <button
                         type="button"
                         disabled={isSaving}
                         onClick={() => void saveItem(r)}
-                        className="inline-flex items-center gap-1 rounded-ds-sm border border-ds-brand/40 bg-ds-brand/10 px-3 py-1 text-[12px] font-semibold text-ds-brand transition hover:bg-ds-brand/20 disabled:opacity-40"
+                        className="inline-flex items-center gap-1 rounded-ds-sm border border-ds-brand/40 bg-ds-brand/10 px-3 py-1 text-xs font-semibold text-ds-brand transition hover:bg-ds-brand/20 disabled:opacity-40"
                       >
                         <Pencil className="h-3 w-3" aria-hidden />
                         {isSaving ? 'Saving…' : 'Save'}
@@ -1109,10 +1109,10 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
 
         {/* Footer note */}
         <div className="space-y-1">
-          <p className="text-center text-[11px] text-ds-ink-faint">
+          <p className="text-center text-xs text-ds-ink-faint">
             All items above belong to the same gang print group. Use "Full edit" to access advanced options per item.
           </p>
-          <p className="text-center text-[11px] text-ds-ink-muted">
+          <p className="text-center text-xs text-ds-ink-muted">
             {savingGroup || saving.size > 0
               ? 'Saving…'
               : dirty

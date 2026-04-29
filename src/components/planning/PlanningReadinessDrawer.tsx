@@ -37,7 +37,7 @@ function FiveStrip({ segments }: { segments: ReadinessFiveSegment[] }) {
           <span
             key={s.key}
             title={s.title}
-            className={`inline-flex h-6 min-w-[32px] items-center justify-center rounded-md border text-[11px] font-bold leading-none font-designing-queue ${stateClass}`}
+            className={`inline-flex h-6 min-w-[32px] items-center justify-center rounded-md border text-xs font-bold leading-none font-designing-queue ${stateClass}`}
           >
             {s.abbr}
           </span>
@@ -73,7 +73,7 @@ function SemiGaugeUtilization({ pct }: { pct: number }) {
           strokeDasharray={`${dash} ${arcLen}`}
         />
       </svg>
-      <span className={`${mono} text-[11px] font-semibold text-ds-ink`}>{p}%</span>
+      <span className={`${mono} text-xs font-semibold text-ds-ink`}>{p}%</span>
     </div>
   )
 }
@@ -116,12 +116,12 @@ function RingPct({
           />
         </svg>
         <div
-          className={`pointer-events-none absolute inset-0 flex items-center justify-center ${mono} text-[10px] font-semibold text-ds-ink`}
+          className={`pointer-events-none absolute inset-0 flex items-center justify-center ${mono} text-xs font-semibold text-ds-ink`}
         >
           {p}%
         </div>
       </div>
-      <span className="text-[8px] uppercase tracking-wide text-ds-ink-faint text-center leading-tight">
+      <span className="text-xs uppercase tracking-wide text-ds-ink-faint text-center leading-tight">
         {label}
       </span>
     </div>
@@ -288,7 +288,7 @@ export function PlanningReadinessDrawer({
               PO {line.po?.poNumber ?? '—'}
             </p>
             <h2 className="text-sm font-semibold text-ds-ink truncate pr-2">{line.cartonName}</h2>
-            <p className="text-[10px] text-ds-ink-faint mt-0.5 truncate max-w-[18rem]">
+            <p className="text-xs text-ds-ink-faint mt-0.5 truncate max-w-[18rem]">
               {line.po?.customer?.name ?? '—'}
             </p>
           </div>
@@ -304,8 +304,8 @@ export function PlanningReadinessDrawer({
 
         <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
           <div className="rounded-lg border border-ds-line/40 bg-ds-card/60 p-3">
-            <p className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>I. Product DNA</p>
-            <div className="mt-2 space-y-1 text-[13px] text-ds-ink">
+            <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>I. Product DNA</p>
+            <div className="mt-2 space-y-1 text-sm text-ds-ink">
               <p className="truncate">
                 <span className="font-medium text-ds-ink-faint">Carton:</span> {line.cartonName ?? '—'}
               </p>
@@ -320,14 +320,14 @@ export function PlanningReadinessDrawer({
           </div>
 
           <div>
-            <p className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>Readiness ledger</p>
+            <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>Readiness ledger</p>
             <div className="mt-2">
               <FiveStrip segments={five.segments} />
             </div>
           </div>
 
           <div>
-            <p className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>Quick assign designer</p>
+            <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>Quick assign designer</p>
             <select
               value={pc.designerKey ?? ''}
               onChange={(e) => {
@@ -348,8 +348,8 @@ export function PlanningReadinessDrawer({
           </div>
 
           <div>
-            <p className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>Summary</p>
-            <ul className={`mt-1 space-y-1 text-[11px] text-ds-ink-muted ${mono}`}>
+            <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>Summary</p>
+            <ul className={`mt-1 space-y-1 text-xs text-ds-ink-muted ${mono}`}>
               <li>
                 Qty: <span className="font-medium text-ds-warning">{line.quantity.toLocaleString('en-IN')}</span>
               </li>
@@ -374,24 +374,24 @@ export function PlanningReadinessDrawer({
           </div>
 
           <div>
-            <p className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>Material Efficiency</p>
+            <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>Material Efficiency</p>
             <div className="mt-2 flex flex-col gap-3 rounded-lg border border-ds-line/40 bg-ds-card/60 px-3 py-3">
               {util && util.yieldPct > 0 ? (
                 <div className="flex flex-col items-center">
                   <SemiGaugeUtilization pct={util.yieldPct} />
                   <p
-                    className={`text-[10px] text-ds-ink-muted mt-1 text-center leading-snug ${mono}`}
+                    className={`text-xs text-ds-ink-muted mt-1 text-center leading-snug ${mono}`}
                   >
                     Utilization: {Math.round(util.yieldPct)}% | Off-cut Waste: {Math.round(100 - util.yieldPct)}%
                   </p>
                 </div>
               ) : (
-                <p className={`text-[10px] text-ds-ink-faint ${mono}`}>
+                <p className={`text-xs text-ds-ink-faint ${mono}`}>
                   Enter blank size, parent sheet, and UPS on the row to show sheet utilization.
                 </p>
               )}
               <div className="flex items-start justify-between gap-2 border-t border-ds-line/40 pt-2">
-                <p className={`text-[11px] text-ds-ink-muted leading-snug ${mono}`}>
+                <p className={`text-xs text-ds-ink-muted leading-snug ${mono}`}>
                   Calculated Make-Ready Sheets:{' '}
                   <span className="font-semibold text-ds-warning">{makeReady.totalSheets}</span>
                 </p>
@@ -408,14 +408,14 @@ export function PlanningReadinessDrawer({
           </div>
 
           <div className="rounded-lg border border-ds-line/40 bg-ds-card/60 p-3">
-            <p className={`mb-2 text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>
+            <p className={`mb-2 text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>
               II. Efficiency Gauges
             </p>
             <div className="flex items-start justify-between gap-3">
               <RingPct label="Material Utilization" pct={materialUtilPct} tone={materialTone} />
               <RingPct label="Production Readiness" pct={productionReadinessPct} tone={readinessTone} />
             </div>
-            <p className="mt-2 text-[9px] leading-snug text-ds-ink-muted">
+            <p className="mt-2 text-xs leading-snug text-ds-ink-muted">
               Five-point strip: {five.allGreen && platesStatus === 'available' ? 'All green' : 'Blocked'} · Tooling:{' '}
               {ti.allReady ? 'OK' : 'Pending'}
             </p>

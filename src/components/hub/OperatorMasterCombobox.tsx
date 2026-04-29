@@ -79,7 +79,7 @@ export function OperatorMasterCombobox({
                 >
                   <span className="text-ds-ink">{o.name}</span>
                   {o.department ? (
-                    <span className="block text-[10px] text-neutral-500">{o.department}</span>
+                    <span className="block text-xs text-neutral-500">{o.department}</span>
                   ) : null}
                 </button>
               </li>

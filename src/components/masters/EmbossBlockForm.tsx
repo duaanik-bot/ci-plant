@@ -252,7 +252,7 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
           <label className="block text-ds-ink-muted mb-1">Target max impressions</label>
           <input type="number" min={1} value={f.maxImpressions} onChange={(e) => patch('maxImpressions', e.target.value)} className={cls} />
           {initialData?.defaultMaxImpressions && mode === 'EDIT' && (
-            <p className="text-[10px] text-ds-ink-faint mt-0.5">Default for {f.blockMaterial}: {initialData.defaultMaxImpressions.toLocaleString()}</p>
+            <p className="text-xs text-ds-ink-faint mt-0.5">Default for {f.blockMaterial}: {initialData.defaultMaxImpressions.toLocaleString()}</p>
           )}
         </div>
         <div>

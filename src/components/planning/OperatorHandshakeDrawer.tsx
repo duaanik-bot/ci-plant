@@ -86,7 +86,7 @@ export function OperatorHandshakeDrawer({
             <h2 id="handshake-title" className="text-sm font-semibold text-ds-warning">
               Operator handshake
             </h2>
-            <p className={`text-[10px] text-ds-ink-faint mt-0.5 ${mono}`}>{title}</p>
+            <p className={`text-xs text-ds-ink-faint mt-0.5 ${mono}`}>{title}</p>
           </div>
           <button
             type="button"
@@ -99,7 +99,7 @@ export function OperatorHandshakeDrawer({
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           <label className="block space-y-1">
-            <span className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>
+            <span className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>
               Operator (Staff Hub)
             </span>
             <select
@@ -117,7 +117,7 @@ export function OperatorHandshakeDrawer({
           </label>
 
           <label className="block space-y-1">
-            <span className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>
+            <span className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>
               Target OEE speed %
             </span>
             <input
@@ -129,32 +129,32 @@ export function OperatorHandshakeDrawer({
               onChange={(e) => setTargetOeePct(Number(e.target.value))}
               className={`w-full h-9 rounded border border-ds-line/50 bg-background px-2 text-xs text-ds-ink ${mono}`}
             />
-            <p className="text-[10px] text-ds-ink-faint">
+            <p className="text-xs text-ds-ink-faint">
               Auto-filled from product / press baseline; adjust per run.
             </p>
           </label>
 
           <div className="space-y-2">
-            <span className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>
+            <span className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>
               Planned maintenance (window)
             </span>
             <div className="grid grid-cols-2 gap-2">
               <label className="space-y-0.5">
-                <span className="text-[9px] text-ds-ink-faint">Start</span>
+                <span className="text-xs text-ds-ink-faint">Start</span>
                 <input
                   type="datetime-local"
                   value={pmStart}
                   onChange={(e) => setPmStart(e.target.value)}
-                  className={`w-full h-9 rounded border border-ds-line/50 bg-background px-1 text-[11px] text-ds-ink ${mono} [color-scheme:dark]`}
+                  className={`w-full h-9 rounded border border-ds-line/50 bg-background px-1 text-xs text-ds-ink ${mono} [color-scheme:dark]`}
                 />
               </label>
               <label className="space-y-0.5">
-                <span className="text-[9px] text-ds-ink-faint">End</span>
+                <span className="text-xs text-ds-ink-faint">End</span>
                 <input
                   type="datetime-local"
                   value={pmEnd}
                   onChange={(e) => setPmEnd(e.target.value)}
-                  className={`w-full h-9 rounded border border-ds-line/50 bg-background px-1 text-[11px] text-ds-ink ${mono} [color-scheme:dark]`}
+                  className={`w-full h-9 rounded border border-ds-line/50 bg-background px-1 text-xs text-ds-ink ${mono} [color-scheme:dark]`}
                 />
               </label>
             </div>

@@ -101,7 +101,7 @@ export function HubCardDeleteAction({
           role="dialog"
           className="absolute right-0 top-[calc(100%+6px)] z-[100] w-[min(16rem,calc(100vw-1.5rem))] rounded-md border border-ds-line/50 bg-ds-main p-2.5 shadow-xl"
         >
-          <p className={`text-[11px] font-bold text-ds-ink ${CONFIRM_MONO}`}>Delete this record?</p>
+          <p className={`text-xs font-bold text-ds-ink ${CONFIRM_MONO}`}>Delete this record?</p>
           <div className="mt-2.5 flex justify-end gap-1.5">
             <button
               type="button"
@@ -110,7 +110,7 @@ export function HubCardDeleteAction({
                 e.stopPropagation()
                 setOpen(false)
               }}
-              className="rounded border border-ds-line/50 bg-ds-elevated/80 px-2.5 py-1 text-[10px] font-semibold text-ds-ink hover:bg-ds-elevated"
+              className="rounded border border-ds-line/50 bg-ds-elevated/80 px-2.5 py-1 text-xs font-semibold text-ds-ink hover:bg-ds-elevated"
             >
               Cancel
             </button>
@@ -121,12 +121,12 @@ export function HubCardDeleteAction({
                 e.stopPropagation()
                 void runDelete()
               }}
-              className="rounded bg-rose-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-rose-500"
+              className="rounded bg-rose-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-rose-500"
             >
               {busy ? '…' : 'Delete'}
             </button>
           </div>
-          <p className={`mt-2 border-t border-ds-line/40 pt-1.5 text-[8px] leading-tight text-neutral-500 ${CONFIRM_MONO}`}>
+          <p className={`mt-2 border-t border-ds-line/40 pt-1.5 text-xs leading-tight text-neutral-500 ${CONFIRM_MONO}`}>
             Hub Integrity Managed - Individual Card Triggers Active.
           </p>
         </div>

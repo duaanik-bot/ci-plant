@@ -1022,7 +1022,7 @@ export default function PlanningPage() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-ds-main text-ds-ink">
       <div className="shrink-0 border-b border-ds-line/60 bg-ds-main/95 px-4 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`shrink-0 text-[12px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Planning</span>
+          <span className={`shrink-0 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Planning</span>
           <LaneCounterChips
             chips={[
               {
@@ -1049,7 +1049,7 @@ export default function PlanningPage() {
               value={planningSearchQuery}
               onChange={(e) => setPlanningSearchQuery(e.target.value)}
               placeholder="Search in planning (carton / PO #)"
-              className="h-8 w-full rounded-md border border-ds-line/60 bg-ds-elevated/35 px-2.5 text-[13px] text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+              className="h-8 w-full rounded-md border border-ds-line/60 bg-ds-elevated/35 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
             />
           </div>
           <BulkActionBar
@@ -1067,7 +1067,7 @@ export default function PlanningPage() {
                 variant={batchBuilderOpen ? 'secondary' : 'primary'}
                 onClick={() => setBatchBuilderOpen((o) => !o)}
                 disabled={planningSelection.size === 0}
-                className="h-8 px-2.5 py-0 text-[12px]"
+                className="h-8 px-2.5 py-0 text-xs"
               >
                 {batchBuilderOpen ? `Close Builder (${planningSelection.size})` : `Builder (${planningSelection.size})`}
               </Button>
@@ -1078,7 +1078,7 @@ export default function PlanningPage() {
                   type="button"
                   onClick={() => void handleMakeProcessing()}
                   disabled={planningSelection.size === 0 || makeProcessingBusy}
-                  className="h-8 px-2.5 py-0 text-[12px]"
+                  className="h-8 px-2.5 py-0 text-xs"
                 >
                   {makeProcessingBusy ? 'Processing…' : 'Make processing'}
                 </Button>
@@ -1087,7 +1087,7 @@ export default function PlanningPage() {
                   variant="secondary"
                   onClick={() => void savePlanningHandoff()}
                   disabled={savingPlanningHandoff}
-                  className="h-8 px-2.5 py-0 text-[12px]"
+                  className="h-8 px-2.5 py-0 text-xs"
                 >
                   {savingPlanningHandoff ? 'Saving…' : 'Save'}
                 </Button>
@@ -1126,7 +1126,7 @@ export default function PlanningPage() {
       </div>
 
       <footer
-        className={`shrink-0 border-t border-ds-line/50 py-2 text-center text-[10px] text-ds-ink-faint ${mono}`}
+        className={`shrink-0 border-t border-ds-line/50 py-2 text-center text-xs text-ds-ink-faint ${mono}`}
       >
         Planning workspace
       </footer>

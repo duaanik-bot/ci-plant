@@ -99,7 +99,7 @@ function SortableGanttBlock({
         <Link
           href={`/orders/purchase-orders/${line.po.id}`}
           onClick={(e) => e.stopPropagation()}
-          className={`text-[9px] text-ds-warning/90 hover:underline truncate ${mono}`}
+          className={`text-xs text-ds-warning/90 hover:underline truncate ${mono}`}
         >
           {line.po.poNumber}
         </Link>
@@ -107,13 +107,13 @@ function SortableGanttBlock({
           <Star className={`h-3 w-3 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`} aria-label="Priority" />
         ) : null}
       </div>
-      <p className="text-[9px] text-ds-ink-muted truncate leading-tight" title={line.cartonName}>
+      <p className="text-xs text-ds-ink-muted truncate leading-tight" title={line.cartonName}>
         {line.cartonName}
       </p>
-      <p className={`text-[9px] text-ds-ink-faint mt-0.5 ${mono}`}>{formatDurationHMM(durationHours)}</p>
-      <p className={`text-[8px] text-ds-ink-faint ${mono}`}>Fin: {finishLabel}</p>
+      <p className={`text-xs text-ds-ink-faint mt-0.5 ${mono}`}>{formatDurationHMM(durationHours)}</p>
+      <p className={`text-xs text-ds-ink-faint ${mono}`}>Fin: {finishLabel}</p>
       {ripple && ripple.delayedJobs > 0 ? (
-        <p className="text-[8px] text-ds-warning/90 mt-0.5" title="Delivery ripple — jobs after this priority slot">
+        <p className="text-xs text-ds-warning/90 mt-0.5" title="Delivery ripple — jobs after this priority slot">
           Ripple: +{ripple.delayedJobs} job · +{formatDurationHMM(ripple.delayedHours)}
         </p>
       ) : null}
@@ -191,7 +191,7 @@ export function PlanningGanttBoard({
 
   if (lanes.length === 0) {
     return (
-      <p className={`text-[11px] text-ds-ink-faint ${mono}`}>
+      <p className={`text-xs text-ds-ink-faint ${mono}`}>
         Assign a press to at least one open line to show the Gantt timeline.
       </p>
     )
@@ -240,7 +240,7 @@ export function PlanningGanttBoard({
 
         return (
           <div key={machine.id} className="rounded-lg border border-border/10 bg-background p-2">
-            <div className={`flex items-center justify-between text-[10px] text-ds-ink-muted mb-1.5 ${mono}`}>
+            <div className={`flex items-center justify-between text-xs text-ds-ink-muted mb-1.5 ${mono}`}>
               <span className="text-ds-warning font-semibold">{machine.machineCode}</span>
               <span>
                 Σ {formatDurationHMM(totalH)} · finish{' '}

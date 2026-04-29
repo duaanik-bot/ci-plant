@@ -302,7 +302,7 @@ export default function GrnPage() {
             </div>
           </div>
           {isBoardType && conversion && pricePerKg && (
-            <p className="text-[10px] text-ds-ink-faint">WAC will be calculated per kg: (Current kg &times; Current WAC + {conversion.totalWeightKg.toFixed(2)} kg &times; \u20B9{pricePerKg}) / total kg</p>
+            <p className="text-xs text-ds-ink-faint">WAC will be calculated per kg: (Current kg &times; Current WAC + {conversion.totalWeightKg.toFixed(2)} kg &times; \u20B9{pricePerKg}) / total kg</p>
           )}
         </div>
 

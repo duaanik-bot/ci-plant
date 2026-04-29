@@ -53,7 +53,7 @@ export function SimilarDiesModal({
           >
             {title}
           </h2>
-          <p className="text-[11px] text-neutral-500 mt-2 leading-snug">
+          <p className="text-xs text-neutral-500 mt-2 leading-snug">
             {isMismatch ? (
               <>
                 Same footprint as <span className="text-ds-warning font-mono">{sourceLabel}</span>
@@ -86,18 +86,18 @@ export function SimilarDiesModal({
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="font-mono text-ds-warning font-semibold">{m.displayCode}</span>
-                  <span className="text-[10px] text-neutral-500">
+                  <span className="text-xs text-neutral-500">
                     Imp: <span className="text-neutral-400 tabular-nums">{m.impressionCount}</span>
                     <span className="mx-1 text-neutral-700">·</span>
                     Cycles: <span className="text-neutral-400 tabular-nums">{m.reuseCount}</span>
                   </span>
                 </div>
                 {isMismatch && m.dieTypeLabel ? (
-                  <p className="text-[11px] text-red-300/90 mt-1 font-medium">
+                  <p className="text-xs text-red-300/90 mt-1 font-medium">
                     Master type: <span className="text-red-200">{m.dieTypeLabel}</span>
                   </p>
                 ) : null}
-                <p className="text-[11px] text-neutral-500 mt-1">
+                <p className="text-xs text-neutral-500 mt-1">
                   Rack / slot:{' '}
                   <span className="text-ds-ink">{m.location?.trim() || '—'}</span>
                 </p>

@@ -77,13 +77,13 @@ function computeChargeableQty(quantity: string, wastagePct: string) {
 
 const labelSec =
   'ds-typo-label mb-1.5 block font-semibold uppercase tracking-wider text-ds-ink-muted'
-const labelKey = 'ds-typo-label mb-1.5 block text-[13px] font-semibold text-ds-ink'
+const labelKey = 'ds-typo-label mb-1.5 block text-sm font-semibold text-ds-ink'
 
 const inputReadable = '[&::placeholder]:text-ds-ink-muted/90 [&::placeholder]:opacity-100 text-ds-ink'
 
 const comboboxControl = 'border-ds-line/80 bg-ds-elevated/50'
-const comboboxInput = 'text-[15px] text-ds-ink'
-const comboboxOptionReadable = 'text-[13px]'
+const comboboxInput = 'text-sm text-ds-ink'
+const comboboxOptionReadable = 'text-sm'
 
 export function PoNewLineItemDrawer({
   isOpen,
@@ -347,7 +347,7 @@ export function PoNewLineItemDrawer({
                 </div>
                 <div>
                   <label className={labelKey}>
-                    Rate <span className="text-[11px] font-normal text-ds-ink-faint">(per unit, ex-GST)</span>
+                    Rate <span className="text-xs font-normal text-ds-ink-faint">(per unit, ex-GST)</span>
                   </label>
                   <input
                     type="number"
@@ -379,7 +379,7 @@ export function PoNewLineItemDrawer({
                     className={`w-full text-sm text-ds-ink-muted ${inputCls} ${poMono} ${inputReadable}`}
                   />
                   {chQty > 0 && (Number(line.wastagePct) || 0) > 0 ? (
-                    <p className="mt-1.5 text-[10px] text-ds-ink-faint">
+                    <p className="mt-1.5 text-xs text-ds-ink-faint">
                       Chargeable qty (incl. waste):{' '}
                       <span className={`${poMono} text-ds-ink-muted`}>
                         {chQty.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
@@ -414,8 +414,8 @@ export function PoNewLineItemDrawer({
                 />
                 <div className="border-t border-ds-line/60 pt-3">
                   <div className="flex flex-col gap-0.5 sm:flex-row sm:items-end sm:justify-between">
-                    <span className="text-[13px] font-medium text-ds-ink-muted">Line total (incl. GST)</span>
-                    <span className="text-[22px] font-bold tabular-nums tracking-tight text-ds-success">
+                    <span className="text-sm font-medium text-ds-ink-muted">Line total (incl. GST)</span>
+                    <span className="text-2xl font-bold tabular-nums tracking-tight text-ds-success">
                       ₹ {money.lineTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </span>
                   </div>

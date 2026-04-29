@@ -17,7 +17,7 @@ export function PageHeader({ title, description, actions, className }: PageHeade
       )}
     >
       <div className="min-w-0 space-y-1">
-        <h1 className="text-lg font-semibold tracking-tight text-ds-ink md:text-[18px]">{title}</h1>
+        <h1 className="text-lg font-semibold tracking-tight text-ds-ink md:text-lg">{title}</h1>
         {description != null && description !== '' ? (
           <div className="max-w-2xl text-sm text-ds-ink-muted [&_p]:m-0">{typeof description === 'string' ? <p>{description}</p> : description}</div>
         ) : null}

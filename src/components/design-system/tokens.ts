@@ -1,5 +1,5 @@
 export const STATUS_CHIP_BASE =
-  'inline-flex items-center rounded-md border px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide leading-none'
+  'inline-flex items-center rounded-md border px-1.5 py-px text-xs font-semibold uppercase tracking-wide leading-none'
 
 export const PUSHED_CHIP_CLASS =
   `${STATUS_CHIP_BASE} border-emerald-500/35 bg-emerald-500/12 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300`

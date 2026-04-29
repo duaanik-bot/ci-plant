@@ -17,7 +17,7 @@ export const SelectDropdown = forwardRef<HTMLSelectElement, SelectDropdownProps>
   return (
     <div className="space-y-1.5">
       {label ? (
-        <label htmlFor={sid} className="block text-[12px] font-medium text-ds-ink-muted">
+        <label htmlFor={sid} className="block text-xs font-medium text-ds-ink-muted">
           {label}
         </label>
       ) : null}
@@ -30,7 +30,7 @@ export const SelectDropdown = forwardRef<HTMLSelectElement, SelectDropdownProps>
       >
         {children}
       </select>
-      {error ? <p className="text-[11px] text-ds-error">{error}</p> : null}
+      {error ? <p className="text-xs text-ds-error">{error}</p> : null}
     </div>
   )
 })

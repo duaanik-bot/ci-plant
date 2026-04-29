@@ -133,7 +133,7 @@ export function PmSpotlightDrawer({
             </div>
 
             <section>
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
                 Service history (last 3)
               </h3>
               {data.serviceHistory.length === 0 ? (
@@ -147,7 +147,7 @@ export function PmSpotlightDrawer({
                     >
                       <span className="text-ds-ink">{new Date(h.verifiedAt).toLocaleString()}</span>
                       <p className="mt-0.5 text-neutral-500">{h.signedOffNote}</p>
-                      <p className="mt-1 text-[10px] text-neutral-600">
+                      <p className="mt-1 text-xs text-neutral-600">
                         Before reset: {h.runHoursBeforeReset}h · {h.impressionsBeforeReset} impressions
                       </p>
                     </li>
@@ -157,7 +157,7 @@ export function PmSpotlightDrawer({
             </section>
 
             <section>
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
                 Task checklist
               </h3>
               {data.checklist.length === 0 ? (
@@ -172,7 +172,7 @@ export function PmSpotlightDrawer({
             </section>
 
             <section>
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
                 Spare parts
               </h3>
               <p className="text-xs text-neutral-500 rounded-lg border border-dashed border-ds-line/50 bg-ds-main/50 px-2 py-2">

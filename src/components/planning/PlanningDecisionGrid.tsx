@@ -24,16 +24,16 @@ import { formatShortTimeAgo } from '@/lib/time-ago'
 import { ACTION_PILL_BASE, ICON_BUTTON_BASE, PUSHED_CHIP_CLASS, STATUS_CHIP_BASE } from '@/components/design-system/tokens'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 
-const cellBase = `align-middle border-b border-ds-line/30 text-[13px] text-ds-ink min-h-[40px] px-2 py-2`
+const cellBase = `align-middle border-b border-ds-line/30 text-sm text-ds-ink min-h-[40px] px-2 py-2`
 const filterGhost = dataTable.filter.input
 
 const inp =
-  'h-8 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-[13px] text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
+  'h-8 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-sm text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
 
 const batchActionSelect =
-  'h-9 min-w-[8rem] rounded-full border border-ds-line/60 bg-ds-elevated px-2 text-[12px] leading-5 font-medium text-ds-ink placeholder:text-ds-ink-faint outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30'
+  'h-9 min-w-[8rem] rounded-full border border-ds-line/60 bg-ds-elevated px-2 text-xs leading-5 font-medium text-ds-ink placeholder:text-ds-ink-faint outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30'
 const batchActionApply =
-  `${ACTION_PILL_BASE} h-9 min-w-0 rounded-full border-ds-brand/40 bg-ds-brand/15 px-2 py-1 text-[11px] text-ds-ink hover:bg-ds-brand/25 disabled:cursor-not-allowed`
+  `${ACTION_PILL_BASE} h-9 min-w-0 rounded-full border-ds-brand/40 bg-ds-brand/15 px-2 py-1 text-xs text-ds-ink hover:bg-ds-brand/25 disabled:cursor-not-allowed`
 
 function firstSpecCoreForGroup(
   rows: PlanningGridLine[],
@@ -752,7 +752,7 @@ export function PlanningDecisionGrid({
       >
         {mode === 'row' && onHold && core.batchHoldReason ? (
           <p
-            className="order-first max-w-full text-left text-[9px] leading-tight text-rose-700/90 dark:text-rose-200/90 line-clamp-1"
+            className="order-first max-w-full text-left text-xs leading-tight text-rose-700/90 dark:text-rose-200/90 line-clamp-1"
             title={core.batchHoldReason}
           >
             <span className="font-semibold text-rose-300/95">Hold:</span> {core.batchHoldReason}
@@ -800,7 +800,7 @@ export function PlanningDecisionGrid({
         {holdIsOpen ? (
           <span className="flex w-full min-w-0 flex-nowrap items-center justify-start gap-1">
             <input
-              className="min-w-0 max-w-[10rem] flex-1 rounded border border-ds-warning/30 bg-ds-main px-1.5 py-px text-[10px] text-ds-ink"
+              className="min-w-0 max-w-[10rem] flex-1 rounded border border-ds-warning/30 bg-ds-main px-1.5 py-px text-xs text-ds-ink"
               placeholder="Reason required"
               value={reasonVal}
               onChange={(e) => setReasonVal(e.target.value)}
@@ -808,7 +808,7 @@ export function PlanningDecisionGrid({
             <button
               type="button"
               disabled={batchActionBusy}
-              className="shrink-0 rounded bg-rose-800 px-1.5 py-px text-[10px] text-white"
+              className="shrink-0 rounded bg-rose-800 px-1.5 py-px text-xs text-white"
               onClick={(e) => {
                 e.stopPropagation()
                 void confirmHold()
@@ -885,13 +885,13 @@ export function PlanningDecisionGrid({
   return (
     <DataTableFrame className="h-full border-ds-line/80 bg-ds-elevated/20">
       {mixAdvisoryNote ? (
-        <div className="shrink-0 border-b border-ds-warning/25 bg-ds-warning/10 px-3 py-2 text-[12px] text-ds-ink">
+        <div className="shrink-0 border-b border-ds-warning/25 bg-ds-warning/10 px-3 py-2 text-xs text-ds-ink">
           {mixAdvisoryNote}
         </div>
       ) : null}
       {mixConflictMessage ? (
         <div
-          className={`shrink-0 px-3 py-2 text-[12px] ${
+          className={`shrink-0 px-3 py-2 text-xs ${
             flash ? 'bg-ds-error/20 text-ds-ink animate-pulse' : 'bg-ds-error/10 text-ds-ink-muted'
           }`}
         >
@@ -908,14 +908,14 @@ export function PlanningDecisionGrid({
         >
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
             <div className="min-w-0 pt-0.5">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              <p className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
                 Group actions · {planningSelection.size} selected
                 <span className="ml-1.5 font-normal normal-case text-ds-ink-muted">
                   (one run per row)
                 </span>
               </p>
               {bulkSpansMultipleBatches ? (
-                <p className="mt-0.5 text-[10px] font-normal normal-case text-ds-warning">
+                <p className="mt-0.5 text-xs font-normal normal-case text-ds-warning">
                   Applying action across multiple batches
                 </p>
               ) : null}
@@ -929,7 +929,7 @@ export function PlanningDecisionGrid({
 
       <div className={`${dataTable.wrap} overflow-x-auto`}>
         <div className="shrink-0 border-y border-ds-line/30 bg-ds-elevated/25 px-3 py-2">
-          <div className="flex items-center justify-between gap-2 text-[11px]">
+          <div className="flex items-center justify-between gap-2 text-xs">
             <button
               type="button"
               onClick={() => setShowColumnFilters((v) => !v)}
@@ -972,7 +972,7 @@ export function PlanningDecisionGrid({
           <thead className={dataTable.thead}>
             <tr>
               <th
-                className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 bg-ds-elevated px-0 py-2 text-center text-[10px] text-ds-ink-faint`}
+                className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 bg-ds-elevated px-0 py-2 text-center text-xs text-ds-ink-faint`}
               >
                 <div className="flex flex-col items-center gap-0.5">
                   <span>#</span>
@@ -998,7 +998,7 @@ export function PlanningDecisionGrid({
                   ) : null}
                   {planningSelection.size > 0 ? (
                     <span
-                      className="rounded border border-ds-brand/35 bg-ds-brand/10 px-1 py-0 text-[9px] font-medium text-ds-brand"
+                      className="rounded border border-ds-brand/35 bg-ds-brand/10 px-1 py-0 text-xs font-medium text-ds-brand"
                       title={`${planningSelection.size} selected`}
                     >
                       {planningSelection.size}
@@ -1163,7 +1163,7 @@ export function PlanningDecisionGrid({
                         className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 border-b border-ds-line/30 border-r border-ds-line/50 bg-ds-brand/10 px-0 text-center`}
                       >
                         <div className="flex flex-col items-center gap-0.5">
-                          <span className="text-[9px] font-bold text-ds-brand">{pIdx + 1}</span>
+                          <span className="text-xs font-bold text-ds-brand">{pIdx + 1}</span>
                           {groupProcessed ? (
                             <button
                               type="button"
@@ -1199,17 +1199,17 @@ export function PlanningDecisionGrid({
                       <td className={`${cellBase} min-w-0`}>
                         <div className="flex min-w-0 flex-col gap-0.5">
                           <div className="flex items-center gap-1">
-                            <span className="inline-flex items-center gap-0.5 rounded border border-ds-brand/40 bg-ds-brand/15 px-1 py-px text-[9px] font-bold text-ds-brand">
+                            <span className="inline-flex items-center gap-0.5 rounded border border-ds-brand/40 bg-ds-brand/15 px-1 py-px text-xs font-bold text-ds-brand">
                               <Layers className="h-2.5 w-2.5" aria-hidden /> GANG · {groupRows.length} items
                             </span>
-                            <span className="text-[9px] text-ds-ink-faint">{firstRow.po.customer.name}</span>
+                            <span className="text-xs text-ds-ink-faint">{firstRow.po.customer.name}</span>
                           </div>
                           {groupRows.slice(0, 2).map((r) => (
                             <button
                               key={r.id}
                               type="button"
                               onClick={(e) => { e.stopPropagation(); onRowBackgroundClick(r.id) }}
-                              className={`line-clamp-2 break-words text-left text-[12px] font-semibold leading-tight transition-colors hover:text-ds-brand ${
+                              className={`line-clamp-2 break-words text-left text-xs font-semibold leading-tight transition-colors hover:text-ds-brand ${
                                 groupCompleted ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-ink'
                               }`}
                               title={r.cartonName}
@@ -1217,13 +1217,13 @@ export function PlanningDecisionGrid({
                               {r.cartonName}
                             </button>
                           ))}
-                          {groupRows.length > 2 && <span className="text-[9px] text-ds-ink-faint">+{groupRows.length - 2} more items</span>}
+                          {groupRows.length > 2 && <span className="text-xs text-ds-ink-faint">+{groupRows.length - 2} more items</span>}
                         </div>
                       </td>
 
                       {/* Size */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className={`text-[12px] ${allSizes.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+                        <span className={`text-xs ${allSizes.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
                           {sizeDisplay || '—'}
                         </span>
                       </td>
@@ -1231,42 +1231,42 @@ export function PlanningDecisionGrid({
                       {/* Qty — combined */}
                       <td className={`${cellBase} min-w-0 text-center`}>
                         <div className="flex flex-col items-center">
-                          <span className="ds-typo-kpi text-[14px]">
+                          <span className="ds-typo-kpi text-sm">
                             {totalGroupQty.toLocaleString('en-IN')}
                           </span>
-                          <span className="text-[9px] text-ds-ink-faint">combined</span>
+                          <span className="text-xs text-ds-ink-faint">combined</span>
                         </div>
                       </td>
 
                       {/* Board */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className={`text-[12px] font-medium ${allBoards.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+                        <span className={`text-xs font-medium ${allBoards.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
                           {boardDisplay}
                         </span>
                       </td>
 
                       {/* GSM */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className={`text-[11px] font-medium ${allGsms.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+                        <span className={`text-xs font-medium ${allGsms.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
                           {gsmDisplay}
                         </span>
                       </td>
 
                       {/* Coating */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className={`line-clamp-2 break-words text-[11px] leading-tight ${allCoatings.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+                        <span className={`line-clamp-2 break-words text-xs leading-tight ${allCoatings.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
                           {coatingDisplay}
                         </span>
                       </td>
 
                       {/* Designer */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className="text-[12px] text-ds-ink-muted">{designerLabel0 || '—'}</span>
+                        <span className="text-xs text-ds-ink-muted">{designerLabel0 || '—'}</span>
                       </td>
 
                       {/* Set type */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className="inline-flex items-center rounded border border-ds-brand/35 bg-ds-brand/10 px-1.5 py-px text-[10px] font-semibold text-ds-brand">
+                        <span className="inline-flex items-center rounded border border-ds-brand/35 bg-ds-brand/10 px-1.5 py-px text-xs font-semibold text-ds-brand">
                           Gang
                         </span>
                       </td>
@@ -1278,7 +1278,7 @@ export function PlanningDecisionGrid({
                             <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus0]}`}>
                               {BATCH_STATUS_LABEL[bStatus0]}
                             </span>
-                            <span className="text-[9px] text-ds-ink-faint">{(planCore0.masterSetId ?? '').slice(0, 10)}</span>
+                            <span className="text-xs text-ds-ink-faint">{(planCore0.masterSetId ?? '').slice(0, 10)}</span>
                           </div>
                           {renderBatchDecisionControls(batchLineIds0, batchGroupKey, 'row')}
                           <button
@@ -1291,7 +1291,7 @@ export function PlanningDecisionGrid({
                                 return next
                               })
                             }}
-                            className="mt-0.5 flex items-center gap-0.5 rounded border border-ds-brand/30 bg-ds-brand/8 px-1.5 py-px text-[9px] font-medium text-ds-brand hover:bg-ds-brand/15 transition-colors"
+                            className="mt-0.5 flex items-center gap-0.5 rounded border border-ds-brand/30 bg-ds-brand/8 px-1.5 py-px text-xs font-medium text-ds-brand hover:bg-ds-brand/15 transition-colors"
                           >
                             {isExpanded ? '▲ Hide items' : `▼ Show ${groupRows.length} items`}
                           </button>
@@ -1329,8 +1329,8 @@ export function PlanningDecisionGrid({
                         className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 border-b border-ds-line/20 border-r border-ds-brand/20 bg-ds-brand/5 px-0 text-center`}
                       >
                         <div className="flex flex-col items-center gap-0.5">
-                          <span className="text-[8px] text-ds-brand/60">↳</span>
-                          <span className="text-[8px] font-medium text-ds-ink-faint">{entry.subIdx + 1}</span>
+                          <span className="text-xs text-ds-brand/60">↳</span>
+                          <span className="text-xs font-medium text-ds-ink-faint">{entry.subIdx + 1}</span>
                         </div>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0 pl-3`}>
@@ -1340,36 +1340,36 @@ export function PlanningDecisionGrid({
                           className="group flex min-w-0 flex-col items-start text-left"
                           title="Open item spec drawer"
                         >
-                          <span className={`line-clamp-2 break-words text-[12px] font-semibold leading-tight transition-colors group-hover:text-ds-brand ${
+                          <span className={`line-clamp-2 break-words text-xs font-semibold leading-tight transition-colors group-hover:text-ds-brand ${
                             subCompleted ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-ink'
                           }`}>
                             {r.cartonName}
                           </span>
-                          <span className="text-[9px] text-ds-ink-faint">{r.po.poNumber}</span>
+                          <span className="text-xs text-ds-ink-faint">{r.po.poNumber}</span>
                         </button>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
-                        <span className="text-[11px] text-ds-ink-muted">{r.cartonSize ?? '—'}</span>
+                        <span className="text-xs text-ds-ink-muted">{r.cartonSize ?? '—'}</span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0 text-center`}>
-                        <span className="text-[12px] font-semibold tabular-nums text-ds-ink">{r.quantity.toLocaleString('en-IN')}</span>
+                        <span className="text-xs font-semibold tabular-nums text-ds-ink">{r.quantity.toLocaleString('en-IN')}</span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
-                        <span className="text-[11px] text-ds-ink-muted">{brd}</span>
+                        <span className="text-xs text-ds-ink-muted">{brd}</span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
-                        <span className="text-[11px] text-ds-ink-muted">{gsm}</span>
+                        <span className="text-xs text-ds-ink-muted">{gsm}</span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
-                        <span className="line-clamp-2 break-words text-[11px] leading-tight text-ds-ink-muted">{coating}</span>
+                        <span className="line-clamp-2 break-words text-xs leading-tight text-ds-ink-muted">{coating}</span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
-                        <span className="text-[11px] text-ds-ink-muted">{designerLabelSub || '—'}</span>
+                        <span className="text-xs text-ds-ink-muted">{designerLabelSub || '—'}</span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
                         <div className="flex flex-col gap-0.5">
                           {upsNum != null && (
-                            <span className="text-[10px] font-medium text-ds-brand">×{upsNum} ups</span>
+                            <span className="text-xs font-medium text-ds-brand">×{upsNum} ups</span>
                           )}
                         </div>
                       </td>
@@ -1377,7 +1377,7 @@ export function PlanningDecisionGrid({
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); onRowBackgroundClick(r.id) }}
-                          className="rounded border border-ds-line/50 px-1.5 py-px text-[9px] text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+                          className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
                         >
                           Spec ↗
                         </button>
@@ -1463,7 +1463,7 @@ export function PlanningDecisionGrid({
                       }`}
                     >
                       <div className="flex flex-col items-center gap-0.5">
-                        <span className="text-[10px] font-bold text-ds-ink-faint">{idx + 1}</span>
+                        <span className="text-xs font-bold text-ds-ink-faint">{idx + 1}</span>
                         {processed ? (
                           <button
                             type="button"
@@ -1506,12 +1506,12 @@ export function PlanningDecisionGrid({
                         }}
                         title="Open product spec drawer"
                       >
-                        <span className={`line-clamp-2 break-words text-[13px] font-semibold leading-tight group-hover:text-ds-brand transition-colors ${
+                        <span className={`line-clamp-2 break-words text-sm font-semibold leading-tight group-hover:text-ds-brand transition-colors ${
                           completedRow ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-ink'
                         }`}>
                           {r.cartonName}
                         </span>
-                        <span className="text-[10px] text-ds-ink-faint">
+                        <span className="text-xs text-ds-ink-faint">
                           {r.po.poNumber} · {r.po.customer.name}
                         </span>
                       </button>
@@ -1519,7 +1519,7 @@ export function PlanningDecisionGrid({
                     <td className={`${cellBase} min-w-0`}>
                       <button
                         type="button"
-                        className="text-left text-[12px] text-ds-ink-muted hover:text-ds-brand transition-colors"
+                        className="text-left text-xs text-ds-ink-muted hover:text-ds-brand transition-colors"
                         onClick={(e) => {
                           e.stopPropagation()
                           onRowBackgroundClick(r.id)
@@ -1533,7 +1533,7 @@ export function PlanningDecisionGrid({
                       <input
                         type="number"
                         min={1}
-                        className={inp + ' text-center text-[13px] font-semibold text-ds-ink tabular-nums'}
+                        className={inp + ' text-center text-sm font-semibold text-ds-ink tabular-nums'}
                         disabled={processed}
                         value={r.quantity}
                         onChange={(e) => {
@@ -1548,23 +1548,23 @@ export function PlanningDecisionGrid({
                       />
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <p className="line-clamp-2 break-words text-[12px] font-medium leading-tight text-ds-ink-muted" title={brd}>
+                      <p className="line-clamp-2 break-words text-xs font-medium leading-tight text-ds-ink-muted" title={brd}>
                         {brd}
                       </p>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <p className="truncate text-[12px] font-medium text-ds-ink-muted" title={gsm}>
+                      <p className="truncate text-xs font-medium text-ds-ink-muted" title={gsm}>
                         {gsm}
                       </p>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <p className="line-clamp-2 break-words text-[12px] font-medium leading-tight text-ds-ink-muted" title={coating}>
+                      <p className="line-clamp-2 break-words text-xs font-medium leading-tight text-ds-ink-muted" title={coating}>
                         {coating}
                       </p>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <select
-                        className={inp + ' py-0 text-[12px]'}
+                        className={inp + ' py-0 text-xs'}
                         disabled={processed}
                         value={designerKey}
                         onClick={(e) => e.stopPropagation()}
@@ -1595,7 +1595,7 @@ export function PlanningDecisionGrid({
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <select
-                        className={inp + ' py-0 text-[12px]'}
+                        className={inp + ' py-0 text-xs'}
                         disabled={processed}
                         value={planCore.layoutType === 'gang' ? 'batch' : 'single'}
                         onClick={(e) => e.stopPropagation()}
@@ -1630,10 +1630,10 @@ export function PlanningDecisionGrid({
                           <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus]}`}>
                             {BATCH_STATUS_LABEL[bStatus]}
                           </span>
-                          <span className="text-[9px] text-ds-ink-faint">{batchIdLabel ? batchIdLabel.slice(0, 10) : 'Single'}</span>
-                          <span className={`text-[9px] font-medium ${batchTypeClass}`}>{batchType === 'MIXED' ? 'Mix' : 'Std'}</span>
+                          <span className="text-xs text-ds-ink-faint">{batchIdLabel ? batchIdLabel.slice(0, 10) : 'Single'}</span>
+                          <span className={`text-xs font-medium ${batchTypeClass}`}>{batchType === 'MIXED' ? 'Mix' : 'Std'}</span>
                           {isReadyForArtwork ? (
-                            <span className="text-[9px] font-semibold text-ds-success">✓ AW ready</span>
+                            <span className="text-xs font-semibold text-ds-success">✓ AW ready</span>
                           ) : null}
                           {pushedTimeLabel ? (
                             <span className={PUSHED_CHIP_CLASS}>
@@ -1642,7 +1642,7 @@ export function PlanningDecisionGrid({
                           ) : null}
                           {rowActionFeedback ? (
                             <span
-                              className={`rounded px-1 py-px text-[9px] font-medium ${
+                              className={`rounded px-1 py-px text-xs font-medium ${
                                 rowActionFeedback.ok
                                   ? 'bg-ds-success/10 text-ds-success'
                                   : 'bg-ds-warning/10 text-ds-warning'
@@ -1667,7 +1667,7 @@ export function PlanningDecisionGrid({
       </div>
 
       {/* ── Pagination bar ── */}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-ds-line/50 bg-ds-elevated/30 px-4 py-2 text-[12px] text-ds-ink-muted">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-ds-line/50 bg-ds-elevated/30 px-4 py-2 text-xs text-ds-ink-muted">
         {/* Left: rows-per-page selector */}
         <div className="flex items-center gap-2">
           <span className="text-ds-ink-faint">Rows per page:</span>

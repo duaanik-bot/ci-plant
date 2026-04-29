@@ -68,7 +68,7 @@ export function DieMakeSwitcher({
 
   return (
     <div
-      className={`inline-flex rounded-md border border-ds-line/50 overflow-hidden text-[10px] font-bold uppercase tracking-wide ${className}`}
+      className={`inline-flex rounded-md border border-ds-line/50 overflow-hidden text-xs font-bold uppercase tracking-wide ${className}`}
       onClick={(e) => e.stopPropagation()}
       role="group"
       aria-label="Die make"

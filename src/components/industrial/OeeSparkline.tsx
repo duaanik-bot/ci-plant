@@ -3,7 +3,7 @@
 /** Compact OEE trend (0–100 scale) for leaderboard rows. */
 export function OeeSparkline({ values }: { values: number[] }) {
   if (!values.length) {
-    return <span className="text-neutral-600 text-[10px]">—</span>
+    return <span className="text-neutral-600 text-xs">—</span>
   }
   const min = 0
   const max = 100

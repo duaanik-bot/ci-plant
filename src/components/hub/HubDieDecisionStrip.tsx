@@ -8,7 +8,7 @@ type Props = {
 /** Two-way: rack vs vendor procurement (no in-house die-making). */
 export function HubDieDecisionStrip({ rackAnchorId, vendorAnchorId }: Props) {
   const link =
-    'inline-flex items-center justify-center rounded-lg border border-ds-line/60 bg-ds-elevated/90 px-2.5 py-1.5 text-[11px] font-medium text-ds-ink hover:bg-ds-elevated/95 hover:border-ds-warning/50 transition-colors'
+    'inline-flex items-center justify-center rounded-lg border border-ds-line/60 bg-ds-elevated/90 px-2.5 py-1.5 text-xs font-medium text-ds-ink hover:bg-ds-elevated/95 hover:border-ds-warning/50 transition-colors'
 
   return (
     <div
@@ -17,7 +17,7 @@ export function HubDieDecisionStrip({ rackAnchorId, vendorAnchorId }: Props) {
       role="navigation"
       aria-label="Die hub decisions"
     >
-      <span className="text-[10px] uppercase tracking-wide text-ds-ink-faint w-full sm:w-auto">Die route</span>
+      <span className="text-xs uppercase tracking-wide text-ds-ink-faint w-full sm:w-auto">Die route</span>
       <a href={`#${rackAnchorId}`} className={link}>
         From rack
       </a>

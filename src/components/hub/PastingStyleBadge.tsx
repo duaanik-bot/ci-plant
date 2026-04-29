@@ -21,7 +21,7 @@ export function PastingStyleBadge({
         : 'border-ds-warning/75 bg-ds-warning/10 text-ds-ink'
   return (
     <span
-      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${tone} ${className}`}
+      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide ${tone} ${className}`}
     >
       {pastingStyleLabel(value)}
     </span>

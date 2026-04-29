@@ -18,14 +18,14 @@ export function SummaryBlock({ label, value, emphasize = 'default', className }:
       )}
     >
       <span
-        className={cn('text-xs text-ds-ink-faint', emphasize === 'total' && 'text-[13px] font-medium text-ds-ink-muted')}
+        className={cn('text-xs text-ds-ink-faint', emphasize === 'total' && 'text-sm font-medium text-ds-ink-muted')}
       >
         {label}
       </span>
       <span
         className={cn(
           'tabular-nums',
-          emphasize === 'total' ? 'text-[22px] font-bold text-ds-success' : 'text-sm font-medium text-ds-ink',
+          emphasize === 'total' ? 'text-2xl font-bold text-ds-success' : 'text-sm font-medium text-ds-ink',
         )}
       >
         {value}

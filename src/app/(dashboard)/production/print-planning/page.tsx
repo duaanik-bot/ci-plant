@@ -10,7 +10,7 @@ export default function PrintPlanningPage() {
       <div className="max-w-[100rem] mx-auto px-3 py-4 space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-ds-ink-faint">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">
               Production · Print planner
             </p>
             <h1 className={`text-xl font-bold text-ds-warning ${mono}`}>Print planning</h1>
