@@ -178,6 +178,7 @@ export function SidebarNav({
         { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart },
         { href: '/orders/planning', label: 'Planning', icon: CalendarCheck },
         { href: '/orders/designing', label: 'Artwork Queue', icon: Image },
+        { href: '/production/job-cards', label: 'Job Cards', icon: FileStack },
       ],
     },
     {
@@ -197,7 +198,6 @@ export function SidebarNav({
       title: '🏭 PRODUCTION EXECUTION',
       borderColor: 'border-l-orange-500',
       links: [
-        { href: '/production/job-cards', label: 'Job Cards', icon: FileStack },
         { href: '/production/print-planning', label: 'Print Planning', icon: LayoutGrid },
       ],
     },

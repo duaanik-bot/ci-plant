@@ -35,6 +35,7 @@ const createSchema = cartonSchema.extend({
   blankLength: z.number().positive().optional(),
   blankWidth: z.number().positive().optional(),
   printingType: z.string().optional(),
+  numberOfColours: z.number().int().min(1).max(12).optional(),
   coatingType: z.string().optional(),
   embossingLeafing: z.string().optional(),
   foilType: z.string().optional(),
@@ -179,6 +180,7 @@ export async function POST(req: NextRequest) {
       regulatoryText: data.regulatoryText || null,
       remarks: data.remarks?.trim() ? data.remarks.trim() : null,
       printingType: data.printingType?.trim() ? data.printingType.trim() : null,
+      numberOfColours: data.numberOfColours ?? null,
       specialInstructions: data.specialInstructions || null,
     },
   })

@@ -19,7 +19,11 @@ import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
 
 type Props = {
-  line: (PlanningGridLine & { directorPriority?: boolean; directorHold?: boolean; materialQueue?: { boardType?: string | null } | null }) | null
+  line: (PlanningGridLine & {
+    directorPriority?: boolean
+    directorHold?: boolean
+    materialQueue?: { boardType?: string | null; sheetLengthMm?: unknown; sheetWidthMm?: unknown } | null
+  }) | null
   open: boolean
   onClose: () => void
   onSave: (lineId: string, opts?: { remarks?: string | null }) => Promise<void>
@@ -51,6 +55,12 @@ function specPasting(line: PlanningGridLine): string {
   return ''
 }
 
+function toPositiveIntString(value: unknown): string {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  return String(Math.floor(n))
+}
+
 export function PlanningJobDetailDrawer({
   line,
   open,
@@ -67,6 +77,8 @@ export function PlanningJobDetailDrawer({
   const [saving, setSaving] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
   const [saveMasterBusy, setSaveMasterBusy] = useState(false)
+  const [sheetLengthMm, setSheetLengthMm] = useState('')
+  const [sheetWidthMm, setSheetWidthMm] = useState('')
 
   useEffect(() => {
     if (!line) {
@@ -76,6 +88,17 @@ export function PlanningJobDetailDrawer({
     setRemarksDraft(line.remarks ?? '')
     setSplitOpen(false)
     setSplitA('')
+    const spec = (line.specOverrides || {}) as Record<string, unknown>
+    setSheetLengthMm(
+      toPositiveIntString(spec.sheetLengthMm) ||
+        toPositiveIntString(line.materialQueue?.sheetLengthMm) ||
+        toPositiveIntString(line.carton?.blankLength),
+    )
+    setSheetWidthMm(
+      toPositiveIntString(spec.sheetWidthMm) ||
+        toPositiveIntString(line.materialQueue?.sheetWidthMm) ||
+        toPositiveIntString(line.carton?.blankWidth),
+    )
   }, [line?.id, line?.remarks])
 
   const handleSave = useCallback(async () => {
@@ -154,6 +177,15 @@ export function PlanningJobDetailDrawer({
     setSaveMasterBusy(true)
     try {
       const spec = (line.specOverrides || {}) as Record<string, unknown>
+      const meta = readPlanningMeta(spec)
+      const ups =
+        typeof meta.ups === 'number' && Number.isFinite(meta.ups) && meta.ups >= 1
+          ? Math.floor(meta.ups)
+          : null
+      const numberOfColours =
+        typeof spec.numberOfColours === 'number' && Number.isFinite(spec.numberOfColours)
+          ? Math.floor(spec.numberOfColours)
+          : line.carton?.numberOfColours ?? null
       const res = await fetch(`/api/masters/cartons/${line.cartonId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -165,6 +197,17 @@ export function PlanningJobDetailDrawer({
           laminateType: line.otherCoating ?? line.carton?.laminateType,
           embossingLeafing: line.embossingLeafing,
           pastingType: specPasting(line) || undefined,
+          blankLength: sheetLengthMm.trim() ? Number(sheetLengthMm.trim()) : undefined,
+          blankWidth: sheetWidthMm.trim() ? Number(sheetWidthMm.trim()) : undefined,
+          numberOfColours: numberOfColours ?? undefined,
+          specialInstructions: JSON.stringify({
+            notes: '',
+            brailleEnabled: false,
+            leafingEnabled: false,
+            embossingEnabled: false,
+            spotUvEnabled: false,
+            ups,
+          }),
         }),
       })
       const j = (await res.json().catch(() => ({}))) as { error?: string }
@@ -179,7 +222,7 @@ export function PlanningJobDetailDrawer({
     } finally {
       setSaveMasterBusy(false)
     }
-  }, [line])
+  }, [line, sheetLengthMm, sheetWidthMm])
 
   if (!line || !open) return null
 
@@ -418,6 +461,68 @@ export function PlanningJobDetailDrawer({
 
         <CardSection title="Gang print" id="plan-drawer-gang-ups">
           <div id="placement-ref">
+            <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div>
+                <label htmlFor="single-sheet-length" className="block text-[12px] font-medium text-ds-ink-muted">
+                  Sheet length (mm)
+                </label>
+                <input
+                  id="single-sheet-length"
+                  type="number"
+                  min={1}
+                  step={1}
+                  placeholder="e.g. 720"
+                  className={fieldInput}
+                  value={sheetLengthMm}
+                  onChange={(e) => setSheetLengthMm(e.target.value)}
+                  onBlur={(e) => {
+                    const specNow = (line.specOverrides || {}) as Record<string, unknown>
+                    const value = e.target.value.trim()
+                    const parsed = value === '' ? null : parseInt(value, 10)
+                    const next = { ...specNow } as Record<string, unknown>
+                    if (Number.isFinite(parsed) && (parsed as number) > 0) {
+                      next.sheetLengthMm = parsed as number
+                      setSheetLengthMm(String(parsed))
+                    } else {
+                      delete next.sheetLengthMm
+                      setSheetLengthMm('')
+                    }
+                    updateRow(line.id, { specOverrides: next })
+                    void onSaveLine(line.id, { specOverrides: next })
+                  }}
+                />
+              </div>
+              <div>
+                <label htmlFor="single-sheet-width" className="block text-[12px] font-medium text-ds-ink-muted">
+                  Sheet width (mm)
+                </label>
+                <input
+                  id="single-sheet-width"
+                  type="number"
+                  min={1}
+                  step={1}
+                  placeholder="e.g. 1020"
+                  className={fieldInput}
+                  value={sheetWidthMm}
+                  onChange={(e) => setSheetWidthMm(e.target.value)}
+                  onBlur={(e) => {
+                    const specNow = (line.specOverrides || {}) as Record<string, unknown>
+                    const value = e.target.value.trim()
+                    const parsed = value === '' ? null : parseInt(value, 10)
+                    const next = { ...specNow } as Record<string, unknown>
+                    if (Number.isFinite(parsed) && (parsed as number) > 0) {
+                      next.sheetWidthMm = parsed as number
+                      setSheetWidthMm(String(parsed))
+                    } else {
+                      delete next.sheetWidthMm
+                      setSheetWidthMm('')
+                    }
+                    updateRow(line.id, { specOverrides: next })
+                    void onSaveLine(line.id, { specOverrides: next })
+                  }}
+                />
+              </div>
+            </div>
             <div id="fix-ups-render" className="space-y-1.5">
             <label htmlFor="ups-input" id="label" className="block text-[12px] font-medium text-ds-ink-muted">
               Ups (per plate/output)

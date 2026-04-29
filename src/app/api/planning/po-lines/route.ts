@@ -76,6 +76,7 @@ export async function GET(req: NextRequest) {
             blankLength: true,
             blankWidth: true,
             artworkCode: true,
+            specialInstructions: true,
           },
         },
         dieMaster: {

@@ -40,6 +40,7 @@ const updateSchema = cartonSchema.partial().extend({
   paperType: z.string().optional(),
   plyCount: z.number().int().min(1).max(3).optional(),
   printingType: z.string().optional().nullable(),
+  numberOfColours: z.number().int().min(1).max(12).optional().nullable(),
   coatingType: z.string().optional().nullable(),
   embossingLeafing: z.string().optional().nullable(),
   artworkCode: z.string().optional().nullable(),
@@ -126,6 +127,7 @@ export async function PUT(
   if (data.paperType !== undefined) update.paperType = toNullableText(data.paperType)
   if (data.plyCount !== undefined) update.plyCount = data.plyCount
   if (data.printingType !== undefined) update.printingType = toNullableText(data.printingType)
+  if (data.numberOfColours !== undefined) update.numberOfColours = data.numberOfColours
   if (data.coatingType !== undefined) update.coatingType = toNullableText(data.coatingType)
   if (data.embossingLeafing !== undefined) update.embossingLeafing = toNullableText(data.embossingLeafing)
   if (data.artworkCode !== undefined) update.artworkCode = toNullableText(data.artworkCode)

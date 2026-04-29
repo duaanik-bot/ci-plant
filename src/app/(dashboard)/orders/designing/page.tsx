@@ -213,6 +213,104 @@ function CustomerAvatar({
   )
 }
 
+function ActionsCell({
+  embossEnabled,
+  onPushJobCard,
+  onPushPlate,
+  onPushEmboss,
+  onPushShadeCard,
+  onRecallPlanning,
+  disablePushJobCard,
+  disablePushPlate,
+  disableRecall,
+  pushJobCardLabel,
+  pushPlateLabel,
+  recallLabel,
+}: {
+  embossEnabled: boolean
+  onPushJobCard: () => void
+  onPushPlate: () => void
+  onPushEmboss: () => void
+  onPushShadeCard: () => void
+  onRecallPlanning: () => void
+  disablePushJobCard?: boolean
+  disablePushPlate?: boolean
+  disableRecall?: boolean
+  pushJobCardLabel?: string
+  pushPlateLabel?: string
+  recallLabel?: string
+}) {
+  return (
+    <div className="flex items-center gap-2 justify-end">
+      <button
+        onClick={onPushJobCard}
+        disabled={disablePushJobCard}
+        className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition disabled:opacity-40"
+      >
+        {pushJobCardLabel ?? 'Push Job Card'}
+      </button>
+
+      <div className="relative group">
+        <button
+          type="button"
+          className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] text-[var(--text-primary)]"
+        >
+          Push to Hubs ▾
+        </button>
+
+        <div className="absolute right-0 mt-2 w-56 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border)] shadow-lg hidden group-hover:block z-50">
+          <div className="p-2 flex flex-col gap-1">
+            <button
+              onClick={onPushPlate}
+              disabled={disablePushPlate}
+              className="text-left px-3 py-2 rounded hover:bg-[var(--accent)]/10 disabled:opacity-40"
+            >
+              {pushPlateLabel ?? 'Plates'}
+            </button>
+
+            <button
+              onClick={onPushEmboss}
+              disabled={!embossEnabled}
+              className={`text-left px-3 py-2 rounded ${
+                embossEnabled
+                  ? 'text-[var(--accent)] hover:bg-[var(--accent)]/10'
+                  : 'opacity-40 cursor-not-allowed'
+              }`}
+            >
+              Emboss
+            </button>
+
+            <button
+              onClick={onPushShadeCard}
+              className="text-left px-3 py-2 rounded hover:bg-[var(--accent)]/10"
+            >
+              Shade Card
+            </button>
+
+            <div className="border-t border-[var(--border)] my-2" />
+
+            <button
+              onClick={onRecallPlanning}
+              disabled={disableRecall}
+              className="text-left px-3 py-2 rounded text-[var(--warning)] hover:bg-[var(--warning)]/10 disabled:opacity-40"
+            >
+              Recall to Planning
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={onRecallPlanning}
+        disabled={disableRecall}
+        className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] text-[var(--warning)] hover:bg-[var(--warning)]/10 disabled:opacity-40"
+      >
+        {recallLabel ?? 'Recall'}
+      </button>
+    </div>
+  )
+}
+
 function NeonCommandFilterTrigger({
   searchQuery,
   onQueryChange,
@@ -331,9 +429,16 @@ function isAwPushedRow(r: Row): boolean {
   return !!r.readiness?.prePressFinalized
 }
 
+function hasLinkedJobCard(r: Row): boolean {
+  return !!r.jobCard?.id
+}
+
 function isAwCompletedRow(r: Row): boolean {
-  const hasLinkedJobCard = !!r.jobCard?.id
-  return isAwPushedRow(r) && hasLinkedJobCard
+  return isAwPushedRow(r) && hasLinkedJobCard(r)
+}
+
+function isAwJobCardOnlyRow(r: Row): boolean {
+  return !isAwPushedRow(r) && hasLinkedJobCard(r)
 }
 
 function awJobCardState(r: Row): 'ready' | 'pending' {
@@ -381,6 +486,12 @@ type PlateJobOrchestrationResult = {
   jobCard: 'ok' | 'fail'
   plateError?: string
   jobCardError?: string
+}
+
+type JobCardOnlyResult = {
+  ok: boolean
+  error?: string
+  idempotent?: boolean
 }
 
 /** Plate Hub triage + job card creation in parallel (no dependency between legs). */
@@ -446,6 +557,32 @@ async function pushPlateHubAndCreateJobCardRow(r: Row): Promise<PlateJobOrchestr
   const jobCardError = jobCard === 'fail' ? jcJson.error || `Job card (${jcRes.status})` : undefined
 
   return { plate, jobCard, plateError, jobCardError }
+}
+
+async function pushJobCardOnlyRow(r: Row): Promise<JobCardOnlyResult> {
+  const mqSheets = r.materialQueue?.totalSheets
+  const requiredSheets = Math.max(
+    1,
+    Math.ceil(
+      mqSheets != null && mqSheets > 0
+        ? mqSheets
+        : Math.max(1, Number(r.quantity) || 0) / 4,
+    ),
+  )
+  const res = await fetch('/api/job-cards', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      poLineItemId: r.id,
+      requiredSheets,
+      wastageSheets: 0,
+      idempotentIfExists: true,
+      orchestrationSource: 'aw_orchestration',
+    }),
+  })
+  const json = (await res.json().catch(() => ({}))) as { error?: string; idempotent?: boolean }
+  if (!res.ok) return { ok: false, error: json.error || `Job card (${res.status})` }
+  return { ok: true, idempotent: json.idempotent === true || res.status === 200 }
 }
 
 function canPushToolingHubRow(r: Row): boolean {
@@ -584,6 +721,7 @@ export default function DesigningQueuePage() {
   const [loading, setLoading] = useState(true)
   const [customerId, setCustomerId] = useState('')
   const [finalizingId, setFinalizingId] = useState<string | null>(null)
+  const [jobCardPushingId, setJobCardPushingId] = useState<string | null>(null)
   const [finalizingGroupId, setFinalizingGroupId] = useState<string | null>(null)
   const [forwardingId, setForwardingId] = useState<string | null>(null)
   const [recallingPlanningId, setRecallingPlanningId] = useState<string | null>(null)
@@ -599,7 +737,6 @@ export default function DesigningQueuePage() {
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set())
   const [bulkPushing, setBulkPushing] = useState(false)
   const [bulkToolingPushing, setBulkToolingPushing] = useState<null | 'DIE' | 'BLOCK'>(null)
-  const [rowDensity, setRowDensity] = useState<'comfortable' | 'dense'>('comfortable')
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null)
   const [jobCardFilter, setJobCardFilter] = useState<'all' | 'pending'>('all')
 
@@ -819,44 +956,9 @@ export default function DesigningQueuePage() {
     return Array.from(new Set(ids))
   }, [sortedVisualRows])
 
-  const selectablePlateEligibleRowIds = useMemo(
-    () => selectableRowIds.filter((id) => {
-      const row = rowsById.get(id)
-      return !!row && canFinalizePlateHubRow(row)
-    }),
-    [selectableRowIds, rowsById],
-  )
-  const selectableDieEligibleRowIds = useMemo(
-    () => selectableRowIds.filter((id) => {
-      const row = rowsById.get(id)
-      return !!row && canPushToolingHubRow(row)
-    }),
-    [selectableRowIds, rowsById],
-  )
-  const selectableEmbossEligibleRowIds = useMemo(
-    () => selectableRowIds.filter((id) => {
-      const row = rowsById.get(id)
-      return !!row && canPushToolingHubRow(row)
-    }),
-    [selectableRowIds, rowsById],
-  )
-
   const allSelectableChecked =
     selectableRowIds.length > 0 && selectableRowIds.every((id) => selectedRowIds.has(id))
   const someSelectableChecked = selectableRowIds.some((id) => selectedRowIds.has(id))
-  const selectedRows = useMemo(
-    () => Array.from(selectedRowIds).map((id) => rowsById.get(id)).filter((r): r is Row => !!r),
-    [selectedRowIds, rowsById],
-  )
-  const selectedPlateEligibleCount = useMemo(
-    () => selectedRows.filter((r) => canFinalizePlateHubRow(r)).length,
-    [selectedRows],
-  )
-  const selectedToolingEligibleCount = useMemo(
-    () => selectedRows.filter((r) => canPushToolingHubRow(r)).length,
-    [selectedRows],
-  )
-  const blockedSelectedCount = Math.max(selectedRows.length - selectedPlateEligibleCount, 0)
   const keyboardRows = useMemo(() => sortedRows, [sortedRows])
 
   const togglePoPriority = async (r: Row, e: React.MouseEvent) => {
@@ -1043,6 +1145,24 @@ export default function DesigningQueuePage() {
       toast.error(e instanceof Error ? e.message : 'Finalize failed')
     } finally {
       setFinalizingId(null)
+    }
+  }
+
+  const pushJobCardFromList = async (r: Row) => {
+    setJobCardPushingId(r.id)
+    try {
+      const out = await pushJobCardOnlyRow(r)
+      if (out.ok) {
+        toast.success(out.idempotent ? 'Job card already existed' : 'Job card created')
+      } else {
+        toast.error(out.error || 'Job card push failed')
+      }
+      await load()
+      router.refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Job card push failed')
+    } finally {
+      setJobCardPushingId(null)
     }
   }
 
@@ -1421,7 +1541,7 @@ export default function DesigningQueuePage() {
           ]}
         />
 
-        <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-lg border border-ds-line/40 bg-ds-elevated/10 px-2 py-1">
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-ds-line/40 bg-ds-elevated/10 px-2 py-1">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-ds-ink-muted">
             <span className="font-semibold text-ds-ink">AW queue</span>
             <span className="text-ds-ink-faint">·</span>
@@ -1429,20 +1549,6 @@ export default function DesigningQueuePage() {
               Ready <span className="font-semibold text-ds-warning">{readyCount}</span>/{rows.length}
             </span>
             <span className="hidden sm:inline text-ds-ink-faint">· {PREPRESS_AUDIT_LEAD}</span>
-          </div>
-          <div className="flex flex-wrap gap-1">
-            <Link
-              href="/orders/purchase-orders"
-              className="rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-card-foreground hover:bg-muted/70"
-            >
-              POs
-            </Link>
-            <Link
-              href="/hub/plates"
-              className="rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-card-foreground hover:bg-muted/70"
-            >
-              Plate Hub
-            </Link>
           </div>
         </div>
 
@@ -1471,87 +1577,12 @@ export default function DesigningQueuePage() {
           >
             My jobs
           </button>
-          <div className="ml-auto inline-flex items-center rounded border border-ds-line/50 bg-card p-0.5 text-xs">
-            <button
-              type="button"
-              onClick={() => setRowDensity('dense')}
-              className={`rounded px-2 py-0.5 ${rowDensity === 'dense' ? 'bg-ds-warning/15 text-ds-warning' : 'text-ds-ink-faint'}`}
-            >
-              Dense
-            </button>
-            <button
-              type="button"
-              onClick={() => setRowDensity('comfortable')}
-              className={`rounded px-2 py-0.5 ${rowDensity === 'comfortable' ? 'bg-ds-warning/15 text-ds-warning' : 'text-ds-ink-faint'}`}
-            >
-              Comfortable
-            </button>
-          </div>
-        </div>
-
-        <div className="sticky top-0 z-20 rounded-md border border-ds-line/40 bg-background/95 px-2.5 py-1 backdrop-blur">
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-ds-ink-faint">
-            <span>Plate eligible: <span className="font-semibold text-emerald-700 dark:text-emerald-300">{selectedPlateEligibleCount}</span></span>
-            <span>Tooling eligible: <span className="font-semibold text-violet-700 dark:text-violet-300">{selectedToolingEligibleCount}</span></span>
-            <span>Blocked: <span className="font-semibold text-orange-700 dark:text-orange-300">{blockedSelectedCount}</span></span>
-            {selectedRows.length > 0 && blockedSelectedCount > 0 ? (
-              <span className="text-orange-700 dark:text-orange-300">
-                Missing usually: Set # digits, AW code, sheet size, or row already pushed/closed.
-              </span>
-            ) : null}
-            <span className="ml-auto">Keys: J/K row · Enter edit · P plate · D die · E emboss · R recall</span>
-          </div>
         </div>
 
         <BulkActionBar
           selectedCount={selectedRowIds.size}
           left={
             <>
-              <span className="inline-flex h-8 items-center rounded-md border border-ds-line/50 bg-ds-elevated/20 px-2.5 text-[11px] text-ds-ink-faint">
-                Eligibility: Plate = Set # + AW · Die/Emboss = Set # + AW + sheet size
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  if (selectablePlateEligibleRowIds.length === 0) {
-                    toast.info('No plate-eligible rows in current view')
-                    return
-                  }
-                  setSelectedRowIds(new Set(selectablePlateEligibleRowIds))
-                }}
-                disabled={bulkPushing || bulkToolingPushing != null}
-                className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink transition-colors hover:bg-ds-elevated/40 disabled:opacity-40"
-              >
-                Select Plate eligible{selectablePlateEligibleRowIds.length > 0 ? ` (${selectablePlateEligibleRowIds.length})` : ''}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (selectableDieEligibleRowIds.length === 0) {
-                    toast.info('No die-eligible rows in current view')
-                    return
-                  }
-                  setSelectedRowIds(new Set(selectableDieEligibleRowIds))
-                }}
-                disabled={bulkPushing || bulkToolingPushing != null}
-                className="h-8 rounded-md border border-violet-500/35 px-2.5 text-xs font-medium text-violet-700 transition-colors hover:bg-violet-500/10 disabled:opacity-40 dark:text-violet-300"
-              >
-                Select Die eligible{selectableDieEligibleRowIds.length > 0 ? ` (${selectableDieEligibleRowIds.length})` : ''}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (selectableEmbossEligibleRowIds.length === 0) {
-                    toast.info('No emboss-eligible rows in current view')
-                    return
-                  }
-                  setSelectedRowIds(new Set(selectableEmbossEligibleRowIds))
-                }}
-                disabled={bulkPushing || bulkToolingPushing != null}
-                className="h-8 rounded-md border border-orange-500/35 px-2.5 text-xs font-medium text-orange-700 transition-colors hover:bg-orange-500/10 disabled:opacity-40 dark:text-orange-300"
-              >
-                Select Emboss eligible{selectableEmbossEligibleRowIds.length > 0 ? ` (${selectableEmbossEligibleRowIds.length})` : ''}
-              </button>
               <button
                 type="button"
                 onClick={() => setSelectedRowIds(new Set())}
@@ -1596,7 +1627,7 @@ export default function DesigningQueuePage() {
           }
         />
         <EnterpriseTableShell>
-          <table className={`w-full min-w-[1020px] table-fixed border-collapse text-left ${rowDensity === 'dense' ? 'text-xs' : 'text-sm'}`}>
+          <table className="w-full min-w-[1020px] table-fixed border-collapse text-left text-xs">
             <thead className="border-b border-border bg-card text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
                 <th className="w-10 px-2 py-2 text-center">
@@ -1651,8 +1682,9 @@ export default function DesigningQueuePage() {
                   const phase0 = firstRow.readiness?.pipelinePhase ?? 'drafting'
                   const badge0 = pipelineBadge(phase0)
                   const groupCompleted = groupRows.every((r) => isAwCompletedRow(r))
-                  const groupPlatePushed = !groupCompleted && groupRows.every((r) => isAwPushedRow(r))
-                  const groupPushAge = (groupCompleted || groupPlatePushed)
+                  const groupPlatePushedPending = !groupCompleted && groupRows.every((r) => isAwPushedRow(r))
+                  const groupJobCardOnly = !groupCompleted && groupRows.every((r) => isAwJobCardOnlyRow(r))
+                  const groupPushAge = (groupCompleted || groupPlatePushedPending)
                     ? formatShortTimeAgo(
                         ((spec0.prePressSentToPlateHubAt as string | undefined) || (spec0.prePressFinalizedAt as string | undefined) || firstRow.createdAt),
                       )
@@ -1679,8 +1711,10 @@ export default function DesigningQueuePage() {
                         className={`border-l-[3px] transition-colors ${
                           groupCompleted
                             ? 'border-emerald-500/70 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
-                            : groupPlatePushed
-                              ? 'border-ds-line/60 bg-ds-elevated/40 hover:bg-ds-elevated/60'
+                            : groupPlatePushedPending
+                              ? 'border-rose-300/70 bg-rose-500/5 hover:bg-rose-500/10 dark:bg-rose-500/10 dark:hover:bg-rose-500/16'
+                              : groupJobCardOnly
+                                  ? 'border-violet-300/70 bg-violet-500/5 hover:bg-violet-500/10 dark:bg-violet-500/10 dark:hover:bg-violet-500/16'
                               : 'border-sky-500/70 bg-sky-500/5 hover:bg-sky-500/8'
                         } ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}
                       >
@@ -1842,10 +1876,11 @@ export default function DesigningQueuePage() {
                         const spec = (r.specOverrides || {}) as Record<string, unknown>
                         const designerName = resolvePlanningDesignerName(spec, userById) || '—'
                         const phase = r.readiness?.pipelinePhase ?? 'drafting'
-                        const badge = pipelineBadge(phase)
+                        const embossEnabled = isEmbossingRequired(r.embossingLeafing)
                         const dQ = daysInQueue(r.createdAt)
                         const completed = isAwCompletedRow(r)
                         const platePushedOnly = !completed && isAwPushedRow(r)
+                        const jobCardOnly = !completed && isAwJobCardOnlyRow(r)
                         const pushedAge = completed || platePushedOnly
                           ? formatShortTimeAgo(
                               ((spec.prePressSentToPlateHubAt as string | undefined) || (spec.prePressFinalizedAt as string | undefined) || r.createdAt),
@@ -1855,8 +1890,9 @@ export default function DesigningQueuePage() {
                         const rowClosed = awPo === AW_PO_STATUS.CLOSED
                         const missingSheetSize = !hasToolingSheetSize(spec)
                         const canFinalizeRow = canFinalizePlateHubRow(r)
-                        const plateReason = plateHubDisabledReason(r)
+                        const canRecallPlanning = canRecallPlanningRow(r, spec)
                         const jcState = awJobCardState(r)
+                        const embossEnabled = isEmbossingRequired(r.embossingLeafing)
 
                         return (
                           <tr
@@ -1865,7 +1901,9 @@ export default function DesigningQueuePage() {
                               completed
                                 ? 'border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
                                 : platePushedOnly
-                                  ? 'border-ds-line/60 bg-ds-elevated/40 hover:bg-ds-elevated/60'
+                                  ? 'border-rose-300/70 bg-rose-500/5 hover:bg-rose-500/10 dark:bg-rose-500/10 dark:hover:bg-rose-500/16'
+                                  : jobCardOnly
+                                    ? 'border-violet-300/70 bg-violet-500/5 hover:bg-violet-500/10 dark:bg-violet-500/10 dark:hover:bg-violet-500/16'
                                   : 'border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6'
                             } ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                           >
@@ -1915,16 +1953,18 @@ export default function DesigningQueuePage() {
                               {rowBatchTypeDisplay(spec)}
                             </td>
                             <td className="px-2 py-1 align-middle">
-                              <span className={`${badge.className} text-[10px] py-0 ${badge.pulse ? 'animate-pulse' : ''}`}>
-                                {badge.label}
-                              </span>
-                              {pushedAge ? (
-                                <div className="mt-0.5">
-                                  <span className={completed ? PUSHED_CHIP_CLASS : 'rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint'}>
-                                    {completed ? `Pushed ${pushedAge}` : `Plate pushed ${pushedAge}`}
+                              <div className="flex flex-wrap items-center gap-1">
+                                {phase === 'awaiting_client' ? (
+                                  <span className="rounded border border-sky-500/45 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">
+                                    Awaiting client
                                   </span>
-                                </div>
-                              ) : null}
+                                ) : null}
+                                {missingSheetSize ? (
+                                  <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-700 dark:text-orange-300">
+                                    Sheet size missing
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
                             <td className="px-2 py-1 align-middle">
                               {jcState === 'ready' ? (
@@ -1932,62 +1972,24 @@ export default function DesigningQueuePage() {
                                   Ready
                                 </span>
                               ) : (
-                                <span className="rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint">
-                                  Pending
-                                </span>
+                                <span className="text-[10px] text-ds-ink-faint">—</span>
                               )}
                             </td>
                             <td className="px-2 py-1 align-middle">
-                              <div className="flex flex-wrap items-center gap-1">
-                                <button
-                                  type="button"
-                                  disabled={finalizingId === r.id || !canFinalizeRow || rowClosed}
-                                  onClick={() => void finalizeFromList(r)}
-                                  title={canFinalizeRow && !rowClosed ? 'Push to Plate Hub' : plateReason}
-                                  className={`rounded border px-1.5 py-0.5 text-xs disabled:opacity-40 ${
-                                    canFinalizeRow && !rowClosed
-                                      ? 'border-emerald-500/45 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/15 dark:text-emerald-200'
-                                      : 'border-ds-line text-ds-ink-faint hover:bg-ds-warning/10'
-                                  }`}
-                                >
-                                  {finalizingId === r.id ? '…' : 'Plate Hub'}
-                                </button>
-                                <details className="group relative">
-                                  <summary className={`${ACTION_PILL_NEUTRAL} cursor-pointer list-none select-none`}>
-                                    More
-                                  </summary>
-                                  <div className="absolute right-0 z-20 mt-1 min-w-[150px] rounded border border-ds-line/60 bg-background p-1 shadow-lg">
-                                    <Link
-                                      href={`/orders/designing/${r.id}`}
-                                      className="flex w-full items-center gap-1 rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-card"
-                                    >
-                                      <Pencil className="h-3 w-3 opacity-70" aria-hidden />
-                                      Edit
-                                    </Link>
-                                    <button
-                                      type="button"
-                                      disabled={finalizingId === r.id || rowClosed}
-                                      onClick={() => void pushToolingFromList(r, 'DIE')}
-                                      className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-violet-700 hover:bg-violet-500/10 disabled:opacity-40 dark:text-violet-300"
-                                    >
-                                      {finalizingId === r.id ? '…' : 'Die Hub'}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={finalizingId === r.id || rowClosed}
-                                      onClick={() => void pushToolingFromList(r, 'BLOCK')}
-                                      className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-orange-700 hover:bg-orange-500/10 disabled:opacity-40 dark:text-orange-300"
-                                    >
-                                      {finalizingId === r.id ? '…' : 'Emboss Hub'}
-                                    </button>
-                                  </div>
-                                </details>
-                                {missingSheetSize ? (
-                                  <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
-                                    Sheet size missing
-                                  </span>
-                                ) : null}
-                              </div>
+                              <ActionsCell
+                                embossEnabled={embossEnabled}
+                                onPushJobCard={() => void pushJobCardFromList(r)}
+                                onPushPlate={() => void finalizeFromList(r)}
+                                onPushEmboss={() => void pushToolingFromList(r, 'BLOCK')}
+                                onPushShadeCard={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
+                                onRecallPlanning={() => void recallPlanning(r)}
+                                disablePushJobCard={jobCardPushingId === r.id || rowClosed || hasLinkedJobCard(r)}
+                                disablePushPlate={finalizingId === r.id || rowClosed || !canFinalizeRow}
+                                disableRecall={recallingPlanningId === r.id || !canRecallPlanning || rowClosed}
+                                pushJobCardLabel={jobCardPushingId === r.id ? '…' : hasLinkedJobCard(r) ? 'Job card ✓' : 'Push Job Card'}
+                                pushPlateLabel={finalizingId === r.id ? '…' : 'Plates'}
+                                recallLabel={recallingPlanningId === r.id ? '…' : 'Recall'}
+                              />
                             </td>
                           </tr>
                         )
@@ -2003,26 +2005,20 @@ export default function DesigningQueuePage() {
                 const designerName = resolvePlanningDesignerName(rowSpec, userById) || '—'
                 const completed = isAwCompletedRow(r)
                 const platePushedOnly = !completed && isAwPushedRow(r)
-                const planningForwarded = !!r.readiness?.planningForwarded
+                const jobCardOnly = !completed && isAwJobCardOnlyRow(r)
                 const spec = (r.specOverrides || {}) as Record<string, unknown>
                 const awPo = readAwPoStatus(spec)
                 const rowClosed = awPo === AW_PO_STATUS.CLOSED
                 const missingSheetSize = !hasToolingSheetSize(spec)
                 const batchSeg = batchProgressSegments(spec)
                 const canFinalizeRow = canFinalizePlateHubRow(r)
-                const plateReason = plateHubDisabledReason(r)
                 const canRecallPlanning =
                   canRecallPlanningRow(r, spec)
                 const showRecall = !!r.id
                 const jcState = awJobCardState(r)
                 const phase = r.readiness?.pipelinePhase ?? 'drafting'
                 const dQ = daysInQueue(r.createdAt)
-                const badge = pipelineBadge(phase)
-                const pushedAge = completed || platePushedOnly
-                  ? formatShortTimeAgo(
-                      ((spec.prePressSentToPlateHubAt as string | undefined) || (spec.prePressFinalizedAt as string | undefined) || r.createdAt),
-                    )
-                  : null
+                const embossEnabled = isEmbossingRequired(r.embossingLeafing)
                 const previewUrl = r.artworkPreviewUrl ?? null
 
                 const priRow = rowIndustrialPriority(r)
@@ -2035,7 +2031,9 @@ export default function DesigningQueuePage() {
                         : completed
                           ? 'border-l-2 border-emerald-500/70 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
                         : platePushedOnly
-                          ? 'border-l-2 border-ds-line/60 bg-ds-elevated/40 hover:bg-ds-elevated/60'
+                          ? 'border-l-2 border-rose-300/70 bg-rose-500/5 hover:bg-rose-500/10 dark:bg-rose-500/10 dark:hover:bg-rose-500/16'
+                          : jobCardOnly
+                            ? 'border-l-2 border-violet-300/70 bg-violet-500/5 hover:bg-violet-500/10 dark:bg-violet-500/10 dark:hover:bg-violet-500/16'
                           : 'border-l-2 border-transparent hover:border-ds-warning hover:bg-neutral-50 dark:hover:bg-ds-elevated/50'
                     } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''} ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                   >
@@ -2150,28 +2148,18 @@ export default function DesigningQueuePage() {
                     <td className={`px-2 py-2 align-middle text-right text-xs ${mono} text-ds-ink`}>{rowUpsDisplay(spec)}</td>
                     <td className="px-2 py-2 align-middle text-[10px] text-ds-ink-muted">{rowBatchTypeDisplay(spec)}</td>
                     <td className="px-2 py-2 align-middle">
-                      <span
-                        className={`${badge.className} text-[10px] ${badge.pulse ? 'animate-pulse motion-reduce:animate-none' : ''}`}
-                        title={
-                          (r.readiness?.artworkStatusLabel ?? '') +
-                          (planningForwarded ? ' · Plate Hub: forwarded to planning' : ' · Plate Hub: pending')
-                        }
-                      >
-                        <Layers
-                          className={`h-3 w-3 shrink-0 ${
-                            planningForwarded ? 'text-emerald-400' : 'text-ds-ink-faint'
-                          }`}
-                          aria-hidden
-                        />
-                        {badge.label}
-                      </span>
-                      {pushedAge ? (
-                        <div className="mt-0.5">
-                          <span className={completed ? PUSHED_CHIP_CLASS : 'rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint'}>
-                            {completed ? `Pushed ${pushedAge}` : `Plate pushed ${pushedAge}`}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {phase === 'awaiting_client' ? (
+                          <span className="rounded border border-sky-500/45 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-700 dark:text-sky-300">
+                            Awaiting client
                           </span>
-                        </div>
-                      ) : null}
+                        ) : null}
+                        {missingSheetSize ? (
+                          <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-700 dark:text-orange-300">
+                            Sheet size missing
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-2 py-2 align-middle">
                       {jcState === 'ready' ? (
@@ -2179,120 +2167,24 @@ export default function DesigningQueuePage() {
                           Ready
                         </span>
                       ) : (
-                        <span className="rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-[10px] text-ds-ink-faint">
-                          Pending
-                        </span>
+                        <span className="text-[10px] text-ds-ink-faint">—</span>
                       )}
                     </td>
                     <td className="px-2 py-2 align-middle">
-                      <div className="flex flex-wrap items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={finalizingId === r.id || rowClosed || !canFinalizeRow}
-                          onClick={() => void finalizeFromList(r)}
-                          title={canFinalizeRow && !rowClosed ? 'Push to Plate Hub' : plateReason}
-                          className={`${ACTION_PILL_NEUTRAL} ${
-                            canFinalizeRow && !rowClosed
-                              ? 'border-emerald-500/45 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/15 dark:text-emerald-200'
-                              : 'border-ds-line text-ds-ink-faint hover:bg-ds-warning/10'
-                          }`}
-                        >
-                          {finalizingId === r.id ? '…' : 'Plate Hub'}
-                        </button>
-                        <details className="group relative">
-                          <summary className={`${ACTION_PILL_NEUTRAL} cursor-pointer list-none select-none`}>
-                            More
-                          </summary>
-                          <div className="absolute right-0 z-20 mt-1 min-w-[170px] rounded border border-ds-line/60 bg-background p-1 shadow-lg">
-                            <Link
-                              href={`/orders/designing/${r.id}`}
-                              className="flex w-full items-center gap-1 rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-card"
-                            >
-                              <Pencil className="h-3 w-3 opacity-70" aria-hidden />
-                              Edit
-                            </Link>
-                            {!planningForwarded && (
-                              <button
-                                type="button"
-                                disabled={forwardingId === r.id || rowClosed}
-                                onClick={() => void forwardPlanning(r)}
-                                className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-ds-ink hover:bg-violet-500/10 disabled:opacity-40"
-                              >
-                                {forwardingId === r.id ? '…' : 'Forward'}
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              disabled={finalizingId === r.id || rowClosed}
-                              onClick={() => void pushToolingFromList(r, 'DIE')}
-                              className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-violet-700 hover:bg-violet-500/10 disabled:opacity-40 dark:text-violet-300"
-                            >
-                              {finalizingId === r.id ? '…' : 'Die Hub'}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={finalizingId === r.id || rowClosed}
-                              onClick={() => void pushToolingFromList(r, 'BLOCK')}
-                              className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-orange-700 hover:bg-orange-500/10 disabled:opacity-40 dark:text-orange-300"
-                            >
-                              {finalizingId === r.id ? '…' : 'Emboss Hub'}
-                            </button>
-                            {showRecall && (
-                              <button
-                                type="button"
-                                disabled={recallingPlanningId === r.id}
-                                onClick={() => void recallPlanning(r)}
-                                className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-rose-700 hover:bg-rose-500/10 disabled:opacity-40 dark:text-rose-300"
-                              >
-                                {recallingPlanningId === r.id ? '…' : 'Recall'}
-                              </button>
-                            )}
-                          </div>
-                        </details>
-                        {missingSheetSize ? (
-                          <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
-                            Sheet size missing
-                          </span>
-                        ) : null}
-                        {completed && (
-                          <Link
-                            href="/hub/plates"
-                            className={`${ACTION_PILL_NEUTRAL} border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300`}
-                          >
-                            Plates
-                          </Link>
-                        )}
-                        {planningForwarded && (
-                          <Link
-                            href="/orders/planning"
-                            className={`${ACTION_PILL_NEUTRAL} border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300`}
-                          >
-                            Planning
-                          </Link>
-                        )}
-                        <a
-                          href={`/api/designing/po-lines/${r.id}/job-spec-pdf`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={`${ICON_BUTTON_BASE} border hover:bg-orange-500/15`}
-                          style={{
-                            borderColor: `${BRAND_ORANGE}99`,
-                            color: BRAND_ORANGE,
-                          }}
-                          title="Spec PDF"
-                          aria-label="Download spec PDF"
-                        >
-                          <FileDown className="h-3.5 w-3.5" strokeWidth={2.25} />
-                        </a>
-                        <Link
-                          href={r.po?.id ? `/orders/purchase-orders/${r.po.id}` : '#'}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded border border-neutral-200 px-1.5 py-0.5 text-xs text-ds-ink-faint hover:text-neutral-900 dark:border-border/10 dark:text-ds-ink-faint dark:hover:text-ds-ink-muted"
-                        >
-                          PO
-                        </Link>
-                      </div>
+                      <ActionsCell
+                        embossEnabled={embossEnabled}
+                        onPushJobCard={() => void pushJobCardFromList(r)}
+                        onPushPlate={() => void finalizeFromList(r)}
+                        onPushEmboss={() => void pushToolingFromList(r, 'BLOCK')}
+                        onPushShadeCard={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
+                        onRecallPlanning={() => void recallPlanning(r)}
+                        disablePushJobCard={jobCardPushingId === r.id || rowClosed || hasLinkedJobCard(r)}
+                        disablePushPlate={finalizingId === r.id || rowClosed || !canFinalizeRow}
+                        disableRecall={!showRecall || recallingPlanningId === r.id || !canRecallPlanning || rowClosed}
+                        pushJobCardLabel={jobCardPushingId === r.id ? '…' : hasLinkedJobCard(r) ? 'Job card ✓' : 'Push Job Card'}
+                        pushPlateLabel={finalizingId === r.id ? '…' : 'Plates'}
+                        recallLabel={recallingPlanningId === r.id ? '…' : 'Recall'}
+                      />
                     </td>
                   </tr>
                 )

@@ -32,6 +32,15 @@ function toolingDimsLabel(die: Dye | null): string {
 
 /** API shape for Carton Master detail (GET/PUT response). */
 export function serializeCarton(row: CartonWithCustomerDye) {
+  let specialUps: number | null = null
+  if (typeof row.specialInstructions === 'string' && row.specialInstructions.trim()) {
+    try {
+      const parsed = JSON.parse(row.specialInstructions) as Record<string, unknown>
+      const rawUps = parsed.ups
+      const n = Number(rawUps)
+      if (Number.isFinite(n) && n > 0) specialUps = Math.floor(n)
+    } catch {}
+  }
   const dm = row.dieMaster
   const masterLabel = dm
     ? masterDieTypeLabel({ dyeType: dm.dyeType, pastingStyle: dm.pastingStyle })
@@ -67,6 +76,8 @@ export function serializeCarton(row: CartonWithCustomerDye) {
     coatingType: row.coatingType,
     foilType: row.foilType,
     embossingLeafing: row.embossingLeafing,
+    numberOfColours: row.numberOfColours,
+    ups: specialUps,
     glueType: row.glueType,
     dyeId: row.dyeId,
     dieMasterId: row.dieMasterId,

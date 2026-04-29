@@ -48,6 +48,38 @@ export type PrintPlanningJobCard = {
   } | null
 }
 
+type JobCardAuditEvent = {
+  id: string
+  at: string
+  action: string
+  tableName: string
+  userName: string | null
+  summary: string
+}
+
+type JobCardDetail = {
+  id: string
+  jobCardNumber: number
+  status: string
+  customer: { id: string; name: string }
+  requiredSheets: number
+  totalSheets: number
+  machineId: string | null
+  poLine: {
+    cartonName: string
+    quantity: number
+    cartonSize: string | null
+    po: { poNumber: string }
+  } | null
+  productionBible?: {
+    sheetSizeLabel: string | null
+    ups: number | null
+    grainDirection: string | null
+  }
+  stages?: { id: string; stageName: string; status: string; operator: string | null }[]
+  auditTimeline?: JobCardAuditEvent[]
+}
+
 function readPrintPlanOrder(jc: PrintPlanningJobCard): number {
   const rout = jc.postPressRouting
   if (!rout || typeof rout !== 'object') return 0
@@ -130,7 +162,15 @@ function Lane({
   )
 }
 
-function SortableCard({ jc }: { jc: PrintPlanningJobCard }) {
+function SortableCard({
+  jc,
+  onOpenDetail,
+  isSelected,
+}: {
+  jc: PrintPlanningJobCard
+  onOpenDetail: (id: string) => void
+  isSelected: boolean
+}) {
   const po = jc.poLine
   const pri = po?.industrialPriority === true
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -146,11 +186,14 @@ function SortableCard({ jc }: { jc: PrintPlanningJobCard }) {
       style={style}
       {...attributes}
       {...listeners}
+      onClick={() => onOpenDetail(jc.id)}
       className={`rounded border px-1.5 py-1.5 text-left cursor-grab active:cursor-grabbing ${
         pri
           ? 'border-ds-warning bg-ds-warning/8 shadow-[0_0_14px_rgba(245,158,11,0.25)]'
           : 'border-ds-line/60 bg-ds-card/95'
-      } ${isDragging ? 'opacity-60 z-50' : ''}`}
+      } ${isSelected ? 'ring-2 ring-ds-warning/70 shadow-[0_0_0_1px_rgba(245,158,11,0.6)]' : ''} ${
+        isDragging ? 'opacity-60 z-50' : ''
+      }`}
     >
       <div className="flex items-start justify-between gap-0.5">
         <Link
@@ -218,6 +261,9 @@ export function PrintPlanningKanban() {
   const [triageIds, setTriageIds] = useState<string[]>([])
   const [machineCols, setMachineCols] = useState<Record<string, string[]>>({})
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detail, setDetail] = useState<JobCardDetail | null>(null)
 
   const pressIds = useMemo(
     () =>
@@ -231,6 +277,24 @@ export function PrintPlanningKanban() {
   const machineById = useMemo(() => new Map(machines.map((m) => [m.id, m])), [machines])
 
   const cardById = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
+
+  const openDetail = useCallback(async (id: string) => {
+    setDetailId(id)
+    setDetailLoading(true)
+    try {
+      const res = await fetch(`/api/job-cards/${id}?auditTimeline=1`)
+      const json = (await res.json()) as JobCardDetail | { error?: string }
+      if (!res.ok || ('error' in json && json.error)) {
+        throw new Error(('error' in json && json.error) || 'Failed to load job card detail')
+      }
+      setDetail(json as JobCardDetail)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load detail')
+      setDetail(null)
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [])
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -263,6 +327,17 @@ export function PrintPlanningKanban() {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  useEffect(() => {
+    if (!detailId) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDetailId(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [detailId])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -387,7 +462,14 @@ export function PrintPlanningKanban() {
               {triageIds.map((id) => {
                 const jc = cardById.get(id)
                 if (!jc) return null
-                return <SortableCard key={id} jc={jc} />
+                return (
+                  <SortableCard
+                    key={id}
+                    jc={jc}
+                    onOpenDetail={openDetail}
+                    isSelected={detailId === id}
+                  />
+                )
               })}
             </div>
           </SortableContext>
@@ -408,7 +490,14 @@ export function PrintPlanningKanban() {
                   {ids.map((id) => {
                     const jc = cardById.get(id)
                     if (!jc) return null
-                    return <SortableCard key={id} jc={jc} />
+                    return (
+                      <SortableCard
+                        key={id}
+                        jc={jc}
+                        onOpenDetail={openDetail}
+                        isSelected={detailId === id}
+                      />
+                    )
                   })}
                 </div>
               </SortableContext>
@@ -429,6 +518,79 @@ export function PrintPlanningKanban() {
           </div>
         ) : null}
       </DragOverlay>
+
+      {detailId ? (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/35" onClick={() => setDetailId(null)} aria-hidden />
+          <aside className="fixed right-0 top-0 z-50 h-screen w-full max-w-md overflow-y-auto border-l border-ds-line/40 bg-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
+              <div>
+                <p className={`text-[10px] uppercase tracking-wide text-ds-ink-faint ${mono}`}>Print planning log</p>
+                <h2 className={`text-sm font-semibold text-ds-warning ${mono}`}>
+                  {detail?.jobCardNumber ? `JC #${detail.jobCardNumber}` : 'Job card'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="rounded border border-ds-line/50 px-2 py-1 text-xs"
+                onClick={() => setDetailId(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            {detailLoading ? (
+              <div className={`p-4 text-sm text-ds-ink-faint ${mono}`}>Loading detail…</div>
+            ) : detail ? (
+              <div className="space-y-3 p-4 text-xs">
+                <section className="rounded-lg border border-ds-line/40 p-3">
+                  <p className={`mb-2 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Snapshot</p>
+                  <div className="space-y-1">
+                    <p><span className="text-ds-ink-faint">Carton:</span> {detail.poLine?.cartonName ?? '—'}</p>
+                    <p><span className="text-ds-ink-faint">Qty:</span> {detail.poLine?.quantity ?? '—'}</p>
+                    <p><span className="text-ds-ink-faint">PO:</span> {detail.poLine?.po.poNumber ?? '—'}</p>
+                    <p><span className="text-ds-ink-faint">Sheet:</span> {detail.productionBible?.sheetSizeLabel ?? '—'}</p>
+                    <p><span className="text-ds-ink-faint">UPS:</span> {detail.productionBible?.ups ?? '—'}</p>
+                    <p><span className="text-ds-ink-faint">Status:</span> {detail.status}</p>
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-ds-line/40 p-3">
+                  <p className={`mb-2 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Stage log</p>
+                  <ul className="space-y-1">
+                    {(detail.stages ?? []).map((s) => (
+                      <li key={s.id} className="flex items-center justify-between gap-2 rounded border border-ds-line/30 px-2 py-1">
+                        <span>{s.stageName}</span>
+                        <span className="text-ds-ink-faint">{s.status}</span>
+                      </li>
+                    ))}
+                    {(detail.stages ?? []).length === 0 ? <li className="text-ds-ink-faint">No stage entries.</li> : null}
+                  </ul>
+                </section>
+
+                <section className="rounded-lg border border-ds-line/40 p-3">
+                  <p className={`mb-2 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Audit timeline</p>
+                  <ul className="space-y-2">
+                    {(detail.auditTimeline ?? []).map((ev) => (
+                      <li key={ev.id} className="rounded border border-ds-line/30 px-2 py-1">
+                        <p className="text-ds-ink-faint">
+                          {new Date(ev.at).toLocaleString()} · {ev.action}
+                        </p>
+                        <p className="text-ds-ink">{ev.summary}</p>
+                      </li>
+                    ))}
+                    {(detail.auditTimeline ?? []).length === 0 ? (
+                      <li className="text-ds-ink-faint">No audit entries.</li>
+                    ) : null}
+                  </ul>
+                </section>
+              </div>
+            ) : (
+              <div className={`p-4 text-sm text-ds-ink-faint ${mono}`}>Unable to load detail.</div>
+            )}
+          </aside>
+        </>
+      ) : null}
     </DndContext>
   )
 }

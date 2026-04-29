@@ -30,6 +30,7 @@ function parseSpecialInstructions(raw: string | undefined) {
     leafingEnabled: false,
     embossingEnabled: false,
     spotUvEnabled: false,
+    ups: '',
   }
   if (!raw) return fallback
   try {
@@ -40,6 +41,10 @@ function parseSpecialInstructions(raw: string | undefined) {
       leafingEnabled: !!obj.leafingEnabled,
       embossingEnabled: !!obj.embossingEnabled,
       spotUvEnabled: !!obj.spotUvEnabled,
+      ups:
+        typeof obj.ups === 'number' && Number.isFinite(obj.ups) && obj.ups > 0
+          ? String(Math.floor(obj.ups))
+          : '',
     }
   } catch {
     return fallback
@@ -75,6 +80,10 @@ export type CartonFormData = {
   gsm: string
   printingType: string
   coatingType: string
+  numberOfColours: string
+  sheetLengthMm: string
+  sheetWidthMm: string
+  ups: string
   brailleEnabled: boolean
   leafingEnabled: boolean
   embossingEnabled: boolean
@@ -103,6 +112,10 @@ const EMPTY: CartonFormData = {
   gsm: '',
   printingType: '',
   coatingType: '',
+  numberOfColours: '',
+  sheetLengthMm: '',
+  sheetWidthMm: '',
+  ups: '',
   brailleEnabled: false,
   leafingEnabled: false,
   embossingEnabled: false,
@@ -154,6 +167,9 @@ export default function CartonForm({ mode, initialData }: Props) {
     embossingEnabled: initialData?.embossingEnabled ?? specials.embossingEnabled,
     spotUvEnabled: initialData?.spotUvEnabled ?? specials.spotUvEnabled,
     specialInstructions: initialData?.specialInstructions ?? specials.notes,
+    ups: initialData?.ups ?? specials.ups,
+    sheetLengthMm: initialData?.sheetLengthMm ?? '',
+    sheetWidthMm: initialData?.sheetWidthMm ?? '',
   }))
   const [customerQuery, setCustomerQuery] = useState(() => toCaps(initialData?.customerName ?? ''))
 
@@ -405,6 +421,9 @@ export default function CartonForm({ mode, initialData }: Props) {
       gsm: toOptionalInt(f.gsm),
       printingType: f.printingType || undefined,
       coatingType: f.coatingType || undefined,
+      numberOfColours: toOptionalInt(f.numberOfColours),
+      blankLength: f.sheetLengthMm ? Number(f.sheetLengthMm) : undefined,
+      blankWidth: f.sheetWidthMm ? Number(f.sheetWidthMm) : undefined,
       embossingLeafing: f.embossingEnabled && f.leafingEnabled
         ? 'Embossing + Leafing'
         : f.embossingEnabled
@@ -418,6 +437,7 @@ export default function CartonForm({ mode, initialData }: Props) {
         leafingEnabled: f.leafingEnabled,
         embossingEnabled: f.embossingEnabled,
         spotUvEnabled: f.spotUvEnabled,
+        ups: toOptionalInt(f.ups) ?? null,
       }),
       remarks: toCaps(f.remarks || '') || undefined,
       dieMasterId: f.dieMasterId.trim() || undefined,
@@ -685,6 +705,57 @@ export default function CartonForm({ mode, initialData }: Props) {
                   <option value=''>Select coating...</option>
                   {COATING_SPECS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
+              </div>
+              <div>
+                <label className='block text-ds-ink-muted mb-1'>Colours</label>
+                <input
+                  type='number'
+                  min={1}
+                  inputMode='numeric'
+                  onKeyDown={blockInvalidNumericKeys}
+                  className={cls}
+                  value={f.numberOfColours}
+                  onChange={(e) => patch('numberOfColours', e.target.value)}
+                  placeholder='e.g. 4'
+                />
+              </div>
+              <div>
+                <label className='block text-ds-ink-muted mb-1'>Sheet size (L × W mm)</label>
+                <div className='grid grid-cols-2 gap-2'>
+                  <input
+                    type='number'
+                    min={1}
+                    inputMode='numeric'
+                    onKeyDown={blockInvalidNumericKeys}
+                    className={cls}
+                    value={f.sheetLengthMm}
+                    onChange={(e) => patch('sheetLengthMm', e.target.value)}
+                    placeholder='Length'
+                  />
+                  <input
+                    type='number'
+                    min={1}
+                    inputMode='numeric'
+                    onKeyDown={blockInvalidNumericKeys}
+                    className={cls}
+                    value={f.sheetWidthMm}
+                    onChange={(e) => patch('sheetWidthMm', e.target.value)}
+                    placeholder='Width'
+                  />
+                </div>
+              </div>
+              <div>
+                <label className='block text-ds-ink-muted mb-1'>UPS</label>
+                <input
+                  type='number'
+                  min={1}
+                  inputMode='numeric'
+                  onKeyDown={blockInvalidNumericKeys}
+                  className={cls}
+                  value={f.ups}
+                  onChange={(e) => patch('ups', e.target.value)}
+                  placeholder='e.g. 6'
+                />
               </div>
               <div className='md:col-span-3 flex flex-wrap items-end gap-4'>
                 <label className='inline-flex items-center gap-2 text-ds-ink-muted'>

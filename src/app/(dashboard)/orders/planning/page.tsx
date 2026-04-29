@@ -179,6 +179,7 @@ type Line = {
     paperType?: string | null
     gsm?: number | null
     numberOfColours?: number | null
+    specialInstructions?: string | null
   } | null
   dieMaster?: { id: string; dyeNumber: number; ups: number; sheetSize: string } | null
   createdAt?: string
@@ -371,6 +372,8 @@ export default function PlanningPage() {
   const [recentlyPushedIds, setRecentlyPushedIds] = useState<Set<string>>(new Set())
   const [planningSearchQuery, setPlanningSearchQuery] = useState('')
 
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false)
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     const q = new URLSearchParams(window.location.search)
@@ -384,6 +387,10 @@ export default function PlanningPage() {
 
   useEffect(() => {
     if (planningSelection.size < 1) setBatchBuilderOpen(false)
+  }, [planningSelection.size])
+
+  useEffect(() => {
+    if (planningSelection.size < 1) setShowSelectedOnly(false)
   }, [planningSelection.size])
 
   const customerSearch = useAutoPopulate<Customer>({
@@ -595,6 +602,11 @@ export default function PlanningPage() {
     })
   }, [rows, planningSearchQuery])
 
+  const planningVisibleRows = useMemo(() => {
+    if (!showSelectedOnly) return moduleFilteredRows
+    return moduleFilteredRows.filter((r) => planningSelection.has(r.id))
+  }, [moduleFilteredRows, planningSelection, showSelectedOnly])
+
   const planningFilterChips = useMemo(() => {
     const chips: Array<{ key: string; label: string; onClear?: () => void }> = []
     if (planningSearchQuery.trim()) {
@@ -659,7 +671,7 @@ export default function PlanningPage() {
   }, [planningSelection, linkLineIdsAsMixSet])
 
   const suggestableLines = useMemo((): SuggestableLine[] => {
-    const view = moduleFilteredRows.filter((r) => {
+    const view = planningVisibleRows.filter((r) => {
       const pending = r.planningStatus === 'pending'
       return ledgerView === 'pending' ? pending : !pending
     })
@@ -681,7 +693,7 @@ export default function PlanningPage() {
             .map(({ r }) => r)
         : view
     return ordered.map(lineToSuggestable)
-  }, [moduleFilteredRows, ledgerView])
+  }, [planningVisibleRows, ledgerView])
 
   const applyBatchDecision = useCallback(
     async (
@@ -1042,6 +1054,12 @@ export default function PlanningPage() {
           </div>
           <BulkActionBar
             selectedCount={planningSelection.size}
+            onSelectedClick={() => {
+              if (planningSelection.size === 0) return
+              setLedgerView('pending')
+              setShowSelectedOnly((prev) => !prev)
+            }}
+            selectedActive={showSelectedOnly}
             className="w-full md:w-auto md:sticky md:bottom-auto md:bg-transparent md:shadow-none md:border-0 md:p-0"
             left={
               <Button
@@ -1085,7 +1103,7 @@ export default function PlanningPage() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-2 py-1">
           <ErrorBoundary moduleName="Planning Grid">
             <PlanningDecisionGrid
-              rows={moduleFilteredRows as PlanningGridLine[]}
+              rows={planningVisibleRows as PlanningGridLine[]}
               ledgerView={ledgerView}
               recentlyPushedIds={recentlyPushedIds}
               planningSelection={planningSelection}
