@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import type { LucideIcon } from 'lucide-react'
 import {
+  Bell,
   ChevronDown,
   ChevronUp,
   ClipboardCheck,
@@ -15,6 +16,7 @@ import {
   Layers,
   LayoutGrid,
   Menu,
+  Search,
   Printer,
   Scale,
   Scissors,
@@ -368,12 +370,30 @@ export function DashboardShell({
                   aria-hidden
                 />
               </Link>
-              <div className="flex flex-1 items-center justify-end gap-0.5 sm:gap-1 md:flex-initial">
+              <div className="ml-auto hidden max-w-[540px] flex-1 items-center justify-end gap-3 lg:flex">
+                <label className="group relative w-full max-w-[380px]">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-secondary)]" />
+                  <input
+                    type="search"
+                    placeholder="Search anything..."
+                    className="h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-card)] pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[var(--brand-primary)]/15"
+                  />
+                </label>
+                <button
+                  type="button"
+                  aria-label="Notifications"
+                  className="relative grid h-10 w-10 place-items-center rounded-lg border border-transparent text-[var(--text-primary)] transition hover:border-[var(--border)] hover:bg-[var(--bg-muted)]"
+                >
+                  <Bell className="h-4 w-4" />
+                  <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
+                </button>
+              </div>
+              <div className="flex items-center justify-end gap-0.5 sm:gap-1">
                 <div className="flex md:hidden">
                   <CommandPaletteTriggerIcon />
                 </div>
                 <ThemeToggle />
-                <div className="inline-flex rounded-md border border-ds-line/70 bg-ds-elevated/40 p-0.5 shadow-sm">
+                <div className="hidden rounded-md border border-ds-line/70 bg-ds-elevated/40 p-0.5 shadow-sm xl:inline-flex">
                   <button
                     type="button"
                     onClick={() => setUiDensity('dense')}
@@ -393,8 +413,8 @@ export function DashboardShell({
                     Comfortable
                   </button>
                 </div>
-                <div className="hidden items-center gap-3 pl-1 sm:flex">
-                  <div className="hidden h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[var(--brand-bg-soft)] ring-2 ring-[var(--brand-primary)]/25 sm:flex sm:items-center sm:justify-center">
+                <div className="hidden items-center gap-2 pl-1 sm:flex">
+                  <div className="hidden h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[var(--border)] bg-[var(--brand-bg-soft)] ring-2 ring-[var(--brand-primary)]/20 sm:flex sm:items-center sm:justify-center">
                     {userImage ? (
                       <img
                         src={userImage}
@@ -434,6 +454,7 @@ export function DashboardShell({
                 {menus.map((menu) => {
                   const menuOpen = !('href' in menu) && openMenu === menu.key
                   const navHighlighted = 'href' in menu ? isActiveMenu(menu) : isActiveMenu(menu) || menuOpen
+                  const isProductionMega = menu.key === 'production'
                   return (
                     <li
                       key={menu.key}
@@ -464,7 +485,9 @@ export function DashboardShell({
                           className={clsx(
                             'relative inline-flex items-center gap-1 rounded-md py-2.5 pl-3 pr-2 text-sm font-medium transition-colors duration-150',
                             navHighlighted
-                              ? 'text-[var(--brand-primary)] after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--brand-primary)]'
+                              ? isProductionMega
+                                ? 'bg-[var(--brand-bg-soft)] text-[var(--brand-primary)]'
+                                : 'text-[var(--brand-primary)] after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--brand-primary)]'
                               : 'text-[var(--text-primary)] hover:bg-[var(--bg-muted)]',
                           )}
                         >
@@ -534,11 +557,11 @@ export function DashboardShell({
                         </div>
                       ) : null}
                       {'mega' in menu && menu.mega && openMenu === menu.key ? (
-                        <div className="absolute left-0 top-full z-[70] pt-1 transition-all duration-150 ease-out">
-                          <div className="w-[640px] max-w-[calc(100vw-2rem)] rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-[0_12px_40px_rgba(0,0,0,0.1),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+                        <div className="absolute left-1/2 top-full z-[70] w-[980px] max-w-[calc(100vw-3rem)] -translate-x-1/2 pt-1 transition-all duration-150 ease-out">
+                          <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-[0_12px_40px_rgba(0,0,0,0.1),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
                             <div className="grid grid-cols-2 gap-10">
                               <div>
-                                <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                                <p className="mb-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[var(--brand-primary)]">
                                   Production Planning
                                 </p>
                                 <div className="space-y-0.5">
@@ -548,7 +571,7 @@ export function DashboardShell({
                                 </div>
                               </div>
                               <div>
-                                <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                                <p className="mb-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[var(--brand-primary)]">
                                   Production Execution
                                 </p>
                                 <div className="space-y-0.5">
