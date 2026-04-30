@@ -16,7 +16,6 @@ import {
   Layers,
   LayoutGrid,
   Menu,
-  Search,
   Printer,
   Scale,
   Scissors,
@@ -395,14 +394,6 @@ export function DashboardShell({
                 />
               </Link>
               <div className="ml-auto hidden max-w-[540px] flex-1 items-center justify-end gap-3 lg:flex">
-                <label className="group relative w-full max-w-[380px]">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-secondary)]" />
-                  <input
-                    type="search"
-                    placeholder="Search anything..."
-                    className="h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-card)] pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[var(--brand-primary)]/15"
-                  />
-                </label>
                 <button
                   type="button"
                   aria-label="Notifications"

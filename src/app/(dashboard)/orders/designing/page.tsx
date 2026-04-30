@@ -737,6 +737,7 @@ export default function DesigningQueuePage() {
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set())
   const [bulkPushing, setBulkPushing] = useState(false)
   const [bulkToolingPushing, setBulkToolingPushing] = useState<null | 'DIE' | 'BLOCK'>(null)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null)
   const [jobCardFilter, setJobCardFilter] = useState<'all' | 'pending'>('all')
 
@@ -1363,6 +1364,41 @@ export default function DesigningQueuePage() {
     }
   }
 
+  const bulkDeleteSelectedRows = async () => {
+    const picked = Array.from(selectedRowIds)
+    if (picked.length === 0) return
+    if (!confirm(`Delete ${picked.length} artwork queue item(s)?`)) return
+    const reason = prompt('Enter delete reason (required):')
+    if (!reason || reason.trim().length < 3) {
+      toast.error('Delete reason is required (minimum 3 characters)')
+      return
+    }
+    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
+    if (token !== 'DELETE') return
+
+    setBulkDeleting(true)
+    let ok = 0
+    let fail = 0
+    for (const id of picked) {
+      try {
+        const res = await fetch(`/api/planning/po-lines/${id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: reason.trim() }),
+        })
+        if (!res.ok) throw new Error('Failed')
+        ok += 1
+      } catch {
+        fail += 1
+      }
+    }
+    if (ok) toast.success(`Deleted ${ok} artwork queue item(s)`)
+    if (fail) toast.error(`Failed to delete ${fail} item(s)`)
+    setSelectedRowIds(new Set())
+    setBulkDeleting(false)
+    await fetchRows()
+  }
+
   const finalizeGroupFromList = async (groupId: string, groupRows: Row[]) => {
     const eligible = groupRows.filter((row) => canFinalizePlateHubRow(row))
     if (eligible.length === 0) {
@@ -1616,12 +1652,20 @@ export default function DesigningQueuePage() {
               <button
                 type="button"
                 onClick={() => void bulkPushSelectedToToolingHub('BLOCK')}
-                disabled={bulkPushing || bulkToolingPushing != null || selectedRowIds.size === 0}
+                disabled={bulkPushing || bulkToolingPushing != null || bulkDeleting || selectedRowIds.size === 0}
                 className="h-8 rounded-md border border-orange-500/40 px-2.5 text-xs font-semibold text-orange-700 transition-colors hover:bg-orange-500/10 disabled:opacity-40 dark:text-orange-300"
               >
                 {bulkToolingPushing === 'BLOCK'
                   ? 'Pushing…'
                   : `Bulk Emboss Hub${selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ''}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => void bulkDeleteSelectedRows()}
+                disabled={bulkPushing || bulkToolingPushing != null || bulkDeleting || selectedRowIds.size === 0}
+                className="h-8 rounded-md border border-rose-500/40 px-2.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-500/10 disabled:opacity-40 dark:text-rose-300"
+              >
+                {bulkDeleting ? 'Deleting…' : `Bulk delete${selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ''}`}
               </button>
             </>
           }

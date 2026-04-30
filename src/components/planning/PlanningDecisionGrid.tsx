@@ -1,7 +1,7 @@
 'use client'
 
 import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { Layers, RotateCcw } from 'lucide-react'
+import { Layers, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   applyBatchDecisionAction,
@@ -335,6 +335,7 @@ export function PlanningDecisionGrid({
   mixAdvisoryNote,
   mixConflictMessage,
   onRecallLine,
+  onDeleteLine,
   onBatchDecision,
   batchActionBusy,
   highlightedRowId = null,
@@ -354,6 +355,7 @@ export function PlanningDecisionGrid({
   mixAdvisoryNote: string | null
   mixConflictMessage: string | null
   onRecallLine: (lineId: string) => Promise<void>
+  onDeleteLine: (lineId: string) => Promise<void>
   onBatchDecision: (
     lineIds: string[],
     action: PlanningBatchDecisionAction,
@@ -1450,21 +1452,34 @@ export function PlanningDecisionGrid({
                             <RotateCcw className="h-3.5 w-3.5" />
                           </button>
                         ) : (
-                          <input
-                            type="checkbox"
-                            className="h-3.5 w-3.5 accent-ds-brand"
-                            checked={planningSelection.has(r.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={() => {
-                              setPlanningSelection((prev) => {
-                                const next = new Set(prev)
-                                if (next.has(r.id)) next.delete(r.id)
-                                else next.add(r.id)
-                                return next
-                              })
-                            }}
-                            aria-label="Select row for group"
-                          />
+                          <>
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5 accent-ds-brand"
+                              checked={planningSelection.has(r.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={() => {
+                                setPlanningSelection((prev) => {
+                                  const next = new Set(prev)
+                                  if (next.has(r.id)) next.delete(r.id)
+                                  else next.add(r.id)
+                                  return next
+                                })
+                              }}
+                              aria-label="Select row for group"
+                            />
+                            <button
+                              type="button"
+                              title="Delete line"
+                              className={`${ICON_BUTTON_BASE} h-6 w-6 rounded-ds-sm border border-rose-500/35 bg-rose-500/10 text-rose-700 duration-200 hover:border-rose-500/60 hover:bg-rose-500/15 dark:text-rose-300`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void onDeleteLine(r.id)
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>

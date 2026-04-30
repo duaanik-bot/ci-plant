@@ -149,6 +149,12 @@ export default function MastersMachinesPage() {
           >
             {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
           </button>
+          <Link
+            href="/masters/machines/new"
+            className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+          >
+            Add machine
+          </Link>
         </div>
       </div>
       <EnterpriseTableShell>

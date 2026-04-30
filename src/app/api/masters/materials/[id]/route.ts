@@ -44,70 +44,37 @@ export async function GET(
   if (error) return error
 
   const { id } = await params
-  const rows = await db.$queryRawUnsafe<Array<{
-    id: string
-    materialCode: string
-    description: string
-    unit: string
-    qtyQuarantine: number
-    qtyAvailable: number
-    qtyReserved: number
-    qtyFg: number
-    weightedAvgCost: number
-    reorderPoint: number
-    safetyStock: number
-    active: boolean
-    boardType: string | null
-    gsm: number | null
-    sheetLength: number | null
-    sheetWidth: number | null
-    brightnessPct: number | null
-    moisturePct: number | null
-    supplierId: string | null
-    supplierName: string | null
-    storageLocation: string | null
-    leadTimeDays: number
-    grainDirection: string | null
-    caliperMicrons: number | null
-    hsnCode: string | null
-  }>>(`
-    select
-      i.id,
-      i.material_code as "materialCode",
-      i.description,
-      i.unit,
-      i.qty_quarantine::float8 as "qtyQuarantine",
-      i.qty_available::float8 as "qtyAvailable",
-      i.qty_reserved::float8 as "qtyReserved",
-      i.qty_fg::float8 as "qtyFg",
-      i.weighted_avg_cost::float8 as "weightedAvgCost",
-      i.reorder_point::float8 as "reorderPoint",
-      i.safety_stock::float8 as "safetyStock",
-      i.active,
-      i.board_type as "boardType",
-      i.gsm,
-      i.sheet_length::float8 as "sheetLength",
-      i.sheet_width::float8 as "sheetWidth",
-      i.brightness_pct::float8 as "brightnessPct",
-      i.moisture_pct::float8 as "moisturePct",
-      i.storage_location as "storageLocation",
-      i.lead_time_days as "leadTimeDays",
-      i.grain_direction as "grainDirection",
-      i.caliper_microns as "caliperMicrons",
-      i.hsn_code as "hsnCode",
-      s.id as "supplierId",
-      s.name as "supplierName"
-    from inventory i
-    left join suppliers s on s.id = i.supplier_id
-    where i.id = $1
-    limit 1
-  `, id)
-  const m = rows[0]
+  const m = await db.inventory.findUnique({
+    where: { id },
+    include: { supplier: { select: { id: true, name: true } } },
+  })
   if (!m) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   return NextResponse.json({
-    ...m,
-    supplier: m.supplierId ? { id: m.supplierId, name: m.supplierName ?? '' } : null,
+    id: m.id,
+    materialCode: m.materialCode,
+    description: m.description,
+    unit: m.unit,
+    qtyQuarantine: Number(m.qtyQuarantine),
+    qtyAvailable: Number(m.qtyAvailable),
+    qtyReserved: Number(m.qtyReserved),
+    qtyFg: Number(m.qtyFg),
+    weightedAvgCost: Number(m.weightedAvgCost),
+    reorderPoint: Number(m.reorderPoint),
+    safetyStock: Number(m.safetyStock),
+    active: m.active,
+    storageLocation: m.storageLocation,
+    leadTimeDays: m.leadTimeDays,
+    boardType: null,
+    gsm: null,
+    sheetLength: null,
+    sheetWidth: null,
+    grainDirection: null,
+    caliperMicrons: null,
+    brightnessPct: null,
+    moisturePct: null,
+    hsnCode: null,
+    supplier: m.supplier ? { id: m.supplier.id, name: m.supplier.name } : null,
   })
 }
 
@@ -172,15 +139,6 @@ export async function PUT(
       ...(data.supplierId !== undefined && { supplierId: data.supplierId }),
       ...(data.weightedAvgCost != null && { weightedAvgCost: data.weightedAvgCost }),
       ...(data.active !== undefined && { active: data.active }),
-      ...(data.boardType !== undefined && { boardType: data.boardType || null }),
-      ...(data.gsm !== undefined && { gsm: data.gsm }),
-      ...(data.sheetLength !== undefined && { sheetLength: data.sheetLength }),
-      ...(data.sheetWidth !== undefined && { sheetWidth: data.sheetWidth }),
-      ...(data.grainDirection !== undefined && { grainDirection: data.grainDirection || null }),
-      ...(data.caliperMicrons !== undefined && { caliperMicrons: data.caliperMicrons }),
-      ...(data.brightnessPct !== undefined && { brightnessPct: data.brightnessPct }),
-      ...(data.moisturePct !== undefined && { moisturePct: data.moisturePct }),
-      ...(data.hsnCode !== undefined && { hsnCode: data.hsnCode?.trim() || null }),
     },
   })
 

@@ -977,6 +977,11 @@ export default function PlanningPage() {
     const ids = Array.from(planningSelection)
     if (ids.length === 0) return
     if (!confirm(`Delete ${ids.length} planning line(s)?`)) return
+    const reason = prompt('Enter delete reason (required):')
+    if (!reason || reason.trim().length < 3) {
+      toast.error('Delete reason is required (minimum 3 characters)')
+      return
+    }
     const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
     if (token !== 'DELETE') return
 
@@ -985,7 +990,11 @@ export default function PlanningPage() {
     let fail = 0
     for (const id of ids) {
       try {
-        const res = await fetch(`/api/planning/po-lines/${id}`, { method: 'DELETE' })
+        const res = await fetch(`/api/planning/po-lines/${id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: reason.trim() }),
+        })
         if (!res.ok) throw new Error('Failed')
         ok += 1
       } catch {
@@ -998,6 +1007,40 @@ export default function PlanningPage() {
     setBulkDeleteBusy(false)
     await fetchRows({ force: true })
   }, [planningSelection, fetchRows])
+
+  const deleteLineWithReason = useCallback(
+    async (lineId: string) => {
+      const line = rows.find((r) => r.id === lineId)
+      if (!line) return
+      if (!confirm(`Delete planning line for "${line.cartonName}"?`)) return
+      const reason = prompt('Enter delete reason (required):')
+      if (!reason || reason.trim().length < 3) {
+        toast.error('Delete reason is required (minimum 3 characters)')
+        return
+      }
+      const token = prompt('Second confirmation: type DELETE to continue.')
+      if (token !== 'DELETE') return
+      try {
+        const res = await fetch(`/api/planning/po-lines/${lineId}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: reason.trim() }),
+        })
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        if (!res.ok) throw new Error(j.error || 'Delete failed')
+        toast.success('Line deleted')
+        setPlanningSelection((prev) => {
+          const next = new Set(prev)
+          next.delete(lineId)
+          return next
+        })
+        await fetchRows({ force: true })
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Delete failed')
+      }
+    },
+    [rows, fetchRows],
+  )
 
   const recallLine = useCallback(
     async (lineId: string) => {
@@ -1149,6 +1192,7 @@ export default function PlanningPage() {
               }}
               updateRow={updateRow}
               onRecallLine={recallLine}
+              onDeleteLine={deleteLineWithReason}
               onSaveLine={savePlanningLine}
               mixAdvisoryNote={null}
               mixConflictMessage={null}

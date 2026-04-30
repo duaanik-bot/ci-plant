@@ -37,6 +37,10 @@ const updateSchema = z.object({
   gsm: z.coerce.number().int().optional().nullable(),
 })
 
+const deleteSchema = z.object({
+  reason: z.string().min(3).max(300).optional(),
+})
+
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -162,13 +166,16 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   const { error, user } = await requireAuth()
   if (error) return error
 
   const { id } = await context.params
+  const body = await req.json().catch(() => ({}))
+  const parsedDelete = deleteSchema.safeParse(body)
+  const deleteReason = parsedDelete.success ? parsedDelete.data.reason?.trim() : undefined
   const existing = await db.poLineItem.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'PO line not found' }, { status: 404 })
 
@@ -186,9 +193,8 @@ export async function DELETE(
     action: 'DELETE',
     tableName: 'po_line_items',
     recordId: id,
-    oldValue: existing,
+    oldValue: { ...existing, deleteReason: deleteReason ?? null },
   })
 
   return NextResponse.json({ ok: true })
 }
-

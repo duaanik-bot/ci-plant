@@ -59,74 +59,33 @@ export async function GET() {
   const { error } = await requireRole('operations_head', 'md')
   if (error) return error
 
-  const list = await db.$queryRawUnsafe<Array<{
-    id: string
-    materialCode: string
-    description: string
-    unit: string
-    qtyQuarantine: number
-    qtyAvailable: number
-    qtyReserved: number
-    qtyFg: number
-    weightedAvgCost: number
-    reorderPoint: number
-    safetyStock: number
-    active: boolean
-    boardType: string | null
-    gsm: number | null
-    sheetLength: number | null
-    sheetWidth: number | null
-    brightnessPct: number | null
-    moisturePct: number | null
-    supplierId: string | null
-    supplierName: string | null
-  }>>(`
-    select
-      i.id,
-      i.material_code as "materialCode",
-      i.description,
-      i.unit,
-      i.qty_quarantine::float8 as "qtyQuarantine",
-      i.qty_available::float8 as "qtyAvailable",
-      i.qty_reserved::float8 as "qtyReserved",
-      i.qty_fg::float8 as "qtyFg",
-      i.weighted_avg_cost::float8 as "weightedAvgCost",
-      i.reorder_point::float8 as "reorderPoint",
-      i.safety_stock::float8 as "safetyStock",
-      i.active,
-      i.board_type as "boardType",
-      i.gsm,
-      i.sheet_length::float8 as "sheetLength",
-      i.sheet_width::float8 as "sheetWidth",
-      i.brightness_pct::float8 as "brightnessPct",
-      i.moisture_pct::float8 as "moisturePct",
-      s.id as "supplierId",
-      s.name as "supplierName"
-    from inventory i
-    left join suppliers s on s.id = i.supplier_id
-    order by i.material_code asc
-  `)
-  return NextResponse.json(list.map((m) => ({
-    id: m.id,
-    materialCode: m.materialCode,
-    description: m.description,
-    unit: m.unit,
-    qtyQuarantine: m.qtyQuarantine,
-    qtyAvailable: m.qtyAvailable,
-    qtyReserved: m.qtyReserved,
-    qtyFg: m.qtyFg,
-    weightedAvgCost: m.weightedAvgCost,
-    reorderPoint: m.reorderPoint,
-    safetyStock: m.safetyStock,
-    active: m.active,
-    boardType: m.boardType,
-    gsm: m.gsm,
-    sheetLength: m.sheetLength,
-    sheetWidth: m.sheetWidth,
-    brightnessPct: m.brightnessPct,
-    moisturePct: m.moisturePct,
-    supplier: m.supplierId ? { id: m.supplierId, name: m.supplierName ?? '' } : null,
-  })))
+  const list = await db.inventory.findMany({
+    orderBy: { materialCode: 'asc' },
+    include: { supplier: { select: { id: true, name: true } } },
+  })
+  return NextResponse.json(
+    list.map((m) => ({
+      id: m.id,
+      materialCode: m.materialCode,
+      description: m.description,
+      unit: m.unit,
+      qtyQuarantine: Number(m.qtyQuarantine),
+      qtyAvailable: Number(m.qtyAvailable),
+      qtyReserved: Number(m.qtyReserved),
+      qtyFg: Number(m.qtyFg),
+      weightedAvgCost: Number(m.weightedAvgCost),
+      reorderPoint: Number(m.reorderPoint),
+      safetyStock: Number(m.safetyStock),
+      active: m.active,
+      boardType: null,
+      gsm: null,
+      sheetLength: null,
+      sheetWidth: null,
+      brightnessPct: null,
+      moisturePct: null,
+      supplier: m.supplier ? { id: m.supplier.id, name: m.supplier.name } : null,
+    })),
+  )
 }
 
 export async function POST(req: NextRequest) {

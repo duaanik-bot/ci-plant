@@ -31,6 +31,16 @@ const cards = [
     label: 'Users',
     description: 'Name, email, role, PIN, machine access',
   },
+  {
+    href: '/masters/departments',
+    label: 'Department',
+    description: 'Department master (setup pending)',
+  },
+  {
+    href: '/masters/employees',
+    label: 'Employee',
+    description: 'Employee master (setup pending)',
+  },
 ]
 
 export default function MastersHomePage() {

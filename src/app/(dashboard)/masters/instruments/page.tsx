@@ -120,6 +120,12 @@ export default function MastersInstrumentsPage() {
           >
             {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
           </button>
+          <Link
+            href="/masters/instruments/new"
+            className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+          >
+            Add instrument
+          </Link>
         </div>
       </div>
       <EnterpriseTableShell>
