@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   if (status) where.planningStatus = status
   if (customerId) where.po = { customerId }
 
-  const [list, machines, invRows] = await Promise.all([
+  const [list, machines, invRows, paperRows] = await Promise.all([
     db.poLineItem.findMany({
       where,
       orderBy: [
@@ -104,6 +104,16 @@ export async function GET(req: NextRequest) {
       where: { active: true },
       select: { materialCode: true, description: true, qtyAvailable: true, qtyReserved: true },
     }),
+    db.paperWarehouse.findMany({
+      where: { qtySheets: { gt: 0 } },
+      select: {
+        paperType: true,
+        boardGrade: true,
+        gsm: true,
+        qtySheets: true,
+        location: true,
+      },
+    }),
   ])
 
   const machineList = machines.map((m) => ({ id: m.id, machineCode: m.machineCode }))
@@ -182,6 +192,56 @@ export async function GET(req: NextRequest) {
         inventoryRows: invRows,
       })
 
+      const boardFromPo = typeof li.paperType === 'string' && li.paperType.trim() ? li.paperType.trim() : ''
+      const boardFromCarton =
+        typeof li.carton?.paperType === 'string' && li.carton.paperType.trim() ? li.carton.paperType.trim() : ''
+      const boardFromQueue =
+        typeof li.materialQueue?.boardType === 'string' && li.materialQueue.boardType.trim()
+          ? li.materialQueue.boardType.trim()
+          : ''
+      const boardWanted = boardFromQueue || boardFromPo || boardFromCarton
+      const gsmWanted =
+        typeof li.materialQueue?.gsm === 'number'
+          ? li.materialQueue.gsm
+          : typeof li.gsm === 'number'
+            ? li.gsm
+            : li.carton?.gsm ?? null
+
+      const boardTokens = boardWanted
+        .toLowerCase()
+        .split(/[\s/,-]+/)
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 2)
+      const boardMatch = (txt: string) => {
+        if (!boardTokens.length) return true
+        const hay = txt.toLowerCase()
+        return boardTokens.some((t) => hay.includes(t))
+      }
+
+      const matchedPaperRows = paperRows.filter((pw) => {
+        if (typeof gsmWanted === 'number' && Number.isFinite(gsmWanted) && pw.gsm !== gsmWanted) return false
+        return boardMatch(`${pw.boardGrade ?? ''} ${pw.paperType}`)
+      })
+      const leftoverSheets = matchedPaperRows
+        .filter((pw) => String(pw.location ?? '').trim().toUpperCase() === 'FLOOR')
+        .reduce((sum, pw) => sum + Math.max(0, Number(pw.qtySheets) || 0), 0)
+      const mainAvailableSheets = matchedPaperRows
+        .filter((pw) => String(pw.location ?? '').trim().toUpperCase() !== 'FLOOR')
+        .reduce((sum, pw) => sum + Math.max(0, Number(pw.qtySheets) || 0), 0)
+      const requiredSheets = li.materialQueue?.totalSheets ?? null
+      const availableTotalSheets = mainAvailableSheets + leftoverSheets
+      let stockSignal: 'green' | 'yellow' | 'red' = 'red'
+      if (requiredSheets != null && availableTotalSheets >= requiredSheets) stockSignal = 'green'
+      else if (availableTotalSheets > 0) stockSignal = 'yellow'
+
+      const suggestedBoardOptions = Array.from(
+        new Set(
+          matchedPaperRows
+            .map((pw) => (pw.boardGrade?.trim() || pw.paperType.trim()))
+            .filter((v) => !!v),
+        ),
+      ).slice(0, 3)
+
       const readinessFive = computeFivePointReadiness({
         artworkLocksCompleted,
         platesStatus,
@@ -213,6 +273,17 @@ export async function GET(req: NextRequest) {
         planningLedger: {
           toolingInterlock,
           materialGate,
+          boardStockInsight: {
+            boardWanted: boardWanted || null,
+            gsmWanted: typeof gsmWanted === 'number' && Number.isFinite(gsmWanted) ? gsmWanted : null,
+            suggestedBoardOptions,
+            availableMainSheets: mainAvailableSheets,
+            availableLeftoverSheets: leftoverSheets,
+            availableTotalSheets,
+            reservedSheets: Math.max(0, Number(requiredSheets ?? 0) - availableTotalSheets),
+            requiredSheets,
+            stockSignal,
+          },
           suggestedMachineId,
           estimatedDurationHours,
           numberOfColours,

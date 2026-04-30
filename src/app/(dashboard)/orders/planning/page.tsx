@@ -92,6 +92,17 @@ type MaterialGate = {
 type PlanningLedger = {
   toolingInterlock: { segments: InterlockSegment[]; allReady: boolean }
   materialGate: MaterialGate
+  boardStockInsight?: {
+    boardWanted: string | null
+    gsmWanted: number | null
+    suggestedBoardOptions: string[]
+    availableMainSheets: number
+    availableLeftoverSheets: number
+    availableTotalSheets: number
+    reservedSheets: number
+    requiredSheets: number | null
+    stockSignal: 'green' | 'yellow' | 'red'
+  }
   suggestedMachineId: string | null
   estimatedDurationHours: number
   numberOfColours: number | null

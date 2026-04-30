@@ -71,6 +71,17 @@ export type PlanningGridLine = {
   dimWidthMm?: unknown
   planningLedger?: {
     numberOfColours?: number | null
+    boardStockInsight?: {
+      boardWanted: string | null
+      gsmWanted: number | null
+      suggestedBoardOptions: string[]
+      availableMainSheets: number
+      availableLeftoverSheets: number
+      availableTotalSheets: number
+      reservedSheets: number
+      requiredSheets: number | null
+      stockSignal: 'green' | 'yellow' | 'red'
+    }
   } | null
   po: {
     id: string
@@ -220,6 +231,16 @@ function coatingLabel(r: PlanningGridLine): string {
   const cartonLamination = typeof r.carton?.laminateType === 'string' ? r.carton.laminateType.trim() : ''
   if (cartonLamination) return cartonLamination
   return '—'
+}
+
+function stockSignalMeta(signal: 'green' | 'yellow' | 'red'): { label: string; cls: string } {
+  if (signal === 'green') {
+    return { label: 'Available', cls: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
+  }
+  if (signal === 'yellow') {
+    return { label: 'Partial', cls: 'border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300' }
+  }
+  return { label: 'Shortage', cls: 'border-rose-500/35 bg-rose-500/15 text-rose-700 dark:text-rose-300' }
 }
 
 type SortKey = 'cartonName' | 'cartonSize' | 'qty' | 'board' | 'gsm' | 'coating' | 'batch'
@@ -1215,9 +1236,16 @@ export function PlanningDecisionGrid({
 
                       {/* Board */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className={`text-xs font-medium ${allBoards.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
-                          {boardDisplay}
-                        </span>
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <span className={`text-xs font-medium ${allBoards.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+                            {boardDisplay}
+                          </span>
+                          {firstRow.planningLedger?.boardStockInsight ? (
+                            <span className={`inline-flex w-fit rounded border px-1 py-px text-[10px] font-medium ${stockSignalMeta(firstRow.planningLedger.boardStockInsight.stockSignal).cls}`}>
+                              {stockSignalMeta(firstRow.planningLedger.boardStockInsight.stockSignal).label}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
 
                       {/* GSM */}
@@ -1330,7 +1358,14 @@ export function PlanningDecisionGrid({
                         <span className="text-xs font-semibold tabular-nums text-ds-ink">{r.quantity.toLocaleString('en-IN')}</span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
-                        <span className="text-xs text-ds-ink-muted">{brd}</span>
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <span className="text-xs text-ds-ink-muted">{brd}</span>
+                          {r.planningLedger?.boardStockInsight ? (
+                            <span className={`inline-flex w-fit rounded border px-1 py-px text-[10px] font-medium ${stockSignalMeta(r.planningLedger.boardStockInsight.stockSignal).cls}`}>
+                              {stockSignalMeta(r.planningLedger.boardStockInsight.stockSignal).label}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
                         <span className="text-xs text-ds-ink-muted">{gsm}</span>
@@ -1536,9 +1571,21 @@ export function PlanningDecisionGrid({
                       />
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <p className="line-clamp-2 break-words text-xs font-medium leading-tight text-ds-ink-muted" title={brd}>
-                        {brd}
-                      </p>
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <p className="line-clamp-2 break-words text-xs font-medium leading-tight text-ds-ink-muted" title={brd}>
+                          {brd}
+                        </p>
+                        {r.planningLedger?.boardStockInsight ? (
+                          <>
+                            <span className={`inline-flex w-fit rounded border px-1 py-px text-[10px] font-medium ${stockSignalMeta(r.planningLedger.boardStockInsight.stockSignal).cls}`}>
+                              {stockSignalMeta(r.planningLedger.boardStockInsight.stockSignal).label}
+                            </span>
+                            <p className="truncate text-[10px] text-ds-ink-faint">
+                              Main {r.planningLedger.boardStockInsight.availableMainSheets.toLocaleString('en-IN')} · Leftover {r.planningLedger.boardStockInsight.availableLeftoverSheets.toLocaleString('en-IN')}
+                            </p>
+                          </>
+                        ) : null}
+                      </div>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <p className="truncate text-xs font-medium text-ds-ink-muted" title={gsm}>
