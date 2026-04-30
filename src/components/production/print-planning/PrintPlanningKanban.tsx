@@ -35,6 +35,7 @@ export type PrintPlanningJobCard = {
   jobCardNumber: number
   status: string
   machineId: string | null
+  plateSetId?: string | null
   postPressRouting: Record<string, unknown> | null
   customer: { id: string; name: string }
   poLine: {
@@ -45,6 +46,8 @@ export type PrintPlanningJobCard = {
     upsFromSpec: number | null
     designerName: string | null
     batchType: string | null
+    numberOfColours: number | null
+    colourBreakdown: string[]
   } | null
 }
 
@@ -89,6 +92,17 @@ function readPrintPlanOrder(jc: PrintPlanningJobCard): number {
   return typeof o === 'number' ? o : 0
 }
 
+function triageReadinessScore(jc: PrintPlanningJobCard): number {
+  const setup =
+    jc.postPressRouting && typeof jc.postPressRouting === 'object'
+      ? ((jc.postPressRouting as Record<string, unknown>).executionSetup as Record<string, unknown> | undefined)
+      : undefined
+  const board = setup?.boardReadiness
+  const boardScore = board === 'ready' ? 2 : board === 'waiting' ? 1 : 0
+  const plateScore = jc.plateSetId ? 2 : 0
+  return boardScore + plateScore
+}
+
 function columnForJob(jc: PrintPlanningJobCard, pressIds: string[]): typeof TRIAGE | string {
   const machineSet = new Set(pressIds)
   const rout = jc.postPressRouting
@@ -121,6 +135,8 @@ function buildBoard(cards: PrintPlanningJobCard[], pressIds: string[]) {
       if (!ja || !jb) return 0
       const d = readPrintPlanOrder(ja) - readPrintPlanOrder(jb)
       if (d !== 0) return d
+      const readinessDelta = triageReadinessScore(jb) - triageReadinessScore(ja)
+      if (readinessDelta !== 0) return readinessDelta
       return jb.jobCardNumber - ja.jobCardNumber
     })
 
@@ -173,6 +189,39 @@ function SortableCard({
 }) {
   const po = jc.poLine
   const pri = po?.industrialPriority === true
+  const setup =
+    jc.postPressRouting && typeof jc.postPressRouting === 'object'
+      ? ((jc.postPressRouting as Record<string, unknown>).executionSetup as Record<string, unknown> | undefined)
+      : undefined
+  const boardReadinessRaw = setup?.boardReadiness
+  const boardReadiness =
+    boardReadinessRaw === 'ready' || boardReadinessRaw === 'waiting' || boardReadinessRaw === 'not_ready'
+      ? boardReadinessRaw
+      : null
+  const boardLabel =
+    boardReadiness === 'ready' ? 'Board ready' : boardReadiness === 'not_ready' ? 'Board blocked' : 'Board waiting'
+  const boardTone =
+    boardReadiness === 'ready'
+      ? 'border-[var(--success)]/40 bg-[var(--success-bg)] text-[var(--success)]'
+      : boardReadiness === 'not_ready'
+        ? 'border-[var(--error)]/40 bg-[var(--error-bg)] text-[var(--error)]'
+        : 'border-[var(--warning)]/40 bg-[var(--warning-bg)] text-[var(--warning)]'
+  const platesReady = !!jc.plateSetId
+  const plateLabel = platesReady ? 'Plates ready' : 'Plates pending'
+  const plateTone = platesReady
+    ? 'border-[var(--success)]/40 bg-[var(--success-bg)] text-[var(--success)]'
+    : 'border-[var(--error)]/40 bg-[var(--error-bg)] text-[var(--error)]'
+  const colourCount =
+    po?.numberOfColours && po.numberOfColours > 0
+      ? po.numberOfColours
+      : (po?.colourBreakdown?.length ?? 0) > 0
+        ? po!.colourBreakdown.length
+        : null
+  const colourSignal = colourCount != null ? `${colourCount}c` : '—'
+  const colourHints =
+    po?.colourBreakdown && po.colourBreakdown.length > 0
+      ? po.colourBreakdown.slice(0, 4).join('/')
+      : 'CMYK'
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: jc.id,
   })
@@ -214,6 +263,12 @@ function SortableCard({
         {po?.poNumber ?? '—'} · Qty {po?.quantity ?? '—'}
         {po?.upsFromSpec != null ? ` · UPS ${po.upsFromSpec}` : ''}
       </p>
+      <div className="mt-1 flex items-center gap-1 text-[10px] leading-tight text-ds-ink-faint">
+        <span className="rounded border border-ds-line/50 bg-ds-main px-1 py-0.5">🎨 {colourSignal}</span>
+        <span className={`rounded border px-1 py-0.5 ${boardTone}`}>{boardLabel}</span>
+        <span className={`rounded border px-1 py-0.5 ${plateTone}`}>{plateLabel}</span>
+      </div>
+      <p className="mt-0.5 truncate text-[10px] text-ds-ink-faint">{colourHints}</p>
       <p className="text-xs text-ds-ink-faint truncate">{jc.customer.name}</p>
     </div>
   )

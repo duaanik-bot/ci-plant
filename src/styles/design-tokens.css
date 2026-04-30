@@ -1,95 +1,113 @@
 /**
- * COLOUR IMPRESSIONS SaaS — CSS variables (Tailwind `ds` mirrors these).
- * Spacing: 1=4, 2=8, 3=12, 4=16, 6=24, 8=32. Radius: rounded-ds-sm/md/lg.
- * Component classes (.ds-input, etc.) live in `globals.css` (must run after @tailwind).
+ * COLOUR IMPRESSIONS — global UI tokens (single source of truth).
+ * Tailwind `ds-*` colors use RGB triplets for alpha support.
  */
 :root {
-  /* Typography system */
   --font-heading: 'Inter', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
   --font-label: 'Inter', system-ui, sans-serif;
   --font-small: 'Inter', system-ui, sans-serif;
 
-  /* Light theme (Figma-style neutral surfaces + cyan action accent). */
-  --ds-bg-main: #f4f7fc;
-  --ds-bg-main-rgb: 244 247 252;
-  --ds-bg-card: #ffffff;
+  /* —— Semantic (app-wide) —— */
+  --brand-primary: #f97316;
+  --brand-primary-hover: #ea580c;
+  --brand-bg-soft: rgba(249, 115, 22, 0.1);
+
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.12);
+
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+
+  --error: #ef4444;
+  --error-bg: rgba(239, 68, 68, 0.12);
+
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+
+  --bg-main: #ffffff;
+  --bg-card: #ffffff;
+  --bg-muted: #f9fafb;
+  --bg-elevated: #f9fafb;
+
+  --border: #e5e7eb;
+
+  /* —— ds-* mirrors (Tailwind theme) —— */
+  --ds-bg-main: var(--bg-main);
+  --ds-bg-main-rgb: 255 255 255;
+  --ds-bg-card: var(--bg-card);
   --ds-bg-card-rgb: 255 255 255;
-  --ds-bg-elevated: #edf2fb;
-  --ds-bg-elevated-rgb: 237 242 251;
-  --ds-border-subtle: #d6deea;
-  --ds-border-subtle-rgb: 214 222 234;
-  --ds-border-strong: #b7c4d8;
-  --ds-border-strong-rgb: 183 196 216;
-  --ds-text-primary: #0f172a;
-  --ds-text-primary-rgb: 15 23 42;
-  --ds-text-secondary: #334155;
-  --ds-text-secondary-rgb: 51 65 85;
-  --ds-text-muted: #64748b;
-  --ds-text-muted-rgb: 100 116 139;
-  --ds-kpi: #0369a1;
-  --ds-kpi-rgb: 3 105 161;
-  --ds-accent: #0ea5e9;
-  --ds-accent-rgb: 14 165 233;
-  --ds-accent-hover: #0284c7;
-  --ds-accent-hover-rgb: 2 132 199;
-  --ds-success: #15803d;
-  --ds-success-rgb: 21 128 61;
-  --ds-warning: #b45309;
-  --ds-warning-rgb: 180 83 9;
-  --ds-error: #dc2626;
-  --ds-error-rgb: 220 38 38;
+  --ds-bg-elevated: var(--bg-elevated);
+  --ds-bg-elevated-rgb: 249 250 251;
+
+  --ds-border-subtle: var(--border);
+  --ds-border-subtle-rgb: 229 231 235;
+  --ds-border-strong: #d1d5db;
+  --ds-border-strong-rgb: 209 213 219;
+
+  --ds-text-primary: var(--text-primary);
+  --ds-text-primary-rgb: 17 24 39;
+  --ds-text-secondary: var(--text-secondary);
+  --ds-text-secondary-rgb: 107 114 128;
+  --ds-text-muted: var(--text-muted);
+  --ds-text-muted-rgb: 156 163 175;
+
+  --ds-kpi: var(--brand-primary);
+  --ds-kpi-rgb: 249 115 22;
+
+  --ds-accent: var(--brand-primary);
+  --ds-accent-rgb: 249 115 22;
+  --ds-accent-hover: var(--brand-primary-hover);
+  --ds-accent-hover-rgb: 234 88 12;
+
+  --ds-success: var(--success);
+  --ds-success-rgb: 34 197 94;
+  --ds-warning: var(--warning);
+  --ds-warning-rgb: 245 158 11;
+  --ds-error: var(--error);
+  --ds-error-rgb: 239 68 68;
+
   --ds-radius-sm: 6px;
   --ds-radius-md: 10px;
   --ds-radius-lg: 12px;
-  /* Depth (mirrors tailwind `shadow-ds-depth`) */
-  --ds-shadow-elevated: 0 8px 24px rgba(15, 23, 42, 0.08);
-  /* Subtle top wash on main canvas */
-  --ds-gradient-app-top: linear-gradient(180deg, rgba(14, 165, 233, 0.09) 0%, rgba(255, 255, 255, 0) 42%),
-    radial-gradient(ellipse 100% 52% at 50% 0%, rgba(2, 132, 199, 0.06), transparent 58%);
-  --ds-gradient-drawer: linear-gradient(180deg, rgba(14, 165, 233, 0.05) 0%, rgba(255, 255, 255, 0) 48%);
 
-  /* Semantic text aliases (requested system) */
-  --text-primary: var(--ds-text-primary);
-  --text-secondary: var(--ds-text-secondary);
-  --text-muted: var(--ds-text-muted);
+  --ds-shadow-elevated: 0 4px 24px rgba(15, 23, 42, 0.08);
+
+  --ds-gradient-app-top: none;
+  --ds-gradient-drawer: none;
 }
 
 .dark {
-  --ds-bg-main: #0a0f1c;
-  --ds-bg-main-rgb: 10 15 28;
-  --ds-bg-card: #111827;
-  --ds-bg-card-rgb: 17 24 39;
-  --ds-bg-elevated: #131a2b;
-  --ds-bg-elevated-rgb: 19 26 43;
-  --ds-border-subtle: #1a2332;
-  --ds-border-subtle-rgb: 26 35 50;
-  --ds-border-strong: #2a3344;
-  --ds-border-strong-rgb: 42 51 68;
-  --ds-text-primary: #e5e7eb;
-  --ds-text-primary-rgb: 229 231 235;
-  --ds-text-secondary: #9ca3af;
-  --ds-text-secondary-rgb: 156 163 175;
-  --ds-text-muted: #8ea0b8;
-  --ds-text-muted-rgb: 142 160 184;
-  --ds-kpi: #7dd3fc;
-  --ds-kpi-rgb: 125 211 252;
-  --ds-accent: #38bdf8;
-  --ds-accent-rgb: 56 189 248;
-  --ds-accent-hover: #0ea5e9;
-  --ds-accent-hover-rgb: 14 165 233;
-  --ds-success: #3fcf8e;
-  --ds-success-rgb: 63 207 142;
-  --ds-warning: #eab308;
-  --ds-warning-rgb: 234 179 8;
-  --ds-error: #f87171;
-  --ds-error-rgb: 248 113 113;
-  --ds-shadow-elevated: 0 10px 30px rgba(0, 0, 0, 0.25);
-  --ds-gradient-app-top: linear-gradient(180deg, rgba(19, 26, 43, 0.55) 0%, rgba(10, 15, 28, 0) 38%),
-    radial-gradient(ellipse 100% 50% at 50% 0%, rgba(56, 189, 248, 0.08), transparent 55%);
-  --ds-gradient-drawer: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(0, 0, 0, 0) 40%);
+  --bg-main: #0a0f1c;
+  --bg-card: #111827;
+  --bg-muted: #1f2937;
+  --bg-elevated: #1f2937;
 
-  --text-primary: var(--ds-text-primary);
-  --text-secondary: var(--ds-text-secondary);
-  --text-muted: var(--ds-text-muted);
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-muted: #9ca3af;
+
+  --border: #1f2937;
+
+  --ds-bg-main-rgb: 10 15 28;
+  --ds-bg-card-rgb: 17 24 39;
+  --ds-bg-elevated-rgb: 31 41 55;
+
+  --ds-border-subtle-rgb: 31 41 55;
+  --ds-border-strong-rgb: 55 65 81;
+
+  --ds-text-primary-rgb: 229 231 235;
+  --ds-text-secondary-rgb: 156 163 175;
+  --ds-text-muted-rgb: 156 163 175;
+
+  --ds-kpi-rgb: 249 115 22;
+  --ds-accent-rgb: 249 115 22;
+  --ds-accent-hover-rgb: 234 88 12;
+
+  --ds-success-rgb: 34 197 94;
+  --ds-warning-rgb: 245 158 11;
+  --ds-error-rgb: 239 68 68;
+
+  --ds-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.35);
 }

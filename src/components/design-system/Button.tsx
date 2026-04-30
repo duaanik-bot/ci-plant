@@ -7,13 +7,13 @@ type Variant = 'primary' | 'secondary' | 'danger' | 'ghost'
 
 const variantClass: Record<Variant, string> = {
   primary:
-    'bg-ds-brand text-white shadow-sm hover:bg-ds-brand-hover hover:brightness-[1.04] hover:shadow-md focus-visible:ring-ds-brand/40',
+    'bg-[var(--brand-primary)] text-white shadow-sm hover:bg-[var(--brand-primary-hover)] hover:brightness-[1.02] hover:shadow-md focus-visible:ring-[var(--brand-primary)]/40',
   secondary:
-    'border border-ds-line bg-ds-elevated/80 text-ds-ink shadow-sm hover:bg-ds-card hover:brightness-[1.02] hover:shadow-md focus-visible:ring-ds-brand/25',
+    'border border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-primary)] shadow-sm hover:bg-[var(--bg-card)] hover:shadow-md focus-visible:ring-[var(--brand-primary)]/25',
   danger:
-    'bg-ds-error/90 text-white hover:bg-ds-error hover:brightness-[1.04] focus-visible:ring-ds-error/35',
+    'bg-[var(--error)] text-white hover:opacity-95 focus-visible:ring-[var(--error)]/35',
   ghost:
-    'text-ds-ink-muted hover:bg-ds-elevated/55 focus-visible:ring-ds-brand/20',
+    'text-[var(--text-secondary)] hover:bg-[var(--bg-muted)] focus-visible:ring-[var(--brand-primary)]/20',
 }
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {

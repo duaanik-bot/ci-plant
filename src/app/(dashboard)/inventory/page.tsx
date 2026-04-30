@@ -52,6 +52,45 @@ type StockStateItem = {
 }
 
 type JobCardOpt = { id: string; jobCardNumber: number; customer?: { name: string } }
+type ActivityRow = {
+  id: string
+  materialId: string
+  materialCode: string
+  materialDescription: string
+  unit: string
+  movementType: string
+  qty: number
+  refType: string | null
+  refId: string | null
+  userId: string | null
+  createdAt: string
+}
+type FgExcessRow = {
+  id: string
+  materialCode: string
+  description: string
+  unit: string
+  qtyFg: number
+  fgValueInr: number
+  boxNumber: string
+  boxAgeDays: number | null
+  estimatedBoxes: number
+  customerHints: {
+    customerId: string
+    customerName: string
+    poNumber: string
+    poDate: string
+    qtyOrdered: number
+  }[]
+  logs: {
+    id: string
+    movementType: string
+    qty: number
+    refType: string | null
+    refId: string | null
+    at: string
+  }[]
+}
 
 function InventoryPageContent() {
   const searchParams = useSearchParams()
@@ -77,6 +116,18 @@ function InventoryPageContent() {
   const [issueSubmitting, setIssueSubmitting] = useState(false)
   const [jobCards, setJobCards] = useState<JobCardOpt[]>([])
   const [jobSearch, setJobSearch] = useState('')
+  const [fgExcess, setFgExcess] = useState<FgExcessRow[]>([])
+  const [fgSearch, setFgSearch] = useState('')
+  const [fgDrawer, setFgDrawer] = useState<FgExcessRow | null>(null)
+  const [activityRows, setActivityRows] = useState<ActivityRow[]>([])
+  const [adjustMaterialId, setAdjustMaterialId] = useState('')
+  const [adjustQty, setAdjustQty] = useState('')
+  const [adjustDirection, setAdjustDirection] = useState<'add' | 'subtract'>('add')
+  const [adjustBucket, setAdjustBucket] = useState<'quarantine' | 'available' | 'reserved' | 'fg'>('available')
+  const [adjustReason, setAdjustReason] = useState('')
+  const [adjustRemarks, setAdjustRemarks] = useState('')
+  const [adjustSubmitting, setAdjustSubmitting] = useState(false)
+  const [adjustOpen, setAdjustOpen] = useState(false)
 
   const loadPaperLedger = useCallback(
     async (opts: { customerPo: string; gsm?: string; board?: string }) => {
@@ -117,13 +168,19 @@ function InventoryPageContent() {
         fetch('/api/job-cards')
           .then((r) => r.json())
           .then((list) => setJobCards(Array.isArray(list) ? list : [])),
+        fetch(`/api/inventory/fg-excess${fgSearch.trim() ? `?q=${encodeURIComponent(fgSearch.trim())}` : ''}`)
+          .then((r) => r.json())
+          .then((rows) => setFgExcess(Array.isArray(rows) ? rows : [])),
+        fetch('/api/inventory/activity-log?limit=40')
+          .then((r) => r.json())
+          .then((rows) => setActivityRows(Array.isArray(rows) ? rows : [])),
       ])
     } catch {
       /* noop */
     } finally {
       setLoading(false)
     }
-  }, [debouncedHubPo, ledgerGsm, ledgerBoard, loadPaperLedger])
+  }, [debouncedHubPo, fgSearch, ledgerGsm, ledgerBoard, loadPaperLedger])
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedHubPo(hubSearchPo), 320)
@@ -246,8 +303,69 @@ function InventoryPageContent() {
 
   const operatorLabel = session?.user?.name?.trim() || 'Operator'
 
+  async function submitAdjust() {
+    const qty = Number(adjustQty)
+    if (!adjustMaterialId) {
+      toast.error('Select material first')
+      return
+    }
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error('Enter valid quantity')
+      return
+    }
+    if (!adjustReason.trim() || !adjustRemarks.trim()) {
+      toast.error('Reason and remarks are required')
+      return
+    }
+    setAdjustSubmitting(true)
+    try {
+      const res = await fetch('/api/inventory/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          materialId: adjustMaterialId,
+          qty,
+          direction: adjustDirection,
+          bucket: adjustBucket,
+          reasonCode: adjustReason.trim(),
+          remarks: adjustRemarks.trim(),
+        }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || 'Adjustment failed')
+      toast.success('Stock adjusted')
+      setAdjustOpen(false)
+      setAdjustQty('')
+      setAdjustReason('')
+      setAdjustRemarks('')
+      await reloadAll()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Adjustment failed')
+    } finally {
+      setAdjustSubmitting(false)
+    }
+  }
+
+  async function reverseMovement(id: string) {
+    const remarks = window.prompt('Reverse remarks (required):', 'Reverse wrong entry')
+    if (!remarks || remarks.trim().length < 3) return
+    try {
+      const res = await fetch('/api/inventory/reverse-movement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ movementId: id, remarks: remarks.trim() }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.error || 'Reverse failed')
+      toast.success('Movement reversed')
+      await reloadAll()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Reverse failed')
+    }
+  }
+
   return (
-    <div className="p-4 max-w-6xl mx-auto">
+    <div className="w-full px-4 py-3">
       <section
         id="paper-ledger"
         className="mb-8 rounded-xl border border-ds-line/40 overflow-hidden bg-background text-ds-ink"
@@ -389,6 +507,89 @@ function InventoryPageContent() {
         </div>
       </section>
 
+      <section className="mb-8 rounded-xl border border-ds-line/40 overflow-hidden bg-background text-ds-ink">
+        <div className="p-4 md:p-6">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-ds-warning">FG warehouse - excess stock</h2>
+              <p className="text-xs text-ds-ink-faint mt-1">
+                Surplus finished stock above immediate customer lift plan. Open any row for movement logs.
+              </p>
+            </div>
+            <input
+              type="text"
+              value={fgSearch}
+              onChange={(e) => setFgSearch(e.target.value)}
+              placeholder="Search material / product"
+              className="w-full max-w-sm rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-ds-line/40">
+            <table className="w-full text-sm">
+              <thead className="bg-background text-left border-b border-ds-line/40">
+                <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
+                  <th className="px-3 py-2">Material</th>
+                  <th className="px-3 py-2">Excess FG</th>
+                  <th className="px-3 py-2">Box no.</th>
+                  <th className="px-3 py-2">Box age</th>
+                  <th className="px-3 py-2">Brands</th>
+                  <th className="px-3 py-2">Value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ds-card">
+                {fgExcess.map((row) => (
+                  <tr
+                    key={row.id}
+                    className="cursor-pointer hover:bg-ds-main/70"
+                    onClick={() => setFgDrawer(row)}
+                  >
+                    <td className="px-3 py-2">
+                      <p className={`text-sm text-ds-ink ${ledgerMono}`}>{row.materialCode}</p>
+                      <p className="text-xs text-ds-ink-faint">{row.description}</p>
+                    </td>
+                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>
+                      {row.qtyFg.toLocaleString('en-IN')} {row.unit}
+                    </td>
+                    <td className={`px-3 py-2 ${ledgerMono}`}>
+                      {row.boxNumber}
+                      <div className="text-xs text-ds-ink-faint">{row.estimatedBoxes} boxes</div>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-ds-ink-faint">
+                      {row.boxAgeDays != null ? `${row.boxAgeDays} days` : '—'}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {row.customerHints.length === 0 ? (
+                          <span className="text-xs text-ds-ink-faint">No linked brand</span>
+                        ) : (
+                          row.customerHints.map((c) => (
+                            <Link
+                              key={`${row.id}-${c.customerId}`}
+                              href={`/orders/purchase-orders?customerId=${encodeURIComponent(c.customerId)}`}
+                              className="rounded border border-ds-line/50 px-2 py-0.5 text-xs text-sky-400 hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                              }}
+                              title={`${c.customerName} · ${c.poNumber}`}
+                            >
+                              {c.customerName}
+                            </Link>
+                          ))
+                        )}
+                      </div>
+                    </td>
+                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmtVal(row.fgValueInr)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {fgExcess.length === 0 ? (
+              <p className="p-6 text-center text-ds-ink-faint text-sm">No FG excess rows found.</p>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
       <SlideOverPanel
         title="Batch detail & issue"
         isOpen={!!drawerRow}
@@ -523,9 +724,77 @@ function InventoryPageContent() {
         ) : null}
       </SlideOverPanel>
 
+      <SlideOverPanel
+        title="FG box detail"
+        isOpen={!!fgDrawer}
+        onClose={() => setFgDrawer(null)}
+        widthClass="max-w-md"
+        backdropClassName="bg-background/60"
+        panelClassName="border-l border-ds-line/40 bg-background shadow-2xl"
+      >
+        {fgDrawer ? (
+          <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-ds-ink-muted ${ledgerMono}`}>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Box number</p>
+              <p className="text-sm text-ds-ink font-semibold">{fgDrawer.boxNumber}</p>
+              <p className="text-ds-ink-faint mt-1">{fgDrawer.description}</p>
+              <p className="text-ds-warning mt-1">
+                On hand: {fgDrawer.qtyFg.toLocaleString('en-IN')} {fgDrawer.unit} · {fgDrawer.estimatedBoxes} boxes
+              </p>
+              <p className="text-ds-ink-faint">
+                Box age: {fgDrawer.boxAgeDays != null ? `${fgDrawer.boxAgeDays} days` : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Linked brands / POs</p>
+              {fgDrawer.customerHints.length === 0 ? (
+                <p className="text-ds-ink-faint">No matched customer history.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {fgDrawer.customerHints.map((c) => (
+                    <li key={`${c.customerId}-${c.poNumber}`} className="rounded border border-ds-line/40 px-2 py-1.5">
+                      <p className="text-sky-400">{c.customerName}</p>
+                      <p className="text-ds-ink-faint">
+                        {c.poNumber} · Qty {c.qtyOrdered.toLocaleString('en-IN')}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Movement logs</p>
+              {fgDrawer.logs.length === 0 ? (
+                <p className="text-ds-ink-faint">No stock logs found.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {fgDrawer.logs.map((log) => (
+                    <li key={log.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                      <p className="text-ds-ink">
+                        {log.movementType} · {log.qty.toLocaleString('en-IN')}
+                      </p>
+                      <p className="text-ds-ink-faint">
+                        {new Date(log.at).toLocaleString()} · {log.refType ?? '—'} {log.refId ? `· ${log.refId.slice(0, 8)}` : ''}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </SlideOverPanel>
+
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-ds-warning">Stock States</h1>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setAdjustOpen(true)}
+            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+          >
+            Adjust Stock
+          </button>
           <Link
             href="/inventory/flow"
             className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
@@ -548,7 +817,7 @@ function InventoryPageContent() {
             href="/inventory/grn"
             className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
           >
-            Goods receipt (GRN)
+            Add Stock (GRN)
           </Link>
         </div>
       </div>
@@ -673,6 +942,145 @@ function InventoryPageContent() {
           </tbody>
         </table>
       </div>
+
+      <section className="mt-8 rounded-xl border border-ds-line/40 bg-background">
+        <div className="border-b border-ds-line/40 px-4 py-3">
+          <h2 className="text-sm font-semibold text-ds-warning">Recent stock movements</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-background text-left border-b border-ds-line/40">
+              <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
+                <th className="px-3 py-2">At</th>
+                <th className="px-3 py-2">Material</th>
+                <th className="px-3 py-2">Type</th>
+                <th className="px-3 py-2">Qty</th>
+                <th className="px-3 py-2">Ref</th>
+                <th className="px-3 py-2">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ds-card">
+              {activityRows.map((r) => (
+                <tr key={r.id}>
+                  <td className="px-3 py-2 text-xs text-ds-ink-faint">{new Date(r.createdAt).toLocaleString()}</td>
+                  <td className="px-3 py-2">
+                    <p className={`text-ds-ink ${ledgerMono}`}>{r.materialCode}</p>
+                    <p className="text-xs text-ds-ink-faint">{r.materialDescription}</p>
+                  </td>
+                  <td className="px-3 py-2 text-xs">{r.movementType}</td>
+                  <td className={`px-3 py-2 ${ledgerMono}`}>{r.qty.toLocaleString('en-IN')}</td>
+                  <td className="px-3 py-2 text-xs text-ds-ink-faint">{r.refType ?? '—'}</td>
+                  <td className="px-3 py-2">
+                    {r.movementType === 'adjust' && String(r.refType ?? '').startsWith('manual_adjust_') ? (
+                      <button
+                        type="button"
+                        onClick={() => void reverseMovement(r.id)}
+                        className="rounded border border-ds-line/50 px-2 py-1 text-xs hover:bg-ds-main"
+                      >
+                        Reverse
+                      </button>
+                    ) : (
+                      <span className="text-xs text-ds-ink-faint">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <SlideOverPanel
+        title="Adjust warehouse stock"
+        isOpen={adjustOpen}
+        onClose={() => setAdjustOpen(false)}
+        widthClass="max-w-md"
+      >
+        <div className="space-y-3 px-1 text-sm">
+          <label className="block text-xs text-ds-ink-faint">
+            Material
+            <select
+              value={adjustMaterialId}
+              onChange={(e) => setAdjustMaterialId(e.target.value)}
+              className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+            >
+              <option value="">Select material</option>
+              {items.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.materialCode} - {i.description}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs text-ds-ink-faint">
+              Direction
+              <select
+                value={adjustDirection}
+                onChange={(e) => setAdjustDirection(e.target.value as 'add' | 'subtract')}
+                className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+              >
+                <option value="add">Add (+)</option>
+                <option value="subtract">Subtract (-)</option>
+              </select>
+            </label>
+            <label className="block text-xs text-ds-ink-faint">
+              Bucket
+              <select
+                value={adjustBucket}
+                onChange={(e) =>
+                  setAdjustBucket(
+                    e.target.value as 'quarantine' | 'available' | 'reserved' | 'fg',
+                  )
+                }
+                className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+              >
+                <option value="quarantine">Quarantine</option>
+                <option value="available">Available</option>
+                <option value="reserved">Reserved</option>
+                <option value="fg">FG</option>
+              </select>
+            </label>
+          </div>
+          <label className="block text-xs text-ds-ink-faint">
+            Qty
+            <input
+              type="number"
+              min={0.001}
+              step="0.001"
+              value={adjustQty}
+              onChange={(e) => setAdjustQty(e.target.value)}
+              className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+            />
+          </label>
+          <label className="block text-xs text-ds-ink-faint">
+            Reason code
+            <input
+              type="text"
+              value={adjustReason}
+              onChange={(e) => setAdjustReason(e.target.value)}
+              className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+              placeholder="e.g. count_correction"
+            />
+          </label>
+          <label className="block text-xs text-ds-ink-faint">
+            Remarks
+            <textarea
+              value={adjustRemarks}
+              onChange={(e) => setAdjustRemarks(e.target.value)}
+              className="mt-1 min-h-[90px] w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={adjustSubmitting}
+            onClick={() => void submitAdjust()}
+            className="w-full rounded bg-ds-warning px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+          >
+            {adjustSubmitting ? 'Saving...' : 'Save adjustment'}
+          </button>
+        </div>
+      </SlideOverPanel>
     </div>
   )
 }

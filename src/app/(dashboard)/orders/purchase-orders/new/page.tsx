@@ -47,6 +47,28 @@ type LineToolingRowMeta = {
   tooltip: string
 }
 
+type StockInsightMatch = {
+  materialId: string
+  materialCode: string
+  description: string
+  qtyFg: number
+  unit: string
+  estimatedBoxes: number
+  boxNumber: string
+  boxAgeDays: number | null
+  approxValueInr: number
+}
+
+type FgReservation = {
+  reservationKey: string
+  materialId: string
+  materialCode: string
+  qtyReserved: number
+  unit: string
+  movementId: string
+  reservedAt: string
+}
+
 type Line = {
   cartonId: string
   cartonName: string
@@ -76,6 +98,9 @@ type Line = {
   ghostFromMaster: { size: boolean; gsm: boolean; pasting: boolean; rate: boolean }
   /** Board/paper procurement; live after PO save. */
   materialProcurementStatus?: string
+  stockCarryForward?: StockInsightMatch | null
+  fgReservation?: FgReservation | null
+  useReservedFirst?: boolean
 }
 
 type CartonLookupFieldProps = {
@@ -115,6 +140,9 @@ const defaultLine = (): Line => ({
   masterPastingStyleMissing: false,
   ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
   materialProcurementStatus: 'not_calculated',
+  stockCarryForward: null,
+  fgReservation: null,
+  useReservedFirst: true,
 })
 
 function hasLineInput(line: Line): boolean {
@@ -126,6 +154,8 @@ function hasLineInput(line: Line): boolean {
     if (key === 'toolingUnlinked') return value === true
     if (key === 'masterPastingStyleMissing') return value === true
     if (key === 'materialProcurementStatus') return false
+    if (key === 'stockCarryForward') return false
+    if (key === 'fgReservation') return false
     return String(value).trim() !== ''
   })
 }
@@ -156,6 +186,9 @@ function resetAutofillFields(line: Line, cartonName: string): Line {
     masterPastingStyleMissing: false,
     ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
     materialProcurementStatus: 'not_calculated',
+    stockCarryForward: null,
+    fgReservation: null,
+    useReservedFirst: true,
   }
 }
 
@@ -443,6 +476,9 @@ export default function NewPurchaseOrderPage() {
   const [masterPulseLine, setMasterPulseLine] = useState<number | null>(null)
 
   const [lineToolingByIdx, setLineToolingByIdx] = useState<Record<number, LineToolingRowMeta>>({})
+  const [stockInsightByIdx, setStockInsightByIdx] = useState<
+    Record<number, { matches: StockInsightMatch[]; linkedHistory: { poNumber: string; quantity: number }[] }>
+  >({})
   /** One-shot row highlight after hub status sync (e.g. new line). */
   const [toolingRowPulse, setToolingRowPulse] = useState<number | null>(null)
   const toolingPulseAfterFetchIdx = useRef<number | null>(null)
@@ -529,6 +565,7 @@ export default function NewPurchaseOrderPage() {
     if (!customerId) {
       setCustomerCartons([])
       setCustomerCartonsLoading(false)
+      setStockInsightByIdx({})
       return
     }
     let cancelled = false
@@ -553,6 +590,60 @@ export default function NewPurchaseOrderPage() {
       cancelled = true
     }
   }, [customerId])
+
+  useEffect(() => {
+    if (!customerId) return
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      void (async () => {
+        const entries = await Promise.all(
+          lines.map(async (ln, idx) => {
+            const hasSignal = ln.cartonId || ln.cartonName.trim() || ln.artworkCode.trim()
+            if (!hasSignal) return [idx, { matches: [], linkedHistory: [] }] as const
+            try {
+              const sp = new URLSearchParams({ customerId })
+              if (ln.cartonId) sp.set('cartonId', ln.cartonId)
+              if (ln.cartonName.trim()) sp.set('cartonName', ln.cartonName.trim())
+              if (ln.artworkCode.trim()) sp.set('artworkCode', ln.artworkCode.trim())
+              const res = await fetch(`/api/purchase-orders/product-stock-insight?${sp.toString()}`)
+              const json = (await res.json()) as {
+                matches?: StockInsightMatch[]
+                linkedHistory?: { poNumber: string; quantity: number }[]
+              }
+              if (!res.ok) return [idx, { matches: [], linkedHistory: [] }] as const
+              return [
+                idx,
+                {
+                  matches: Array.isArray(json.matches) ? json.matches : [],
+                  linkedHistory: Array.isArray(json.linkedHistory) ? json.linkedHistory : [],
+                },
+              ] as const
+            } catch {
+              return [idx, { matches: [], linkedHistory: [] }] as const
+            }
+          }),
+        )
+        if (cancelled) return
+        setStockInsightByIdx(Object.fromEntries(entries))
+      })()
+    }, 260)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [customerId, lines])
+
+  useEffect(() => {
+    setLines((prev) =>
+      prev.map((ln, idx) => {
+        const candidate = stockInsightByIdx[idx]?.matches?.[0] ?? null
+        if (!candidate && !ln.stockCarryForward) return ln
+        if (!candidate && ln.stockCarryForward) return { ...ln, stockCarryForward: null }
+        if (candidate && ln.stockCarryForward?.materialId === candidate.materialId) return ln
+        return { ...ln, stockCarryForward: candidate }
+      }),
+    )
+  }, [stockInsightByIdx])
 
   const deliverySchedule = useMemo(() => computeSuggestedDelivery(lines), [lines])
 
@@ -660,6 +751,106 @@ export default function NewPurchaseOrderPage() {
 
   const updateLine = (idx: number, patch: Partial<Line>) => {
     setLines((prev) => prev.map((ln, i) => (i === idx ? { ...ln, ...patch } : ln)))
+  }
+
+  async function reserveFgForLine(lineIndex: number, qtyRequested: number) {
+    const line = lines[lineIndex]
+    const candidate = line?.stockCarryForward
+    if (!line || !candidate) {
+      toast.error('No FG stock candidate selected for this line')
+      return
+    }
+    if (line.fgReservation) {
+      toast.error('FG stock already reserved for this line')
+      return
+    }
+    const qty = Number(qtyRequested)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error('Enter a valid reserve quantity')
+      return
+    }
+    if (qty > candidate.qtyFg) {
+      toast.error(`Cannot reserve above FG on-hand (${candidate.qtyFg.toLocaleString('en-IN')})`)
+      return
+    }
+    const latest = await fetch(
+      `/api/purchase-orders/product-stock-insight?${new URLSearchParams({
+        customerId,
+        cartonId: line.cartonId || '',
+        cartonName: line.cartonName || '',
+        artworkCode: line.artworkCode || '',
+      }).toString()}`,
+    ).then((r) => r.json())
+    const liveTop = Array.isArray(latest?.matches)
+      ? (latest.matches as StockInsightMatch[]).find((m) => m.materialId === candidate.materialId) ??
+        (latest.matches as StockInsightMatch[])[0]
+      : null
+    if (!liveTop || qty > liveTop.qtyFg) {
+      throw new Error(
+        `Live FG changed. Available now: ${Number(liveTop?.qtyFg ?? 0).toLocaleString('en-IN')} ${candidate.unit}`,
+      )
+    }
+    const reservationKey = `fg-${Date.now()}-${lineIndex}-${Math.random().toString(36).slice(2, 9)}`
+    const res = await fetch('/api/inventory/fg-reserve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        materialId: candidate.materialId,
+        qty,
+        reservationKey,
+        cartonName: line.cartonName,
+        artworkCode: line.artworkCode,
+      }),
+    })
+    const json = (await res.json().catch(() => ({}))) as {
+      error?: string
+      materialCode?: string
+      qtyReserved?: number
+      unit?: string
+      movementId?: string
+      reservedAt?: string
+      qtyFgAfter?: number
+    }
+    if (!res.ok) {
+      throw new Error(json.error || 'FG reserve failed')
+    }
+    updateLine(lineIndex, {
+      fgReservation: {
+        reservationKey,
+        materialId: candidate.materialId,
+        materialCode: json.materialCode ?? candidate.materialCode,
+        qtyReserved: json.qtyReserved ?? qty,
+        unit: json.unit ?? candidate.unit,
+        movementId: json.movementId ?? '',
+        reservedAt: json.reservedAt ?? new Date().toISOString(),
+      },
+      stockCarryForward: {
+        ...candidate,
+        qtyFg: Math.max(0, Number(json.qtyFgAfter ?? candidate.qtyFg - qty)),
+      },
+    })
+    toast.success(`Reserved ${qty.toLocaleString('en-IN')} ${candidate.unit} from FG stock`)
+  }
+
+  async function unreserveFgForLine(lineIndex: number) {
+    const line = lines[lineIndex]
+    if (!line?.fgReservation) {
+      toast.error('No FG reservation found on this line')
+      return
+    }
+    const res = await fetch('/api/inventory/fg-unreserve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        materialId: line.fgReservation.materialId,
+        qty: line.fgReservation.qtyReserved,
+        reservationKey: line.fgReservation.reservationKey,
+      }),
+    })
+    const json = (await res.json().catch(() => ({}))) as { error?: string }
+    if (!res.ok) throw new Error(json.error || 'Unreserve failed')
+    updateLine(lineIndex, { fgReservation: null })
+    toast.success('FG reservation released')
   }
 
   const saveProductMasterPasting = async (
@@ -855,6 +1046,8 @@ export default function NewPurchaseOrderPage() {
   }, 0)
   const grandTotal = subtotal + totalGst
   const totalQty = validLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
+  const totalFgReserved = lines.reduce((s, l) => s + (l.fgReservation?.qtyReserved ?? 0), 0)
+  const netFreshDemand = Math.max(0, totalQty - totalFgReserved)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -921,6 +1114,10 @@ export default function NewPurchaseOrderPage() {
                 masterDieType: l.toolingDieType.trim() || undefined,
                 dieMasterId: l.dieMasterId.trim() || undefined,
                 pastingStyle: l.pastingStyle as PastingStyle,
+                stockCarryForward:
+                  stockInsightByIdx[lines.findIndex((row) => row === l)]?.matches?.[0] ?? undefined,
+                fgReservation: l.fgReservation ?? undefined,
+                useReservedFirst: l.useReservedFirst !== false,
               },
             }
           }),
@@ -1326,6 +1523,21 @@ export default function NewPurchaseOrderPage() {
                             })
                           }}
                         />
+                        {stockInsightByIdx[idx]?.matches?.[0] ? (
+                          <button
+                            type="button"
+                            className="mt-1 w-full rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-left text-xs text-emerald-300"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setDetailLineIdx(idx)
+                            }}
+                            title="Stock available - open line drawer for full details"
+                          >
+                            In FG stock: {stockInsightByIdx[idx].matches[0].qtyFg.toLocaleString('en-IN')}{' '}
+                            {stockInsightByIdx[idx].matches[0].unit} · Box{' '}
+                            {stockInsightByIdx[idx].matches[0].boxNumber}
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                     <td
@@ -1453,6 +1665,18 @@ export default function NewPurchaseOrderPage() {
                 ₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </span>
+            <span>
+              FG reserved{' '}
+              <span className={cn(poMono, 'text-sm font-semibold text-emerald-300')}>
+                {totalFgReserved.toLocaleString('en-IN')}
+              </span>
+            </span>
+            <span>
+              Fresh demand{' '}
+              <span className={cn(poMono, 'text-sm font-semibold text-ds-ink')}>
+                {netFreshDemand.toLocaleString('en-IN')}
+              </span>
+            </span>
           </div>
         </div>
       </div>
@@ -1472,6 +1696,12 @@ export default function NewPurchaseOrderPage() {
         masterPastePopoverLine={masterPastePopoverLine}
         setMasterPastePopoverLine={setMasterPastePopoverLine}
         onSavePastingToMaster={(i, id, s) => void saveProductMasterPasting(i, id, s)}
+        onReserveFg={async (i, qty) => {
+          await reserveFgForLine(i, qty)
+        }}
+        onUnreserveFg={async (i) => {
+          await unreserveFgForLine(i)
+        }}
       />
 
       <SlideOverPanel title="Quick Create Customer" isOpen={qcCustomerOpen} onClose={() => setQcCustomerOpen(false)}>

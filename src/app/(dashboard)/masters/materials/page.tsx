@@ -84,7 +84,7 @@ export default function MastersMaterialsPage() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Board / Paper Master</h2>
+        <h2 className="text-base font-semibold text-[var(--text-primary)]">Board / Paper Master</h2>
         <Link href="/masters/materials/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
           Add material
         </Link>
@@ -101,7 +101,7 @@ export default function MastersMaterialsPage() {
       </div>
 
       <EnterpriseTableShell>
-        <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
+        <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-sm text-[var(--text-primary)]">
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>Stock</th>

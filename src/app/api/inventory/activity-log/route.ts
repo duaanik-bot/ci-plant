@@ -21,6 +21,7 @@ export async function GET(req: Request) {
 
   const list = movements.map((m) => ({
     id: m.id,
+    materialId: m.materialId,
     materialCode: m.material.materialCode,
     materialDescription: m.material.description,
     unit: m.material.unit,

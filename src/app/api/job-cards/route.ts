@@ -87,7 +87,8 @@ export async function GET(req: NextRequest) {
   else if (segment === 'qa_hold') where.status = 'final_qc'
   else if (segment === 'completed') where.status = { in: ['closed', 'qa_released'] }
   else if (segment === 'print_planning') {
-    where.status = { notIn: ['closed', 'qa_released'] }
+    // Planning triage should only show cards after explicit push/release from Job Card.
+    where.status = { in: ['qa_released', 'in_progress', 'final_qc'] }
   } else if (status) where.status = status
 
   let idFilter: number[] | null = null
@@ -146,6 +147,8 @@ export async function GET(req: NextRequest) {
       upsFromSpec: number | null
       designerName: string | null
       batchType: string | null
+      numberOfColours: number | null
+      colourBreakdown: string[]
     }
   >()
   type PoLineYield = NonNullable<Parameters<typeof computeJobYieldMetricsForCard>[2]>
@@ -180,6 +183,8 @@ export async function GET(req: NextRequest) {
             blankLength: true,
             blankWidth: true,
             gsm: true,
+            numberOfColours: true,
+            colourBreakdown: true,
           },
         },
         dieMaster: { select: { dyeNumber: true } },
@@ -214,6 +219,15 @@ export async function GET(req: NextRequest) {
           : typeof spec.batchType === 'string'
             ? (spec.batchType as string)
             : null
+      const colourBreakdown = Array.isArray(l.carton?.colourBreakdown)
+        ? l.carton.colourBreakdown
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object') return null
+              const name = (entry as Record<string, unknown>).name
+              return typeof name === 'string' ? name.trim() : null
+            })
+            .filter((name): name is string => !!name)
+        : []
       poLineByJcNumber.set(l.jobCardNumber, {
         id: l.id,
         cartonName: l.cartonName,
@@ -229,6 +243,8 @@ export async function GET(req: NextRequest) {
         upsFromSpec,
         designerName,
         batchType,
+        numberOfColours: l.carton?.numberOfColours ?? null,
+        colourBreakdown,
       })
       if (yieldMetrics) {
         poLineForYield.set(l.jobCardNumber, {

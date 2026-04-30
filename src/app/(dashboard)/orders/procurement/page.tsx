@@ -1984,7 +1984,7 @@ export default function ProcurementWorkbenchPage() {
 
   const qTrim = debouncedQ.trim()
   const glassKpi =
-    'ring-1 ring-ring/30 shadow-[0_8px_32px_rgba(0,0,0,0.35)] bg-gradient-to-br from-ds-main/50 to-ds-card/30'
+    'ring-1 ring-ring/30 shadow-ds-depth bg-[var(--bg-card)] border border-[var(--border)]'
 
   return (
     <IndustrialModuleShell
@@ -2254,7 +2254,7 @@ export default function ProcurementWorkbenchPage() {
             <tbody>
               {displayRequirements.map((r, rowIdx) => {
                 const pri = r.industrialPriority
-                  ? 'ring-2 ring-orange-500/60 shadow-[0_0_26px_rgba(251,146,60,0.38)] bg-gradient-to-r from-orange-950/25 to-ds-warning/10'
+                  ? 'ring-2 ring-[var(--brand-primary)]/50 shadow-ds-depth-sm bg-[var(--brand-bg-soft)]'
                   : ''
                 const riskGlow = leadBufferRowGlow(r.leadBuffer)
                 const days = daysSinceRequest(r.oldestCalculatedAt)

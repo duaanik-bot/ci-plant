@@ -32,12 +32,12 @@ export function PlateStarLedger({
           <div key={`${r.key}-${idx}`} className="flex flex-wrap items-center gap-x-0.5 gap-y-0">
             <PlateHubColourSwatch short={r.short} label={r.label} size="sm" className="mr-0.5" />
             {Array.from({ length: shown }, (_, i) => (
-              <span key={i} className="text-yellow-500 text-xs leading-none" aria-hidden>
+              <span key={i} className="text-[var(--warning)] text-xs leading-none" aria-hidden>
                 ★
               </span>
             ))}
             {plus > 0 ? (
-              <span className="text-yellow-500 shrink-0" aria-hidden>
+              <span className="text-[var(--warning)] shrink-0" aria-hidden>
                 +{plus}
               </span>
             ) : null}

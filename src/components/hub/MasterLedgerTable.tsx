@@ -60,7 +60,7 @@ function PlateStageDaysCell({ lastStatusUpdatedAt }: { lastStatusUpdatedAt: stri
   return (
     <span
       className={`font-designing-queue text-sm font-medium tabular-nums ${
-        critical ? 'text-rose-600 animate-industrial-age-pulse dark:text-rose-400' : 'text-ds-ink-faint dark:text-ds-ink-muted'
+        critical ? 'text-[var(--error)] animate-industrial-age-pulse' : 'text-ds-ink-faint dark:text-ds-ink-muted'
       }`}
       title="Days since last status update in this zone"
     >
@@ -188,11 +188,11 @@ export function MasterLedgerTable({
                           statusLabel: r.statusLabel,
                         })
                       }
-                      className="block w-full max-w-md min-w-0 break-words whitespace-normal text-left text-sm font-bold leading-snug tracking-tight text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                      className="block w-full max-w-md min-w-0 break-words whitespace-normal text-left text-sm font-bold leading-snug tracking-tight text-[var(--brand-primary)] hover:opacity-90 hover:underline"
                     >
                       {r.cartonName}
                       {r.partialRemake ? (
-                        <span className="ml-1 font-bold text-rose-600 dark:text-rose-400">(Remake)</span>
+                        <span className="ml-1 font-bold text-[var(--error)]">(Remake)</span>
                       ) : null}
                     </button>
                     <p className="mt-0.5 break-words text-xs font-medium text-ds-ink-faint whitespace-normal dark:text-ds-ink-muted">

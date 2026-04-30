@@ -34,6 +34,27 @@ type Line = {
   pastingStyle: string
   masterPastingStyleMissing: boolean
   ghostFromMaster: { size: boolean; gsm: boolean; pasting: boolean; rate: boolean }
+  stockCarryForward?: {
+    materialId: string
+    materialCode: string
+    description: string
+    qtyFg: number
+    unit: string
+    estimatedBoxes: number
+    boxNumber: string
+    boxAgeDays: number | null
+    approxValueInr: number
+  } | null
+  fgReservation?: {
+    reservationKey: string
+    materialId: string
+    materialCode: string
+    qtyReserved: number
+    unit: string
+    movementId: string
+    reservedAt: string
+  } | null
+  useReservedFirst?: boolean
 }
 
 type PoNewLineItemDrawerProps = {
@@ -51,6 +72,8 @@ type PoNewLineItemDrawerProps = {
   masterPastePopoverLine: number | null
   setMasterPastePopoverLine: (n: number | null) => void
   onSavePastingToMaster: (lineIndex: number, cartonId: string, style: PastingStyle) => void
+  onReserveFg?: (lineIndex: number, qty: number) => Promise<void>
+  onUnreserveFg?: (lineIndex: number) => Promise<void>
 }
 
 const SECTION_IDS = ['po-sec-material', 'po-sec-print', 'po-sec-cost'] as const
@@ -100,8 +123,11 @@ export function PoNewLineItemDrawer({
   masterPastePopoverLine,
   setMasterPastePopoverLine,
   onSavePastingToMaster,
+  onReserveFg,
+  onUnreserveFg,
 }: PoNewLineItemDrawerProps) {
   const panelRootRef = useRef<HTMLDivElement | null>(null)
+  const reserveQtyRef = useRef<HTMLInputElement | null>(null)
 
   const moveFocus = useCallback(
     (dir: 'next' | 'prev' | 'sectionNext') => {
@@ -215,6 +241,80 @@ export function PoNewLineItemDrawer({
         ) : (
           <>
             <CardSection id="po-sec-material" title="Material">
+              {line.stockCarryForward ? (
+                <div className="rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300 sm:col-span-3">
+                  FG stock available: {line.stockCarryForward.qtyFg.toLocaleString('en-IN')} {line.stockCarryForward.unit}
+                  {' · '}Box {line.stockCarryForward.boxNumber}
+                  {' · '}Age {line.stockCarryForward.boxAgeDays ?? '—'} days
+                  {line.fgReservation ? (
+                    <span>
+                      {' · '}Reserved {line.fgReservation.qtyReserved.toLocaleString('en-IN')} {line.fgReservation.unit}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              {line.stockCarryForward ? (
+                <div className="rounded border border-ds-line/50 bg-ds-elevated/30 px-3 py-2 sm:col-span-3">
+                  <p className="mb-2 text-xs uppercase tracking-wide text-ds-warning">Reserve from FG stock</p>
+                  <p className="mb-2 text-xs text-ds-ink-faint">
+                    Fresh demand after reserve:{' '}
+                    <span className="text-ds-ink">
+                      {Math.max(
+                        0,
+                        (Number(line.quantity) || 0) - (line.fgReservation?.qtyReserved ?? 0),
+                      ).toLocaleString('en-IN')}
+                    </span>
+                  </p>
+                  {line.fgReservation ? (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <p className="text-xs text-emerald-300">
+                        Reserved {line.fgReservation.qtyReserved.toLocaleString('en-IN')} {line.fgReservation.unit} from{' '}
+                        {line.fgReservation.materialCode} · {new Date(line.fgReservation.reservedAt).toLocaleString()}
+                      </p>
+                      {onUnreserveFg ? (
+                        <Button type="button" variant="secondary" onClick={() => void onUnreserveFg(lineIndex)}>
+                          Unreserve
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="block text-xs text-ds-ink-faint">
+                        Reserve qty
+                        <input
+                          ref={reserveQtyRef}
+                          type="number"
+                          min={1}
+                          max={Math.max(1, line.stockCarryForward.qtyFg)}
+                          className={`mt-1 w-28 ${inputCls}`}
+                          placeholder="Qty"
+                        />
+                      </label>
+                      {onReserveFg ? (
+                        <Button
+                          type="button"
+                          onClick={async () => {
+                            const raw = reserveQtyRef.current?.value ?? ''
+                            const qty = Number(raw)
+                            await onReserveFg(lineIndex, qty)
+                          }}
+                        >
+                          Reserve from FG
+                        </Button>
+                      ) : null}
+                    </div>
+                  )}
+                  <label className="mt-2 flex items-center gap-2 text-xs text-ds-ink-faint">
+                    <input
+                      type="checkbox"
+                      checked={line.useReservedFirst !== false}
+                      onChange={(e) => updateLine(lineIndex, { useReservedFirst: e.target.checked })}
+                      className="rounded border-ds-line/60"
+                    />
+                    Use reserved stock first during planning/job-card generation
+                  </label>
+                </div>
+              ) : null}
               <div>
                 <label className={labelSec}>Board</label>
                 <div data-skip-po-enter-chain>

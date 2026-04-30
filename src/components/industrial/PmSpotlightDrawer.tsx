@@ -106,9 +106,9 @@ export function PmSpotlightDrawer({
       onClose={onClose}
       widthClass="max-w-lg"
     >
-      <div className={`space-y-5 text-sm text-neutral-400 bg-background min-h-[120px] ${mono}`}>
+      <div className={`space-y-5 text-sm text-[var(--text-secondary)] bg-background min-h-[120px] ${mono}`}>
         {loading ? (
-          <p className="text-neutral-500 text-sm">Loading…</p>
+          <p className="text-[var(--text-secondary)] text-sm">Loading…</p>
         ) : data ? (
           <>
             <div className="flex items-center gap-4 rounded-xl border border-ds-line/40 bg-ds-main/80 px-3 py-3">
@@ -119,11 +119,11 @@ export function PmSpotlightDrawer({
               />
               <div className="space-y-1 text-xs">
                 <p className="text-ds-ink font-medium">{data.machine.name}</p>
-                <p className="text-neutral-500">
+                <p className="text-[var(--text-secondary)]">
                   Health {data.health.hasSchedule ? `${data.health.healthPct}%` : 'no schedule'}
                 </p>
                 {data.health.hasSchedule ? (
-                  <p className="text-neutral-500">
+                  <p className="text-[var(--text-secondary)]">
                     Usage {data.usageRunHours}h · {data.usageImpressions} imp.
                     {data.intervalRunHours != null ? ` / ${data.intervalRunHours}h` : ''}
                     {data.intervalImpressions != null ? ` · ${data.intervalImpressions} imp. interval` : ''}
@@ -133,21 +133,21 @@ export function PmSpotlightDrawer({
             </div>
 
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">
                 Service history (last 3)
               </h3>
               {data.serviceHistory.length === 0 ? (
-                <p className="text-neutral-600 text-xs">No PM sign-offs recorded yet.</p>
+                <p className="text-[var(--text-secondary)] text-xs">No PM sign-offs recorded yet.</p>
               ) : (
                 <ul className="space-y-2">
                   {data.serviceHistory.map((h) => (
                     <li
                       key={h.verifiedAt}
-                      className="rounded-lg border border-ds-line/40 bg-background px-2 py-2 text-xs text-neutral-500"
+                      className="rounded-lg border border-ds-line/40 bg-background px-2 py-2 text-xs text-[var(--text-secondary)]"
                     >
                       <span className="text-ds-ink">{new Date(h.verifiedAt).toLocaleString()}</span>
-                      <p className="mt-0.5 text-neutral-500">{h.signedOffNote}</p>
-                      <p className="mt-1 text-xs text-neutral-600">
+                      <p className="mt-0.5 text-[var(--text-secondary)]">{h.signedOffNote}</p>
+                      <p className="mt-1 text-xs text-[var(--text-secondary)]">
                         Before reset: {h.runHoursBeforeReset}h · {h.impressionsBeforeReset} impressions
                       </p>
                     </li>
@@ -157,13 +157,13 @@ export function PmSpotlightDrawer({
             </section>
 
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">
                 Task checklist
               </h3>
               {data.checklist.length === 0 ? (
-                <p className="text-neutral-600 text-xs">Configure checklist on the machine PM schedule.</p>
+                <p className="text-[var(--text-secondary)] text-xs">Configure checklist on the machine PM schedule.</p>
               ) : (
-                <ol className="list-decimal list-inside space-y-1.5 text-xs text-neutral-500">
+                <ol className="list-decimal list-inside space-y-1.5 text-xs text-[var(--text-secondary)]">
                   {data.checklist.map((step, i) => (
                     <li key={i}>{step}</li>
                   ))}
@@ -172,10 +172,10 @@ export function PmSpotlightDrawer({
             </section>
 
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">
                 Spare parts
               </h3>
-              <p className="text-xs text-neutral-500 rounded-lg border border-dashed border-ds-line/50 bg-ds-main/50 px-2 py-2">
+              <p className="text-xs text-[var(--text-secondary)] rounded-lg border border-dashed border-ds-line/50 bg-ds-main/50 px-2 py-2">
                 {data.sparePartsPlaceholder ?? 'Placeholder — inventory pick list integration pending.'}
               </p>
             </section>
@@ -185,14 +185,14 @@ export function PmSpotlightDrawer({
                 type="button"
                 disabled={busy}
                 onClick={() => void signOff()}
-                className="w-full rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-primary-foreground text-sm font-medium py-2.5"
+                className="w-full rounded-lg bg-[var(--success)] hover:opacity-90 disabled:opacity-50 text-white text-sm font-medium py-2.5"
               >
                 {busy ? '…' : 'Sign off PM completion'}
               </button>
             ) : null}
           </>
         ) : (
-          <p className="text-neutral-600 text-sm">Could not load machine.</p>
+          <p className="text-[var(--text-secondary)] text-sm">Could not load machine.</p>
         )}
       </div>
     </SlideOverPanel>

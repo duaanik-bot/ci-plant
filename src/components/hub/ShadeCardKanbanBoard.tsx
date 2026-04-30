@@ -78,7 +78,7 @@ function AgeRing({ pct, monoClass, tier }: { pct: number; monoClass: string; tie
   const c = 2 * Math.PI * r
   const dash = (pct / 100) * c
   const stroke =
-    tier === 'expired' ? 'text-rose-500' : tier === 'reverify' ? 'text-ds-warning' : 'text-emerald-500'
+    tier === 'expired' ? 'text-[var(--error)]' : tier === 'reverify' ? 'text-ds-warning' : 'text-[var(--success)]'
   return (
     <div className={`relative h-9 w-9 shrink-0 ${monoClass}`} title={`${pct.toFixed(0)}% of 12-mo lifecycle`}>
       <svg width="36" height="36" viewBox="0 0 36 36" className="-rotate-90">
@@ -138,7 +138,7 @@ function KanbanCardInner({
       }`}
     >
       <div className="flex items-start justify-between gap-1">
-        <p className="text-xs font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
+        <p className="text-xs font-bold text-[var(--success)] truncate leading-tight font-sans">{clientName}</p>
         <div className="flex items-center gap-1 shrink-0">
           {row.industrialPriority ? (
             <Star
@@ -166,11 +166,11 @@ function KanbanCardInner({
         <span
           className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
             tier === 'expired'
-              ? 'bg-rose-950/90 text-rose-200 border border-rose-500/40'
+              ? 'bg-[var(--error-bg)] text-[var(--error)] border border-[var(--error)]/40'
               : tier === 'reverify'
                 ? 'bg-ds-warning/10 text-ds-warning border border-ds-warning/45'
                 : row.custodyStatus === 'on_floor'
-                  ? 'bg-sky-950/50 text-sky-200 border border-sky-700/40'
+                  ? 'bg-[var(--brand-bg-soft)] text-[var(--brand-primary)] border border-[var(--brand-primary)]/40'
                   : 'bg-ds-elevated text-neutral-400 border border-ds-line/50'
           }`}
         >
@@ -265,7 +265,7 @@ function DraggableKanbanCard({
                 e.stopPropagation()
                 onQuickIssue()
               }}
-              className="h-6 rounded-md border border-sky-500/40 bg-sky-500/8 px-2 text-xs font-medium text-sky-700 dark:text-sky-300"
+              className="h-6 rounded-md border border-[var(--brand-primary)]/40 bg-[var(--brand-bg-soft)] px-2 text-xs font-medium text-[var(--brand-primary)]"
             >
               Issue
             </button>
@@ -276,7 +276,7 @@ function DraggableKanbanCard({
                 e.stopPropagation()
                 onQuickReceive()
               }}
-              className="h-6 rounded-md border border-emerald-500/40 bg-emerald-500/8 px-2 text-xs font-medium text-emerald-700 dark:text-emerald-300"
+              className="h-6 rounded-md border border-[var(--success)]/40 bg-[var(--success-bg)] px-2 text-xs font-medium text-[var(--success)]"
             >
               Receive
             </button>
@@ -329,7 +329,7 @@ function KanbanColumn({
       <div
         ref={setNodeRef}
         className={`flex flex-1 flex-col gap-2 p-2 min-h-[200px] ${
-          dropId && isOver ? 'bg-emerald-950/20 ring-1 ring-emerald-500/30' : ''
+          dropId && isOver ? 'bg-[var(--success-bg)] ring-1 ring-[var(--success)]/30' : ''
         }`}
       >
         {children}
@@ -628,11 +628,11 @@ export function ShadeCardKanbanBoard({
               />
             </label>
             {issueJobCardId && issueJobCardNumber != null ? (
-              <p className="text-xs text-emerald-300 font-sans">
+              <p className="text-xs text-[var(--success)] font-sans">
                 <span className={monoClass}>JC #{issueJobCardNumber}</span> linked
                 <button
                   type="button"
-                  className="ml-2 text-sky-400 underline"
+                  className="ml-2 text-[var(--brand-primary)] hover:opacity-90 underline"
                   onClick={() => {
                     setIssueJobCardId('')
                     setIssueJobCardNumber(null)
@@ -727,7 +727,7 @@ export function ShadeCardKanbanBoard({
               <button
                 type="button"
                 onClick={() => void submitIssue()}
-                className="px-3 py-1.5 rounded bg-blue-600 text-primary-foreground font-sans"
+                className="px-3 py-1.5 rounded bg-[var(--brand-primary)] hover:opacity-90 text-white font-sans"
               >
                 Confirm issue
               </button>
@@ -800,7 +800,7 @@ export function ShadeCardKanbanBoard({
               <button
                 type="button"
                 onClick={() => void submitReceive()}
-                className="px-3 py-1.5 rounded bg-emerald-600 text-primary-foreground"
+                className="px-3 py-1.5 rounded bg-[var(--success)] hover:opacity-90 text-white"
               >
                 Receive
               </button>

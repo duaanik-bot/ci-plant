@@ -292,7 +292,7 @@ function ActionsCell({
             <button
               onClick={onRecallPlanning}
               disabled={disableRecall}
-              className="text-left px-3 py-2 rounded text-[var(--warning)] hover:bg-[var(--warning)]/10 disabled:opacity-40"
+              className="text-left px-3 py-2 rounded text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-40"
             >
               Recall to Planning
             </button>
@@ -303,7 +303,7 @@ function ActionsCell({
       <button
         onClick={onRecallPlanning}
         disabled={disableRecall}
-        className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] text-[var(--warning)] hover:bg-[var(--warning)]/10 disabled:opacity-40"
+        className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-40"
       >
         {recallLabel ?? 'Recall'}
       </button>
@@ -1410,7 +1410,7 @@ export default function DesigningQueuePage() {
         <span className="truncate text-sm font-semibold text-neutral-900 dark:text-ds-ink">Artwork queue</span>
       </div>
 
-      <div className="mx-auto max-w-[1600px] space-y-3 px-2 py-3 pb-10 sm:px-3">
+      <div className="w-full space-y-3 px-3 py-3 pb-10 md:px-4">
         <div className="rounded-lg border border-ds-line/70 bg-ds-elevated/70 p-2 shadow-md ring-1 ring-ds-line/30">
         <div className="flex flex-col gap-1.5 md:flex-row md:flex-wrap md:items-center md:gap-2">
           <div className="min-w-0 flex-1 md:min-w-[14rem] md:max-w-xl">

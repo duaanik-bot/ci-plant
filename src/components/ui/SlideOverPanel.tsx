@@ -25,7 +25,7 @@ type SlideOverPanelProps = StandardSlideOverOptions & {
 
 const DRAWER_RAIL = 'w-[min(100%,clamp(420px,38vw,640px))]'
 const PANEL_BASE =
-  'border-l border-ds-line/80 bg-ds-card bg-gradient-to-b from-white/[0.04] to-transparent text-ds-ink shadow-ds-drawer'
+  'border-l border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] shadow-ds-drawer'
 const HEADER_FOOTER_PAD = 'px-4 py-3 md:px-6'
 const BODY_PAD = 'px-4 py-4 md:px-6'
 

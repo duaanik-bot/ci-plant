@@ -36,7 +36,7 @@ function VendorPill({ stage, active }: { stage: VendorPipelineStage; active: Ven
         current
           ? 'bg-ds-warning/18 border-ds-warning text-primary-foreground'
           : done
-            ? 'bg-emerald-900/40 border-emerald-700 text-emerald-200'
+            ? 'bg-[var(--success-bg)] border-[var(--success)]/60 text-[var(--success)]'
             : 'bg-ds-elevated border-ds-line/60 text-ds-ink-faint'
       }`}
     >
@@ -283,7 +283,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
       <header className="sticky top-0 z-30 border-b border-ds-line/50 bg-ds-main/95 backdrop-blur-sm px-4 py-3 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-cyan-400">Universal Tooling Hub</h1>
+            <h1 className="text-xl font-bold tracking-tight text-[var(--brand-primary)]">Universal Tooling Hub</h1>
             <p className="text-xs text-ds-ink-faint">{title} · live workboard</p>
           </div>
           <Link
@@ -326,7 +326,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
           {triageMode === 'retrieve' ? (
             <p className="text-xs text-ds-ink-muted rounded-lg border border-ds-line/50 bg-ds-card/60 p-3">
               No jobs in staging for retrieval. Use{' '}
-              <span className="text-cyan-300">column 3 · Live inventory</span> to locate the physical asset and book it
+              <span className="text-[var(--brand-primary)]">column 3 · Live inventory</span> to locate the physical asset and book it
               out to the floor.
             </p>
           ) : (
@@ -364,7 +364,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                     ) : (
                       incomingDisplay.map((r) => (
                         <tr key={r.id} className="border-t border-ds-line/40 align-top">
-                          <td className="p-2 font-mono text-cyan-300 whitespace-nowrap">{r.code}</td>
+                          <td className="p-2 font-mono text-[var(--brand-primary)] whitespace-nowrap">{r.code}</td>
                           <td className="p-2">
                             <div className="font-medium text-ds-ink text-balance">{r.title}</div>
                             <div className="text-ds-ink-faint">{r.subtitle || '—'}</div>
@@ -436,7 +436,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                     onClick={() => setBlockCond(c)}
                     className={`px-2 py-1 rounded text-xs border ${
                       blockCond === c
-                        ? 'bg-violet-700 border-violet-500 text-primary-foreground'
+                        ? 'bg-[var(--brand-primary)] border-[var(--brand-primary-hover)] text-white'
                         : 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted'
                     }`}
                   >
@@ -447,7 +447,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
               <button
                 type="button"
                 onClick={() => void saveBlockCondition()}
-                className="px-3 py-1.5 rounded-lg bg-violet-700 hover:bg-violet-600 text-xs font-medium"
+                className="px-3 py-1.5 rounded-lg bg-[var(--brand-primary)] hover:opacity-90 text-white text-xs font-medium"
               >
                 Save condition
               </button>
@@ -471,7 +471,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                   key={`proc-${r.id}`}
                   className="rounded-lg border border-ds-line/50 bg-ds-card/80 p-3 text-xs space-y-2"
                 >
-                  <div className="font-mono text-cyan-300">{r.code}</div>
+                  <div className="font-mono text-[var(--brand-primary)]">{r.code}</div>
                   <div className="text-ds-ink font-medium">{r.title}</div>
                   <div className="flex flex-wrap gap-0.5">
                     {PIPELINE.map((st) => (
@@ -521,21 +521,21 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                   key={s.slot}
                   className="rounded-lg border border-ds-line/60 bg-ds-card overflow-hidden flex flex-col"
                 >
-                  <div className="aspect-square relative bg-gradient-to-br from-ds-warning/20 to-violet-900/40 flex items-center justify-center">
+                  <div className="relative flex aspect-square items-center justify-center bg-[var(--bg-muted)]">
                     <span className="text-xs text-ds-ink-faint px-1 text-center text-balance">
                       {s.previewUrl ? 'Image URL configured' : 'Colour preview'}
                     </span>
                   </div>
                   <div className="p-2 text-xs space-y-0.5">
-                    <div className="font-mono text-cyan-300">{s.ref}</div>
+                    <div className="font-mono text-[var(--brand-primary)]">{s.ref}</div>
                     <div className="text-ds-ink-muted">Slot {s.slot}</div>
-                    <div className="text-emerald-400/90">{s.holder}</div>
+                    <div className="text-[var(--success)]">{s.holder}</div>
                     <div className="text-ds-ink-faint">
                       Approval: <span className="text-ds-ink-muted">{s.approvalDate || '—'}</span>
                     </div>
                     <div className="text-ds-ink-faint">
                       Master artwork:{' '}
-                      <span className="font-mono text-violet-300/95">{s.masterArtworkRef || '—'}</span>
+                      <span className="font-mono text-[var(--brand-primary)]">{s.masterArtworkRef || '—'}</span>
                     </div>
                   </div>
                 </div>
@@ -551,7 +551,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                     key={b.id}
                     className="rounded-lg border border-ds-line/50 bg-ds-card/80 px-2 py-1.5 flex justify-between gap-2"
                   >
-                    <span className="font-mono text-cyan-300">{b.blockCode}</span>
+                    <span className="font-mono text-[var(--brand-primary)]">{b.blockCode}</span>
                     <span className="text-ds-ink-muted">{b.condition}</span>
                   </li>
                 ))
@@ -575,7 +575,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
             <p className="text-xs text-ds-ink-faint">Machine custody and ink-lab checkouts.</p>
           ) : (
             <p className="text-xs text-ds-ink-faint">
-              Return to rack logs impression wear — use <span className="text-emerald-400">Return to rack</span> below.
+              Return to rack logs impression wear — use <span className="text-[var(--success)]">Return to rack</span> below.
             </p>
           )}
           <div className="rounded-xl border border-ds-line/50 overflow-hidden">
@@ -606,7 +606,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                           aria-label={`Select ${c.toolCode}`}
                         />
                       </td>
-                      <td className="p-2 font-mono text-cyan-300">{c.toolCode}</td>
+                      <td className="p-2 font-mono text-[var(--brand-primary)]">{c.toolCode}</td>
                       <td className="p-2">{c.machineId}</td>
                       <td className="p-2">{c.operator}</td>
                       <td className="p-2 text-ds-ink-muted whitespace-nowrap" title={c.timeOutAt}>
@@ -634,7 +634,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
               type="button"
               disabled={selectedCustodyIds.length === 0}
               onClick={() => setReturnOpen(true)}
-              className="px-3 py-2 rounded-lg bg-emerald-800 hover:bg-emerald-700 text-sm w-full text-left disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-3 py-2 rounded-lg bg-[var(--success)] hover:opacity-90 text-white text-sm w-full text-left disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Return selected to rack…
               {selectedCustodyIds.length > 0 ? ` (${selectedCustodyIds.length})` : ''}
@@ -660,7 +660,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
                     onClick={() => setReturnToolCondition(c)}
                     className={`px-2 py-1 rounded text-xs border ${
                       returnToolCondition === c
-                        ? 'bg-emerald-800 border-emerald-500 text-primary-foreground'
+                        ? 'bg-[var(--success)] border-[var(--success)] text-white'
                         : 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted'
                     }`}
                   >
@@ -726,7 +726,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
               <button
                 type="button"
                 onClick={() => void submitHubReturn()}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-sm font-medium"
+                className="px-3 py-1.5 rounded-lg bg-[var(--success)] hover:opacity-90 text-white text-sm font-medium"
               >
                 Confirm return
               </button>

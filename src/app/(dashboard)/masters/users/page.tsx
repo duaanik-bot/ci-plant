@@ -44,7 +44,7 @@ export default function MastersUsersPage() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">User Master</h2>
+        <h2 className="text-base font-semibold text-[var(--text-primary)]">User Master</h2>
         <Link
           href="/masters/users/new"
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-primary-foreground hover:bg-blue-700"

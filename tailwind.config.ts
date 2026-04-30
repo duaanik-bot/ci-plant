@@ -24,12 +24,12 @@ const config: Config = {
         'ds-lg': '12px',
       },
       boxShadow: {
-        /** Premium depth — cards, shells, table wraps */
-        'ds-depth': '0 10px 30px rgba(0,0,0,0.25)',
-        'ds-depth-sm': '0 4px 16px rgba(0,0,0,0.2)',
-        'ds-drawer': '0 10px 30px rgba(0,0,0,0.25)',
-        'ds-drawer-foot': '0 -8px 28px rgba(0,0,0,0.22)',
-        'ds-focus': '0 0 0 3px rgba(99, 102, 241, 0.18)',
+        /** Unified depth — neutral only */
+        'ds-depth': '0 4px 24px rgba(15,23,42,0.08)',
+        'ds-depth-sm': '0 1px 3px rgba(15,23,42,0.06)',
+        'ds-drawer': '0 8px 32px rgba(15,23,42,0.12)',
+        'ds-drawer-foot': '0 -4px 20px rgba(15,23,42,0.08)',
+        'ds-focus': '0 0 0 3px rgba(249, 115, 22, 0.2)',
       },
       keyframes: {
         'po-age-alert': {
@@ -57,7 +57,7 @@ const config: Config = {
         'ds-drawer-slide': 'ds-drawer-slide 200ms ease-out both',
       },
       colors: {
-        border: 'hsl(var(--border))',
+        border: 'var(--border)',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',

@@ -1,51 +1,35 @@
 export type AccentPreset = 'cyan' | 'emerald' | 'amber'
 
-type AccentVars = {
-  accent: string
-  accentHover: string
-  primaryHsl: string
-  ringHsl: string
-}
-
-const ACCENT_PRESETS: Record<AccentPreset, AccentVars> = {
-  cyan: {
-    accent: '#38BDF8',
-    accentHover: '#0EA5E9',
-    primaryHsl: '199 89% 60%',
-    ringHsl: '199 89% 60%',
-  },
-  emerald: {
-    accent: '#34D399',
-    accentHover: '#10B981',
-    primaryHsl: '160 84% 39%',
-    ringHsl: '160 84% 39%',
-  },
-  amber: {
-    accent: '#F59E0B',
-    accentHover: '#D97706',
-    primaryHsl: '38 92% 50%',
-    ringHsl: '38 92% 50%',
-  },
-}
+/** All presets map to the same brand orange — accent switcher is retained without fragmenting the palette. */
+const BRAND = {
+  accent: '#F97316',
+  accentHover: '#EA580C',
+  accentRgb: '249 115 22',
+  accentHoverRgb: '234 88 12',
+  /** HSL for shadcn `primary` / `ring` */
+  primaryHsl: '24 95% 53%',
+  ringHsl: '24 95% 53%',
+} as const
 
 export const ACCENT_STORAGE_KEY = 'ci-accent-preset'
 export const CONTRAST_STORAGE_KEY = 'ci-high-contrast'
 
-export function applyAccentPreset(preset: AccentPreset): void {
+export function applyAccentPreset(_preset: AccentPreset): void {
   if (typeof document === 'undefined') return
-  const vars = ACCENT_PRESETS[preset]
   const root = document.documentElement
-  root.style.setProperty('--ds-accent', vars.accent)
-  root.style.setProperty('--ds-accent-hover', vars.accentHover)
-  root.style.setProperty('--primary', vars.primaryHsl)
-  root.style.setProperty('--ring', vars.ringHsl)
+  root.style.setProperty('--ds-accent', BRAND.accent)
+  root.style.setProperty('--ds-accent-hover', BRAND.accentHover)
+  root.style.setProperty('--ds-accent-rgb', BRAND.accentRgb)
+  root.style.setProperty('--ds-accent-hover-rgb', BRAND.accentHoverRgb)
+  root.style.setProperty('--primary', BRAND.primaryHsl)
+  root.style.setProperty('--ring', BRAND.ringHsl)
 }
 
 export function getStoredAccentPreset(): AccentPreset {
-  if (typeof window === 'undefined') return 'cyan'
+  if (typeof window === 'undefined') return 'amber'
   const raw = window.localStorage.getItem(ACCENT_STORAGE_KEY)
   if (raw === 'emerald' || raw === 'amber' || raw === 'cyan') return raw
-  return 'cyan'
+  return 'amber'
 }
 
 export function applyHighContrast(enabled: boolean): void {

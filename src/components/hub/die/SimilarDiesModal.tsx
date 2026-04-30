@@ -49,7 +49,7 @@ export function SimilarDiesModal({
         <div className="px-3.5 py-3 border-b border-ds-line/40 shrink-0">
           <h2
             id="similar-dies-title"
-            className={`ci-hub-modal-title border-0 pb-0 ${isMismatch ? '!text-red-400' : ''}`}
+            className={`ci-hub-modal-title border-0 pb-0 ${isMismatch ? '!text-[var(--error)]' : ''}`}
           >
             {title}
           </h2>
@@ -81,7 +81,7 @@ export function SimilarDiesModal({
               <div
                 key={m.id}
                 className={`rounded-lg border px-3 py-2 text-xs ${
-                  isMismatch ? 'border-red-900/80 bg-red-950/20' : 'border-ds-line/40 bg-background'
+                  isMismatch ? 'border-[var(--error)]/50 bg-[var(--error-bg)]' : 'border-ds-line/40 bg-background'
                 }`}
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -93,8 +93,8 @@ export function SimilarDiesModal({
                   </span>
                 </div>
                 {isMismatch && m.dieTypeLabel ? (
-                  <p className="text-xs text-red-300/90 mt-1 font-medium">
-                    Master type: <span className="text-red-200">{m.dieTypeLabel}</span>
+                  <p className="text-xs text-[var(--error)] mt-1 font-medium">
+                    Master type: <span className="text-[var(--error)] font-semibold">{m.dieTypeLabel}</span>
                   </p>
                 ) : null}
                 <p className="text-xs text-neutral-500 mt-1">

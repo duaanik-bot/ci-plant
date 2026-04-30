@@ -7,15 +7,16 @@ import {
   stripPlateColourDisplaySuffix,
   type PlateHubSwatchKind,
 } from '@/lib/hub-plate-card-ui'
+import { pantoneContrastFg, pantoneHexApprox } from '@/lib/pantone-hex-approx'
 
 const ACTIVE_CLASSES: Record<PlateHubSwatchKind, string> = {
   cyan: 'bg-cyan-500 text-primary-foreground',
   magenta: 'bg-plateMagenta text-foreground',
   yellow: 'bg-yellow-400 text-gray-900',
   black: 'bg-background text-foreground border border-ds-line/50',
-  spotOrange: 'bg-orange-500 text-foreground',
+  spotOrange: 'bg-[var(--brand-primary)] text-white',
   spotPurple: 'bg-purple-600 text-foreground',
-  other: 'bg-orange-500 text-foreground',
+  other: 'bg-[var(--brand-primary)] text-white',
 }
 
 const SIZE_CLASSES = {
@@ -45,6 +46,25 @@ export function PlateHubColourSwatch({
       <div
         title={label}
         className={`${base} bg-gray-700/30 text-foreground border border-ds-line/50 ${className}`}
+      >
+        {display}
+      </div>
+    )
+  }
+
+  /** Same lookup as designing / plate requirement inputs — approximate coated hex only. */
+  const cleanLabel = stripPlateColourDisplaySuffix(label).trim()
+  const pantoneHex = pantoneHexApprox(cleanLabel)
+  if (pantoneHex) {
+    return (
+      <div
+        title={label}
+        className={`${base} ${className}`}
+        style={{
+          backgroundColor: pantoneHex,
+          color: pantoneContrastFg(pantoneHex),
+          border: '1px solid rgba(255,255,255,0.35)',
+        }}
       >
         {display}
       </div>

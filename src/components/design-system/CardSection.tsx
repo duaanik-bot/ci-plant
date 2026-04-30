@@ -13,7 +13,7 @@ export function CardSection({ title, id, children, className }: CardSectionProps
     <section
       id={id}
       className={cn(
-        'space-y-4 rounded-ds-md border border-ds-line/35 bg-gradient-to-b from-ds-elevated/40 to-ds-elevated/20 p-4 md:p-5 shadow-ds-depth-sm transition-[border-color,box-shadow] duration-200 ease-out',
+        'space-y-4 rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-4 md:p-5 shadow-ds-depth-sm transition-[border-color,box-shadow] duration-200 ease-out',
         className,
       )}
     >

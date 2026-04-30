@@ -98,11 +98,11 @@ export function DieTakeFromStockModal({
         {loading ? (
           <p className="text-sm text-neutral-500 shrink-0">Loading rack matches…</p>
         ) : error ? (
-          <p className="text-sm text-rose-400 shrink-0">{error}</p>
+          <p className="text-sm text-[var(--error)] shrink-0">{error}</p>
         ) : hint && candidates.length === 0 ? (
           <p className="text-sm text-ds-warning shrink-0">{hint}</p>
         ) : candidates.length === 0 ? (
-          <p className="text-sm text-rose-400 shrink-0">
+          <p className="text-sm text-[var(--error)] shrink-0">
             No dies in live inventory with identical L×W×H.
           </p>
         ) : (

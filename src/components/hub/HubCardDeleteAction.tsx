@@ -92,7 +92,7 @@ export function HubCardDeleteAction({
           if (stopPropagationOnTrigger) e.stopPropagation()
           if (!disabled) setOpen((o) => !o)
         }}
-        className="flex h-6 w-6 items-center justify-center rounded-md border border-ds-line/50 bg-ds-card/90 text-ds-ink-faint transition-shadow hover:border-rose-500/50 hover:text-rose-500 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex h-6 w-6 items-center justify-center rounded-md border border-ds-line/50 bg-ds-card/90 text-ds-ink-faint transition-shadow hover:border-[var(--error)]/50 hover:text-[var(--error)] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40"
       >
         <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden />
       </button>
@@ -121,7 +121,7 @@ export function HubCardDeleteAction({
                 e.stopPropagation()
                 void runDelete()
               }}
-              className="rounded bg-rose-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-rose-500"
+              className="rounded bg-[var(--error)] px-2.5 py-1 text-xs font-bold text-white hover:opacity-90"
             >
               {busy ? '…' : 'Delete'}
             </button>

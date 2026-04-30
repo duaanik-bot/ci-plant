@@ -7,8 +7,8 @@ export default function ReportsDashboardPage() {
       <p className="text-sm text-ds-ink-muted">
         Executive summary reports are being aligned. Use the live dashboard in the meantime.
       </p>
-      <Link href="/dashboard" className="text-blue-400 hover:underline text-sm">
-        Open Live Dashboard →
+      <Link href="/orders/purchase-orders" className="text-blue-400 hover:underline text-sm">
+        Open Customer POs →
       </Link>
     </section>
   )

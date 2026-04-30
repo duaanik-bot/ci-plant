@@ -114,7 +114,7 @@ export function JobAuditModal({
               <h2 id="job-audit-title" className="text-lg font-semibold text-foreground">
                 Job details &amp; history
               </h2>
-              <p className="text-sm font-bold leading-snug tracking-tight text-blue-400 mt-1 break-words whitespace-normal">
+              <p className="text-sm font-bold leading-snug tracking-tight text-[var(--brand-primary)] mt-1 break-words whitespace-normal">
                 {context.cartonName}
               </p>
               <p className="text-xs font-medium text-gray-300 opacity-90 mt-0.5 break-words whitespace-normal leading-snug">
@@ -132,7 +132,7 @@ export function JobAuditModal({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 px-2 py-1 rounded border border-ds-line/50 text-neutral-400 text-xs hover:bg-ds-elevated"
+              className="shrink-0 px-2 py-1 rounded border border-ds-line/50 text-[var(--text-secondary)] text-xs hover:bg-ds-elevated"
             >
               Close
             </button>
@@ -141,33 +141,33 @@ export function JobAuditModal({
 
         <div className="p-4 overflow-y-auto flex-1 space-y-4">
           <section>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">
               Current specs
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-ds-line/40 bg-background/50 p-3">
               <div>
-                <p className="text-xs text-neutral-500 uppercase">Plate size</p>
+                <p className="text-xs text-[var(--text-secondary)] uppercase">Plate size</p>
                 <p className="text-sm text-ds-ink font-medium">{sizeMm}</p>
               </div>
               <div>
-                <p className="text-xs text-neutral-500 uppercase">Zone</p>
+                <p className="text-xs text-[var(--text-secondary)] uppercase">Zone</p>
                 <p className="text-sm text-ds-ink font-medium">{context.zoneLabel}</p>
               </div>
               <div>
-                <p className="text-xs text-neutral-500 uppercase">Colours required</p>
+                <p className="text-xs text-[var(--text-secondary)] uppercase">Colours required</p>
                 <p className="text-sm text-ds-ink font-medium tabular-nums">{context.coloursRequired}</p>
               </div>
               <div>
-                <p className="text-xs text-neutral-500 uppercase">In rack / matched</p>
+                <p className="text-xs text-[var(--text-secondary)] uppercase">In rack / matched</p>
                 <p className="text-sm text-ds-ink font-medium tabular-nums">{inRack}</p>
               </div>
               <div className="sm:col-span-2">
-                <p className="text-xs text-neutral-500 uppercase mb-1">Colour channels</p>
+                <p className="text-xs text-[var(--text-secondary)] uppercase mb-1">Colour channels</p>
                 <PlateHubColourSwatchStrip labels={context.plateColours} />
               </div>
               {context.statusLabel ? (
                 <div className="sm:col-span-2">
-                  <p className="text-xs text-neutral-500 uppercase">Status</p>
+                  <p className="text-xs text-[var(--text-secondary)] uppercase">Status</p>
                   <p className="text-sm text-ds-ink capitalize">{context.statusLabel}</p>
                 </div>
               ) : null}
@@ -175,25 +175,25 @@ export function JobAuditModal({
           </section>
 
           <section>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">
               Hub event timeline
             </h3>
             {loading ? (
-              <p className="text-sm text-neutral-500">Loading history…</p>
+              <p className="text-sm text-[var(--text-secondary)]">Loading history…</p>
             ) : error ? (
-              <p className="text-sm text-rose-400">{error}</p>
+              <p className="text-sm text-[var(--error)]">{error}</p>
             ) : entries.length === 0 ? (
-              <p className="text-sm text-neutral-500">No hub events recorded yet for this job.</p>
+              <p className="text-sm text-[var(--text-secondary)]">No hub events recorded yet for this job.</p>
             ) : (
               <ul className="relative border-l border-ds-line/50 pl-4 space-y-4 ml-1.5">
                 {entries.map((e, i) => (
                   <li key={e.id ?? `${e.timeLabel}-${i}`} className="relative">
                     <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-ds-warning ring-4 ring-ds-main" />
-                    <p className="text-xs text-neutral-500 font-mono">{e.timeLabel}</p>
+                    <p className="text-xs text-[var(--text-secondary)] font-mono">{e.timeLabel}</p>
                     <p className="text-sm font-bold text-ds-ink mt-0.5">{e.action}</p>
-                    <p className="text-xs text-neutral-500 mt-1 leading-snug">{e.detail}</p>
+                    <p className="text-xs text-[var(--text-secondary)] mt-1 leading-snug">{e.detail}</p>
                     {e.performedBy ? (
-                      <p className="text-xs text-neutral-600 mt-1">By {e.performedBy}</p>
+                      <p className="text-xs text-[var(--text-secondary)] mt-1">By {e.performedBy}</p>
                     ) : null}
                   </li>
                 ))}

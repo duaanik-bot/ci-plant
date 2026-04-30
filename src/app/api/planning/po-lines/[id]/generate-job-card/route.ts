@@ -128,7 +128,15 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   }
 
   const mqSheets = li.materialQueue?.totalSheets
-  const requiredSheets = bodySheets ?? mqSheets ?? Math.max(1, Math.ceil(li.quantity / 4))
+  const baseRequiredSheets = bodySheets ?? mqSheets ?? Math.max(1, Math.ceil(li.quantity / 4))
+  const reservedQty =
+    spec.fgReservation && typeof spec.fgReservation === 'object'
+      ? Number((spec.fgReservation as Record<string, unknown>).qtyReserved ?? 0)
+      : 0
+  const useReservedFirst = spec.useReservedFirst !== false
+  const requiredSheets = useReservedFirst
+    ? Math.max(1, baseRequiredSheets - Math.max(0, reservedQty))
+    : baseRequiredSheets
   const waste = wastageSheets ?? 0
   const totalSheets = requiredSheets + waste
 
@@ -267,6 +275,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         readinessFive: { segments: fiveSegs, allGreen },
         materialGate,
         estimatedDurationHours: estH,
+        reservedApplied: useReservedFirst ? Math.max(0, reservedQty) : 0,
+        baseRequiredSheets,
       },
     },
     { status: 201 },

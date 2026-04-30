@@ -811,7 +811,7 @@ export default function PurchaseOrdersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1480px] space-y-3 p-3 pb-24 md:p-4">
+    <div className="w-full space-y-3 px-3 py-3 pb-24 md:px-4 md:py-4">
       <div className="sticky top-0 z-40 rounded-md border border-ds-line/60 bg-ds-main/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
         <div className="flex flex-wrap items-center gap-2">
           <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
@@ -1226,12 +1226,15 @@ export default function PurchaseOrdersPage() {
                   <td className={`w-[12rem] px-1.5 align-middle ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-ds-elevated to-ds-elevated text-xs font-bold text-ds-warning ring-1 ring-ds-line/80"
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[var(--bg-muted)] text-xs font-bold text-[var(--brand-primary)] ring-1 ring-[var(--border)]"
                         aria-hidden
                       >
                         {customerInitials(po.customer?.name ?? '')}
                       </span>
-                      <span className="line-clamp-2 break-words text-xs text-neutral-700 dark:text-ds-ink md:text-xs" title={po.customer?.name}>
+                      <span
+                        className="line-clamp-2 break-words text-xs text-[var(--text-primary)] md:text-xs"
+                        title={po.customer?.name}
+                      >
                         {po.customer?.name}
                       </span>
                     </div>

@@ -671,11 +671,11 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
           <h1 className="text-xl font-bold text-ds-warning">{title}</h1>
           {toolType === 'shade_cards' ? (
             <div
-              className={`rounded-lg border border-orange-900/40 bg-ds-main px-3 py-2 ${shadeMono}`}
+              className={`rounded-lg border border-[var(--warning)]/40 bg-ds-main px-3 py-2 ${shadeMono}`}
               title="ΔE Limit Enforced < 2.0"
             >
               <p className="text-xs uppercase tracking-wider text-neutral-500">Fading Standards</p>
-              <p className="text-xl font-bold text-orange-400 tabular-nums leading-tight">{shadeFadingStandardsCount}</p>
+              <p className="text-xl font-bold text-[var(--brand-primary)] tabular-nums leading-tight">{shadeFadingStandardsCount}</p>
             </div>
           ) : null}
         </div>
@@ -794,7 +794,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                       type="button"
                       onClick={() => openIssue(d.id)}
                       disabled={(d.custodyStatus ?? '') !== 'in_stock'}
-                      className="text-blue-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="text-[var(--brand-primary)] hover:opacity-90 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Issue
                     </button>
@@ -802,7 +802,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                       type="button"
                       onClick={() => openReceive(d.id)}
                       disabled={(d.custodyStatus ?? '') !== 'on_floor'}
-                      className="text-emerald-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="text-[var(--success)] hover:opacity-90 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Receive
                     </button>
@@ -854,7 +854,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                       type="button"
                       onClick={() => openIssue(b.id)}
                       disabled={(b.custodyStatus ?? '') !== 'in_stock'}
-                      className="text-blue-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="text-[var(--brand-primary)] hover:opacity-90 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Issue
                     </button>
@@ -862,7 +862,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                       type="button"
                       onClick={() => openReceive(b.id)}
                       disabled={(b.custodyStatus ?? '') !== 'on_floor'}
-                      className="text-emerald-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="text-[var(--success)] hover:opacity-90 hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Receive
                     </button>
@@ -922,7 +922,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   <tr
                     key={s.id}
                     className={`h-[44px] max-h-[44px] hover:bg-ds-main/50 ${
-                      tier === 'expired' ? 'bg-[rgba(225,29,72,0.15)]' : ''
+                      tier === 'expired' ? 'bg-[var(--error-bg)]' : ''
                     }`}
                   >
                     <td className={`px-2 align-middle text-neutral-500 whitespace-nowrap ${shadeMono}`}>
@@ -933,7 +933,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                         <button
                           type="button"
                           onClick={() => void openShadeAudit(s.id)}
-                          className="shrink-0 mt-0.5 text-neutral-500 hover:text-sky-400 p-0.5 rounded"
+                          className="shrink-0 mt-0.5 text-neutral-500 hover:text-[var(--brand-primary)] p-0.5 rounded"
                           title="Custody history"
                           aria-label="Open custody history"
                         >
@@ -944,12 +944,12 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                             href={`/product/${productLinkId}`}
                             className="min-w-0 flex-1 block rounded hover:bg-ds-card/50 -m-0.5 p-0.5"
                           >
-                            <p className="font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
+                            <p className="font-bold text-[var(--success)] truncate leading-tight font-sans">{clientName}</p>
                             <p className="text-sm text-foreground truncate leading-snug font-sans">{productName}</p>
                           </Link>
                         ) : (
                           <div className="min-w-0">
-                            <p className="font-bold text-emerald-400 truncate leading-tight font-sans">{clientName}</p>
+                            <p className="font-bold text-[var(--success)] truncate leading-tight font-sans">{clientName}</p>
                             <p className="text-sm text-foreground truncate leading-snug font-sans">{productName}</p>
                           </div>
                         )}
@@ -965,7 +965,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                       {months == null ? (
                         <span className="text-neutral-600">—</span>
                       ) : tier === 'fresh' ? (
-                        <span className={`text-xs font-medium text-emerald-500 ${shadeMono}`}>{ageLabel} mo</span>
+                        <span className={`text-xs font-medium text-[var(--success)] ${shadeMono}`}>{ageLabel} mo</span>
                       ) : tier === 'reverify' ? (
                         <span className={`inline-flex items-center gap-1 text-xs font-medium text-ds-warning ${shadeMono}`}>
                           {shadeCardIsApproachingHardExpiry(months) ? (
@@ -980,7 +980,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                           {ageLabel} mo
                         </span>
                       ) : (
-                        <span className={`inline-flex items-center gap-1 text-xs font-medium text-rose-500 ${shadeMono}`}>
+                        <span className={`inline-flex items-center gap-1 text-xs font-medium text-[var(--error)] ${shadeMono}`}>
                           <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
                           EXPIRED · {ageLabel} mo
                         </span>
@@ -991,7 +991,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                         <span
                           className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium border font-sans ${
                             tier === 'expired'
-                              ? 'bg-rose-950/80 text-rose-100 border-rose-500/40'
+                              ? 'bg-[var(--error-bg)] text-[var(--error)] border-[var(--error)]/40'
                               : 'bg-ds-elevated text-ds-ink border-ds-line/50'
                           }`}
                         >
@@ -1019,7 +1019,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                         onClick={() => openIssue(s.id)}
                         disabled={status !== 'in_stock' || tier === 'expired'}
                         title={tier === 'expired' ? 'Card expired (≥12 mo) — replace before issue' : 'Issue to machine'}
-                        className="inline-flex p-1.5 rounded text-sky-400 hover:bg-ds-card disabled:opacity-30 disabled:cursor-not-allowed"
+                        className="inline-flex p-1.5 rounded text-[var(--brand-primary)] hover:bg-ds-card disabled:opacity-30 disabled:cursor-not-allowed"
                       >
                         <Send className="h-4 w-4" />
                       </button>
@@ -1028,7 +1028,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                         onClick={() => openReceive(s.id)}
                         disabled={status !== 'on_floor'}
                         title="Receive to rack"
-                        className="inline-flex p-1.5 rounded text-emerald-400 hover:bg-ds-card disabled:opacity-30 disabled:cursor-not-allowed"
+                        className="inline-flex p-1.5 rounded text-[var(--success)] hover:bg-ds-card disabled:opacity-30 disabled:cursor-not-allowed"
                       >
                         <Inbox className="h-4 w-4" />
                       </button>
@@ -1067,11 +1067,11 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   />
                 </label>
                 {issueJobCardId && issueJobCardNumber != null ? (
-                  <p className="text-xs text-emerald-300 font-sans">
+                  <p className="text-xs text-[var(--success)] font-sans">
                     <span className={shadeMono}>JC #{issueJobCardNumber}</span> linked
                     <button
                       type="button"
-                      className="ml-2 text-sky-400 underline font-sans"
+                      className="ml-2 text-[var(--brand-primary)] hover:opacity-90 underline font-sans"
                       onClick={() => {
                         setIssueJobCardId('')
                         setIssueJobCardNumber(null)
@@ -1185,7 +1185,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4">
           <div className="w-full max-w-md rounded-lg border border-ds-warning/30 bg-ds-card p-4 space-y-3 text-sm">
             <h2 className="text-lg font-semibold text-foreground">Receive from vendor</h2>
-            <p className="text-ds-ink-muted text-xs">Confirms the tool is back from the vendor and returns it to <span className="text-emerald-300">In Stock</span>.</p>
+            <p className="text-ds-ink-muted text-xs">Confirms the tool is back from the vendor and returns it to <span className="text-[var(--success)]">In Stock</span>.</p>
             <label className="block text-ds-ink-muted">
               Notes (optional)
               <textarea
@@ -1330,7 +1330,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               location <span className="text-neutral-400">Master Rack</span>.
             </p>
             <label className="block text-neutral-400 font-sans">
-              Manufacturing date <span className="text-rose-400">*</span>
+              Manufacturing date <span className="text-[var(--error)]">*</span>
               <input
                 type="date"
                 required
@@ -1340,7 +1340,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               />
             </label>
             <label className="block text-neutral-400 font-sans">
-              Product Master <span className="text-rose-400">*</span>
+              Product Master <span className="text-[var(--error)]">*</span>
               <input
                 value={cartonQuery}
                 onChange={(e) => setCartonQuery(e.target.value)}
@@ -1362,7 +1362,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                         setAddAwCode((prev) => (prev.trim() ? prev : (c.artworkCode?.trim() ?? '')))
                       }}
                     >
-                      <span className="text-emerald-400 font-semibold">{c.customer.name}</span>
+                      <span className="text-[var(--success)] font-semibold">{c.customer.name}</span>
                       <span className="text-neutral-500"> · </span>
                       {c.cartonName}
                       {c.artworkCode ? (
@@ -1382,7 +1382,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               <p className="text-xs text-neutral-600 font-sans">Pick a row above to link Product Master.</p>
             )}
             <label className="block text-neutral-400 font-sans">
-              Substrate type <span className="text-rose-400">*</span>
+              Substrate type <span className="text-[var(--error)]">*</span>
               <select
                 value={addSubstrate}
                 onChange={(e) => setAddSubstrate(e.target.value as (typeof SHADE_SUBSTRATE_VALUES)[number])}
@@ -1397,7 +1397,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
             </label>
             <div className="grid grid-cols-3 gap-2">
               <label className="block text-neutral-400 font-sans col-span-1">
-                L* <span className="text-rose-400">*</span>
+                L* <span className="text-[var(--error)]">*</span>
                 <input
                   value={addLabL}
                   onChange={(e) => setAddLabL(e.target.value)}
@@ -1407,7 +1407,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 />
               </label>
               <label className="block text-neutral-400 font-sans col-span-1">
-                a* <span className="text-rose-400">*</span>
+                a* <span className="text-[var(--error)]">*</span>
                 <input
                   value={addLabA}
                   onChange={(e) => setAddLabA(e.target.value)}
@@ -1417,7 +1417,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 />
               </label>
               <label className="block text-neutral-400 font-sans col-span-1">
-                b* <span className="text-rose-400">*</span>
+                b* <span className="text-[var(--error)]">*</span>
                 <input
                   value={addLabB}
                   onChange={(e) => setAddLabB(e.target.value)}

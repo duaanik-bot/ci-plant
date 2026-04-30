@@ -97,13 +97,13 @@ function BoardZoneTitle({
         <span>{name}</span>
         <span
           className={`tabular-nums font-bold ${
-            count === 0 ? 'text-neutral-500' : 'text-ds-warning'
+            count === 0 ? 'text-[var(--text-secondary)]' : 'text-ds-warning'
           }`}
         >
           ({count})
         </span>
       </h2>
-      <p className="text-xs uppercase tracking-wider text-neutral-500 font-semibold tabular-nums leading-tight shrink-0">
+      <p className="text-xs uppercase tracking-wider text-[var(--text-secondary)] font-semibold tabular-nums leading-tight shrink-0">
         {unitCount} units
       </p>
     </div>
@@ -138,12 +138,12 @@ function DieHubZoneSummaryBar({
     >
       <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${dotClass}`} aria-hidden />
       <div className="min-w-0">
-        <p className="text-xs uppercase tracking-wide text-neutral-500 font-semibold leading-tight">
+        <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)] font-semibold leading-tight">
           {label}
         </p>
         <p
           className={`text-lg font-bold tabular-nums leading-tight ${
-            count === 0 ? 'text-neutral-500' : 'text-foreground'
+            count === 0 ? 'text-[var(--text-secondary)]' : 'text-foreground'
           }`}
         >
           ({count})
@@ -167,20 +167,20 @@ function DieHubZoneSummaryBar({
       <Card
         label="Outside vendor"
         count={outsideVendor}
-        dotClass="bg-violet-500 shadow-[0_0_10px_rgba(167,139,250,0.5)]"
-        borderClass="border-violet-500/55"
+        dotClass="bg-[var(--brand-primary)] shadow-ds-depth-sm"
+        borderClass="border-[var(--brand-primary)]/55"
       />
       <Card
         label="Live inventory"
         count={liveInventory}
-        dotClass="bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.45)]"
-        borderClass="border-emerald-600/55"
+        dotClass="bg-[var(--success)] shadow-ds-depth-sm"
+        borderClass="border-[var(--success)]/55"
       />
       <Card
         label="Custody floor (in-use)"
         count={custodyInUse}
-        dotClass="bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.5)]"
-        borderClass="border-sky-600/55"
+        dotClass="bg-[var(--brand-primary)] shadow-ds-depth-sm"
+        borderClass="border-[var(--brand-primary)]/55"
       />
     </div>
   )
@@ -323,10 +323,10 @@ function JobCardStatusBadge({ hub }: { hub: JobCardHub | null | undefined }) {
   if (!hub) return null
   const tone =
     hub.key === 'printed'
-      ? 'border-emerald-600/60 bg-emerald-950/50 text-emerald-200'
+      ? 'border-[var(--success)]/50 bg-[var(--success-bg)] text-[var(--success)]'
       : hub.key === 'planning'
-        ? 'border-ds-warning/50 bg-ds-warning/10 text-ds-warning'
-        : 'border-sky-600/60 bg-sky-950/50 text-sky-200'
+        ? 'border-[var(--warning)]/50 bg-[var(--warning-bg)] text-[var(--warning)]'
+        : 'border-[var(--brand-primary)]/50 bg-[var(--brand-bg-soft)] text-[var(--brand-primary)]'
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold shrink-0 ${tone}`}
@@ -342,7 +342,7 @@ function HubStaleTime({ at }: { at: string | null | undefined }) {
   return (
     <p
       className={`mt-1.5 text-xs leading-tight ${
-        stale ? 'text-red-400 font-medium' : 'text-neutral-500'
+        stale ? 'text-[var(--error)] font-medium' : 'text-[var(--text-secondary)]'
       }`}
     >
       Time in queue: {age}
@@ -352,7 +352,7 @@ function HubStaleTime({ at }: { at: string | null | undefined }) {
 
 function HubTriageTime({ at }: { at: string | null | undefined }) {
   return (
-    <p className="mt-1.5 text-xs leading-tight text-neutral-500">
+    <p className="mt-1.5 text-xs leading-tight text-[var(--text-secondary)]">
       Time in triage: {hubQueueAgeLabel(at)}
     </p>
   )
@@ -361,7 +361,7 @@ function HubTriageTime({ at }: { at: string | null | undefined }) {
 function HubRackAdded({ createdAt }: { createdAt: string | null | undefined }) {
   if (!createdAt) return null
   return (
-    <p className="mt-1.5 text-xs leading-tight text-neutral-500">
+    <p className="mt-1.5 text-xs leading-tight text-[var(--text-secondary)]">
       Added to rack: {hubAddedToRackLabel(createdAt)}
     </p>
   )
@@ -369,7 +369,7 @@ function HubRackAdded({ createdAt }: { createdAt: string | null | undefined }) {
 
 function HubCustodyReady({ at }: { at: string | null | undefined }) {
   return (
-    <p className="mt-1.5 text-xs leading-tight text-neutral-500">
+    <p className="mt-1.5 text-xs leading-tight text-[var(--text-secondary)]">
       Marked ready: {hubMarkedReadyLabel(at)}
     </p>
   )
@@ -549,9 +549,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       const el = document.querySelector<HTMLElement>(`[data-hub-emboss-id="${focusBlockId}"]`)
       if (el) {
         el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-        el.classList.add('ring-2', 'ring-emerald-500/60', 'ring-offset-2', 'ring-offset-black')
+        el.classList.add('ring-2', 'ring-ds-success/60', 'ring-offset-2', 'ring-offset-black')
         window.setTimeout(() => {
-          el.classList.remove('ring-2', 'ring-emerald-500/60', 'ring-offset-2', 'ring-offset-black')
+          el.classList.remove('ring-2', 'ring-ds-success/60', 'ring-offset-2', 'ring-offset-black')
         }, 2400)
         return
       }
@@ -1192,7 +1192,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     if (r.kind === 'die') {
       return (
         <>
-          <div className="mt-1 space-y-0.5 text-xs font-medium text-neutral-500 leading-tight">
+          <div className="mt-1 space-y-0.5 text-xs font-medium text-[var(--text-secondary)] leading-tight">
             <p className="flex flex-wrap items-center gap-1.5">
               <span>Type:</span>
               <PastingStyleBadge value={r.pastingStyle} />
@@ -1204,20 +1204,20 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             </p>
             <p>
               Die type (master):{' '}
-              <span className="text-neutral-400">{r.masterType?.trim() || '—'}</span>
+              <span className="text-[var(--text-secondary)]">{r.masterType?.trim() || '—'}</span>
             </p>
-            <p className="text-xs text-neutral-500">
-              Material: <span className="text-neutral-500">{r.materialLabel}</span>
+            <p className="text-xs text-[var(--text-secondary)]">
+              Material: <span className="text-[var(--text-secondary)]">{r.materialLabel}</span>
             </p>
             {r.location ? (
-              <p className="text-xs text-neutral-500">Rack: {r.location}</p>
+              <p className="text-xs text-[var(--text-secondary)]">Rack: {r.location}</p>
             ) : null}
           </div>
           <details className="mt-1.5 rounded border border-ds-line/40 bg-ds-main/50 px-2 py-1">
-            <summary className="text-xs font-semibold uppercase tracking-wide text-neutral-500 cursor-pointer select-none">
+            <summary className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] cursor-pointer select-none">
               Technical data
             </summary>
-            <div className="mt-1 space-y-0.5 text-xs text-neutral-500">
+            <div className="mt-1 space-y-0.5 text-xs text-[var(--text-secondary)]">
               <p>Sheet: {r.sheetSize?.trim() || '—'}</p>
               <p className="tabular-nums">UPS: {r.ups}</p>
             </div>
@@ -1226,7 +1226,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       )
     }
     return (
-      <div className="mt-1 space-y-0.5 text-xs font-medium text-neutral-500">
+      <div className="mt-1 space-y-0.5 text-xs font-medium text-[var(--text-secondary)]">
         {zone === 'triage' && r.triageAwReference ? (
           <p>
             AW: <span className="text-ds-ink">{r.triageAwReference}</span>
@@ -1238,11 +1238,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           </p>
         ) : null}
         <p>
-          Type: <span className="text-neutral-400">{r.typeLabel}</span>
+          Type: <span className="text-[var(--text-secondary)]">{r.typeLabel}</span>
         </p>
         <p>
-          Material: <span className="text-neutral-400">{r.materialLabel}</span>
-          <span className="text-neutral-600 ml-1">(Brass · Magnesium · Copper)</span>
+          Material: <span className="text-[var(--text-secondary)]">{r.materialLabel}</span>
+          <span className="text-[var(--text-secondary)] ml-1">(Brass · Magnesium · Copper)</span>
         </p>
         {r.reliefDepthMm != null && Number.isFinite(r.reliefDepthMm) ? (
           <p className={HUB_EMB_MONO}>
@@ -1250,17 +1250,17 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           </p>
         ) : null}
         <p
-          className={`${HUB_EMB_MONO} ${r.strikeOverLimit ? 'text-red-400 animate-pulse font-semibold' : 'text-orange-300/90'}`}
+          className={`${HUB_EMB_MONO} ${r.strikeOverLimit ? 'text-[var(--error)] animate-pulse font-semibold' : 'text-[var(--brand-primary)]'}`}
         >
           Strikes: {r.cumulativeStrikes.toLocaleString()} / {r.strikeLimit.toLocaleString()}
         </p>
         {r.blockSize ? (
           <p>
-            Size: <span className="text-neutral-400">{r.blockSize}</span>
+            Size: <span className="text-[var(--text-secondary)]">{r.blockSize}</span>
           </p>
         ) : null}
         {r.storageLocation ? (
-          <p className="text-xs text-neutral-500">Rack: {r.storageLocation}</p>
+          <p className="text-xs text-[var(--text-secondary)]">Rack: {r.storageLocation}</p>
         ) : null}
       </div>
     )
@@ -1274,12 +1274,14 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     const industrialGlow =
       r.industrialPriority === true ? ` ${INDUSTRIAL_PRIORITY_ROW_CLASS}` : ''
     const strikeAlert =
-      r.kind === 'emboss' && r.strikeOverLimit ? ' ring-1 ring-red-500/70 border-red-600/80 animate-pulse' : ''
+      r.kind === 'emboss' && r.strikeOverLimit
+        ? ' ring-1 ring-[var(--error)]/70 border-[var(--error)]/80 animate-pulse'
+        : ''
     const liClass = `rounded-lg border bg-card p-2 overflow-visible ${
       custodyInUse
-        ? 'border-2 border-blue-500 hub-tool-in-use-pulse'
+        ? 'border-2 border-[var(--brand-primary)] hub-tool-in-use-pulse'
         : zone === 'custody' && r.jobCardHub?.key === 'printed'
-          ? 'border-emerald-600/70 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
+          ? 'border-[var(--success)]/40 shadow-ds-depth-sm'
           : 'border-ds-line/40'
     }${industrialGlow}${strikeAlert}`
 
@@ -1347,7 +1349,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                       matches: mismatch,
                     })
                   }
-                  className="shrink-0 text-xs font-bold uppercase tracking-wider text-red-400 border border-red-600/60 rounded px-1.5 py-0.5 hover:bg-red-950/40"
+                  className="shrink-0 rounded border border-[var(--error)]/50 bg-[var(--error-bg)] px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider text-[var(--error)] hover:opacity-90"
                 >
                   Type mismatch
                 </button>
@@ -1369,17 +1371,17 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <HubPriorityRankBadge rank={pri.rank} />
             </div>
           </div>
-          <p className="text-xs text-neutral-500 truncate mt-1" title={r.title}>
+          <p className="text-xs text-[var(--text-secondary)] truncate mt-1" title={r.title}>
             {r.title}
           </p>
           {r.hubConditionPoor ? (
-            <p className="mt-1 text-xs font-bold uppercase tracking-wider text-red-400 border border-red-700/60 rounded px-1.5 py-0.5 w-fit">
+            <p className="mt-1 text-xs font-bold uppercase tracking-wider text-[var(--error)] border border-[var(--error)]/60 rounded px-1.5 py-0.5 w-fit">
               Poor condition
             </p>
           ) : null}
           <button
             type="button"
-            className="text-left w-full text-blue-400 hover:text-blue-300 hover:underline font-semibold text-sm mt-0.5 truncate"
+            className="text-left w-full text-[var(--brand-primary)] hover:opacity-90 hover:underline font-semibold text-sm mt-0.5 truncate"
             onClick={() =>
               setToolingAudit({
                 tool: 'die',
@@ -1398,14 +1400,14 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
               <JobCardStatusBadge hub={r.jobCardHub} />
               {r.hubCustodySource === 'rack' ? (
-                <span className="inline-flex items-center rounded border border-ds-line/50 bg-ds-card px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide text-neutral-400">
+                <span className="inline-flex items-center rounded border border-ds-line/50 bg-ds-card px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">
                   Source: Rack
                 </span>
               ) : null}
             </div>
           ) : null}
           {zone === 'custody' && r.custodyStatus === CUSTODY_ON_FLOOR && r.issuedOperator?.trim() ? (
-            <p className="mt-1 text-xs text-sky-300/95 font-medium">
+            <p className="mt-1 text-xs text-[var(--brand-primary)] font-medium">
               👤 Issued to: {r.issuedOperator.trim()}
             </p>
           ) : null}
@@ -1419,11 +1421,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             />
           </div>
           {r.dateOfManufacturing ? (
-            <p className="text-xs text-neutral-500 mt-1 tabular-nums">
+            <p className="text-xs text-[var(--text-secondary)] mt-1 tabular-nums">
               Mfg: {format(new Date(r.dateOfManufacturing), 'MMM d, yyyy')}
             </p>
           ) : null}
-          <p className="text-xs text-neutral-600 mt-1 leading-tight">
+          <p className="text-xs text-[var(--text-secondary)] mt-1 leading-tight">
             {hubLastActionLine(r.lastStatusUpdatedAt) ?? '—'}
           </p>
           {zone === 'prep' ? (
@@ -1431,7 +1433,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <button
                 type="button"
                 disabled={saving}
-                className="mt-1.5 w-full py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-primary-foreground text-xs font-semibold disabled:opacity-50"
+                className="mt-1.5 w-full py-1.5 rounded bg-[var(--success)] hover:opacity-90 text-white text-xs font-semibold disabled:opacity-50"
                 onClick={() =>
                   void runTransition({ action: 'mark_ready', tool: toolKind, id: r.id }, 'Marked ready')
                 }
@@ -1442,7 +1444,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 <button
                   type="button"
                   disabled={saving}
-                  className="mt-1.5 w-full py-1.5 rounded border border-emerald-600/80 bg-emerald-950/30 text-emerald-100 text-xs font-semibold hover:bg-emerald-950/50 disabled:opacity-50"
+                  className="mt-1.5 w-full py-1.5 rounded border border-[var(--success)]/80 bg-[var(--success-bg)] text-[var(--success)] text-xs font-semibold hover:opacity-90 disabled:opacity-50"
                   onClick={() =>
                     void runTransition(
                       { action: 'vendor_to_live_inventory', tool: 'die', id: r.id },
@@ -1458,13 +1460,13 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           ) : null}
           {zone === 'inventory' ? (
             <>
-              <p className="text-xs font-medium text-neutral-500 mt-1 tabular-nums">
+              <p className="text-xs font-medium text-[var(--text-secondary)] mt-1 tabular-nums">
                 Reuse cycles: {r.reuseCount ?? 0}
               </p>
               <button
                 type="button"
                 disabled={saving}
-                className="mt-1.5 w-full py-1.5 rounded border border-orange-600/80 bg-orange-950/40 text-orange-100 text-xs font-semibold hover:bg-orange-950/60 disabled:opacity-50"
+                className="mt-1.5 w-full py-1.5 rounded border border-[var(--warning)]/80 bg-[var(--warning-bg)] text-[var(--warning)] text-xs font-semibold hover:opacity-90 disabled:opacity-50"
                 onClick={() =>
                   void runTransition(
                     { action: 'inventory_to_custody_floor', tool: toolKind, id: r.id },
@@ -1480,7 +1482,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           {zone === 'custody' ? (
             <div className="mt-1.5 flex flex-col gap-2">
               {custodyInUse ? (
-                <p className="text-xs font-bold uppercase tracking-wide text-blue-400">In use on press</p>
+                <p className="text-xs font-bold uppercase tracking-wide text-[var(--brand-primary)]">In use on press</p>
               ) : null}
               {r.custodyStatus !== 'on_floor' ? (
                 <>
@@ -1499,7 +1501,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   <button
                     type="button"
                     disabled={saving}
-                    className="w-full py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-primary-foreground text-xs font-bold shadow-sm disabled:opacity-50"
+                    className="w-full py-1.5 rounded bg-[var(--brand-primary)] hover:opacity-90 text-white text-xs font-bold shadow-sm disabled:opacity-50"
                     onClick={() => setIssueDieId(r.id)}
                   >
                     Issue to machine
@@ -1521,8 +1523,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 disabled={saving}
                 className={`w-full py-1.5 rounded text-foreground text-xs font-bold shadow-sm ${
                   r.jobCardHub?.key === 'printed'
-                    ? 'bg-emerald-500 hover:bg-emerald-400 ring-2 ring-emerald-300/40'
-                    : 'bg-emerald-700 hover:bg-emerald-600'
+                    ? 'bg-[var(--success)] hover:opacity-90 ring-2 ring-[var(--success)]/40 text-white'
+                    : 'bg-[var(--success)] hover:opacity-90 text-white'
                 }`}
                 onClick={() => openReturnModal(r)}
               >
@@ -1530,7 +1532,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               </button>
               <button
                 type="button"
-                className="w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-xs font-semibold hover:bg-rose-950/70"
+                className="w-full rounded border border-[var(--error)]/50 bg-[var(--error-bg)] py-1.5 text-xs font-semibold text-[var(--error)] hover:opacity-90"
                 onClick={() => {
                   setScrapId(r.id)
                   setScrapReason('')
@@ -1621,31 +1623,33 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           {r.linkedProductId ? (
             <Link
               href={`/masters/cartons/${r.linkedProductId}`}
-              className="block font-sans text-sm font-bold text-emerald-400 hover:text-emerald-300 hover:underline truncate"
+              className="block truncate font-sans text-sm font-bold text-[var(--brand-primary)] hover:text-[var(--brand-primary-hover)] hover:underline"
             >
               {prodTitle}
             </Link>
           ) : (
-            <span className="block font-sans text-sm font-bold text-emerald-400 truncate">{prodTitle}</span>
+            <span className="block truncate font-sans text-sm font-bold text-[var(--brand-primary)]">
+              {prodTitle}
+            </span>
           )}
           <p className={`text-xs text-ds-ink-muted ${HUB_EMB_MONO}`}>
             <span className="text-ds-ink-faint font-sans">Code: </span>
             <button
               type="button"
-              className="text-ds-ink hover:text-sky-300 hover:underline"
+              className="text-ds-ink hover:text-[var(--brand-primary)] hover:underline"
               onClick={() => setEmbossSpotlightId(r.id)}
             >
               {r.displayCode}
             </button>
-            <span className="text-neutral-600"> | </span>
+            <span className="text-[var(--text-secondary)]"> | </span>
             <span className="text-ds-ink-faint font-sans">Ver: </span>
             <span className="text-ds-ink">{verDisp}</span>
           </p>
-          <p className="text-xs text-neutral-500 font-sans">
+          <p className="text-xs text-[var(--text-secondary)] font-sans">
             {r.materialLabel}
             {r.reliefDepthMm != null && Number.isFinite(r.reliefDepthMm) ? (
               <>
-                <span className="text-neutral-600"> · </span>
+                <span className="text-[var(--text-secondary)]"> · </span>
                 <span className={HUB_EMB_MONO}>{r.reliefDepthMm}mm</span>
               </>
             ) : null}
@@ -1655,12 +1659,12 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           {r.operationalStatus === 'In-Use' && r.issuedMachineId ? (
             <Link
               href={`/production/machine-flow?highlightMachineId=${encodeURIComponent(r.issuedMachineId)}`}
-              className="text-xs font-bold uppercase tracking-wide text-emerald-400 hover:text-emerald-300 hover:underline"
+              className="text-xs font-bold uppercase tracking-wide text-[var(--success)] hover:opacity-90 hover:underline"
             >
               In production
             </Link>
           ) : (
-            <span className="text-xs font-bold uppercase tracking-wide text-neutral-500">
+            <span className="text-xs font-bold uppercase tracking-wide text-[var(--text-secondary)]">
               {r.operationalStatus === 'In-Use'
                 ? 'In production'
                 : r.operationalStatus === 'Repair'
@@ -1672,12 +1676,12 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           )}
         </div>
         {r.hubConditionPoor ? (
-          <p className="mt-1 text-xs font-bold uppercase tracking-wider text-red-400 border border-red-700/60 rounded px-1.5 py-0.5 w-fit">
+          <p className="mt-1 text-xs font-bold uppercase tracking-wider text-[var(--error)] border border-[var(--error)]/60 rounded px-1.5 py-0.5 w-fit">
             Poor condition
           </p>
         ) : null}
         {r.strikeOverLimit ? (
-          <p className="mt-1 text-xs font-bold uppercase tracking-wider text-red-400 border border-red-600/70 rounded px-1.5 py-0.5 w-fit animate-pulse">
+          <p className="mt-1 w-fit animate-pulse rounded border border-[var(--error)]/50 bg-[var(--error-bg)] px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider text-[var(--error)]">
             Strike limit exceeded
           </p>
         ) : null}
@@ -1687,12 +1691,12 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           </div>
         ) : null}
         {zone === 'custody' && r.custodyStatus === CUSTODY_ON_FLOOR && r.issuedOperator?.trim() ? (
-          <p className="mt-1 text-xs text-sky-300/95 font-medium">
+          <p className="mt-1 text-xs text-[var(--brand-primary)] font-medium">
             👤 Issued to: {r.issuedOperator.trim()}
           </p>
         ) : null}
         {r.issuedMachineLabel ? (
-          <p className={`mt-0.5 text-xs text-neutral-500 ${HUB_EMB_MONO}`}>Press: {r.issuedMachineLabel}</p>
+          <p className={`mt-0.5 text-xs text-[var(--text-secondary)] ${HUB_EMB_MONO}`}>Press: {r.issuedMachineLabel}</p>
         ) : null}
         {renderSpecs(r, zone)}
         {zone === 'triage' ? (
@@ -1718,7 +1722,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <button
               type="button"
               disabled={saving}
-              className="mt-1.5 w-full py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-primary-foreground text-xs font-semibold disabled:opacity-50"
+              className="mt-1.5 w-full py-1.5 rounded bg-[var(--success)] hover:opacity-90 text-white text-xs font-semibold disabled:opacity-50"
               onClick={() => void runTransition({ action: 'mark_ready', tool: toolKind, id: r.id }, 'Marked ready')}
             >
               Mark ready
@@ -1728,13 +1732,13 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         ) : null}
         {zone === 'inventory' ? (
           <>
-            <p className="text-xs font-medium text-neutral-500 mt-1 tabular-nums">
+            <p className="text-xs font-medium text-[var(--text-secondary)] mt-1 tabular-nums">
               Reuse cycles: {r.reuseCount ?? 0}
             </p>
             <button
               type="button"
               disabled={saving}
-              className="mt-1.5 w-full py-1.5 rounded border border-orange-600/80 bg-orange-950/40 text-orange-100 text-xs font-semibold hover:bg-orange-950/60 disabled:opacity-50"
+              className="mt-1.5 w-full py-1.5 rounded border border-[var(--warning)]/80 bg-[var(--warning-bg)] text-[var(--warning)] text-xs font-semibold hover:opacity-90 disabled:opacity-50"
               onClick={() =>
                 void runTransition(
                   { action: 'inventory_to_custody_floor', tool: toolKind, id: r.id },
@@ -1750,7 +1754,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         {zone === 'custody' ? (
           <div className="mt-1.5 flex flex-col gap-2">
             {custodyInUse ? (
-              <p className="text-xs font-bold uppercase tracking-wide text-blue-400">In use on press</p>
+              <p className="text-xs font-bold uppercase tracking-wide text-[var(--brand-primary)]">In use on press</p>
             ) : null}
             {r.custodyStatus !== 'on_floor' ? (
               <button
@@ -1761,7 +1765,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                     ? 'Poor condition — confirm operator when issuing; maintenance still recommended'
                     : undefined
                 }
-                className="w-full py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-primary-foreground text-xs font-bold shadow-sm disabled:opacity-50"
+                className="w-full py-1.5 rounded bg-[var(--brand-primary)] hover:opacity-90 text-white text-xs font-bold shadow-sm disabled:opacity-50"
                 onClick={() => setIssueDieId(r.id)}
               >
                 Issue to machine
@@ -1770,10 +1774,10 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <button
               type="button"
               disabled={saving}
-              className={`w-full py-1.5 rounded text-foreground text-xs font-bold shadow-sm ${
+              className={`w-full py-1.5 rounded text-white text-xs font-bold shadow-sm ${
                 r.jobCardHub?.key === 'printed'
-                  ? 'bg-emerald-500 hover:bg-emerald-400 ring-2 ring-emerald-300/40'
-                  : 'bg-emerald-700 hover:bg-emerald-600'
+                  ? 'bg-[var(--success)] hover:opacity-90 ring-2 ring-[var(--success)]/40'
+                  : 'bg-[var(--success)] hover:opacity-90'
               }`}
               onClick={() => openReturnModal(r)}
             >
@@ -1781,7 +1785,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             </button>
             <button
               type="button"
-              className="w-full py-1.5 rounded border border-rose-800/70 bg-rose-950/40 text-rose-100 text-xs font-semibold hover:bg-rose-950/70"
+              className="w-full py-1.5 rounded border border-[var(--error)]/50 bg-[var(--error-bg)] text-[var(--error)] text-xs font-semibold hover:opacity-90"
               onClick={() => {
                 setScrapId(r.id)
                 setScrapReason('')
@@ -1825,7 +1829,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
           <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
             <div className="min-w-0">
               <h1 className="text-2xl font-bold tracking-tight text-foreground">{title}</h1>
-              <p className="text-sm text-neutral-500 mt-1">
+              <p className="text-sm text-[var(--text-secondary)] mt-1">
                 Preparation lanes → custody staging. High-contrast layout for floor speed.
               </p>
               <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 max-w-xl">
@@ -1861,7 +1865,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
                   hubView === 'board'
                     ? 'bg-ds-warning text-primary-foreground'
-                    : 'text-neutral-500 hover:text-foreground hover:bg-ds-elevated'
+                    : 'text-[var(--text-secondary)] hover:text-foreground hover:bg-ds-elevated'
                 }`}
               >
                 Board view
@@ -1874,7 +1878,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
                   hubView === 'table'
                     ? 'bg-ds-warning text-primary-foreground'
-                    : 'text-neutral-500 hover:text-foreground hover:bg-ds-elevated'
+                    : 'text-[var(--text-secondary)] hover:text-foreground hover:bg-ds-elevated'
                 }`}
               >
                 Table view
@@ -1884,7 +1888,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         </header>
 
         {loading || !data ? (
-          <p className="text-neutral-500">Loading…</p>
+          <p className="text-[var(--text-secondary)]">Loading…</p>
         ) : hubView === 'table' ? (
           <div className="space-y-4">
             {mode === 'dies' && dieHubZoneSummary ? (
@@ -1896,32 +1900,32 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               />
             ) : null}
             <div
-              className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-2 text-xs uppercase tracking-wider text-neutral-500 font-semibold tabular-nums"
+              className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-2 text-xs uppercase tracking-wider text-[var(--text-secondary)] font-semibold tabular-nums"
               role="status"
             >
-              <span className="text-neutral-400">
+              <span className="text-[var(--text-secondary)]">
                 Showing {filteredLedgerSummary.jobs}{' '}
                 {filteredLedgerSummary.jobs === 1 ? 'job' : 'jobs'}
               </span>
-              <span className="text-neutral-600 mx-1">·</span>
+              <span className="text-[var(--text-secondary)] mx-1">·</span>
               <span>{filteredLedgerSummary.units} total units across selected filters</span>
             </div>
             <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end lg:justify-between">
               <div className="flex flex-col lg:flex-row flex-wrap gap-3 lg:items-end flex-1 min-w-0">
                 <label className="block flex-1 min-w-[200px]">
-                  <span className="text-xs uppercase tracking-wide text-neutral-500 font-semibold">
+                  <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)] font-semibold">
                     Search
                   </span>
                   <input
                     value={ledgerSearch}
                     onChange={(e) => setLedgerSearch(e.target.value)}
                     placeholder="Code, title, specs, zone…"
-                    className="mt-1 w-full px-3 py-2 rounded-md bg-card border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
+                    className="mt-1 w-full px-3 py-2 rounded-md bg-card border border-ds-line/50 text-foreground text-sm placeholder:text-[var(--text-secondary)]"
                   />
                 </label>
                 {mode === 'dies' ? (
                   <label className="block min-w-[160px]">
-                    <span className="text-xs uppercase tracking-wide text-neutral-500 font-semibold">
+                    <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)] font-semibold">
                       Pasting style
                     </span>
                     <select
@@ -1941,7 +1945,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   </label>
                 ) : null}
                 <label className="block min-w-[180px]">
-                  <span className="text-xs uppercase tracking-wide text-neutral-500 font-semibold">
+                  <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)] font-semibold">
                     Zone
                   </span>
                   <select
@@ -1965,7 +1969,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                       setManualDieTarget('live_inventory')
                       setManualDieOpen(true)
                     }}
-                    className="px-3 py-2 rounded-md border border-emerald-600/80 bg-emerald-950/40 text-emerald-100 text-xs font-bold hover:bg-emerald-950/70 whitespace-nowrap"
+                    className="px-3 py-2 rounded-md border border-[var(--success)]/80 bg-[var(--success-bg)] text-[var(--success)] text-xs font-bold hover:opacity-90 whitespace-nowrap"
                   >
                     + Add Die
                   </button>
@@ -1998,7 +2002,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             {mode === 'dies' ? (
               <div className="rounded-lg border border-ds-line/50 bg-ds-main/90 px-3 py-2.5 mb-4 flex flex-col sm:flex-row sm:items-end gap-3 sm:justify-between">
                 <label className="block min-w-[200px] max-w-md flex-1">
-                  <span className="text-xs uppercase tracking-wide text-neutral-500 font-semibold">
+                  <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)] font-semibold">
                     Pasting style filter
                   </span>
                   <select
@@ -2016,7 +2020,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                     ))}
                   </select>
                 </label>
-                <p className="text-xs text-neutral-500 sm:pb-2">
+                <p className="text-xs text-[var(--text-secondary)] sm:pb-2">
                   Column counts and table zone summary use this filter with each zone&apos;s search.
                 </p>
               </div>
@@ -2033,11 +2037,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 value={triageSearch}
                 onChange={(e) => setTriageSearch(e.target.value)}
                 placeholder="Search…"
-                className="mb-3 w-full px-3 py-2 rounded-md bg-card border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
+                className="mb-3 w-full px-3 py-2 rounded-md bg-card border border-ds-line/50 text-foreground text-sm placeholder:text-[var(--text-secondary)]"
               />
               <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                 {triageF.length === 0 ? (
-                  <li className="text-neutral-500 text-sm">No jobs awaiting triage.</li>
+                  <li className="text-[var(--text-secondary)] text-sm">No jobs awaiting triage.</li>
                 ) : (
                   <AnimatePresence initial={false}>
                   {triageF.map((r) =>
@@ -2122,7 +2126,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                       unitCount={prepMetrics.unitCount}
                     />
                   </div>
-                  <p className="text-xs text-neutral-500">{prepSub}</p>
+                  <p className="text-xs text-[var(--text-secondary)]">{prepSub}</p>
                   {mode === 'dies' ? (
                     <button
                       type="button"
@@ -2130,7 +2134,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                         setManualDieTarget('vendor')
                         setManualDieOpen(true)
                       }}
-                      className="w-full px-3 py-2 rounded-md border border-violet-500/80 bg-violet-950/40 text-violet-100 text-xs font-bold hover:bg-violet-950/70"
+                      className="w-full px-3 py-2 rounded-md border border-[var(--brand-primary)]/80 bg-[var(--brand-bg-soft)] text-[var(--brand-primary)] text-xs font-bold hover:opacity-90"
                     >
                       + Manual Vendor PO
                     </button>
@@ -2148,11 +2152,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   value={prepSearch}
                   onChange={(e) => setPrepSearch(e.target.value)}
                   placeholder="Search…"
-                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
+                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-[var(--text-secondary)]"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {prepF.length === 0 ? (
-                    <li className="text-neutral-500 text-sm">Empty.</li>
+                    <li className="text-[var(--text-secondary)] text-sm">Empty.</li>
                   ) : (
                     <AnimatePresence initial={false}>
                       {prepF.map((r) => renderCard(r, 'prep'))}
@@ -2177,7 +2181,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                         setManualDieTarget('live_inventory')
                         setManualDieOpen(true)
                       }}
-                      className="w-full px-3 py-2 rounded-md border border-emerald-600/80 bg-emerald-950/40 text-emerald-100 text-xs font-bold hover:bg-emerald-950/70"
+                      className="w-full px-3 py-2 rounded-md border border-[var(--success)]/80 bg-[var(--success-bg)] text-[var(--success)] text-xs font-bold hover:opacity-90"
                     >
                       + Add Die
                     </button>
@@ -2187,11 +2191,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   value={invSearch}
                   onChange={(e) => setInvSearch(e.target.value)}
                   placeholder="Search…"
-                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
+                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-[var(--text-secondary)]"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {invF.length === 0 ? (
-                    <li className="text-neutral-500 text-sm">No tools in rack.</li>
+                    <li className="text-[var(--text-secondary)] text-sm">No tools in rack.</li>
                   ) : (
                     <AnimatePresence initial={false}>
                       {invF.map((r) => renderCard(r, 'inventory'))}
@@ -2207,20 +2211,20 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                     count={custF.length}
                     unitCount={custMetrics.unitCount}
                   />
-                  <p className="text-xs font-bold uppercase tracking-wider text-blue-400/90 tabular-nums">
+                  <p className="text-xs font-bold uppercase tracking-wider text-[var(--brand-primary)] tabular-nums">
                     {custodyInUseCount} active on press
                   </p>
                 </div>
-                <p className="text-xs text-neutral-500 mb-2">Staging · tools marked ready</p>
+                <p className="text-xs text-[var(--text-secondary)] mb-2">Staging · tools marked ready</p>
                 <input
                   value={custSearch}
                   onChange={(e) => setCustSearch(e.target.value)}
                   placeholder="Search…"
-                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-neutral-500"
+                  className="mb-3 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground text-sm placeholder:text-[var(--text-secondary)]"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
                   {custF.length === 0 ? (
-                    <li className="text-neutral-500 text-sm">Nothing in staging.</li>
+                    <li className="text-[var(--text-secondary)] text-sm">Nothing in staging.</li>
                   ) : (
                     <AnimatePresence initial={false}>
                       {custF.map((r) => renderCard(r, 'custody'))}
@@ -2229,7 +2233,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 </ul>
               </section>
             </div>
-            <p className="mt-4 text-center text-xs text-neutral-500 font-[family-name:var(--font-designing-queue)] tracking-tight px-2">
+            <p className="mt-4 text-center text-xs text-[var(--text-secondary)] font-[family-name:var(--font-designing-queue)] tracking-tight px-2">
               Audit Trail Synchronized - Accountability Layer Active.
             </p>
           </>
@@ -2258,7 +2262,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
           <div className="ci-hub-modal-panel max-w-md max-h-[90vh]">
             <h3 className="ci-hub-modal-title">Return to live inventory</h3>
-            <p className="text-xs text-neutral-500 leading-snug">
+            <p className="text-xs text-[var(--text-secondary)] leading-snug">
               Confirm rack return. If you change dimensions vs. the master record, select a reason (same
               policy as Plate Hub).
             </p>
@@ -2270,7 +2274,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               disabled={saving}
             />
             <div>
-              <span className="block text-sm text-neutral-400 mb-1">Condition</span>
+              <span className="block text-sm text-[var(--text-secondary)] mb-1">Condition</span>
               <div className="flex rounded-lg border border-ds-line/50 overflow-hidden p-0.5 bg-background/40">
                 {(['Good', 'Fair', 'Poor'] as const).map((c) => (
                   <button
@@ -2280,9 +2284,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                     className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors ${
                       returnCondition === c
                         ? c === 'Poor'
-                          ? 'bg-red-900/80 text-red-100'
+                          ? 'bg-[var(--error-bg)] text-[var(--error)] border border-[var(--error)]/40'
                           : 'bg-ds-warning text-primary-foreground'
-                        : 'text-neutral-500 hover:text-ds-ink'
+                        : 'text-[var(--text-secondary)] hover:text-ds-ink'
                     }`}
                   >
                     {c}
@@ -2292,7 +2296,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             </div>
             {returnModal.kind === 'die' ? (
               <>
-                <label className="block text-sm text-neutral-400">
+                <label className="block text-sm text-[var(--text-secondary)]">
                   Dimensions (carton / die outline)
                   <input
                     value={returnDieCarton}
@@ -2300,7 +2304,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                     className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
                   />
                 </label>
-                <label className="block text-sm text-neutral-400">
+                <label className="block text-sm text-[var(--text-secondary)]">
                   Sheet size
                   <input
                     value={returnDieSheet}
@@ -2310,7 +2314,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 </label>
               </>
             ) : (
-              <label className="block text-sm text-neutral-400">
+              <label className="block text-sm text-[var(--text-secondary)]">
                 Block size
                 <input
                   value={returnEmbossSize}
@@ -2336,8 +2340,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               return changed ? (
                 <div className="space-y-2 rounded-lg border border-ds-warning/45 bg-ds-warning/8 p-3">
                   <p className="text-xs font-semibold text-ds-warning">Size change on return</p>
-                  <label className="block text-sm text-neutral-400">
-                    Reason <span className="text-red-400">*</span>
+                  <label className="block text-sm text-[var(--text-secondary)]">
+                    Reason <span className="text-[var(--error)]">*</span>
                     <select
                       value={returnSizeReason}
                       onChange={(e) =>
@@ -2355,7 +2359,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                       ))}
                     </select>
                   </label>
-                  <label className="block text-sm text-neutral-400">
+                  <label className="block text-sm text-[var(--text-secondary)]">
                     Remarks (optional)
                     <textarea
                       value={returnSizeRemarks}
@@ -2370,7 +2374,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
+                className="px-3 py-2 rounded border border-ds-line/50 text-[var(--text-secondary)]"
                 onClick={() => setReturnModal(null)}
                 disabled={saving}
               >
@@ -2395,7 +2399,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <h3 className="ci-hub-modal-title">
               {manualDieTarget === 'live_inventory' ? 'Add die — Live inventory' : 'Manual vendor PO (die)'}
             </h3>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Dye #
               <input
                 value={mdNumber}
@@ -2404,7 +2408,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 inputMode="numeric"
               />
             </label>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Dimensions / carton label (L × W × H or master ref)
               <input
                 value={mdCartonSize}
@@ -2412,7 +2416,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
               />
             </label>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Sheet size (optional)
               <input
                 value={mdSheetSize}
@@ -2420,7 +2424,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
               />
             </label>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               UPS
               <input
                 value={mdUps}
@@ -2429,7 +2433,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 inputMode="numeric"
               />
             </label>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Material / die type
               <input
                 value={mdMaterial}
@@ -2438,7 +2442,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 placeholder="Laser, Wood, Steel Rule…"
               />
             </label>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Pasting type
               <select
                 value={mdPastingType}
@@ -2452,7 +2456,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 ))}
               </select>
             </label>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Initial make
               <select
                 value={mdDieMake}
@@ -2466,7 +2470,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
+                className="px-3 py-2 rounded border border-ds-line/50 text-[var(--text-secondary)]"
                 onClick={() => {
                   setManualDieOpen(false)
                   setManualDieTarget('vendor')
@@ -2491,7 +2495,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
           <div className="ci-hub-modal-panel max-w-md">
             <h3 className="ci-hub-modal-title">Manual in-house request</h3>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Block code
               <input
                 value={meCode}
@@ -2499,7 +2503,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
               />
             </label>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Type (Blind / Foil / …)
               <input
                 value={meType}
@@ -2507,7 +2511,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
               />
             </label>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Material
               <input
                 value={meMaterial}
@@ -2515,7 +2519,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
               />
             </label>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Block size (optional)
               <input
                 value={meSize}
@@ -2526,7 +2530,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
+                className="px-3 py-2 rounded border border-ds-line/50 text-[var(--text-secondary)]"
                 onClick={() => setManualEmbossOpen(false)}
               >
                 Cancel
@@ -2546,9 +2550,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
       {scrapId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="ci-hub-modal-panel max-w-md border-rose-900/50">
-            <h3 className="ci-hub-modal-title text-rose-200/95 border-rose-900/40">Scrap / damage</h3>
-            <p className="text-xs text-neutral-500 leading-snug">Record why this tool is removed from active inventory.</p>
+          <div className="ci-hub-modal-panel max-w-md border-[var(--error)]/50">
+            <h3 className="ci-hub-modal-title text-[var(--error)] border-[var(--error)]/40">Scrap / damage</h3>
+            <p className="text-xs text-[var(--text-secondary)] leading-snug">Record why this tool is removed from active inventory.</p>
             <textarea
               value={scrapReason}
               onChange={(e) => setScrapReason(e.target.value)}
@@ -2559,7 +2563,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
+                className="px-3 py-2 rounded border border-ds-line/50 text-[var(--text-secondary)]"
                 onClick={() => {
                   setScrapId(null)
                   setScrapReason('')
@@ -2570,7 +2574,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
               <button
                 type="button"
                 disabled={saving || scrapReason.trim().length < 3}
-                className="px-3 py-2 rounded bg-rose-700 text-primary-foreground font-semibold disabled:opacity-50"
+                className="px-3 py-2 rounded bg-[var(--error)] hover:opacity-90 text-white font-semibold disabled:opacity-50"
                 onClick={() => void submitScrap()}
               >
                 Confirm scrap
@@ -2584,7 +2588,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
           <div className="ci-hub-modal-panel max-w-md border-ds-warning/20">
             <h3 className="ci-hub-modal-title">Reverse last hub action</h3>
-            <p className="text-xs text-neutral-500 leading-snug">
+            <p className="text-xs text-[var(--text-secondary)] leading-snug">
               Who is undoing this step? Pick a name from Operator Master — this is stored on the audit log.
             </p>
             <OperatorMasterCombobox
@@ -2597,7 +2601,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
+                className="px-3 py-2 rounded border border-ds-line/50 text-[var(--text-secondary)]"
                 onClick={() => setReverseRowId(null)}
               >
                 Cancel
@@ -2617,12 +2621,12 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
 
       {issueDieId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
-          <div className="ci-hub-modal-panel max-w-md border-sky-900/35">
+          <div className="ci-hub-modal-panel max-w-md border-[var(--brand-primary)]/35">
             <h3 className="ci-hub-modal-title">Issue to machine</h3>
-            <p className="text-xs text-neutral-500 leading-snug">
+            <p className="text-xs text-[var(--text-secondary)] leading-snug">
               Select press and operator. Names come from Operator Master (Die Hub staff settings).
             </p>
-            <label className="block text-sm text-neutral-400">
+            <label className="block text-sm text-[var(--text-secondary)]">
               Machine
               <select
                 value={issueMachineId}
@@ -2647,7 +2651,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
+                className="px-3 py-2 rounded border border-ds-line/50 text-[var(--text-secondary)]"
                 onClick={() => setIssueDieId(null)}
               >
                 Cancel

@@ -66,6 +66,16 @@ type Line = {
   toolingDieType: string
   toolingDims: string
   toolingUnlinked: boolean
+  fgReservation?: {
+    reservationKey: string
+    materialId: string
+    materialCode: string
+    qtyReserved: number
+    unit: string
+    movementId: string
+    reservedAt: string
+  } | null
+  useReservedFirst?: boolean
 }
 
 type CartonLookupFieldProps = {
@@ -411,6 +421,11 @@ export default function EditPurchaseOrderPage() {
             toolingDieType: li.lineDieType || '',
             toolingDims: sizeForLine,
             toolingUnlinked: false,
+            fgReservation:
+              specOverrides.fgReservation && typeof specOverrides.fgReservation === 'object'
+                ? (specOverrides.fgReservation as Line['fgReservation'])
+                : null,
+            useReservedFirst: specOverrides.useReservedFirst !== false,
           }
         })
         setLines(mapped.length > 0 ? mapped : [defaultLine()])
@@ -705,6 +720,8 @@ export default function EditPurchaseOrderPage() {
               wastagePct: Number(l.wastagePct) || 10,
               boardGrade: l.boardGrade.trim() || undefined,
               foilType: l.foilType.trim() || undefined,
+              fgReservation: l.fgReservation ?? undefined,
+              useReservedFirst: l.useReservedFirst !== false,
               ...(l.pastingStyle === 'BSO' || l.pastingStyle === 'LOCK_BOTTOM'
                 ? { pastingStyle: l.pastingStyle === 'BSO' ? PastingStyle.BSO : PastingStyle.LOCK_BOTTOM }
                 : {}),
@@ -1274,6 +1291,33 @@ export default function EditPurchaseOrderPage() {
           </DataTableFrame>
         </div>
       </fieldset>
+
+      {lines.some((l) => !!l.fgReservation) ? (
+        <div className="rounded-xl border border-ds-line/50 bg-ds-elevated/30 p-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ds-warning">
+            FG reservation log
+          </p>
+          <div className="space-y-1.5 text-xs">
+            {lines
+              .filter((l) => !!l.fgReservation)
+              .map((l, idx) => (
+                <div
+                  key={`${l.id ?? idx}-${l.fgReservation?.reservationKey ?? idx}`}
+                  className="rounded border border-ds-line/40 px-2 py-1.5 text-ds-ink-faint"
+                >
+                  <span className="text-ds-ink">{l.cartonName || `Line ${idx + 1}`}</span>
+                  {' · '}Reserved {l.fgReservation?.qtyReserved.toLocaleString('en-IN')}{' '}
+                  {l.fgReservation?.unit} from {l.fgReservation?.materialCode}
+                  {' · '}Use reserved first: {l.useReservedFirst !== false ? 'Yes' : 'No'}
+                  {' · '}
+                  {l.fgReservation?.reservedAt
+                    ? new Date(l.fgReservation.reservedAt).toLocaleString()
+                    : '—'}
+                </div>
+              ))}
+          </div>
+        </div>
+      ) : null}
 
       <div
         className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/40 bg-background/85 shadow-[0_-8px_32px_rgba(0,0,0,0.55)] backdrop-blur-md"

@@ -83,12 +83,12 @@ export function EmbossHubSpotlightDrawer({
               {b.linkedProductId ? (
                 <Link
                   href={`/masters/cartons/${b.linkedProductId}`}
-                  className="block text-base font-bold text-emerald-400 font-sans leading-snug hover:text-emerald-300 hover:underline"
+                  className="block text-base font-bold text-[var(--success)] font-sans leading-snug hover:opacity-90 hover:underline"
                 >
                   {b.productName}
                 </Link>
               ) : (
-                <p className="text-base font-bold text-emerald-400 font-sans leading-snug">{b.productName}</p>
+                <p className="text-base font-bold text-[var(--success)] font-sans leading-snug">{b.productName}</p>
               )}
               <p className={`text-xs text-ds-ink-muted ${mono}`}>
                 <span className="text-ds-ink-faint font-sans">Code: </span>
@@ -113,7 +113,7 @@ export function EmbossHubSpotlightDrawer({
               {b.currentMachine ? (
                 <Link
                   href={`/production/machine-flow?highlightMachineId=${encodeURIComponent(b.currentMachine.id)}`}
-                  className="block text-ds-ink hover:text-emerald-300 hover:underline"
+                  className="block text-ds-ink hover:text-[var(--success)] hover:underline"
                 >
                   {b.currentMachine.code} · {b.currentMachine.name}
                 </Link>
@@ -127,7 +127,7 @@ export function EmbossHubSpotlightDrawer({
               ) : null}
               <p className={`text-xs text-neutral-500 pt-1 font-sans`}>
                 Cumulative strikes (master):{' '}
-                <span className={`text-orange-300 ${mono}`}>{b.cumulativeStrikes.toLocaleString()}</span>
+                <span className={`text-[var(--brand-primary)] ${mono}`}>{b.cumulativeStrikes.toLocaleString()}</span>
               </p>
             </section>
 
@@ -142,7 +142,7 @@ export function EmbossHubSpotlightDrawer({
                   {data.timeline.map((e) => (
                     <li key={e.id} className="relative">
                       <span
-                        className="absolute -start-[21px] top-1.5 flex h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-ring"
+                        className="absolute -start-[21px] top-1.5 flex h-2.5 w-2.5 rounded-full bg-[var(--success)] ring-4 ring-ring"
                         aria-hidden
                       />
                       <p className="text-xs text-neutral-500 font-sans">{formatAt(e.atIso)}</p>
@@ -153,7 +153,7 @@ export function EmbossHubSpotlightDrawer({
                             Job:{' '}
                             <Link
                               href={`/production/job-cards/${e.jobCardId}`}
-                              className="text-sky-400 hover:underline"
+                              className="text-[var(--brand-primary)] hover:opacity-90 hover:underline"
                             >
                               {e.jobDisplay}
                             </Link>
@@ -161,7 +161,7 @@ export function EmbossHubSpotlightDrawer({
                         ) : null}
                         {e.impressionsDelta != null ? (
                           <p className={mono}>
-                            <span className="text-orange-300/95">+{e.impressionsDelta.toLocaleString()}</span>
+                            <span className="text-[var(--brand-primary)]">+{e.impressionsDelta.toLocaleString()}</span>
                             {e.impressionsCumulative != null ? (
                               <span className="text-neutral-500">
                                 {' '}

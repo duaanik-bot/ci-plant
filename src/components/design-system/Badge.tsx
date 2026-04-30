@@ -4,11 +4,13 @@ import { cn } from '@/lib/cn'
 type Tone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger'
 
 const toneMap: Record<Tone, string> = {
-  neutral: 'border-ds-line/50 bg-ds-elevated/60 text-ds-ink-muted',
-  brand: 'border-ds-brand/25 bg-ds-brand/12 text-ds-ink',
-  success: 'border-ds-success/20 bg-ds-success/8 text-ds-success',
-  warning: 'border-ds-warning/25 bg-ds-warning/8 text-ds-warning',
-  danger: 'border-ds-error/25 bg-ds-error/8 text-ds-error',
+  neutral:
+    'border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-secondary)]',
+  brand:
+    'border-transparent bg-[var(--brand-bg-soft)] text-[var(--brand-primary)]',
+  success: 'border-transparent bg-[var(--success-bg)] text-[var(--success)]',
+  warning: 'border-transparent bg-[var(--warning-bg)] text-[var(--warning)]',
+  danger: 'border-transparent bg-[var(--error-bg)] text-[var(--error)]',
 }
 
 export function Badge({ className, tone = 'neutral', ...props }: HTMLAttributes<HTMLSpanElement> & { tone?: Tone }) {

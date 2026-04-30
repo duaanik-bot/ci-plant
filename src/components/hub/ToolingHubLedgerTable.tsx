@@ -245,7 +245,7 @@ export function ToolingHubLedgerTable({
                             units: r.units,
                           })
                         }
-                        className="block max-w-[220px] truncate text-left text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                        className="block max-w-[220px] truncate text-left text-xs font-medium text-[var(--brand-primary)] hover:opacity-90 hover:underline"
                       >
                         {r.title}
                       </button>
@@ -340,7 +340,7 @@ export function ToolingHubLedgerTable({
                         <button
                           type="button"
                           onClick={() => openAuditForDie(r, dimTitle)}
-                          className="block max-w-[140px] truncate text-left text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                          className="block max-w-[140px] truncate text-left text-xs font-semibold text-[var(--brand-primary)] hover:opacity-90 hover:underline"
                         >
                           {dimTitle}
                         </button>
@@ -394,7 +394,7 @@ export function ToolingHubLedgerTable({
                               matches: r.typeMismatchMatches ?? [],
                             })
                           }
-                          className="text-red-400 hover:text-red-300 font-bold text-xs uppercase tracking-wide"
+                          className="text-[var(--error)] hover:opacity-90 font-bold text-xs uppercase tracking-wide"
                         >
                           Type mismatch
                         </button>
@@ -428,7 +428,7 @@ export function ToolingHubLedgerTable({
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {r.hubConditionPoor ? (
-                        <span className="inline-flex items-center rounded border border-red-600/70 bg-red-50 px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide text-red-800 whitespace-nowrap dark:bg-red-950/50 dark:text-red-300">
+                        <span className="inline-flex items-center rounded border border-[var(--error)]/70 bg-[var(--error-bg)] px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide text-[var(--error)] whitespace-nowrap">
                           Maintenance
                         </span>
                       ) : (

@@ -11,9 +11,9 @@ import {
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 
 const labelClass: Record<SuggestedBatch['label'], string> = {
-  High: 'text-emerald-300 ring-emerald-500/50 bg-emerald-500/15',
-  Medium: 'text-ds-warning ring-ds-warning/35 bg-ds-warning/8',
-  Low: 'text-rose-200 ring-rose-500/40 bg-rose-500/10',
+  High: 'text-[var(--success)] ring-[var(--success)]/40 bg-[var(--success-bg)]',
+  Medium: 'text-[var(--warning)] ring-[var(--warning)]/35 bg-[var(--warning-bg)]',
+  Low: 'text-[var(--error)] ring-[var(--error)]/35 bg-[var(--error-bg)]',
 }
 
 type Props = {
@@ -41,15 +41,17 @@ export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onAccept, o
   return (
     <div>
       <div className="mb-2 flex items-center gap-2 text-ds-ink-muted">
-        <Sparkles className="h-4 w-4 text-cyan-400" aria-hidden />
-        <h2 className="text-xs font-semibold tracking-tight text-cyan-400/95">Suggested groups</h2>
+        <Sparkles className="h-4 w-4 text-[var(--brand-primary)]" aria-hidden />
+        <h2 className="text-xs font-semibold tracking-tight text-[var(--brand-primary)]">
+          Suggested groups
+        </h2>
         <span className={`text-xs text-ds-ink-faint ${mono}`}>{suggestions.length}</span>
       </div>
       <div className="flex flex-wrap gap-2">
         {suggestions.map((b) => (
           <article
             key={b.id}
-            className="flex w-full min-w-[16rem] max-w-sm flex-1 flex-col rounded-xl border border-cyan-500/20 bg-gradient-to-b from-cyan-950/25 to-ds-card/50 p-3 shadow-sm sm:min-w-[18rem]"
+            className="flex w-full min-w-[16rem] max-w-sm flex-1 flex-col rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-sm sm:min-w-[18rem]"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">

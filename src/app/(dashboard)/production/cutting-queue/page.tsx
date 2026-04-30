@@ -173,7 +173,7 @@ export default function CuttingQueuePage() {
 
   return (
     <div className="min-h-screen bg-background text-ds-ink pb-10">
-      <div className="mx-auto max-w-7xl px-3 py-3 space-y-3">
+      <div className="w-full px-3 py-3 md:px-4 space-y-3">
         <div className="sticky top-0 z-20 border-b border-ds-line/30 bg-background/95 py-1.5 backdrop-blur">
           <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>
             Production execution · Cutting

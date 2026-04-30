@@ -385,7 +385,7 @@ export default function JobCardDetailPage() {
   const bible = jc?.productionBible
   const effectiveRouting = {
     ...suggestPostPressRouting(jc?.poLine ?? null),
-    ...(jc.postPressRouting ?? {}),
+    ...(jc?.postPressRouting ?? {}),
   }
 
   useEffect(() => {
@@ -591,10 +591,14 @@ export default function JobCardDetailPage() {
     }
     const nextRouting = {
       ...(jc.postPressRouting ?? {}),
-      printPlan: {
-        ...(jc.postPressRouting?.printPlan ?? { lane: 'triage' as const, order: 0 }),
-        machineId: machineId || null,
-      },
+      ...(release || jc.postPressRouting?.printPlan
+        ? {
+            printPlan: {
+              ...(jc.postPressRouting?.printPlan ?? { lane: 'triage' as const, order: 0 }),
+              machineId: machineId || null,
+            },
+          }
+        : {}),
       executionSetup: {
         prePressRemarks: prePressRemarks || null,
         boardReadiness,
@@ -613,6 +617,36 @@ export default function JobCardDetailPage() {
       postPressRouting: nextRouting,
     })
   }
+
+  const returnTo = searchParams.get('returnTo') || '/production/job-cards'
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        void saveExecution(false)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        router.push(returnTo)
+        return
+      }
+      if (e.key === ']' || e.key === '[') {
+        const raw = window.sessionStorage.getItem('job-card-visible-order')
+        if (!raw) return
+        const ids = raw.split(',').filter(Boolean)
+        const idx = ids.indexOf(id)
+        if (idx < 0) return
+        const nextIdx = e.key === ']' ? idx + 1 : idx - 1
+        if (nextIdx < 0 || nextIdx >= ids.length) return
+        e.preventDefault()
+        router.push(`/production/job-cards/${ids[nextIdx]}?returnTo=${encodeURIComponent(returnTo)}`)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [id, returnTo, router, jc, saveExecution])
 
   if (!jc) {
     return (
@@ -662,54 +696,6 @@ export default function JobCardDetailPage() {
       : statusLabel === 'Ready'
         ? 'border-ds-warning/40 bg-ds-warning/10 text-ds-warning'
         : 'border-ds-line/50 bg-ds-main text-ds-ink-faint'
-
-  const returnTo = searchParams.get('returnTo') || '/production/job-cards'
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault()
-        void saveExecution(false)
-        return
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        router.push(returnTo)
-        return
-      }
-      if (e.key === ']' || e.key === '[') {
-        const raw = window.sessionStorage.getItem('job-card-visible-order')
-        if (!raw) return
-        const ids = raw.split(',').filter(Boolean)
-        const idx = ids.indexOf(id)
-        if (idx < 0) return
-        const nextIdx = e.key === ']' ? idx + 1 : idx - 1
-        if (nextIdx < 0 || nextIdx >= ids.length) return
-        e.preventDefault()
-        router.push(`/production/job-cards/${ids[nextIdx]}?returnTo=${encodeURIComponent(returnTo)}`)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [
-    id,
-    returnTo,
-    router,
-    sheetDefined,
-    boardStatus,
-    toolingReady,
-    awPoMatch,
-    designerUserId,
-    prePressRemarks,
-    boardReadiness,
-    sheetSizeOverride,
-    machineId,
-    priority,
-    targetStartDate,
-    plannedCompletion,
-    jc?.artworkApproved,
-    jc?.finalQcPass,
-  ])
 
   return (
     <div className="min-h-screen bg-background text-ds-ink pb-24">

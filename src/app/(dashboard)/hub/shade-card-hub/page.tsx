@@ -354,7 +354,7 @@ export default function ShadeCardHubPage() {
 
   return (
     <div className="min-h-screen bg-background text-ds-ink">
-      <div className="max-w-[1600px] mx-auto p-3 md:p-4 space-y-4 pb-20">
+      <div className="w-full px-3 py-3 md:px-4 md:py-4 space-y-4 pb-20">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-bold text-ds-warning tracking-tight font-sans">Shade Card Hub</h1>

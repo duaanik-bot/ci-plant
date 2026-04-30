@@ -810,7 +810,7 @@ export default function ProductionStagePage() {
                 </p>
                 <div className="h-3 w-full rounded-full bg-ds-card border border-ds-line/40 overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-ds-warning to-ds-warning transition-all duration-500"
+                    className="h-full bg-[var(--warning)] transition-all duration-500"
                     style={{
                       width: `${Math.min(
                         100,

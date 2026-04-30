@@ -324,7 +324,7 @@ export default function DirectorCommandCenterPage() {
         onFocusLine={setFocusedLineId}
         monoClass={mono}
       />
-      <div className="min-w-0 flex-1 p-3 md:p-4 max-w-[1800px] mx-auto space-y-3 pb-24">
+      <div className="min-w-0 flex-1 p-3 md:p-4 w-full space-y-3 pb-24">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-lg md:text-xl font-bold text-ds-warning tracking-tight">

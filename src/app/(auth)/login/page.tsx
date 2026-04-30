@@ -37,7 +37,7 @@ function LoginForm() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-ds-card to-ds-elevated p-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[var(--bg-main)] p-4">
       <div className="w-full max-w-md">
         {/* Branding */}
         <div className="text-center mb-8">

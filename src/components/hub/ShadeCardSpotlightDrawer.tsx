@@ -377,7 +377,7 @@ export function ShadeCardSpotlightDrawer({
                 </div>
                 <div
                   className={`rounded-xl border px-3 py-3 flex gap-4 items-center ${
-                    row.fadeAlert ? 'border-red-600 animate-pulse bg-red-950/20' : 'border-ds-line/40 bg-ds-main/60'
+                    row.fadeAlert ? 'border-[var(--error)] animate-pulse bg-[var(--error-bg)]' : 'border-ds-line/40 bg-ds-main/60'
                   }`}
                 >
                   <div
@@ -391,11 +391,11 @@ export function ShadeCardSpotlightDrawer({
                     title="Color swatch"
                   />
                   <div className="min-w-0 font-sans">
-                    <p className="text-sm font-bold text-emerald-400 truncate">{clientName}</p>
+                    <p className="text-sm font-bold text-[var(--success)] truncate">{clientName}</p>
                     {productLinkId ? (
                       <Link
                         href={`/product/${productLinkId}`}
-                        className="mt-0.5 block truncate text-sm text-foreground hover:text-sky-300 hover:underline"
+                        className="mt-0.5 block truncate text-sm text-foreground hover:text-[var(--brand-primary)] hover:underline"
                       >
                         {productTitle}
                       </Link>
@@ -415,7 +415,7 @@ export function ShadeCardSpotlightDrawer({
                             {' '}
                             ·{' '}
                             {shadeCardAgeTier(row.currentAgeMonths) === 'expired' ? (
-                              <span className="text-rose-500 inline-flex items-center gap-0.5">
+                              <span className="text-[var(--error)] inline-flex items-center gap-0.5">
                                 <AlertTriangle className="h-3 w-3 inline" aria-hidden />
                                 EXPIRED · {row.currentAgeMonths.toFixed(2)} mo
                               </span>
@@ -425,7 +425,7 @@ export function ShadeCardSpotlightDrawer({
                                 {row.currentAgeMonths.toFixed(2)} mo
                               </span>
                             ) : (
-                              <span className="text-emerald-500">{row.currentAgeMonths.toFixed(2)} mo</span>
+                              <span className="text-[var(--success)]">{row.currentAgeMonths.toFixed(2)} mo</span>
                             )}
                           </>
                         ) : null}
@@ -433,7 +433,7 @@ export function ShadeCardSpotlightDrawer({
                     ) : null}
                     <p className="mt-1 text-xs text-neutral-500" title="ΔE Limit Enforced < 2.0">
                       ΔE{' '}
-                      <span className={row.deltaEAlert ? 'text-red-400 font-semibold' : 'text-emerald-400'}>
+                      <span className={row.deltaEAlert ? 'text-[var(--error)] font-semibold' : 'text-[var(--success)]'}>
                         {row.deltaEReading != null ? row.deltaEReading : '—'}
                       </span>{' '}
                       <span className="text-neutral-600">(limit &lt; 2.0)</span>
@@ -512,7 +512,7 @@ export function ShadeCardSpotlightDrawer({
                       ) : (
                         <p className="p-3 text-xs text-neutral-500 font-sans">
                           Preview not available.{' '}
-                          <a href={proofUrl} target="_blank" rel="noopener noreferrer" className="text-sky-400 underline">
+                          <a href={proofUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--brand-primary)] hover:opacity-90 underline">
                             Open file →
                           </a>
                         </p>
@@ -590,7 +590,7 @@ export function ShadeCardSpotlightDrawer({
                     href={row.inkRecipeLink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block text-xs text-sky-400 hover:underline font-sans"
+                    className="block text-xs text-[var(--brand-primary)] hover:opacity-90 hover:underline font-sans"
                   >
                     Ink Kitchen recipe URL →
                   </a>
@@ -664,7 +664,7 @@ export function ShadeCardSpotlightDrawer({
                     type="button"
                     disabled={busy}
                     onClick={() => void saveVerification()}
-                    className="w-full rounded-lg bg-emerald-800 py-2 text-xs font-semibold text-primary-foreground hover:bg-emerald-700 disabled:opacity-50 font-sans"
+                    className="w-full rounded-lg bg-[var(--success)] py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 font-sans"
                   >
                     {busy ? '…' : `Save & log — ${COLOR_VERIFICATION_AUDIT}`}
                   </button>

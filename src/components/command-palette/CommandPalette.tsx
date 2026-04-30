@@ -24,6 +24,7 @@ import {
   storedToCommandResult,
 } from '@/lib/command-palette-recent'
 import { pastingStyleSearchBadgeClass, pastingStyleShortLabel } from '@/lib/pasting-style'
+import clsx from 'clsx'
 
 const DEBOUNCE_MS = 200
 
@@ -416,7 +417,15 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   )
 }
 
-export function CommandPaletteTrigger() {
+export function CommandPaletteTrigger({
+  className,
+  placeholder,
+  variant = 'default',
+}: {
+  className?: string
+  placeholder?: string
+  variant?: 'default' | 'navbar'
+} = {}) {
   const { open } = useCommandPalette()
   const [kbdHint, setKbdHint] = useState('⌘K')
   useEffect(() => {
@@ -425,16 +434,44 @@ export function CommandPaletteTrigger() {
     )
     setKbdHint(mac ? '⌘K' : 'Ctrl+K')
   }, [])
+  const resolvedPlaceholder =
+    placeholder ??
+    (variant === 'navbar'
+      ? 'Search anything…'
+      : 'Search POs, dies, products, jobs…')
   return (
     <button
       type="button"
       onClick={() => open()}
-      className="flex w-full max-w-xl items-center gap-2 rounded-lg border border-border bg-card/70 px-3 py-2 text-left text-sm text-muted-foreground shadow-inner ring-1 ring-ring/20 backdrop-blur-md transition hover:border-primary/40 hover:bg-accent hover:text-accent-foreground"
+      className={clsx(
+        'flex w-full items-center gap-2 text-left text-sm transition duration-200',
+        variant === 'navbar'
+          ? clsx(
+              'max-w-none rounded-full border border-[var(--border)] bg-[var(--bg-card)] px-4 py-2.5 text-[var(--text-secondary)] shadow-[0_2px_14px_rgba(15,23,42,0.06),0_0_0_1px_rgba(249,115,22,0.07)] hover:border-[rgba(249,115,22,0.45)] hover:shadow-[0_6px_28px_rgba(15,23,42,0.1),0_0_24px_rgba(249,115,22,0.12)] dark:shadow-[0_2px_20px_rgba(0,0,0,0.35)]',
+            )
+          : clsx(
+              'max-w-xl rounded-lg border border-border bg-card/70 px-3 py-2 text-muted-foreground shadow-inner ring-1 ring-ring/20 backdrop-blur-md hover:border-primary/40 hover:bg-accent hover:text-accent-foreground',
+            ),
+        className,
+      )}
       aria-label="Open command palette"
     >
-      <Search className="h-4 w-4 shrink-0 text-ds-ink-faint" aria-hidden />
-      <span className="flex-1 truncate">Search POs, dies, products, jobs…</span>
-      <kbd className="hidden sm:inline rounded border border-ds-line/60 bg-ds-main/80 px-1.5 py-0.5 text-xs font-mono text-ds-ink-faint">
+      <Search
+        className={clsx(
+          'h-4 w-4 shrink-0',
+          variant === 'navbar' ? 'text-[var(--text-secondary)]' : 'text-ds-ink-faint',
+        )}
+        aria-hidden
+      />
+      <span className="flex-1 truncate">{resolvedPlaceholder}</span>
+      <kbd
+        className={clsx(
+          'hidden rounded px-1.5 py-0.5 text-xs font-mono sm:inline',
+          variant === 'navbar'
+            ? 'border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-secondary)]'
+            : 'border border-ds-line/60 bg-ds-main/80 text-ds-ink-faint',
+        )}
+      >
         {kbdHint}
       </kbd>
     </button>

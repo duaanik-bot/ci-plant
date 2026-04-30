@@ -164,15 +164,15 @@ export function ToolingJobAuditModal({
               <h2 id="tooling-audit-title" className="text-lg font-semibold text-foreground truncate">
                 Tool details &amp; history
               </h2>
-              <p className="text-sm font-medium text-blue-300/90 mt-1 truncate">{context.title}</p>
-              <p className="text-xs text-neutral-500 mt-0.5 font-mono">
+              <p className="text-sm font-medium text-[var(--brand-primary)] mt-1 truncate">{context.title}</p>
+              <p className="text-xs text-[var(--text-secondary)] mt-0.5 font-mono">
                 {context.displayCode} · {context.zoneLabel}
               </p>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 px-2 py-1 rounded border border-ds-line/50 text-neutral-400 text-xs hover:bg-ds-elevated"
+              className="shrink-0 px-2 py-1 rounded border border-ds-line/50 text-[var(--text-secondary)] text-xs hover:bg-ds-elevated"
             >
               Close
             </button>
@@ -188,7 +188,7 @@ export function ToolingJobAuditModal({
               aria-selected={tab === 'timeline'}
               onClick={() => setTab('timeline')}
               className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-                tab === 'timeline' ? 'bg-ds-warning text-primary-foreground' : 'text-neutral-500 hover:text-foreground'
+                tab === 'timeline' ? 'bg-[var(--warning)] text-white' : 'text-[var(--text-secondary)] hover:text-foreground'
               }`}
             >
               Timeline
@@ -199,7 +199,7 @@ export function ToolingJobAuditModal({
               aria-selected={tab === 'usage'}
               onClick={() => setTab('usage')}
               className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-                tab === 'usage' ? 'bg-ds-warning text-primary-foreground' : 'text-neutral-500 hover:text-foreground'
+                tab === 'usage' ? 'bg-[var(--warning)] text-white' : 'text-[var(--text-secondary)] hover:text-foreground'
               }`}
             >
               Usage history
@@ -209,54 +209,54 @@ export function ToolingJobAuditModal({
 
         <div className="p-4 overflow-y-auto flex-1 space-y-4">
           <section>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">
               Current specs
             </h3>
             <div className="rounded-lg border border-ds-line/40 bg-background/50 p-3 space-y-2">
-              <p className="text-xs text-neutral-500 uppercase">Units</p>
+              <p className="text-xs text-[var(--text-secondary)] uppercase">Units</p>
               <p className="text-sm text-ds-ink font-medium tabular-nums">{context.units}</p>
-              <p className="text-xs text-neutral-500 uppercase">Specification</p>
+              <p className="text-xs text-[var(--text-secondary)] uppercase">Specification</p>
               <p className="text-sm text-ds-ink leading-snug">{context.specSummary}</p>
             </div>
           </section>
 
           {tab === 'timeline' ? (
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">
                 Hub event timeline
               </h3>
               {loading ? (
-                <p className="text-sm text-neutral-500">Loading history…</p>
+                <p className="text-sm text-[var(--text-secondary)]">Loading history…</p>
               ) : error ? (
-                <p className="text-sm text-rose-400">{error}</p>
+                <p className="text-sm text-[var(--error)]">{error}</p>
               ) : entries.length === 0 ? (
-                <p className="text-sm text-neutral-500">No hub events recorded yet for this tool.</p>
+                <p className="text-sm text-[var(--text-secondary)]">No hub events recorded yet for this tool.</p>
               ) : (
                 <ul className="relative border-l border-ds-line/50 pl-4 space-y-4 ml-1.5">
                 {entries.map((e, i) => (
                   <li key={e.id ?? `${e.timeLabel}-${i}`} className="relative">
-                    <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-ds-warning ring-4 ring-ds-main" />
+                    <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-[var(--brand-primary)] ring-4 ring-ds-main" />
                     {context.tool === 'die' ? (
                       <div className="rounded-lg border border-ds-line/40 bg-background/40 p-2.5 space-y-1.5">
-                        <p className="text-xs text-neutral-500 font-mono tabular-nums">{e.timeLabel}</p>
+                        <p className="text-xs text-[var(--text-secondary)] font-mono tabular-nums">{e.timeLabel}</p>
                         <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-1 text-xs">
-                          <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Operator</dt>
+                          <dt className="text-[var(--text-secondary)] font-semibold uppercase tracking-wide">Operator</dt>
                           <dd className="text-ds-ink">
                             {(e.operatorName ?? e.performedBy)?.trim() || '—'}
                           </dd>
-                          <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Action</dt>
+                          <dt className="text-[var(--text-secondary)] font-semibold uppercase tracking-wide">Action</dt>
                           <dd className="text-ds-ink font-mono text-xs">
                             {e.hubAction?.trim() || e.actionType?.trim() || '—'}
                           </dd>
-                          <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Condition</dt>
+                          <dt className="text-[var(--text-secondary)] font-semibold uppercase tracking-wide">Condition</dt>
                           <dd className="text-ds-ink">{e.condition?.trim() || '—'}</dd>
-                          <dt className="text-neutral-500 font-semibold uppercase tracking-wide">Timestamp</dt>
-                          <dd className="text-neutral-500 font-mono text-xs break-all">
+                          <dt className="text-[var(--text-secondary)] font-semibold uppercase tracking-wide">Timestamp</dt>
+                          <dd className="text-[var(--text-secondary)] font-mono text-xs break-all">
                             {e.createdAt ?? '—'}
                           </dd>
                         </dl>
                         {e.summaryLine ? (
-                          <p className="text-xs text-neutral-500 leading-snug pt-1 border-t border-ds-line/50">
+                          <p className="text-xs text-[var(--text-secondary)] leading-snug pt-1 border-t border-ds-line/50">
                             {e.summaryLine}
                           </p>
                         ) : null}
@@ -265,11 +265,11 @@ export function ToolingJobAuditModal({
                       <p className="text-sm text-ds-ink leading-snug font-medium">{e.summaryLine}</p>
                     ) : (
                       <>
-                        <p className="text-xs text-neutral-500 font-mono">{e.timeLabel}</p>
+                        <p className="text-xs text-[var(--text-secondary)] font-mono">{e.timeLabel}</p>
                         <p className="text-sm font-bold text-ds-ink mt-0.5">{e.action}</p>
-                        <p className="text-xs text-neutral-500 mt-1 leading-snug">{e.detail}</p>
+                        <p className="text-xs text-[var(--text-secondary)] mt-1 leading-snug">{e.detail}</p>
                         {e.performedBy ? (
-                          <p className="text-xs text-neutral-600 mt-1">By {e.performedBy}</p>
+                          <p className="text-xs text-[var(--text-secondary)] mt-1">By {e.performedBy}</p>
                         ) : null}
                       </>
                     )}
@@ -280,23 +280,23 @@ export function ToolingJobAuditModal({
             </section>
           ) : (
             <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">
                 Usage history
               </h3>
-              <p className="text-xs text-neutral-500 mb-2 leading-snug">
+              <p className="text-xs text-[var(--text-secondary)] mb-2 leading-snug">
                 Returns to rack with the press that was last issued (from hub events).
               </p>
               {loading ? (
-                <p className="text-sm text-neutral-500">Loading…</p>
+                <p className="text-sm text-[var(--text-secondary)]">Loading…</p>
               ) : error ? (
-                <p className="text-sm text-rose-400">{error}</p>
+                <p className="text-sm text-[var(--error)]">{error}</p>
               ) : usageRows.length === 0 ? (
-                <p className="text-sm text-neutral-500">No return cycles recorded yet.</p>
+                <p className="text-sm text-[var(--text-secondary)]">No return cycles recorded yet.</p>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-ds-line/40">
                   <table className="w-full text-left text-xs border-collapse min-w-[420px]">
                     <thead>
-                      <tr className="border-b border-ds-line/40 text-xs uppercase tracking-wide text-neutral-500">
+                      <tr className="border-b border-ds-line/40 text-xs uppercase tracking-wide text-[var(--text-secondary)]">
                         <th className="px-2 py-2 font-semibold whitespace-nowrap">Date</th>
                         <th className="px-2 py-2 font-semibold">Operator</th>
                         <th className="px-2 py-2 font-semibold">Machine</th>
@@ -306,16 +306,16 @@ export function ToolingJobAuditModal({
                     <tbody>
                       {usageRows.map((row, i) => (
                         <tr key={`${row.dateLabel}-${i}`} className="border-b border-ds-line/50">
-                          <td className="px-2 py-2 text-neutral-500 font-mono whitespace-nowrap">
+                          <td className="px-2 py-2 text-[var(--text-secondary)] font-mono whitespace-nowrap">
                             {row.dateLabel}
                           </td>
                           <td className="px-2 py-2 text-ds-ink">{row.operator}</td>
-                          <td className="px-2 py-2 text-neutral-400">{row.machine}</td>
+                          <td className="px-2 py-2 text-[var(--text-secondary)]">{row.machine}</td>
                           <td className="px-2 py-2">
                             {row.returnCondition === 'Poor' ? (
-                              <span className="text-red-400 font-semibold">{row.returnCondition}</span>
+                              <span className="font-semibold text-[var(--error)]">{row.returnCondition}</span>
                             ) : (
-                              <span className="text-neutral-400">{row.returnCondition}</span>
+                              <span className="text-[var(--text-secondary)]">{row.returnCondition}</span>
                             )}
                           </td>
                         </tr>

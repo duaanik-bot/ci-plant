@@ -113,7 +113,7 @@ export function DieTriageCard({
       transition={{ duration: 0.2 }}
       className={`rounded-lg border bg-background p-2 overflow-visible ${
         onHold
-          ? 'border-yellow-500/70 shadow-[0_0_16px_rgba(234,179,8,0.22)] ring-2 ring-yellow-400/35'
+          ? 'border-[var(--warning)]/70 shadow-[0_0_16px_rgba(245,158,11,0.22)] ring-2 ring-[var(--warning)]/35'
           : 'border-ds-line/40'
       }`}
     >
@@ -142,7 +142,7 @@ export function DieTriageCard({
             <button
               type="button"
               onClick={onSimilarClick}
-              className="text-xs font-bold uppercase tracking-wider text-red-400 border border-red-600/60 rounded px-1.5 py-0.5 hover:bg-red-950/40"
+              className="text-xs font-bold uppercase tracking-wider text-[var(--error)] border border-[var(--error)]/60 rounded px-1.5 py-0.5 hover:bg-[var(--error-bg)]"
             >
               Type mismatch
             </button>
@@ -162,19 +162,19 @@ export function DieTriageCard({
         {r.title}
       </p>
       {onHold ? (
-        <p className="mt-1 text-xs text-yellow-200/90 leading-snug">
-          <span className="font-bold uppercase tracking-wide text-yellow-400">On hold</span>
+        <p className="mt-1 text-xs text-[var(--warning)] leading-snug">
+          <span className="font-bold uppercase tracking-wide text-[var(--warning)]">On hold</span>
           {r.hubTriageHoldReason ? `: ${r.hubTriageHoldReason}` : null}
         </p>
       ) : null}
       {r.hubConditionPoor ? (
-        <p className="mt-1 text-xs font-bold uppercase tracking-wider text-red-400 border border-red-700/60 rounded px-1.5 py-0.5 w-fit">
+        <p className="mt-1 text-xs font-bold uppercase tracking-wider text-[var(--error)] border border-[var(--error)]/60 rounded px-1.5 py-0.5 w-fit">
           Poor condition
         </p>
       ) : null}
       <button
         type="button"
-        className="text-left w-full text-blue-400 hover:text-blue-300 hover:underline font-semibold text-sm mt-0.5 truncate"
+        className="text-left w-full text-[var(--brand-primary)] hover:opacity-90 hover:underline font-semibold text-sm mt-0.5 truncate"
         onClick={onOpenAudit}
       >
         {dimTitle}
@@ -187,7 +187,7 @@ export function DieTriageCard({
           <button
             type="button"
             disabled={triageLocked}
-            className="py-1.5 rounded-md bg-orange-600 hover:bg-orange-500 text-foreground text-xs font-bold disabled:opacity-50 shadow-sm"
+            className="py-1.5 rounded-md bg-[var(--warning)] hover:opacity-90 text-white text-xs font-bold disabled:opacity-50 shadow-sm"
             onClick={onRouteToVendor}
           >
             Route to vendor
@@ -240,12 +240,12 @@ export function DieTriageCard({
           ) : null}
         </div>
 
-        <div className="rounded-md border border-yellow-800/50 bg-yellow-950/20 p-2 space-y-2">
+        <div className="rounded-md border border-[var(--warning)]/50 bg-[var(--warning-bg)] p-2 space-y-2">
           {onHold ? (
             <button
               type="button"
               disabled={saving}
-              className="w-full py-1.5 rounded-md border border-yellow-600/70 bg-yellow-950/40 text-yellow-100 text-xs font-bold hover:bg-yellow-950/60 disabled:opacity-50"
+              className="w-full py-1.5 rounded-md border border-[var(--warning)]/70 bg-[var(--warning-bg)] text-[var(--warning)] text-xs font-bold hover:opacity-90 disabled:opacity-50"
               onClick={() => onTriageHold(false)}
             >
               Release on-hold
@@ -265,7 +265,7 @@ export function DieTriageCard({
               <button
                 type="button"
                 disabled={saving || !holdReasonDraft.trim()}
-                className="w-full py-1.5 rounded-md bg-yellow-700 hover:bg-yellow-600 text-foreground text-xs font-bold disabled:opacity-50"
+                className="w-full py-1.5 rounded-md bg-[var(--warning)] hover:opacity-90 text-white text-xs font-bold disabled:opacity-50"
                 onClick={() => onTriageHold(true, holdReasonDraft.trim())}
               >
                 On-hold
