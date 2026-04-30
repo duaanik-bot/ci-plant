@@ -76,3 +76,34 @@ export async function PUT(
 
   return NextResponse.json(supplier)
 }
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error, user } = await requireRole('operations_head', 'md')
+  if (error) return error
+
+  const { id } = await params
+  const existing = await db.supplier.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
+
+  try {
+    await db.supplier.delete({ where: { id } })
+  } catch {
+    return NextResponse.json(
+      { error: 'Supplier cannot be deleted because it is linked to active records.' },
+      { status: 409 },
+    )
+  }
+
+  await createAuditLog({
+    userId: user!.id,
+    action: 'DELETE',
+    tableName: 'suppliers',
+    recordId: id,
+    oldValue: existing,
+  })
+
+  return NextResponse.json({ ok: true })
+}

@@ -131,6 +131,16 @@ export async function PUT(
 
   const data = parsed.data
 
+  if (data.status === 'draft' && existing.status === 'confirmed') {
+    const inProd = existing.lineItems.some((li) => li.planningStatus === 'in_production')
+    if (inProd) {
+      return NextResponse.json(
+        { error: 'Cannot move to draft while a line is in production.', code: 'PO_IN_PRODUCTION' },
+        { status: 409 },
+      )
+    }
+  }
+
   /** After "Release to Planning", only safe fields can change (read-only PO + lines). */
   if (existing.status === 'sent_to_planning') {
     if (data.lineItems !== undefined) {

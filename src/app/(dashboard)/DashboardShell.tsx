@@ -6,7 +6,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  Bell,
   ChevronDown,
   ChevronUp,
   ClipboardCheck,
@@ -26,7 +25,6 @@ import {
 import clsx from 'clsx'
 import {
   CommandPaletteProvider,
-  CommandPaletteTrigger,
   CommandPaletteTriggerIcon,
 } from '@/components/command-palette/CommandPalette'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
@@ -38,9 +36,7 @@ import {
   getStoredAccentPreset,
   getStoredHighContrast,
 } from '@/lib/accent-theme'
-
-/** Display-only count for the bell badge (no notifications API wired). */
-const NAV_NOTIFICATIONS_BADGE_UI = 12
+import { useUiDensity } from '@/lib/ui-density'
 
 type MegaNavItem = {
   label: string
@@ -124,6 +120,7 @@ export function DashboardShell({
   const userImage = (session?.user as { image?: string | null } | undefined)?.image ?? null
   const canSeeMasters = userRole === 'operations_head' || userRole === 'md'
   const navRef = useRef<HTMLDivElement | null>(null)
+  const [uiDensity, setUiDensity] = useUiDensity()
 
   useEffect(() => {
     setOpenMenu(null)
@@ -179,38 +176,24 @@ export function DashboardShell({
         {
           key: 'production',
           label: 'Production',
-          mega: true as const,
-          planningItems: [
+          items: [
+            { label: 'Print Planning', href: '/production/print-planning' },
+            { label: 'Coating Planning', href: '/production/print-planning?planner=coating' },
+            { label: 'Die Planning', href: '/production/print-planning?planner=die' },
+            { label: 'Pasting Planning', href: '/production/print-planning?planner=pasting' },
+          ],
+        },
+        {
+          key: 'live',
+          label: 'Live Production',
+          items: [
             {
-              label: 'Print Planning',
-              href: '/production/print-planning',
-              description: 'Triage, lanes, and sheet-level readiness',
+              label: 'Cutting',
+              href: '/production/cutting-queue',
+              description: 'Cutting queue and floor sequence',
               Icon: LayoutGrid,
               iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
             },
-            {
-              label: 'Coating Planning',
-              href: '/production/print-planning?planner=coating',
-              description: 'Schedule varnish & coating passes',
-              Icon: Droplets,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Die Planning',
-              href: '/production/print-planning?planner=die',
-              description: 'Die-cut sequencing and tooling checks',
-              Icon: Stamp,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Pasting Planning',
-              href: '/production/print-planning?planner=pasting',
-              description: 'Pasting window and finish routing',
-              Icon: ClipboardPaste,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-          ],
-          executionItems: [
             {
               label: 'Printing',
               href: '/production/stages/printing',
@@ -260,19 +243,6 @@ export function DashboardShell({
               Icon: Scale,
               iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
             },
-          ],
-        },
-        {
-          key: 'live',
-          label: 'Live Production',
-          items: [
-            { label: 'Cutting', href: '/production/cutting-queue' },
-            { label: 'Printing', href: '/production/stages/printing' },
-            { label: 'Coating', href: '/production/stages/coating' },
-            { label: 'Die', href: '/production/stages/dye-cutting' },
-            { label: 'Pasting', href: '/production/stages/pasting' },
-            { label: 'Billing', href: '/billing' },
-            { label: 'Short & Excess', href: '/stores/approve-excess' },
           ],
         },
         {
@@ -330,6 +300,26 @@ export function DashboardShell({
   )
 
   const isActiveMenu = (menu: (typeof menus)[number]) => {
+    if (!('href' in menu)) {
+      if (menu.key === 'production') {
+        return pathname === '/production/print-planning' || pathname.startsWith('/production/print-planning/')
+      }
+      if (menu.key === 'live') {
+        if (pathname.startsWith('/stores/')) return false
+        return (
+          pathname === '/production/cutting-queue' ||
+          pathname.startsWith('/production/cutting-queue/') ||
+          pathname.startsWith('/production/stages/') ||
+          pathname === '/dispatch' ||
+          pathname.startsWith('/dispatch/') ||
+          pathname === '/billing' ||
+          pathname.startsWith('/billing/')
+        )
+      }
+      if (menu.key === 'stores') {
+        return pathname.startsWith('/stores/')
+      }
+    }
     if ('href' in menu)
       return pathname === menu.href || pathname.startsWith(menu.href + '/')
     if ('mega' in menu && menu.mega) {
@@ -362,7 +352,7 @@ export function DashboardShell({
           ref={navRef}
           className="fixed inset-x-0 top-0 z-[1000] bg-[var(--bg-main)] font-sans shadow-[0_4px_24px_-6px_rgba(15,23,42,0.08),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_4px_28px_-4px_rgba(0,0,0,0.45)]"
         >
-          {/* Row 1 — brand, search, utilities */}
+          {/* Row 1 — brand, utilities */}
           <div className="border-b border-[var(--border)]">
             <div className="mx-auto flex h-14 max-w-[1920px] items-center gap-3 px-4 sm:gap-4 sm:px-5">
               <Link
@@ -378,28 +368,31 @@ export function DashboardShell({
                   aria-hidden
                 />
               </Link>
-              <div className="hidden min-w-0 flex-1 justify-center px-2 md:flex">
-                <div className="w-full max-w-xl lg:max-w-2xl">
-                  <CommandPaletteTrigger variant="navbar" />
-                </div>
-              </div>
               <div className="flex flex-1 items-center justify-end gap-0.5 sm:gap-1 md:flex-initial">
                 <div className="flex md:hidden">
                   <CommandPaletteTriggerIcon />
                 </div>
-                <button
-                  type="button"
-                  className="relative rounded-md p-2 text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--bg-muted)]"
-                  aria-label="Notifications"
-                >
-                  <Bell className="h-[18px] w-[18px]" />
-                  {NAV_NOTIFICATIONS_BADGE_UI > 0 ? (
-                    <span className="absolute right-1 top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white shadow-sm">
-                      {NAV_NOTIFICATIONS_BADGE_UI > 99 ? '99+' : NAV_NOTIFICATIONS_BADGE_UI}
-                    </span>
-                  ) : null}
-                </button>
                 <ThemeToggle />
+                <div className="inline-flex rounded-md border border-ds-line/70 bg-ds-elevated/40 p-0.5 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setUiDensity('dense')}
+                    className={`rounded px-2 py-1 text-xs ${
+                      uiDensity === 'dense' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'
+                    }`}
+                  >
+                    Dense
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUiDensity('comfortable')}
+                    className={`rounded px-2 py-1 text-xs ${
+                      uiDensity === 'comfortable' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'
+                    }`}
+                  >
+                    Comfortable
+                  </button>
+                </div>
                 <div className="hidden items-center gap-3 pl-1 sm:flex">
                   <div className="hidden h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[var(--brand-bg-soft)] ring-2 ring-[var(--brand-primary)]/25 sm:flex sm:items-center sm:justify-center">
                     {userImage ? (
@@ -437,7 +430,7 @@ export function DashboardShell({
           {/* Row 2 — primary nav */}
           <div className="hidden border-b border-[var(--border)] lg:block">
             <nav className="mx-auto max-w-[1920px] px-4 sm:px-5">
-              <ul className="flex h-12 items-center gap-0.5 overflow-x-auto overflow-y-visible whitespace-nowrap">
+              <ul className="flex h-12 items-center gap-0.5 whitespace-nowrap">
                 {menus.map((menu) => {
                   const menuOpen = !('href' in menu) && openMenu === menu.key
                   const navHighlighted = 'href' in menu ? isActiveMenu(menu) : isActiveMenu(menu) || menuOpen
@@ -486,16 +479,56 @@ export function DashboardShell({
                       {'items' in menu && openMenu === menu.key ? (
                         <div className="absolute left-0 top-full z-[70] pt-1 transition-all duration-150 ease-out">
                           <div className="w-[320px] rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.1),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+                            {menu.key === 'live' ? (
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                                Production Execution
+                              </p>
+                            ) : null}
                             <div className="space-y-0.5">
-                              {menu.items.map((item) => (
-                                <Link
-                                  key={item.href}
-                                  href={item.href}
-                                  className="flex h-9 items-center rounded-md px-2 py-[6px] text-sm text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--brand-bg-soft)] hover:text-[var(--brand-primary)]"
-                                >
-                                  {item.label}
-                                </Link>
-                              ))}
+                              {menu.items.map((item) =>
+                                'Icon' in item && item.Icon ? (
+                                  <button
+                                    key={item.href}
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenu(null)
+                                      router.push(item.href)
+                                    }}
+                                    className="w-full text-left"
+                                  >
+                                    <div className="group flex gap-3 rounded-lg py-1.5 pl-2 pr-3 transition-colors duration-150 hover:bg-[var(--brand-bg-soft)]">
+                                      <span
+                                        className={clsx(
+                                          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg [&>svg]:h-4 [&>svg]:w-4',
+                                          item.iconWrap ?? 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+                                        )}
+                                      >
+                                        <item.Icon aria-hidden />
+                                      </span>
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block text-sm font-medium text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand-primary)]">
+                                          {item.label}
+                                        </span>
+                                        <span className="mt-0.5 block text-xs leading-snug text-[var(--text-secondary)]">
+                                          {item.description ?? ''}
+                                        </span>
+                                      </span>
+                                    </div>
+                                  </button>
+                                ) : (
+                                  <button
+                                    key={item.href}
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenu(null)
+                                      router.push(item.href)
+                                    }}
+                                    className="flex h-9 items-center rounded-md px-2 py-[6px] text-sm text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--brand-bg-soft)] hover:text-[var(--brand-primary)]"
+                                  >
+                                    {item.label}
+                                  </button>
+                                ),
+                              )}
                             </div>
                           </div>
                         </div>
@@ -580,15 +613,32 @@ export function DashboardShell({
                     <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
                       {menu.label}
                     </p>
-                    {menu.items.map((item) => (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className="flex h-9 items-center rounded-md px-2 py-[6px] text-sm text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--brand-bg-soft)] hover:text-[var(--brand-primary)]"
-                      >
-                        {item.label}
-                      </Link>
-                    ))}
+                    {menu.items.map((item) =>
+                      'Icon' in item && item.Icon ? (
+                        <MegaNavLink
+                          key={item.href}
+                          item={{
+                            label: item.label,
+                            href: item.href,
+                            description: item.description ?? '',
+                            Icon: item.Icon,
+                            iconWrap: item.iconWrap ?? 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+                          }}
+                        />
+                      ) : (
+                        <button
+                          key={item.href}
+                          type="button"
+                          onClick={() => {
+                            setMobileOpen(false)
+                            router.push(item.href)
+                          }}
+                          className="flex h-9 items-center rounded-md px-2 py-[6px] text-sm text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--brand-bg-soft)] hover:text-[var(--brand-primary)]"
+                        >
+                          {item.label}
+                        </button>
+                      ),
+                    )}
                   </div>
                 ),
               )}

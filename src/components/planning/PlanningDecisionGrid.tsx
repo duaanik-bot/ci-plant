@@ -23,6 +23,7 @@ import {
 import { formatShortTimeAgo } from '@/lib/time-ago'
 import { ACTION_PILL_BASE, ICON_BUTTON_BASE, PUSHED_CHIP_CLASS, STATUS_CHIP_BASE } from '@/components/design-system/tokens'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
+import { useUiDensity } from '@/lib/ui-density'
 
 const cellBase = `align-middle border-b border-ds-line/30 text-sm text-ds-ink min-h-[40px] px-2 py-2`
 const filterGhost = dataTable.filter.input
@@ -384,10 +385,7 @@ export function PlanningDecisionGrid({
     Record<string, { ok: boolean; text: string }>
   >({})
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
-  const [rowDensity, setRowDensity] = useState<'dense' | 'comfortable'>(() => {
-    if (typeof window === 'undefined') return 'comfortable'
-    return window.localStorage.getItem('planning-row-density') === 'dense' ? 'dense' : 'comfortable'
-  })
+  const [rowDensity] = useUiDensity()
   const [showColumnFilters, setShowColumnFilters] = useState(false)
 
   const setActionFeedback = (lineId: string, ok: boolean, text: string) => {
@@ -497,11 +495,6 @@ export function PlanningDecisionGrid({
       }
     }
   }, [fCarton, fSize, fQty, fBoard, fGsm, fCoating, fBatch, ledgerView, sortKey, sortDir])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem('planning-row-density', rowDensity)
-  }, [rowDensity])
 
   const toggleSort = (k: SortKey) => {
     setSortKey((prev) => {
@@ -939,28 +932,8 @@ export function PlanningDecisionGrid({
             >
               {showColumnFilters ? 'Hide filters' : 'Show filters'}
             </button>
-            <div className="flex items-center gap-1">
-            <span className="text-ds-ink-faint">Density</span>
-            <button
-              type="button"
-              onClick={() => setRowDensity('dense')}
-              className={`rounded-full px-2 py-0.5 ${
-                rowDensity === 'dense' ? 'bg-ds-brand/20 text-ds-ink' : 'text-ds-ink-muted hover:text-ds-ink'
-              }`}
-            >
-              Dense
-            </button>
-            <button
-              type="button"
-              onClick={() => setRowDensity('comfortable')}
-              className={`rounded-full px-2 py-0.5 ${
-                rowDensity === 'comfortable'
-                  ? 'bg-ds-brand/20 text-ds-ink'
-                  : 'text-ds-ink-muted hover:text-ds-ink'
-              }`}
-            >
-              Comfortable
-            </button>
+            <div className="text-ds-ink-faint">
+              Density: {rowDensity === 'dense' ? 'Dense' : 'Comfortable'}
             </div>
           </div>
         </div>

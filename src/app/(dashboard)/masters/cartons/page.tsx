@@ -35,21 +35,66 @@ export default function CartonMasterPage() {
   const [rows, setRows] = useState<CartonRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  async function load() {
+    try {
+      const cartonsRes = await fetch('/api/masters/cartons')
+      const cartonsJson = await cartonsRes.json()
+      setRows(Array.isArray(cartonsJson) ? cartonsJson : [])
+    } catch {
+      toast.error('Failed to load cartons')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    async function load() {
+    void load()
+  }, [])
+
+  async function handleDelete(c: CartonRow) {
+    if (!confirm(`Delete carton "${c.cartonName}"? This action cannot be undone.`)) return
+    setDeletingId(c.id)
+    try {
+      const res = await fetch(`/api/masters/cartons/${c.id}`, { method: 'DELETE' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to delete carton')
+      toast.success('Carton deleted')
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete carton')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  async function handleBulkDelete() {
+    const targets = filtered.filter((c) => selectedIds.has(c.id))
+    if (!targets.length) return
+    if (!confirm(`Delete ${targets.length} carton record(s)?`)) return
+    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
+    if (token !== 'DELETE') return
+    setBulkDeleting(true)
+    let ok = 0
+    let fail = 0
+    for (const c of targets) {
       try {
-        const cartonsRes = await fetch('/api/masters/cartons')
-        const cartonsJson = await cartonsRes.json()
-        setRows(Array.isArray(cartonsJson) ? cartonsJson : [])
+        const res = await fetch(`/api/masters/cartons/${c.id}`, { method: 'DELETE' })
+        if (!res.ok) throw new Error('Failed')
+        ok += 1
       } catch {
-        toast.error('Failed to load cartons')
-      } finally {
-        setLoading(false)
+        fail += 1
       }
     }
-    load()
-  }, [])
+    if (ok) toast.success(`Deleted ${ok} carton(s)`)
+    if (fail) toast.error(`Failed to delete ${fail} carton(s)`)
+    setBulkDeleting(false)
+    setSelectedIds(new Set())
+    await load()
+  }
 
   const filtered = useMemo(() => {
     return rows.filter((c) => {
@@ -82,9 +127,37 @@ export default function CartonMasterPage() {
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Carton Master</h2>
-        <Link href="/masters/cartons/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
-          Add carton
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setSelectedIds((prev) =>
+                prev.size === filtered.length ? new Set() : new Set(filtered.map((c) => c.id)),
+              )
+            }
+            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+          >
+            {selectedIds.size === filtered.length && filtered.length > 0 ? 'Unselect all' : 'Select all'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            disabled={selectedIds.size === 0 || bulkDeleting}
+            onClick={() => void handleBulkDelete()}
+            className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-sm text-rose-600 disabled:opacity-50 dark:text-rose-400"
+          >
+            {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
+          </button>
+          <Link href="/masters/cartons/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
+            Add carton
+          </Link>
+        </div>
       </div>
 
       <div className="mb-3">
@@ -101,6 +174,17 @@ export default function CartonMasterPage() {
         <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
           <thead className={enterpriseTheadClass}>
             <tr>
+              <th className={enterpriseThClass}>
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && selectedIds.size === filtered.length}
+                  onChange={() =>
+                    setSelectedIds((prev) =>
+                      prev.size === filtered.length ? new Set() : new Set(filtered.map((c) => c.id)),
+                    )
+                  }
+                />
+              </th>
               <th className={enterpriseThClass}>Carton</th>
               <th className={enterpriseThClass}>Client</th>
               <th className={enterpriseThClass}>L×W×H</th>
@@ -115,6 +199,20 @@ export default function CartonMasterPage() {
           <tbody className={enterpriseTbodyClass}>
             {filtered.map((c) => (
               <tr key={c.id} className={enterpriseTrClass}>
+                <td className={cellWrap}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(c.id)}
+                    onChange={() =>
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(c.id)) next.delete(c.id)
+                        else next.add(c.id)
+                        return next
+                      })
+                    }
+                  />
+                </td>
                 <td className={`${cellWrap} font-designing-queue`}>{c?.cartonName ?? '—'}</td>
                 <td className={cellWrap}>{c?.customer?.name ?? '—'}</td>
                 <td className={enterpriseTdMonoClass}>
@@ -130,9 +228,17 @@ export default function CartonMasterPage() {
                   </span>
                 </td>
                 <td className={cellWrap}>
-                  <Link href={`/masters/cartons/${c?.id ?? ''}`} className="text-blue-600 hover:underline dark:text-blue-400">
+                  <Link href={`/masters/cartons/${c?.id ?? ''}`} className="mr-2 text-blue-600 hover:underline dark:text-blue-400">
                     Edit
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(c)}
+                    disabled={deletingId === c.id}
+                    className="text-rose-600 hover:underline disabled:opacity-50 dark:text-rose-400"
+                  >
+                    {deletingId === c.id ? 'Deleting…' : 'Delete'}
+                  </button>
                 </td>
               </tr>
             ))}

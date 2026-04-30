@@ -76,3 +76,34 @@ export async function PUT(
     lastLoginAt: out.lastLoginAt?.toISOString() ?? null,
   })
 }
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error, user } = await requireRole('operations_head', 'md')
+  if (error) return error
+
+  const { id } = await params
+  const existing = await db.user.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+
+  try {
+    await db.user.delete({ where: { id } })
+  } catch {
+    return NextResponse.json(
+      { error: 'User cannot be deleted because it is linked to audit/transaction records.' },
+      { status: 409 },
+    )
+  }
+
+  await createAuditLog({
+    userId: user!.id,
+    action: 'DELETE',
+    tableName: 'users',
+    recordId: id,
+    oldValue: { name: existing.name, roleId: existing.roleId, active: existing.active },
+  })
+
+  return NextResponse.json({ ok: true })
+}

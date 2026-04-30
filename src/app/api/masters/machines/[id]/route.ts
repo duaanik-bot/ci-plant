@@ -86,3 +86,34 @@ export async function PUT(
     nextPmDue: machine.nextPmDue?.toISOString().slice(0, 10) ?? null,
   })
 }
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error, user } = await requireRole('operations_head', 'md')
+  if (error) return error
+
+  const { id } = await params
+  const existing = await db.machine.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: 'Machine not found' }, { status: 404 })
+
+  try {
+    await db.machine.delete({ where: { id } })
+  } catch {
+    return NextResponse.json(
+      { error: 'Machine cannot be deleted because it is linked to active records.' },
+      { status: 409 },
+    )
+  }
+
+  await createAuditLog({
+    userId: user!.id,
+    action: 'DELETE',
+    tableName: 'machines',
+    recordId: id,
+    oldValue: existing,
+  })
+
+  return NextResponse.json({ ok: true })
+}

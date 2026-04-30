@@ -368,6 +368,7 @@ export default function PlanningPage() {
   const [productDrawerLine, setProductDrawerLine] = useState<PlanningGridLine | null>(null)
   const [savingPlanningHandoff, setSavingPlanningHandoff] = useState(false)
   const [batchActionBusy, setBatchActionBusy] = useState(false)
+  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false)
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set())
   const [recentlyPushedIds, setRecentlyPushedIds] = useState<Set<string>>(new Set())
   const [planningSearchQuery, setPlanningSearchQuery] = useState('')
@@ -972,6 +973,32 @@ export default function PlanningPage() {
     void makeProcessingForIds(ids)
   }, [planningSelection, makeProcessingForIds])
 
+  const handleBulkDeletePlanning = useCallback(async () => {
+    const ids = Array.from(planningSelection)
+    if (ids.length === 0) return
+    if (!confirm(`Delete ${ids.length} planning line(s)?`)) return
+    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
+    if (token !== 'DELETE') return
+
+    setBulkDeleteBusy(true)
+    let ok = 0
+    let fail = 0
+    for (const id of ids) {
+      try {
+        const res = await fetch(`/api/planning/po-lines/${id}`, { method: 'DELETE' })
+        if (!res.ok) throw new Error('Failed')
+        ok += 1
+      } catch {
+        fail += 1
+      }
+    }
+    if (ok > 0) toast.success(`Deleted ${ok} planning line(s)`)
+    if (fail > 0) toast.error(`Failed to delete ${fail} line(s)`)
+    setPlanningSelection(new Set())
+    setBulkDeleteBusy(false)
+    await fetchRows({ force: true })
+  }, [planningSelection, fetchRows])
+
   const recallLine = useCallback(
     async (lineId: string) => {
       try {
@@ -1077,10 +1104,19 @@ export default function PlanningPage() {
                 <Button
                   type="button"
                   onClick={() => void handleMakeProcessing()}
-                  disabled={planningSelection.size === 0 || makeProcessingBusy}
+                  disabled={planningSelection.size === 0 || makeProcessingBusy || bulkDeleteBusy}
                   className="h-8 px-2.5 py-0 text-xs"
                 >
                   {makeProcessingBusy ? 'Processing…' : 'Make processing'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => void handleBulkDeletePlanning()}
+                  disabled={planningSelection.size === 0 || makeProcessingBusy || bulkDeleteBusy}
+                  className="h-8 px-2.5 py-0 text-xs"
+                >
+                  {bulkDeleteBusy ? 'Deleting…' : 'Bulk delete'}
                 </Button>
                 <Button
                   type="button"

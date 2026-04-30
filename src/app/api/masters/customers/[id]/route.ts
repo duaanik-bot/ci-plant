@@ -83,3 +83,34 @@ export async function PUT(
     active: customer.active,
   })
 }
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error, user } = await requireRole('operations_head', 'md')
+  if (error) return error
+
+  const { id } = await params
+  const existing = await db.customer.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
+
+  try {
+    await db.customer.delete({ where: { id } })
+  } catch {
+    return NextResponse.json(
+      { error: 'Customer cannot be deleted because it is linked to active records. Deactivate instead.' },
+      { status: 409 },
+    )
+  }
+
+  await createAuditLog({
+    userId: user!.id,
+    action: 'DELETE',
+    tableName: 'customers',
+    recordId: id,
+    oldValue: existing,
+  })
+
+  return NextResponse.json({ ok: true })
+}

@@ -80,3 +80,34 @@ export async function PUT(
     calibrationDue: instrument.calibrationDue?.toISOString().slice(0, 10) ?? null,
   })
 }
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error, user } = await requireRole('operations_head', 'md')
+  if (error) return error
+
+  const { id } = await params
+  const existing = await db.qcInstrument.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: 'Instrument not found' }, { status: 404 })
+
+  try {
+    await db.qcInstrument.delete({ where: { id } })
+  } catch {
+    return NextResponse.json(
+      { error: 'Instrument cannot be deleted because it is linked to active records.' },
+      { status: 409 },
+    )
+  }
+
+  await createAuditLog({
+    userId: user!.id,
+    action: 'DELETE',
+    tableName: 'qc_instruments',
+    recordId: id,
+    oldValue: existing,
+  })
+
+  return NextResponse.json({ ok: true })
+}

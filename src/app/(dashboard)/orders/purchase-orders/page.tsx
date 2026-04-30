@@ -25,8 +25,8 @@ import {
 } from '@/components/design-system/tokens'
 import { formatShortTimeAgo } from '@/lib/time-ago'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
-import { RowStateLegend } from '@/components/ui/RowStateLegend'
 import { BulkActionBar, LaneCounterChips } from '@/components/design-system'
+import { useUiDensity } from '@/lib/ui-density'
 
 type LineItem = {
   id: string
@@ -59,8 +59,6 @@ type PurchaseOrder = {
   /** Set when row matched via line-item name (server or client deep filter). */
   deepMatchProductName?: string | null
 }
-
-type Customer = { id: string; name: string }
 
 type ExecutiveMetrics = {
   totalActivePosCount: number
@@ -160,6 +158,11 @@ function customerInitials(name: string): string {
 
 function formatRupee(n: number): string {
   return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+}
+
+function canRevertConfirmedPoToDraft(po: PurchaseOrder): boolean {
+  if (po.status !== 'confirmed') return false
+  return !po.lineItems.some((li) => li.planningStatus === 'in_production')
 }
 
 function statusBadge(po: PurchaseOrder): { label: string; className: string } {
@@ -264,11 +267,10 @@ function PoDeepFilterBar({
 
 export default function PurchaseOrdersPage() {
   const [listFilterQuery, setListFilterQuery] = useState('')
-  const [poDensity, setPoDensity] = useState<'dense' | 'comfortable'>('dense')
+  const [poDensity] = useUiDensity()
   const [selectedPoId, setSelectedPoId] = useState<string | null>(null)
   const [selectedPoIds, setSelectedPoIds] = useState<Set<string>>(new Set())
   const [showColumnMenu, setShowColumnMenu] = useState(false)
-  const [showFilterMenu, setShowFilterMenu] = useState(false)
   const [visibleCols, setVisibleCols] = useState({
     age: true,
     ready: true,
@@ -283,15 +285,14 @@ export default function PurchaseOrdersPage() {
   debouncedLiveRef.current = debouncedListFilter
 
   const [list, setList] = useState<PurchaseOrder[]>([])
-  const [customers, setCustomers] = useState<Customer[]>([])
   const [metrics, setMetrics] = useState<ExecutiveMetrics | null>(null)
   const [loading, setLoading] = useState(true)
   const [metricsLoading, setMetricsLoading] = useState(true)
   const [status, setStatus] = useState('')
-  const [customerId, setCustomerId] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [bulkUpdatingStatus, setBulkUpdatingStatus] = useState<string | null>(null)
+  const [bulkRevertingDraft, setBulkRevertingDraft] = useState(false)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
   const [priorityBusyId, setPriorityBusyId] = useState<string | null>(null)
@@ -305,7 +306,6 @@ export default function PurchaseOrdersPage() {
     async (opts?: { deepSearch?: string }) => {
       const params = new URLSearchParams()
       if (status) params.set('status', status)
-      if (customerId) params.set('customerId', customerId)
       if (opts?.deepSearch && opts.deepSearch.trim().length >= 2) {
         params.set('deepSearch', opts.deepSearch.trim())
       }
@@ -318,7 +318,7 @@ export default function PurchaseOrdersPage() {
       setList(arr)
       return arr
     },
-    [status, customerId],
+    [status],
   )
 
   async function loadMetrics() {
@@ -341,10 +341,7 @@ export default function PurchaseOrdersPage() {
     void (async () => {
       try {
         await loadPurchaseOrders()
-        const custRes = await fetch('/api/masters/customers')
-        const custJson = await custRes.json()
         if (cancelled) return
-        setCustomers(Array.isArray(custJson) ? custJson : [])
         if (
           catalogHeavyRef.current &&
           debouncedLiveRef.current.trim().length >= 2
@@ -358,7 +355,7 @@ export default function PurchaseOrdersPage() {
     return () => {
       cancelled = true
     }
-  }, [status, customerId, loadPurchaseOrders])
+  }, [status, loadPurchaseOrders])
 
   useEffect(() => {
     const q = debouncedListFilter.trim()
@@ -553,12 +550,6 @@ export default function PurchaseOrdersPage() {
   const someVisibleSelected = viewRows.some((p) => selectedPoIds.has(p.id))
 
   const [masterProductExists, setMasterProductExists] = useState<boolean | null>(null)
-  const activeFilterCount = useMemo(() => {
-    let c = 0
-    if (status) c += 1
-    if (customerId) c += 1
-    return c
-  }, [status, customerId])
 
   useEffect(() => {
     const q = listFilterQuery.trim()
@@ -620,16 +611,15 @@ export default function PurchaseOrdersPage() {
   }, [viewRows, selectedPoId])
 
   useEffect(() => {
-    if (!showColumnMenu && !showFilterMenu) return
+    if (!showColumnMenu) return
     const onClickAway = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null
       if (target?.closest('[data-po-menu-root]')) return
       setShowColumnMenu(false)
-      setShowFilterMenu(false)
     }
     document.addEventListener('mousedown', onClickAway)
     return () => document.removeEventListener('mousedown', onClickAway)
-  }, [showColumnMenu, showFilterMenu])
+  }, [showColumnMenu])
 
   useEffect(() => {
     if (!viewRows.length) {
@@ -806,6 +796,48 @@ export default function PurchaseOrdersPage() {
     [viewRows, selectedPoIds, drawerPo, loadMetrics],
   )
 
+  const bulkRevertSelectedToDraft = useCallback(async () => {
+    const targets = viewRows.filter(
+      (p) => selectedPoIds.has(p.id) && canRevertConfirmedPoToDraft(p),
+    )
+    if (targets.length === 0) {
+      toast.info('Select confirmed POs with no lines in production to move to Draft.')
+      return
+    }
+    if (
+      !confirm(
+        `Move ${targets.length} PO${targets.length > 1 ? 's' : ''} back to Draft?`,
+      )
+    )
+      return
+    setBulkRevertingDraft(true)
+    let ok = 0
+    let fail = 0
+    for (const po of targets) {
+      try {
+        const res = await fetch(`/api/purchase-orders/${po.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'draft', industrialVerification: true }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed')
+        ok += 1
+      } catch {
+        fail += 1
+      }
+    }
+    if (ok > 0) {
+      const ids = new Set(targets.map((t) => t.id))
+      setList((prev) => prev.map((p) => (ids.has(p.id) ? { ...p, status: 'draft' } : p)))
+      if (drawerPo && ids.has(drawerPo.id)) setDrawerPo((d) => (d ? { ...d, status: 'draft' } : d))
+      toast.success(`Moved ${ok} PO${ok > 1 ? 's' : ''} to Draft`)
+      void loadMetrics()
+    }
+    if (fail > 0) toast.error(`Could not revert ${fail} PO${fail > 1 ? 's' : ''}`)
+    setBulkRevertingDraft(false)
+  }, [viewRows, selectedPoIds, drawerPo, loadMetrics])
+
   if (loading && list.length === 0) {
     return <div className="p-4 text-ds-ink-muted text-sm">Loading purchase orders…</div>
   }
@@ -859,72 +891,6 @@ export default function PurchaseOrdersPage() {
               </div>
             ) : null}
           </div>
-          <div className="relative" data-po-menu-root>
-            <button
-              type="button"
-              onClick={() => setShowFilterMenu((v) => !v)}
-              className="inline-flex h-8 items-center rounded-md border border-ds-line bg-ds-elevated/80 px-2 text-xs text-ds-ink shadow-sm"
-            >
-              Filters
-              {activeFilterCount > 0 ? (
-                <span className="ml-1 rounded border border-ds-brand/40 bg-ds-brand/15 px-1 text-xs font-semibold text-ds-ink">
-                  {activeFilterCount}
-                </span>
-              ) : null}
-            </button>
-            {showFilterMenu ? (
-              <div className="absolute right-0 z-50 mt-1 w-56 rounded-md border border-ds-line/70 bg-ds-main p-2 text-xs shadow-lg">
-                <label className="mb-1 block text-xs uppercase tracking-wider text-ds-ink-muted">Status</label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  className="mb-2 h-8 w-full rounded-md border border-ds-line/60 bg-background px-2 text-xs font-medium text-ds-ink focus:border-ds-brand focus:outline-none"
-                >
-                  <option value="">All statuses</option>
-                  <option value="draft">Draft</option>
-                  <option value="confirmed">Confirmed</option>
-                  <option value="approved">Approved</option>
-                  <option value="sent_to_planning">In Planning</option>
-                  <option value="closed">Closed</option>
-                </select>
-                <label className="mb-1 block text-xs uppercase tracking-wider text-ds-ink-muted">Customer</label>
-                <select
-                  value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
-                  className="h-8 w-full rounded-md border border-ds-line/60 bg-background px-2 text-xs font-medium text-ds-ink focus:border-ds-brand focus:outline-none"
-                >
-                  <option value="">All customers</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-          </div>
-          <div className="inline-flex rounded-md border border-ds-line/70 bg-ds-elevated/40 p-0.5 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setPoDensity('dense')}
-              className={`rounded px-2 py-1 text-xs ${poDensity === 'dense' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'}`}
-            >
-              Dense
-            </button>
-            <button
-              type="button"
-              onClick={() => setPoDensity('comfortable')}
-              className={`rounded px-2 py-1 text-xs ${poDensity === 'comfortable' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'}`}
-            >
-              Comfortable
-            </button>
-          </div>
-          <Link
-            href="/orders/designing"
-            className="inline-flex h-8 items-center justify-center rounded-md border border-ds-line bg-ds-elevated/80 px-3 text-xs font-medium text-ds-ink shadow-sm transition duration-200 hover:bg-ds-card"
-          >
-            Prepress
-          </Link>
           <Link
             href="/orders/purchase-orders/new"
             className="inline-flex h-8 items-center justify-center rounded-md bg-ds-brand px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-ds-brand-hover"
@@ -934,20 +900,6 @@ export default function PurchaseOrdersPage() {
           <span className="md:hidden">
             <CommandPaletteTriggerIcon />
           </span>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-1">
-          {(['', 'draft', 'confirmed'] as const).map((preset) => (
-            <button
-              key={preset || 'all'}
-              type="button"
-              onClick={() => setStatus(preset)}
-              className={`rounded-md border px-2 py-1 text-xs ${
-                status === preset ? 'border-ds-brand/60 bg-ds-brand/15 text-ds-ink' : 'border-ds-line/50 text-ds-ink-faint'
-              }`}
-            >
-              {preset === '' ? 'All' : preset[0].toUpperCase() + preset.slice(1)}
-            </button>
-          ))}
         </div>
         <div className="mt-2">
           <LaneCounterChips
@@ -960,9 +912,6 @@ export default function PurchaseOrdersPage() {
               { key: 'closed', label: 'Closed', count: laneCounts.closed, active: status === 'closed', onClick: () => setStatus('closed'), tone: 'danger' },
             ]}
           />
-        </div>
-        <div className="mt-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-3 py-1.5">
-          <RowStateLegend helperText="Priority rows are pinned. Pushed rows are sent to planning and moved to end while staying interactive." />
         </div>
       </div>
 
@@ -1005,15 +954,23 @@ export default function PurchaseOrdersPage() {
             <button
               type="button"
               onClick={() => void bulkUpdateStatus('confirmed')}
-              disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null}
+              disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null || bulkRevertingDraft}
               className="h-8 rounded-md border border-emerald-500/40 px-2.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-300"
             >
               {bulkUpdatingStatus === 'confirmed' ? 'Confirming…' : 'Bulk confirm'}
             </button>
             <button
               type="button"
+              onClick={() => void bulkRevertSelectedToDraft()}
+              disabled={selectedPoIds.size === 0 || bulkRevertingDraft || bulkUpdatingStatus != null}
+              className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-semibold text-ds-ink hover:bg-ds-elevated/80 disabled:opacity-40"
+            >
+              {bulkRevertingDraft ? 'Reverting…' : 'Bulk move to draft'}
+            </button>
+            <button
+              type="button"
               onClick={() => void bulkUpdateStatus('approved')}
-              disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null}
+              disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null || bulkRevertingDraft}
               className="h-8 rounded-md border border-sky-500/40 px-2.5 text-xs font-semibold text-sky-700 hover:bg-sky-500/10 disabled:opacity-40 dark:text-sky-300"
             >
               {bulkUpdatingStatus === 'approved' ? 'Approving…' : 'Bulk approve'}
@@ -1273,9 +1230,7 @@ export default function PurchaseOrdersPage() {
                   {visibleCols.status ? (
                     <td className={`px-1.5 align-middle ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
                       <div className="flex flex-col items-start gap-0.5">
-                        <span className={`${STATUS_CHIP_BASE} ${badge.className}`}>
-                          {badge.label}
-                        </span>
+                        <span className={`${STATUS_CHIP_BASE} ${badge.className}`}>{badge.label}</span>
                         {pushedToPlanning ? (
                           <span className={PUSHED_CHIP_CLASS}>
                             Pushed {formatShortTimeAgo(po.poDate) ?? 'just now'}

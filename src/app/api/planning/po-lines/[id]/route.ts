@@ -161,3 +161,34 @@ export async function PATCH(
   return NextResponse.json(updated)
 }
 
+export async function DELETE(
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const { error, user } = await requireAuth()
+  if (error) return error
+
+  const { id } = await context.params
+  const existing = await db.poLineItem.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: 'PO line not found' }, { status: 404 })
+
+  try {
+    await db.poLineItem.delete({ where: { id } })
+  } catch {
+    return NextResponse.json(
+      { error: 'Line cannot be deleted because it is linked to downstream records.' },
+      { status: 409 },
+    )
+  }
+
+  await createAuditLog({
+    userId: user!.id,
+    action: 'DELETE',
+    tableName: 'po_line_items',
+    recordId: id,
+    oldValue: existing,
+  })
+
+  return NextResponse.json({ ok: true })
+}
+

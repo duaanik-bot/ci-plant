@@ -47,14 +47,62 @@ export default function MastersMaterialsPage() {
   const [list, setList] = useState<Material[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
-  useEffect(() => {
+  function load() {
     fetch('/api/masters/materials')
       .then((r) => r.json())
       .then((data) => setList(Array.isArray(data) ? data : []))
       .catch(() => toast.error('Failed to load'))
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
   }, [])
+
+  async function handleDelete(m: Material) {
+    if (!confirm(`Delete material "${m.materialCode}"? This action cannot be undone.`)) return
+    setDeletingId(m.id)
+    try {
+      const res = await fetch(`/api/masters/materials/${m.id}`, { method: 'DELETE' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to delete material')
+      toast.success('Material deleted')
+      load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete material')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  async function handleBulkDelete() {
+    const targets = filtered.filter((m) => selectedIds.has(m.id))
+    if (!targets.length) return
+    if (!confirm(`Delete ${targets.length} material record(s)?`)) return
+    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
+    if (token !== 'DELETE') return
+    setBulkDeleting(true)
+    let ok = 0
+    let fail = 0
+    for (const m of targets) {
+      try {
+        const res = await fetch(`/api/masters/materials/${m.id}`, { method: 'DELETE' })
+        if (!res.ok) throw new Error('Failed')
+        ok += 1
+      } catch {
+        fail += 1
+      }
+    }
+    if (ok) toast.success(`Deleted ${ok} material(s)`)
+    if (fail) toast.error(`Failed to delete ${fail} material(s)`)
+    setBulkDeleting(false)
+    setSelectedIds(new Set())
+    load()
+  }
 
   const filtered = useMemo(() => {
     if (!search.trim()) return list
@@ -85,9 +133,37 @@ export default function MastersMaterialsPage() {
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold text-[var(--text-primary)]">Board / Paper Master</h2>
-        <Link href="/masters/materials/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
-          Add material
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setSelectedIds((prev) =>
+                prev.size === filtered.length ? new Set() : new Set(filtered.map((m) => m.id)),
+              )
+            }
+            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+          >
+            {selectedIds.size === filtered.length && filtered.length > 0 ? 'Unselect all' : 'Select all'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            disabled={selectedIds.size === 0 || bulkDeleting}
+            onClick={() => void handleBulkDelete()}
+            className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-sm text-rose-600 disabled:opacity-50 dark:text-rose-400"
+          >
+            {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
+          </button>
+          <Link href="/masters/materials/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
+            Add material
+          </Link>
+        </div>
       </div>
 
       <div className="mb-3">
@@ -104,6 +180,17 @@ export default function MastersMaterialsPage() {
         <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-sm text-[var(--text-primary)]">
           <thead className={enterpriseTheadClass}>
             <tr>
+              <th className={enterpriseThClass}>
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && selectedIds.size === filtered.length}
+                  onChange={() =>
+                    setSelectedIds((prev) =>
+                      prev.size === filtered.length ? new Set() : new Set(filtered.map((m) => m.id)),
+                    )
+                  }
+                />
+              </th>
               <th className={enterpriseThClass}>Stock</th>
               <th className={enterpriseThClass}>Code</th>
               <th className={enterpriseThClass}>Description</th>
@@ -123,6 +210,20 @@ export default function MastersMaterialsPage() {
               return (
                 <tr key={m.id} className={enterpriseTrClass}>
                   <td className={`${cellWrap} w-10`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(m.id)}
+                      onChange={() =>
+                        setSelectedIds((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(m.id)) next.delete(m.id)
+                          else next.add(m.id)
+                          return next
+                        })
+                      }
+                    />
+                  </td>
+                  <td className={`${cellWrap} w-10`}>
                     <span className={`inline-block h-2.5 w-2.5 rounded-full ${DOT[h]}`} title={h} />
                   </td>
                   <td className={`${cellWrap} font-designing-queue`}>{m?.materialCode ?? '—'}</td>
@@ -139,9 +240,17 @@ export default function MastersMaterialsPage() {
                     </span>
                   </td>
                   <td className={cellWrap}>
-                    <Link href={`/masters/materials/${m?.id ?? ''}`} className="text-blue-600 hover:underline dark:text-blue-400">
+                    <Link href={`/masters/materials/${m?.id ?? ''}`} className="mr-2 text-blue-600 hover:underline dark:text-blue-400">
                       Edit
                     </Link>
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(m)}
+                      disabled={deletingId === m.id}
+                      className="text-rose-600 hover:underline disabled:opacity-50 dark:text-rose-400"
+                    >
+                      {deletingId === m.id ? 'Deleting…' : 'Delete'}
+                    </button>
                   </td>
                 </tr>
               )
