@@ -179,10 +179,34 @@ export function DashboardShell({
           key: 'production',
           label: 'Production',
           items: [
-            { label: 'Print Planning', href: '/production/print-planning' },
-            { label: 'Coating Planning', href: '/production/print-planning?planner=coating' },
-            { label: 'Die Planning', href: '/production/print-planning?planner=die' },
-            { label: 'Pasting Planning', href: '/production/print-planning?planner=pasting' },
+            {
+              label: 'Print Planning',
+              href: '/production/print-planning',
+              description: 'Plan and schedule print jobs',
+              Icon: ClipboardPaste,
+              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+            },
+            {
+              label: 'Coating Planning',
+              href: '/production/print-planning?planner=coating',
+              description: 'Plan and schedule coating jobs',
+              Icon: Layers,
+              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+            },
+            {
+              label: 'Die Planning',
+              href: '/production/print-planning?planner=die',
+              description: 'Plan and schedule die cutting jobs',
+              Icon: Scissors,
+              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+            },
+            {
+              label: 'Pasting Planning',
+              href: '/production/print-planning?planner=pasting',
+              description: 'Plan and schedule pasting jobs',
+              Icon: ClipboardCheck,
+              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+            },
           ],
         },
         {
@@ -501,43 +525,33 @@ export function DashboardShell({
                       )}
                       {'items' in menu && openMenu === menu.key ? (
                         <div className="absolute left-0 top-full z-[70] pt-1 transition-all duration-150 ease-out">
-                          <div className="w-[320px] rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.1),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+                          <div className={clsx(
+                            'rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.1),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]',
+                            menu.key === 'live' || menu.key === 'production' ? 'w-[520px] max-w-[calc(100vw-2rem)]' : 'w-[320px]',
+                          )}>
                             {menu.key === 'live' ? (
                               <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
                                 Production Execution
                               </p>
                             ) : null}
-                            <div className="space-y-0.5">
+                            <div className="grid grid-cols-1 gap-0.5">
                               {menu.items.map((item) =>
                                 'Icon' in item && item.Icon ? (
-                                  <button
+                                  <Link
                                     key={item.href}
-                                    type="button"
-                                    onClick={() => {
-                                      setOpenMenu(null)
-                                      router.push(item.href)
-                                    }}
-                                    className="w-full text-left"
+                                    href={item.href}
+                                    className="block"
                                   >
-                                    <div className="group flex gap-3 rounded-lg py-1.5 pl-2 pr-3 transition-colors duration-150 hover:bg-[var(--brand-bg-soft)]">
-                                      <span
-                                        className={clsx(
-                                          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg [&>svg]:h-4 [&>svg]:w-4',
-                                          item.iconWrap ?? 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-                                        )}
-                                      >
-                                        <item.Icon aria-hidden />
-                                      </span>
-                                      <span className="min-w-0 flex-1">
-                                        <span className="block text-sm font-medium text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand-primary)]">
-                                          {item.label}
-                                        </span>
-                                        <span className="mt-0.5 block text-xs leading-snug text-[var(--text-secondary)]">
-                                          {item.description ?? ''}
-                                        </span>
-                                      </span>
-                                    </div>
-                                  </button>
+                                    <MegaNavLink
+                                      item={{
+                                        label: item.label,
+                                        href: item.href,
+                                        description: item.description ?? '',
+                                        Icon: item.Icon,
+                                        iconWrap: item.iconWrap ?? 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+                                      }}
+                                    />
+                                  </Link>
                                 ) : (
                                   <button
                                     key={item.href}
