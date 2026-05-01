@@ -26,6 +26,8 @@ const updateSchema = z.object({
   weightedAvgCost: z.number().min(0).optional(),
   active: z.boolean().optional(),
   boardType: z.string().optional().nullable(),
+  boardClassification: z.string().optional().nullable(),
+  attributes: z.string().optional().nullable(),
   gsm: z.number().int().positive().optional().nullable(),
   sheetLength: z.number().positive().optional().nullable(),
   sheetWidth: z.number().positive().optional().nullable(),
@@ -65,10 +67,15 @@ export async function GET(
     active: m.active,
     storageLocation: m.storageLocation,
     leadTimeDays: m.leadTimeDays,
-    boardType: null,
-    gsm: null,
-    sheetLength: null,
-    sheetWidth: null,
+    boardType: m.boardType,
+    boardClassification: m.boardClassification,
+    gsm: m.gsm,
+    sheetLength: m.sheetLength != null ? Number(m.sheetLength) : null,
+    sheetWidth: m.sheetWidth != null ? Number(m.sheetWidth) : null,
+    attributes: m.attributes,
+    physicalStockSheets: Number(m.physicalStockSheets),
+    shortageSheets: Number(m.shortageSheets),
+    totalWeightKg: Number(m.totalWeightKg),
     grainDirection: null,
     caliperMicrons: null,
     brightnessPct: null,
@@ -95,6 +102,8 @@ export async function PUT(
     weightedAvgCost: toOptionalNumber(body.weightedAvgCost),
     supplierId: body.supplierId === '' ? null : body.supplierId,
     gsm: toOptionalNumber(body.gsm),
+    boardClassification: typeof body.boardClassification === 'string' ? body.boardClassification : null,
+    attributes: typeof body.attributes === 'string' ? body.attributes : null,
     sheetLength: toOptionalNumber(body.sheetLength),
     sheetWidth: toOptionalNumber(body.sheetWidth),
     caliperMicrons: toOptionalNumber(body.caliperMicrons),
@@ -126,11 +135,44 @@ export async function PUT(
     }
   }
 
+  if (data.boardType && data.gsm && data.sheetLength && data.sheetWidth) {
+    const duplicateSpec = await db.inventory.findFirst({
+      where: {
+        id: { not: id },
+        boardType: data.boardType,
+        gsm: data.gsm,
+        sheetLength: data.sheetLength,
+        sheetWidth: data.sheetWidth,
+      },
+      select: { id: true },
+    })
+    if (duplicateSpec) {
+      return NextResponse.json(
+        { error: 'Duplicate material spec already exists', fields: { boardType: 'Same board + size + gsm already exists' } },
+        { status: 400 },
+      )
+    }
+  }
+
+  const nextBoardType = data.boardType ?? existing.boardType
+  const nextGsm = data.gsm ?? existing.gsm
+  const nextSheetLength = data.sheetLength ?? (existing.sheetLength != null ? Number(existing.sheetLength) : null)
+  const nextSheetWidth = data.sheetWidth ?? (existing.sheetWidth != null ? Number(existing.sheetWidth) : null)
+  const nextAttributes = data.attributes ?? existing.attributes
+  const qtyAvailable = Number(existing.qtyAvailable)
+  const totalWeightKg =
+    nextSheetLength && nextSheetWidth && nextGsm
+      ? Number(((qtyAvailable * (nextSheetLength * nextSheetWidth * nextGsm)) / 1_000_000).toFixed(6))
+      : Number(existing.totalWeightKg)
+  const computedDescription = [nextBoardType || '', nextGsm ? `${nextGsm} GSM` : '', (nextAttributes || '').trim()]
+    .filter(Boolean)
+    .join(' · ')
+
   const material = await db.inventory.update({
     where: { id },
     data: {
       ...(data.materialCode != null && { materialCode: data.materialCode.trim() }),
-      ...(data.description != null && data.description.trim().length > 0 && { description: data.description.trim() }),
+      description: computedDescription || data.description?.trim() || existing.description,
       ...(data.unit != null && { unit: data.unit }),
       ...(data.reorderPoint != null && { reorderPoint: data.reorderPoint }),
       ...(data.safetyStock != null && { safetyStock: data.safetyStock }),
@@ -139,6 +181,13 @@ export async function PUT(
       ...(data.supplierId !== undefined && { supplierId: data.supplierId }),
       ...(data.weightedAvgCost != null && { weightedAvgCost: data.weightedAvgCost }),
       ...(data.active !== undefined && { active: data.active }),
+      ...(data.boardType !== undefined && { boardType: data.boardType || null }),
+      ...(data.boardClassification !== undefined && { boardClassification: data.boardClassification || null }),
+      ...(data.gsm !== undefined && { gsm: data.gsm ?? null }),
+      ...(data.sheetLength !== undefined && { sheetLength: data.sheetLength ?? null }),
+      ...(data.sheetWidth !== undefined && { sheetWidth: data.sheetWidth ?? null }),
+      ...(data.attributes !== undefined && { attributes: data.attributes || null }),
+      totalWeightKg,
     },
   })
 

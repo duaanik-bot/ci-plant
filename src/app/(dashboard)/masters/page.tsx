@@ -27,9 +27,9 @@ const cards = [
     description: 'Calibration due dates, certificates',
   },
   {
-    href: '/masters/effects',
-    label: 'Effects',
-    description: 'Embossing, coating, foil, pasting values by category',
+    href: '/masters/minimasters',
+    label: 'MiniMasters',
+    description: 'Dynamic dropdown values and logic triggers',
   },
   {
     href: '/masters/users',

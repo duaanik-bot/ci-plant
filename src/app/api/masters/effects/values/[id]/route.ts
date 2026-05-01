@@ -7,6 +7,8 @@ export const dynamic = 'force-dynamic'
 
 const updateSchema = z.object({
   value: z.string().trim().min(1).max(120).optional(),
+  abbreviation: z.string().trim().max(24).nullable().optional(),
+  impactOn: z.string().trim().max(80).nullable().optional(),
   description: z.string().trim().max(1000).nullable().optional(),
   sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
   active: z.boolean().optional(),
@@ -52,6 +54,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     where: { id },
     data: {
       ...(parsed.data.value !== undefined ? { value: parsed.data.value } : {}),
+      ...(parsed.data.abbreviation !== undefined ? { abbreviation: parsed.data.abbreviation || null } : {}),
+      ...(parsed.data.impactOn !== undefined ? { impactOn: parsed.data.impactOn || null } : {}),
       ...(parsed.data.description !== undefined ? { description: parsed.data.description || null } : {}),
       ...(parsed.data.sortOrder !== undefined ? { sortOrder: parsed.data.sortOrder } : {}),
       ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
@@ -59,4 +63,61 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   })
 
   return NextResponse.json(updated)
+}
+
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { error } = await requireRole('operations_head', 'md')
+  if (error) return error
+
+  const { id } = await params
+  const existing = await db.effectValue.findUnique({
+    where: { id },
+    include: { category: { select: { name: true } } },
+  })
+  if (!existing) return NextResponse.json({ error: 'Value not found' }, { status: 404 })
+
+  const value = existing.value.trim()
+  const category = existing.category.name.trim().toLowerCase()
+  const linkedQueries: Promise<unknown>[] = []
+
+  if (category === 'board type') {
+    linkedQueries.push(
+      db.$queryRaw`SELECT count(*)::int AS c FROM inventory WHERE lower(coalesce(board_type,'')) = lower(${value})`,
+      db.$queryRaw`SELECT count(*)::int AS c FROM material_queue WHERE lower(coalesce(board_type,'')) = lower(${value})`,
+      db.$queryRaw`SELECT count(*)::int AS c FROM cartons WHERE lower(coalesce(paper_type,'')) = lower(${value})`,
+      db.$queryRaw`SELECT count(*)::int AS c FROM po_line_items WHERE lower(coalesce(paper_type,'')) = lower(${value})`,
+    )
+  } else if (category === 'coating') {
+    linkedQueries.push(
+      db.$queryRaw`SELECT count(*)::int AS c FROM cartons WHERE lower(coalesce(coating_type,'')) = lower(${value})`,
+      db.$queryRaw`SELECT count(*)::int AS c FROM po_line_items WHERE lower(coalesce(coating_type,'')) = lower(${value})`,
+    )
+  } else if (category === 'foil') {
+    linkedQueries.push(
+      db.$queryRaw`SELECT count(*)::int AS c FROM cartons WHERE lower(coalesce(foil_type,'')) = lower(${value})`,
+      db.$queryRaw`SELECT count(*)::int AS c FROM po_line_items WHERE lower(coalesce(foil_type,'')) = lower(${value})`,
+    )
+  } else if (category === 'embossing') {
+    linkedQueries.push(
+      db.$queryRaw`SELECT count(*)::int AS c FROM cartons WHERE lower(coalesce(embossing_leafing,'')) = lower(${value})`,
+      db.$queryRaw`SELECT count(*)::int AS c FROM po_line_items WHERE lower(coalesce(embossing_leafing,'')) = lower(${value})`,
+    )
+  }
+
+  const linkedCounts = await Promise.all(linkedQueries)
+  const hasLinks = linkedCounts.some((rows) => {
+    if (!Array.isArray(rows) || rows.length === 0) return false
+    const first = rows[0] as { c?: number | null }
+    return Number(first.c || 0) > 0
+  })
+
+  if (hasLinks) {
+    return NextResponse.json(
+      { error: 'This value is used in active records. Please inactivate instead.' },
+      { status: 400 },
+    )
+  }
+
+  await db.effectValue.delete({ where: { id } })
+  return NextResponse.json({ ok: true })
 }

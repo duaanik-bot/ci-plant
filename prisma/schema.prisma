@@ -237,6 +237,12 @@ model Inventory {
   id              String   @id @default(uuid())
   materialCode    String   @unique @map("material_code") @db.VarChar(30)
   description     String
+  boardType       String?  @map("board_type") @db.VarChar(120)
+  boardClassification String? @map("board_classification") @db.VarChar(120)
+  sheetLength     Decimal? @map("sheet_length") @db.Decimal(12, 4)
+  sheetWidth      Decimal? @map("sheet_width") @db.Decimal(12, 4)
+  gsm             Int?
+  attributes      String?  @db.Text
   unit            String   @db.VarChar(20) // sheets | kg | litres | metres | pieces
   supplierId      String?  @map("supplier_id")
   category        String   @default("A") @db.VarChar(1) // A | B | C
@@ -254,6 +260,9 @@ model Inventory {
   impressionLife  Int?     @map("impression_life") // for plates
   storageLocation String?  @map("storage_location") @db.VarChar(60)
   leadTimeDays    Int      @default(7) @map("lead_time_days")
+  physicalStockSheets Decimal @default(0) @map("physical_stock_sheets") @db.Decimal(12, 3)
+  shortageSheets  Decimal  @default(0) @map("shortage_sheets") @db.Decimal(12, 3)
+  totalWeightKg   Decimal  @default(0) @map("total_weight_kg") @db.Decimal(16, 6)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
@@ -266,6 +275,7 @@ model Inventory {
   wasteRecords         WasteRecord[]
 
   @@map("inventory")
+  @@unique([boardType, sheetLength, sheetWidth, gsm], map: "inventory_board_size_gsm_unique")
 }
 
 // ─────────────────────────────────────────
@@ -1945,6 +1955,8 @@ model EffectValue {
   id          String   @id @default(uuid())
   categoryId  String   @map("category_id")
   value       String   @db.VarChar(120)
+  abbreviation String? @db.VarChar(24)
+  impactOn    String?  @map("impact_on") @db.VarChar(80)
   description String?
   sortOrder   Int      @default(100) @map("sort_order")
   active      Boolean  @default(true)

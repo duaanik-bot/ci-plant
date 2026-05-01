@@ -14,22 +14,42 @@ function toOptionalNumber(value: unknown): number | undefined {
 
 const UNITS = ['sheets', 'packets', 'kg', 'grs', 'tonnes', 'litres', 'metres', 'pieces'] as const
 
-const BOARD_TYPE_PREFIX: Record<string, string> = {
-  FBB: 'FBB',
-  SAFFIRE: 'SAF',
-  'WB DUplex': 'WB',
-  'GB Duples': 'GB',
-  CFBB: 'CFBB',
-  Artcard: 'ART',
-  Maplitho: 'MAP',
+function makeShortAbbr(name: string): string {
+  const cleaned = name.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+  return cleaned.slice(0, 4) || 'BRD'
 }
 
-function generateMaterialCode(boardType: string, gsm?: number, sheetLength?: number, sheetWidth?: number): string {
-  const prefix = BOARD_TYPE_PREFIX[boardType] ?? 'BRD'
-  const parts = [prefix]
-  if (gsm) parts.push(String(gsm))
-  if (sheetLength && sheetWidth) parts.push(`${Math.round(sheetLength)}x${Math.round(sheetWidth)}`)
-  return parts.join('-')
+async function boardTypeAbbreviation(boardType: string): Promise<string> {
+  const row = await db.effectValue.findFirst({
+    where: {
+      active: true,
+      value: { equals: boardType, mode: 'insensitive' },
+      category: { name: { equals: 'Board Type', mode: 'insensitive' } },
+    },
+    select: { abbreviation: true },
+  })
+  return makeShortAbbr(row?.abbreviation?.trim() || boardType)
+}
+
+async function generateMaterialCode(boardType: string, gsm?: number, sheetLength?: number, sheetWidth?: number): Promise<string> {
+  const abbr = await boardTypeAbbreviation(boardType)
+  const len = sheetLength ? Math.round(sheetLength) : 0
+  const wid = sheetWidth ? Math.round(sheetWidth) : 0
+  const gsmPart = gsm ? String(Math.round(gsm)) : ''
+  return `${len}${wid}${abbr}${gsmPart}`
+}
+
+function computeWeightKg(availableSheets: number, length: number, width: number, gsm: number): number {
+  if (!Number.isFinite(availableSheets) || !Number.isFinite(length) || !Number.isFinite(width) || !Number.isFinite(gsm)) return 0
+  if (availableSheets <= 0 || length <= 0 || width <= 0 || gsm <= 0) return 0
+  return Number(((availableSheets * (length * width * gsm)) / 1_000_000).toFixed(6))
+}
+
+function computeDescription(boardType: string | null | undefined, gsm: number | null | undefined, attributes: string | null | undefined): string {
+  const board = (boardType || '').trim()
+  const gsmPart = gsm && gsm > 0 ? `${gsm} GSM` : ''
+  const attrs = (attributes || '').trim()
+  return [board, gsmPart, attrs].filter(Boolean).join(' · ')
 }
 
 const createSchema = z.object({
@@ -45,6 +65,8 @@ const createSchema = z.object({
   weightedAvgCost: z.number().min(0).default(0),
   active: z.boolean().default(true),
   boardType: z.string().optional().nullable(),
+  boardClassification: z.string().optional().nullable(),
+  attributes: z.string().optional().nullable(),
   gsm: z.number().int().positive().optional().nullable(),
   sheetLength: z.number().positive().optional().nullable(),
   sheetWidth: z.number().positive().optional().nullable(),
@@ -77,10 +99,15 @@ export async function GET() {
       reorderPoint: Number(m.reorderPoint),
       safetyStock: Number(m.safetyStock),
       active: m.active,
-      boardType: null,
-      gsm: null,
-      sheetLength: null,
-      sheetWidth: null,
+      boardType: m.boardType,
+      boardClassification: m.boardClassification,
+      gsm: m.gsm,
+      sheetLength: m.sheetLength != null ? Number(m.sheetLength) : null,
+      sheetWidth: m.sheetWidth != null ? Number(m.sheetWidth) : null,
+      attributes: m.attributes,
+      physicalStockSheets: Number(m.physicalStockSheets),
+      shortageSheets: Number(m.shortageSheets),
+      totalWeightKg: Number(m.totalWeightKg),
       brightnessPct: null,
       moisturePct: null,
       supplier: m.supplier ? { id: m.supplier.id, name: m.supplier.name } : null,
@@ -101,6 +128,8 @@ export async function POST(req: NextRequest) {
     weightedAvgCost: toOptionalNumber(body.weightedAvgCost) ?? 0,
     supplierId: body.supplierId || null,
     gsm: toOptionalNumber(body.gsm),
+    boardClassification: typeof body.boardClassification === 'string' ? body.boardClassification : null,
+    attributes: typeof body.attributes === 'string' ? body.attributes : null,
     sheetLength: toOptionalNumber(body.sheetLength),
     sheetWidth: toOptionalNumber(body.sheetWidth),
     caliperMicrons: toOptionalNumber(body.caliperMicrons),
@@ -120,7 +149,7 @@ export async function POST(req: NextRequest) {
 
   let materialCode: string
   if (data.autoGenerateCode && data.boardType) {
-    const base = generateMaterialCode(
+    const base = await generateMaterialCode(
       data.boardType,
       data.gsm ?? undefined,
       data.sheetLength ?? undefined,
@@ -150,10 +179,40 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (data.boardType && data.gsm && data.sheetLength && data.sheetWidth) {
+    const duplicateSpec = await db.inventory.findFirst({
+      where: {
+        boardType: data.boardType,
+        gsm: data.gsm,
+        sheetLength: data.sheetLength,
+        sheetWidth: data.sheetWidth,
+      },
+      select: { id: true },
+    })
+    if (duplicateSpec) {
+      return NextResponse.json(
+        { error: 'Duplicate material spec already exists', fields: { boardType: 'Same board + size + gsm already exists' } },
+        { status: 400 },
+      )
+    }
+  }
+
+  const qtyAvailable = 0
+  const physicalStockSheets = 0
+  const shortageSheets = 0
+  const totalWeightKg = computeWeightKg(qtyAvailable, data.sheetLength ?? 0, data.sheetWidth ?? 0, data.gsm ?? 0)
+  const finalDescription = computeDescription(data.boardType, data.gsm, data.attributes) || data.description?.trim() || materialCode
+
   const material = await db.inventory.create({
     data: {
       materialCode,
-      description: data.description?.trim() || materialCode,
+      description: finalDescription,
+      boardType: data.boardType || null,
+      boardClassification: data.boardClassification || null,
+      sheetLength: data.sheetLength ?? null,
+      sheetWidth: data.sheetWidth ?? null,
+      gsm: data.gsm ?? null,
+      attributes: data.attributes || null,
       unit: data.unit,
       reorderPoint: data.reorderPoint,
       safetyStock: data.safetyStock,
@@ -161,6 +220,9 @@ export async function POST(req: NextRequest) {
       leadTimeDays: data.leadTimeDays,
       supplierId: data.supplierId || null,
       weightedAvgCost: data.weightedAvgCost,
+      physicalStockSheets,
+      shortageSheets,
+      totalWeightKg,
       active: data.active,
     },
   })

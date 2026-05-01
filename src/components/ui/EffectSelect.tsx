@@ -42,7 +42,7 @@ export function EffectSelect({
 
     void (async () => {
       try {
-        const res = await fetch(`/api/effects/values?category=${encodeURIComponent(name)}`, { cache: 'no-store' })
+        const res = await fetch(`/api/minimasters/values?category=${encodeURIComponent(name)}`, { cache: 'no-store' })
         const data = (await res.json().catch(() => [])) as EffectOption[]
         if (!cancelled) setOptions(Array.isArray(data) ? data : [])
       } catch {

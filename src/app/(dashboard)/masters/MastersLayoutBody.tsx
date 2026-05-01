@@ -46,7 +46,7 @@ const GROUPS: MasterGroup[] = [
     items: [
       { label: 'Cartons', href: '/masters/cartons', icon: Package },
       { label: 'Materials', href: '/masters/materials', icon: Boxes },
-      { label: 'Effects', href: '/masters/effects', icon: Droplets },
+      { label: 'MiniMasters', href: '/masters/minimasters', icon: Droplets },
     ],
   },
   {

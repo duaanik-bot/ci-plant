@@ -3,6 +3,8 @@ import { db } from '@/lib/db'
 export type EffectOption = {
   id: string
   value: string
+  abbreviation: string | null
+  impactOn: string | null
   description: string | null
   sortOrder: number
 }
@@ -26,6 +28,8 @@ export async function getEffectValues(category: string): Promise<EffectOption[]>
     select: {
       id: true,
       value: true,
+      abbreviation: true,
+      impactOn: true,
       description: true,
       sortOrder: true,
     },

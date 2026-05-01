@@ -18,6 +18,8 @@ type EffectValue = {
   id: string
   categoryId: string
   value: string
+  abbreviation: string | null
+  impactOn: string | null
   description: string | null
   sortOrder: number
   active: boolean
@@ -48,7 +50,7 @@ export default function EffectsMasterPage() {
   const [drawerMode, setDrawerMode] = useState<DrawerMode>(null)
   const [saving, setSaving] = useState(false)
   const [categoryForm, setCategoryForm] = useState({ name: '', sortOrder: '100', active: true })
-  const [valueForm, setValueForm] = useState({ value: '', description: '', sortOrder: '100', active: true })
+  const [valueForm, setValueForm] = useState({ value: '', abbreviation: '', impactOn: '', description: '', sortOrder: '100', active: true })
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [editingValueId, setEditingValueId] = useState<string | null>(null)
   const [categoryErrors, setCategoryErrors] = useState<{ name?: string; submit?: string }>({})
@@ -71,7 +73,7 @@ export default function EffectsMasterPage() {
   }, [search, values])
 
   async function loadCategories() {
-    const res = await fetch('/api/masters/effects/categories', { cache: 'no-store' })
+    const res = await fetch('/api/masters/minimasters/categories', { cache: 'no-store' })
     const data = (await readApiPayload<EffectCategory[]>(res)) as EffectCategory[] | ApiErrorPayload
     if (!res.ok) throw new Error((data as ApiErrorPayload).error || 'Failed to load categories')
     const next = Array.isArray(data) ? data : []
@@ -87,7 +89,7 @@ export default function EffectsMasterPage() {
       setValues([])
       return
     }
-    const res = await fetch(`/api/masters/effects/values?categoryId=${encodeURIComponent(categoryId)}`, { cache: 'no-store' })
+    const res = await fetch(`/api/masters/minimasters/values?categoryId=${encodeURIComponent(categoryId)}`, { cache: 'no-store' })
     const data = (await readApiPayload<EffectValue[]>(res)) as EffectValue[] | ApiErrorPayload
     if (!res.ok) throw new Error((data as ApiErrorPayload).error || 'Failed to load values')
     setValues(Array.isArray(data) ? data : [])
@@ -134,7 +136,7 @@ export default function EffectsMasterPage() {
     if (!selectedCategoryId) return
     setDrawerMode('create-value')
     setEditingValueId(null)
-    setValueForm({ value: '', description: '', sortOrder: '100', active: true })
+    setValueForm({ value: '', abbreviation: '', impactOn: '', description: '', sortOrder: '100', active: true })
   }
 
   function openEditValue(v: EffectValue) {
@@ -142,6 +144,8 @@ export default function EffectsMasterPage() {
     setEditingValueId(v.id)
     setValueForm({
       value: v.value,
+      abbreviation: v.abbreviation ?? '',
+      impactOn: v.impactOn ?? '',
       description: v.description ?? '',
       sortOrder: String(v.sortOrder),
       active: v.active,
@@ -168,7 +172,7 @@ export default function EffectsMasterPage() {
       console.log('[EffectsMaster] createCategory payload', payload)
 
       const res = await fetch(
-        '/api/masters/effects/categories',
+        '/api/masters/minimasters/categories',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -230,7 +234,7 @@ export default function EffectsMasterPage() {
       }
       console.log('[EffectsMaster] updateCategory payload', payload)
 
-      const res = await fetch(`/api/masters/effects/categories/${editingCategoryId}`, {
+      const res = await fetch(`/api/masters/minimasters/categories/${editingCategoryId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -266,14 +270,16 @@ export default function EffectsMasterPage() {
       const payload = {
         categoryId: selectedCategoryId,
         value: trimmedValue,
+        abbreviation: valueForm.abbreviation.trim() || null,
+        impactOn: valueForm.impactOn.trim() || null,
         description: valueForm.description || null,
         sortOrder: Number(valueForm.sortOrder || 100),
         active: valueForm.active,
       }
       const res = await fetch(
         drawerMode === 'edit-value' && editingValueId
-          ? `/api/masters/effects/values/${editingValueId}`
-          : '/api/masters/effects/values',
+          ? `/api/masters/minimasters/values/${editingValueId}`
+          : '/api/masters/minimasters/values',
         {
           method: drawerMode === 'edit-value' ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -296,7 +302,7 @@ export default function EffectsMasterPage() {
 
   async function toggleValueStatus(v: EffectValue, active: boolean) {
     try {
-      const res = await fetch(`/api/masters/effects/values/${v.id}`, {
+      const res = await fetch(`/api/masters/minimasters/values/${v.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active }),
@@ -310,6 +316,33 @@ export default function EffectsMasterPage() {
     }
   }
 
+  async function deleteValue(v: EffectValue) {
+    if (!confirm(`Delete value "${v.value}"?`)) return
+    try {
+      const res = await fetch(`/api/masters/minimasters/values/${v.id}`, { method: 'DELETE' })
+      const json = (await readApiPayload<{ ok: boolean }>(res)) as { ok?: boolean; error?: string }
+      if (!res.ok) throw new Error(json.error || 'Delete failed')
+      toast.success('Value deleted')
+      await loadValues(selectedCategoryId)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed')
+    }
+  }
+
+  async function deleteCategory() {
+    if (!selectedCategory) return
+    if (!confirm(`Delete category "${selectedCategory.name}" and its values?`)) return
+    try {
+      const res = await fetch(`/api/masters/minimasters/categories/${selectedCategory.id}`, { method: 'DELETE' })
+      const json = (await readApiPayload<{ ok: boolean }>(res)) as { ok?: boolean; error?: string }
+      if (!res.ok) throw new Error(json.error || 'Delete failed')
+      toast.success('Category deleted')
+      await refreshAll()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed')
+    }
+  }
+
   if (loading) {
     return <div className="text-sm text-ds-ink-faint">Loading...</div>
   }
@@ -319,9 +352,9 @@ export default function EffectsMasterPage() {
       <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-[var(--text-primary)]">Effects Master</h2>
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">MiniMasters</h2>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Centralized source of truth for Embossing, Coating, Foil, and Pasting.
+              Centralized source of truth for dynamic dropdown values and logic triggers.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -380,13 +413,22 @@ export default function EffectsMasterPage() {
             ) : null}
           </div>
           {selectedCategory ? (
-            <button
-              type="button"
-              onClick={() => openEditCategory(selectedCategory)}
-              className="mt-3 text-xs text-[var(--text-muted)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline"
-            >
-              Edit selected category
-            </button>
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => openEditCategory(selectedCategory)}
+                className="text-xs text-[var(--text-muted)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline"
+              >
+                Edit selected category
+              </button>
+              <button
+                type="button"
+                onClick={() => void deleteCategory()}
+                className="text-xs text-ds-error underline-offset-2 hover:underline"
+              >
+                Delete category
+              </button>
+            </div>
           ) : null}
         </aside>
 
@@ -398,6 +440,8 @@ export default function EffectsMasterPage() {
                 <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
                   <th className="px-3 py-2">Value Name</th>
                   <th className="px-3 py-2">Description</th>
+                  <th className="px-3 py-2">Abbreviation</th>
+                  <th className="px-3 py-2">Impact On</th>
                   <th className="px-3 py-2">Sort Order</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Actions</th>
@@ -412,6 +456,8 @@ export default function EffectsMasterPage() {
                   >
                     <td className="px-3 py-3 font-medium text-[var(--text-primary)]">{v.value}</td>
                     <td className="px-3 py-3 text-[var(--text-muted)]">{v.description || '—'}</td>
+                    <td className="px-3 py-3 text-[var(--text-muted)]">{v.abbreviation || '—'}</td>
+                    <td className="px-3 py-3 text-[var(--text-muted)]">{v.impactOn || '—'}</td>
                     <td className="px-3 py-3 text-[var(--text-muted)]">{v.sortOrder}</td>
                     <td className="px-3 py-3">
                       <span className="inline-flex rounded-md border border-[var(--border)] bg-[var(--bg-muted)] px-2 py-0.5 text-xs text-[var(--text-primary)]">
@@ -443,6 +489,13 @@ export default function EffectsMasterPage() {
                           Reactivate
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => void deleteValue(v)}
+                        className="ml-3 text-xs text-ds-error underline-offset-2 hover:underline"
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -559,6 +612,24 @@ export default function EffectsMasterPage() {
                 placeholder="Optional notes for operators"
                 value={valueForm.description}
                 onChange={(e) => setValueForm((p) => ({ ...p, description: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-ds-ink-muted">Abbreviation</label>
+              <input
+                className="ds-input w-full"
+                value={valueForm.abbreviation}
+                placeholder="e.g. SAF"
+                onChange={(e) => setValueForm((p) => ({ ...p, abbreviation: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-ds-ink-muted">Impact On</label>
+              <input
+                className="ds-input w-full"
+                value={valueForm.impactOn}
+                placeholder="e.g. cost_multiplier"
+                onChange={(e) => setValueForm((p) => ({ ...p, impactOn: e.target.value }))}
               />
             </div>
             <div>

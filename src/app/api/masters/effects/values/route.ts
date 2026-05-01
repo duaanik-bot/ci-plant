@@ -8,6 +8,8 @@ export const dynamic = 'force-dynamic'
 const createSchema = z.object({
   categoryId: z.string().uuid('Category is required'),
   value: z.string().trim().min(1, 'Value is required').max(120, 'Max 120 characters'),
+  abbreviation: z.string().trim().max(24, 'Max 24 characters').optional().nullable(),
+  impactOn: z.string().trim().max(80, 'Max 80 characters').optional().nullable(),
   description: z.string().trim().max(1000, 'Max 1000 characters').optional().nullable(),
   sortOrder: z.coerce.number().int().min(0).max(9999).default(100),
   active: z.boolean().default(true),
@@ -74,6 +76,8 @@ export async function POST(req: NextRequest) {
       data: {
         categoryId: parsed.data.categoryId,
         value: parsed.data.value,
+        abbreviation: parsed.data.abbreviation || null,
+        impactOn: parsed.data.impactOn || null,
         description: parsed.data.description || null,
         sortOrder: parsed.data.sortOrder,
         active: parsed.data.active,

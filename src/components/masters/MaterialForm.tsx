@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { EffectSelect } from '@/components/ui/EffectSelect'
 
 const UNIT_OPTIONS = [
   { value: 'sheets', label: 'Sheets' },
@@ -11,7 +12,6 @@ const UNIT_OPTIONS = [
   { value: 'grs', label: 'GRS' },
   { value: 'tonnes', label: 'Tonnes' },
 ]
-const BOARD_TYPES = ['FBB', 'SAFFIRE', 'WB DUplex', 'GB Duples', 'CFBB', 'Artcard', 'Maplitho']
 const GRAIN_DIRECTIONS = ['Long Grain', 'Short Grain']
 
 type Supplier = { id: string; name: string }
@@ -32,6 +32,8 @@ export type MaterialFormData = {
   description: string
   unit: string
   boardType: string
+  boardClassification: string
+  attributes: string
   gsm: string
   sheetLength: string
   sheetWidth: string
@@ -54,6 +56,8 @@ const EMPTY: MaterialFormData = {
   description: '',
   unit: 'sheets',
   boardType: '',
+  boardClassification: '',
+  attributes: '',
   gsm: '',
   sheetLength: '',
   sheetWidth: '',
@@ -117,6 +121,13 @@ export default function MaterialForm({ mode, initialData }: Props) {
     [f.sheetLength, f.sheetWidth, f.gsm],
   )
 
+  const autoDescription = useMemo(() => {
+    const board = f.boardType.trim()
+    const gsm = f.gsm.trim()
+    const attrs = f.attributes.trim()
+    return [board, gsm ? `${gsm} GSM` : '', attrs].filter(Boolean).join(' · ')
+  }, [f.boardType, f.gsm, f.attributes])
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setFieldErrors({})
@@ -125,9 +136,11 @@ export default function MaterialForm({ mode, initialData }: Props) {
     const payload = {
       ...(mode === 'ADD' ? { autoGenerateCode: autoCode } : {}),
       materialCode: autoCode && mode === 'ADD' ? undefined : f.materialCode.trim(),
-      description: f.description.trim() || undefined,
+      description: autoDescription || f.description.trim() || undefined,
       unit: f.unit,
       boardType: f.boardType || null,
+      boardClassification: f.boardClassification || null,
+      attributes: f.attributes.trim() || null,
       gsm: f.gsm ? Number(f.gsm) : null,
       sheetLength: f.sheetLength ? Number(f.sheetLength) : null,
       sheetWidth: f.sheetWidth ? Number(f.sheetWidth) : null,
@@ -259,7 +272,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
             value={autoCode && mode === 'ADD' ? '' : f.materialCode}
             onChange={(e) => patch('materialCode', e.target.value)}
             disabled={autoCode && mode === 'ADD'}
-            placeholder={autoCode && mode === 'ADD' ? 'Auto-generated from board type + GSM + size' : 'Enter code e.g. BRD-SBS-300'}
+            placeholder={autoCode && mode === 'ADD' ? 'Auto-generated from size + board abbreviation + GSM' : 'Enter product code'}
             className={`${cls} ${autoCode && mode === 'ADD' ? 'opacity-50 cursor-not-allowed' : ''} border ${errCls('materialCode')}`}
           />
           {fieldErrors.materialCode && <p className="text-xs text-red-400">{fieldErrors.materialCode}</p>}
@@ -271,14 +284,37 @@ export default function MaterialForm({ mode, initialData }: Props) {
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="block text-ds-ink-muted mb-1">Board type</label>
-              <select value={f.boardType} onChange={(e) => patch('boardType', e.target.value)} className={cls}>
-                <option value="">Select board type...</option>
-                {BOARD_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <EffectSelect
+                category="Board Type"
+                value={f.boardType}
+                onChange={(next) => patch('boardType', next)}
+                className={cls}
+                placeholder="Select board type..."
+              />
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Description</label>
-              <input value={f.description} onChange={(e) => patch('description', e.target.value)} className={`${cls} border ${errCls('description')}`} placeholder="e.g. Duplex Board 300gsm" />
+              <label className="block text-ds-ink-muted mb-1">Board classification</label>
+              <EffectSelect
+                category="Board Classification"
+                value={f.boardClassification}
+                onChange={(next) => patch('boardClassification', next)}
+                className={cls}
+                placeholder="Select classification..."
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-ds-ink-muted mb-1">Material attribute</label>
+              <EffectSelect
+                category="Material Attribute"
+                value={f.attributes}
+                onChange={(next) => patch('attributes', next)}
+                className={cls}
+                placeholder="Select material attribute..."
+              />
+            </div>
+            <div>
+              <label className="block text-ds-ink-muted mb-1">Description (auto-generated)</label>
+              <input value={autoDescription || f.description} readOnly className={`${cls} border ${errCls('description')} opacity-70 cursor-not-allowed`} placeholder="Auto-generated" />
               {fieldErrors.description && <p className="text-xs text-red-400 mt-0.5">{fieldErrors.description}</p>}
             </div>
           </div>

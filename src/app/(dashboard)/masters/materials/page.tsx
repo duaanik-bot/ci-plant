@@ -19,8 +19,13 @@ type Material = {
   materialCode: string
   description: string
   unit: string
+  boardClassification: string | null
+  sheetLength: number | null
+  sheetWidth: number | null
   qtyAvailable: number
   qtyReserved: number
+  shortageSheets: number
+  totalWeightKg: number
   reorderPoint: number
   safetyStock: number
   boardType: string | null
@@ -50,6 +55,8 @@ export default function MastersMaterialsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [sortKey, setSortKey] = useState<'gsm' | 'qtyAvailable' | 'qtyReserved' | 'shortageSheets' | 'totalWeightKg' | 'active'>('gsm')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   function load() {
     fetch('/api/masters/materials')
@@ -116,7 +123,6 @@ export default function MastersMaterialsPage() {
         m.unit,
         String(m.qtyAvailable),
         String(m.qtyReserved),
-        m.supplier?.name ?? '',
         m.active ? 'active' : 'inactive',
       ]
         .join(' ')
@@ -124,6 +130,48 @@ export default function MastersMaterialsPage() {
       return haystack.includes(q)
     })
   }, [list, search])
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered]
+    arr.sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1
+      const av =
+        sortKey === 'active'
+          ? (a.active ? 1 : 0)
+          : sortKey === 'gsm'
+            ? a.gsm ?? 0
+            : sortKey === 'qtyAvailable'
+              ? a.qtyAvailable
+              : sortKey === 'qtyReserved'
+                ? a.qtyReserved
+                : sortKey === 'shortageSheets'
+                  ? a.shortageSheets
+                  : a.totalWeightKg
+      const bv =
+        sortKey === 'active'
+          ? (b.active ? 1 : 0)
+          : sortKey === 'gsm'
+            ? b.gsm ?? 0
+            : sortKey === 'qtyAvailable'
+              ? b.qtyAvailable
+              : sortKey === 'qtyReserved'
+                ? b.qtyReserved
+                : sortKey === 'shortageSheets'
+                  ? b.shortageSheets
+                  : b.totalWeightKg
+      return av === bv ? a.materialCode.localeCompare(b.materialCode) : (av > bv ? 1 : -1) * dir
+    })
+    return arr
+  }, [filtered, sortDir, sortKey])
+
+  function toggleSort(key: typeof sortKey) {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortKey(key)
+    setSortDir('asc')
+  }
 
   if (loading) {
     return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading...</div>
@@ -138,12 +186,12 @@ export default function MastersMaterialsPage() {
             type="button"
             onClick={() =>
               setSelectedIds((prev) =>
-                prev.size === filtered.length ? new Set() : new Set(filtered.map((m) => m.id)),
+                prev.size === sorted.length ? new Set() : new Set(sorted.map((m) => m.id)),
               )
             }
             className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
           >
-            {selectedIds.size === filtered.length && filtered.length > 0 ? 'Unselect all' : 'Select all'}
+            {selectedIds.size === sorted.length && sorted.length > 0 ? 'Unselect all' : 'Select all'}
           </button>
           <button
             type="button"
@@ -171,7 +219,7 @@ export default function MastersMaterialsPage() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search code, description, board type, GSM, supplier..."
+          placeholder="Search code, board type, classification, size, GSM..."
           className="min-h-[40px] w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-card-foreground"
         />
       </div>
@@ -183,30 +231,45 @@ export default function MastersMaterialsPage() {
               <th className={enterpriseThClass}>
                 <input
                   type="checkbox"
-                  checked={filtered.length > 0 && selectedIds.size === filtered.length}
+                  checked={sorted.length > 0 && selectedIds.size === sorted.length}
                   onChange={() =>
                     setSelectedIds((prev) =>
-                      prev.size === filtered.length ? new Set() : new Set(filtered.map((m) => m.id)),
+                      prev.size === sorted.length ? new Set() : new Set(sorted.map((m) => m.id)),
                     )
                   }
                 />
               </th>
               <th className={enterpriseThClass}>Stock</th>
-              <th className={enterpriseThClass}>Code</th>
-              <th className={enterpriseThClass}>Description</th>
+              <th className={enterpriseThClass}>Product Code</th>
               <th className={enterpriseThClass}>Board Type</th>
-              <th className={enterpriseThClass}>GSM</th>
-              <th className={enterpriseThClass}>Unit</th>
-              <th className={enterpriseThClass}>Available</th>
-              <th className={enterpriseThClass}>Reserved</th>
-              <th className={enterpriseThClass}>Supplier</th>
-              <th className={enterpriseThClass}>Status</th>
+              <th className={enterpriseThClass}>Classification</th>
+              <th className={enterpriseThClass}>Size</th>
+              <th className={enterpriseThClass}>
+                <button type="button" onClick={() => toggleSort('gsm')}>GSM</button>
+              </th>
+              <th className={enterpriseThClass}>
+                <button type="button" onClick={() => toggleSort('qtyAvailable')}>Available Sheets</button>
+              </th>
+              <th className={enterpriseThClass}>
+                <button type="button" onClick={() => toggleSort('qtyReserved')}>Reserved Sheets</button>
+              </th>
+              <th className={enterpriseThClass}>
+                <button type="button" onClick={() => toggleSort('shortageSheets')}>Shortage</button>
+              </th>
+              <th className={enterpriseThClass}>
+                <button type="button" onClick={() => toggleSort('totalWeightKg')}>Total Weight KG</button>
+              </th>
+              <th className={enterpriseThClass}>
+                <button type="button" onClick={() => toggleSort('active')}>Status</button>
+              </th>
               <th className={enterpriseThClass}>Action</th>
             </tr>
           </thead>
           <tbody className={enterpriseTbodyClass}>
-            {filtered.map((m) => {
+            {sorted.map((m) => {
               const h = stockHealth(m.qtyAvailable, m.reorderPoint, m.safetyStock)
+              const sizeLabel =
+                m.sheetLength && m.sheetWidth ? `${m.sheetLength} x ${m.sheetWidth}` : '—'
               return (
                 <tr key={m.id} className={enterpriseTrClass}>
                   <td className={`${cellWrap} w-10`}>
@@ -227,13 +290,14 @@ export default function MastersMaterialsPage() {
                     <span className={`inline-block h-2.5 w-2.5 rounded-full ${DOT[h]}`} title={h} />
                   </td>
                   <td className={`${cellWrap} font-designing-queue`}>{m?.materialCode ?? '—'}</td>
-                  <td className={cellWrap}>{m?.description ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{m?.boardType ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{m?.boardClassification ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{sizeLabel}</td>
                   <td className={enterpriseTdMonoClass}>{m?.gsm ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{m?.unit ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{m?.qtyAvailable ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{m?.qtyReserved ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{m?.supplier?.name ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{m?.shortageSheets ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{m?.totalWeightKg?.toFixed(3) ?? '—'}</td>
                   <td className={cellWrap}>
                     <span className={m?.active ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
                       {m?.active ? 'Active' : 'Inactive'}
@@ -258,7 +322,7 @@ export default function MastersMaterialsPage() {
           </tbody>
         </table>
       </EnterpriseTableShell>
-      {filtered.length === 0 && (
+      {sorted.length === 0 && (
         <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No materials match your search.</p>
       )}
     </div>

@@ -272,7 +272,7 @@ export function SidebarNav({
         { href: '/masters/machines', label: 'Machines', icon: Cpu },
         { href: '/masters/users', label: 'Users', icon: UserCog },
         { href: '/masters/instruments', label: 'QC Instruments', icon: FlaskConical },
-        { href: '/masters/effects', label: 'Effects', icon: Palette },
+        { href: '/masters/minimasters', label: 'MiniMasters', icon: Palette },
       ],
       show: canSeeMasters,
     },
