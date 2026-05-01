@@ -43,9 +43,8 @@ import {
   PUSHED_CHIP_CLASS,
   STATUS_CHIP_BASE,
 } from '@/components/design-system/tokens'
-import { BulkActionBar, LaneCounterChips } from '@/components/design-system'
+import { BulkActionBar } from '@/components/design-system'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
-import { RowStateLegend } from '@/components/ui/RowStateLegend'
 import { AwGroupEditDrawer } from '@/components/designing/AwGroupEditDrawer'
 
 type SpecOverrides = {
@@ -739,7 +738,6 @@ export default function DesigningQueuePage() {
   const [bulkToolingPushing, setBulkToolingPushing] = useState<null | 'DIE' | 'BLOCK'>(null)
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null)
-  const [jobCardFilter, setJobCardFilter] = useState<'all' | 'pending'>('all')
 
   const load = useCallback(async () => {
     try {
@@ -821,11 +819,8 @@ export default function DesigningQueuePage() {
         return resolvePlanningDesignerName(spec, userById).trim().toLowerCase() === wanted
       })
     }
-    if (jobCardFilter === 'pending') {
-      list = list.filter((r) => awJobCardState(r) === 'pending')
-    }
     return list
-  }, [rows, awSearchQuery, designerFilter, userById, jobCardFilter])
+  }, [rows, awSearchQuery, designerFilter, userById])
 
   const awFilterChips = useMemo(() => {
     const chips: Array<{ key: string; label: string; onClear?: () => void }> = []
@@ -839,16 +834,13 @@ export default function DesigningQueuePage() {
         onClear: () => setDesignerFilter('all'),
       })
     }
-    if (jobCardFilter === 'pending') {
-      chips.push({ key: 'job-card', label: 'Job card: Pending', onClear: () => setJobCardFilter('all') })
-    }
     if (customerId) {
       const c = customers.find((x) => x.id === customerId)
       chips.push({ key: 'customer', label: `Customer: ${c?.name || customerId}`, onClear: () => setCustomerId('') })
     }
     if (myJobsOnly) chips.push({ key: 'my-jobs', label: 'My jobs only', onClear: () => setMyJobsOnly(false) })
     return chips
-  }, [awSearchQuery, designerFilter, customerId, myJobsOnly, customers, jobCardFilter])
+  }, [awSearchQuery, designerFilter, customerId, myJobsOnly, customers])
 
   const cycleSort = useCallback((column: AuditSortKey) => {
     setSortKey((prev) => {
@@ -1483,6 +1475,18 @@ export default function DesigningQueuePage() {
               ))}
             </select>
           </div>
+          <select
+            value={customerId}
+            onChange={(e) => setCustomerId(e.target.value)}
+            className={`h-9 min-w-[9rem] max-w-[14rem] rounded-lg border border-border bg-card px-2 py-1 text-xs text-card-foreground ${mono}`}
+          >
+            <option value="">All customers</option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
         </div>
         </div>
 
@@ -1520,7 +1524,6 @@ export default function DesigningQueuePage() {
                     setDesignerFilter('all')
                     setCustomerId('')
                     setMyJobsOnly(false)
-                    setJobCardFilter('all')
                   }}
                   className="rounded border border-ds-line/60 px-2 py-0.5 text-xs text-ds-ink-faint hover:text-ds-ink"
                 >
@@ -1528,54 +1531,8 @@ export default function DesigningQueuePage() {
                 </button>
               ) : null}
             </div>
-            <RowStateLegend helperText="Priority rows are pinned. Plate-only rows stay in place (grey). Rows move to end only after job card is ensured (green)." />
           </div>
         </div>
-
-        <LaneCounterChips
-          chips={[
-            {
-              key: 'all',
-              label: 'All',
-              count: rows.length,
-              active: jobCardFilter === 'all' && sortKey == null,
-              onClick: () => {
-                setJobCardFilter('all')
-                setSortKey(null)
-              },
-              tone: 'brand',
-            },
-            {
-              key: 'jc-pending',
-              label: 'Job card pending',
-              count: rows.filter((r) => awJobCardState(r) === 'pending').length,
-              active: jobCardFilter === 'pending',
-              onClick: () => setJobCardFilter((prev) => (prev === 'pending' ? 'all' : 'pending')),
-              tone: 'warning',
-            },
-            {
-              key: 'floor',
-              label: 'On-Floor',
-              count: rows.filter((r) => r.readiness?.pipelinePhase === 'awaiting_client').length,
-              active: false,
-              tone: 'info',
-            },
-            {
-              key: 'revision',
-              label: 'Revision',
-              count: rows.filter((r) => r.readiness?.pipelinePhase === 'revision').length,
-              active: false,
-              tone: 'warning',
-            },
-            {
-              key: 'finalized',
-              label: 'Finalized',
-              count: rows.filter((r) => isAwCompletedRow(r)).length,
-              active: false,
-              tone: 'success',
-            },
-          ]}
-        />
 
         <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-ds-line/40 bg-ds-elevated/10 px-2 py-1">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-ds-ink-muted">
@@ -1589,18 +1546,6 @@ export default function DesigningQueuePage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <select
-            value={customerId}
-            onChange={(e) => setCustomerId(e.target.value)}
-            className={`h-9 min-w-[8rem] max-w-[14rem] rounded-lg border border-border bg-card px-2 py-1 text-xs text-card-foreground ${mono}`}
-          >
-            <option value="">All customers</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
           <button
             type="button"
             onClick={() => setMyJobsOnly((o) => !o)}
