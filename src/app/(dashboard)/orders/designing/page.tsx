@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -239,6 +239,62 @@ function ActionsCell({
   pushPlateLabel?: string
   recallLabel?: string
 }) {
+  const [hubsOpen, setHubsOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  const recomputeMenuPosition = useCallback(() => {
+    const el = triggerRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const menuWidth = 240
+    const viewportW = window.innerWidth
+    const viewportH = window.innerHeight
+    const margin = 8
+
+    let left = rect.right - menuWidth
+    if (left < margin) left = margin
+    if (left + menuWidth > viewportW - margin) left = viewportW - menuWidth - margin
+
+    let top = rect.bottom + 8
+    const menuHeight = menuRef.current?.offsetHeight ?? 220
+    if (top + menuHeight > viewportH - margin) {
+      top = Math.max(margin, rect.top - menuHeight - 8)
+    }
+
+    setMenuPos({ top, left })
+  }, [])
+
+  useEffect(() => {
+    if (!hubsOpen) return
+    recomputeMenuPosition()
+
+    const onDocPointer = (ev: PointerEvent) => {
+      const t = ev.target as Node | null
+      if (!t) return
+      if (menuRef.current?.contains(t) || triggerRef.current?.contains(t)) return
+      setHubsOpen(false)
+    }
+
+    const onEsc = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setHubsOpen(false)
+    }
+
+    const onViewportChange = () => recomputeMenuPosition()
+
+    document.addEventListener('pointerdown', onDocPointer)
+    document.addEventListener('keydown', onEsc)
+    window.addEventListener('resize', onViewportChange)
+    window.addEventListener('scroll', onViewportChange, true)
+    return () => {
+      document.removeEventListener('pointerdown', onDocPointer)
+      document.removeEventListener('keydown', onEsc)
+      window.removeEventListener('resize', onViewportChange)
+      window.removeEventListener('scroll', onViewportChange, true)
+    }
+  }, [hubsOpen, recomputeMenuPosition])
+
   return (
     <div className="flex items-center gap-2 justify-end">
       <button
@@ -249,55 +305,78 @@ function ActionsCell({
         {pushJobCardLabel ?? 'Push Job Card'}
       </button>
 
-      <div className="relative group">
+      <div className="relative">
         <button
+          ref={triggerRef}
           type="button"
+          onClick={() => setHubsOpen((v) => !v)}
           className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] text-[var(--text-primary)]"
         >
           Push to Hubs ▾
         </button>
-
-        <div className="absolute right-0 mt-2 w-56 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border)] shadow-lg hidden group-hover:block z-50">
-          <div className="p-2 flex flex-col gap-1">
-            <button
-              onClick={onPushPlate}
-              disabled={disablePushPlate}
-              className="text-left px-3 py-2 rounded hover:bg-[var(--accent)]/10 disabled:opacity-40"
-            >
-              {pushPlateLabel ?? 'Plates'}
-            </button>
-
-            <button
-              onClick={onPushEmboss}
-              disabled={!embossEnabled}
-              className={`text-left px-3 py-2 rounded ${
-                embossEnabled
-                  ? 'text-[var(--accent)] hover:bg-[var(--accent)]/10'
-                  : 'opacity-40 cursor-not-allowed'
-              }`}
-            >
-              Emboss
-            </button>
-
-            <button
-              onClick={onPushShadeCard}
-              className="text-left px-3 py-2 rounded hover:bg-[var(--accent)]/10"
-            >
-              Shade Card
-            </button>
-
-            <div className="border-t border-[var(--border)] my-2" />
-
-            <button
-              onClick={onRecallPlanning}
-              disabled={disableRecall}
-              className="text-left px-3 py-2 rounded text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-40"
-            >
-              Recall to Planning
-            </button>
-          </div>
-        </div>
       </div>
+
+      {hubsOpen && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className="fixed w-[240px] rounded-lg bg-[var(--bg-elevated)] border border-[var(--border)] shadow-lg"
+              style={{ top: menuPos.top, left: menuPos.left, zIndex: 9999 }}
+            >
+              <div className="p-2 flex flex-col gap-1">
+                <button
+                  onClick={() => {
+                    onPushPlate()
+                    setHubsOpen(false)
+                  }}
+                  disabled={disablePushPlate}
+                  className="text-left px-3 py-2 rounded hover:bg-[var(--accent)]/10 disabled:opacity-40"
+                >
+                  {pushPlateLabel ?? 'Plates'}
+                </button>
+
+                <button
+                  onClick={() => {
+                    onPushEmboss()
+                    setHubsOpen(false)
+                  }}
+                  disabled={!embossEnabled}
+                  className={`text-left px-3 py-2 rounded ${
+                    embossEnabled
+                      ? 'text-[var(--accent)] hover:bg-[var(--accent)]/10'
+                      : 'opacity-40 cursor-not-allowed'
+                  }`}
+                >
+                  Emboss
+                </button>
+
+                <button
+                  onClick={() => {
+                    onPushShadeCard()
+                    setHubsOpen(false)
+                  }}
+                  className="text-left px-3 py-2 rounded hover:bg-[var(--accent)]/10"
+                >
+                  Shade Card
+                </button>
+
+                <div className="border-t border-[var(--border)] my-2" />
+
+                <button
+                  onClick={() => {
+                    onRecallPlanning()
+                    setHubsOpen(false)
+                  }}
+                  disabled={disableRecall}
+                  className="text-left px-3 py-2 rounded text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-40"
+                >
+                  Recall to Planning
+                </button>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       <button
         onClick={onRecallPlanning}
