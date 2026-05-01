@@ -12,6 +12,15 @@ const createSchema = z.object({
   active: z.boolean().default(true),
 })
 
+function resolveActiveFlag(input: { status?: string | boolean; active: boolean }): boolean {
+  if (input.status === undefined) return input.active
+  if (typeof input.status === 'boolean') return input.status
+  const normalized = input.status.trim().toLowerCase()
+  if (['true', '1', 'active', 'enabled', 'yes'].includes(normalized)) return true
+  if (['false', '0', 'inactive', 'disabled', 'no'].includes(normalized)) return false
+  return input.active
+}
+
 export async function GET() {
   const { error } = await requireRole('operations_head', 'md')
   if (error) return error
@@ -70,10 +79,7 @@ export async function POST(req: NextRequest) {
     data: {
       name: parsed.data.name,
       sortOrder: parsed.data.sortOrder,
-      active:
-        parsed.data.status !== undefined
-          ? String(parsed.data.status).toLowerCase() === 'true'
-          : parsed.data.active,
+      active: resolveActiveFlag({ status: parsed.data.status, active: parsed.data.active }),
     },
   })
 

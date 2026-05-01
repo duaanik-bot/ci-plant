@@ -41,6 +41,7 @@ export default function EffectsMasterPage() {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [editingValueId, setEditingValueId] = useState<string | null>(null)
   const [categoryErrors, setCategoryErrors] = useState<{ name?: string; submit?: string }>({})
+  const [valueError, setValueError] = useState<string | null>(null)
 
   const selectedCategory = useMemo(
     () => categories.find((c) => c.id === selectedCategoryId) ?? null,
@@ -150,7 +151,7 @@ export default function EffectsMasterPage() {
       const payload = {
         name,
         sortOrder: Number(categoryForm.sortOrder || 100),
-        status: categoryForm.active,
+        status: categoryForm.active ? 'active' : 'inactive',
         active: categoryForm.active,
       }
       console.log('[EffectsMaster] createCategory payload', payload)
@@ -165,7 +166,11 @@ export default function EffectsMasterPage() {
       )
       const json = await res.json().catch(() => ({}))
       console.log('[EffectsMaster] createCategory response', { ok: res.ok, status: res.status, data: json })
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Save failed')
+      if (!res.ok) {
+        const api = json as { error?: string; fields?: { name?: string } }
+        if (api.fields?.name) setCategoryErrors({ name: api.fields.name })
+        throw new Error(api.error || 'Save failed')
+      }
 
       const created = json as Partial<EffectCategory> & { id: string; name: string; sortOrder: number; active: boolean }
       const nextCategory: EffectCategory = {
@@ -239,10 +244,17 @@ export default function EffectsMasterPage() {
   async function saveValue() {
     if (!selectedCategoryId) return
     setSaving(true)
+    setValueError(null)
     try {
+      const trimmedValue = valueForm.value.trim()
+      if (!trimmedValue) {
+        setValueError('Value name is required')
+        toast.error('Value name is required')
+        return
+      }
       const payload = {
         categoryId: selectedCategoryId,
-        value: valueForm.value,
+        value: trimmedValue,
         description: valueForm.description || null,
         sortOrder: Number(valueForm.sortOrder || 100),
         active: valueForm.active,
@@ -263,7 +275,9 @@ export default function EffectsMasterPage() {
       setDrawerMode(null)
       await refreshAll(selectedCategoryId)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed')
+      const msg = e instanceof Error ? e.message : 'Save failed'
+      setValueError(msg)
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
@@ -291,32 +305,43 @@ export default function EffectsMasterPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-[var(--text-primary)]">Effects Master</h2>
-        <div className="flex items-center gap-2">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search value, description, status..."
-            className="ds-input min-h-[40px] w-[18rem]"
-          />
-          <button type="button" onClick={openCreateCategory} className="rounded-lg border border-ds-line/60 px-3 py-2 text-sm">
-            Add Category
-          </button>
-          <button
-            type="button"
-            onClick={openCreateValue}
-            disabled={!selectedCategoryId}
-            className="rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
-          >
-            Add Value
-          </button>
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Effects Master</h2>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              Centralized source of truth for Embossing, Coating, Foil, and Pasting.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search value, description, status..."
+              className="ds-input min-h-[40px] w-[18rem]"
+            />
+            <button
+              type="button"
+              onClick={openCreateCategory}
+              className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
+            >
+              Add Category
+            </button>
+            <button
+              type="button"
+              onClick={openCreateValue}
+              disabled={!selectedCategoryId}
+              className="rounded-lg border border-[var(--border)] bg-[var(--brand)] px-3 py-2 text-sm text-[var(--brand-foreground)] disabled:opacity-50"
+            >
+              Add Value
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[260px_1fr]">
-        <aside className="rounded-lg border border-border bg-card p-3">
-          <h3 className="mb-2 text-sm font-semibold">Categories</h3>
+      <div className="grid gap-4 md:grid-cols-[280px_1fr]">
+        <aside className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-3">
+          <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Categories</h3>
           <div className="space-y-1">
             {categories.map((c) => {
               const selected = c.id === selectedCategoryId
@@ -326,30 +351,40 @@ export default function EffectsMasterPage() {
                   type="button"
                   onClick={() => setSelectedCategoryId(c.id)}
                   onDoubleClick={() => openEditCategory(c)}
-                  className={`flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm ${
-                    selected ? 'bg-ds-brand/15 text-ds-ink' : 'hover:bg-ds-elevated/70 text-ds-ink-muted'
+                  className={`flex w-full items-center justify-between rounded-md border px-2 py-2 text-left text-sm transition-colors ${
+                    selected
+                      ? 'border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-primary)]'
+                      : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]'
                   }`}
                 >
                   <span>{c.name}</span>
-                  <span className="text-xs">{c.valueCount}</span>
+                  <span className="text-xs text-[var(--text-muted)]">{c.valueCount}</span>
                 </button>
               )
             })}
-            {categories.length === 0 ? <p className="text-xs text-ds-ink-faint">No categories yet.</p> : null}
+            {categories.length === 0 ? (
+              <div className="rounded-md border border-dashed border-[var(--border)] p-3 text-xs text-[var(--text-muted)]">
+                No categories yet. Click <span className="font-medium">Add Category</span> to create your first one.
+              </div>
+            ) : null}
           </div>
           {selectedCategory ? (
-            <button type="button" onClick={() => openEditCategory(selectedCategory)} className="mt-3 text-xs text-blue-600 hover:underline">
+            <button
+              type="button"
+              onClick={() => openEditCategory(selectedCategory)}
+              className="mt-3 text-xs text-[var(--text-muted)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline"
+            >
               Edit selected category
             </button>
           ) : null}
         </aside>
 
-        <section className="rounded-lg border border-border bg-card p-3">
-          <h3 className="mb-3 text-sm font-semibold">{selectedCategory?.name ?? 'Values'}</h3>
+        <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-3">
+          <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{selectedCategory?.name ?? 'Values'}</h3>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
               <thead>
-                <tr className="border-b border-ds-line/60 text-left text-xs uppercase tracking-wide text-ds-ink-muted">
+                <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
                   <th className="px-3 py-2">Value Name</th>
                   <th className="px-3 py-2">Description</th>
                   <th className="px-3 py-2">Sort Order</th>
@@ -361,27 +396,39 @@ export default function EffectsMasterPage() {
                 {filteredValues.map((v) => (
                   <tr
                     key={v.id}
-                    className="cursor-pointer border-b border-ds-line/40 hover:bg-ds-elevated/50"
+                    className="cursor-pointer border-b border-[var(--border)] hover:bg-[var(--bg-muted)]"
                     onClick={() => openEditValue(v)}
                   >
-                    <td className="px-3 py-3 font-medium text-ds-ink">{v.value}</td>
-                    <td className="px-3 py-3 text-ds-ink-muted">{v.description || '—'}</td>
-                    <td className="px-3 py-3 text-ds-ink-muted">{v.sortOrder}</td>
+                    <td className="px-3 py-3 font-medium text-[var(--text-primary)]">{v.value}</td>
+                    <td className="px-3 py-3 text-[var(--text-muted)]">{v.description || '—'}</td>
+                    <td className="px-3 py-3 text-[var(--text-muted)]">{v.sortOrder}</td>
                     <td className="px-3 py-3">
-                      <span className={v.active ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                      <span className="inline-flex rounded-md border border-[var(--border)] bg-[var(--bg-muted)] px-2 py-0.5 text-xs text-[var(--text-primary)]">
                         {v.active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
                     <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                      <button type="button" onClick={() => openEditValue(v)} className="mr-3 text-blue-600 hover:underline">
+                      <button
+                        type="button"
+                        onClick={() => openEditValue(v)}
+                        className="mr-3 text-xs text-[var(--text-muted)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline"
+                      >
                         Edit
                       </button>
                       {v.active ? (
-                        <button type="button" onClick={() => void toggleValueStatus(v, false)} className="text-rose-600 hover:underline">
+                        <button
+                          type="button"
+                          onClick={() => void toggleValueStatus(v, false)}
+                          className="text-xs text-[var(--text-muted)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline"
+                        >
                           Inactivate
                         </button>
                       ) : (
-                        <button type="button" onClick={() => void toggleValueStatus(v, true)} className="text-emerald-600 hover:underline">
+                        <button
+                          type="button"
+                          onClick={() => void toggleValueStatus(v, true)}
+                          className="text-xs text-[var(--text-muted)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline"
+                        >
                           Reactivate
                         </button>
                       )}
@@ -392,7 +439,11 @@ export default function EffectsMasterPage() {
             </table>
           </div>
           {filteredValues.length === 0 ? (
-            <p className="mt-4 text-sm text-ds-ink-faint">No values found for this category.</p>
+            <div className="mt-4 rounded-md border border-dashed border-[var(--border)] p-5 text-center">
+              <p className="text-sm text-[var(--text-muted)]">
+                {selectedCategory ? 'No values found for this category.' : 'Select a category to view values.'}
+              </p>
+            </div>
           ) : null}
         </section>
       </div>
@@ -474,7 +525,14 @@ export default function EffectsMasterPage() {
             </div>
             <div>
               <label className="mb-1 block text-xs text-ds-ink-muted">Value Name</label>
-              <input className="ds-input w-full" value={valueForm.value} onChange={(e) => setValueForm((p) => ({ ...p, value: e.target.value }))} />
+              <input
+                className={`ds-input w-full ${valueError ? 'border-ds-error/60 ring-1 ring-ds-error/40' : ''}`}
+                value={valueForm.value}
+                onChange={(e) => {
+                  setValueForm((p) => ({ ...p, value: e.target.value }))
+                  setValueError(null)
+                }}
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs text-ds-ink-muted">Description</label>
@@ -498,6 +556,7 @@ export default function EffectsMasterPage() {
                 {saving ? 'Saving…' : 'Save'}
               </button>
             </div>
+            {valueError ? <p className="text-xs text-ds-error">{valueError}</p> : null}
           </form>
         ) : null}
       </SlideOverPanel>
