@@ -26,6 +26,17 @@ type EffectValue = {
 }
 
 type DrawerMode = 'create-category' | 'edit-category' | 'create-value' | 'edit-value' | null
+type ApiErrorPayload = { error?: string; fields?: Record<string, string> }
+
+async function readApiPayload<T>(res: Response): Promise<T | ApiErrorPayload> {
+  const text = await res.text().catch(() => '')
+  if (!text) return {}
+  try {
+    return JSON.parse(text) as T | ApiErrorPayload
+  } catch {
+    return { error: text.slice(0, 240) || `HTTP ${res.status}` }
+  }
+}
 
 export default function EffectsMasterPage() {
   const [loading, setLoading] = useState(true)
@@ -61,8 +72,8 @@ export default function EffectsMasterPage() {
 
   async function loadCategories() {
     const res = await fetch('/api/masters/effects/categories', { cache: 'no-store' })
-    const data = (await res.json().catch(() => [])) as EffectCategory[]
-    if (!res.ok) throw new Error((data as unknown as { error?: string }).error || 'Failed to load categories')
+    const data = (await readApiPayload<EffectCategory[]>(res)) as EffectCategory[] | ApiErrorPayload
+    if (!res.ok) throw new Error((data as ApiErrorPayload).error || 'Failed to load categories')
     const next = Array.isArray(data) ? data : []
     setCategories(next)
     if (!selectedCategoryId && next.length > 0) setSelectedCategoryId(next[0]!.id)
@@ -77,8 +88,8 @@ export default function EffectsMasterPage() {
       return
     }
     const res = await fetch(`/api/masters/effects/values?categoryId=${encodeURIComponent(categoryId)}`, { cache: 'no-store' })
-    const data = (await res.json().catch(() => [])) as EffectValue[]
-    if (!res.ok) throw new Error((data as unknown as { error?: string }).error || 'Failed to load values')
+    const data = (await readApiPayload<EffectValue[]>(res)) as EffectValue[] | ApiErrorPayload
+    if (!res.ok) throw new Error((data as ApiErrorPayload).error || 'Failed to load values')
     setValues(Array.isArray(data) ? data : [])
   }
 
@@ -164,10 +175,10 @@ export default function EffectsMasterPage() {
           body: JSON.stringify(payload),
         },
       )
-      const json = await res.json().catch(() => ({}))
+      const json = (await readApiPayload<EffectCategory>(res)) as EffectCategory | ApiErrorPayload
       console.log('[EffectsMaster] createCategory response', { ok: res.ok, status: res.status, data: json })
       if (!res.ok) {
-        const api = json as { error?: string; fields?: { name?: string } }
+        const api = json as ApiErrorPayload
         if (api.fields?.name) setCategoryErrors({ name: api.fields.name })
         throw new Error(api.error || 'Save failed')
       }
@@ -224,9 +235,9 @@ export default function EffectsMasterPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const json = await res.json().catch(() => ({}))
+      const json = (await readApiPayload<EffectCategory>(res)) as EffectCategory | ApiErrorPayload
       console.log('[EffectsMaster] updateCategory response', { ok: res.ok, status: res.status, data: json })
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Save failed')
+      if (!res.ok) throw new Error((json as ApiErrorPayload).error || 'Save failed')
 
       await refreshAll(selectedCategoryId)
       setCategoryForm({ name: '', sortOrder: '100', active: true })
@@ -269,8 +280,8 @@ export default function EffectsMasterPage() {
           body: JSON.stringify(payload),
         },
       )
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Save failed')
+      const json = (await readApiPayload<EffectValue>(res)) as EffectValue | ApiErrorPayload
+      if (!res.ok) throw new Error((json as ApiErrorPayload).error || 'Save failed')
       toast.success(drawerMode === 'edit-value' ? 'Value updated' : 'Value created')
       setDrawerMode(null)
       await refreshAll(selectedCategoryId)
@@ -290,8 +301,8 @@ export default function EffectsMasterPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active }),
       })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Update failed')
+      const json = (await readApiPayload<EffectValue>(res)) as EffectValue | ApiErrorPayload
+      if (!res.ok) throw new Error((json as ApiErrorPayload).error || 'Update failed')
       toast.success(active ? 'Value reactivated' : 'Value inactivated')
       await loadValues(selectedCategoryId)
     } catch (e) {

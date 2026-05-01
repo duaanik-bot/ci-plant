@@ -22,66 +22,76 @@ function resolveActiveFlag(input: { status?: string | boolean; active: boolean }
 }
 
 export async function GET() {
-  const { error } = await requireRole('operations_head', 'md')
-  if (error) return error
+  try {
+    const { error } = await requireRole('operations_head', 'md')
+    if (error) return error
 
-  const categories = await db.effectCategory.findMany({
-    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    include: {
-      _count: {
-        select: {
-          values: true,
+    const categories = await db.effectCategory.findMany({
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      include: {
+        _count: {
+          select: {
+            values: true,
+          },
         },
       },
-    },
-  })
+    })
 
-  return NextResponse.json(
-    categories.map((c) => ({
-      id: c.id,
-      name: c.name,
-      sortOrder: c.sortOrder,
-      active: c.active,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      valueCount: c._count.values,
-    })),
-  )
+    return NextResponse.json(
+      categories.map((c) => ({
+        id: c.id,
+        name: c.name,
+        sortOrder: c.sortOrder,
+        active: c.active,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+        valueCount: c._count.values,
+      })),
+    )
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to load categories'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const { error } = await requireRole('operations_head', 'md')
-  if (error) return error
+  try {
+    const { error } = await requireRole('operations_head', 'md')
+    if (error) return error
 
-  const body = await req.json().catch(() => ({}))
-  const parsed = createSchema.safeParse(body)
-  if (!parsed.success) {
-    const fields: Record<string, string> = {}
-    parsed.error.issues.forEach((issue) => {
-      const key = String(issue.path[0] || 'name')
-      fields[key] = issue.message
+    const body = await req.json().catch(() => ({}))
+    const parsed = createSchema.safeParse(body)
+    if (!parsed.success) {
+      const fields: Record<string, string> = {}
+      parsed.error.issues.forEach((issue) => {
+        const key = String(issue.path[0] || 'name')
+        fields[key] = issue.message
+      })
+      return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+    }
+
+    const duplicate = await db.effectCategory.findFirst({
+      where: { name: { equals: parsed.data.name, mode: 'insensitive' } },
+      select: { id: true },
     })
-    return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+    if (duplicate) {
+      return NextResponse.json(
+        { error: 'Category already exists', fields: { name: 'Category already exists' } },
+        { status: 400 },
+      )
+    }
+
+    const created = await db.effectCategory.create({
+      data: {
+        name: parsed.data.name,
+        sortOrder: parsed.data.sortOrder,
+        active: resolveActiveFlag({ status: parsed.data.status, active: parsed.data.active }),
+      },
+    })
+
+    return NextResponse.json(created, { status: 201 })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to create category'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
-
-  const duplicate = await db.effectCategory.findFirst({
-    where: { name: { equals: parsed.data.name, mode: 'insensitive' } },
-    select: { id: true },
-  })
-  if (duplicate) {
-    return NextResponse.json(
-      { error: 'Category already exists', fields: { name: 'Category already exists' } },
-      { status: 400 },
-    )
-  }
-
-  const created = await db.effectCategory.create({
-    data: {
-      name: parsed.data.name,
-      sortOrder: parsed.data.sortOrder,
-      active: resolveActiveFlag({ status: parsed.data.status, active: parsed.data.active }),
-    },
-  })
-
-  return NextResponse.json(created, { status: 201 })
 }

@@ -14,65 +14,75 @@ const createSchema = z.object({
 })
 
 export async function GET(req: NextRequest) {
-  const { error } = await requireRole('operations_head', 'md')
-  if (error) return error
+  try {
+    const { error } = await requireRole('operations_head', 'md')
+    if (error) return error
 
-  const categoryId = req.nextUrl.searchParams.get('categoryId')?.trim()
-  if (!categoryId) {
-    return NextResponse.json({ error: 'categoryId is required' }, { status: 400 })
+    const categoryId = req.nextUrl.searchParams.get('categoryId')?.trim()
+    if (!categoryId) {
+      return NextResponse.json({ error: 'categoryId is required' }, { status: 400 })
+    }
+
+    const rows = await db.effectValue.findMany({
+      where: { categoryId },
+      orderBy: [{ sortOrder: 'asc' }, { value: 'asc' }],
+    })
+
+    return NextResponse.json(rows)
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to load values'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
-
-  const rows = await db.effectValue.findMany({
-    where: { categoryId },
-    orderBy: [{ sortOrder: 'asc' }, { value: 'asc' }],
-  })
-
-  return NextResponse.json(rows)
 }
 
 export async function POST(req: NextRequest) {
-  const { error } = await requireRole('operations_head', 'md')
-  if (error) return error
+  try {
+    const { error } = await requireRole('operations_head', 'md')
+    if (error) return error
 
-  const body = await req.json().catch(() => ({}))
-  const parsed = createSchema.safeParse(body)
-  if (!parsed.success) {
-    const fields: Record<string, string> = {}
-    parsed.error.issues.forEach((issue) => {
-      const key = String(issue.path[0] || 'value')
-      fields[key] = issue.message
+    const body = await req.json().catch(() => ({}))
+    const parsed = createSchema.safeParse(body)
+    if (!parsed.success) {
+      const fields: Record<string, string> = {}
+      parsed.error.issues.forEach((issue) => {
+        const key = String(issue.path[0] || 'value')
+        fields[key] = issue.message
+      })
+      return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+    }
+
+    const category = await db.effectCategory.findUnique({ where: { id: parsed.data.categoryId } })
+    if (!category) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 })
+    }
+
+    const duplicate = await db.effectValue.findFirst({
+      where: {
+        categoryId: parsed.data.categoryId,
+        value: { equals: parsed.data.value, mode: 'insensitive' },
+      },
+      select: { id: true },
     })
-    return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+    if (duplicate) {
+      return NextResponse.json(
+        { error: 'Value already exists in this category', fields: { value: 'Value already exists' } },
+        { status: 400 },
+      )
+    }
+
+    const created = await db.effectValue.create({
+      data: {
+        categoryId: parsed.data.categoryId,
+        value: parsed.data.value,
+        description: parsed.data.description || null,
+        sortOrder: parsed.data.sortOrder,
+        active: parsed.data.active,
+      },
+    })
+
+    return NextResponse.json(created, { status: 201 })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to create value'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
-
-  const category = await db.effectCategory.findUnique({ where: { id: parsed.data.categoryId } })
-  if (!category) {
-    return NextResponse.json({ error: 'Category not found' }, { status: 404 })
-  }
-
-  const duplicate = await db.effectValue.findFirst({
-    where: {
-      categoryId: parsed.data.categoryId,
-      value: { equals: parsed.data.value, mode: 'insensitive' },
-    },
-    select: { id: true },
-  })
-  if (duplicate) {
-    return NextResponse.json(
-      { error: 'Value already exists in this category', fields: { value: 'Value already exists' } },
-      { status: 400 },
-    )
-  }
-
-  const created = await db.effectValue.create({
-    data: {
-      categoryId: parsed.data.categoryId,
-      value: parsed.data.value,
-      description: parsed.data.description || null,
-      sortOrder: parsed.data.sortOrder,
-      active: parsed.data.active,
-    },
-  })
-
-  return NextResponse.json(created, { status: 201 })
 }
