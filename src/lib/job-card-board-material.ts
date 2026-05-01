@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client'
 import { boardGradesMatch, normalizeBoardKey } from '@/lib/procurement-price-benchmark'
 import { computeMaterialGate } from '@/lib/planning-interlock'
 import { warehouseBoardLabel } from '@/lib/paper-interconnect'
+import { getMaterialReadiness } from '@/lib/material-readiness-service'
 
 export type JobCardBoardMaterialSnapshot = {
   requiredSheets: number
@@ -16,6 +17,11 @@ export type JobCardBoardMaterialSnapshot = {
   materialPendingWatermark: boolean
   warehouseHandshake: { issuedAt: string; custodianName: string } | null
   ledgerLink: { gsm: number; board: string } | null
+  reservedSheets?: number
+  shortageSheets?: number
+  availableStock?: number
+  prStatus?: string
+  grnEta?: string | null
 }
 
 export async function computeBoardMaterialForJobCard(
@@ -82,6 +88,8 @@ export async function computeBoardMaterialForJobCard(
   const materialPendingWatermark =
     materialGate.status === 'shortage' || materialGate.status === 'ordered'
 
+  const readiness = await getMaterialReadiness(jc.id, db).catch(() => null)
+
   return {
     requiredSheets,
     issuedToFloorSheets,
@@ -102,5 +110,10 @@ export async function computeBoardMaterialForJobCard(
     ledgerLink: poLine?.materialQueue
       ? { gsm: poLine.materialQueue.gsm, board: poLine.materialQueue.boardType }
       : null,
+    reservedSheets: readiness?.reservedSheets ?? 0,
+    shortageSheets: readiness?.shortageSheets ?? Math.max(0, requiredSheets - issuedToFloorSheets),
+    availableStock: readiness?.availableStock ?? paperWarehouseSheetsForSpec,
+    prStatus: readiness?.prStatus ?? 'not_created',
+    grnEta: readiness?.grnEta ?? null,
   }
 }

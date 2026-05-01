@@ -11,6 +11,7 @@ import {
   firstFivePointBlockerName,
 } from '@/lib/planning-interlock'
 import { applyAllocatedStockToJobCard, get_allocated_stock_dims } from '@/lib/allocated-stock-dims'
+import { reserveMaterial } from '@/lib/material-readiness-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         },
       },
       materialQueue: {
-        select: { totalSheets: true, boardType: true, gsm: true },
+        select: { totalSheets: true, boardType: true, gsm: true, sheetLengthMm: true, sheetWidthMm: true },
       },
       carton: {
         select: {
@@ -268,6 +269,27 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     machine?.stdWastePct != null ? Number(machine.stdWastePct) : null,
   )
 
+  const materialId =
+    li.materialQueue && li.materialQueue.boardType && li.materialQueue.gsm
+      ? (
+          await db.inventory.findFirst({
+            where: {
+              active: true,
+              boardType: li.materialQueue.boardType,
+              gsm: li.materialQueue.gsm,
+              sheetLength: li.materialQueue.sheetLengthMm,
+              sheetWidth: li.materialQueue.sheetWidthMm,
+            },
+            select: { id: true },
+          })
+        )?.id ?? null
+      : null
+
+  let reservationResult: Awaited<ReturnType<typeof reserveMaterial>> | null = null
+  if (materialId) {
+    reservationResult = await reserveMaterial(materialId, created.id, requiredSheets, li.id)
+  }
+
   return NextResponse.json(
     {
       ...created,
@@ -277,6 +299,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         estimatedDurationHours: estH,
         reservedApplied: useReservedFirst ? Math.max(0, reservedQty) : 0,
         baseRequiredSheets,
+        materialReservation: reservationResult,
       },
     },
     { status: 201 },

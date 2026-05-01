@@ -271,6 +271,8 @@ model Inventory {
   bomLines             BomLine[]
   sheetIssues          SheetIssue[]
   purchaseRequisitions PurchaseRequisition[]
+  materialReservations MaterialReservation[]
+  materialShortages    MaterialShortage[]
   stockMovements       StockMovement[]
   wasteRecords         WasteRecord[]
 
@@ -1228,6 +1230,8 @@ model ProductionJobCard {
   downtimeLogs ProductionDowntimeLog[]
   oeeLedgerEntry ProductionOeeLedger?
   shadeCardsIssued ShadeCard[] @relation("ShadeCardIssuedJobCard")
+  materialReservations MaterialReservation[]
+  materialShortages    MaterialShortage[]
 
   @@map("production_job_cards")
 }
@@ -1908,11 +1912,72 @@ model PurchaseRequisition {
   supplierId       String?   @map("supplier_id")
   expectedDelivery DateTime? @map("expected_delivery") @db.Date
   poReference      String?   @map("po_reference") @db.VarChar(60)
+  boardType        String?   @map("board_type") @db.VarChar(120)
+  sizeLabel        String?   @map("size_label") @db.VarChar(80)
+  gsm              Int?
+  shortageId       String?   @unique @map("shortage_id")
+  sourceJobCardId  String?   @map("source_job_card_id")
+  sourcePlanningId String?   @map("source_planning_id")
   createdAt        DateTime  @default(now()) @map("created_at")
 
   material Inventory @relation(fields: [materialId], references: [id])
 
   @@map("purchase_requisitions")
+}
+
+model MaterialReservation {
+  id             String   @id @default(uuid())
+  materialId     String   @map("material_id")
+  jobCardId      String   @map("job_card_id")
+  planningId     String?  @map("planning_id")
+  requiredSheets Decimal  @map("required_sheets") @db.Decimal(12, 3)
+  reservedSheets Decimal  @default(0) @map("reserved_sheets") @db.Decimal(12, 3)
+  shortageSheets Decimal  @default(0) @map("shortage_sheets") @db.Decimal(12, 3)
+  status         String   @default("draft") @db.VarChar(32)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  material Inventory         @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  jobCard  ProductionJobCard @relation(fields: [jobCardId], references: [id], onDelete: Cascade)
+
+  @@unique([materialId, jobCardId])
+  @@index([jobCardId])
+  @@map("material_reservations")
+}
+
+model MaterialShortage {
+  id              String   @id @default(uuid())
+  materialId      String   @map("material_id")
+  jobCardId       String   @map("job_card_id")
+  planningId      String?  @map("planning_id")
+  shortageQty     Decimal  @map("shortage_qty") @db.Decimal(12, 3)
+  allocatedQty    Decimal  @default(0) @map("allocated_qty") @db.Decimal(12, 3)
+  remainingQty    Decimal  @map("remaining_qty") @db.Decimal(12, 3)
+  status          String   @default("open") @db.VarChar(24)
+  purchaseReqId   String?  @map("purchase_req_id")
+  requiredByDate  DateTime? @map("required_by_date") @db.Date
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  material Inventory         @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  jobCard  ProductionJobCard @relation(fields: [jobCardId], references: [id], onDelete: Cascade)
+
+  @@index([materialId, status])
+  @@index([jobCardId, status])
+  @@map("material_shortages")
+}
+
+model GrnShortageAllocation {
+  id          String   @id @default(uuid())
+  grnId       String   @map("grn_id")
+  shortageId  String   @map("shortage_id")
+  materialId  String   @map("material_id")
+  allocatedQty Decimal @map("allocated_qty") @db.Decimal(12, 3)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([grnId, shortageId])
+  @@index([shortageId])
+  @@map("grn_shortage_allocations")
 }
 
 // ─────────────────────────────────────────

@@ -3,6 +3,7 @@ import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
+import { findOpenShortagesForMaterial } from '@/lib/material-readiness-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -173,6 +174,8 @@ export async function POST(req: NextRequest) {
     await checkReorderPoints(data.materialId)
   } catch (_) {}
 
+  const matchingShortages = await findOpenShortagesForMaterial(data.materialId)
+
   return NextResponse.json({
     success: true,
     message: `${totalSheets} sheets (${totalWeightKg > 0 ? totalWeightKg.toFixed(2) + ' kg' : inv.unit}) received into quarantine for ${inv.materialCode}.`,
@@ -181,5 +184,17 @@ export async function POST(req: NextRequest) {
     totalWeightKg,
     totalCost,
     newWac: parseFloat(newWac.toFixed(4)),
+    allocationPrompt:
+      matchingShortages.length > 0
+        ? `This stock matches shortage for Job ${matchingShortages[0]!.jobCardId}. Allocate now?`
+        : null,
+    matchingShortages: matchingShortages.map((s) => ({
+      shortageId: s.id,
+      jobCardId: s.jobCardId,
+      planningId: s.planningId,
+      remainingQty: Number(s.remainingQty),
+      shortageQty: Number(s.shortageQty),
+      purchaseReqId: s.purchaseReqId,
+    })),
   })
 }
