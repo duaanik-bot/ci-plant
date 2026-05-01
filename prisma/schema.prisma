@@ -1923,3 +1923,37 @@ model StockMovement {
 
   @@map("stock_movements")
 }
+
+// ─────────────────────────────────────────
+// EFFECTS MASTER (centralized specification values)
+// ─────────────────────────────────────────
+
+model EffectCategory {
+  id        String   @id @default(uuid())
+  name      String   @unique @db.VarChar(80)
+  sortOrder Int      @default(100) @map("sort_order")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  values EffectValue[]
+
+  @@map("effect_categories")
+}
+
+model EffectValue {
+  id          String   @id @default(uuid())
+  categoryId  String   @map("category_id")
+  value       String   @db.VarChar(120)
+  description String?
+  sortOrder   Int      @default(100) @map("sort_order")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  category EffectCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@unique([categoryId, value])
+  @@index([categoryId, active, sortOrder])
+  @@map("effect_values")
+}

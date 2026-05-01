@@ -324,6 +324,7 @@ export function DashboardShell({
             { label: 'Department', href: '/masters/departments' },
             { label: 'Employee', href: '/masters/employees' },
             { label: 'QC Instrument', href: '/masters/instruments' },
+            { label: 'Effects', href: '/masters/effects' },
           ],
         },
       ].filter((m) => !('hidden' in m && m.hidden)),

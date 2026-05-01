@@ -27,6 +27,11 @@ const cards = [
     description: 'Calibration due dates, certificates',
   },
   {
+    href: '/masters/effects',
+    label: 'Effects',
+    description: 'Embossing, coating, foil, pasting values by category',
+  },
+  {
     href: '/masters/users',
     label: 'Users',
     description: 'Name, email, role, PIN, machine access',
