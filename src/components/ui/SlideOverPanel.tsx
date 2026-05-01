@@ -19,7 +19,7 @@ type SlideOverPanelProps = StandardSlideOverOptions & {
   children: ReactNode
   /** Sticky footer (primary / secondary actions) */
   footer?: ReactNode
-  /** Defaults to `z-[60]`; only one app drawer is active at a time. */
+  /** Defaults above app shell header so form fields are never hidden under top nav. */
   zIndexClass?: string
 }
 
@@ -43,7 +43,7 @@ export function SlideOverPanel({
   backdropClassName = 'bg-[rgba(0,0,0,0.25)]',
   panelClassName,
   footer,
-  zIndexClass = 'z-[60]',
+  zIndexClass = 'z-[1100]',
   animateEnter = true,
 }: SlideOverPanelProps) {
   useEffect(() => {

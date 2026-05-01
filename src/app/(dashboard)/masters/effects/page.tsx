@@ -473,11 +473,15 @@ export default function EffectsMasterPage() {
               void updateCategory()
             }}
           >
+            <p className="rounded-md border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-xs text-[var(--text-muted)]">
+              Create a category first (for example: Coating), then add detailed values from <span className="font-medium">Add Value</span>.
+            </p>
             <div>
-              <label className="mb-1 block text-xs text-ds-ink-muted">Category</label>
+              <label className="mb-1 block text-xs text-ds-ink-muted">Category Name</label>
               <input
                 className={`ds-input w-full ${categoryErrors.name ? 'border-ds-error/60 ring-1 ring-ds-error/40' : ''}`}
                 value={categoryForm.name}
+                placeholder="e.g. Coating"
                 onChange={(e) => {
                   setCategoryForm((p) => ({ ...p, name: e.target.value }))
                   setCategoryErrors((prev) => ({ ...prev, name: undefined, submit: undefined }))
@@ -491,6 +495,7 @@ export default function EffectsMasterPage() {
                 type="number"
                 className="ds-input w-full"
                 value={categoryForm.sortOrder}
+                placeholder="100"
                 onChange={(e) => setCategoryForm((p) => ({ ...p, sortOrder: e.target.value }))}
               />
             </div>
@@ -528,6 +533,7 @@ export default function EffectsMasterPage() {
               <input
                 className={`ds-input w-full ${valueError ? 'border-ds-error/60 ring-1 ring-ds-error/40' : ''}`}
                 value={valueForm.value}
+                placeholder="e.g. Gloss"
                 onChange={(e) => {
                   setValueForm((p) => ({ ...p, value: e.target.value }))
                   setValueError(null)
@@ -536,7 +542,13 @@ export default function EffectsMasterPage() {
             </div>
             <div>
               <label className="mb-1 block text-xs text-ds-ink-muted">Description</label>
-              <textarea className="ds-input w-full" rows={3} value={valueForm.description} onChange={(e) => setValueForm((p) => ({ ...p, description: e.target.value }))} />
+              <textarea
+                className="ds-input w-full"
+                rows={3}
+                placeholder="Optional notes for operators"
+                value={valueForm.description}
+                onChange={(e) => setValueForm((p) => ({ ...p, description: e.target.value }))}
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs text-ds-ink-muted">Sort Order</label>
