@@ -87,6 +87,43 @@ type ActivityRow = {
   createdAt: string
 }
 
+type MaterialDetailPayload = {
+  material: {
+    id: string
+    materialCode: string
+    description: string
+    boardType: string | null
+    boardClassification: string | null
+    gsm: number | null
+    sheetLength: number | null
+    sheetWidth: number | null
+  }
+  logs: Array<{
+    id: string
+    movementType: string
+    qty: number
+    refType: string | null
+    refId: string | null
+    createdAt: string
+  }>
+  reservations: Array<{
+    id: string
+    planningId: string | null
+    cartonName: string | null
+    poNumber: string | null
+    requiredSheets: number
+    reservedSheets: number
+    shortageSheets: number
+    status: string
+    jobCard: {
+      id: string
+      jobCardNumber: number
+      status: string
+      customerName: string
+    }
+  }>
+}
+
 function InventoryPageContent() {
   const searchParams = useSearchParams()
   const ledgerGsm = searchParams.get('ledgerGsm')?.trim() ?? ''
@@ -130,6 +167,9 @@ function InventoryPageContent() {
   const [adjustRemarks, setAdjustRemarks] = useState('')
   const [adjustSubmitting, setAdjustSubmitting] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
+  const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
+  const [materialDrawerLoading, setMaterialDrawerLoading] = useState(false)
+  const [materialDrawerData, setMaterialDrawerData] = useState<MaterialDetailPayload | null>(null)
 
   const loadPaperLedger = useCallback(
     async (opts: { customerPo: string; gsm?: string; board?: string }) => {
@@ -391,6 +431,246 @@ function InventoryPageContent() {
     }
   }
 
+  async function openMaterialDrawer(row: PaperWarehouseRow) {
+    setMaterialDrawerRow(row)
+    setMaterialDrawerData(null)
+    setMaterialDrawerLoading(true)
+    try {
+      const res = await fetch(`/api/inventory/paper-warehouse/${row.material_id}/details`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to load material details')
+      setMaterialDrawerData(data as MaterialDetailPayload)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load material details')
+    } finally {
+      setMaterialDrawerLoading(false)
+    }
+  }
+
+  const paperWarehouseOnlyMode = true
+  if (paperWarehouseOnlyMode) {
+    return (
+      <div className="w-full px-4 py-3">
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button
+            type="button"
+            onClick={() => setAdjustOpen(true)}
+            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+          >
+            Adjust Stock
+          </button>
+          <Link
+            href="/inventory/flow"
+            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+          >
+            Inventory Flow
+          </Link>
+          <Link
+            href="/inventory/simulation"
+            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+          >
+            Live Simulation
+          </Link>
+          <Link
+            href="/inventory/purchase-requisitions"
+            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+          >
+            Purchase Requisitions
+          </Link>
+          <Link
+            href="/inventory/grn"
+            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+          >
+            Add Stock (GRN)
+          </Link>
+        </div>
+        <section
+          id="paper-ledger"
+          className="rounded-xl border border-ds-line/40 overflow-hidden bg-background text-ds-ink"
+        >
+          <div className="p-4 md:p-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-ds-warning">Paper Warehouse (Raw Materials)</h2>
+                <p className="text-xs text-ds-ink-faint mt-1 font-mono">
+                  Master-driven paper stock only. Reservation, incoming, and shortage are synchronized with Planning and PR.
+                </p>
+                {(ledgerGsm || ledgerBoard) && (
+                  <p className={`text-xs text-ds-warning mt-2 ${ledgerMono}`}>
+                    Job card deep link · GSM {ledgerGsm || '—'} · Board {ledgerBoard || '—'}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+                <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
+                <div className="rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></div>
+                <div className="rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></div>
+                <div className="rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></div>
+                <div className="rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></div>
+                <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
+                <div className="rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
+              </div>
+            </div>
+
+            <label className="block mb-3 text-xs text-ds-ink-faint uppercase tracking-wide">
+              Search raw material
+              <input
+                type="text"
+                value={hubSearchPo}
+                onChange={(e) => setHubSearchPo(e.target.value)}
+                placeholder="material code / board type / classification / size / gsm"
+                className={`mt-1 w-full max-w-md rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
+              />
+            </label>
+
+            <div className="flex flex-wrap gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => setPaperLedgerSort('oldest')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
+                  paperLedgerSort === 'oldest'
+                    ? 'bg-ds-warning border-ds-warning text-primary-foreground'
+                    : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
+                }`}
+              >
+                Oldest first
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaperLedgerSort('newest')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
+                  paperLedgerSort === 'newest'
+                    ? 'bg-ds-warning border-ds-warning text-primary-foreground'
+                    : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
+                }`}
+              >
+                Newest first
+              </button>
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-ds-line/40">
+              <table className="w-full text-sm">
+                <thead className="bg-background text-left border-b border-ds-line/40">
+                  <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
+                    <th className="px-3 py-2">Material code</th>
+                    <th className="px-3 py-2">Board type</th>
+                    <th className="px-3 py-2">Board classification</th>
+                    <th className="px-3 py-2">Size</th>
+                    <th className="px-3 py-2">GSM</th>
+                    <th className="px-3 py-2">Available</th>
+                    <th className="px-3 py-2">Reserved</th>
+                    <th className="px-3 py-2">Incoming</th>
+                    <th className="px-3 py-2">Shortage</th>
+                    <th className="px-3 py-2">Reorder</th>
+                    <th className="px-3 py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ds-card">
+                  {paperWarehouseRows.map((row) => (
+                    <tr key={row.material_id} className="hover:bg-ds-main/40">
+                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.material_code}</td>
+                      <td className="px-3 py-2 text-ds-ink-muted">
+                        <button
+                          type="button"
+                          onClick={() => void openMaterialDrawer(row)}
+                          className="underline underline-offset-2 hover:text-ds-ink"
+                        >
+                          {row.board_type_id ?? '-'}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 text-ds-ink-muted">{row.board_classification_id ?? '-'}</td>
+                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.size_display}</td>
+                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.gsm ?? '-'}</td>
+                      <td className={`px-3 py-2 text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
+                      <td className={`px-3 py-2 text-amber-300 ${ledgerMono}`}>{fmt(row.reserved_sheets)}</td>
+                      <td className={`px-3 py-2 text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
+                      <td className={`px-3 py-2 text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
+                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
+                      <td className="px-3 py-2 text-xs text-ds-ink-faint">{row.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {paperWarehouseRows.length === 0 && (
+                <p className="p-6 text-center text-ds-ink-faint text-sm">
+                  No paper warehouse rows found.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <SlideOverPanel
+          title="Material details"
+          isOpen={!!materialDrawerRow}
+          onClose={() => {
+            setMaterialDrawerRow(null)
+            setMaterialDrawerData(null)
+          }}
+          widthClass="max-w-xl"
+          backdropClassName="bg-background/60"
+          panelClassName="border-l border-ds-line/40 bg-background shadow-2xl"
+        >
+          {materialDrawerRow ? (
+            <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-ds-ink-muted ${ledgerMono}`}>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Material</p>
+                <p className="text-sm text-ds-ink font-semibold">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p>
+                <p className="text-ds-ink-faint">
+                  {(materialDrawerData?.material.boardType ?? materialDrawerRow.board_type_id ?? '-') + ' · ' + (materialDrawerData?.material.gsm ?? materialDrawerRow.gsm ?? '-')}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Reserved products / jobs</p>
+                {materialDrawerLoading ? (
+                  <p className="text-ds-ink-faint">Loading…</p>
+                ) : !materialDrawerData || materialDrawerData.reservations.length === 0 ? (
+                  <p className="text-ds-ink-faint">No active reservations.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {materialDrawerData.reservations.map((r) => (
+                      <li key={r.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                        <p className="text-ds-ink">
+                          JC#{r.jobCard.jobCardNumber} · {r.jobCard.customerName}
+                        </p>
+                        <p className="text-ds-ink-faint">
+                          {r.cartonName ?? 'Carton —'} {r.poNumber ? `· ${r.poNumber}` : ''}
+                        </p>
+                        <p className="text-ds-warning">
+                          Reserved {r.reservedSheets.toLocaleString('en-IN')} / Required {r.requiredSheets.toLocaleString('en-IN')}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Recent stock logs</p>
+                {materialDrawerLoading ? (
+                  <p className="text-ds-ink-faint">Loading…</p>
+                ) : !materialDrawerData || materialDrawerData.logs.length === 0 ? (
+                  <p className="text-ds-ink-faint">No stock logs found.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {materialDrawerData.logs.map((log) => (
+                      <li key={log.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                        <p className="text-ds-ink">{log.movementType} · {log.qty.toLocaleString('en-IN')}</p>
+                        <p className="text-ds-ink-faint">
+                          {new Date(log.createdAt).toLocaleString()} · {log.refType ?? '—'} {log.refId ? `· ${log.refId.slice(0, 8)}` : ''}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </SlideOverPanel>
+      </div>
+    )
+  }
+
   return (
     <div className="w-full px-4 py-3">
       <section
@@ -496,23 +776,6 @@ function InventoryPageContent() {
                 No paper warehouse rows found.
               </p>
             )}
-          </div>
-        </div>
-      </section>
-
-      <section className="mb-8 rounded-xl border border-ds-line/40 overflow-hidden bg-background text-ds-ink">
-        <div className="p-4 md:p-6">
-          <h2 className="text-lg font-semibold text-ds-warning">FG Warehouse</h2>
-          <p className="mt-1 text-xs text-ds-ink-faint">
-            Finished goods are managed in a separate warehouse module to avoid raw-paper confusion.
-          </p>
-          <div className="mt-3">
-            <Link
-              href="/inventory/fg-warehouse"
-              className="inline-flex rounded border border-ds-line/50 bg-ds-card px-3 py-2 text-xs text-ds-ink hover:bg-ds-main/50"
-            >
-              Open FG Warehouse
-            </Link>
           </div>
         </div>
       </section>
@@ -688,83 +951,6 @@ function InventoryPageContent() {
         </div>
       </div>
 
-      {alerts.length > 0 && (
-        <div className="mb-4 p-3 rounded-lg bg-red-900/30 border border-red-700 text-red-200 text-sm">
-          Reorder alert: {alerts.length} material(s) at or below reorder point.
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="rounded-lg border-2 border-red-700/50 bg-red-900/20 p-4">
-          <h2 className="font-semibold text-red-300 mb-2">Quarantine</h2>
-          {items
-            .filter((i) => i.qtyQuarantine > 0)
-            .map((i) => (
-              <div key={i.id} className="text-sm py-1.5 flex flex-col gap-0.5">
-                <span className="flex justify-between">
-                  <span>{i.materialCode}</span>
-                  <span>
-                    {fmt(i.qtyQuarantine)} {i.unit}
-                  </span>
-                </span>
-                <span className="text-red-200/80 text-xs">{fmtVal(i.valueQuarantine)}</span>
-              </div>
-            ))}
-          {items.every((i) => i.qtyQuarantine === 0) && <p className="text-ds-ink-faint text-sm">None</p>}
-        </div>
-        <div className="rounded-lg border-2 border-green-700/50 bg-green-900/20 p-4">
-          <h2 className="font-semibold text-green-300 mb-2">Available</h2>
-          {items
-            .filter((i) => i.qtyAvailable > 0)
-            .map((i) => (
-              <div key={i.id} className="text-sm py-1.5 flex flex-col gap-0.5">
-                <span className="flex justify-between">
-                  <span>{i.materialCode}</span>
-                  <span>
-                    {fmt(i.qtyAvailable)} {i.unit}
-                  </span>
-                </span>
-                <span className="text-green-200/80 text-xs">{fmtVal(i.valueAvailable)}</span>
-              </div>
-            ))}
-          {items.every((i) => i.qtyAvailable === 0) && <p className="text-ds-ink-faint text-sm">None</p>}
-        </div>
-        <div className="rounded-lg border-2 border-ds-warning/30 bg-ds-warning/8 p-4">
-          <h2 className="font-semibold text-ds-warning mb-2">Reserved / WIP</h2>
-          {items
-            .filter((i) => i.qtyReserved > 0)
-            .map((i) => (
-              <div key={i.id} className="text-sm py-1.5 flex flex-col gap-0.5">
-                <span className="flex justify-between">
-                  <span>{i.materialCode}</span>
-                  <span>
-                    {fmt(i.qtyReserved)} {i.unit}
-                  </span>
-                </span>
-                <span className="text-ds-warning/80 text-xs">{fmtVal(i.valueReserved)}</span>
-              </div>
-            ))}
-          {items.every((i) => i.qtyReserved === 0) && <p className="text-ds-ink-faint text-sm">None</p>}
-        </div>
-        <div className="rounded-lg border-2 border-blue-700/50 bg-blue-900/20 p-4">
-          <h2 className="font-semibold text-blue-300 mb-2">Finished Goods</h2>
-          {items
-            .filter((i) => i.qtyFg > 0)
-            .map((i) => (
-              <div key={i.id} className="text-sm py-1.5 flex flex-col gap-0.5">
-                <span className="flex justify-between">
-                  <span>{i.materialCode}</span>
-                  <span>
-                    {fmt(i.qtyFg)} {i.unit}
-                  </span>
-                </span>
-                <span className="text-blue-200/80 text-xs">{fmtVal(i.valueFg)}</span>
-              </div>
-            ))}
-          {items.every((i) => i.qtyFg === 0) && <p className="text-ds-ink-faint text-sm">None</p>}
-        </div>
-      </div>
-
       <div className="mt-6 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-ds-elevated text-left">
@@ -775,7 +961,6 @@ function InventoryPageContent() {
               <th className="px-4 py-2">Quarantine</th>
               <th className="px-4 py-2">Available</th>
               <th className="px-4 py-2">Reserved</th>
-              <th className="px-4 py-2">FG</th>
               <th className="px-4 py-2">Reorder</th>
               <th className="px-4 py-2">Value (est)</th>
               <th className="px-4 py-2">Actions</th>
@@ -783,7 +968,7 @@ function InventoryPageContent() {
           </thead>
           <tbody className="divide-y divide-ds-line/40">
             {items.map((i) => {
-              const totalVal = i.valueQuarantine + i.valueAvailable + i.valueReserved + i.valueFg
+              const totalVal = i.valueQuarantine + i.valueAvailable + i.valueReserved
               return (
                 <tr key={i.id} className="hover:bg-ds-elevated/50">
                   <td className={`px-4 py-2 ${ledgerMono}`}>{i.materialCode}</td>
@@ -792,7 +977,6 @@ function InventoryPageContent() {
                   <td className={`px-4 py-2 ${ledgerMono}`}>{fmt(i.qtyQuarantine)}</td>
                   <td className={`px-4 py-2 ${ledgerMono}`}>{fmt(i.qtyAvailable)}</td>
                   <td className={`px-4 py-2 ${ledgerMono}`}>{fmt(i.qtyReserved)}</td>
-                  <td className={`px-4 py-2 ${ledgerMono}`}>{fmt(i.qtyFg)}</td>
                   <td className={`px-4 py-2 ${ledgerMono}`}>{fmt(i.reorderPoint)}</td>
                   <td className={`px-4 py-2 ${ledgerMono}`}>{fmtVal(totalVal)}</td>
                   <td className="px-4 py-2">
