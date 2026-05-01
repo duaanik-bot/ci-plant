@@ -43,7 +43,6 @@ import {
   PUSHED_CHIP_CLASS,
   STATUS_CHIP_BASE,
 } from '@/components/design-system/tokens'
-import { BulkActionBar } from '@/components/design-system'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 import { AwGroupEditDrawer } from '@/components/designing/AwGroupEditDrawer'
 
@@ -730,6 +729,7 @@ export default function DesigningQueuePage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [priorityBusyPoId, setPriorityBusyPoId] = useState<string | null>(null)
   const [myJobsOnly, setMyJobsOnly] = useState(false)
+  const [awTab, setAwTab] = useState<'all' | 'my' | 'ready' | 'pending'>('all')
   const [designerFilter, setDesignerFilter] = useState<DesignerFilterValue>('all')
   const [expandedAwGroups, setExpandedAwGroups] = useState<Set<string>>(new Set())
   const [activeGroupEdit, setActiveGroupEdit] = useState<{ groupId: string; rows: Row[] } | null>(null)
@@ -737,6 +737,7 @@ export default function DesigningQueuePage() {
   const [bulkPushing, setBulkPushing] = useState(false)
   const [bulkToolingPushing, setBulkToolingPushing] = useState<null | 'DIE' | 'BLOCK'>(null)
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [hubsMenuOpen, setHubsMenuOpen] = useState(false)
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -783,6 +784,10 @@ export default function DesigningQueuePage() {
     return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
   }, [load])
 
+  useEffect(() => {
+    setMyJobsOnly(awTab === 'my')
+  }, [awTab])
+
   const userById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
 
   const planningDesignerOptions = useMemo(() => {
@@ -819,8 +824,13 @@ export default function DesigningQueuePage() {
         return resolvePlanningDesignerName(spec, userById).trim().toLowerCase() === wanted
       })
     }
+    if (awTab === 'ready') {
+      list = list.filter((r) => awJobCardState(r) === 'ready')
+    } else if (awTab === 'pending') {
+      list = list.filter((r) => awJobCardState(r) === 'pending')
+    }
     return list
-  }, [rows, awSearchQuery, designerFilter, userById])
+  }, [rows, awSearchQuery, designerFilter, userById, awTab])
 
   const awFilterChips = useMemo(() => {
     const chips: Array<{ key: string; label: string; onClear?: () => void }> = []
@@ -1391,6 +1401,25 @@ export default function DesigningQueuePage() {
     await load()
   }
 
+  const bulkPushSelectedToJobCards = async () => {
+    const picked = Array.from(selectedRowIds)
+    if (picked.length === 0) return
+    let ok = 0
+    let fail = 0
+    for (const id of picked) {
+      const row = rows.find((r) => r.id === id)
+      if (!row) continue
+      try {
+        await pushJobCardFromList(row)
+        ok += 1
+      } catch {
+        fail += 1
+      }
+    }
+    if (ok) toast.success(`Pushed ${ok} row(s) to Job Card`)
+    if (fail) toast.error(`Failed for ${fail} row(s)`)
+  }
+
   const finalizeGroupFromList = async (groupId: string, groupRows: Row[]) => {
     const eligible = groupRows.filter((row) => canFinalizePlateHubRow(row))
     if (eligible.length === 0) {
@@ -1434,187 +1463,124 @@ export default function DesigningQueuePage() {
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 text-card-foreground md:hidden">
-        <span className="truncate text-sm font-semibold text-neutral-900 dark:text-ds-ink">Artwork queue</span>
-      </div>
+      <div className="w-full space-y-4 p-4 pb-10">
+        <section className="rounded-lg border border-ds-line/40 bg-card p-4">
+          <h1 className="text-[18px] font-semibold text-ds-ink">AW Queue</h1>
+          <p className="mt-1 text-[13px] text-ds-ink-faint">
+            {rows.length} Jobs • {readyCount} Ready • {Math.max(0, rows.length - readyCount)} Pending
+          </p>
+        </section>
 
-      <div className="w-full space-y-3 px-3 py-3 pb-10 md:px-4">
-        <div className="rounded-lg border border-ds-line/70 bg-ds-elevated/70 p-2 shadow-md ring-1 ring-ds-line/30">
-        <div className="flex flex-col gap-1.5 md:flex-row md:flex-wrap md:items-center md:gap-2">
-          <div className="min-w-0 flex-1 md:min-w-[14rem] md:max-w-xl">
-            <NeonCommandFilterTrigger
-              searchQuery={awSearchQuery}
-              onQueryChange={setAwSearchQuery}
-              onClearQuery={() => setAwSearchQuery('')}
-            />
-          </div>
-          <div className="relative flex min-h-[36px] shrink-0 items-center md:min-w-[11rem]">
-            <User
-              className="pointer-events-none absolute left-2.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2 text-ds-ink-faint"
-              aria-hidden
-            />
-            <ChevronDown
-              className="pointer-events-none absolute right-2.5 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-ds-ink-faint"
-              aria-hidden
-            />
-            <select
-              value={designerFilter}
-              onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
-              aria-label="Filter by designer"
-              title="Filter by planning designer — All, Unassigned, or planning names"
-              className={`h-9 w-full min-w-[12rem] appearance-none rounded border border-ds-brand/35 bg-ds-main/95 py-1.5 pl-8 pr-9 text-sm font-medium text-ds-ink shadow-sm outline-none transition focus:border-ds-brand focus:ring-2 focus:ring-ds-brand/30 md:min-w-[11rem] ${mono} ${
-                designerFilter !== 'all' ? 'bg-ds-brand/8' : ''
-              }`}
-            >
-              <option value="all">Filter by Designer…</option>
-              <option value="unassigned">Unassigned</option>
-              {planningDesignerOptions.map((name) => (
-                <option key={name} value={`planning:${name}`}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <select
-            value={customerId}
-            onChange={(e) => setCustomerId(e.target.value)}
-            className={`h-9 min-w-[9rem] max-w-[14rem] rounded-lg border border-border bg-card px-2 py-1 text-xs text-card-foreground ${mono}`}
-          >
-            <option value="">All customers</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        </div>
+        <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3">
+          <div className="flex min-h-[56px] flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="relative w-full max-w-[420px]">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ds-ink-faint" />
+                <input
+                  type="search"
+                  value={awSearchQuery}
+                  onChange={(e) => setAwSearchQuery(e.target.value)}
+                  placeholder="Search carton or PO #"
+                  className={`h-9 w-full rounded border border-ds-line/60 bg-ds-main pl-9 pr-3 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                />
+              </div>
+              <select
+                value={designerFilter}
+                onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
+                className={`h-9 w-[180px] rounded border border-ds-line/60 bg-ds-main px-2 text-sm text-ds-ink ${mono}`}
+              >
+                <option value="all">All designers</option>
+                <option value="unassigned">Unassigned</option>
+                {planningDesignerOptions.map((name) => (
+                  <option key={name} value={`planning:${name}`}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={customerId}
+                onChange={(e) => setCustomerId(e.target.value)}
+                className={`h-9 w-[180px] rounded border border-ds-line/60 bg-ds-main px-2 text-sm text-ds-ink ${mono}`}
+              >
+                <option value="">All customers</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        <div className="rounded-lg border border-ds-line/40 bg-ds-elevated/20 px-2.5 py-1.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Applied filters</span>
-              {awFilterChips.length === 0 ? (
-                <span className="text-xs text-ds-ink-faint">None</span>
-              ) : (
-                awFilterChips.map((chip) => (
-                  <span
-                    key={chip.key}
-                    className="inline-flex items-center gap-1 rounded border border-ds-line/60 bg-ds-main/50 px-2 py-0.5 text-xs text-ds-ink"
-                  >
-                    {chip.label}
-                    {chip.onClear ? (
-                      <button
-                        type="button"
-                        onClick={chip.onClear}
-                        className="text-ds-ink-faint hover:text-ds-ink"
-                        title={`Clear ${chip.key} filter`}
-                      >
-                        ×
-                      </button>
-                    ) : null}
-                  </span>
-                ))
-              )}
-              {awFilterChips.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-ds-ink-faint">{selectedRowIds.size} Selected</span>
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => {
-                    setAwSearchQuery('')
-                    setDesignerFilter('all')
-                    setCustomerId('')
-                    setMyJobsOnly(false)
-                  }}
-                  className="rounded border border-ds-line/60 px-2 py-0.5 text-xs text-ds-ink-faint hover:text-ds-ink"
+                  onClick={() => setHubsMenuOpen((v) => !v)}
+                  disabled={selectedRowIds.size === 0 || bulkPushing || bulkToolingPushing != null}
+                  className="h-9 rounded border border-ds-line/60 bg-ds-main px-3 text-xs font-medium text-ds-ink disabled:opacity-40"
                 >
-                  Clear all
+                  Push to Hubs
                 </button>
-              ) : null}
+                {hubsMenuOpen ? (
+                  <div className="absolute right-0 top-10 z-20 min-w-[10rem] rounded-lg border border-ds-line/60 bg-card p-1 shadow-lg">
+                    <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToPlateHub() }}>Plate</button>
+                    <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToToolingHub('DIE') }}>Die</button>
+                    <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToToolingHub('BLOCK') }}>Emboss</button>
+                    <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer') }}>Shade Card</button>
+                  </div>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => void bulkPushSelectedToJobCards()}
+                disabled={selectedRowIds.size === 0 || bulkPushing || bulkToolingPushing != null}
+                className="h-9 rounded bg-ds-brand px-3 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                Push to Job Card
+              </button>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-ds-line/40 bg-ds-elevated/10 px-2 py-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-ds-ink-muted">
-            <span className="font-semibold text-ds-ink">AW queue</span>
-            <span className="text-ds-ink-faint">·</span>
-            <span>
-              Ready <span className="font-semibold text-ds-warning">{readyCount}</span>/{rows.length}
-            </span>
-            <span className="hidden sm:inline text-ds-ink-faint">· {PREPRESS_AUDIT_LEAD}</span>
+        <section className="rounded-lg border border-ds-line/40 bg-card p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { key: 'all' as const, label: 'All' },
+              { key: 'my' as const, label: 'My Jobs' },
+              { key: 'ready' as const, label: 'Ready' },
+              { key: 'pending' as const, label: 'Pending' },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setAwTab(tab.key)}
+                className={`rounded-full border px-3 py-1 text-xs ${awTab === tab.key ? 'border-ds-brand/45 bg-ds-brand/12 text-ds-brand' : 'border-ds-line/60 text-ds-ink-faint hover:text-ds-ink'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <button
-            type="button"
-            onClick={() => setMyJobsOnly((o) => !o)}
-            className={`h-9 rounded-lg border px-2.5 text-xs font-medium transition-colors ${mono} ${
-              myJobsOnly
-                ? 'border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200'
-                : 'border-border bg-card text-ds-ink-faint hover:border-neutral-300 dark:text-ds-ink-muted dark:hover:border-ds-line/60'
-            }`}
-            title="Show only lines allocated to you in Planning"
-          >
-            My jobs
-          </button>
-        </div>
-
-        <BulkActionBar
-          selectedCount={selectedRowIds.size}
-          left={
-            <>
+        </section>
+        {sortedRows.length === 0 ? (
+          <section className="flex min-h-[420px] items-center justify-center rounded-lg border border-ds-line/40 bg-card p-4">
+            <div className="text-center">
+              <ImageOff className="mx-auto h-10 w-10 text-ds-ink-faint" />
+              <h3 className="mt-3 text-base font-semibold text-ds-ink">No artwork jobs yet</h3>
+              <p className="mt-1 text-sm text-ds-ink-faint">
+                Jobs from Planning will appear here once artwork is created.
+              </p>
               <button
                 type="button"
-                onClick={() => setSelectedRowIds(new Set())}
-                disabled={bulkPushing || bulkToolingPushing != null || selectedRowIds.size === 0}
-                className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink transition-colors hover:bg-ds-elevated/40 disabled:opacity-40"
+                onClick={() => router.push('/orders/planning')}
+                className="mt-4 h-9 rounded bg-ds-brand px-3 text-sm font-semibold text-white"
               >
-                Clear selection
+                Go to Planning
               </button>
-            </>
-          }
-          right={
-            <>
-              <button
-                type="button"
-                onClick={() => void bulkPushSelectedToPlateHub()}
-                disabled={bulkPushing || bulkToolingPushing != null || selectedRowIds.size === 0}
-                className="h-8 rounded-md border border-emerald-500/40 px-2.5 text-xs font-semibold text-emerald-800 transition-colors hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-200"
-              >
-                {bulkPushing ? 'Pushing…' : `Bulk Plate Hub${selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ''}`}
-              </button>
-              <button
-                type="button"
-                onClick={() => void bulkPushSelectedToToolingHub('DIE')}
-                disabled={bulkPushing || bulkToolingPushing != null || selectedRowIds.size === 0}
-                className="h-8 rounded-md border border-violet-500/40 px-2.5 text-xs font-semibold text-violet-700 transition-colors hover:bg-violet-500/10 disabled:opacity-40 dark:text-violet-300"
-              >
-                {bulkToolingPushing === 'DIE'
-                  ? 'Pushing…'
-                  : `Bulk Die Hub${selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ''}`}
-              </button>
-              <button
-                type="button"
-                onClick={() => void bulkPushSelectedToToolingHub('BLOCK')}
-                disabled={bulkPushing || bulkToolingPushing != null || bulkDeleting || selectedRowIds.size === 0}
-                className="h-8 rounded-md border border-orange-500/40 px-2.5 text-xs font-semibold text-orange-700 transition-colors hover:bg-orange-500/10 disabled:opacity-40 dark:text-orange-300"
-              >
-                {bulkToolingPushing === 'BLOCK'
-                  ? 'Pushing…'
-                  : `Bulk Emboss Hub${selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ''}`}
-              </button>
-              <button
-                type="button"
-                onClick={() => void bulkDeleteSelectedRows()}
-                disabled={bulkPushing || bulkToolingPushing != null || bulkDeleting || selectedRowIds.size === 0}
-                className="h-8 rounded-md border border-rose-500/40 px-2.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-500/10 disabled:opacity-40 dark:text-rose-300"
-              >
-                {bulkDeleting ? 'Deleting…' : `Bulk delete${selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ''}`}
-              </button>
-            </>
-          }
-        />
+            </div>
+          </section>
+        ) : (
+        <section className="rounded-lg border border-ds-line/40 bg-card p-4">
         <EnterpriseTableShell>
           <table className="w-full min-w-[1020px] table-fixed border-collapse text-left text-xs">
             <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
@@ -1638,8 +1604,8 @@ export default function DesigningQueuePage() {
                     className="h-3.5 w-3.5 accent-ds-brand"
                   />
                 </th>
-                <th className="w-[48px] px-2 py-2">Prv</th>
-                <th className="min-w-[10rem] px-2 py-2">Carton / PO / Customer</th>
+                <th className="w-[48px] px-2 py-2">•</th>
+                <th className="min-w-[10rem] px-2 py-2">Product</th>
                 <SortHeader
                   label="Qty"
                   column="qty"
@@ -1653,7 +1619,7 @@ export default function DesigningQueuePage() {
                 <th className="w-[5.5rem] px-2 py-2">Batch</th>
                 <th className="w-[7rem] px-2 py-2">Status</th>
                 <th className="w-[7.5rem] px-2 py-2">Job card</th>
-                <th className="min-w-[10rem] px-2 py-2">Actions</th>
+                <th className="min-w-[10rem] px-2 py-2">→</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200 bg-card dark:divide-ds-line/30">
@@ -2180,13 +2146,7 @@ export default function DesigningQueuePage() {
             </tbody>
           </table>
         </EnterpriseTableShell>
-
-        {sortedRows.length === 0 && (
-          <p className="py-8 text-center text-sm text-ds-ink-faint">
-            {awSearchQuery.trim().length >= 2
-              ? 'No rows match current view or filters. Clear filters to see all rows.'
-              : 'No rows in this queue yet.'}
-          </p>
+        </section>
         )}
       </div>
 
