@@ -1,6 +1,6 @@
 'use client'
 
-import type { Dispatch, FormEvent, SetStateAction } from 'react'
+import { useEffect, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import {
   BOARD_GRADES,
   COATING_TYPES,
@@ -8,6 +8,7 @@ import {
   FOIL_TYPES,
   PAPER_TYPES,
 } from '@/lib/constants'
+import { fetchMiniMasterOptions } from '@/lib/minimasters-options'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { Button } from '@/components/design-system/Button'
 import { cn } from '@/lib/cn'
@@ -42,6 +43,34 @@ type Props = {
 }
 
 export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onSubmit }: Props) {
+  const [paperOptions, setPaperOptions] = useState<string[]>(PAPER_TYPES as unknown as string[])
+  const [coatingOptions, setCoatingOptions] = useState<string[]>(COATING_TYPES as unknown as string[])
+  const [embossOptions, setEmbossOptions] = useState<string[]>(EMBOSSING_TYPES as unknown as string[])
+  const [foilOptions, setFoilOptions] = useState<string[]>(FOIL_TYPES as unknown as string[])
+  const [boardGradeOptions, setBoardGradeOptions] = useState<string[]>(BOARD_GRADES as unknown as string[])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const [boardType, boardClass, coating, emboss, foil] = await Promise.all([
+        fetchMiniMasterOptions('Board Type'),
+        fetchMiniMasterOptions('Board Classification'),
+        fetchMiniMasterOptions('Coating'),
+        fetchMiniMasterOptions('Embossing'),
+        fetchMiniMasterOptions('Foil'),
+      ])
+      if (cancelled) return
+      if (boardType.length > 0) setPaperOptions(boardType)
+      if (boardClass.length > 0) setBoardGradeOptions(boardClass)
+      if (coating.length > 0) setCoatingOptions(coating)
+      if (emboss.length > 0) setEmbossOptions(emboss)
+      if (foil.length > 0) setFoilOptions(foil)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const set = (patch: Partial<PoQuickCreateCartonValues>) =>
     setValues((prev) => ({ ...prev, ...patch }))
 
@@ -137,7 +166,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
         <label className="mb-1 block text-xs font-medium text-ds-ink-muted">Board grade</label>
         <PackagingEnumCombobox
           aria-label="Board grade"
-          options={BOARD_GRADES}
+          options={boardGradeOptions}
           value={values.boardGrade || null}
           onChange={(v) => set({ boardGrade: v ?? '' })}
           controlClassName={comboboxControl}
@@ -159,7 +188,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
           <label className="mb-1 block text-xs font-medium text-ds-ink-muted">Paper</label>
           <PackagingEnumCombobox
             aria-label="Paper / board"
-            options={PAPER_TYPES}
+            options={paperOptions}
             value={values.paperType || null}
             onChange={(v) => set({ paperType: v ?? '' })}
             controlClassName={comboboxControl}
@@ -173,7 +202,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
         <div className="mb-2">
           <PackagingEnumCombobox
             aria-label="Coating"
-            options={COATING_TYPES}
+            options={coatingOptions}
             value={values.coatingType || null}
             onChange={(v) => set({ coatingType: v ?? '' })}
             controlClassName={comboboxControl}
@@ -184,7 +213,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
         <div className="mb-2">
           <PackagingEnumCombobox
             aria-label="Embossing"
-            options={EMBOSSING_TYPES}
+            options={embossOptions}
             value={values.embossingLeafing || null}
             onChange={(v) => set({ embossingLeafing: v ?? '' })}
             controlClassName={comboboxControl}
@@ -194,7 +223,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
         </div>
         <PackagingEnumCombobox
           aria-label="Foil"
-          options={FOIL_TYPES}
+          options={foilOptions}
           value={values.foilType || null}
           onChange={(v) => set({ foilType: v ?? '' })}
           controlClassName={comboboxControl}

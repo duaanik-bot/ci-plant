@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { PastingStyle } from '@prisma/client'
 import { COATING_TYPES, EMBOSSING_TYPES, FOIL_TYPES, PAPER_TYPES, BOARD_GRADES } from '@/lib/constants'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
@@ -9,6 +9,7 @@ import { CardSection } from '@/components/design-system/CardSection'
 import { SummaryBlock } from '@/components/design-system/SummaryBlock'
 import { Drawer } from '@/components/design-system/Drawer'
 import { Button } from '@/components/design-system/Button'
+import { fetchMiniMasterOptions } from '@/lib/minimasters-options'
 
 type Line = {
   cartonId: string
@@ -126,6 +127,34 @@ export function PoNewLineItemDrawer({
   onReserveFg,
   onUnreserveFg,
 }: PoNewLineItemDrawerProps) {
+  const [boardGradeOptions, setBoardGradeOptions] = useState<string[]>(BOARD_GRADES as unknown as string[])
+  const [paperOptions, setPaperOptions] = useState<string[]>(PAPER_TYPES as unknown as string[])
+  const [coatingOptions, setCoatingOptions] = useState<string[]>(COATING_TYPES as unknown as string[])
+  const [embossOptions, setEmbossOptions] = useState<string[]>(EMBOSSING_TYPES as unknown as string[])
+  const [foilOptions, setFoilOptions] = useState<string[]>(FOIL_TYPES as unknown as string[])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const [boardType, boardClass, coating, emboss, foil] = await Promise.all([
+        fetchMiniMasterOptions('Board Type'),
+        fetchMiniMasterOptions('Board Classification'),
+        fetchMiniMasterOptions('Coating'),
+        fetchMiniMasterOptions('Embossing'),
+        fetchMiniMasterOptions('Foil'),
+      ])
+      if (cancelled) return
+      if (boardClass.length > 0) setBoardGradeOptions(boardClass)
+      if (boardType.length > 0) setPaperOptions(boardType)
+      if (coating.length > 0) setCoatingOptions(coating)
+      if (emboss.length > 0) setEmbossOptions(emboss)
+      if (foil.length > 0) setFoilOptions(foil)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const panelRootRef = useRef<HTMLDivElement | null>(null)
   const reserveQtyRef = useRef<HTMLInputElement | null>(null)
 
@@ -320,7 +349,7 @@ export function PoNewLineItemDrawer({
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Board grade"
-                    options={BOARD_GRADES}
+                    options={boardGradeOptions}
                     value={line.boardGrade || null}
                     onChange={(v) => updateLine(lineIndex, { boardGrade: v ?? '' })}
                     controlClassName={comboboxControl}
@@ -351,7 +380,7 @@ export function PoNewLineItemDrawer({
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Paper / board type"
-                    options={PAPER_TYPES}
+                    options={paperOptions}
                     value={line.paperType || null}
                     onChange={(v) => updateLine(lineIndex, { paperType: v ?? '' })}
                     controlClassName={comboboxControl}
@@ -369,7 +398,7 @@ export function PoNewLineItemDrawer({
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Coating"
-                    options={COATING_TYPES}
+                    options={coatingOptions}
                     value={line.coatingType || null}
                     onChange={(v) => updateLine(lineIndex, { coatingType: v ?? '' })}
                     controlClassName={comboboxControl}
@@ -384,7 +413,7 @@ export function PoNewLineItemDrawer({
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Embossing and leafing"
-                    options={EMBOSSING_TYPES}
+                    options={embossOptions}
                     value={line.embossingLeafing || null}
                     onChange={(v) => updateLine(lineIndex, { embossingLeafing: v ?? '' })}
                     controlClassName={comboboxControl}
@@ -399,7 +428,7 @@ export function PoNewLineItemDrawer({
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Foil"
-                    options={FOIL_TYPES}
+                    options={foilOptions}
                     value={line.foilType || null}
                     onChange={(v) => updateLine(lineIndex, { foilType: v ?? '' })}
                     controlClassName={comboboxControl}

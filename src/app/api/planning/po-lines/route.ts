@@ -230,6 +230,7 @@ export async function GET(req: NextRequest) {
         .reduce((sum, pw) => sum + Math.max(0, Number(pw.qtySheets) || 0), 0)
       const requiredSheets = li.materialQueue?.totalSheets ?? null
       const availableTotalSheets = mainAvailableSheets + leftoverSheets
+      const shortageSheets = Math.max(0, Number(requiredSheets ?? 0) - availableTotalSheets)
       let stockSignal: 'green' | 'yellow' | 'red' = 'red'
       if (requiredSheets != null && availableTotalSheets >= requiredSheets) stockSignal = 'green'
       else if (availableTotalSheets > 0) stockSignal = 'yellow'
@@ -280,7 +281,8 @@ export async function GET(req: NextRequest) {
             availableMainSheets: mainAvailableSheets,
             availableLeftoverSheets: leftoverSheets,
             availableTotalSheets,
-            reservedSheets: Math.max(0, Number(requiredSheets ?? 0) - availableTotalSheets),
+            reservedSheets: shortageSheets,
+            shortageSheets,
             requiredSheets,
             stockSignal,
           },

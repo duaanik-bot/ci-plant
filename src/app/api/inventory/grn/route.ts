@@ -58,8 +58,13 @@ export async function POST(req: NextRequest) {
   const inv = await db.inventory.findUnique({ where: { id: data.materialId } })
   if (!inv) return NextResponse.json({ error: 'Material not found' }, { status: 404 })
 
-  const isBoardType = false
-  const sheetWeightG = 0
+  const isBoardType =
+    inv.unit === 'sheets' &&
+    !!(inv.boardType && inv.gsm && inv.sheetLength && inv.sheetWidth)
+  const sheetWeightG =
+    isBoardType && inv.gsm && inv.sheetLength && inv.sheetWidth
+      ? Number(inv.sheetLength) * Number(inv.sheetWidth) * Number(inv.gsm) / 1_000_000
+      : 0
 
   let totalSheets: number
   let totalWeightKg: number
@@ -124,13 +129,24 @@ export async function POST(req: NextRequest) {
       : 0
 
   await db.$transaction(async (tx) => {
-    await tx.inventory.update({
+    const updated = await tx.inventory.update({
       where: { id: data.materialId },
       data: {
         qtyQuarantine: { increment: quarantineQty },
         weightedAvgCost: newWac,
       },
     })
+    const nextAvailable = Number(updated.qtyAvailable)
+    const nextWeightKg =
+      isBoardType && sheetWeightG > 0
+        ? Number(((nextAvailable * sheetWeightG) / 1000).toFixed(6))
+        : Number(updated.totalWeightKg)
+    if (nextWeightKg !== Number(updated.totalWeightKg)) {
+      await tx.inventory.update({
+        where: { id: data.materialId },
+        data: { totalWeightKg: nextWeightKg },
+      })
+    }
 
     await tx.stockMovement.create({
       data: {

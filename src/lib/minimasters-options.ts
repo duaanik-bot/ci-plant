@@ -1,0 +1,23 @@
+export type MiniMasterOption = {
+  id: string
+  value: string
+}
+
+export async function fetchMiniMasterOptions(category: string): Promise<string[]> {
+  const c = category.trim()
+  if (!c) return []
+  try {
+    const res = await fetch(`/api/minimasters/values?category=${encodeURIComponent(c)}`, {
+      cache: 'no-store',
+    })
+    if (!res.ok) return []
+    const data = (await res.json().catch(() => [])) as MiniMasterOption[]
+    if (!Array.isArray(data)) return []
+    return data
+      .map((d) => (typeof d.value === 'string' ? d.value.trim() : ''))
+      .filter((v) => v.length > 0)
+  } catch {
+    return []
+  }
+}
+
