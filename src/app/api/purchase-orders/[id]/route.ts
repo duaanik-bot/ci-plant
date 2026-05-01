@@ -11,6 +11,26 @@ import { isPlanningFactsLocked, mergeSpecRespectingPlanningLock } from '@/lib/pl
 
 export const dynamic = 'force-dynamic'
 
+async function sanitizeCartonIds<T extends { cartonId?: string | null }>(
+  lineItems: T[],
+): Promise<Array<T & { cartonId: string | null }>> {
+  const requested = Array.from(
+    new Set(
+      lineItems
+        .map((li) => (typeof li.cartonId === 'string' ? li.cartonId.trim() : ''))
+        .filter((id) => id.length > 0),
+    ),
+  )
+  if (!requested.length) return lineItems.map((li) => ({ ...li, cartonId: li.cartonId?.trim() || null }))
+
+  const rows = await db.carton.findMany({ where: { id: { in: requested } }, select: { id: true } })
+  const valid = new Set(rows.map((r) => r.id))
+  return lineItems.map((li) => {
+    const id = typeof li.cartonId === 'string' ? li.cartonId.trim() : ''
+    return { ...li, cartonId: id && valid.has(id) ? id : null }
+  })
+}
+
 const lineItemUpdateSchema = purchaseOrderSchema.shape.lineItems.element
   .omit({ rate: true })
   .extend({
@@ -130,6 +150,7 @@ export async function PUT(
   }
 
   const data = parsed.data
+  const safeLineItems = data.lineItems ? await sanitizeCartonIds(data.lineItems) : undefined
 
   if (data.status === 'draft' && existing.status === 'confirmed') {
     const inProd = existing.lineItems.some((li) => li.planningStatus === 'in_production')
@@ -215,11 +236,11 @@ export async function PUT(
 
     // Planning-first: keep line planningStatus as `pending` until Planning Decision Layer saves (no auto-jump to AW).
 
-    if (data.lineItems) {
+    if (safeLineItems) {
       const existingLines = existing.lineItems
       const existingById = new Map(existingLines.map((x) => [x.id, x]))
       const incomingIdSet = new Set(
-        data.lineItems
+        safeLineItems
           .map((li) => li.id)
           .filter((x): x is string => typeof x === 'string' && x.length > 0),
       )
@@ -230,7 +251,7 @@ export async function PUT(
         })
       }
 
-      for (const li of data.lineItems) {
+      for (const li of safeLineItems) {
         const prev = li.id ? existingById.get(li.id) : undefined
         const rawSpec =
           li.specOverrides && Object.keys(li.specOverrides).length > 0
@@ -253,7 +274,7 @@ export async function PUT(
 
         const row = {
           poId: id,
-          cartonId: li.cartonId || null,
+          cartonId: li.cartonId,
           cartonName: li.cartonName,
           cartonSize: li.cartonSize || null,
           quantity: li.quantity,

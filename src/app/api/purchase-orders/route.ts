@@ -11,6 +11,26 @@ import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
 
 export const dynamic = 'force-dynamic'
 
+async function sanitizeCartonIds<T extends { cartonId?: string | null }>(
+  lineItems: T[],
+): Promise<Array<T & { cartonId: string | null }>> {
+  const requested = Array.from(
+    new Set(
+      lineItems
+        .map((li) => (typeof li.cartonId === 'string' ? li.cartonId.trim() : ''))
+        .filter((id) => id.length > 0),
+    ),
+  )
+  if (!requested.length) return lineItems.map((li) => ({ ...li, cartonId: li.cartonId?.trim() || null }))
+
+  const rows = await db.carton.findMany({ where: { id: { in: requested } }, select: { id: true } })
+  const valid = new Set(rows.map((r) => r.id))
+  return lineItems.map((li) => {
+    const id = typeof li.cartonId === 'string' ? li.cartonId.trim() : ''
+    return { ...li, cartonId: id && valid.has(id) ? id : null }
+  })
+}
+
 function toOptionalNumber(value: unknown): number | undefined {
   if (value === null || value === undefined || value === '') return undefined
   const parsed = Number(value)
@@ -211,6 +231,7 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data
+  const safeLineItems = await sanitizeCartonIds(data.lineItems)
 
   const rawPoNumber = data.poNumber?.trim()
   let poNumber: string
@@ -253,11 +274,11 @@ export async function POST(req: NextRequest) {
       })
 
       await Promise.all(
-        data.lineItems.map((li) =>
+        safeLineItems.map((li) =>
           tx.poLineItem.create({
             data: {
               poId: po.id,
-              cartonId: li.cartonId || null,
+              cartonId: li.cartonId,
               cartonName: li.cartonName,
               cartonSize: li.cartonSize || null,
               quantity: li.quantity,
