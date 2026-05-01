@@ -40,6 +40,7 @@ export default function EffectsMasterPage() {
   const [valueForm, setValueForm] = useState({ value: '', description: '', sortOrder: '100', active: true })
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [editingValueId, setEditingValueId] = useState<string | null>(null)
+  const [categoryErrors, setCategoryErrors] = useState<{ name?: string; submit?: string }>({})
 
   const selectedCategory = useMemo(
     () => categories.find((c) => c.id === selectedCategoryId) ?? null,
@@ -107,12 +108,14 @@ export default function EffectsMasterPage() {
     setDrawerMode('create-category')
     setEditingCategoryId(null)
     setCategoryForm({ name: '', sortOrder: '100', active: true })
+    setCategoryErrors({})
   }
 
   function openEditCategory(c: EffectCategory) {
     setDrawerMode('edit-category')
     setEditingCategoryId(c.id)
     setCategoryForm({ name: c.name, sortOrder: String(c.sortOrder), active: c.active })
+    setCategoryErrors({})
   }
 
   function openCreateValue() {
@@ -133,31 +136,101 @@ export default function EffectsMasterPage() {
     })
   }
 
-  async function saveCategory() {
+  async function createCategory() {
+    const name = categoryForm.name.trim()
+    if (!name) {
+      setCategoryErrors({ name: 'Category name is required' })
+      toast.error('Category name is required')
+      return
+    }
+
     setSaving(true)
+    setCategoryErrors({})
     try {
       const payload = {
-        name: categoryForm.name,
+        name,
         sortOrder: Number(categoryForm.sortOrder || 100),
+        status: categoryForm.active,
         active: categoryForm.active,
       }
+      console.log('[EffectsMaster] createCategory payload', payload)
+
       const res = await fetch(
-        drawerMode === 'edit-category' && editingCategoryId
-          ? `/api/masters/effects/categories/${editingCategoryId}`
-          : '/api/masters/effects/categories',
+        '/api/masters/effects/categories',
         {
-          method: drawerMode === 'edit-category' ? 'PUT' : 'POST',
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         },
       )
       const json = await res.json().catch(() => ({}))
+      console.log('[EffectsMaster] createCategory response', { ok: res.ok, status: res.status, data: json })
       if (!res.ok) throw new Error((json as { error?: string }).error || 'Save failed')
-      toast.success(drawerMode === 'edit-category' ? 'Category updated' : 'Category created')
+
+      const created = json as Partial<EffectCategory> & { id: string; name: string; sortOrder: number; active: boolean }
+      const nextCategory: EffectCategory = {
+        id: created.id,
+        name: created.name,
+        sortOrder: created.sortOrder ?? Number(categoryForm.sortOrder || 100),
+        active: created.active ?? categoryForm.active,
+        createdAt: created.createdAt ?? new Date().toISOString(),
+        updatedAt: created.updatedAt ?? new Date().toISOString(),
+        valueCount: 0,
+      }
+      setCategories((prev) =>
+        [...prev, nextCategory].sort((a, b) => (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name)),
+      )
+      setSelectedCategoryId(nextCategory.id)
+
+      setCategoryForm({ name: '', sortOrder: '100', active: true })
       setDrawerMode(null)
-      await refreshAll(selectedCategoryId)
+      toast.success('Category created')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed')
+      const msg = e instanceof Error ? e.message : 'Save failed'
+      setCategoryErrors({ submit: msg })
+      toast.error(msg)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function updateCategory() {
+    const name = categoryForm.name.trim()
+    if (!name) {
+      setCategoryErrors({ name: 'Category name is required' })
+      toast.error('Category name is required')
+      return
+    }
+    if (!editingCategoryId) return
+
+    setSaving(true)
+    setCategoryErrors({})
+    try {
+      const payload = {
+        name,
+        sortOrder: Number(categoryForm.sortOrder || 100),
+        status: categoryForm.active,
+        active: categoryForm.active,
+      }
+      console.log('[EffectsMaster] updateCategory payload', payload)
+
+      const res = await fetch(`/api/masters/effects/categories/${editingCategoryId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json().catch(() => ({}))
+      console.log('[EffectsMaster] updateCategory response', { ok: res.ok, status: res.status, data: json })
+      if (!res.ok) throw new Error((json as { error?: string }).error || 'Save failed')
+
+      await refreshAll(selectedCategoryId)
+      setCategoryForm({ name: '', sortOrder: '100', active: true })
+      setDrawerMode(null)
+      toast.success('Category updated')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Save failed'
+      setCategoryErrors({ submit: msg })
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
@@ -342,12 +415,24 @@ export default function EffectsMasterPage() {
             className="space-y-3 text-sm"
             onSubmit={(e) => {
               e.preventDefault()
-              void saveCategory()
+              if (drawerMode === 'create-category') {
+                void createCategory()
+                return
+              }
+              void updateCategory()
             }}
           >
             <div>
               <label className="mb-1 block text-xs text-ds-ink-muted">Category</label>
-              <input className="ds-input w-full" value={categoryForm.name} onChange={(e) => setCategoryForm((p) => ({ ...p, name: e.target.value }))} />
+              <input
+                className={`ds-input w-full ${categoryErrors.name ? 'border-ds-error/60 ring-1 ring-ds-error/40' : ''}`}
+                value={categoryForm.name}
+                onChange={(e) => {
+                  setCategoryForm((p) => ({ ...p, name: e.target.value }))
+                  setCategoryErrors((prev) => ({ ...prev, name: undefined, submit: undefined }))
+                }}
+              />
+              {categoryErrors.name ? <p className="mt-1 text-xs text-ds-error">{categoryErrors.name}</p> : null}
             </div>
             <div>
               <label className="mb-1 block text-xs text-ds-ink-muted">Sort Order</label>
@@ -371,6 +456,7 @@ export default function EffectsMasterPage() {
                 {saving ? 'Saving…' : 'Save'}
               </button>
             </div>
+            {categoryErrors.submit ? <p className="text-xs text-ds-error">{categoryErrors.submit}</p> : null}
           </form>
         ) : null}
 
