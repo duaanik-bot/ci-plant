@@ -25,7 +25,6 @@ import { Copy, Star, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/design-system/PageHeader'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
-import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 
 type Customer = {
   id: string
@@ -408,7 +407,7 @@ function CartonLookupField({
           const suggestedName = trimmedQuery
           if (suggestedName) onCreate(suggestedName)
         }}
-        inputClassName="min-w-0 w-full max-w-full rounded-lg border border-ds-line/50 bg-ds-card/40 px-2.5 py-2 text-sm font-medium text-ds-ink shadow-sm transition placeholder:text-ds-ink-faint focus:border-ds-warning/40 focus:outline-none focus:ring-2 focus:ring-ds-warning/35 whitespace-normal"
+        inputClassName="h-9 min-w-0 w-full max-w-full border-ds-line/50 bg-ds-card/40 px-2.5 text-sm font-medium text-ds-ink shadow-sm placeholder:text-ds-ink-faint focus:border-ds-warning/40 focus:outline-none focus:ring-2 focus:ring-ds-warning/35 whitespace-normal"
         dropdownClassName="min-w-[320px]"
       />
       {!line.cartonId && line.cartonName.trim() ? (
@@ -1285,12 +1284,9 @@ export default function NewPurchaseOrderPage() {
   const inputClsGhost =
     'ds-input w-full min-w-0 [color-scheme:dark] !border-ds-line/50 !bg-ds-elevated/50 !text-ds-ink-muted placeholder:text-ds-ink-faint'
   const inputErr = 'ring-1 ring-ds-error/40 !border-ds-error/60'
-  const lineCellPad = `${dataTable.td.base} align-middle min-h-[52px]`
   const poMono = 'po-mono-metric'
-  const tableInputPrimary = 'text-sm font-semibold text-ds-ink tabular-nums'
-  const tableInputSecondary = 'text-sm font-medium text-ds-ink-muted'
-  const thPrimary = 'text-left text-sm font-semibold tracking-tight text-ds-ink'
-  const thSecondary = 'text-left text-sm font-medium uppercase tracking-wider text-ds-ink-muted'
+  const tableInputPrimary = 'h-9 text-sm font-semibold leading-9 text-ds-ink tabular-nums'
+  const tableInputSecondary = 'h-9 text-sm font-medium leading-9 text-ds-ink-muted'
 
   return (
     <form
@@ -1483,24 +1479,16 @@ export default function NewPurchaseOrderPage() {
         </div>
         {fieldErrors.lines && <p className="text-xs text-ds-error">{fieldErrors.lines}</p>}
 
-        <DataTableFrame className="max-h-[min(calc(100vh-18rem),640px)] min-h-[240px] border-ds-line/60 bg-ds-elevated/20">
-          <div className={dataTable.wrap}>
-            <table className={dataTable.table}>
-            <thead className={dataTable.thead}>
-              <tr>
-                <th
-                  className={`${dataTable.th} w-[40%] sticky left-0 z-40 min-h-[48px] border-r border-ds-line/50 bg-ds-elevated/95 shadow-[2px_0_8px_rgba(0,0,0,0.2)] pr-2 text-left text-xs font-semibold text-ds-ink`}
-                >
-                  Carton
-                </th>
-                <th className={`${lineCellPad} ${thSecondary} w-[11%] ${poMono}`}>Size</th>
-                <th className={`${lineCellPad} ${thPrimary} w-[9%] text-center ${poMono}`}>Qty *</th>
-                <th className={`${lineCellPad} ${thPrimary} w-[18%] text-right ${poMono}`}>Rate</th>
-                <th className={`${lineCellPad} ${thPrimary} w-[16%] text-right ${poMono}`}>Amount</th>
-                <th className={`${lineCellPad} w-[6%] text-right text-xs font-normal text-ds-ink-faint`} aria-label="Row actions" />
-              </tr>
-            </thead>
-            <tbody>
+        <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/20 p-4">
+          <div className="grid items-center gap-x-3 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted" style={{ gridTemplateColumns: 'minmax(320px,1.6fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}>
+            <div>Carton</div>
+            <div>Size</div>
+            <div className="text-center">Qty *</div>
+            <div className="text-right">Rate</div>
+            <div className="text-right">Amount</div>
+            <div className="text-right">Actions</div>
+          </div>
+          <div className="space-y-2">
               {lines.map((ln, idx) => {
                 const qty = Number(ln.quantity) || 0
                 const rate = Number(ln.rate) || 0
@@ -1510,11 +1498,10 @@ export default function NewPurchaseOrderPage() {
                 const tMeta = lineToolingByIdx[idx]
                 const tSig = tMeta?.signal ?? 'red'
                 const rowStripe = idx % 2 === 0 ? 'bg-ds-main/40' : 'bg-ds-elevated/25'
-                const stickBg = rowStripe
                 const rowRing =
                   tSig === 'red' ? 'ring-1 ring-ds-error/30 ring-inset' : ''
                 return (
-                  <tr
+                  <div
                     key={idx}
                     onMouseEnter={() => setKbRowIndex(idx)}
                     onClick={(e) => {
@@ -1523,7 +1510,7 @@ export default function NewPurchaseOrderPage() {
                       setDetailLineIdx(idx)
                     }}
                     title="Click or Enter — line details & costing (Tab in drawer for fields)"
-                    className={`group min-h-[52px] cursor-pointer border-b border-ds-line/30 ${dataTable.tr.body} ${dataTable.tr.hover} ${rowStripe} ${
+                    className={`group grid cursor-pointer items-start gap-x-3 rounded-lg border border-ds-line/40 px-3 py-2 ${rowStripe} ${
                       toolingRowPulse === idx ? 'po-tooling-row-sync-pulse' : ''
                     } ${rowRing} ${
                       detailLineIdx === null && kbRowIndex === idx
@@ -1534,10 +1521,9 @@ export default function NewPurchaseOrderPage() {
                         ? 'bg-ds-brand/8 ring-1 ring-inset ring-ds-brand/30'
                         : ''
                     }`}
+                    style={{ gridTemplateColumns: 'minmax(320px,1.6fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}
                   >
-                    <td
-                      className={`${lineCellPad} align-top ${stickBg} sticky left-0 z-20 max-w-0 border-r border-ds-line/50 shadow-[2px_0_8px_rgba(0,0,0,0.12)] transition-colors group-hover:bg-ds-elevated/20`}
-                    >
+                    <div className="min-w-0">
                       <div data-line-stop className="min-w-0" onClick={(e) => e.stopPropagation()}>
                         <CartonLookupField
                           line={ln}
@@ -1576,10 +1562,8 @@ export default function NewPurchaseOrderPage() {
                           </button>
                         ) : null}
                       </div>
-                    </td>
-                    <td
-                      className={`${lineCellPad} ${masterPulseLine === idx ? 'po-master-field-pulse' : ''} align-top`}
-                    >
+                    </div>
+                    <div className={`${masterPulseLine === idx ? 'po-master-field-pulse' : ''} min-w-0`}>
                       <div data-line-stop onClick={(e) => e.stopPropagation()}>
                         <input
                           type="text"
@@ -1597,18 +1581,18 @@ export default function NewPurchaseOrderPage() {
                           placeholder="L×W×H"
                         />
                       </div>
-                    </td>
-                    <td className={`${lineCellPad} text-center align-top`} data-line-stop onClick={(e) => e.stopPropagation()}>
+                    </div>
+                    <div className="text-center" data-line-stop onClick={(e) => e.stopPropagation()}>
                       <input
                         type="number"
                         min={1}
                         value={ln.quantity}
                         onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                        className={`inline-block w-16 min-w-0 text-center ${inputCls} ${tableInputPrimary} ${poMono}`}
+                        className={`inline-block h-9 w-24 min-w-0 text-center ${inputCls} ${tableInputPrimary} ${poMono}`}
                       />
-                    </td>
-                    <td
-                      className={`${lineCellPad} text-right align-top`}
+                    </div>
+                    <div
+                      className="text-right"
                       data-line-stop
                       onClick={(e) => e.stopPropagation()}
                       title={
@@ -1628,48 +1612,44 @@ export default function NewPurchaseOrderPage() {
                             ghostFromMaster: { ...ln.ghostFromMaster, rate: false },
                           })
                         }
-                        className={`inline-block w-full min-w-0 max-w-[6.5rem] text-right ${
+                        className={`inline-block h-9 w-full min-w-0 max-w-[7.5rem] text-right ${
                           ln.ghostFromMaster.rate ? inputClsGhost : inputCls
                         } ${tableInputPrimary} ${poMono}`}
                       />
-                    </td>
-                    <td
-                      className={`${lineCellPad} text-right align-top text-base font-bold tabular-nums text-ds-success ${poMono}`}
-                    >
+                    </div>
+                    <div className={`pt-2 text-right text-base font-bold tabular-nums text-ds-success ${poMono}`}>
                       {amount.toFixed(2)}
-                    </td>
-                    <td
-                      className={`${lineCellPad} text-right align-middle`}
+                    </div>
+                    <div
+                      className="pt-1 text-right"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="inline-flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                      <div className="inline-flex items-center justify-end gap-1.5 opacity-100">
                         <button
                           type="button"
                           title="Duplicate"
                           onClick={() => duplicateLine(idx)}
-                          className="rounded-ds-sm p-1.5 text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-brand"
+                          className="flex h-7 w-7 items-center justify-center rounded text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-brand"
                         >
-                          <Copy className="h-3.5 w-3.5" strokeWidth={2} />
+                          <Copy className="h-4 w-4" strokeWidth={2} />
                         </button>
                         {lines.length > 1 ? (
                           <button
                             type="button"
                             title="Remove"
                             onClick={() => removeLine(idx)}
-                            className="rounded-ds-sm p-1.5 text-ds-error/80 transition hover:bg-ds-error/10"
+                            className="flex h-7 w-7 items-center justify-center rounded text-ds-error/80 transition hover:bg-ds-error/10"
                           >
-                            <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                            <Trash2 className="h-4 w-4" strokeWidth={2} />
                           </button>
                         ) : null}
                       </div>
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 )
               })}
-            </tbody>
-          </table>
           </div>
-        </DataTableFrame>
+        </div>
       </div>
 
       <div

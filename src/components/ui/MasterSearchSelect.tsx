@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 type SearchSelectItem = {
   id: string
@@ -73,15 +74,54 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
+  const [mounted, setMounted] = useState(false)
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number; maxHeight: number; placeAbove: boolean } | null>(null)
+
+  useEffect(() => setMounted(true), [])
+
+  const menuIdRef = useRef(`mss-${Math.random().toString(36).slice(2)}`)
+
+  const closeDropdown = () => setOpen(false)
+
+  const recalcPosition = () => {
+    const el = containerRef.current?.querySelector('input')
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const viewportH = window.innerHeight
+    const spaceBelow = viewportH - rect.bottom
+    const spaceAbove = rect.top
+    const desired = 320
+    const placeAbove = spaceBelow < 220 && spaceAbove > spaceBelow
+    const maxHeight = Math.max(160, Math.min(desired, placeAbove ? spaceAbove - 12 : spaceBelow - 12))
+    const top = placeAbove ? Math.max(8, rect.top - maxHeight - 6) : rect.bottom + 6
+
+    setDropdownPos({
+      top,
+      left: rect.left,
+      width: rect.width,
+      maxHeight,
+      placeAbove,
+    })
+  }
 
   useEffect(() => {
     function handleOutside(event: MouseEvent) {
       if (!containerRef.current?.contains(event.target as Node)) {
-        setOpen(false)
+        closeDropdown()
       }
     }
     document.addEventListener('mousedown', handleOutside)
     return () => document.removeEventListener('mousedown', handleOutside)
+  }, [])
+
+  useEffect(() => {
+    const key = `master-search-open:${menuIdRef.current}`
+    const onOtherOpen = (event: Event) => {
+      const custom = event as CustomEvent<{ key?: string }>
+      if (custom.detail?.key !== key) closeDropdown()
+    }
+    window.addEventListener('master-search-open', onOtherOpen as EventListener)
+    return () => window.removeEventListener('master-search-open', onOtherOpen as EventListener)
   }, [])
 
   const trimmedQuery = query.trim()
@@ -112,12 +152,24 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
   const showDropdown = showIdlePanel || showSearchPanel || (open && !disabled && loading && trimmedQuery.length > 0)
 
   useEffect(() => {
+    if (!showDropdown) return
+    recalcPosition()
+    const onWin = () => recalcPosition()
+    window.addEventListener('resize', onWin)
+    window.addEventListener('scroll', onWin, true)
+    return () => {
+      window.removeEventListener('resize', onWin)
+      window.removeEventListener('scroll', onWin, true)
+    }
+  }, [showDropdown, query, options.length, lastUsed.length, browseDeduped.length])
+
+  useEffect(() => {
     setActiveIndex(visibleItems.length > 0 ? 0 : -1)
   }, [visibleItems.length, showDropdown, trimmedQuery])
 
   const commitSelection = (item: T) => {
     onSelect(item)
-    setOpen(false)
+    closeDropdown()
   }
 
   const setActiveById = (id: string) => {
@@ -136,14 +188,18 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
       <input
         type="text"
         value={query}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          const key = `master-search-open:${menuIdRef.current}`
+          window.dispatchEvent(new CustomEvent('master-search-open', { detail: { key } }))
+          setOpen(true)
+        }}
         onKeyDown={(e) => {
           if (!showDropdown && (e.key === 'ArrowDown' || e.key === 'Enter')) {
             setOpen(true)
             return
           }
           if (e.key === 'Escape') {
-            setOpen(false)
+            closeDropdown()
             return
           }
           if (!visibleItems.length) return
@@ -162,6 +218,8 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
         }}
         onChange={(e) => {
           onQueryChange(e.target.value)
+          const key = `master-search-open:${menuIdRef.current}`
+          window.dispatchEvent(new CustomEvent('master-search-open', { detail: { key } }))
           setOpen(true)
         }}
         placeholder={placeholder}
@@ -173,10 +231,20 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
       />
       {error ? <p className="text-xs text-red-400 mt-1">{error}</p> : null}
 
-      {showDropdown ? (
-        <div className={`absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-ds-line/50 bg-ds-card shadow-2xl ${dropdownClassName ?? ''}`}>
+      {showDropdown && mounted && dropdownPos
+        ? createPortal(
+        <div
+          className={`overflow-hidden rounded-lg border border-ds-line/50 bg-ds-card shadow-2xl ${dropdownClassName ?? ''}`}
+          style={{
+            position: 'fixed',
+            top: dropdownPos.top,
+            left: dropdownPos.left,
+            width: dropdownPos.width,
+            zIndex: 9999,
+          }}
+        >
           {showIdlePanel ? (
-            <div className="max-h-64 overflow-y-auto py-1">
+            <div className="overflow-y-auto py-1" style={{ maxHeight: dropdownPos.maxHeight }}>
               {browseLoading ? (
                 <div className="px-3 py-2 text-xs text-ds-ink-muted">{browseLoadingMessage}</div>
               ) : null}
@@ -199,11 +267,11 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                       onMouseDown={(e) => e.preventDefault()}
                       onMouseEnter={() => setActiveById(item.id)}
                       onClick={() => commitSelection(item)}
-                      className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm text-ds-ink hover:bg-ds-elevated ${
-                        visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
-                      }`}
-                    >
-                      <span>{getOptionLabel(item)}</span>
+                    className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left hover:bg-ds-elevated ${
+                      visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
+                    }`}
+                  >
+                      <span className="text-sm font-semibold text-ds-ink">{getOptionLabel(item)}</span>
                       <span className="text-xs text-ds-ink-faint">Recent</span>
                     </button>
                   ))}
@@ -232,7 +300,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                           visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
                         }`}
                       >
-                        <div className="text-sm text-ds-ink">{getOptionLabel(item)}</div>
+                        <div className="text-sm font-semibold text-ds-ink">{getOptionLabel(item)}</div>
                         {meta ? <div className="text-xs text-ds-ink-faint">{meta}</div> : null}
                       </button>
                     )
@@ -243,7 +311,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
           ) : null}
 
           {showSearchPanel ? (
-            <div className="max-h-64 overflow-y-auto py-1">
+            <div className="overflow-y-auto py-1" style={{ maxHeight: dropdownPos.maxHeight }}>
               {loading ? (
                 <div className="px-3 py-2 text-xs text-ds-ink-muted">{loadingMessage}</div>
               ) : null}
@@ -261,7 +329,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                         visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
                       }`}
                     >
-                      <div className="text-sm text-ds-ink">{getOptionLabel(item)}</div>
+                      <div className="text-sm font-semibold text-ds-ink">{getOptionLabel(item)}</div>
                       {meta ? <div className="text-xs text-ds-ink-faint">{meta}</div> : null}
                     </button>
                   )
@@ -277,7 +345,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                         onEmptyAction()
                         setOpen(false)
                       }}
-                      className="mt-2 text-xs font-medium text-ds-warning hover:text-ds-warning"
+                      className="mt-2 w-full rounded border border-ds-warning/30 bg-ds-warning/10 px-2 py-1 text-left text-xs font-semibold text-ds-warning hover:bg-ds-warning/20"
                     >
                       {emptyActionLabel}
                     </button>
@@ -294,7 +362,8 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
               {dropdownFooter}
             </div>
           ) : null}
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   )
