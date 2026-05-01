@@ -590,23 +590,35 @@ function canPushToolingHubRow(r: Row): boolean {
   if (!setN || !aw) return false
   const spec = (r.specOverrides || {}) as Record<string, unknown>
   if (readAwPoStatus(spec) === AW_PO_STATUS.CLOSED) return false
+  return !!resolveAwSheetSize(spec)
+}
+
+function resolveAwSheetSize(spec: Record<string, unknown>): string {
+  const pick = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : '')
   const planningCore = readPlanningCore(spec)
+  const aliases: unknown[] = [
+    spec.actualSheetSize,
+    spec.sheetSize,
+    spec.sheet_size,
+    (spec.spec as Record<string, unknown> | undefined)?.actualSheetSize,
+    (spec.spec as Record<string, unknown> | undefined)?.sheetSize,
+    (spec.dimensions as Record<string, unknown> | undefined)?.sheetSize,
+    planningCore.actualSheetSizeLabel,
+  ]
+  for (const item of aliases) {
+    const txt = pick(item)
+    if (txt) return txt
+  }
   const len = Number(spec.sheetLengthMm)
   const wid = Number(spec.sheetWidthMm)
-  const hasSheet =
-    (Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0) ||
-    (typeof planningCore.actualSheetSizeLabel === 'string' && planningCore.actualSheetSizeLabel.trim().length > 0)
-  return hasSheet
+  if (Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0) {
+    return `${Math.floor(len)}×${Math.floor(wid)} mm`
+  }
+  return ''
 }
 
 function hasToolingSheetSize(spec: Record<string, unknown>): boolean {
-  const planningCore = readPlanningCore(spec)
-  const len = Number(spec.sheetLengthMm)
-  const wid = Number(spec.sheetWidthMm)
-  return (
-    (Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0) ||
-    (typeof planningCore.actualSheetSizeLabel === 'string' && planningCore.actualSheetSizeLabel.trim().length > 0)
-  )
+  return !!resolveAwSheetSize(spec)
 }
 
 function resolvePlanningDesignerName(
@@ -1180,14 +1192,7 @@ export default function DesigningQueuePage() {
     const spec = (r.specOverrides || {}) as Record<string, unknown>
     const planningCore = readPlanningCore(spec)
     const planningMeta = readPlanningMeta(spec)
-    const len = Number(spec.sheetLengthMm)
-    const wid = Number(spec.sheetWidthMm)
-    const actualSheetSize =
-      Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0
-        ? `${Math.floor(len)}×${Math.floor(wid)} mm`
-        : typeof planningCore.actualSheetSizeLabel === 'string' && planningCore.actualSheetSizeLabel.trim()
-          ? planningCore.actualSheetSizeLabel.trim()
-          : ''
+    const actualSheetSize = resolveAwSheetSize(spec)
     const upsRaw = spec.ups ?? spec.numberOfUps ?? planningCore.ups ?? planningMeta.ups
     const ups = typeof upsRaw === 'number' && Number.isFinite(upsRaw) && upsRaw >= 1 ? Math.floor(upsRaw) : 1
     if (!actualSheetSize) {
@@ -1303,14 +1308,7 @@ export default function DesigningQueuePage() {
           const spec = (row.specOverrides || {}) as Record<string, unknown>
           const planningCore = readPlanningCore(spec)
           const planningMeta = readPlanningMeta(spec)
-          const len = Number(spec.sheetLengthMm)
-          const wid = Number(spec.sheetWidthMm)
-          const actualSheetSize =
-            Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0
-              ? `${Math.floor(len)}×${Math.floor(wid)} mm`
-              : typeof planningCore.actualSheetSizeLabel === 'string' && planningCore.actualSheetSizeLabel.trim()
-                ? planningCore.actualSheetSizeLabel.trim()
-                : ''
+          const actualSheetSize = resolveAwSheetSize(spec)
           if (!actualSheetSize) throw new Error('Sheet size is required')
           const upsRaw = spec.ups ?? spec.numberOfUps ?? planningCore.ups ?? planningMeta.ups
           const ups = typeof upsRaw === 'number' && Number.isFinite(upsRaw) && upsRaw >= 1 ? Math.floor(upsRaw) : 1
