@@ -756,7 +756,7 @@ export default function JobCardDetailPage() {
           </div>
         </div>
 
-        <div ref={(el) => (sectionRefs.current.summary = el)} className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        <div ref={(el) => { sectionRefs.current.summary = el }} className="grid grid-cols-2 md:grid-cols-6 gap-3">
           {[
             ['Quantity', `${jc.totalSheets} sheets`],
             ['Sheet Size', effectiveSheetSize || '—'],
@@ -786,7 +786,7 @@ export default function JobCardDetailPage() {
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
           <div className="xl:col-span-2 space-y-6">
-            <div ref={(el) => (sectionRefs.current.spec = el)} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
+            <div ref={(el) => { sectionRefs.current.spec = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
               <h2 className="text-sm font-semibold text-ds-ink">Section 1 — Identification & Spec</h2>
               <div className="grid md:grid-cols-5 gap-3 text-xs">
                 <div><p className="text-ds-ink-faint mb-1">Pre-batch printed</p><p>No</p></div>
@@ -822,7 +822,7 @@ export default function JobCardDetailPage() {
               </div>
             </div>
 
-            <div ref={(el) => (sectionRefs.current.execution = el)} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
+            <div ref={(el) => { sectionRefs.current.execution = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
               <h2 className="text-sm font-semibold text-ds-ink">Section 4 — Execution Setup</h2>
               <div className="grid md:grid-cols-4 gap-3 text-xs">
                 <div>
@@ -852,7 +852,7 @@ export default function JobCardDetailPage() {
           </div>
 
           <div className="space-y-6">
-            <div ref={(el) => (sectionRefs.current.board = el)} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
+            <div ref={(el) => { sectionRefs.current.board = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
               <h2 className="text-sm font-semibold text-ds-ink">Section 2 — Board & Material</h2>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div><p className="text-ds-ink-faint mb-1">Board Type</p><p>{jc.poLine?.materialQueue?.boardType ?? 'SBS'}</p></div>
@@ -881,7 +881,7 @@ export default function JobCardDetailPage() {
               {boardStatus !== 'ready' ? <div className="rounded border border-ds-warning/40 bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning">Expected board delivery: {jc.boardMaterial?.warehouseHandshake?.issuedAt ? new Date(jc.boardMaterial.warehouseHandshake.issuedAt).toLocaleDateString() : 'TBD'}</div> : null}
             </div>
 
-            <div ref={(el) => (sectionRefs.current.tooling = el)} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
+            <div ref={(el) => { sectionRefs.current.tooling = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
               <h2 className="text-sm font-semibold text-ds-ink">Section 3 — Tooling Requirement</h2>
               <div className="space-y-2 text-xs">
                 {toolRows.map((row) => (
@@ -893,14 +893,14 @@ export default function JobCardDetailPage() {
               </div>
             </div>
 
-            <div ref={(el) => (sectionRefs.current.validation = el)} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
+            <div ref={(el) => { sectionRefs.current.validation = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
               <h2 className="text-sm font-semibold text-ds-ink">Section 5 — Validation Checklist</h2>
-              {[
+              {([
                 ['Sheet size defined', sheetDefined],
                 ['Board readiness', boardStatus === 'ready'],
                 ['Tooling linked', toolingReady],
                 ['AW & PO match', awPoMatch],
-              ].map(([label, ok]) => (
+              ] as Array<[string, boolean]>).map(([label, ok]) => (
                 <div key={label} className={`rounded border px-2 py-1 text-xs ${ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-ds-warning/50 bg-ds-warning/10 text-ds-warning'}`}>{ok ? 'OK' : 'Warning'} · {label}</div>
               ))}
             </div>

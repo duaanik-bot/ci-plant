@@ -117,8 +117,8 @@ export function JobCardDrawer({
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
         <CardSection
           title="Job Summary"
-          subtitle="Read-only job details with editable sheet size if missing."
         >
+          <p className="mb-2 text-xs text-ds-ink-faint">Read-only job details with editable sheet size if missing.</p>
           <div className="grid grid-cols-2 gap-3 text-xs text-ds-ink">
             <div><span className="text-ds-ink-faint">Qty</span><div className="mt-0.5">{data.qty}</div></div>
             <div><span className="text-ds-ink-faint">Size</span><div className="mt-0.5">{data.size}</div></div>
@@ -223,18 +223,16 @@ export function JobCardHubAuditDrawer({
       .then(async ([detailRes, machinesRes]) => {
         const rawDetail = (await detailRes.json().catch(() => ({}))) as
           | (DrawerPayload & { error?: string })
+          | { error?: string }
           | null
-        const detail =
-          rawDetail && typeof rawDetail === 'object'
-            ? rawDetail
-            : ({ error: 'Failed to load job card' } as { error: string })
         const m = (await machinesRes.json().catch(() => [])) as MachineOpt[]
         if (cancelled) return
-        if (!detailRes.ok || detail.error) {
+        if (!detailRes.ok || !rawDetail || typeof rawDetail !== 'object' || 'error' in rawDetail) {
           setData(null)
-          toast.error(detail.error || 'Failed to load job card')
+          toast.error((rawDetail && typeof rawDetail === 'object' && 'error' in rawDetail && rawDetail.error) || 'Failed to load job card')
           return
         }
+        const detail = rawDetail as DrawerPayload
         setData(detail)
         setMachines(Array.isArray(m) ? m : [])
         setMachineId(detail.machineId ?? '')

@@ -1396,7 +1396,7 @@ export default function DesigningQueuePage() {
     if (fail) toast.error(`Failed to delete ${fail} item(s)`)
     setSelectedRowIds(new Set())
     setBulkDeleting(false)
-    await fetchRows()
+    await load()
   }
 
   const finalizeGroupFromList = async (groupId: string, groupRows: Row[]) => {

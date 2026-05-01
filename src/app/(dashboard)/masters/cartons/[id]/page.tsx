@@ -8,6 +8,8 @@ import CartonForm, { type CartonFormData } from '@/components/masters/CartonForm
 type ApiCarton = CartonFormData & {
   id: string
   customer?: { id: string; name: string }
+  blankLength?: number | string | null
+  blankWidth?: number | string | null
 }
 
 export default function CartonEditPage() {
@@ -43,10 +45,10 @@ export default function CartonEditPage() {
         remarks: data.remarks ?? '',
         printingType: data.printingType ?? '',
         coatingType: data.coatingType ?? '',
-        numberOfColours: (data as { numberOfColours?: number | null }).numberOfColours != null ? String((data as { numberOfColours?: number | null }).numberOfColours) : '',
-        sheetLengthMm: (data as { blankLength?: number | null }).blankLength != null ? String((data as { blankLength?: number | null }).blankLength) : '',
-        sheetWidthMm: (data as { blankWidth?: number | null }).blankWidth != null ? String((data as { blankWidth?: number | null }).blankWidth) : '',
-        ups: (data as { ups?: number | null }).ups != null ? String((data as { ups?: number | null }).ups) : '',
+        numberOfColours: data.numberOfColours != null ? String(data.numberOfColours) : '',
+        sheetLengthMm: data.blankLength != null ? String(data.blankLength) : '',
+        sheetWidthMm: data.blankWidth != null ? String(data.blankWidth) : '',
+        ups: data.ups != null ? String(data.ups) : '',
         pastingStyle: data.pastingStyle ?? '',
         finishedLength: data.finishedLength != null ? String(data.finishedLength) : '',
         finishedWidth: data.finishedWidth != null ? String(data.finishedWidth) : '',

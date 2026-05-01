@@ -46,6 +46,8 @@ type MegaNavItem = {
   Icon: LucideIcon
   iconWrap: string
 }
+type SimpleNavItem = { label: string; href: string }
+type MenuItem = SimpleNavItem | MegaNavItem
 
 function BrandLogoMark({ className }: { className?: string }) {
   return (
@@ -104,6 +106,10 @@ function MegaNavLink({ item }: { item: MegaNavItem }) {
       </span>
     </Link>
   )
+}
+
+function isMegaNavItem(item: MenuItem): item is MegaNavItem {
+  return 'description' in item && 'Icon' in item && 'iconWrap' in item
 }
 
 export function DashboardShell({
@@ -347,10 +353,6 @@ export function DashboardShell({
     }
     if ('href' in menu)
       return pathname === menu.href || pathname.startsWith(menu.href + '/')
-    if ('mega' in menu && menu.mega) {
-      const rows = [...menu.planningItems, ...menu.executionItems]
-      return rows.some((it) => pathname === it.href || pathname.startsWith(it.href.split('?')[0] + '/'))
-    }
     return menu.items.some((it) => pathname === it.href || pathname.startsWith(it.href.split('?')[0] + '/'))
   }
 
@@ -527,7 +529,7 @@ export function DashboardShell({
                             ) : null}
                             <div className="grid grid-cols-1 gap-0.5">
                               {menu.items.map((item) =>
-                                'Icon' in item && item.Icon ? (
+                                isMegaNavItem(item) ? (
                                   <Link
                                     key={item.href}
                                     href={item.href}
@@ -561,34 +563,6 @@ export function DashboardShell({
                           </div>
                         </div>
                       ) : null}
-                      {'mega' in menu && menu.mega && openMenu === menu.key ? (
-                        <div className="absolute left-1/2 top-full z-[70] w-[980px] max-w-[calc(100vw-3rem)] -translate-x-1/2 pt-1 transition-all duration-150 ease-out">
-                          <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-[0_12px_40px_rgba(0,0,0,0.1),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
-                            <div className="grid grid-cols-2 gap-10">
-                              <div>
-                                <p className="mb-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[var(--brand-primary)]">
-                                  Production Planning
-                                </p>
-                                <div className="space-y-0.5">
-                                  {menu.planningItems.map((item) => (
-                                    <MegaNavLink key={item.href} item={item} />
-                                  ))}
-                                </div>
-                              </div>
-                              <div>
-                                <p className="mb-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[var(--brand-primary)]">
-                                  Production Execution
-                                </p>
-                                <div className="space-y-0.5">
-                                  {menu.executionItems.map((item) => (
-                                    <MegaNavLink key={item.href} item={item} />
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
                     </li>
                   )
                 })}
@@ -612,27 +586,6 @@ export function DashboardShell({
                   >
                     {menu.label}
                   </Link>
-                ) : 'mega' in menu && menu.mega ? (
-                  <div
-                    key={menu.key}
-                    className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-3"
-                  >
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                      {menu.label}
-                    </p>
-                    <p className="mb-1 mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                      Production Planning
-                    </p>
-                    {menu.planningItems.map((item) => (
-                      <MegaNavLink key={item.href} item={item} />
-                    ))}
-                    <p className="mb-1 mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                      Production Execution
-                    </p>
-                    {menu.executionItems.map((item) => (
-                      <MegaNavLink key={item.href} item={item} />
-                    ))}
-                  </div>
                 ) : (
                   <div
                     key={menu.key}
@@ -642,7 +595,7 @@ export function DashboardShell({
                       {menu.label}
                     </p>
                     {menu.items.map((item) =>
-                      'Icon' in item && item.Icon ? (
+                      isMegaNavItem(item) ? (
                         <MegaNavLink
                           key={item.href}
                           item={{
