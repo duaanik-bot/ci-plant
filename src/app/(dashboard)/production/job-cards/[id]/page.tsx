@@ -66,6 +66,22 @@ type BoardMaterial = {
   ledgerLink: { gsm: number; board: string } | null
 }
 
+type MaterialReadiness = {
+  requiredSheets: number
+  reservedSheets: number
+  shortageSheets: number
+  availableStock: number
+  prStatus: string
+  grnEta: string | null
+  status: string
+}
+
+type MaterialTimelineEvent = {
+  at: string
+  event: string
+  detail: string
+}
+
 export type PostPressRouting = {
   chemicalCoating?: boolean
   lamination?: boolean
@@ -275,6 +291,8 @@ export default function JobCardDetailPage() {
   const [plannedCompletion, setPlannedCompletion] = useState('')
   const [activeSection, setActiveSection] = useState<'summary' | 'spec' | 'board' | 'tooling' | 'execution' | 'validation'>('summary')
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
+  const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness | null>(null)
+  const [materialTimeline, setMaterialTimeline] = useState<MaterialTimelineEvent[]>([])
   const [initialForm, setInitialForm] = useState<{
     designerUserId: string
     prePressRemarks: string
@@ -306,6 +324,23 @@ export default function JobCardDetailPage() {
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to load'))
   }, [id])
+
+  useEffect(() => {
+    fetch(`/api/job-cards/${id}/material-readiness`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data || data.error) return
+        setMaterialReadiness(data as MaterialReadiness)
+      })
+      .catch(() => {})
+  }, [id, lastSavedAt])
+
+  useEffect(() => {
+    fetch(`/api/job-cards/${id}/material-timeline`)
+      .then((r) => r.json())
+      .then((data) => setMaterialTimeline(Array.isArray(data?.events) ? (data.events as MaterialTimelineEvent[]) : []))
+      .catch(() => setMaterialTimeline([]))
+  }, [id, lastSavedAt])
 
   useEffect(() => {
     fetch('/api/users')
@@ -877,6 +912,33 @@ export default function JobCardDetailPage() {
                     {label}
                   </button>
                 ))}
+              </div>
+              <div className="rounded-lg border border-ds-line/40 bg-ds-main/30 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">Material Readiness</p>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>Required Sheets: <span className="text-ds-ink">{materialReadiness?.requiredSheets ?? '-'}</span></div>
+                  <div>Reserved Sheets: <span className="text-ds-ink">{materialReadiness?.reservedSheets ?? '-'}</span></div>
+                  <div>Available Stock: <span className="text-ds-ink">{materialReadiness?.availableStock ?? '-'}</span></div>
+                  <div>Shortage: <span className="text-ds-ink">{materialReadiness?.shortageSheets ?? '-'}</span></div>
+                  <div>Incoming (PR): <span className="text-ds-ink">{materialReadiness?.prStatus ?? '-'}</span></div>
+                  <div>GRN ETA: <span className="text-ds-ink">{materialReadiness?.grnEta ? new Date(materialReadiness.grnEta).toLocaleDateString() : '-'}</span></div>
+                </div>
+                <div className="mt-3">
+                  <p className="mb-1 text-[11px] uppercase tracking-wide text-ds-ink-faint">Material Movement Timeline</p>
+                  <div className="max-h-44 space-y-1 overflow-auto rounded border border-ds-line/30 bg-background/40 p-2">
+                    {materialTimeline.length === 0 ? (
+                      <p className="text-xs text-ds-ink-faint">No material timeline events yet.</p>
+                    ) : (
+                      materialTimeline.map((ev, idx) => (
+                        <div key={`${ev.at}-${idx}`} className="text-xs">
+                          <span className="text-ds-ink-faint">{new Date(ev.at).toLocaleString()}</span>{' '}
+                          <span className="font-medium text-ds-ink">{ev.event}</span>{' '}
+                          <span className="text-ds-ink-muted">{ev.detail}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
               {boardStatus !== 'ready' ? <div className="rounded border border-ds-warning/40 bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning">Expected board delivery: {jc.boardMaterial?.warehouseHandshake?.issuedAt ? new Date(jc.boardMaterial.warehouseHandshake.issuedAt).toLocaleDateString() : 'TBD'}</div> : null}
             </div>

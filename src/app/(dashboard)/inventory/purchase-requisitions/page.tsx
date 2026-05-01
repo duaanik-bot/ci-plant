@@ -1,199 +1,181 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
+import { useMemo, useState, useEffect } from 'react'
+import { PR_STAGE_LABEL, dbStatusToUiStage, type PrUiStage } from '@/lib/purchase-requisition-status'
 
 type PR = {
   id: string
   materialId: string
   qtyRequired: number
-  estimatedValue: number
   triggerReason: string
   status: string
-  raisedBy: string
-  raisedAt: string
-  approvedBy: string | null
-  approvedAt: string | null
   poReference: string | null
   expectedDelivery: string | null
+  sourceJobCardId?: string | null
+  sourcePlanningId?: string | null
   material: { materialCode: string; description: string; unit: string }
 }
+
+type Stage = PrUiStage
+
+const STAGES: Array<{ key: Stage; label: string; accent: string }> = [
+  { key: 'draft', label: PR_STAGE_LABEL.draft, accent: 'border-orange-400/50' },
+  { key: 'approved', label: PR_STAGE_LABEL.approved, accent: 'border-sky-400/50' },
+  { key: 'ordered', label: PR_STAGE_LABEL.ordered, accent: 'border-indigo-400/50' },
+  { key: 'received', label: PR_STAGE_LABEL.received, accent: 'border-emerald-400/50' },
+]
 
 export default function PurchaseRequisitionsPage() {
   const [list, setList] = useState<PR[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('')
-  const [approving, setApproving] = useState<string | null>(null)
-  const [convertId, setConvertId] = useState<string | null>(null)
-  const [poRef, setPoRef] = useState('')
+  const [movingId, setMovingId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   const fetchList = () => {
-    const url = filter ? `/api/purchase-requisitions?status=${encodeURIComponent(filter)}` : '/api/purchase-requisitions'
-    fetch(url)
+    fetch('/api/purchase-requisitions')
       .then((r) => r.json())
       .then((data) => setList(Array.isArray(data) ? data : []))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
-    setLoading(true)
     fetchList()
-  }, [filter])
+  }, [])
 
-  const handleApprove = async (id: string) => {
-    setApproving(id)
-    try {
-      const res = await fetch(`/api/purchase-requisitions/${id}/approve`, { method: 'PUT' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed')
-      fetchList()
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed')
-    } finally {
-      setApproving(null)
+  const grouped = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const filtered = list.filter((r) => {
+      if (!q) return true
+      return [
+        r.material.materialCode,
+        r.material.description,
+        r.triggerReason,
+        r.sourceJobCardId || '',
+        r.sourcePlanningId || '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    })
+
+    const byStage: Record<Stage, PR[]> = {
+      draft: [],
+      approved: [],
+      ordered: [],
+      received: [],
     }
-  }
 
-  const handleConvert = async (id: string) => {
-    if (!poRef.trim()) return
-    setApproving(id)
+    for (const row of filtered) {
+      byStage[dbStatusToUiStage(row.status)].push(row)
+    }
+
+    return byStage
+  }, [list, search])
+
+  async function moveStage(pr: PR, stage: Stage) {
+    setMovingId(pr.id)
     try {
-      const res = await fetch(`/api/purchase-requisitions/${id}/convert-to-po`, {
+      const body: Record<string, unknown> = { stage }
+      if (stage === 'ordered' && !pr.poReference) {
+        body.poReference = `AUTO-${new Date().toISOString().slice(0, 10)}-${pr.material.materialCode}`
+      }
+      const res = await fetch(`/api/purchase-requisitions/${pr.id}/stage`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ poReference: poRef.trim() }),
+        body: JSON.stringify(body),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed')
-      setConvertId(null)
-      setPoRef('')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to move stage')
       fetchList()
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed')
+      alert(e instanceof Error ? e.message : 'Failed to move stage')
     } finally {
-      setApproving(null)
+      setMovingId(null)
     }
-  }
-
-  const statusBadge = (status: string) => {
-    const map: Record<string, string> = {
-      pending: 'bg-ds-warning/12 text-ds-warning border-ds-warning',
-      approved: 'bg-green-900/50 text-green-300 border-green-600',
-      converted_to_po: 'bg-blue-900/50 text-blue-300 border-blue-600',
-      rejected: 'bg-red-900/50 text-red-300 border-red-600',
-    }
-    const cls = map[status] || 'bg-ds-elevated text-ds-ink-muted'
-    return <span className={`px-2 py-0.5 rounded text-xs border ${cls}`}>{status}</span>
   }
 
   if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
   return (
-    <div className="p-4 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-ds-warning">Purchase Requisitions</h1>
-        <Link href="/inventory" className="text-ds-ink-muted hover:text-foreground text-sm">
-          ← Stock States
-        </Link>
+    <div className="p-4 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-ds-warning">Purchase Request Kanban</h1>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search material / job / reason"
+          className="w-full max-w-sm rounded-lg border border-ds-line/60 bg-ds-card px-3 py-2 text-sm"
+        />
       </div>
 
-      <div className="mb-4 flex gap-2">
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground text-sm"
-        >
-          <option value="">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="approved">Approved</option>
-          <option value="converted_to_po">Converted to PO</option>
-          <option value="rejected">Rejected</option>
-        </select>
-      </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+        {STAGES.map((stage) => {
+          const rows = grouped[stage.key]
+          const groupedByMaterial = Object.values(
+            rows.reduce<Record<string, { key: string; materialCode: string; description: string; unit: string; totalQty: number; jobs: Set<string>; rows: PR[] }>>((acc, r) => {
+              const key = r.materialId
+              if (!acc[key]) {
+                acc[key] = {
+                  key,
+                  materialCode: r.material.materialCode,
+                  description: r.material.description,
+                  unit: r.material.unit,
+                  totalQty: 0,
+                  jobs: new Set<string>(),
+                  rows: [],
+                }
+              }
+              acc[key].totalQty += Number(r.qtyRequired)
+              if (r.sourceJobCardId) acc[key].jobs.add(r.sourceJobCardId)
+              acc[key].rows.push(r)
+              return acc
+            }, {}),
+          )
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-ds-elevated text-left">
-            <tr>
-              <th className="px-4 py-2">Material</th>
-              <th className="px-4 py-2">Qty</th>
-              <th className="px-4 py-2">Est. Value</th>
-              <th className="px-4 py-2">Reason</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Raised</th>
-              <th className="px-4 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ds-line/40">
-            {list.map((pr) => (
-              <tr key={pr.id} className="hover:bg-ds-elevated/50">
-                <td className="px-4 py-2">
-                  <span className="font-mono">{pr.material.materialCode}</span>
-                  <span className="text-ds-ink-muted ml-1">{pr.material.description}</span>
-                </td>
-                <td className="px-4 py-2">
-                  {Number(pr.qtyRequired).toLocaleString()} {pr.material.unit}
-                </td>
-                <td className="px-4 py-2">₹{Number(pr.estimatedValue).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
-                <td className="px-4 py-2 text-ds-ink-muted max-w-xs truncate">{pr.triggerReason}</td>
-                <td className="px-4 py-2">{statusBadge(pr.status)}</td>
-                <td className="px-4 py-2 text-ds-ink-muted">
-                  {new Date(pr.raisedAt).toLocaleDateString()}
-                </td>
-                <td className="px-4 py-2">
-                  {pr.status === 'pending' && (
-                    <button
-                      onClick={() => handleApprove(pr.id)}
-                      disabled={!!approving}
-                      className="px-2 py-1 rounded bg-green-700 hover:bg-green-600 text-primary-foreground text-xs disabled:opacity-50"
-                    >
-                      {approving === pr.id ? '…' : 'Approve'}
-                    </button>
-                  )}
-                  {pr.status === 'approved' && (
-                    <>
-                      {convertId === pr.id ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            value={poRef}
-                            onChange={(e) => setPoRef(e.target.value)}
-                            placeholder="PO ref"
-                            className="w-28 px-2 py-1 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-xs"
-                          />
-                          <button
-                            onClick={() => handleConvert(pr.id)}
-                            disabled={!!approving || !poRef.trim()}
-                            className="px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-primary-foreground text-xs disabled:opacity-50"
-                          >
-                            Convert
-                          </button>
-                          <button
-                            onClick={() => { setConvertId(null); setPoRef('') }}
-                            className="text-ds-ink-muted text-xs"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
+          return (
+            <div key={stage.key} className={`rounded-xl border ${stage.accent} bg-ds-card/30 p-3`}>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-ds-ink">{stage.label}</h2>
+                <span className="rounded border border-ds-line/40 px-2 py-0.5 text-xs text-ds-ink-muted">{rows.length}</span>
+              </div>
+
+              <div className="space-y-2">
+                {groupedByMaterial.map((g) => (
+                  <div key={`${stage.key}-${g.key}`} className="rounded-lg border border-ds-line/40 bg-background p-2">
+                    <p className="text-sm font-semibold text-ds-ink">{g.materialCode}</p>
+                    <p className="text-xs text-ds-ink-faint line-clamp-2">{g.description}</p>
+                    <p className="mt-1 text-xs text-ds-ink-muted">
+                      Total: <span className="font-semibold text-ds-ink">{g.totalQty.toLocaleString('en-IN')} {g.unit}</span>
+                    </p>
+                    <p className="text-xs text-ds-ink-faint">Linked jobs: {g.jobs.size || '-'}</p>
+
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {STAGES.filter((s) => s.key !== stage.key).map((to) => (
                         <button
-                          onClick={() => setConvertId(pr.id)}
-                          className="px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-primary-foreground text-xs"
+                          key={to.key}
+                          type="button"
+                          disabled={movingId != null}
+                          onClick={() => void moveStage(g.rows[0]!, to.key)}
+                          className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40"
                         >
-                          Convert to PO
+                          Move → {to.label}
                         </button>
-                      )}
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {groupedByMaterial.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-ds-line/40 p-3 text-center text-xs text-ds-ink-faint">
+                    No items in {stage.label.toLowerCase()}.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          )
+        })}
       </div>
-      {list.length === 0 && (
-        <p className="p-4 text-ds-ink-faint text-center">No purchase requisitions found.</p>
-      )}
     </div>
   )
 }

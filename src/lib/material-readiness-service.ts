@@ -17,9 +17,38 @@ type RequirementResult = {
   materialId: string | null
 }
 
+export class ShortagePrRecoveryError extends Error {
+  shortageId: string
+
+  constructor(shortageId: string, message = 'Reservation saved, but Purchase Request creation failed. Retry PR creation.') {
+    super(message)
+    this.name = 'ShortagePrRecoveryError'
+    this.shortageId = shortageId
+  }
+}
+
 function asNumber(v: unknown): number {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
+}
+
+function dateBucketKey(d: Date | null | undefined): string {
+  if (!d) return 'none'
+  const iso = d.toISOString()
+  return iso.slice(0, 7) // YYYY-MM
+}
+
+async function shortagePriorityKey(
+  planningId: string | null | undefined,
+  client: DbClient = db,
+): Promise<'high' | 'normal'> {
+  if (!planningId) return 'normal'
+  const line = await client.poLineItem.findUnique({
+    where: { id: planningId },
+    select: { directorPriority: true, po: { select: { isPriority: true } } },
+  })
+  if (!line) return 'normal'
+  return line.directorPriority || line.po?.isPriority ? 'high' : 'normal'
 }
 
 async function resolvePlanningLineByJobCard(client: DbClient, jobCardId: string) {
@@ -114,16 +143,28 @@ export async function createShortage(
   if (shortageQty <= 0) throw new Error('Shortage qty must be positive')
 
   return withTransaction(client, async (tx) => {
-    const shortage = await tx.materialShortage.create({
-      data: {
-        materialId,
-        jobCardId,
-        planningId: planningId ?? undefined,
-        shortageQty,
-        remainingQty: shortageQty,
-        status: 'open',
-      },
+    const existing = await tx.materialShortage.findFirst({
+      where: { materialId, jobCardId, planningId: planningId ?? null, status: 'open' },
+      orderBy: { createdAt: 'desc' },
     })
+    const shortage = existing
+      ? await tx.materialShortage.update({
+          where: { id: existing.id },
+          data: {
+            shortageQty: { increment: shortageQty },
+            remainingQty: { increment: shortageQty },
+          },
+        })
+      : await tx.materialShortage.create({
+          data: {
+            materialId,
+            jobCardId,
+            planningId: planningId ?? undefined,
+            shortageQty,
+            remainingQty: shortageQty,
+            status: 'open',
+          },
+        })
 
     await tx.inventory.update({
       where: { id: materialId },
@@ -152,6 +193,35 @@ export async function createPurchaseRequestFromShortage(shortageId: string, clie
 
     const material = await tx.inventory.findUnique({ where: { id: shortage.materialId } })
     if (!material) throw new Error('Material not found')
+
+    const shortageBucket = dateBucketKey(shortage.requiredByDate ?? null)
+    const shortagePriority = await shortagePriorityKey(shortage.planningId, tx)
+    const openForMaterial = await tx.purchaseRequisition.findFirst({
+      where: {
+        materialId: shortage.materialId,
+        status: { in: ['pending', 'approved', 'converted_to_po'] },
+        supplierId: material.supplierId ?? null,
+      },
+      orderBy: { raisedAt: 'desc' },
+    })
+    if (openForMaterial) {
+      const linkedShortage = openForMaterial.shortageId
+        ? await tx.materialShortage.findUnique({ where: { id: openForMaterial.shortageId } })
+        : null
+      const openBucket = dateBucketKey(linkedShortage?.requiredByDate ?? null)
+      const openPriority = await shortagePriorityKey(linkedShortage?.planningId ?? null, tx)
+      if (openBucket === shortageBucket && openPriority === shortagePriority) {
+        const merged = await tx.purchaseRequisition.update({
+          where: { id: openForMaterial.id },
+          data: {
+            qtyRequired: { increment: shortage.remainingQty },
+            triggerReason: `${openForMaterial.triggerReason}; merged-shortage:${shortage.id}; job:${shortage.jobCardId}`,
+          },
+        })
+        await tx.materialShortage.update({ where: { id: shortage.id }, data: { purchaseReqId: merged.id } })
+        return merged
+      }
+    }
 
     const sizeLabel = material.sheetLength && material.sheetWidth
       ? `${Math.round(Number(material.sheetLength))}x${Math.round(Number(material.sheetWidth))}`
@@ -189,7 +259,7 @@ export async function reserveMaterial(
 ) {
   if (requiredSheets <= 0) throw new Error('Required sheets must be positive')
 
-  return withTransaction(client, async (tx) => {
+  const txResult = await withTransaction(client, async (tx) => {
     const material = await tx.inventory.findUnique({ where: { id: materialId } })
     if (!material) throw new Error('Material not found')
 
@@ -198,13 +268,16 @@ export async function reserveMaterial(
     const shortageQty = Math.max(0, requiredSheets - reserveQty)
 
     if (reserveQty > 0) {
-      await tx.inventory.update({
-        where: { id: materialId },
+      const updated = await tx.inventory.updateMany({
+        where: { id: materialId, qtyAvailable: { gte: reserveQty } },
         data: {
           qtyAvailable: { decrement: reserveQty },
           qtyReserved: { increment: reserveQty },
         },
       })
+      if (updated.count === 0) {
+        throw new Error('Stock changed. Please refresh and reserve again.')
+      }
 
       await tx.stockMovement.create({
         data: {
@@ -239,50 +312,36 @@ export async function reserveMaterial(
     })
 
     let shortage: { id: string } | null = null
-    let purchaseRequest: { id: string } | null = null
 
     if (shortageQty > 0) {
-      shortage = await tx.materialShortage.create({
-        data: {
-          materialId,
-          jobCardId,
-          planningId: planningId ?? undefined,
-          shortageQty,
-          remainingQty: shortageQty,
-          status: 'open',
-        },
+      const existingShortage = await tx.materialShortage.findFirst({
+        where: { materialId, jobCardId, planningId: planningId ?? null, status: 'open' },
+        orderBy: { createdAt: 'desc' },
       })
+      shortage = existingShortage
+        ? await tx.materialShortage.update({
+            where: { id: existingShortage.id },
+            data: {
+              shortageQty: { increment: shortageQty },
+              remainingQty: { increment: shortageQty },
+            },
+          })
+        : await tx.materialShortage.create({
+            data: {
+              materialId,
+              jobCardId,
+              planningId: planningId ?? undefined,
+              shortageQty,
+              remainingQty: shortageQty,
+              status: 'open',
+            },
+          })
 
       await tx.inventory.update({
         where: { id: materialId },
         data: { shortageSheets: { increment: shortageQty } },
       })
 
-      const sizeLabel = material.sheetLength && material.sheetWidth
-        ? `${Math.round(Number(material.sheetLength))}x${Math.round(Number(material.sheetWidth))}`
-        : null
-
-      purchaseRequest = await tx.purchaseRequisition.create({
-        data: {
-          materialId,
-          qtyRequired: shortageQty,
-          estimatedValue: 0,
-          triggerReason: 'planning_shortage_auto',
-          status: 'pending',
-          raisedBy: 'system',
-          boardType: material.boardType ?? undefined,
-          sizeLabel: sizeLabel ?? undefined,
-          gsm: material.gsm ?? undefined,
-          sourceJobCardId: jobCardId,
-          sourcePlanningId: planningId ?? undefined,
-          shortageId: shortage.id,
-        },
-      })
-
-      await tx.materialShortage.update({
-        where: { id: shortage.id },
-        data: { purchaseReqId: purchaseRequest.id },
-      })
     }
 
     return {
@@ -292,9 +351,27 @@ export async function reserveMaterial(
       shortageSheets: shortageQty,
       reservation,
       shortage,
-      purchaseRequest,
     }
   })
+
+  let purchaseRequest: { id: string } | null = null
+  if (txResult.shortage?.id) {
+    // Keep reservation transaction short to avoid interactive tx timeout (P2028).
+    try {
+      purchaseRequest = await createPurchaseRequestFromShortage(txResult.shortage.id, db)
+    } catch (error) {
+      const msg = error instanceof Error && error.message ? error.message : 'Purchase Request creation failed'
+      throw new ShortagePrRecoveryError(
+        txResult.shortage.id,
+        `Reservation saved with shortage, but PR creation failed. You can retry using "Create PR for Shortage". (${msg})`,
+      )
+    }
+  }
+
+  return {
+    ...txResult,
+    purchaseRequest,
+  }
 }
 
 export async function allocateGRNToShortage(grnId: string, shortageId: string, client: DbClient = db) {
@@ -372,7 +449,7 @@ export async function allocateGRNToShortage(grnId: string, shortageId: string, c
     if (shortage.purchaseReqId) {
       await tx.purchaseRequisition.update({
         where: { id: shortage.purchaseReqId },
-        data: { status: remainingQty === 0 ? 'converted_to_po' : 'approved' },
+        data: { status: remainingQty === 0 ? 'received' : 'approved' },
       })
     }
 
@@ -403,9 +480,38 @@ export async function getMaterialReadiness(jobCardId: string, client: DbClient =
     }),
   ])
 
-  const pr = openShortage?.purchaseReqId
+  const prFromOpenShortage = openShortage?.purchaseReqId
     ? await client.purchaseRequisition.findUnique({ where: { id: openShortage.purchaseReqId } })
     : null
+
+  let pr = prFromOpenShortage
+  if (!pr) {
+    const shortages = await client.materialShortage.findMany({
+      where: { materialId: req.materialId, jobCardId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, purchaseReqId: true },
+    })
+    const shortagePrIds = shortages
+      .map((s) => s.purchaseReqId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+
+    if (shortagePrIds.length > 0) {
+      pr = await client.purchaseRequisition.findFirst({
+        where: { id: { in: shortagePrIds } },
+        orderBy: { raisedAt: 'desc' },
+      })
+    }
+
+    if (!pr) {
+      pr = await client.purchaseRequisition.findFirst({
+        where: {
+          materialId: req.materialId,
+          sourceJobCardId: jobCardId,
+        },
+        orderBy: { raisedAt: 'desc' },
+      })
+    }
+  }
 
   const requiredSheets = asNumber(reservation?.requiredSheets) || req.requiredSheets
   const reservedSheets = asNumber(reservation?.reservedSheets)

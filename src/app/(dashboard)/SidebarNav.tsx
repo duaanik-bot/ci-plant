@@ -217,8 +217,6 @@ export function SidebarNav({
       links: [
         { href: '/inventory', label: 'Raw Materials', icon: Warehouse },
         { href: '/inventory/flow', label: 'Inventory Flow', icon: RefreshCw },
-        { href: '/inventory/purchase-requisitions', label: 'Purchase Requests', icon: FileStack },
-        { href: '/inventory/grn', label: 'GRN', icon: Download },
       ],
     },
     {

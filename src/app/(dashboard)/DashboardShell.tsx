@@ -309,19 +309,11 @@ export function DashboardShell({
           ],
         },
         {
-          key: 'procurement',
-          label: 'Procurement',
-          items: [
-            { label: 'Purchase Requests', href: '/inventory/purchase-requisitions' },
-            { label: 'GRN', href: '/inventory/grn', description: 'Goods receipt entries' },
-          ],
-        },
-        {
           key: 'inventory',
           label: 'Inventory',
           items: [
-            { label: 'Paper Warehouse', href: '/inventory#paper-ledger', description: 'Paper stock and reserve' },
-            { label: 'FG Warehouse', href: '/inventory#fg-ledger', description: 'Finished goods ledger' },
+            { label: 'Paper Warehouse', href: '/inventory#paper-ledger', description: 'Raw paper/board stock only' },
+            { label: 'FG Warehouse', href: '/inventory/fg-warehouse', description: 'Finished goods stock ledger' },
           ],
         },
         {

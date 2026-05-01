@@ -1104,7 +1104,8 @@ export default function EditPurchaseOrderPage() {
           {fieldErrors.lines ? <p className="text-xs text-ds-error">{fieldErrors.lines}</p> : null}
 
           <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/20 p-4">
-            <div className="grid items-center gap-x-3 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted" style={{ gridTemplateColumns: 'minmax(320px,1.6fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}>
+            <div className="grid items-center gap-x-3 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted" style={{ gridTemplateColumns: '48px minmax(340px,1.8fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}>
+              <div className="text-center">S.No</div>
               <div>Carton</div>
               <div>Size</div>
               <div className="text-center">Qty *</div>
@@ -1144,8 +1145,11 @@ export default function EditPurchaseOrderPage() {
                             ? undefined
                             : 'Click row for material, printing, and costing'
                         }
-                        style={{ gridTemplateColumns: 'minmax(320px,1.6fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}
+                        style={{ gridTemplateColumns: '48px minmax(340px,1.8fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}
                       >
+                        <div className="pt-2 text-center text-sm font-semibold tabular-nums text-ds-ink-muted">
+                          {idx + 1}
+                        </div>
                         <div className="min-w-0">
                           <div data-line-stop className="min-w-0" onClick={(e) => e.stopPropagation()}>
                             <CartonLookupField

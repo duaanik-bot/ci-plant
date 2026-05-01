@@ -129,6 +129,7 @@ export async function POST(req: NextRequest) {
       ? parseFloat((quarantineQty * data.costPerUnit).toFixed(2))
       : 0
 
+  let grnMovementId = ''
   await db.$transaction(async (tx) => {
     const updated = await tx.inventory.update({
       where: { id: data.materialId },
@@ -149,7 +150,7 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    await tx.stockMovement.create({
+    const movement = await tx.stockMovement.create({
       data: {
         materialId: data.materialId,
         movementType: 'grn_quarantine',
@@ -159,6 +160,7 @@ export async function POST(req: NextRequest) {
         userId: user!.id,
       },
     })
+    grnMovementId = movement.id
   })
 
   await createAuditLog({
@@ -175,6 +177,31 @@ export async function POST(req: NextRequest) {
   } catch (_) {}
 
   const matchingShortages = await findOpenShortagesForMaterial(data.materialId)
+  const shortageCards = await Promise.all(
+    matchingShortages.map(async (s) => {
+      const jc = await db.productionJobCard.findUnique({
+        where: { id: s.jobCardId },
+        select: { id: true, jobCardNumber: true },
+      })
+      const poLine = jc?.jobCardNumber
+        ? await db.poLineItem.findFirst({
+            where: { jobCardNumber: jc.jobCardNumber },
+            select: { cartonId: true, cartonName: true },
+          })
+        : null
+      return {
+        shortageId: s.id,
+        jobCardId: s.jobCardId,
+        jobCardNumber: jc?.jobCardNumber ?? null,
+        planningId: s.planningId,
+        remainingQty: Number(s.remainingQty),
+        shortageQty: Number(s.shortageQty),
+        purchaseReqId: s.purchaseReqId,
+        linkedCartonId: poLine?.cartonId ?? null,
+        linkedCartonName: poLine?.cartonName ?? null,
+      }
+    }),
+  )
 
   return NextResponse.json({
     success: true,
@@ -184,17 +211,11 @@ export async function POST(req: NextRequest) {
     totalWeightKg,
     totalCost,
     newWac: parseFloat(newWac.toFixed(4)),
+    grnMovementId,
     allocationPrompt:
       matchingShortages.length > 0
         ? `This stock matches shortage for Job ${matchingShortages[0]!.jobCardId}. Allocate now?`
         : null,
-    matchingShortages: matchingShortages.map((s) => ({
-      shortageId: s.id,
-      jobCardId: s.jobCardId,
-      planningId: s.planningId,
-      remainingQty: Number(s.remainingQty),
-      shortageQty: Number(s.shortageQty),
-      purchaseReqId: s.purchaseReqId,
-    })),
+    matchingShortages: shortageCards,
   })
 }

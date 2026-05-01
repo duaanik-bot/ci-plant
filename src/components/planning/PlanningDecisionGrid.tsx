@@ -70,6 +70,7 @@ export type PlanningGridLine = {
   dimLengthMm?: unknown
   dimWidthMm?: unknown
   planningLedger?: {
+    materialGate?: { netAvailable?: number | null } | null
     numberOfColours?: number | null
     boardStockInsight?: {
       boardWanted: string | null
@@ -215,7 +216,7 @@ export function boardLabel(r: PlanningGridLine): string {
 }
 
 function gsmLabel(r: PlanningGridLine): string {
-  const raw = r.gsm ?? r.carton?.gsm ?? null
+  const raw = r.carton?.gsm ?? r.gsm ?? null
   const n = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(n) || n <= 0) return '—'
   return `${Math.round(n)} GSM`
@@ -230,6 +231,22 @@ function coatingLabel(r: PlanningGridLine): string {
   if (cartonCoating) return cartonCoating
   const cartonLamination = typeof r.carton?.laminateType === 'string' ? r.carton.laminateType.trim() : ''
   if (cartonLamination) return cartonLamination
+  return '—'
+}
+
+function availableFgCount(r: PlanningGridLine): number {
+  const n = Number(r.planningLedger?.materialGate?.netAvailable ?? 0)
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0
+}
+
+function sheetSizeLabel(r: PlanningGridLine): string {
+  const fromDie = typeof r.dieMaster?.sheetSize === 'string' ? r.dieMaster.sheetSize.trim() : ''
+  if (fromDie) return fromDie
+  const len = Number(r.materialQueue?.sheetLengthMm)
+  const wid = Number(r.materialQueue?.sheetWidthMm)
+  if (Number.isFinite(len) && len > 0 && Number.isFinite(wid) && wid > 0) {
+    return `${Math.round(len)}×${Math.round(wid)}`
+  }
   return '—'
 }
 
@@ -462,7 +479,7 @@ export function PlanningDecisionGrid({
         const q = parseInt(fQty, 10)
         if (Number.isFinite(q) && r.quantity !== q) return false
       }
-      if (fBoard.trim() && !match(boardLabel(r), fBoard)) return false
+      if (fBoard.trim() && !match(String(availableFgCount(r)), fBoard)) return false
       if (fGsm.trim() && !match(gsmLabel(r), fGsm)) return false
       if (fCoating.trim() && !match(coatingLabel(r), fCoating)) return false
       if (fBatch.trim()) {
@@ -1002,39 +1019,37 @@ export function PlanningDecisionGrid({
                   ) : null}
                 </div>
               </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[22%] min-w-0 py-2`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[20%] min-w-0 py-2`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('cartonName')}>
                   Carton {sortKey === 'cartonName' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[9%] min-w-0 py-2`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[10%] min-w-0 py-2`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('cartonSize')}>
                   Size {sortKey === 'cartonSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[8%] min-w-0 py-2 text-center`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[7%] min-w-0 py-2 text-center`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('qty')}>
                   Qty {sortKey === 'qty' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[9%] min-w-0 py-2`}>
-                <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('board')}>
-                  Board {sortKey === 'board' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-                </button>
-              </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[8%] min-w-0 py-2`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[7%] min-w-0 py-2`}>Available FG</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[10%] min-w-0 py-2`}>Sheet Size</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[6%] min-w-0 py-2 text-center`}>UPS</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[7%] min-w-0 py-2`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('gsm')}>
                   GSM {sortKey === 'gsm' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[10%] min-w-0 py-2`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[9%] min-w-0 py-2`}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('coating')}>
                   Coating {sortKey === 'coating' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[10%] min-w-0 py-2`}>Designer</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[9%] min-w-0 py-2`}>Designer</th>
               <th className={`${dataTable.th} min-h-[32px] w-[6%] min-w-0 py-2`}>Set type</th>
-              <th className={`${dataTable.th} sticky right-0 z-20 min-h-[32px] w-[20%] min-w-0 bg-ds-elevated/95 py-2 text-left`}>
+              <th className={`${dataTable.th} sticky right-0 z-20 min-h-[32px] w-[19%] min-w-0 bg-ds-elevated/95 py-2 text-left`}>
                 <button
                   type="button"
                   className={`${dataTable.thSortBtn} w-full justify-start text-left`}
@@ -1077,12 +1092,14 @@ export function PlanningDecisionGrid({
               <th className="px-2 py-1">
                 <input
                   className={filterGhost}
-                  placeholder="Board"
+                  placeholder="FG"
                   value={fBoard}
                   onChange={(e) => setFBoard(e.target.value)}
                   onClick={(e) => e.stopPropagation()}
                 />
               </th>
+              <th className="px-2 py-1" />
+              <th className="px-2 py-1" />
               <th className="px-2 py-1">
                 <input
                   className={filterGhost}
@@ -1126,12 +1143,14 @@ export function PlanningDecisionGrid({
                 const bStatus0 = effectiveBatchStatus(planCore0)
                 const batchLineIds0 = batchGroup?.lineIds ?? groupRows.map((r) => r.id)
                 const totalGroupQty = groupRows.reduce((s, r) => s + (r.quantity || 0), 0)
-                const allBoards = Array.from(new Set(groupRows.map((r) => boardLabel(r))))
-                const boardDisplay = allBoards.length === 1 ? allBoards[0]! : 'Mixed'
                 const allGsms = Array.from(new Set(groupRows.map((r) => gsmLabel(r))))
                 const gsmDisplay = allGsms.length === 1 ? allGsms[0]! : 'Mixed'
                 const allCoatings = Array.from(new Set(groupRows.map((r) => coatingLabel(r))))
                 const coatingDisplay = allCoatings.length === 1 ? allCoatings[0]! : 'Mixed'
+                const allSheetSizes = Array.from(new Set(groupRows.map((r) => sheetSizeLabel(r))))
+                const sheetDisplay = allSheetSizes.length === 1 ? allSheetSizes[0]! : 'Mixed'
+                const fgTotal = groupRows.reduce((sum, r) => sum + availableFgCount(r), 0)
+                const pm0 = readPlanningMeta(spec0)
                 const designerLabel0 = designerHandoffLabel(spec0, planCore0)
                 const isExpanded = expandedGroups.has(groupId)
                 const allGroupSel = groupRows.every((r) => planningSelection.has(r.id))
@@ -1234,18 +1253,25 @@ export function PlanningDecisionGrid({
                         </div>
                       </td>
 
-                      {/* Board */}
+                      {/* Available FG */}
                       <td className={`${cellBase} min-w-0`}>
-                        <div className="flex min-w-0 flex-col gap-0.5">
-                          <span className={`text-xs font-medium ${allBoards.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
-                            {boardDisplay}
-                          </span>
-                          {firstRow.planningLedger?.boardStockInsight ? (
-                            <span className={`inline-flex w-fit rounded border px-1 py-px text-[10px] font-medium ${stockSignalMeta(firstRow.planningLedger.boardStockInsight.stockSignal).cls}`}>
-                              {stockSignalMeta(firstRow.planningLedger.boardStockInsight.stockSignal).label}
-                            </span>
-                          ) : null}
-                        </div>
+                        <span className="text-xs font-semibold tabular-nums text-ds-ink-muted">
+                          {fgTotal.toLocaleString('en-IN')}
+                        </span>
+                      </td>
+
+                      {/* Sheet Size */}
+                      <td className={`${cellBase} min-w-0`}>
+                        <span className={`text-xs ${allSheetSizes.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+                          {sheetDisplay}
+                        </span>
+                      </td>
+
+                      {/* UPS */}
+                      <td className={`${cellBase} min-w-0 text-center`}>
+                        <span className="text-xs font-medium text-ds-brand">
+                          {typeof pm0.ups === 'number' ? `×${pm0.ups}` : '—'}
+                        </span>
                       </td>
 
                       {/* GSM */}
@@ -1311,12 +1337,13 @@ export function PlanningDecisionGrid({
                 const spec = (r.specOverrides || {}) as Record<string, unknown>
                 const planCore = readPlanningCore(spec)
                 const pm = readPlanningMeta(spec)
-                const brd = boardLabel(r)
                 const gsm = gsmLabel(r)
                 const coating = coatingLabel(r)
                 const upsNum = typeof pm.ups === 'number' && Number.isFinite(pm.ups) && pm.ups >= 1 ? pm.ups : null
                 const designerLabelSub = designerHandoffLabel(spec, planCore)
                 const subCompleted = r.planningStatus !== 'pending'
+                const fgAvailable = availableFgCount(r)
+                const sheetSize = sheetSizeLabel(r)
                 return (
                   <Fragment key={`sub:${r.id}`}>
                     <tr
@@ -1358,14 +1385,15 @@ export function PlanningDecisionGrid({
                         <span className="text-xs font-semibold tabular-nums text-ds-ink">{r.quantity.toLocaleString('en-IN')}</span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
-                        <div className="flex min-w-0 flex-col gap-0.5">
-                          <span className="text-xs text-ds-ink-muted">{brd}</span>
-                          {r.planningLedger?.boardStockInsight ? (
-                            <span className={`inline-flex w-fit rounded border px-1 py-px text-[10px] font-medium ${stockSignalMeta(r.planningLedger.boardStockInsight.stockSignal).cls}`}>
-                              {stockSignalMeta(r.planningLedger.boardStockInsight.stockSignal).label}
-                            </span>
-                          ) : null}
-                        </div>
+                        <span className="text-xs font-semibold tabular-nums text-ds-ink-muted">
+                          {fgAvailable.toLocaleString('en-IN')}
+                        </span>
+                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                        <span className="text-xs text-ds-ink-muted">{sheetSize}</span>
+                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0 text-center`}>
+                        <span className="text-xs font-medium text-ds-brand">{upsNum != null ? `×${upsNum}` : '—'}</span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
                         <span className="text-xs text-ds-ink-muted">{gsm}</span>
@@ -1376,13 +1404,7 @@ export function PlanningDecisionGrid({
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
                         <span className="text-xs text-ds-ink-muted">{designerLabelSub || '—'}</span>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
-                        <div className="flex flex-col gap-0.5">
-                          {upsNum != null && (
-                            <span className="text-xs font-medium text-ds-brand">×{upsNum} ups</span>
-                          )}
-                        </div>
-                      </td>
+                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`} />
                       <td className={`${cellBase} sticky right-0 z-10 min-w-0 border-b border-ds-line/20 border-l border-ds-line/30 bg-inherit text-left`}>
                         <button
                           type="button"
@@ -1410,7 +1432,6 @@ export function PlanningDecisionGrid({
                 planCore.mixSetMemberIds.length > 0
               )
               const bStatus = effectiveBatchStatus(planCore)
-              const brd = boardLabel(r)
               const gsm = gsmLabel(r)
               const coating = coatingLabel(r)
               const pm = readPlanningMeta(spec)
@@ -1436,6 +1457,8 @@ export function PlanningDecisionGrid({
                   )
                 : null
               const rowActionFeedback = actionFeedbackByLineId[r.id]
+              const fgAvailable = availableFgCount(r)
+              const sheetSize = sheetSizeLabel(r)
               const prev = idx > 0 ? sorted[idx - 1] : null
               const prevSpec = prev ? ((prev.specOverrides || {}) as Record<string, unknown>) : null
               const prevCore = prevSpec ? readPlanningCore(prevSpec) : null
@@ -1571,21 +1594,19 @@ export function PlanningDecisionGrid({
                       />
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <p className="line-clamp-2 break-words text-xs font-medium leading-tight text-ds-ink-muted" title={brd}>
-                          {brd}
-                        </p>
-                        {r.planningLedger?.boardStockInsight ? (
-                          <>
-                            <span className={`inline-flex w-fit rounded border px-1 py-px text-[10px] font-medium ${stockSignalMeta(r.planningLedger.boardStockInsight.stockSignal).cls}`}>
-                              {stockSignalMeta(r.planningLedger.boardStockInsight.stockSignal).label}
-                            </span>
-                            <p className="truncate text-[10px] text-ds-ink-faint">
-                              Main {r.planningLedger.boardStockInsight.availableMainSheets.toLocaleString('en-IN')} · Leftover {r.planningLedger.boardStockInsight.availableLeftoverSheets.toLocaleString('en-IN')}
-                            </p>
-                          </>
-                        ) : null}
-                      </div>
+                      <p className="truncate text-xs font-semibold tabular-nums text-ds-ink-muted">
+                        {fgAvailable.toLocaleString('en-IN')}
+                      </p>
+                    </td>
+                    <td className={`${cellBase} min-w-0`}>
+                      <p className="truncate text-xs font-medium text-ds-ink-muted" title={sheetSize}>
+                        {sheetSize}
+                      </p>
+                    </td>
+                    <td className={`${cellBase} min-w-0 text-center`}>
+                      <p className="text-xs font-semibold text-ds-brand">
+                        {upsNum != null ? `×${upsNum}` : '—'}
+                      </p>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <p className="truncate text-xs font-medium text-ds-ink-muted" title={gsm}>

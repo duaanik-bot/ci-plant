@@ -1046,8 +1046,6 @@ export default function NewPurchaseOrderPage() {
   }, 0)
   const grandTotal = subtotal + totalGst
   const totalQty = validLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
-  const totalFgReserved = lines.reduce((s, l) => s + (l.fgReservation?.qtyReserved ?? 0), 0)
-  const netFreshDemand = Math.max(0, totalQty - totalFgReserved)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -1480,7 +1478,8 @@ export default function NewPurchaseOrderPage() {
         {fieldErrors.lines && <p className="text-xs text-ds-error">{fieldErrors.lines}</p>}
 
         <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/20 p-4">
-          <div className="grid items-center gap-x-3 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted" style={{ gridTemplateColumns: 'minmax(320px,1.6fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}>
+          <div className="grid items-center gap-x-3 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted" style={{ gridTemplateColumns: '48px minmax(340px,1.8fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}>
+            <div className="text-center">S.No</div>
             <div>Carton</div>
             <div>Size</div>
             <div className="text-center">Qty *</div>
@@ -1521,8 +1520,11 @@ export default function NewPurchaseOrderPage() {
                         ? 'bg-ds-brand/8 ring-1 ring-inset ring-ds-brand/30'
                         : ''
                     }`}
-                    style={{ gridTemplateColumns: 'minmax(320px,1.6fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}
+                    style={{ gridTemplateColumns: '48px minmax(340px,1.8fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}
                   >
+                    <div className="pt-2 text-center text-sm font-semibold tabular-nums text-ds-ink-muted">
+                      {idx + 1}
+                    </div>
                     <div className="min-w-0">
                       <div data-line-stop className="min-w-0" onClick={(e) => e.stopPropagation()}>
                         <CartonLookupField
@@ -1680,18 +1682,6 @@ export default function NewPurchaseOrderPage() {
               Grand total{' '}
               <span className={cn(poMono, 'ds-typo-total !text-ds-success')}>
                 ₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </span>
-            </span>
-            <span>
-              FG reserved{' '}
-              <span className={cn(poMono, 'text-sm font-semibold text-emerald-300')}>
-                {totalFgReserved.toLocaleString('en-IN')}
-              </span>
-            </span>
-            <span>
-              Fresh demand{' '}
-              <span className={cn(poMono, 'text-sm font-semibold text-ds-ink')}>
-                {netFreshDemand.toLocaleString('en-IN')}
               </span>
             </span>
           </div>

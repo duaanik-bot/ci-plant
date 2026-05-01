@@ -63,6 +63,7 @@ const createSchema = z.object({
   leadTimeDays: z.number().int().min(0).default(7),
   supplierId: z.string().uuid().optional().nullable(),
   weightedAvgCost: z.number().min(0).default(0),
+  packetWeight: z.number().positive(),
   active: z.boolean().default(true),
   boardType: z.string().optional().nullable(),
   boardClassification: z.string().optional().nullable(),
@@ -96,6 +97,7 @@ export async function GET() {
       qtyReserved: Number(m.qtyReserved),
       qtyFg: Number(m.qtyFg),
       weightedAvgCost: Number(m.weightedAvgCost),
+      packetWeight: Number(m.maxDailyUsage),
       reorderPoint: Number(m.reorderPoint),
       safetyStock: Number(m.safetyStock),
       active: m.active,
@@ -126,6 +128,7 @@ export async function POST(req: NextRequest) {
     safetyStock: toOptionalNumber(body.safetyStock) ?? 0,
     leadTimeDays: toOptionalNumber(body.leadTimeDays) ?? 7,
     weightedAvgCost: toOptionalNumber(body.weightedAvgCost) ?? 0,
+    packetWeight: toOptionalNumber(body.packetWeight),
     supplierId: body.supplierId || null,
     gsm: toOptionalNumber(body.gsm),
     boardClassification: typeof body.boardClassification === 'string' ? body.boardClassification : null,
@@ -146,6 +149,16 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data
+  const fields: Record<string, string> = {}
+  if (!data.boardType?.trim()) fields.boardType = 'Board Type is required'
+  if (!data.boardClassification?.trim()) fields.boardClassification = 'Board Classification is required'
+  if (!data.sheetLength || data.sheetLength <= 0) fields.sheetLength = 'Sheet length is required'
+  if (!data.sheetWidth || data.sheetWidth <= 0) fields.sheetWidth = 'Sheet width is required'
+  if (!data.gsm || data.gsm <= 0) fields.gsm = 'GSM is required'
+  if (!data.packetWeight || data.packetWeight <= 0) fields.packetWeight = 'Packet weight is required'
+  if (Object.keys(fields).length > 0) {
+    return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+  }
 
   let materialCode: string
   if (data.autoGenerateCode && data.boardType) {
@@ -220,6 +233,7 @@ export async function POST(req: NextRequest) {
       leadTimeDays: data.leadTimeDays,
       supplierId: data.supplierId || null,
       weightedAvgCost: data.weightedAvgCost,
+      maxDailyUsage: data.packetWeight,
       physicalStockSheets,
       shortageSheets,
       totalWeightKg,

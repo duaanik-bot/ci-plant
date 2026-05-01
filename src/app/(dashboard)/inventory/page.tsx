@@ -35,6 +35,27 @@ type PaperLedgerRow = {
   suggestBalanceWriteOff: boolean
 }
 
+type PaperWarehouseRow = {
+  material_id: string
+  material_code: string
+  board_type_id: string | null
+  board_classification_id: string | null
+  length: number | null
+  width: number | null
+  gsm: number | null
+  size_display: string
+  available_sheets: number
+  reserved_sheets: number
+  incoming_sheets: number
+  shortage_sheets: number
+  reorder_level: number
+  packet_weight: number
+  status: string
+  est_value_inr: number
+  age_days: number
+  ageing_risk: 'low' | 'medium' | 'high'
+}
+
 type StockStateItem = {
   id: string
   materialCode: string
@@ -65,32 +86,6 @@ type ActivityRow = {
   userId: string | null
   createdAt: string
 }
-type FgExcessRow = {
-  id: string
-  materialCode: string
-  description: string
-  unit: string
-  qtyFg: number
-  fgValueInr: number
-  boxNumber: string
-  boxAgeDays: number | null
-  estimatedBoxes: number
-  customerHints: {
-    customerId: string
-    customerName: string
-    poNumber: string
-    poDate: string
-    qtyOrdered: number
-  }[]
-  logs: {
-    id: string
-    movementType: string
-    qty: number
-    refType: string | null
-    refId: string | null
-    at: string
-  }[]
-}
 
 function InventoryPageContent() {
   const searchParams = useSearchParams()
@@ -104,6 +99,16 @@ function InventoryPageContent() {
     rows: PaperLedgerRow[]
     staleCapitalInr: number
   } | null>(null)
+  const [paperWarehouseRows, setPaperWarehouseRows] = useState<PaperWarehouseRow[]>([])
+  const [paperWarehouseKpi, setPaperWarehouseKpi] = useState({
+    totalPhysical: 0,
+    available: 0,
+    reserved: 0,
+    incoming: 0,
+    shortage: 0,
+    value: 0,
+    ageingRisk: 0,
+  })
   const [paperLedgerSort, setPaperLedgerSort] = useState<'oldest' | 'newest'>('oldest')
   const [hubSearchPo, setHubSearchPo] = useState('')
   const [debouncedHubPo, setDebouncedHubPo] = useState('')
@@ -116,9 +121,6 @@ function InventoryPageContent() {
   const [issueSubmitting, setIssueSubmitting] = useState(false)
   const [jobCards, setJobCards] = useState<JobCardOpt[]>([])
   const [jobSearch, setJobSearch] = useState('')
-  const [fgExcess, setFgExcess] = useState<FgExcessRow[]>([])
-  const [fgSearch, setFgSearch] = useState('')
-  const [fgDrawer, setFgDrawer] = useState<FgExcessRow | null>(null)
   const [activityRows, setActivityRows] = useState<ActivityRow[]>([])
   const [adjustMaterialId, setAdjustMaterialId] = useState('')
   const [adjustQty, setAdjustQty] = useState('')
@@ -150,6 +152,25 @@ function InventoryPageContent() {
     [],
   )
 
+  const loadPaperWarehouse = useCallback(async (q: string) => {
+    const res = await fetch(`/api/inventory/paper-warehouse${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`)
+    const data = await res.json().catch(() => ({}))
+    setPaperWarehouseRows(Array.isArray(data?.rows) ? (data.rows as PaperWarehouseRow[]) : [])
+    setPaperWarehouseKpi(
+      data?.kpi && typeof data.kpi === 'object'
+        ? {
+            totalPhysical: Number(data.kpi.totalPhysical) || 0,
+            available: Number(data.kpi.available) || 0,
+            reserved: Number(data.kpi.reserved) || 0,
+            incoming: Number(data.kpi.incoming) || 0,
+            shortage: Number(data.kpi.shortage) || 0,
+            value: Number(data.kpi.value) || 0,
+            ageingRisk: Number(data.kpi.ageingRisk) || 0,
+          }
+        : { totalPhysical: 0, available: 0, reserved: 0, incoming: 0, shortage: 0, value: 0, ageingRisk: 0 },
+    )
+  }, [])
+
   const reloadAll = useCallback(async () => {
     setLoading(true)
     try {
@@ -165,12 +186,10 @@ function InventoryPageContent() {
           gsm: ledgerGsm,
           board: ledgerBoard,
         }),
+        loadPaperWarehouse(hubSearchPo),
         fetch('/api/job-cards')
           .then((r) => r.json())
           .then((list) => setJobCards(Array.isArray(list) ? list : [])),
-        fetch(`/api/inventory/fg-excess${fgSearch.trim() ? `?q=${encodeURIComponent(fgSearch.trim())}` : ''}`)
-          .then((r) => r.json())
-          .then((rows) => setFgExcess(Array.isArray(rows) ? rows : [])),
         fetch('/api/inventory/activity-log?limit=40')
           .then((r) => r.json())
           .then((rows) => setActivityRows(Array.isArray(rows) ? rows : [])),
@@ -180,7 +199,7 @@ function InventoryPageContent() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedHubPo, fgSearch, ledgerGsm, ledgerBoard, loadPaperLedger])
+  }, [debouncedHubPo, hubSearchPo, ledgerGsm, ledgerBoard, loadPaperLedger, loadPaperWarehouse])
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedHubPo(hubSearchPo), 320)
@@ -189,6 +208,14 @@ function InventoryPageContent() {
 
   useEffect(() => {
     void reloadAll()
+  }, [reloadAll])
+
+  useEffect(() => {
+    const onRefresh = () => {
+      void reloadAll()
+    }
+    window.addEventListener('inventory:refresh', onRefresh)
+    return () => window.removeEventListener('inventory:refresh', onRefresh)
   }, [reloadAll])
 
   useEffect(() => {
@@ -373,10 +400,9 @@ function InventoryPageContent() {
         <div className="p-4 md:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-4">
             <div>
-              <h2 className="text-lg font-semibold text-ds-warning">Warehouse hub — Paper pending issue</h2>
+              <h2 className="text-lg font-semibold text-ds-warning">Paper Warehouse (Raw Materials)</h2>
               <p className="text-xs text-ds-ink-faint mt-1 font-mono">
-                Director priority stars sort to the top. Search customer PO # to trace batches. JetBrains mono for
-                weights and PO numbers.
+                Master-driven paper stock only. Reservation, incoming, and shortage are synchronized with Planning and PR.
               </p>
               {(ledgerGsm || ledgerBoard) && (
                 <p className={`text-xs text-ds-warning mt-2 ${ledgerMono}`}>
@@ -384,22 +410,24 @@ function InventoryPageContent() {
                 </p>
               )}
             </div>
-            <div className="rounded-lg border border-red-900/70 bg-red-950/50 px-4 py-3 shrink-0">
-              <p className="text-xs uppercase tracking-wide text-red-300/90">Stale capital</p>
-              <p className={`text-2xl text-red-200 ${ledgerMono}`}>
-                {fmtVal(paperLedger?.staleCapitalInr ?? 0)}
-              </p>
-              <p className="text-xs text-ds-ink-faint mt-1">₹ value of sheets on hand &gt; 60 days</p>
+            <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+              <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
+              <div className="rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></div>
+              <div className="rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></div>
+              <div className="rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></div>
+              <div className="rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></div>
+              <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
+              <div className="rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
             </div>
           </div>
 
           <label className="block mb-3 text-xs text-ds-ink-faint uppercase tracking-wide">
-            Deep search — Customer PO #
+            Search raw material
             <input
               type="text"
               value={hubSearchPo}
               onChange={(e) => setHubSearchPo(e.target.value)}
-              placeholder="e.g. CI-PO-2026-0001"
+              placeholder="material code / board type / classification / size / gsm"
               className={`mt-1 w-full max-w-md rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
             />
           </label>
@@ -432,75 +460,40 @@ function InventoryPageContent() {
             <table className="w-full text-sm">
               <thead className="bg-background text-left border-b border-ds-line/40">
                 <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
-                  <th className="px-2 py-2 w-8">Pri</th>
-                  <th className="px-3 py-2">Lot</th>
+                  <th className="px-3 py-2">Material code</th>
+                  <th className="px-3 py-2">Board type</th>
+                  <th className="px-3 py-2">Board classification</th>
+                  <th className="px-3 py-2">Size</th>
                   <th className="px-3 py-2">GSM</th>
-                  <th className="px-3 py-2">Grade / type</th>
-                  <th className="px-3 py-2">Qty</th>
-                  <th className="px-3 py-2">Gate date</th>
-                  <th className="px-3 py-2">Age</th>
-                  <th className="px-3 py-2">Value (est.)</th>
+                  <th className="px-3 py-2">Available</th>
+                  <th className="px-3 py-2">Reserved</th>
+                  <th className="px-3 py-2">Incoming</th>
+                  <th className="px-3 py-2">Shortage</th>
+                  <th className="px-3 py-2">Reorder</th>
                   <th className="px-3 py-2">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ds-card">
-                {sortedPaperRows.map((row) => {
-                  const priGlow = row.industrialPriority
-                    ? 'shadow-[0_0_20px_rgba(251,146,60,0.35)] ring-1 ring-orange-500/50 bg-orange-950/15'
-                    : ''
-                  return (
-                    <tr
-                      key={row.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setDrawerRow(row)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          setDrawerRow(row)
-                        }
-                      }}
-                      className={`hover:bg-ds-main/80 cursor-pointer ${priGlow}`}
-                    >
-                      <td className="px-2 py-2 align-middle">
-                        <Star
-                          className={`h-4 w-4 ${
-                            row.industrialPriority
-                              ? 'text-orange-400 fill-orange-400 drop-shadow-[0_0_6px_rgba(251,146,60,0.9)]'
-                              : 'text-neutral-700'
-                          }`}
-                          strokeWidth={row.industrialPriority ? 0 : 1.2}
-                        />
-                      </td>
-                      <td className={`px-3 py-2 text-xs text-ds-ink ${ledgerMono}`}>{row.lotNumber ?? '—'}</td>
-                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.gsm}</td>
-                      <td className="px-3 py-2 text-ds-ink-muted">
-                        {(row.boardGrade ?? '').trim() || row.paperType}
-                      </td>
-                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>
-                        {row.qtySheets.toLocaleString('en-IN')}
-                      </td>
-                      <td className={`px-3 py-2 text-ds-ink-muted ${ledgerMono}`}>{row.receiptDate}</td>
-                      <td className="px-3 py-2">
-                        <span className={`inline-flex items-center gap-2 tabular-nums ${ledgerMono}`}>
-                          <span
-                            className={`h-2 w-2 shrink-0 rounded-full ${ageDotClass(row.ageBucket)}`}
-                            title={ageLabel(row.ageBucket)}
-                          />
-                          {row.ageDays}d
-                          <span className="text-xs text-ds-ink-faint">({ageLabel(row.ageBucket)})</span>
-                        </span>
-                      </td>
-                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmtVal(row.valueInr)}</td>
-                      <td className="px-3 py-2 text-xs text-ds-ink-faint">{row.status}</td>
-                    </tr>
-                  )
-                })}
+                {paperWarehouseRows.map((row) => (
+                  <tr key={row.material_id} className="hover:bg-ds-main/40">
+                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.material_code}</td>
+                    <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
+                    <td className="px-3 py-2 text-ds-ink-muted">{row.board_classification_id ?? '-'}</td>
+                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.size_display}</td>
+                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.gsm ?? '-'}</td>
+                    <td className={`px-3 py-2 text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
+                    <td className={`px-3 py-2 text-amber-300 ${ledgerMono}`}>{fmt(row.reserved_sheets)}</td>
+                    <td className={`px-3 py-2 text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
+                    <td className={`px-3 py-2 text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
+                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
+                    <td className="px-3 py-2 text-xs text-ds-ink-faint">{row.status}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-            {sortedPaperRows.length === 0 && (
+            {paperWarehouseRows.length === 0 && (
               <p className="p-6 text-center text-ds-ink-faint text-sm">
-                No main-warehouse paper rows with quantity (or no match for this PO search).
+                No paper warehouse rows found.
               </p>
             )}
           </div>
@@ -509,83 +502,17 @@ function InventoryPageContent() {
 
       <section className="mb-8 rounded-xl border border-ds-line/40 overflow-hidden bg-background text-ds-ink">
         <div className="p-4 md:p-6">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-ds-warning">FG warehouse - excess stock</h2>
-              <p className="text-xs text-ds-ink-faint mt-1">
-                Surplus finished stock above immediate customer lift plan. Open any row for movement logs.
-              </p>
-            </div>
-            <input
-              type="text"
-              value={fgSearch}
-              onChange={(e) => setFgSearch(e.target.value)}
-              placeholder="Search material / product"
-              className="w-full max-w-sm rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="overflow-x-auto rounded-lg border border-ds-line/40">
-            <table className="w-full text-sm">
-              <thead className="bg-background text-left border-b border-ds-line/40">
-                <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
-                  <th className="px-3 py-2">Material</th>
-                  <th className="px-3 py-2">Excess FG</th>
-                  <th className="px-3 py-2">Box no.</th>
-                  <th className="px-3 py-2">Box age</th>
-                  <th className="px-3 py-2">Brands</th>
-                  <th className="px-3 py-2">Value</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ds-card">
-                {fgExcess.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="cursor-pointer hover:bg-ds-main/70"
-                    onClick={() => setFgDrawer(row)}
-                  >
-                    <td className="px-3 py-2">
-                      <p className={`text-sm text-ds-ink ${ledgerMono}`}>{row.materialCode}</p>
-                      <p className="text-xs text-ds-ink-faint">{row.description}</p>
-                    </td>
-                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>
-                      {row.qtyFg.toLocaleString('en-IN')} {row.unit}
-                    </td>
-                    <td className={`px-3 py-2 ${ledgerMono}`}>
-                      {row.boxNumber}
-                      <div className="text-xs text-ds-ink-faint">{row.estimatedBoxes} boxes</div>
-                    </td>
-                    <td className="px-3 py-2 text-xs text-ds-ink-faint">
-                      {row.boxAgeDays != null ? `${row.boxAgeDays} days` : '—'}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1.5">
-                        {row.customerHints.length === 0 ? (
-                          <span className="text-xs text-ds-ink-faint">No linked brand</span>
-                        ) : (
-                          row.customerHints.map((c) => (
-                            <Link
-                              key={`${row.id}-${c.customerId}`}
-                              href={`/orders/purchase-orders?customerId=${encodeURIComponent(c.customerId)}`}
-                              className="rounded border border-ds-line/50 px-2 py-0.5 text-xs text-sky-400 hover:underline"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                              }}
-                              title={`${c.customerName} · ${c.poNumber}`}
-                            >
-                              {c.customerName}
-                            </Link>
-                          ))
-                        )}
-                      </div>
-                    </td>
-                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmtVal(row.fgValueInr)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {fgExcess.length === 0 ? (
-              <p className="p-6 text-center text-ds-ink-faint text-sm">No FG excess rows found.</p>
-            ) : null}
+          <h2 className="text-lg font-semibold text-ds-warning">FG Warehouse</h2>
+          <p className="mt-1 text-xs text-ds-ink-faint">
+            Finished goods are managed in a separate warehouse module to avoid raw-paper confusion.
+          </p>
+          <div className="mt-3">
+            <Link
+              href="/inventory/fg-warehouse"
+              className="inline-flex rounded border border-ds-line/50 bg-ds-card px-3 py-2 text-xs text-ds-ink hover:bg-ds-main/50"
+            >
+              Open FG Warehouse
+            </Link>
           </div>
         </div>
       </section>
@@ -719,67 +646,6 @@ function InventoryPageContent() {
               >
                 {issueSubmitting ? 'Saving…' : 'Save — issue to floor'}
               </button>
-            </div>
-          </div>
-        ) : null}
-      </SlideOverPanel>
-
-      <SlideOverPanel
-        title="FG box detail"
-        isOpen={!!fgDrawer}
-        onClose={() => setFgDrawer(null)}
-        widthClass="max-w-md"
-        backdropClassName="bg-background/60"
-        panelClassName="border-l border-ds-line/40 bg-background shadow-2xl"
-      >
-        {fgDrawer ? (
-          <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-ds-ink-muted ${ledgerMono}`}>
-            <div>
-              <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Box number</p>
-              <p className="text-sm text-ds-ink font-semibold">{fgDrawer.boxNumber}</p>
-              <p className="text-ds-ink-faint mt-1">{fgDrawer.description}</p>
-              <p className="text-ds-warning mt-1">
-                On hand: {fgDrawer.qtyFg.toLocaleString('en-IN')} {fgDrawer.unit} · {fgDrawer.estimatedBoxes} boxes
-              </p>
-              <p className="text-ds-ink-faint">
-                Box age: {fgDrawer.boxAgeDays != null ? `${fgDrawer.boxAgeDays} days` : '—'}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Linked brands / POs</p>
-              {fgDrawer.customerHints.length === 0 ? (
-                <p className="text-ds-ink-faint">No matched customer history.</p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {fgDrawer.customerHints.map((c) => (
-                    <li key={`${c.customerId}-${c.poNumber}`} className="rounded border border-ds-line/40 px-2 py-1.5">
-                      <p className="text-sky-400">{c.customerName}</p>
-                      <p className="text-ds-ink-faint">
-                        {c.poNumber} · Qty {c.qtyOrdered.toLocaleString('en-IN')}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Movement logs</p>
-              {fgDrawer.logs.length === 0 ? (
-                <p className="text-ds-ink-faint">No stock logs found.</p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {fgDrawer.logs.map((log) => (
-                    <li key={log.id} className="rounded border border-ds-line/40 px-2 py-1.5">
-                      <p className="text-ds-ink">
-                        {log.movementType} · {log.qty.toLocaleString('en-IN')}
-                      </p>
-                      <p className="text-ds-ink-faint">
-                        {new Date(log.at).toLocaleString()} · {log.refType ?? '—'} {log.refId ? `· ${log.refId.slice(0, 8)}` : ''}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
             </div>
           </div>
         ) : null}

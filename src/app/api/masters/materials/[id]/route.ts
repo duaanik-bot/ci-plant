@@ -24,6 +24,7 @@ const updateSchema = z.object({
   leadTimeDays: z.number().int().min(0).optional(),
   supplierId: z.string().uuid().optional().nullable(),
   weightedAvgCost: z.number().min(0).optional(),
+  packetWeight: z.number().positive().optional(),
   active: z.boolean().optional(),
   boardType: z.string().optional().nullable(),
   boardClassification: z.string().optional().nullable(),
@@ -62,6 +63,7 @@ export async function GET(
     qtyReserved: Number(m.qtyReserved),
     qtyFg: Number(m.qtyFg),
     weightedAvgCost: Number(m.weightedAvgCost),
+    packetWeight: Number(m.maxDailyUsage),
     reorderPoint: Number(m.reorderPoint),
     safetyStock: Number(m.safetyStock),
     active: m.active,
@@ -100,6 +102,7 @@ export async function PUT(
     safetyStock: toOptionalNumber(body.safetyStock),
     leadTimeDays: toOptionalNumber(body.leadTimeDays),
     weightedAvgCost: toOptionalNumber(body.weightedAvgCost),
+    packetWeight: toOptionalNumber(body.packetWeight),
     supplierId: body.supplierId === '' ? null : body.supplierId,
     gsm: toOptionalNumber(body.gsm),
     boardClassification: typeof body.boardClassification === 'string' ? body.boardClassification : null,
@@ -123,6 +126,22 @@ export async function PUT(
   if (!existing) return NextResponse.json({ error: 'Material not found' }, { status: 404 })
 
   const data = parsed.data
+  const nextBoardType = data.boardType ?? existing.boardType
+  const nextBoardClassification = data.boardClassification ?? existing.boardClassification
+  const nextGsm = data.gsm ?? existing.gsm
+  const nextSheetLength = data.sheetLength ?? (existing.sheetLength != null ? Number(existing.sheetLength) : null)
+  const nextSheetWidth = data.sheetWidth ?? (existing.sheetWidth != null ? Number(existing.sheetWidth) : null)
+  const nextPacketWeight = data.packetWeight ?? Number(existing.maxDailyUsage)
+  const fields: Record<string, string> = {}
+  if (!nextBoardType?.trim()) fields.boardType = 'Board Type is required'
+  if (!nextBoardClassification?.trim()) fields.boardClassification = 'Board Classification is required'
+  if (!nextSheetLength || nextSheetLength <= 0) fields.sheetLength = 'Sheet length is required'
+  if (!nextSheetWidth || nextSheetWidth <= 0) fields.sheetWidth = 'Sheet width is required'
+  if (!nextGsm || nextGsm <= 0) fields.gsm = 'GSM is required'
+  if (!nextPacketWeight || nextPacketWeight <= 0) fields.packetWeight = 'Packet weight is required'
+  if (Object.keys(fields).length > 0) {
+    return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
+  }
   if (data.materialCode != null) {
     const duplicate = await db.inventory.findFirst({
       where: { materialCode: data.materialCode, id: { not: id } },
@@ -154,10 +173,6 @@ export async function PUT(
     }
   }
 
-  const nextBoardType = data.boardType ?? existing.boardType
-  const nextGsm = data.gsm ?? existing.gsm
-  const nextSheetLength = data.sheetLength ?? (existing.sheetLength != null ? Number(existing.sheetLength) : null)
-  const nextSheetWidth = data.sheetWidth ?? (existing.sheetWidth != null ? Number(existing.sheetWidth) : null)
   const nextAttributes = data.attributes ?? existing.attributes
   const qtyAvailable = Number(existing.qtyAvailable)
   const totalWeightKg =
@@ -180,6 +195,7 @@ export async function PUT(
       ...(data.leadTimeDays != null && { leadTimeDays: data.leadTimeDays }),
       ...(data.supplierId !== undefined && { supplierId: data.supplierId }),
       ...(data.weightedAvgCost != null && { weightedAvgCost: data.weightedAvgCost }),
+      ...(data.packetWeight != null && { maxDailyUsage: data.packetWeight }),
       ...(data.active !== undefined && { active: data.active }),
       ...(data.boardType !== undefined && { boardType: data.boardType || null }),
       ...(data.boardClassification !== undefined && { boardClassification: data.boardClassification || null }),

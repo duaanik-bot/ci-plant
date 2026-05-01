@@ -20,30 +20,14 @@ type Material = {
   description: string
   unit: string
   boardClassification: string | null
+  attributes: string | null
   sheetLength: number | null
   sheetWidth: number | null
-  qtyAvailable: number
-  qtyReserved: number
-  shortageSheets: number
-  totalWeightKg: number
-  reorderPoint: number
-  safetyStock: number
+  packetWeight: number
   boardType: string | null
   gsm: number | null
   supplier: { id: string; name: string } | null
   active: boolean
-}
-
-function stockHealth(available: number, reorder: number, safety: number): 'green' | 'yellow' | 'red' {
-  if (available <= safety) return 'red'
-  if (available <= reorder) return 'yellow'
-  return 'green'
-}
-
-const DOT: Record<string, string> = {
-  green: 'bg-green-500',
-  yellow: 'bg-ds-warning',
-  red: 'bg-red-500',
 }
 
 const cellWrap = `${enterpriseTdBase} whitespace-normal break-words align-top`
@@ -55,7 +39,7 @@ export default function MastersMaterialsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
-  const [sortKey, setSortKey] = useState<'gsm' | 'qtyAvailable' | 'qtyReserved' | 'shortageSheets' | 'totalWeightKg' | 'active'>('gsm')
+  const [sortKey, setSortKey] = useState<'gsm' | 'packetWeight' | 'active'>('gsm')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   function load() {
@@ -119,10 +103,10 @@ export default function MastersMaterialsPage() {
         m.materialCode,
         m.description,
         m.boardType ?? '',
+        m.boardClassification ?? '',
+        m.attributes ?? '',
         m.gsm != null ? String(m.gsm) : '',
-        m.unit,
-        String(m.qtyAvailable),
-        String(m.qtyReserved),
+        String(m.packetWeight),
         m.active ? 'active' : 'inactive',
       ]
         .join(' ')
@@ -140,25 +124,13 @@ export default function MastersMaterialsPage() {
           ? (a.active ? 1 : 0)
           : sortKey === 'gsm'
             ? a.gsm ?? 0
-            : sortKey === 'qtyAvailable'
-              ? a.qtyAvailable
-              : sortKey === 'qtyReserved'
-                ? a.qtyReserved
-                : sortKey === 'shortageSheets'
-                  ? a.shortageSheets
-                  : a.totalWeightKg
+            : a.packetWeight
       const bv =
         sortKey === 'active'
           ? (b.active ? 1 : 0)
           : sortKey === 'gsm'
             ? b.gsm ?? 0
-            : sortKey === 'qtyAvailable'
-              ? b.qtyAvailable
-              : sortKey === 'qtyReserved'
-                ? b.qtyReserved
-                : sortKey === 'shortageSheets'
-                  ? b.shortageSheets
-                  : b.totalWeightKg
+            : b.packetWeight
       return av === bv ? a.materialCode.localeCompare(b.materialCode) : (av > bv ? 1 : -1) * dir
     })
     return arr
@@ -180,7 +152,7 @@ export default function MastersMaterialsPage() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-[var(--text-primary)]">Board / Paper Master</h2>
+        <h2 className="text-base font-semibold text-[var(--text-primary)]">Material Master</h2>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -219,13 +191,13 @@ export default function MastersMaterialsPage() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search code, board type, classification, size, GSM..."
+          placeholder="Search code, board type, board classification, size, GSM..."
           className="min-h-[40px] w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-card-foreground"
         />
       </div>
 
       <EnterpriseTableShell>
-        <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-sm text-[var(--text-primary)]">
+        <table className="w-full min-w-[980px] table-fixed border-collapse text-left text-sm text-[var(--text-primary)]">
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>
@@ -239,26 +211,17 @@ export default function MastersMaterialsPage() {
                   }
                 />
               </th>
-              <th className={enterpriseThClass}>Stock</th>
               <th className={enterpriseThClass}>Product Code</th>
               <th className={enterpriseThClass}>Board Type</th>
-              <th className={enterpriseThClass}>Classification</th>
+              <th className={enterpriseThClass}>Board Classification</th>
               <th className={enterpriseThClass}>Size</th>
               <th className={enterpriseThClass}>
                 <button type="button" onClick={() => toggleSort('gsm')}>GSM</button>
               </th>
               <th className={enterpriseThClass}>
-                <button type="button" onClick={() => toggleSort('qtyAvailable')}>Available Sheets</button>
+                <button type="button" onClick={() => toggleSort('packetWeight')}>Packet Weight</button>
               </th>
-              <th className={enterpriseThClass}>
-                <button type="button" onClick={() => toggleSort('qtyReserved')}>Reserved Sheets</button>
-              </th>
-              <th className={enterpriseThClass}>
-                <button type="button" onClick={() => toggleSort('shortageSheets')}>Shortage</button>
-              </th>
-              <th className={enterpriseThClass}>
-                <button type="button" onClick={() => toggleSort('totalWeightKg')}>Total Weight KG</button>
-              </th>
+              <th className={enterpriseThClass}>Attributes</th>
               <th className={enterpriseThClass}>
                 <button type="button" onClick={() => toggleSort('active')}>Status</button>
               </th>
@@ -267,7 +230,6 @@ export default function MastersMaterialsPage() {
           </thead>
           <tbody className={enterpriseTbodyClass}>
             {sorted.map((m) => {
-              const h = stockHealth(m.qtyAvailable, m.reorderPoint, m.safetyStock)
               const sizeLabel =
                 m.sheetLength && m.sheetWidth ? `${m.sheetLength} x ${m.sheetWidth}` : '—'
               return (
@@ -286,18 +248,13 @@ export default function MastersMaterialsPage() {
                       }
                     />
                   </td>
-                  <td className={`${cellWrap} w-10`}>
-                    <span className={`inline-block h-2.5 w-2.5 rounded-full ${DOT[h]}`} title={h} />
-                  </td>
                   <td className={`${cellWrap} font-designing-queue`}>{m?.materialCode ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{m?.boardType ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{m?.boardClassification ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{sizeLabel}</td>
                   <td className={enterpriseTdMonoClass}>{m?.gsm ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{m?.qtyAvailable ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{m?.qtyReserved ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{m?.shortageSheets ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{m?.totalWeightKg?.toFixed(3) ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{Number(m?.packetWeight ?? 0).toFixed(3)}</td>
+                  <td className={enterpriseTdMutedClass}>{m?.attributes ?? '—'}</td>
                   <td className={cellWrap}>
                     <span className={m?.active ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
                       {m?.active ? 'Active' : 'Inactive'}

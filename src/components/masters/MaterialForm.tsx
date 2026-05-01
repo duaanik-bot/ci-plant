@@ -48,6 +48,7 @@ export type MaterialFormData = {
   leadTimeDays: string
   supplierId: string
   weightedAvgCost: string
+  packetWeight: string
   active: boolean
 }
 
@@ -72,6 +73,7 @@ const EMPTY: MaterialFormData = {
   leadTimeDays: '7',
   supplierId: '',
   weightedAvgCost: '0',
+  packetWeight: '',
   active: true,
 }
 
@@ -155,6 +157,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
       leadTimeDays: Number(f.leadTimeDays) || 7,
       supplierId: f.supplierId || null,
       weightedAvgCost: Number(f.weightedAvgCost) || 0,
+      packetWeight: f.packetWeight ? Number(f.packetWeight) : null,
       active: f.active,
     }
 
@@ -283,7 +286,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
           <h3 className="text-ds-ink-muted font-medium mb-3">Board Classification</h3>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-ds-ink-muted mb-1">Board type</label>
+              <label className="block text-ds-ink-muted mb-1">Board Type</label>
               <EffectSelect
                 category="Board Type"
                 value={f.boardType}
@@ -291,9 +294,10 @@ export default function MaterialForm({ mode, initialData }: Props) {
                 className={cls}
                 placeholder="Select board type..."
               />
+              {fieldErrors.boardType && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.boardType}</p>}
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Board classification</label>
+              <label className="block text-ds-ink-muted mb-1">Board Classification</label>
               <EffectSelect
                 category="Board Classification"
                 value={f.boardClassification}
@@ -301,6 +305,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
                 className={cls}
                 placeholder="Select classification..."
               />
+              {fieldErrors.boardClassification && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.boardClassification}</p>}
             </div>
             <div className="md:col-span-2">
               <label className="block text-ds-ink-muted mb-1">Material attribute</label>
@@ -326,20 +331,36 @@ export default function MaterialForm({ mode, initialData }: Props) {
           <div className="grid md:grid-cols-3 gap-4">
             <div>
               <label className="block text-ds-ink-muted mb-1">GSM</label>
-              <input type="number" min={0} value={f.gsm} onChange={(e) => patch('gsm', e.target.value)} className={cls} placeholder="e.g. 300" />
+              <input type="number" min={0} value={f.gsm} onChange={(e) => patch('gsm', e.target.value)} className={`${cls} border ${errCls('gsm')}`} placeholder="e.g. 300" />
+              {fieldErrors.gsm && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.gsm}</p>}
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Sheet length (mm)</label>
-              <input type="number" step="0.01" min={0} value={f.sheetLength} onChange={(e) => patch('sheetLength', e.target.value)} className={cls} />
+              <input type="number" step="0.01" min={0} value={f.sheetLength} onChange={(e) => patch('sheetLength', e.target.value)} className={`${cls} border ${errCls('sheetLength')}`} />
+              {fieldErrors.sheetLength && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.sheetLength}</p>}
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Sheet width (mm)</label>
-              <input type="number" step="0.01" min={0} value={f.sheetWidth} onChange={(e) => patch('sheetWidth', e.target.value)} className={cls} />
+              <input type="number" step="0.01" min={0} value={f.sheetWidth} onChange={(e) => patch('sheetWidth', e.target.value)} className={`${cls} border ${errCls('sheetWidth')}`} />
+              {fieldErrors.sheetWidth && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.sheetWidth}</p>}
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Sheet weight (g)</label>
               <input type="text" readOnly value={sheetWeight > 0 ? `${sheetWeight} g` : '—'} className={`${cls} opacity-60 cursor-not-allowed`} />
               <p className="text-xs text-ds-ink-faint mt-0.5">= L x W x GSM / 1,000,000</p>
+            </div>
+            <div>
+              <label className="block text-ds-ink-muted mb-1">Packet Weight</label>
+              <input
+                type="number"
+                min={0}
+                step="0.001"
+                value={f.packetWeight}
+                onChange={(e) => patch('packetWeight', e.target.value)}
+                className={`${cls} border ${errCls('packetWeight')}`}
+                placeholder="e.g. 12.5"
+              />
+              {fieldErrors.packetWeight && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.packetWeight}</p>}
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Grain direction</label>

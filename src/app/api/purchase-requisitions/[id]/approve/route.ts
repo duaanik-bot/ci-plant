@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { createAuditLog } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,13 +41,22 @@ export async function PUT(
     )
   }
 
-  await db.purchaseRequisition.update({
+  const updated = await db.purchaseRequisition.update({
     where: { id },
     data: {
       status: 'approved',
       approvedBy: user!.id,
       approvedAt: new Date(),
     },
+  })
+
+  await createAuditLog({
+    userId: user!.id,
+    action: 'UPDATE',
+    tableName: 'purchase_requisitions',
+    recordId: updated.id,
+    oldValue: { status: pr.status },
+    newValue: { status: updated.status },
   })
 
   return NextResponse.json({

@@ -6,10 +6,9 @@ import { toast } from 'sonner'
 import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
 import { INDUSTRIAL_PRIORITY_STAR_ICON_CLASS } from '@/lib/industrial-priority-ui'
 import {
-  MASTER_BOARD_GRADES,
-  MASTER_COATINGS_AND_VARNISHES,
   MASTER_EMBOSSING_AND_LEAFING,
 } from '@/lib/master-enums'
+import { fetchMiniMasterOptions } from '@/lib/minimasters-options'
 import { mergePlanningMetaUps, readPlanningMeta } from '@/lib/planning-decision-spec'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
@@ -77,8 +76,11 @@ export function PlanningJobDetailDrawer({
   const [saving, setSaving] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
   const [saveMasterBusy, setSaveMasterBusy] = useState(false)
+  const [reserveBusy, setReserveBusy] = useState(false)
   const [sheetLengthMm, setSheetLengthMm] = useState('')
   const [sheetWidthMm, setSheetWidthMm] = useState('')
+  const [boardTypeOptions, setBoardTypeOptions] = useState<string[]>([])
+  const [coatingOptions, setCoatingOptions] = useState<string[]>([])
 
   useEffect(() => {
     if (!line) {
@@ -101,6 +103,36 @@ export function PlanningJobDetailDrawer({
     )
   }, [line?.id, line?.remarks])
 
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [coating, materialsRes] = await Promise.all([
+          fetchMiniMasterOptions('Coating'),
+          fetch('/api/masters/materials', { cache: 'no-store' }),
+        ])
+        if (cancelled) return
+        if (coating.length > 0) setCoatingOptions(coating)
+        if (materialsRes.ok) {
+          const data = (await materialsRes.json()) as Array<{ boardType?: string | null }>
+          const values = Array.from(
+            new Set(
+              (Array.isArray(data) ? data : [])
+                .map((m) => (typeof m?.boardType === 'string' ? m.boardType.trim() : ''))
+                .filter(Boolean),
+            ),
+          )
+          setBoardTypeOptions(values)
+        }
+      } catch {
+        /* keep existing values */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const handleSave = useCallback(async () => {
     if (!line) return
     setSaving(true)
@@ -115,6 +147,50 @@ export function PlanningJobDetailDrawer({
       setSaving(false)
     }
   }, [line, remarksDraft, onSave, onClose, updateRow])
+
+  const handleReserveMaterial = useCallback(async () => {
+    if (!line) return
+    setReserveBusy(true)
+    try {
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const errData = data as { error?: string; retryable?: boolean; shortageId?: string }
+        if (errData.retryable && errData.shortageId) {
+          toast.error(errData.error || 'Reservation completed, but PR creation failed.', {
+            action: {
+              label: 'Create PR for Shortage',
+              onClick: async () => {
+                const retry = await fetch(`/api/material-shortages/${errData.shortageId}/create-pr`, { method: 'POST' })
+                const retryData = await retry.json().catch(() => ({}))
+                if (!retry.ok) {
+                  toast.error((retryData as { error?: string }).error || 'Retry failed')
+                  return
+                }
+                toast.success('Purchase Request created for shortage.')
+                window.dispatchEvent(new Event('planning:refresh'))
+                window.dispatchEvent(new Event('inventory:refresh'))
+              },
+            },
+          })
+          return
+        }
+        throw new Error(errData.error || 'Reservation failed')
+      }
+      const out = data as { status: string; reservedSheets: number; shortageSheets: number; purchaseRequestId?: string | null }
+      const msg =
+        out.status === 'fully_reserved'
+          ? `Fully reserved (${out.reservedSheets.toLocaleString('en-IN')} sheets).`
+          : `Partial reserved (${out.reservedSheets.toLocaleString('en-IN')}) · shortage ${out.shortageSheets.toLocaleString('en-IN')}${out.purchaseRequestId ? ' · PR created' : ''}.`
+      toast.success(msg)
+      window.dispatchEvent(new Event('planning:refresh'))
+      window.dispatchEvent(new Event('inventory:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Reservation failed')
+    } finally {
+      setReserveBusy(false)
+    }
+  }, [line])
 
   const handleAddToBatch = useCallback(() => {
     if (!line) return
@@ -324,7 +400,7 @@ export function PlanningJobDetailDrawer({
             </div>
           </div>
           <label className="mt-1 block">
-            <span className="ds-typo-label">Board</span>
+            <span className="ds-typo-label">Board Classification</span>
             <input
               className={fieldInput + ' ' + mono}
               value={boardInput}
@@ -359,10 +435,10 @@ export function PlanningJobDetailDrawer({
             />
           </div>
           <div onClick={(e) => e.stopPropagation()}>
-            <p className="ds-typo-label">Paper</p>
+            <p className="ds-typo-label">Board Type</p>
             <PackagingEnumCombobox
-              aria-label="Paper"
-              options={MASTER_BOARD_GRADES}
+              aria-label="Board Type"
+              options={boardTypeOptions}
               value={line.paperType ?? line.carton?.paperType ?? null}
               onChange={(v) => {
                 updateRow(line.id, { paperType: v })
@@ -373,6 +449,16 @@ export function PlanningJobDetailDrawer({
               inputClassName={comboInput}
             />
           </div>
+          <div className="pt-2">
+            <Button
+              type="button"
+              onClick={() => void handleReserveMaterial()}
+              disabled={reserveBusy}
+              className="w-full"
+            >
+              {reserveBusy ? 'Reserving…' : 'Reserve Material & Sync PR'}
+            </Button>
+          </div>
         </CardSection>
 
         <CardSection title="Printing" id="plan-drawer-printing">
@@ -381,7 +467,7 @@ export function PlanningJobDetailDrawer({
               <p className="ds-typo-label">Coating</p>
               <PackagingEnumCombobox
                 aria-label="Coating"
-                options={MASTER_COATINGS_AND_VARNISHES}
+                options={coatingOptions}
                 value={line.coatingType ?? line.carton?.coatingType ?? null}
                 onChange={(v) => {
                   updateRow(line.id, { coatingType: v })
@@ -411,7 +497,7 @@ export function PlanningJobDetailDrawer({
               <p className="ds-typo-label">Laminate</p>
               <PackagingEnumCombobox
                 aria-label="Laminate"
-                options={MASTER_COATINGS_AND_VARNISHES}
+                options={coatingOptions}
                 value={line.otherCoating ?? line.carton?.laminateType ?? null}
                 onChange={(v) => {
                   updateRow(line.id, { otherCoating: v })

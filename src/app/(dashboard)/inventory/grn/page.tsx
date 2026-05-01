@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
+import { GrnAllocationPrompt } from '@/components/inventory/GrnAllocationPrompt'
 
 type InventoryItem = {
   id: string
@@ -21,6 +22,18 @@ type InventoryItem = {
   qtyAvailable: number
   qtyQuarantine: number
   weightedAvgCost: number
+}
+
+type GrnShortageMatch = {
+  shortageId: string
+  jobCardId: string
+  jobCardNumber: number | null
+  planningId: string | null
+  remainingQty: number
+  shortageQty: number
+  purchaseReqId: string | null
+  linkedCartonId: string | null
+  linkedCartonName: string | null
 }
 
 function calcSheetWeight(l: number, w: number, gsm: number) {
@@ -50,6 +63,11 @@ export default function GrnPage() {
   const [submitting, setSubmitting] = useState(false)
   const [toleranceWarning, setToleranceWarning] = useState<string | null>(null)
   const [approvalOverride, setApprovalOverride] = useState(false)
+  const [allocationPromptOpen, setAllocationPromptOpen] = useState(false)
+  const [allocationGrnId, setAllocationGrnId] = useState('')
+  const [allocationReceivedQty, setAllocationReceivedQty] = useState(0)
+  const [allocationMaterialCode, setAllocationMaterialCode] = useState('')
+  const [allocationMatches, setAllocationMatches] = useState<GrnShortageMatch[]>([])
 
   const materialSearch = useAutoPopulate<InventoryItem>({
     storageKey: 'grn-material',
@@ -137,7 +155,16 @@ export default function GrnPage() {
 
       if (!res.ok) throw new Error(data.error || 'Failed')
       toast.success(data.message)
-      router.push('/inventory')
+      const matches = Array.isArray(data.matchingShortages) ? (data.matchingShortages as GrnShortageMatch[]) : []
+      if (matches.length > 0 && typeof data.grnMovementId === 'string' && data.grnMovementId) {
+        setAllocationGrnId(data.grnMovementId)
+        setAllocationReceivedQty(Number(data.totalSheets) || Number(qty))
+        setAllocationMaterialCode(selectedMaterial?.materialCode ?? '')
+        setAllocationMatches(matches)
+        setAllocationPromptOpen(true)
+      } else {
+        router.push('/inventory')
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed')
     } finally {
@@ -339,6 +366,23 @@ export default function GrnPage() {
           {submitting ? 'Posting...' : 'Post GRN'}
         </button>
       </form>
+
+      <GrnAllocationPrompt
+        open={allocationPromptOpen}
+        grnMovementId={allocationGrnId}
+        materialCode={allocationMaterialCode}
+        receivedQty={allocationReceivedQty}
+        matches={allocationMatches}
+        onClose={() => {
+          setAllocationPromptOpen(false)
+          router.push('/inventory')
+        }}
+        onAllocated={() => {
+          toast.success('GRN allocated to shortage')
+          setAllocationPromptOpen(false)
+          router.push('/inventory')
+        }}
+      />
     </div>
   )
 }
