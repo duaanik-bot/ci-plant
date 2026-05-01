@@ -78,11 +78,11 @@ export default function NewMachinePage() {
           <input value={specification} onChange={(e) => setSpecification(e.target.value)} className="w-full rounded-lg border border-ds-line/60 bg-ds-elevated px-3 py-2 text-foreground" />
         </div>
         <div>
-          <label className="mb-1 block text-sm text-ds-ink-muted">Capacity per shift *</label>
+          <label className="mb-1 block text-sm text-ds-ink-muted">Capacity per shift</label>
           <input type="number" min={1} value={capacityPerShift} onChange={(e) => setCapacityPerShift(e.target.value)} className={`w-full rounded-lg border px-3 py-2 text-foreground ${fieldErrors.capacityPerShift ? 'border-red-500 bg-ds-elevated' : 'border-ds-line/60 bg-ds-elevated'}`} />
         </div>
         <div>
-          <label className="mb-1 block text-sm text-ds-ink-muted">Standard waste % *</label>
+          <label className="mb-1 block text-sm text-ds-ink-muted">Standard waste %</label>
           <input type="number" min={0} step="0.1" value={stdWastePct} onChange={(e) => setStdWastePct(e.target.value)} className={`w-full rounded-lg border px-3 py-2 text-foreground ${fieldErrors.stdWastePct ? 'border-red-500 bg-ds-elevated' : 'border-ds-line/60 bg-ds-elevated'}`} />
         </div>
         <div>
