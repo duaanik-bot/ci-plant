@@ -17,7 +17,7 @@ export default async function MastersLayout({
   }
 
   return (
-    <div className="mx-auto min-h-0 max-w-6xl bg-neutral-50 p-4 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
+    <div className="mx-auto min-h-0 w-full max-w-none bg-neutral-50 p-4 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <Link
           href="/orders/purchase-orders"
