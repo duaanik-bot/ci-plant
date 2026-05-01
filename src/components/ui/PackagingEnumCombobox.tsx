@@ -48,6 +48,7 @@ export function PackagingEnumCombobox({
   const listId = `${id}-listbox`
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const selectingRef = useRef(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
@@ -89,7 +90,11 @@ export function PackagingEnumCombobox({
 
   const onPick = useCallback(
     (opt: string) => {
+      selectingRef.current = true
       commit(opt === '' ? null : opt)
+      window.setTimeout(() => {
+        selectingRef.current = false
+      }, 0)
     },
     [commit],
   )
@@ -152,9 +157,11 @@ export function PackagingEnumCombobox({
           }}
           onBlur={() => {
             window.setTimeout(() => {
+              if (selectingRef.current) return
               const q = query.trim()
-              if (!q && allowEmpty) {
-                commit(null)
+              if (!q) {
+                // Keep the current value when user only opened/closed the list.
+                commit(displayValue ? displayValue : null)
                 return
               }
               const exact = (masterOptions as readonly string[]).find((o) => o.toLowerCase() === q.toLowerCase())
