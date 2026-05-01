@@ -1142,6 +1142,7 @@ export default function NewPurchaseOrderPage() {
 
   const submitQuickCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     const next: Record<string, string> = {}
     if (!qcCustomer.name.trim()) next.name = 'Name is required'
     setQcErrors(next)
@@ -1178,6 +1179,7 @@ export default function NewPurchaseOrderPage() {
 
   const submitQuickCreateCarton = async (e: React.FormEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     if (!customerId) {
       toast.error('Select a customer first')
       return

@@ -45,8 +45,14 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
   const set = (patch: Partial<PoQuickCreateCartonValues>) =>
     setValues((prev) => ({ ...prev, ...patch }))
 
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onSubmit(e)
+  }
+
   return (
-    <form onSubmit={onSubmit} className="space-y-4 text-sm">
+    <form onSubmit={handleSubmit} className="space-y-4 text-sm">
       <div>
         <label className="mb-1 block text-xs font-medium text-ds-ink-muted">
           Carton name<span className="text-ds-error">*</span>

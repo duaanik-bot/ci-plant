@@ -791,6 +791,7 @@ export default function EditPurchaseOrderPage() {
 
   const submitQuickCreateCarton = async (e: React.FormEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     if (!customerId) { toast.error('Select a customer first'); return }
     const next: Record<string, string> = {}
     if (!qcCarton.cartonName.trim()) next.cartonName = 'Carton name is required'
