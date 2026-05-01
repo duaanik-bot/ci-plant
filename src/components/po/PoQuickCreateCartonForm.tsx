@@ -27,6 +27,7 @@ export type PoQuickCreateCartonValues = {
   coatingType: string
   embossingLeafing: string
   foilType: string
+  pastingType: string
 }
 
 const comboboxControl =
@@ -47,17 +48,19 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
   const [coatingOptions, setCoatingOptions] = useState<string[]>(COATING_TYPES as unknown as string[])
   const [embossOptions, setEmbossOptions] = useState<string[]>(EMBOSSING_TYPES as unknown as string[])
   const [foilOptions, setFoilOptions] = useState<string[]>(FOIL_TYPES as unknown as string[])
+  const [pastingOptions, setPastingOptions] = useState<string[]>([])
   const [boardGradeOptions, setBoardGradeOptions] = useState<string[]>(BOARD_GRADES as unknown as string[])
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const [boardType, boardClass, coating, emboss, foil] = await Promise.all([
+      const [boardType, boardClass, coating, emboss, foil, pasting] = await Promise.all([
         fetchMiniMasterOptions('Board Type'),
         fetchMiniMasterOptions('Board Classification'),
         fetchMiniMasterOptions('Coating'),
         fetchMiniMasterOptions('Embossing'),
         fetchMiniMasterOptions('Foil'),
+        fetchMiniMasterOptions('Pasting'),
       ])
       if (cancelled) return
       if (boardType.length > 0) setPaperOptions(boardType)
@@ -65,6 +68,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
       if (coating.length > 0) setCoatingOptions(coating)
       if (emboss.length > 0) setEmbossOptions(emboss)
       if (foil.length > 0) setFoilOptions(foil)
+      if (pasting.length > 0) setPastingOptions(pasting)
     })()
     return () => {
       cancelled = true
@@ -81,7 +85,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 text-sm">
+    <form onSubmit={handleSubmit} className="space-y-5 text-sm">
       <div>
         <label className="mb-1 block text-xs font-medium text-ds-ink-muted">
           Carton name<span className="text-ds-error">*</span>
@@ -109,7 +113,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
       </div>
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">L</label>
+          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">L<span className="text-ds-error">*</span></label>
           <input
             type="number"
             step={0.01}
@@ -117,9 +121,10 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
             onChange={(e) => set({ sizeL: e.target.value })}
             className="ds-input w-full [color-scheme:dark] tabular-nums"
           />
+          {errors.sizeL ? <p className="mt-1 text-xs text-ds-error">{errors.sizeL}</p> : null}
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">W</label>
+          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">W<span className="text-ds-error">*</span></label>
           <input
             type="number"
             step={0.01}
@@ -127,9 +132,10 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
             onChange={(e) => set({ sizeW: e.target.value })}
             className="ds-input w-full [color-scheme:dark] tabular-nums"
           />
+          {errors.sizeW ? <p className="mt-1 text-xs text-ds-error">{errors.sizeW}</p> : null}
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">H</label>
+          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">H<span className="text-ds-error">*</span></label>
           <input
             type="number"
             step={0.01}
@@ -137,6 +143,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
             onChange={(e) => set({ sizeH: e.target.value })}
             className="ds-input w-full [color-scheme:dark] tabular-nums"
           />
+          {errors.sizeH ? <p className="mt-1 text-xs text-ds-error">{errors.sizeH}</p> : null}
         </div>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -163,7 +170,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
         </div>
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-ds-ink-muted">Board grade</label>
+        <label className="mb-1 block text-xs font-medium text-ds-ink-muted">Board grade<span className="text-ds-error">*</span></label>
         <PackagingEnumCombobox
           aria-label="Board grade"
           options={boardGradeOptions}
@@ -173,16 +180,18 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
           inputClassName={comboboxInput}
           className="w-full"
         />
+        {errors.boardGrade ? <p className="mt-1 text-xs text-ds-error">{errors.boardGrade}</p> : null}
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">GSM</label>
+          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">GSM<span className="text-ds-error">*</span></label>
           <input
             type="number"
             value={values.gsm}
             onChange={(e) => set({ gsm: e.target.value })}
             className="ds-input w-full [color-scheme:dark] tabular-nums"
           />
+          {errors.gsm ? <p className="mt-1 text-xs text-ds-error">{errors.gsm}</p> : null}
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-ds-ink-muted">Paper</label>
@@ -197,9 +206,9 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
           />
         </div>
       </div>
-      <div>
-        <p className="mb-1 block text-xs font-medium text-ds-ink-muted">Coating / Emboss / Foil</p>
-        <div className="mb-2">
+      <div className="space-y-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">Coating</label>
           <PackagingEnumCombobox
             aria-label="Coating"
             options={coatingOptions}
@@ -210,7 +219,8 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
             className="w-full"
           />
         </div>
-        <div className="mb-2">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">Emboss</label>
           <PackagingEnumCombobox
             aria-label="Embossing"
             options={embossOptions}
@@ -221,15 +231,30 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
             className="w-full"
           />
         </div>
-        <PackagingEnumCombobox
-          aria-label="Foil"
-          options={foilOptions}
-          value={values.foilType || null}
-          onChange={(v) => set({ foilType: v ?? '' })}
-          controlClassName={comboboxControl}
-          inputClassName={comboboxInput}
-          className="w-full"
-        />
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">Foil</label>
+          <PackagingEnumCombobox
+            aria-label="Foil"
+            options={foilOptions}
+            value={values.foilType || null}
+            onChange={(v) => set({ foilType: v ?? '' })}
+            controlClassName={comboboxControl}
+            inputClassName={comboboxInput}
+            className="w-full"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ds-ink-muted">Pasting</label>
+          <PackagingEnumCombobox
+            aria-label="Pasting"
+            options={pastingOptions}
+            value={values.pastingType || null}
+            onChange={(v) => set({ pastingType: v ?? '' })}
+            controlClassName={comboboxControl}
+            inputClassName={comboboxInput}
+            className="w-full"
+          />
+        </div>
       </div>
       <div className="flex justify-end border-t border-ds-line/40 pt-4">
         <Button type="submit" disabled={saving} variant="primary" className="min-w-[8rem]">

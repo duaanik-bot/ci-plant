@@ -463,6 +463,7 @@ export default function NewPurchaseOrderPage() {
     coatingType: '',
     embossingLeafing: '',
     foilType: '',
+    pastingType: '',
   })
   const [qcCartonErrors, setQcCartonErrors] = useState<Record<string, string>>({})
   const [qcCartonSaving, setQcCartonSaving] = useState(false)
@@ -1186,8 +1187,17 @@ export default function NewPurchaseOrderPage() {
     }
     const next: Record<string, string> = {}
     if (!qcCarton.cartonName.trim()) next.cartonName = 'Carton name is required'
+    if (!qcCarton.sizeL.trim() || Number(qcCarton.sizeL) <= 0) next.sizeL = 'Length is required'
+    if (!qcCarton.sizeW.trim() || Number(qcCarton.sizeW) <= 0) next.sizeW = 'Width is required'
+    if (!qcCarton.sizeH.trim() || Number(qcCarton.sizeH) <= 0) next.sizeH = 'Height is required'
+    if (!qcCarton.boardGrade.trim()) next.boardGrade = 'Board grade is required'
+    if (!qcCarton.gsm.trim() || Number(qcCarton.gsm) <= 0) next.gsm = 'GSM is required'
     setQcCartonErrors(next)
-    if (Object.keys(next).length) return
+    if (Object.keys(next).length) {
+      toast.error('Please fill all mandatory carton fields')
+      return
+    }
+    if (qcCartonSaving) return
     setQcCartonSaving(true)
     try {
       const body: Record<string, unknown> = {
@@ -1202,6 +1212,7 @@ export default function NewPurchaseOrderPage() {
         coatingType: qcCarton.coatingType || undefined,
         embossingLeafing: qcCarton.embossingLeafing || undefined,
         foilType: qcCarton.foilType || undefined,
+        pastingType: qcCarton.pastingType || undefined,
       }
       const l = qcCarton.sizeL ? Number(qcCarton.sizeL) : null
       const w = qcCarton.sizeW ? Number(qcCarton.sizeW) : null
@@ -1216,6 +1227,10 @@ export default function NewPurchaseOrderPage() {
       })
       const data = await res.json()
       if (!res.ok) {
+        if (data?.fields && typeof data.fields === 'object') {
+          setQcCartonErrors((data.fields as Record<string, string>) ?? {})
+        }
+        console.error('[QuickCreateCarton] create failed', data)
         toast.error(data?.error ?? 'Failed to create carton')
         return
       }
@@ -1227,19 +1242,39 @@ export default function NewPurchaseOrderPage() {
         specialInstructions?: string | null
       }
       const formatted = poCartonOptionFromMasterCreateResponse(created, qcCarton)
-      if (activeCartonLineIndex != null) {
-        applyCartonToLine(activeCartonLineIndex, formatted)
+
+      const refreshRes = await fetch(`/api/cartons?customerId=${encodeURIComponent(customerId)}&limit=280`)
+      const refreshJson = (await refreshRes.json().catch(() => [])) as Record<string, unknown>[]
+      const refreshed = Array.isArray(refreshJson) ? refreshJson.map(mapApiRowToPoCarton) : []
+      if (refreshed.length > 0) {
+        setCustomerCartons(refreshed)
+      } else {
+        setCustomerCartons((prev) => {
+          if (prev.some((p) => p.id === formatted.id)) return prev
+          return [...prev, formatted].sort((a, b) => a.cartonName.localeCompare(b.cartonName))
+        })
       }
+
+      const targetIndex =
+        activeCartonLineIndex != null
+          ? activeCartonLineIndex
+          : detailLineIdx != null
+            ? detailLineIdx
+            : kbRowIndex
+
+      if (targetIndex < 0 || targetIndex >= lines.length) {
+        toast.error('Carton created, but could not map to current PO line')
+        return
+      }
+
+      applyCartonToLine(targetIndex, formatted)
       setQcCartonOpen(false)
       setActiveCartonLineIndex(null)
-      setQcCarton({ cartonName: '', artworkCode: '', sizeL: '', sizeW: '', sizeH: '', rate: '', gstPct: '5', boardGrade: '', gsm: '', paperType: '', coatingType: '', embossingLeafing: '', foilType: '' })
-      setCustomerCartons((prev) => {
-        if (prev.some((p) => p.id === formatted.id)) return prev
-        return [...prev, formatted].sort((a, b) => a.cartonName.localeCompare(b.cartonName))
-      })
-      toast.success('Carton created')
-    } catch {
-      toast.error('Failed to create carton')
+      setQcCarton({ cartonName: '', artworkCode: '', sizeL: '', sizeW: '', sizeH: '', rate: '', gstPct: '5', boardGrade: '', gsm: '', paperType: '', coatingType: '', embossingLeafing: '', foilType: '', pastingType: '' })
+      toast.success('Carton created and added to PO')
+    } catch (err) {
+      console.error('[QuickCreateCarton] unexpected error', err)
+      toast.error(err instanceof Error ? err.message : 'Failed to create carton')
     } finally {
       setQcCartonSaving(false)
     }
