@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Layers, PauseCircle, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
@@ -38,6 +39,23 @@ type Props = {
 }
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
+
+type MaterialReadinessPanelData = {
+  materialId: string | null
+  materialCode: string | null
+  boardType: string | null
+  boardClassification: string | null
+  size: string | null
+  gsm: number | null
+  requiredSheets: number
+  availableSheets: number
+  reservedSheets: number
+  incomingSheets: number
+  shortageSheets: number
+  prStatus: string
+  grnEta: string | null
+  status: 'green' | 'yellow' | 'red' | 'grey'
+}
 
 function specFoil(line: PlanningGridLine): string {
   const s = (line.specOverrides || {}) as Record<string, unknown>
@@ -81,6 +99,8 @@ export function PlanningJobDetailDrawer({
   const [sheetWidthMm, setSheetWidthMm] = useState('')
   const [boardTypeOptions, setBoardTypeOptions] = useState<string[]>([])
   const [coatingOptions, setCoatingOptions] = useState<string[]>([])
+  const [readiness, setReadiness] = useState<MaterialReadinessPanelData | null>(null)
+  const [readinessLoading, setReadinessLoading] = useState(false)
 
   useEffect(() => {
     if (!line) {
@@ -133,6 +153,48 @@ export function PlanningJobDetailDrawer({
     }
   }, [])
 
+  const loadReadiness = useCallback(async () => {
+    if (!line) {
+      setReadiness(null)
+      return
+    }
+    setReadinessLoading(true)
+    try {
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, { cache: 'no-store' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Could not load material readiness')
+      const out = data as Partial<MaterialReadinessPanelData>
+      setReadiness({
+        materialId: typeof out.materialId === 'string' ? out.materialId : null,
+        materialCode: typeof out.materialCode === 'string' ? out.materialCode : null,
+        boardType: typeof out.boardType === 'string' ? out.boardType : null,
+        boardClassification: typeof out.boardClassification === 'string' ? out.boardClassification : null,
+        size: typeof out.size === 'string' ? out.size : null,
+        gsm: typeof out.gsm === 'number' && Number.isFinite(out.gsm) ? out.gsm : null,
+        requiredSheets: Number(out.requiredSheets) || 0,
+        availableSheets: Number(out.availableSheets) || 0,
+        reservedSheets: Number(out.reservedSheets) || 0,
+        incomingSheets: Number(out.incomingSheets) || 0,
+        shortageSheets: Number(out.shortageSheets) || 0,
+        prStatus: typeof out.prStatus === 'string' ? out.prStatus : 'not_created',
+        grnEta: typeof out.grnEta === 'string' ? out.grnEta : null,
+        status:
+          out.status === 'green' || out.status === 'yellow' || out.status === 'red' || out.status === 'grey'
+            ? out.status
+            : 'grey',
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load material readiness')
+      setReadiness(null)
+    } finally {
+      setReadinessLoading(false)
+    }
+  }, [line])
+
+  useEffect(() => {
+    void loadReadiness()
+  }, [loadReadiness])
+
   const handleSave = useCallback(async () => {
     if (!line) return
     setSaving(true)
@@ -183,6 +245,7 @@ export function PlanningJobDetailDrawer({
           ? `Fully reserved (${out.reservedSheets.toLocaleString('en-IN')} sheets).`
           : `Partial reserved (${out.reservedSheets.toLocaleString('en-IN')}) · shortage ${out.shortageSheets.toLocaleString('en-IN')}${out.purchaseRequestId ? ' · PR created' : ''}.`
       toast.success(msg)
+      await loadReadiness()
       window.dispatchEvent(new Event('planning:refresh'))
       window.dispatchEvent(new Event('inventory:refresh'))
     } catch (e) {
@@ -190,7 +253,7 @@ export function PlanningJobDetailDrawer({
     } finally {
       setReserveBusy(false)
     }
-  }, [line])
+  }, [line, loadReadiness])
 
   const handleAddToBatch = useCallback(() => {
     if (!line) return
@@ -318,6 +381,22 @@ export function PlanningJobDetailDrawer({
   const fieldInput = 'ds-input mt-0.5 w-full text-sm py-2 [color-scheme:dark]'
   const comboControl = 'border-ds-line/80 bg-ds-elevated/50'
   const comboInput = 'text-sm text-ds-ink'
+  const noMaterialSelected = !readinessLoading && !readiness?.materialId
+  const reserveDisabled = reserveBusy || readinessLoading || noMaterialSelected
+  const statusTone =
+    readiness?.status === 'green'
+      ? 'border-ds-success/35 bg-ds-success/10 text-ds-success'
+      : readiness?.status === 'yellow'
+        ? 'border-ds-warning/35 bg-ds-warning/10 text-ds-warning'
+        : readiness?.status === 'red'
+          ? 'border-ds-danger/35 bg-ds-danger/10 text-ds-danger'
+          : 'border-ds-line/60 bg-ds-elevated/40 text-ds-ink-muted'
+  const materialSummary = readiness
+    ? `${Math.max(0, readiness.availableSheets).toLocaleString('en-IN')} sheets available out of ${Math.max(
+        0,
+        readiness.requiredSheets,
+      ).toLocaleString('en-IN')} required. Shortage: ${Math.max(0, readiness.shortageSheets).toLocaleString('en-IN')}.`
+    : 'No material selected.'
 
   return (
     <StandardDrawer
@@ -449,11 +528,47 @@ export function PlanningJobDetailDrawer({
               inputClassName={comboInput}
             />
           </div>
+        </CardSection>
+
+        <CardSection title="Material Readiness" id="plan-drawer-material-readiness">
+          <div className={`rounded-ds-md border px-3 py-3 text-xs ${statusTone}`}>
+            <p className="text-sm font-semibold text-ds-ink">Material Readiness</p>
+            <p className="mt-1 text-xs text-ds-ink-muted">
+              {readinessLoading ? 'Loading material readiness…' : noMaterialSelected ? 'No material selected.' : materialSummary}
+            </p>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <div><span className="text-ds-ink-muted">Material Code</span><p className={`${mono} text-ds-ink`}>{readiness?.materialCode || '-'}</p></div>
+            <div><span className="text-ds-ink-muted">Board Type</span><p className="text-ds-ink">{readiness?.boardType || '-'}</p></div>
+            <div><span className="text-ds-ink-muted">Board Classification</span><p className="text-ds-ink">{readiness?.boardClassification || '-'}</p></div>
+            <div><span className="text-ds-ink-muted">Size</span><p className={`${mono} text-ds-ink`}>{readiness?.size || '-'}</p></div>
+            <div><span className="text-ds-ink-muted">GSM</span><p className={`${mono} text-ds-ink`}>{readiness?.gsm ? `${readiness.gsm} GSM` : '-'}</p></div>
+            <div><span className="text-ds-ink-muted">Required Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.requiredSheets || 0).toLocaleString('en-IN')}</p></div>
+            <div><span className="text-ds-ink-muted">Available Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.availableSheets || 0).toLocaleString('en-IN')}</p></div>
+            <div><span className="text-ds-ink-muted">Reserved Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.reservedSheets || 0).toLocaleString('en-IN')}</p></div>
+            <div><span className="text-ds-ink-muted">Incoming Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.incomingSheets || 0).toLocaleString('en-IN')}</p></div>
+            <div><span className="text-ds-ink-muted">Shortage Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.shortageSheets || 0).toLocaleString('en-IN')}</p></div>
+            <div><span className="text-ds-ink-muted">PR Status</span><p className="text-ds-ink">{readiness?.prStatus || '-'}</p></div>
+            <div><span className="text-ds-ink-muted">GRN ETA</span><p className={`${mono} text-ds-ink`}>{readiness?.grnEta ? new Date(readiness.grnEta).toLocaleDateString('en-IN') : '-'}</p></div>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <Link
+              href={
+                readiness?.materialId
+                  ? `/inventory?materialId=${encodeURIComponent(readiness.materialId)}`
+                  : `/inventory?ledgerBoard=${encodeURIComponent(readiness?.boardType || '')}&ledgerGsm=${encodeURIComponent(String(readiness?.gsm ?? ''))}`
+              }
+              className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
+            >
+              View Stock
+            </Link>
+            {noMaterialSelected ? <span className="text-xs text-ds-warning">No material selected.</span> : null}
+          </div>
           <div className="pt-2">
             <Button
               type="button"
               onClick={() => void handleReserveMaterial()}
-              disabled={reserveBusy}
+              disabled={reserveDisabled}
               className="w-full"
             >
               {reserveBusy ? 'Reserving…' : 'Reserve Material & Sync PR'}

@@ -30,6 +30,42 @@ const bodySchema = z.object({
   approvalOverride: z.boolean().default(false),
 })
 
+export async function GET(req: NextRequest) {
+  const { error } = await requireRole(
+    'stores',
+    'production_manager',
+    'operations_head',
+    'md',
+  )
+  if (error) return error
+
+  const { searchParams } = new URL(req.url)
+  const materialId = searchParams.get('materialId')?.trim()
+  if (!materialId) {
+    return NextResponse.json({ openShortages: [] })
+  }
+
+  const matchingShortages = await findOpenShortagesForMaterial(materialId)
+  const shortageCards = await Promise.all(
+    matchingShortages.map(async (s) => {
+      const jc = await db.productionJobCard.findUnique({
+        where: { id: s.jobCardId },
+        select: { id: true, jobCardNumber: true },
+      })
+      return {
+        shortageId: s.id,
+        jobCardId: s.jobCardId,
+        jobCardNumber: jc?.jobCardNumber ?? null,
+        planningId: s.planningId,
+        pendingShortage: Number(s.remainingQty),
+        requiredQty: Number(s.shortageQty),
+      }
+    }),
+  )
+
+  return NextResponse.json({ openShortages: shortageCards })
+}
+
 export async function POST(req: NextRequest) {
   const { error, user } = await requireRole(
     'stores',

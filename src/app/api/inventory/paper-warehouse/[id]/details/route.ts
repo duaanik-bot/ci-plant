@@ -22,6 +22,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
       gsm: true,
       sheetLength: true,
       sheetWidth: true,
+      qtyQuarantine: true,
     },
   })
   if (!material) return NextResponse.json({ error: 'Material not found' }, { status: 404 })
@@ -61,6 +62,28 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
       },
     }),
   ])
+
+  const shortages = await db.materialShortage.findMany({
+    where: { materialId: id, status: 'open' },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      jobCardId: true,
+      planningId: true,
+      shortageQty: true,
+      remainingQty: true,
+      requiredByDate: true,
+      createdAt: true,
+    },
+  })
+
+  const shortageJobCards = shortages.length
+    ? await db.productionJobCard.findMany({
+        where: { id: { in: shortages.map((s) => s.jobCardId) } },
+        select: { id: true, jobCardNumber: true, status: true },
+      })
+    : []
+  const shortageJobCardMap = new Map(shortageJobCards.map((j) => [j.id, j]))
 
   const planningIds = Array.from(
     new Set(reservations.map((r) => r.planningId).filter((v): v is string => typeof v === 'string' && v.length > 0)),
@@ -109,6 +132,21 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
         },
       }
     }),
+    shortages: shortages.map((s) => {
+      const jc = shortageJobCardMap.get(s.jobCardId)
+      const materialIncoming = Number(material.qtyQuarantine ?? 0)
+      const priority = materialIncoming > 0 ? 'normal' : 'urgent'
+      return {
+        id: s.id,
+        jobCardId: s.jobCardId,
+        jobCardNumber: jc?.jobCardNumber ?? null,
+        planningId: s.planningId,
+        requiredQty: Number(s.shortageQty),
+        pendingShortage: Number(s.remainingQty),
+        requiredByDate: s.requiredByDate ? s.requiredByDate.toISOString() : null,
+        priority,
+        status: jc?.status ?? null,
+      }
+    }),
   })
 }
-

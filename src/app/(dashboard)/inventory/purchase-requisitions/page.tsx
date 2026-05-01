@@ -14,6 +14,14 @@ type PR = {
   sourceJobCardId?: string | null
   sourcePlanningId?: string | null
   material: { materialCode: string; description: string; unit: string }
+  linkedShortages?: Array<{
+    jobCardId: string
+    jobCardNumber: number | null
+    planningId: string | null
+    requiredByDate: string | null
+    pendingShortage: number
+    requiredQty: number
+  }>
 }
 
 type Stage = PrUiStage
@@ -114,7 +122,7 @@ export default function PurchaseRequisitionsPage() {
         {STAGES.map((stage) => {
           const rows = grouped[stage.key]
           const groupedByMaterial = Object.values(
-            rows.reduce<Record<string, { key: string; materialCode: string; description: string; unit: string; totalQty: number; jobs: Set<string>; rows: PR[] }>>((acc, r) => {
+            rows.reduce<Record<string, { key: string; materialCode: string; description: string; unit: string; totalQty: number; jobs: Set<string>; rows: PR[]; requiredDates: string[]; priority: 'urgent' | 'normal' }>>((acc, r) => {
               const key = r.materialId
               if (!acc[key]) {
                 acc[key] = {
@@ -125,10 +133,19 @@ export default function PurchaseRequisitionsPage() {
                   totalQty: 0,
                   jobs: new Set<string>(),
                   rows: [],
+                  requiredDates: [],
+                  priority: 'normal',
                 }
               }
               acc[key].totalQty += Number(r.qtyRequired)
               if (r.sourceJobCardId) acc[key].jobs.add(r.sourceJobCardId)
+              const linked = Array.isArray(r.linkedShortages) ? r.linkedShortages : []
+              for (const l of linked) {
+                if (l.jobCardId) acc[key].jobs.add(l.jobCardId)
+                if (l.requiredByDate) acc[key].requiredDates.push(l.requiredByDate)
+              }
+              const hasIncoming = stage.key !== 'draft'
+              if (linked.length > 0 && !hasIncoming) acc[key].priority = 'urgent'
               acc[key].rows.push(r)
               return acc
             }, {}),
@@ -149,7 +166,23 @@ export default function PurchaseRequisitionsPage() {
                     <p className="mt-1 text-xs text-ds-ink-muted">
                       Total: <span className="font-semibold text-ds-ink">{g.totalQty.toLocaleString('en-IN')} {g.unit}</span>
                     </p>
-                    <p className="text-xs text-ds-ink-faint">Linked jobs: {g.jobs.size || '-'}</p>
+                    <p className="text-xs text-ds-ink-faint">
+                      Linked jobs:{' '}
+                      {g.jobs.size === 0
+                        ? '-'
+                        : Array.from(g.jobs).slice(0, 3).join(', ') + (g.jobs.size > 3 ? ` +${g.jobs.size - 3} more` : '')}
+                    </p>
+                    <p className="text-xs text-ds-ink-faint">
+                      Required date:{' '}
+                      {g.requiredDates.length > 0
+                        ? new Date(
+                            g.requiredDates.sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0]!,
+                          ).toLocaleDateString('en-IN')
+                        : '-'}
+                    </p>
+                    <p className={g.priority === 'urgent' ? 'text-rose-300 text-xs' : 'text-amber-300 text-xs'}>
+                      Priority: {g.priority === 'urgent' ? 'Urgent' : 'Normal'}
+                    </p>
 
                     <div className="mt-2 flex flex-wrap gap-1">
                       {STAGES.filter((s) => s.key !== stage.key).map((to) => (

@@ -122,12 +122,24 @@ type MaterialDetailPayload = {
       customerName: string
     }
   }>
+  shortages: Array<{
+    id: string
+    jobCardId: string
+    jobCardNumber: number | null
+    planningId: string | null
+    requiredQty: number
+    pendingShortage: number
+    requiredByDate: string | null
+    priority: 'urgent' | 'normal'
+    status: string | null
+  }>
 }
 
 function InventoryPageContent() {
   const searchParams = useSearchParams()
   const ledgerGsm = searchParams.get('ledgerGsm')?.trim() ?? ''
   const ledgerBoard = searchParams.get('ledgerBoard')?.trim() ?? ''
+  const deepLinkMaterialId = searchParams.get('materialId')?.trim() ?? ''
   const { data: session } = useSession()
   const [items, setItems] = useState<StockStateItem[]>([])
   const [alerts, setAlerts] = useState<StockStateItem[]>([])
@@ -170,6 +182,7 @@ function InventoryPageContent() {
   const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
   const [materialDrawerLoading, setMaterialDrawerLoading] = useState(false)
   const [materialDrawerData, setMaterialDrawerData] = useState<MaterialDetailPayload | null>(null)
+  const [deepLinkOpenedMaterialId, setDeepLinkOpenedMaterialId] = useState<string | null>(null)
 
   const loadPaperLedger = useCallback(
     async (opts: { customerPo: string; gsm?: string; board?: string }) => {
@@ -268,6 +281,16 @@ function InventoryPageContent() {
     window.addEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
     return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
   }, [debouncedHubPo, ledgerGsm, ledgerBoard, loadPaperLedger])
+
+  useEffect(() => {
+    if (!deepLinkMaterialId) return
+    if (deepLinkOpenedMaterialId === deepLinkMaterialId) return
+    if (!paperWarehouseRows.length) return
+    const row = paperWarehouseRows.find((r) => r.material_id === deepLinkMaterialId)
+    if (!row) return
+    setDeepLinkOpenedMaterialId(deepLinkMaterialId)
+    void openMaterialDrawer(row)
+  }, [deepLinkMaterialId, deepLinkOpenedMaterialId, paperWarehouseRows])
 
   useEffect(() => {
     if (!drawerRow) {
@@ -558,6 +581,7 @@ function InventoryPageContent() {
                     <th className="px-3 py-2">GSM</th>
                     <th className="px-3 py-2">Available</th>
                     <th className="px-3 py-2">Reserved</th>
+                    <th className="px-3 py-2">Free stock</th>
                     <th className="px-3 py-2">Incoming</th>
                     <th className="px-3 py-2">Shortage</th>
                     <th className="px-3 py-2">Reorder</th>
@@ -582,6 +606,17 @@ function InventoryPageContent() {
                       <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.gsm ?? '-'}</td>
                       <td className={`px-3 py-2 text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
                       <td className={`px-3 py-2 text-amber-300 ${ledgerMono}`}>{fmt(row.reserved_sheets)}</td>
+                      <td
+                        className={`px-3 py-2 ${ledgerMono} ${
+                          row.available_sheets - row.reserved_sheets > 0
+                            ? 'text-emerald-300'
+                            : row.available_sheets - row.reserved_sheets === 0
+                              ? 'text-amber-300'
+                              : 'text-rose-300'
+                        }`}
+                      >
+                        {fmt(row.available_sheets - row.reserved_sheets)}
+                      </td>
                       <td className={`px-3 py-2 text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
                       <td className={`px-3 py-2 text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
                       <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
@@ -621,7 +656,7 @@ function InventoryPageContent() {
               </div>
 
               <div>
-                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Reserved products / jobs</p>
+                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Reserved by Jobs</p>
                 {materialDrawerLoading ? (
                   <p className="text-ds-ink-faint">Loading…</p>
                 ) : !materialDrawerData || materialDrawerData.reservations.length === 0 ? (
@@ -631,13 +666,40 @@ function InventoryPageContent() {
                     {materialDrawerData.reservations.map((r) => (
                       <li key={r.id} className="rounded border border-ds-line/40 px-2 py-1.5">
                         <p className="text-ds-ink">
-                          JC#{r.jobCard.jobCardNumber} · {r.jobCard.customerName}
+                          Job Card: {r.jobCard.id} · JC#{r.jobCard.jobCardNumber} · {r.jobCard.customerName}
                         </p>
                         <p className="text-ds-ink-faint">
                           {r.cartonName ?? 'Carton —'} {r.poNumber ? `· ${r.poNumber}` : ''}
                         </p>
                         <p className="text-ds-warning">
                           Reserved {r.reservedSheets.toLocaleString('en-IN')} / Required {r.requiredSheets.toLocaleString('en-IN')}
+                        </p>
+                        <p className="text-ds-ink-faint">Status: {r.jobCard.status || '-'}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Shortage priority</p>
+                {materialDrawerLoading ? (
+                  <p className="text-ds-ink-faint">Loading…</p>
+                ) : !materialDrawerData || !Array.isArray(materialDrawerData.shortages) || materialDrawerData.shortages.length === 0 ? (
+                  <p className="text-ds-ink-faint">No open shortages.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {materialDrawerData.shortages.map((s) => (
+                      <li key={s.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                        <p className="text-ds-ink">
+                          Job Card: {s.jobCardId} {s.jobCardNumber ? `· JC#${s.jobCardNumber}` : ''}
+                        </p>
+                        <p className="text-ds-ink-faint">
+                          Required {Number(s.requiredQty || 0).toLocaleString('en-IN')} · Pending {Number(s.pendingShortage || 0).toLocaleString('en-IN')}
+                        </p>
+                        <p className={s.priority === 'urgent' ? 'text-rose-300' : 'text-amber-300'}>
+                          Priority: {s.priority === 'urgent' ? 'Urgent' : 'Normal'}
+                          {s.requiredByDate ? ` · Required by ${new Date(s.requiredByDate).toLocaleDateString('en-IN')}` : ''}
                         </p>
                       </li>
                     ))}
@@ -747,6 +809,7 @@ function InventoryPageContent() {
                   <th className="px-3 py-2">GSM</th>
                   <th className="px-3 py-2">Available</th>
                   <th className="px-3 py-2">Reserved</th>
+                  <th className="px-3 py-2">Free stock</th>
                   <th className="px-3 py-2">Incoming</th>
                   <th className="px-3 py-2">Shortage</th>
                   <th className="px-3 py-2">Reorder</th>
@@ -763,6 +826,17 @@ function InventoryPageContent() {
                     <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.gsm ?? '-'}</td>
                     <td className={`px-3 py-2 text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
                     <td className={`px-3 py-2 text-amber-300 ${ledgerMono}`}>{fmt(row.reserved_sheets)}</td>
+                    <td
+                      className={`px-3 py-2 ${ledgerMono} ${
+                        row.available_sheets - row.reserved_sheets > 0
+                          ? 'text-emerald-300'
+                          : row.available_sheets - row.reserved_sheets === 0
+                            ? 'text-amber-300'
+                            : 'text-rose-300'
+                      }`}
+                    >
+                      {fmt(row.available_sheets - row.reserved_sheets)}
+                    </td>
                     <td className={`px-3 py-2 text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
                     <td className={`px-3 py-2 text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
                     <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>

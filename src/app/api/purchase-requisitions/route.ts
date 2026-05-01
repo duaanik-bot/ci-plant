@@ -38,6 +38,28 @@ export async function GET(req: NextRequest) {
   })
 
   const ids = list.map((r) => r.id)
+  const shortages = ids.length
+    ? await db.materialShortage.findMany({
+        where: { purchaseReqId: { in: ids } },
+        select: {
+          purchaseReqId: true,
+          jobCardId: true,
+          planningId: true,
+          requiredByDate: true,
+          remainingQty: true,
+          shortageQty: true,
+        },
+      })
+    : []
+
+  const jobIds = Array.from(new Set(shortages.map((s) => s.jobCardId)))
+  const jobCards = jobIds.length
+    ? await db.productionJobCard.findMany({
+        where: { id: { in: jobIds } },
+        select: { id: true, jobCardNumber: true },
+      })
+    : []
+  const jobMap = new Map(jobCards.map((j) => [j.id, j]))
   const audits = ids.length
     ? await db.auditLog.findMany({
         where: {
@@ -63,6 +85,16 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(
     list.map((r) => ({
+      linkedShortages: shortages
+        .filter((s) => s.purchaseReqId === r.id)
+        .map((s) => ({
+          jobCardId: s.jobCardId,
+          jobCardNumber: jobMap.get(s.jobCardId)?.jobCardNumber ?? null,
+          planningId: s.planningId,
+          requiredByDate: s.requiredByDate ? s.requiredByDate.toISOString() : null,
+          pendingShortage: Number(s.remainingQty),
+          requiredQty: Number(s.shortageQty),
+        })),
       ...r,
       uiStage: dbStatusToUiStage(r.status),
       orderedAt:

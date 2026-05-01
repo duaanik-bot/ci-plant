@@ -36,6 +36,15 @@ type GrnShortageMatch = {
   linkedCartonName: string | null
 }
 
+type OpenShortagePreview = {
+  shortageId: string
+  jobCardId: string
+  jobCardNumber: number | null
+  planningId: string | null
+  pendingShortage: number
+  requiredQty: number
+}
+
 function calcSheetWeight(l: number, w: number, gsm: number) {
   if (!l || !w || !gsm) return 0
   return parseFloat(((l * w * gsm) / 1_000_000).toFixed(4))
@@ -68,6 +77,7 @@ export default function GrnPage() {
   const [allocationReceivedQty, setAllocationReceivedQty] = useState(0)
   const [allocationMaterialCode, setAllocationMaterialCode] = useState('')
   const [allocationMatches, setAllocationMatches] = useState<GrnShortageMatch[]>([])
+  const [openShortages, setOpenShortages] = useState<OpenShortagePreview[]>([])
 
   const materialSearch = useAutoPopulate<InventoryItem>({
     storageKey: 'grn-material',
@@ -91,6 +101,27 @@ export default function GrnPage() {
     setSelectedMaterial(m)
     setEntryUnit('sheets')
   }
+
+  useEffect(() => {
+    let cancelled = false
+    if (!materialId) {
+      setOpenShortages([])
+      return
+    }
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/inventory/grn?materialId=${encodeURIComponent(materialId)}`, { cache: 'no-store' })
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        setOpenShortages(Array.isArray((data as { openShortages?: unknown[] }).openShortages) ? ((data as { openShortages: OpenShortagePreview[] }).openShortages) : [])
+      } catch {
+        if (!cancelled) setOpenShortages([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [materialId])
 
   const isBoardType = !!(selectedMaterial?.boardType && selectedMaterial?.gsm && selectedMaterial?.sheetLength && selectedMaterial?.sheetWidth)
   const sheetWeightG = useMemo(
@@ -243,6 +274,28 @@ export default function GrnPage() {
               </div>
             </div>
           )}
+
+          {selectedMaterial ? (
+            <div className="mt-3 rounded-lg border border-ds-line/50 bg-ds-elevated/40 p-3">
+              <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-2">Open Shortages</p>
+              {openShortages.length === 0 ? (
+                <p className="text-xs text-ds-ink-faint">No open shortages for this material.</p>
+              ) : (
+                <ul className="space-y-1.5 text-xs">
+                  {openShortages.map((s) => (
+                    <li key={s.shortageId} className="flex flex-wrap items-center justify-between gap-2 rounded border border-ds-line/40 px-2 py-1.5">
+                      <span className="text-ds-ink">
+                        Job {s.jobCardId} {s.jobCardNumber ? `· JC#${s.jobCardNumber}` : ''}
+                      </span>
+                      <span className="text-ds-ink-faint">
+                        Required {Number(s.requiredQty).toLocaleString('en-IN')} · Pending {Number(s.pendingShortage).toLocaleString('en-IN')}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
         </div>
 
         {/* Quantity Entry */}
