@@ -44,6 +44,7 @@ import {
   STATUS_CHIP_BASE,
 } from '@/components/design-system/tokens'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
+import { Button } from '@/components/design-system/Button'
 import { AwGroupEditDrawer } from '@/components/designing/AwGroupEditDrawer'
 
 type SpecOverrides = {
@@ -1514,14 +1515,15 @@ export default function DesigningQueuePage() {
             <div className="flex items-center gap-2">
               <span className="text-xs text-ds-ink-faint">{selectedRowIds.size} Selected</span>
               <div className="relative">
-                <button
+                <Button
+                  variant="utility"
                   type="button"
                   onClick={() => setHubsMenuOpen((v) => !v)}
                   disabled={selectedRowIds.size === 0 || bulkPushing || bulkToolingPushing != null}
-                  className="h-9 rounded border border-ds-line/60 bg-ds-main px-3 text-xs font-medium text-ds-ink disabled:opacity-40"
+                  className="h-9 px-3 text-xs"
                 >
                   Push to Hubs
-                </button>
+                </Button>
                 {hubsMenuOpen ? (
                   <div className="absolute right-0 top-10 z-20 min-w-[10rem] rounded-lg border border-ds-line/60 bg-card p-1 shadow-lg">
                     <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToPlateHub() }}>Plate</button>
@@ -1531,14 +1533,15 @@ export default function DesigningQueuePage() {
                   </div>
                 ) : null}
               </div>
-              <button
+              <Button
+                variant="success"
                 type="button"
                 onClick={() => void bulkPushSelectedToJobCards()}
                 disabled={selectedRowIds.size === 0 || bulkPushing || bulkToolingPushing != null}
-                className="h-9 rounded bg-ds-brand px-3 text-xs font-semibold text-white disabled:opacity-40"
+                className="h-9 px-3 text-xs font-semibold"
               >
                 Push to Job Card
-              </button>
+              </Button>
             </div>
           </div>
         </section>

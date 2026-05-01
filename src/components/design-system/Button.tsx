@@ -3,7 +3,7 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react'
 import { cn } from '@/lib/cn'
 
-type Variant = 'primary' | 'secondary' | 'danger' | 'ghost'
+type Variant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'success' | 'utility'
 
 const variantClass: Record<Variant, string> = {
   primary:
@@ -14,6 +14,10 @@ const variantClass: Record<Variant, string> = {
     'bg-[var(--error)] text-white hover:opacity-95 focus-visible:ring-[var(--error)]/35',
   ghost:
     'text-[var(--text-secondary)] hover:bg-[var(--bg-muted)] focus-visible:ring-[var(--brand-primary)]/20',
+  success:
+    'bg-[var(--success)] text-white shadow-sm hover:brightness-95 hover:shadow-md focus-visible:ring-[var(--success)]/35',
+  utility:
+    'border border-violet-400/45 bg-violet-500/10 text-violet-700 shadow-sm hover:bg-violet-500/15 hover:shadow-md focus-visible:ring-violet-400/35 dark:text-violet-300',
 }
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
