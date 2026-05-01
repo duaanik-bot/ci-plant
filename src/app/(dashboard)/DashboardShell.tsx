@@ -46,7 +46,7 @@ type MegaNavItem = {
   Icon: LucideIcon
   iconWrap: string
 }
-type SimpleNavItem = { label: string; href: string }
+type SimpleNavItem = { label: string; href: string; description?: string; Icon?: LucideIcon }
 type MenuItem = SimpleNavItem | MegaNavItem
 
 function BrandLogoMark({ className }: { className?: string }) {
@@ -108,6 +108,38 @@ function MegaNavLink({ item }: { item: MegaNavItem }) {
   )
 }
 
+function BlockNavLink({
+  item,
+  onNavigate,
+}: {
+  item: MenuItem
+  onNavigate?: (href: string) => void
+}) {
+  const Icon = 'Icon' in item && item.Icon ? item.Icon : Stamp
+  const description = 'description' in item ? (item.description ?? '') : ''
+  return (
+    <button
+      type="button"
+      onClick={() => (onNavigate ? onNavigate(item.href) : undefined)}
+      className="group w-full rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-3 text-left transition-colors hover:bg-[var(--bg-muted)]"
+    >
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--bg-muted)] text-[var(--brand-primary)]">
+          <Icon className="h-4 w-4" aria-hidden />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--brand-primary)]">
+            {item.label}
+          </span>
+          <span className="mt-0.5 block text-xs leading-snug text-[var(--text-secondary)]">
+            {description || 'Open module'}
+          </span>
+        </span>
+      </div>
+    </button>
+  )
+}
+
 function isMegaNavItem(item: MenuItem): item is MegaNavItem {
   return 'description' in item && 'Icon' in item && 'iconWrap' in item
 }
@@ -165,19 +197,19 @@ export function DashboardShell({
           label: 'Orders',
           items: [
             { label: 'Customer POs', href: '/orders/purchase-orders' },
-            { label: 'Planning', href: '/orders/planning' },
-            { label: 'Artwork Queue', href: '/orders/designing' },
-            { label: 'Job Cards', href: '/production/job-cards' },
+            { label: 'Planning', href: '/orders/planning', description: 'Plan print jobs and scheduling' },
+            { label: 'Artwork Queue', href: '/orders/designing', description: 'Artwork readiness and job prep' },
+            { label: 'Job Cards', href: '/production/job-cards', description: 'Create and track job cards' },
           ],
         },
         {
           key: 'tooling',
           label: 'Tooling Hub',
           items: [
-            { label: 'Plates', href: '/hub/plates' },
-            { label: 'Dies', href: '/hub/dies' },
-            { label: 'Embossing Blocks', href: '/hub/blocks' },
-            { label: 'Shade Cards', href: '/hub/shade-card-hub' },
+            { label: 'Plates', href: '/hub/plates', description: 'CTP and plate workflow', Icon: Printer },
+            { label: 'Dies', href: '/hub/dies', description: 'Die readiness and issuance', Icon: Scissors },
+            { label: 'Embossing Blocks', href: '/hub/blocks', description: 'Emboss block tracking', Icon: Layers },
+            { label: 'Shade Cards', href: '/hub/shade-card-hub', description: 'Shade approvals and control', Icon: Droplets },
           ],
         },
         {
@@ -281,33 +313,33 @@ export function DashboardShell({
           label: 'Procurement',
           items: [
             { label: 'Purchase Requests', href: '/inventory/purchase-requisitions' },
-            { label: 'GRN', href: '/inventory/grn' },
+            { label: 'GRN', href: '/inventory/grn', description: 'Goods receipt entries' },
           ],
         },
         {
           key: 'inventory',
           label: 'Inventory',
           items: [
-            { label: 'Paper Warehouse', href: '/inventory#paper-ledger' },
-            { label: 'FG Warehouse', href: '/inventory#fg-ledger' },
+            { label: 'Paper Warehouse', href: '/inventory#paper-ledger', description: 'Paper stock and reserve' },
+            { label: 'FG Warehouse', href: '/inventory#fg-ledger', description: 'Finished goods ledger' },
           ],
         },
         {
           key: 'stores',
           label: 'Stores',
           items: [
-            { label: 'Issue Sheets', href: '/stores/issue' },
-            { label: 'Approve Excess', href: '/stores/approve-excess' },
+            { label: 'Issue Sheets', href: '/stores/issue', description: 'Material issue and consumption' },
+            { label: 'Approve Excess', href: '/stores/approve-excess', description: 'Short and excess approvals' },
           ],
         },
-        { key: 'quality', label: 'Quality', items: [{ label: 'Quality Control', href: '/qms/qc' }] },
+        { key: 'quality', label: 'Quality', items: [{ label: 'Quality Control', href: '/qms/qc', description: 'QC checks and logs', Icon: ClipboardCheck }] },
         {
           key: 'reports',
           label: 'Reports',
           items: [
-            { label: 'MD Dashboard', href: '/reports/dashboard' },
-            { label: 'Production Summary', href: '/reports/production' },
-            { label: 'Wastage Report', href: '/reports/wastage' },
+            { label: 'MD Dashboard', href: '/reports/dashboard', description: 'Executive production view', Icon: LayoutGrid },
+            { label: 'Production Summary', href: '/reports/production', description: 'Output and run summary', Icon: FileText },
+            { label: 'Wastage Report', href: '/reports/wastage', description: 'Wastage trends and losses', Icon: Scale },
           ],
         },
         {
@@ -315,16 +347,16 @@ export function DashboardShell({
           label: 'Masters',
           hidden: !canSeeMasters,
           items: [
-            { label: 'Customers', href: '/masters/customers' },
-            { label: 'Suppliers', href: '/masters/suppliers' },
-            { label: 'Cartons', href: '/masters/cartons' },
-            { label: 'Materials', href: '/masters/materials' },
-            { label: 'Machines', href: '/masters/machines' },
-            { label: 'Users', href: '/masters/users' },
-            { label: 'Department', href: '/masters/departments' },
-            { label: 'Employee', href: '/masters/employees' },
-            { label: 'QC Instrument', href: '/masters/instruments' },
-            { label: 'Effects', href: '/masters/effects' },
+            { label: 'Customers', href: '/masters/customers', description: 'Customer profiles and terms' },
+            { label: 'Suppliers', href: '/masters/suppliers', description: 'Vendor details and lead times' },
+            { label: 'Cartons', href: '/masters/cartons', description: 'Carton templates and specs' },
+            { label: 'Materials', href: '/masters/materials', description: 'Paper and material records' },
+            { label: 'Machines', href: '/masters/machines', description: 'Machine capacity and PM' },
+            { label: 'Users', href: '/masters/users', description: 'User access and roles' },
+            { label: 'Department', href: '/masters/departments', description: 'Department structure' },
+            { label: 'Employee', href: '/masters/employees', description: 'Employee master records' },
+            { label: 'QC Instrument', href: '/masters/instruments', description: 'QC instrument master' },
+            { label: 'Effects', href: '/masters/effects', description: 'Coating, foil, emboss specs' },
           ],
         },
       ].filter((m) => !('hidden' in m && m.hidden)),
@@ -477,12 +509,6 @@ export function DashboardShell({
                     <li
                       key={menu.key}
                       className="relative shrink-0"
-                      onMouseEnter={() => {
-                        if (!('href' in menu)) setOpenMenu(menu.key)
-                      }}
-                      onMouseLeave={() => {
-                        if (!('href' in menu)) setOpenMenu((prev) => (prev === menu.key ? null : prev))
-                      }}
                     >
                       {'href' in menu ? (
                         <Link
@@ -521,43 +547,46 @@ export function DashboardShell({
                         <div className="absolute left-0 top-full z-[70] pt-1 transition-all duration-150 ease-out">
                           <div className={clsx(
                             'rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.1),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]',
-                            menu.key === 'live' || menu.key === 'production' ? 'w-[520px] max-w-[calc(100vw-2rem)]' : 'w-[320px]',
+                            menu.key === 'live' || menu.key === 'production' || menu.key === 'masters'
+                              ? 'w-[760px] max-w-[calc(100vw-2rem)]'
+                              : 'w-[520px] max-w-[calc(100vw-2rem)]',
                           )}>
                             {menu.key === 'live' ? (
                               <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
                                 Production Execution
                               </p>
                             ) : null}
-                            <div className="grid grid-cols-1 gap-0.5">
+                            <div
+                              className={clsx(
+                                'grid gap-2',
+                                menu.items.length >= 6 ? 'grid-cols-3' : menu.items.length >= 3 ? 'grid-cols-2' : 'grid-cols-1',
+                              )}
+                            >
                               {menu.items.map((item) =>
                                 isMegaNavItem(item) ? (
-                                  <Link
+                                  <div
                                     key={item.href}
-                                    href={item.href}
-                                    className="block"
                                   >
-                                    <MegaNavLink
-                                      item={{
-                                        label: item.label,
-                                        href: item.href,
-                                        description: item.description ?? '',
-                                        Icon: item.Icon,
-                                        iconWrap: item.iconWrap ?? 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+                                    <BlockNavLink
+                                      item={item}
+                                      onNavigate={(href) => {
+                                        setOpenMenu(null)
+                                        router.push(href)
                                       }}
                                     />
-                                  </Link>
+                                  </div>
                                 ) : (
-                                  <button
+                                  <div
                                     key={item.href}
-                                    type="button"
-                                    onClick={() => {
-                                      setOpenMenu(null)
-                                      router.push(item.href)
-                                    }}
-                                    className="flex h-9 items-center rounded-md px-2 py-[6px] text-sm text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--brand-bg-soft)] hover:text-[var(--brand-primary)]"
                                   >
-                                    {item.label}
-                                  </button>
+                                    <BlockNavLink
+                                      item={item}
+                                      onNavigate={(href) => {
+                                        setOpenMenu(null)
+                                        router.push(href)
+                                      }}
+                                    />
+                                  </div>
                                 ),
                               )}
                             </div>
