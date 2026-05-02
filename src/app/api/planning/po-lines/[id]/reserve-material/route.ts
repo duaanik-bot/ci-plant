@@ -27,7 +27,7 @@ function parsePosInt(value: string | null): number | null {
   return i > 0 ? i : null
 }
 
-async function resolvePlanningContext(id: string) {
+async function resolvePlanningContext(id: string, opts?: { requireJobCard?: boolean }) {
   const line = await db.poLineItem.findUnique({
     where: { id },
     include: {
@@ -55,7 +55,7 @@ async function resolvePlanningContext(id: string) {
   const jobCard = line.jobCardNumber
     ? await db.productionJobCard.findFirst({ where: { jobCardNumber: line.jobCardNumber } })
     : null
-  if (!jobCard) {
+  if (opts?.requireJobCard !== false && !jobCard) {
     return { error: NextResponse.json({ error: 'Job card missing for planning line' }, { status: 400 }) as NextResponse }
   }
 
@@ -149,7 +149,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   if (error) return error
 
   const { id } = await context.params
-  const ctx = await resolvePlanningContext(id)
+  const ctx = await resolvePlanningContext(id, { requireJobCard: false })
   if ('error' in ctx) return ctx.error
 
   const { searchParams } = new URL(req.url)
@@ -158,7 +158,12 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const upsOverride = parsePosInt(searchParams.get('ups'))
   const wastageSheetsOverride = parsePosInt(searchParams.get('wastageSheets'))
   const gsmTolerance = Math.max(0, parsePosInt(searchParams.get('gsmTolerance')) ?? 10)
-  const requirement = await calculateRequirement({ jobCardId: ctx.jobCard.id, planningId: id })
+  const requirement = ctx.jobCard
+    ? await calculateRequirement({ jobCardId: ctx.jobCard.id, planningId: id })
+    : {
+        requiredSheets: 0,
+        materialId: null,
+      }
   const auto = await resolveMaterialFromSpec(ctx.line)
   const selectedMaterial =
     selectedMaterialId
@@ -299,7 +304,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const incomingSheets = Math.max(0, Number(material?.qtyQuarantine) || 0)
   const shortageSheets = materialId ? Math.max(0, requiredSheets - availableSheets) : requiredSheets
 
-  const pr = materialId
+  const pr = materialId && ctx.jobCard
     ? await db.purchaseRequisition.findFirst({
         where: { materialId, sourceJobCardId: ctx.jobCard.id },
         orderBy: { raisedAt: 'desc' },
@@ -360,7 +365,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   if (error) return error
 
   const { id } = await context.params
-  const ctx = await resolvePlanningContext(id)
+  const ctx = await resolvePlanningContext(id, { requireJobCard: true })
   if ('error' in ctx) return ctx.error
   const { line, jobCard } = ctx
 
