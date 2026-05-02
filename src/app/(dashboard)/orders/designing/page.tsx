@@ -370,7 +370,7 @@ function ActionsCell({
                   disabled={disableRecall}
                   className="text-left px-3 py-2 rounded text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-40"
                 >
-                  Recall to Planning
+                  Send Back to Planning
                 </button>
               </div>
             </div>,
@@ -383,7 +383,7 @@ function ActionsCell({
         disabled={disableRecall}
         className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-40"
       >
-        {recallLabel ?? 'Recall'}
+        {recallLabel ?? 'Send Back'}
       </button>
     </div>
   )
@@ -521,6 +521,17 @@ function isAwJobCardOnlyRow(r: Row): boolean {
 
 function awJobCardState(r: Row): 'ready' | 'pending' {
   return isAwCompletedRow(r) ? 'ready' : 'pending'
+}
+
+function canPushJobCardRow(r: Row): boolean {
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  const awApproved =
+    r.readiness?.approvalsComplete === true ||
+    r.readiness?.artworkApproved === true ||
+    (!!spec.customerApprovalPharma && !!spec.shadeCardQaTextApproval)
+  const toolingReadyOrNotRequired = r.readiness?.readyForProduction === true
+  const rowClosed = readAwPoStatus(spec) === AW_PO_STATUS.CLOSED
+  return awApproved && toolingReadyOrNotRequired && !rowClosed && !hasLinkedJobCard(r)
 }
 
 function canRecallPlanningRow(r: Row, spec: Record<string, unknown>): boolean {
@@ -1482,11 +1493,22 @@ export default function DesigningQueuePage() {
   const bulkPushSelectedToJobCards = async () => {
     const picked = Array.from(selectedRowIds)
     if (picked.length === 0) return
+    const ineligible = picked
+      .map((id) => rows.find((r) => r.id === id))
+      .filter((r): r is Row => !!r)
+      .filter((r) => !canPushJobCardRow(r))
+    if (ineligible.length > 0) {
+      toast.error('Some rows are blocked: AW approval + tooling readiness required before Job Card push.')
+    }
     let ok = 0
     let fail = 0
     for (const id of picked) {
       const row = rows.find((r) => r.id === id)
       if (!row) continue
+      if (!canPushJobCardRow(row)) {
+        fail += 1
+        continue
+      }
       try {
         await pushJobCardFromList(row)
         ok += 1
@@ -2017,12 +2039,12 @@ export default function DesigningQueuePage() {
                                 onPushEmboss={() => void pushToolingFromList(r, 'BLOCK')}
                                 onPushShadeCard={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
                                 onRecallPlanning={() => void recallPlanning(r)}
-                                disablePushJobCard={jobCardPushingId === r.id || rowClosed || hasLinkedJobCard(r)}
+                                disablePushJobCard={jobCardPushingId === r.id || !canPushJobCardRow(r)}
                                 disablePushPlate={finalizingId === r.id || rowClosed || !canFinalizeRow}
                                 disableRecall={recallingPlanningId === r.id || !canRecallPlanning || rowClosed}
                                 pushJobCardLabel={jobCardPushingId === r.id ? '…' : hasLinkedJobCard(r) ? 'Job card ✓' : 'Push Job Card'}
                                 pushPlateLabel={finalizingId === r.id ? '…' : 'Plates'}
-                                recallLabel={recallingPlanningId === r.id ? '…' : 'Recall'}
+                                recallLabel={recallingPlanningId === r.id ? '…' : 'Send Back'}
                               />
                             </td>
                           </tr>
@@ -2212,12 +2234,12 @@ export default function DesigningQueuePage() {
                         onPushEmboss={() => void pushToolingFromList(r, 'BLOCK')}
                         onPushShadeCard={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
                         onRecallPlanning={() => void recallPlanning(r)}
-                        disablePushJobCard={jobCardPushingId === r.id || rowClosed || hasLinkedJobCard(r)}
+                        disablePushJobCard={jobCardPushingId === r.id || !canPushJobCardRow(r)}
                         disablePushPlate={finalizingId === r.id || rowClosed || !canFinalizeRow}
                         disableRecall={!showRecall || recallingPlanningId === r.id || !canRecallPlanning || rowClosed}
                         pushJobCardLabel={jobCardPushingId === r.id ? '…' : hasLinkedJobCard(r) ? 'Job card ✓' : 'Push Job Card'}
                         pushPlateLabel={finalizingId === r.id ? '…' : 'Plates'}
-                        recallLabel={recallingPlanningId === r.id ? '…' : 'Recall'}
+                        recallLabel={recallingPlanningId === r.id ? '…' : 'Send Back'}
                       />
                     </td>
                   </tr>

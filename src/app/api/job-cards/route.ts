@@ -10,6 +10,7 @@ import {
   postPressRoutingFromPoLine,
   postPressRoutingSchema,
 } from '@/lib/job-card-routing-spec'
+import { computeFivePointReadiness, computeMaterialGate } from '@/lib/planning-interlock'
 
 export const dynamic = 'force-dynamic'
 
@@ -325,6 +326,18 @@ export async function POST(req: NextRequest) {
     where: { id: poLineItemId },
     include: {
       po: { include: { customer: true } },
+      shadeCard: {
+        select: {
+          custodyStatus: true,
+          mfgDate: true,
+          approvalDate: true,
+          createdAt: true,
+          isActive: true,
+        },
+      },
+      materialQueue: {
+        select: { totalSheets: true, boardType: true, gsm: true, sheetLengthMm: true, sheetWidthMm: true },
+      },
       carton: {
         select: {
           embossingLeafing: true,
@@ -354,6 +367,47 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: `Job card already created for this line (JC# ${li.jobCardNumber})` },
       { status: 400 }
+    )
+  }
+
+  const spec = (li.specOverrides && typeof li.specOverrides === 'object'
+    ? li.specOverrides
+    : {}) as Record<string, unknown>
+  const artworkLocksCompleted = Number(spec.artworkLocksCompleted ?? 0)
+  const awApproved = artworkLocksCompleted >= 2 || !!(spec.customerApprovalPharma && spec.shadeCardQaTextApproval)
+  if (!awApproved) {
+    return NextResponse.json(
+      { error: 'Artwork not approved — complete AW approval before pushing Job Card.' },
+      { status: 400 },
+    )
+  }
+
+  const invRows = await db.inventory.findMany({
+    where: { active: true },
+    select: { materialCode: true, description: true, qtyAvailable: true, qtyReserved: true },
+  })
+  const materialGate = computeMaterialGate({
+    materialQueue: li.materialQueue,
+    materialProcurementStatus: li.materialProcurementStatus,
+    inventoryRows: invRows,
+  })
+  const platesStatus = String(spec.platesStatus ?? 'new_required')
+  const dieStatus = String(spec.dieStatus ?? (li.dyeId ? 'good' : 'not_available'))
+  const embossStatus = String(spec.embossStatus ?? 'vendor_ordered')
+  const { allGreen } = computeFivePointReadiness({
+    artworkLocksCompleted: awApproved ? 2 : 0,
+    platesStatus,
+    materialGate,
+    dieStatus,
+    embossingLeafing: li.embossingLeafing ?? li.carton?.embossingLeafing,
+    embossStatus,
+    shadeCardId: li.shadeCardId,
+    shadeCard: li.shadeCard,
+  })
+  if (!allGreen) {
+    return NextResponse.json(
+      { error: 'Tooling not ready — complete required tooling (or mark not required) before pushing Job Card.' },
+      { status: 400 },
     )
   }
 
@@ -461,10 +515,6 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  const spec =
-    li.specOverrides && typeof li.specOverrides === 'object'
-      ? (li.specOverrides as Record<string, unknown>)
-      : {}
   const awTarget =
     typeof spec.actualSheetSize === 'string' ? spec.actualSheetSize.trim() || null : null
   const allocated = await get_allocated_stock_dims(db, { poLineItemId: li.id })
@@ -475,4 +525,3 @@ export async function POST(req: NextRequest) {
   const refreshed = await db.productionJobCard.findUnique({ where: { id: created.id } })
   return NextResponse.json(refreshed ?? created, { status: 201 })
 }
-

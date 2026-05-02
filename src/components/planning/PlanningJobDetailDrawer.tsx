@@ -172,6 +172,9 @@ export function PlanningJobDetailDrawer({
   const [stockDetailsOpen, setStockDetailsOpen] = useState(false)
   const [stockDetailsLoading, setStockDetailsLoading] = useState(false)
   const [stockDetails, setStockDetails] = useState<MaterialStockDetails | null>(null)
+  const [optionDetailsOpen, setOptionDetailsOpen] = useState<Record<string, boolean>>({})
+  const [optionDetailsLoading, setOptionDetailsLoading] = useState<Record<string, boolean>>({})
+  const [optionDetailsByMaterial, setOptionDetailsByMaterial] = useState<Record<string, MaterialStockDetails | null>>({})
 
   useEffect(() => {
     if (!line) {
@@ -346,18 +349,21 @@ export function PlanningJobDetailDrawer({
     }
   }, [line, remarksDraft, onSave, onClose, updateRow])
 
-  const handleReserveMaterial = useCallback(async () => {
+  const handleReserveMaterial = useCallback(async (materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string) => {
     if (!line) return
     setReserveBusy(true)
     try {
-      const chosenMaterialId = selectedMaterialId || readiness?.materialId || ''
+      const chosenMaterialId = materialIdArg || selectedMaterialId || readiness?.materialId || ''
       const spec = (line.specOverrides || {}) as Record<string, unknown>
       const meta = readPlanningMeta(spec)
       const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
       const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
       const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
       const requiredSheets = Math.max(1, Math.ceil(qty / ups) + wastageSheets)
-      const selectedOption = (readiness?.suggestedBoardOptions || []).find((o) => o.materialId === chosenMaterialId) || null
+      const selectedOption =
+        cutsPerSheetArg && parentSizeArg
+          ? { cutsPerSheet: cutsPerSheetArg, size: parentSizeArg }
+          : (readiness?.suggestedBoardOptions || []).find((o) => o.materialId === chosenMaterialId) || null
       const res = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -400,6 +406,10 @@ export function PlanningJobDetailDrawer({
           ? `Fully reserved (${out.reservedSheets.toLocaleString('en-IN')} sheets).`
           : `Partial reserved (${out.reservedSheets.toLocaleString('en-IN')}) · shortage ${out.shortageSheets.toLocaleString('en-IN')}${out.purchaseRequestId ? ' · PR created' : ''}.`
       toast.success(msg)
+      if (chosenMaterialId) {
+        setSelectedMaterialId(chosenMaterialId)
+        setSelectionLocked(true)
+      }
       await loadReadiness()
       window.dispatchEvent(new Event('planning:refresh'))
       window.dispatchEvent(new Event('inventory:refresh'))
@@ -408,7 +418,23 @@ export function PlanningJobDetailDrawer({
     } finally {
       setReserveBusy(false)
     }
-  }, [line, loadReadiness, selectedMaterialId, readiness?.materialId, wastageSheetsInput])
+  }, [line, loadReadiness, selectedMaterialId, readiness?.materialId, wastageSheetsInput, readiness?.suggestedBoardOptions])
+
+  const loadOptionDetails = useCallback(async (materialId: string) => {
+    if (!materialId) return
+    setOptionDetailsLoading((prev) => ({ ...prev, [materialId]: true }))
+    try {
+      const res = await fetch(`/api/inventory/paper-warehouse/${materialId}/details`, { cache: 'no-store' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to load details')
+      setOptionDetailsByMaterial((prev) => ({ ...prev, [materialId]: data as MaterialStockDetails }))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load details')
+      setOptionDetailsByMaterial((prev) => ({ ...prev, [materialId]: null }))
+    } finally {
+      setOptionDetailsLoading((prev) => ({ ...prev, [materialId]: false }))
+    }
+  }, [])
 
   const handleAddToBatch = useCallback(() => {
     if (!line) return
@@ -548,8 +574,6 @@ export function PlanningJobDetailDrawer({
   const comboControl = 'border-ds-line/80 bg-ds-elevated/50'
   const comboInput = 'text-sm text-ds-ink'
   const noMaterialSelected = !readinessLoading && !(selectedMaterialId || readiness?.materialId)
-  const hasSuggestions = (readiness?.suggestedBoardOptions?.length || 0) > 0
-  const reserveDisabled = reserveBusy || readinessLoading || noMaterialSelected || (hasSuggestions && !selectionLocked)
   const statusTone =
     readiness?.status === 'green'
       ? 'border-ds-success/35 bg-ds-success/10 text-ds-success'
@@ -567,17 +591,10 @@ export function PlanningJobDetailDrawer({
           ? `Required ${Math.max(0, readiness.requiredSheets).toLocaleString('en-IN')} sheets. No stock available. Shortage ${Math.max(0, readiness.shortageSheets).toLocaleString('en-IN')}.`
           : 'No matching material selected.'
     : 'No material selected.'
-  const reserveButtonLabel = reserveBusy
-    ? 'Reserving…'
-    : hasSuggestions && !selectionLocked
-      ? 'Lock material selection before reservation'
-      : noMaterialSelected
-      ? 'Select material before reservation'
-      : (readiness?.availableSheets ?? 0) <= 0
-        ? 'Create Shortage PR'
-        : (readiness?.availableSheets ?? 0) < (readiness?.requiredSheets ?? 0)
-          ? 'Reserve Available & Create PR'
-          : 'Reserve Material'
+  const hasDecisionInputs =
+    !!resolvedSheetSize && resolvedSheetSize !== '-' &&
+    calcQty > 0 &&
+    calcUps > 0
 
   return (
     <StandardDrawer
@@ -632,7 +649,7 @@ export function PlanningJobDetailDrawer({
         loading: saving,
       }}
     >
-      <div className="space-y-5 text-sm text-ds-ink" aria-label="Job detail">
+      <div className="space-y-3 text-sm text-ds-ink" aria-label="Job detail">
         <CardSection title="Job Snapshot" id="plan-drawer-job-snapshot">
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div><span className="text-ds-ink-muted">Carton/Product</span><p className="text-ds-ink">{line.cartonName || '-'}</p></div>
@@ -755,30 +772,28 @@ export function PlanningJobDetailDrawer({
           {readiness?.materialMatchState === 'none' ? (
             <p className="text-xs text-ds-warning">No matching material in Paper Warehouse.</p>
           ) : null}
-          <div className="mt-3 space-y-2">
+          <div className="mt-2 space-y-2">
             <p className="text-xs font-semibold text-ds-ink">Suggested Board Options</p>
             <p className="text-[11px] text-ds-ink-faint">
               Suggestions are ranked by cuts, wastage, GSM match, and stock availability. User must manually lock material before reservation.
             </p>
-            {!readiness?.requiredFinalSize ? (
-              <p className="text-xs text-ds-warning">Required size missing. Please enter sheet/final size first.</p>
+            {!hasDecisionInputs ? (
+              <p className="text-xs text-ds-warning">Suggestions load when Sheet Size, Qty, and UPS are available.</p>
             ) : (readiness?.suggestedBoardOptions?.length || 0) === 0 ? (
               <p className="text-xs text-ds-warning">No suitable stock found. Create PR?</p>
             ) : (
               <div className="space-y-2">
-                {(readiness?.suggestedBoardOptions || []).slice(0, 8).map((opt) => {
+                {(readiness?.suggestedBoardOptions || []).slice(0, 10).map((opt) => {
                   const selected = selectedMaterialId === opt.materialId
+                  const openOpt = !!optionDetailsOpen[opt.materialId]
+                  const optDetails = optionDetailsByMaterial[opt.materialId]
+                  const optLoading = !!optionDetailsLoading[opt.materialId]
                   return (
-                    <button
+                    <div
                       key={opt.materialId}
-                      type="button"
                       className={`w-full rounded border px-2 py-2 text-left text-xs ${
                         selected ? 'border-ds-warning/50 bg-ds-warning/10' : 'border-ds-line/40 bg-background'
                       }`}
-                      onClick={() => {
-                        setSelectedMaterialId(opt.materialId)
-                        setSelectionLocked(false)
-                      }}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className={`${mono} text-ds-ink`}>
@@ -798,11 +813,72 @@ export function PlanningJobDetailDrawer({
                           }`}>{opt.status}</span>
                         </div>
                       </div>
-                      <p className="mt-1 text-ds-ink-faint">
-                        Size {opt.size} · Cuts/Sheet {opt.cutsPerSheet} · Req Parent {opt.requiredParentSheets} · Avl {opt.availableSheets} · Short {opt.shortageParentSheets} · Wastage {opt.wastagePct}% · Yield {opt.yieldPct}% · Orientation {opt.orientation}
-                        {opt.gsmDelta != null ? ` · GSM Δ ${opt.gsmDelta} (tol ±${readiness?.gsmTolerance ?? 10})` : ''}
-                      </p>
-                    </button>
+                      <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-ds-ink-faint">
+                        <span>Cuts/Sheet: {opt.cutsPerSheet}</span>
+                        <span>Req Parent: {opt.requiredParentSheets}</span>
+                        <span>Available: {opt.availableSheets}</span>
+                        <span>Wastage: {opt.wastagePct}%</span>
+                        <span>Status: {opt.status}</span>
+                        <span>
+                          {opt.gsmDelta != null ? `GSM Δ ${opt.gsmDelta} (±${readiness?.gsmTolerance ?? 10})` : '-'}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          disabled={reserveBusy}
+                          onClick={() => void handleReserveMaterial(opt.materialId, opt.cutsPerSheet, opt.size)}
+                          className="h-8 px-2 text-xs"
+                        >
+                          {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
+                        </Button>
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
+                          onClick={() => {
+                            const next = !openOpt
+                            setOptionDetailsOpen((prev) => ({ ...prev, [opt.materialId]: next }))
+                            if (next && !optionDetailsByMaterial[opt.materialId]) {
+                              void loadOptionDetails(opt.materialId)
+                            }
+                          }}
+                        >
+                          {openOpt ? 'Hide Details' : 'View Details'}
+                        </button>
+                      </div>
+                      {openOpt ? (
+                        <div className="mt-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2 text-xs">
+                          {optLoading ? (
+                            <p className="text-ds-ink-faint">Loading…</p>
+                          ) : !optDetails ? (
+                            <p className="text-ds-ink-faint">-</p>
+                          ) : (
+                            <>
+                              <div className="grid grid-cols-2 gap-1">
+                                <span>Available: {Math.max(0, readiness?.availableSheets || 0).toLocaleString('en-IN')}</span>
+                                <span>Reserved: {Math.max(0, readiness?.reservedSheets || 0).toLocaleString('en-IN')}</span>
+                                <span>Incoming: {Math.max(0, readiness?.incomingSheets || 0).toLocaleString('en-IN')}</span>
+                                <span>Shortage: {Math.max(0, readiness?.shortageSheets || 0).toLocaleString('en-IN')}</span>
+                              </div>
+                              <div className="mt-2">
+                                <p className="text-ds-ink-muted mb-1">Recent logs</p>
+                                {(optDetails.logs || []).length === 0 ? (
+                                  <p className="text-ds-ink-faint">No logs.</p>
+                                ) : (
+                                  <ul className="space-y-1">
+                                    {optDetails.logs.slice(0, 5).map((l) => (
+                                      <li key={l.id} className="rounded border border-ds-line/20 px-1.5 py-0.5">
+                                        {new Date(l.createdAt).toLocaleString('en-IN')} · {l.movementType} · {Number(l.qty).toLocaleString('en-IN')}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
                   )
                 })}
                 <div className="flex items-center justify-between">
@@ -860,7 +936,7 @@ export function PlanningJobDetailDrawer({
             <div><span className="text-ds-ink-muted">PR Status</span><p className="text-ds-ink">{readiness?.prStatus || '-'}</p></div>
             <div><span className="text-ds-ink-muted">GRN ETA</span><p className={`${mono} text-ds-ink`}>{readiness?.grnEta ? new Date(readiness.grnEta).toLocaleDateString('en-IN') : '-'}</p></div>
           </div>
-          <div className="mt-3 flex items-center justify-between gap-2">
+          <div className="mt-2 flex items-center justify-between gap-2">
             <button
               type="button"
               className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
@@ -941,20 +1017,10 @@ export function PlanningJobDetailDrawer({
                   : `/inventory?ledgerBoard=${encodeURIComponent(readiness?.boardType || '')}&ledgerGsm=${encodeURIComponent(String(readiness?.gsm ?? ''))}`}
                 className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
               >
-                Open Paper Warehouse
+                Open Warehouse (optional)
               </Link>
             </div>
           ) : null}
-          <div className="pt-2">
-            <Button
-              type="button"
-              onClick={() => void handleReserveMaterial()}
-              disabled={reserveDisabled}
-              className="w-full"
-            >
-              {reserveButtonLabel}
-            </Button>
-          </div>
         </CardSection>
 
         <CardSection title="Printing" id="plan-drawer-printing">

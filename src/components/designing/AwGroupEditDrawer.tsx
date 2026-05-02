@@ -644,12 +644,9 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                 min={1}
                 step={1}
                 value={groupSheetLengthMm}
-                onChange={(e) => {
-                  setGroupSheetLengthMm(e.target.value)
-                  setDirty(true)
-                }}
+                readOnly
                 placeholder="From planning"
-                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                className={`w-full cursor-not-allowed rounded-ds-sm border border-ds-line/50 bg-ds-elevated/20 px-2.5 py-1.5 text-sm text-ds-ink-faint ${mono}`}
               />
             </div>
             <div>
@@ -659,17 +656,14 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                 min={1}
                 step={1}
                 value={groupSheetWidthMm}
-                onChange={(e) => {
-                  setGroupSheetWidthMm(e.target.value)
-                  setDirty(true)
-                }}
+                readOnly
                 placeholder="From planning"
-                className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                className={`w-full cursor-not-allowed rounded-ds-sm border border-ds-line/50 bg-ds-elevated/20 px-2.5 py-1.5 text-sm text-ds-ink-faint ${mono}`}
               />
             </div>
           </div>
           <div className="mt-3 rounded border border-ds-line/35 bg-ds-elevated/20 px-2.5 py-2">
-            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-ds-ink-faint">UPS by product (editable)</p>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-ds-ink-faint">UPS by product (Planning locked)</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {rows.map((r) => (
                 <label key={`ups-unified-${r.id}`} className="flex items-center justify-between gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 px-2 py-1.5">
@@ -679,8 +673,8 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                     min={1}
                     step={1}
                     value={itemStates[r.id]?.ups ?? ''}
-                    onChange={(e) => updateItem(r.id, { ups: e.target.value })}
-                    className={`w-[5.5rem] rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2 py-1 text-xs text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                    readOnly
+                    className={`w-[5.5rem] cursor-not-allowed rounded-ds-sm border border-ds-line/50 bg-ds-elevated/20 px-2 py-1 text-xs text-ds-ink-faint ${mono}`}
                   />
                 </label>
               ))}
@@ -960,7 +954,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                     {/* UPS from planning */}
                     <div>
                       <label htmlFor={`ups-${r.id}`} className="mb-1 block text-xs font-bold uppercase tracking-wider text-ds-ink-faint">
-                        UPS (planning)
+                        UPS (Planning locked)
                       </label>
                       <input
                         id={`ups-${r.id}`}
@@ -968,9 +962,9 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                         min={1}
                         step={1}
                         value={st.ups}
-                        onChange={(e) => updateItem(r.id, { ups: e.target.value })}
+                        readOnly
                         placeholder="e.g. 2"
-                        className={`w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-1.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                        className={`w-full cursor-not-allowed rounded-ds-sm border border-ds-line/50 bg-ds-elevated/20 px-2.5 py-1.5 text-sm text-ds-ink-faint ${mono}`}
                       />
                     </div>
                   </div>

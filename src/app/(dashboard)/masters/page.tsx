@@ -1,65 +1,94 @@
 import Link from 'next/link'
 
-const cards = [
+const groupedCards = [
   {
-    href: '/masters/customers',
-    label: 'Customer',
-    description: 'Company name, GST, contact, credit limit, artwork approval',
+    group: 'Business',
+    cards: [
+      {
+        href: '/masters/customers',
+        label: 'Customer',
+        description: 'Company name, GST, contact, credit limit, artwork approval',
+      },
+      {
+        href: '/masters/suppliers',
+        label: 'Supplier',
+        description: 'Suppliers, material types, lead time, payment terms',
+      },
+    ],
   },
   {
-    href: '/masters/suppliers',
-    label: 'Supplier',
-    description: 'Suppliers, material types, lead time, payment terms',
+    group: 'Product System',
+    cards: [
+      {
+        href: '/masters/materials',
+        label: 'Material',
+        description: 'Material codes, units, reorder point, supplier',
+      },
+      {
+        href: '/masters/minimasters',
+        label: 'MiniMasters',
+        description: 'Dynamic dropdown values and logic triggers',
+      },
+    ],
   },
   {
-    href: '/masters/materials',
-    label: 'Material',
-    description: 'Material codes, units, reorder point, supplier',
+    group: 'Operations',
+    cards: [
+      {
+        href: '/masters/machines',
+        label: 'Machine',
+        description: 'CI-01 to CI-12, capacity, waste %, PM dates',
+      },
+      {
+        href: '/masters/instruments',
+        label: 'QC Instruments',
+        description: 'Calibration due dates, certificates',
+      },
+    ],
   },
   {
-    href: '/masters/machines',
-    label: 'Machine',
-    description: 'CI-01 to CI-12, capacity, waste %, PM dates',
-  },
-  {
-    href: '/masters/instruments',
-    label: 'QC Instruments',
-    description: 'Calibration due dates, certificates',
-  },
-  {
-    href: '/masters/minimasters',
-    label: 'MiniMasters',
-    description: 'Dynamic dropdown values and logic triggers',
-  },
-  {
-    href: '/masters/users',
-    label: 'Users',
-    description: 'Name, email, role, PIN, machine access',
-  },
-  {
-    href: '/masters/departments',
-    label: 'Department',
-    description: 'Department master (setup pending)',
-  },
-  {
-    href: '/masters/employees',
-    label: 'Employee',
-    description: 'Employee master (setup pending)',
+    group: 'Organization',
+    cards: [
+      {
+        href: '/masters/users',
+        label: 'Users',
+        description: 'Name, email, role, PIN, machine access',
+      },
+      {
+        href: '/masters/departments',
+        label: 'Department',
+        description: 'Department master (setup pending)',
+      },
+      {
+        href: '/masters/employees',
+        label: 'Employee',
+        description: 'Employee master (setup pending)',
+      },
+    ],
   },
 ]
 
 export default function MastersHomePage() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {cards.map((c) => (
-        <Link
-          key={c.href}
-          href={c.href}
-          className="block rounded-lg border border-border bg-card p-5 text-card-foreground shadow-sm ring-1 ring-ring/30 transition-colors hover:border-blue-300 hover:ring-blue-200/50 dark:hover:border-blue-600/50"
-        >
-          <span className="font-semibold text-blue-600 dark:text-blue-400">{c.label}</span>
-          <span className="mt-1 block text-sm text-ds-ink-faint dark:text-ds-ink-muted">{c.description}</span>
-        </Link>
+    <div className="space-y-5">
+      {groupedCards.map((section) => (
+        <section key={section.group} className="rounded-lg border border-ds-line/50 bg-card p-3">
+          <h3 className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-ds-ink-muted">
+            {section.group}
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {section.cards.map((c) => (
+              <Link
+                key={c.href}
+                href={c.href}
+                className="block rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm ring-1 ring-ring/30 transition-colors hover:border-blue-300 hover:ring-blue-200/50 dark:hover:border-blue-600/50"
+              >
+                <span className="font-semibold text-blue-600 dark:text-blue-400">{c.label}</span>
+                <span className="mt-1 block text-sm text-ds-ink-faint dark:text-ds-ink-muted">{c.description}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
       ))}
     </div>
   )

@@ -432,22 +432,6 @@ export default function MaterialForm({ mode, initialData }: Props) {
                 {GRAIN_DIRECTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-ds-ink-muted mb-1">Caliper (microns) (optional)</label>
-              <input type="number" step="0.01" min={0} value={f.caliperMicrons} onChange={(e) => patch('caliperMicrons', e.target.value)} className={cls} />
-            </div>
-            <div>
-              <label className="block text-ds-ink-muted mb-1">Brightness % (optional)</label>
-              <input type="number" step="0.1" min={0} max={100} value={f.brightnessPct} onChange={(e) => patch('brightnessPct', e.target.value)} className={cls} />
-            </div>
-            <div>
-              <label className="block text-ds-ink-muted mb-1">Moisture % (optional)</label>
-              <input type="number" step="0.1" min={0} max={100} value={f.moisturePct} onChange={(e) => patch('moisturePct', e.target.value)} className={cls} />
-            </div>
-            <div>
-              <label className="block text-ds-ink-muted mb-1">HSN code (optional)</label>
-              <input value={f.hsnCode} onChange={(e) => patch('hsnCode', e.target.value)} className={cls} placeholder="e.g. 4810" />
-            </div>
           </div>
         </div>
 
@@ -459,13 +443,6 @@ export default function MaterialForm({ mode, initialData }: Props) {
               <label className="block text-ds-ink-muted mb-1">Unit of measure</label>
               <select value={f.unit} onChange={(e) => patch('unit', e.target.value)} className={cls}>
                 {UNIT_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-ds-ink-muted mb-1">Primary supplier (optional)</label>
-              <select value={f.supplierId} onChange={(e) => patch('supplierId', e.target.value)} className={cls}>
-                <option value="">None</option>
-                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div>
