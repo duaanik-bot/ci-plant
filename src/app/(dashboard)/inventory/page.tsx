@@ -178,6 +178,9 @@ function InventoryPageContent() {
   const [adjustReason, setAdjustReason] = useState('')
   const [adjustRemarks, setAdjustRemarks] = useState('')
   const [adjustSubmitting, setAdjustSubmitting] = useState(false)
+  const [adjustMode, setAdjustMode] = useState<'single' | 'bulk'>('single')
+  const [bulkAdjustInput, setBulkAdjustInput] = useState('')
+  const [bulkAdjustSubmitting, setBulkAdjustSubmitting] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
   const [materialDrawerLoading, setMaterialDrawerLoading] = useState(false)
@@ -437,6 +440,100 @@ function InventoryPageContent() {
     }
   }
 
+  function openAdjustForRow(
+    row: PaperWarehouseRow,
+    direction: 'add' | 'subtract' = 'add',
+    bucket: 'quarantine' | 'available' | 'reserved' | 'fg' = 'available',
+  ) {
+    setAdjustMode('single')
+    setAdjustMaterialId(row.material_id)
+    setAdjustDirection(direction)
+    setAdjustBucket(bucket)
+    setAdjustQty('')
+    setAdjustReason('')
+    setAdjustRemarks('')
+    setAdjustOpen(true)
+  }
+
+  async function submitBulkAdjust() {
+    const lines = bulkAdjustInput
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+    if (lines.length === 0) {
+      toast.error('Add at least one bulk entry')
+      return
+    }
+
+    const materialByCode = new Map(items.map((i) => [i.materialCode.trim().toLowerCase(), i.id]))
+    let success = 0
+    const failures: string[] = []
+    setBulkAdjustSubmitting(true)
+    try {
+      for (let idx = 0; idx < lines.length; idx += 1) {
+        const raw = lines[idx]!
+        const parts = raw.split(',').map((p) => p.trim())
+        if (parts.length < 6) {
+          failures.push(`Line ${idx + 1}: use 6 fields`)
+          continue
+        }
+        const [materialToken, qtyToken, directionToken, bucketToken, reasonCode, remarks] = parts
+        const qty = Number(qtyToken)
+        const direction = directionToken?.toLowerCase() === 'subtract' ? 'subtract' : directionToken?.toLowerCase() === 'add' ? 'add' : null
+        const bucket = ['quarantine', 'available', 'reserved', 'fg'].includes((bucketToken || '').toLowerCase())
+          ? (bucketToken!.toLowerCase() as 'quarantine' | 'available' | 'reserved' | 'fg')
+          : null
+        const materialId = materialToken && materialToken.length > 30
+          ? materialToken
+          : materialByCode.get((materialToken || '').toLowerCase())
+
+        if (!materialId) {
+          failures.push(`Line ${idx + 1}: material not found (${materialToken || '-'})`)
+          continue
+        }
+        if (!Number.isFinite(qty) || qty <= 0 || !direction || !bucket || !reasonCode || !remarks) {
+          failures.push(`Line ${idx + 1}: invalid qty/direction/bucket/reason/remarks`)
+          continue
+        }
+
+        const res = await fetch('/api/inventory/adjust', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            materialId,
+            qty,
+            direction,
+            bucket,
+            reasonCode,
+            remarks,
+          }),
+        })
+        const payload = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          failures.push(`Line ${idx + 1}: ${payload.error || 'failed'}`)
+          continue
+        }
+        success += 1
+      }
+
+      if (success > 0) {
+        toast.success(`Bulk stock update complete: ${success} successful`)
+        await reloadAll()
+      }
+      if (failures.length > 0) {
+        toast.error(`Bulk update had ${failures.length} failed line(s). Check format/errors.`)
+        console.warn('[inventory/bulk-adjust/failures]', failures)
+      } else if (success > 0) {
+        setBulkAdjustInput('')
+        setAdjustOpen(false)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Bulk adjustment failed')
+    } finally {
+      setBulkAdjustSubmitting(false)
+    }
+  }
+
   async function reverseMovement(id: string) {
     const remarks = window.prompt('Reverse remarks (required):', 'Reverse wrong entry')
     if (!remarks || remarks.trim().length < 3) return
@@ -659,16 +756,30 @@ function InventoryPageContent() {
                         })()}
                       </td>
                       <td className="px-3 py-2 text-xs">
-                        {row.shortage_sheets > 0 ? (
-                          <a
-                            href={`/inventory/purchase-requisitions?materialId=${encodeURIComponent(row.material_id)}`}
-                            className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openAdjustForRow(row, 'add', 'available')}
+                            className="rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-emerald-300 hover:bg-emerald-500/20"
                           >
-                            Procure
-                          </a>
-                        ) : (
-                          <span className="text-ds-ink-faint">-</span>
-                        )}
+                            + Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openAdjustForRow(row, 'subtract', 'available')}
+                            className="rounded border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-amber-300 hover:bg-amber-500/20"
+                          >
+                            - Remove
+                          </button>
+                          {row.shortage_sheets > 0 ? (
+                            <a
+                              href={`/inventory/purchase-requisitions?materialId=${encodeURIComponent(row.material_id)}`}
+                              className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
+                            >
+                              Procure
+                            </a>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -779,6 +890,139 @@ function InventoryPageContent() {
               </div>
             </div>
           ) : null}
+        </SlideOverPanel>
+
+        <SlideOverPanel
+          title="Adjust warehouse stock"
+          isOpen={adjustOpen}
+          onClose={() => setAdjustOpen(false)}
+          widthClass="max-w-md"
+        >
+          <div className="space-y-3 px-1 text-sm">
+            <div className="inline-flex rounded-lg border border-ds-line/50 bg-background p-1">
+              <button
+                type="button"
+                onClick={() => setAdjustMode('single')}
+                className={`rounded px-2.5 py-1.5 text-xs ${adjustMode === 'single' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted'}`}
+              >
+                Single entry
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdjustMode('bulk')}
+                className={`rounded px-2.5 py-1.5 text-xs ${adjustMode === 'bulk' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted'}`}
+              >
+                Bulk entries
+              </button>
+            </div>
+
+            {adjustMode === 'single' ? (
+              <>
+                <label className="block text-xs text-ds-ink-faint">
+                  Material
+                  <select
+                    value={adjustMaterialId}
+                    onChange={(e) => setAdjustMaterialId(e.target.value)}
+                    className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                  >
+                    <option value="">Select material</option>
+                    {items.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.materialCode} - {i.description}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block text-xs text-ds-ink-faint">
+                    Direction
+                    <select
+                      value={adjustDirection}
+                      onChange={(e) => setAdjustDirection(e.target.value as 'add' | 'subtract')}
+                      className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                    >
+                      <option value="add">Add (+)</option>
+                      <option value="subtract">Subtract (-)</option>
+                    </select>
+                  </label>
+                  <label className="block text-xs text-ds-ink-faint">
+                    Bucket
+                    <select
+                      value={adjustBucket}
+                      onChange={(e) =>
+                        setAdjustBucket(
+                          e.target.value as 'quarantine' | 'available' | 'reserved' | 'fg',
+                        )
+                      }
+                      className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                    >
+                      <option value="quarantine">Quarantine</option>
+                      <option value="available">Available</option>
+                      <option value="reserved">Reserved</option>
+                      <option value="fg">FG</option>
+                    </select>
+                  </label>
+                </div>
+                <label className="block text-xs text-ds-ink-faint">
+                  Qty
+                  <input
+                    type="number"
+                    min={0.001}
+                    step="0.001"
+                    value={adjustQty}
+                    onChange={(e) => setAdjustQty(e.target.value)}
+                    className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                  />
+                </label>
+                <label className="block text-xs text-ds-ink-faint">
+                  Reason code
+                  <input
+                    type="text"
+                    value={adjustReason}
+                    onChange={(e) => setAdjustReason(e.target.value)}
+                    className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                    placeholder="e.g. count_correction"
+                  />
+                </label>
+                <label className="block text-xs text-ds-ink-faint">
+                  Remarks
+                  <textarea
+                    value={adjustRemarks}
+                    onChange={(e) => setAdjustRemarks(e.target.value)}
+                    className="mt-1 min-h-[90px] w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={adjustSubmitting}
+                  onClick={() => void submitAdjust()}
+                  className="w-full rounded bg-ds-warning px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  {adjustSubmitting ? 'Saving...' : 'Save adjustment'}
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-ds-ink-faint">
+                  One line per entry: <span className={ledgerMono}>materialCode or materialId, qty, add|subtract, available|reserved|quarantine|fg, reasonCode, remarks</span>
+                </p>
+                <textarea
+                  value={bulkAdjustInput}
+                  onChange={(e) => setBulkAdjustInput(e.target.value)}
+                  placeholder={`TEST-MAT-123, 100, add, available, trial_load, Trial load opening stock\nTEST-MAT-123, 20, subtract, available, trial_fix, Count correction`}
+                  className="min-h-[180px] w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                />
+                <button
+                  type="button"
+                  disabled={bulkAdjustSubmitting}
+                  onClick={() => void submitBulkAdjust()}
+                  className="w-full rounded bg-ds-warning px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  {bulkAdjustSubmitting ? 'Processing…' : 'Run bulk update'}
+                </button>
+              </>
+            )}
+          </div>
         </SlideOverPanel>
       </div>
     )
