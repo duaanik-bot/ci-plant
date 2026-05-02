@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { calculateRequirement, reserveMaterial, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
 import { parseSheetSizeToPair, resolveSheetSize } from '@/lib/planning-sheet-size'
+import { buildMaterialCutFitOptions } from '@/lib/material-cut-fit'
 
 export const dynamic = 'force-dynamic'
 
 function n(v: unknown): number {
   const x = Number(v)
   return Number.isFinite(x) ? x : 0
+}
+
+function parsePosInt(value: string | null): number | null {
+  if (!value) return null
+  const n = Number(value)
+  if (!Number.isFinite(n)) return null
+  const i = Math.floor(n)
+  return i > 0 ? i : null
 }
 
 async function resolvePlanningContext(id: string) {
@@ -138,6 +148,10 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
 
   const { searchParams } = new URL(req.url)
   const selectedMaterialId = searchParams.get('materialId')?.trim() ?? ''
+  const qtyOverride = parsePosInt(searchParams.get('qty'))
+  const upsOverride = parsePosInt(searchParams.get('ups'))
+  const wastageSheetsOverride = parsePosInt(searchParams.get('wastageSheets'))
+  const gsmTolerance = Math.max(0, parsePosInt(searchParams.get('gsmTolerance')) ?? 10)
   const requirement = await calculateRequirement({ jobCardId: ctx.jobCard.id, planningId: id })
   const auto = await resolveMaterialFromSpec(ctx.line)
   const selectedMaterial =
@@ -147,7 +161,70 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const materialId = selectedMaterial?.id ?? requirement.materialId ?? auto.materialId
   const material = selectedMaterial ?? (materialId ? await db.inventory.findUnique({ where: { id: materialId } }) : null)
 
-  const requiredSheets = Math.max(1, Number(requirement.requiredSheets) || 0)
+  const spec = (ctx.line.specOverrides as Record<string, unknown> | null) || {}
+  const core = (spec.planningCore as Record<string, unknown> | undefined) || {}
+  const qtyBase = qtyOverride ?? Math.max(1, Math.floor(n(ctx.line.quantity)))
+  const upsBase =
+    upsOverride ??
+    Math.max(1, Math.floor(n((spec.meta as Record<string, unknown> | undefined)?.ups ?? core.ups ?? 1)))
+  const wastageSheets =
+    wastageSheetsOverride ??
+    Math.max(0, Math.floor(n(spec.wastageSheets ?? core.wastageSheets ?? 150)))
+  const baseRequired = Math.max(1, Math.ceil(qtyBase / upsBase))
+  const requiredSheets = Math.max(1, baseRequired + wastageSheets) || Math.max(1, Number(requirement.requiredSheets) || 0)
+  const requiredSizePair = parseSheetSizeToPair(auto.resolvedSheetSize || '')
+  const inventoryCandidates =
+    requiredSizePair && auto.boardTypeRaw && auto.gsmRaw
+      ? await db.inventory.findMany({
+          where: {
+            active: true,
+            boardType: { equals: auto.boardTypeRaw, mode: 'insensitive' },
+            ...(auto.boardClassificationRaw
+              ? { boardClassification: { equals: auto.boardClassificationRaw, mode: 'insensitive' as const } }
+              : {}),
+            gsm: { gte: auto.gsmRaw - gsmTolerance, lte: auto.gsmRaw + gsmTolerance },
+            sheetLength: { gt: 0 },
+            sheetWidth: { gt: 0 },
+          },
+          select: {
+            id: true,
+            materialCode: true,
+            boardType: true,
+            boardClassification: true,
+            gsm: true,
+            qtyAvailable: true,
+            sheetLength: true,
+            sheetWidth: true,
+          },
+          take: 80,
+        })
+      : []
+  const suggestedBoardOptions = requiredSizePair
+    ? buildMaterialCutFitOptions({
+        requiredLength: requiredSizePair.length,
+        requiredWidth: requiredSizePair.width,
+        requiredFinalSheets: requiredSheets,
+        requiredGsm: auto.gsmRaw ?? null,
+        config: {
+          gsmTolerance,
+          allowRotation: true,
+          maxSuggestions: 10,
+        },
+        materials: inventoryCandidates.map((m) => ({
+          materialId: m.id,
+          materialCode: m.materialCode,
+          boardType: m.boardType,
+          boardClassification: m.boardClassification,
+          gsm: m.gsm,
+          availableParentSheets: Number(m.qtyAvailable) || 0,
+          parentLength: Number(m.sheetLength) || 0,
+          parentWidth: Number(m.sheetWidth) || 0,
+        })),
+      })
+    : []
+  const selectedSuggestion = selectedMaterialId
+    ? suggestedBoardOptions.find((o) => o.materialId === selectedMaterialId) ?? null
+    : null
   const availableSheets = Math.max(0, Number(material?.qtyAvailable) || 0)
   const reservedSheets = Math.max(0, Number(material?.qtyReserved) || 0)
   const incomingSheets = Math.max(0, Number(material?.qtyQuarantine) || 0)
@@ -173,6 +250,15 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         ? `${Math.round(Number(material.sheetLength))}x${Math.round(Number(material.sheetWidth))}`
         : auto.resolvedSheetSize || null,
     gsm: material?.gsm ?? auto.gsmRaw ?? null,
+    qty: qtyBase,
+    ups: upsBase,
+    wastageSheets,
+    baseRequiredSheets: baseRequired,
+    suggestedBoardOptions,
+    requiredFinalSize:
+      requiredSizePair ? `${Math.round(requiredSizePair.length)} x ${Math.round(requiredSizePair.width)}` : null,
+    selectedSuggestion,
+    gsmTolerance,
     requiredSheets,
     availableSheets,
     reservedSheets,
@@ -205,13 +291,19 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   const spec = (line.specOverrides as Record<string, unknown> | null) || {}
   const core = (spec.planningCore as Record<string, unknown> | undefined) || {}
   const ups = Math.max(1, Math.floor(n((spec.meta as Record<string, unknown> | undefined)?.ups ?? core.ups ?? 1)))
-  const wastagePct = Math.max(0, n(spec.wastagePct ?? core.wastagePct ?? 0))
-
-  const baseRequired = Math.ceil(n(line.quantity) / ups)
-  const requiredSheets = Math.max(1, Math.ceil(baseRequired + baseRequired * (wastagePct / 100)))
+  const body = (await req.json().catch(() => ({}))) as {
+    materialId?: string
+    wastageSheets?: number
+    requiredSheets?: number
+    cutsPerSheet?: number
+    parentSize?: string
+  }
+  const wastageSheets = Math.max(0, Math.floor(n(body.wastageSheets ?? spec.wastageSheets ?? core.wastageSheets ?? 150)))
+  const baseRequired = Math.max(1, Math.ceil(n(line.quantity) / ups))
+  const computedRequired = Math.max(1, baseRequired + wastageSheets)
+  const requiredSheets = Math.max(1, Math.floor(n(body.requiredSheets ?? computedRequired)))
 
   const requirement = await calculateRequirement({ jobCardId: jobCard.id, planningId: id })
-  const body = (await req.json().catch(() => ({}))) as { materialId?: string }
   let materialId = requirement.materialId
   if (typeof body.materialId === 'string' && body.materialId.trim()) {
     const pick = await db.inventory.findUnique({ where: { id: body.materialId.trim() }, select: { id: true } })
@@ -224,6 +316,23 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   if (!materialId) {
     return NextResponse.json({ error: 'No material mapped for this planning line' }, { status: 400 })
   }
+
+  const specNow = ((line.specOverrides as Record<string, unknown> | null) || {}) as Record<string, unknown>
+  const specMeta = ((specNow.meta as Record<string, unknown> | undefined) || {}) as Record<string, unknown>
+  const nextSpec: Record<string, unknown> = {
+    ...specNow,
+    planningMaterialId: materialId,
+    wastageSheets,
+    meta: {
+      ...specMeta,
+      cutsPerSheet: Math.max(0, Math.floor(n(body.cutsPerSheet))),
+      parentSize: typeof body.parentSize === 'string' ? body.parentSize.trim() : '',
+    },
+  }
+  await db.poLineItem.update({
+    where: { id },
+    data: { specOverrides: nextSpec as unknown as Prisma.JsonObject },
+  })
 
   let result: Awaited<ReturnType<typeof reserveMaterial>>
   try {

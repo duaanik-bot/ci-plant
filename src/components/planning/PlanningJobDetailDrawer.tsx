@@ -55,6 +55,31 @@ type MaterialReadinessPanelData = {
   shortageSheets: number
   prStatus: string
   grnEta: string | null
+  qty?: number
+  ups?: number
+  wastageSheets?: number
+  baseRequiredSheets?: number
+  requiredFinalSize?: string | null
+  gsmTolerance?: number
+  suggestedBoardOptions?: Array<{
+    materialId: string
+    materialCode: string
+    boardType: string | null
+    boardClassification: string | null
+    gsm: number | null
+    size: string
+    availableSheets: number
+    cutsPerSheet: number
+    requiredParentSheets: number
+    shortageParentSheets: number
+    wastagePct: number
+    yieldPct: number
+    orientation: 'LxW' | 'WxL'
+    matchType: 'Exact' | 'Size Fit' | 'GSM Tolerance'
+    status: 'Ready' | 'Partial' | 'Shortage'
+    tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
+    gsmDelta: number | null
+  }>
   status: 'green' | 'yellow' | 'red' | 'grey'
   materialCandidates?: Array<{ id: string; materialCode: string; description: string }>
   materialMatchState?: 'matched' | 'multiple' | 'none' | 'unknown'
@@ -137,11 +162,13 @@ export function PlanningJobDetailDrawer({
   const [reserveBusy, setReserveBusy] = useState(false)
   const [sheetLengthMm, setSheetLengthMm] = useState('')
   const [sheetWidthMm, setSheetWidthMm] = useState('')
+  const [wastageSheetsInput, setWastageSheetsInput] = useState('150')
   const [boardTypeOptions, setBoardTypeOptions] = useState<string[]>([])
   const [coatingOptions, setCoatingOptions] = useState<string[]>([])
   const [readiness, setReadiness] = useState<MaterialReadinessPanelData | null>(null)
   const [readinessLoading, setReadinessLoading] = useState(false)
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>('')
+  const [selectionLocked, setSelectionLocked] = useState(false)
   const [stockDetailsOpen, setStockDetailsOpen] = useState(false)
   const [stockDetailsLoading, setStockDetailsLoading] = useState(false)
   const [stockDetails, setStockDetails] = useState<MaterialStockDetails | null>(null)
@@ -165,6 +192,9 @@ export function PlanningJobDetailDrawer({
         toPositiveIntString(line.materialQueue?.sheetWidthMm) ||
         toPositiveIntString(line.carton?.blankWidth),
     )
+    const ws = Math.max(0, Math.floor(Number((spec.wastageSheets as number | undefined) ?? 150)))
+    setWastageSheetsInput(String(Number.isFinite(ws) ? ws : 150))
+    setSelectionLocked(false)
   }, [line?.id, line?.remarks])
 
   useEffect(() => {
@@ -205,7 +235,17 @@ export function PlanningJobDetailDrawer({
     setReadinessLoading(true)
     try {
       const qs = selectedMaterialId ? `?materialId=${encodeURIComponent(selectedMaterialId)}` : ''
-      const res = await fetch(`/api/planning/po-lines/${line.id}/reserve-material${qs}`, { cache: 'no-store' })
+      const spec = (line.specOverrides || {}) as Record<string, unknown>
+      const meta = readPlanningMeta(spec)
+      const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
+      const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
+      const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
+      const params = new URLSearchParams()
+      if (selectedMaterialId) params.set('materialId', selectedMaterialId)
+      params.set('qty', String(qty))
+      params.set('ups', String(ups))
+      params.set('wastageSheets', String(wastageSheets))
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reserve-material?${params.toString()}`, { cache: 'no-store' })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Could not load material readiness')
       const out = data as Partial<MaterialReadinessPanelData>
@@ -223,6 +263,20 @@ export function PlanningJobDetailDrawer({
         shortageSheets: Number(out.shortageSheets) || 0,
         prStatus: typeof out.prStatus === 'string' ? out.prStatus : 'not_created',
         grnEta: typeof out.grnEta === 'string' ? out.grnEta : null,
+        qty: Number(out.qty) || 0,
+        ups: Number(out.ups) || 0,
+        wastageSheets: Number(out.wastageSheets) || 0,
+        baseRequiredSheets: Number(out.baseRequiredSheets) || 0,
+        requiredFinalSize: typeof out.requiredFinalSize === 'string' ? out.requiredFinalSize : null,
+        gsmTolerance: Number(out.gsmTolerance) || 10,
+        suggestedBoardOptions: Array.isArray(out.suggestedBoardOptions)
+          ? out.suggestedBoardOptions.filter(
+              (
+                o,
+              ): o is NonNullable<MaterialReadinessPanelData['suggestedBoardOptions']>[number] =>
+                !!o && typeof o.materialId === 'string' && typeof o.materialCode === 'string' && typeof o.size === 'string',
+            )
+          : [],
         status:
           out.status === 'green' || out.status === 'yellow' || out.status === 'red' || out.status === 'grey'
             ? out.status
@@ -241,17 +295,14 @@ export function PlanningJobDetailDrawer({
             ? out.materialMatchState
             : 'unknown',
       })
-      setSelectedMaterialId((curr) => {
-        if (curr) return curr
-        return typeof out.materialId === 'string' ? out.materialId : ''
-      })
+      setSelectedMaterialId((curr) => curr || '')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load material readiness')
       setReadiness(null)
     } finally {
       setReadinessLoading(false)
     }
-  }, [line, selectedMaterialId])
+  }, [line, selectedMaterialId, wastageSheetsInput])
 
   const loadStockDetails = useCallback(async (materialId: string) => {
     if (!materialId) return
@@ -300,10 +351,24 @@ export function PlanningJobDetailDrawer({
     setReserveBusy(true)
     try {
       const chosenMaterialId = selectedMaterialId || readiness?.materialId || ''
+      const spec = (line.specOverrides || {}) as Record<string, unknown>
+      const meta = readPlanningMeta(spec)
+      const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
+      const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
+      const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
+      const requiredSheets = Math.max(1, Math.ceil(qty / ups) + wastageSheets)
+      const selectedOption = (readiness?.suggestedBoardOptions || []).find((o) => o.materialId === chosenMaterialId) || null
       const res = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(chosenMaterialId ? { materialId: chosenMaterialId } : {}),
+        body: JSON.stringify({
+          ...(chosenMaterialId ? { materialId: chosenMaterialId } : {}),
+          wastageSheets,
+          requiredSheets,
+          ...(selectedOption
+            ? { cutsPerSheet: selectedOption.cutsPerSheet, parentSize: selectedOption.size }
+            : {}),
+        }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -343,7 +408,7 @@ export function PlanningJobDetailDrawer({
     } finally {
       setReserveBusy(false)
     }
-  }, [line, loadReadiness, selectedMaterialId, readiness?.materialId])
+  }, [line, loadReadiness, selectedMaterialId, readiness?.materialId, wastageSheetsInput])
 
   const handleAddToBatch = useCallback(() => {
     if (!line) return
@@ -470,6 +535,11 @@ export function PlanningJobDetailDrawer({
     materialQueue: (line.materialQueue || {}) as Record<string, unknown>,
   })
   const amount = (line.quantity || 0) * (line.rate != null ? Number(line.rate) : 0)
+  const calcQty = Math.max(1, Number(line.quantity || 1))
+  const calcUps = Math.max(1, Number(gangUpsStr || 1))
+  const calcWastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
+  const calcBaseSheets = Math.max(1, Math.ceil(calcQty / calcUps))
+  const calcRequiredSheets = Math.max(1, calcBaseSheets + calcWastageSheets)
 
   const totalQty = line.quantity
   const splitB = typeof splitA === 'number' && splitA > 0 && splitA < totalQty ? totalQty - splitA : null
@@ -478,7 +548,8 @@ export function PlanningJobDetailDrawer({
   const comboControl = 'border-ds-line/80 bg-ds-elevated/50'
   const comboInput = 'text-sm text-ds-ink'
   const noMaterialSelected = !readinessLoading && !(selectedMaterialId || readiness?.materialId)
-  const reserveDisabled = reserveBusy || readinessLoading || noMaterialSelected
+  const hasSuggestions = (readiness?.suggestedBoardOptions?.length || 0) > 0
+  const reserveDisabled = reserveBusy || readinessLoading || noMaterialSelected || (hasSuggestions && !selectionLocked)
   const statusTone =
     readiness?.status === 'green'
       ? 'border-ds-success/35 bg-ds-success/10 text-ds-success'
@@ -498,7 +569,9 @@ export function PlanningJobDetailDrawer({
     : 'No material selected.'
   const reserveButtonLabel = reserveBusy
     ? 'Reserving…'
-    : noMaterialSelected
+    : hasSuggestions && !selectionLocked
+      ? 'Lock material selection before reservation'
+      : noMaterialSelected
       ? 'Select material before reservation'
       : (readiness?.availableSheets ?? 0) <= 0
         ? 'Create Shortage PR'
@@ -682,13 +755,104 @@ export function PlanningJobDetailDrawer({
           {readiness?.materialMatchState === 'none' ? (
             <p className="text-xs text-ds-warning">No matching material in Paper Warehouse.</p>
           ) : null}
+          <div className="mt-3 space-y-2">
+            <p className="text-xs font-semibold text-ds-ink">Suggested Board Options</p>
+            <p className="text-[11px] text-ds-ink-faint">
+              Suggestions are ranked by cuts, wastage, GSM match, and stock availability. User must manually lock material before reservation.
+            </p>
+            {!readiness?.requiredFinalSize ? (
+              <p className="text-xs text-ds-warning">Required size missing. Please enter sheet/final size first.</p>
+            ) : (readiness?.suggestedBoardOptions?.length || 0) === 0 ? (
+              <p className="text-xs text-ds-warning">No suitable stock found. Create PR?</p>
+            ) : (
+              <div className="space-y-2">
+                {(readiness?.suggestedBoardOptions || []).slice(0, 8).map((opt) => {
+                  const selected = selectedMaterialId === opt.materialId
+                  return (
+                    <button
+                      key={opt.materialId}
+                      type="button"
+                      className={`w-full rounded border px-2 py-2 text-left text-xs ${
+                        selected ? 'border-ds-warning/50 bg-ds-warning/10' : 'border-ds-line/40 bg-background'
+                      }`}
+                      onClick={() => {
+                        setSelectedMaterialId(opt.materialId)
+                        setSelectionLocked(false)
+                      }}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className={`${mono} text-ds-ink`}>
+                          {opt.materialCode} · {opt.size} · {opt.gsm ?? '-'} GSM
+                        </p>
+                        <div className="flex items-center gap-2">
+                          {(opt.tags || []).map((tag) => (
+                            <span key={tag} className="text-[10px] text-ds-success">{tag}</span>
+                          ))}
+                          <span className="text-[10px] text-ds-ink-faint">{opt.matchType}</span>
+                          <span className={`text-[10px] ${
+                            opt.status === 'Ready'
+                              ? 'text-ds-success'
+                              : opt.status === 'Partial'
+                                ? 'text-ds-warning'
+                                : 'text-ds-danger'
+                          }`}>{opt.status}</span>
+                        </div>
+                      </div>
+                      <p className="mt-1 text-ds-ink-faint">
+                        Size {opt.size} · Cuts/Sheet {opt.cutsPerSheet} · Req Parent {opt.requiredParentSheets} · Avl {opt.availableSheets} · Short {opt.shortageParentSheets} · Wastage {opt.wastagePct}% · Yield {opt.yieldPct}% · Orientation {opt.orientation}
+                        {opt.gsmDelta != null ? ` · GSM Δ ${opt.gsmDelta} (tol ±${readiness?.gsmTolerance ?? 10})` : ''}
+                      </p>
+                    </button>
+                  )
+                })}
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-ds-ink-faint">
+                    Selected: {selectedMaterialId ? readiness?.suggestedBoardOptions?.find((o) => o.materialId === selectedMaterialId)?.materialCode || selectedMaterialId : 'None'}
+                  </p>
+                  <button
+                    type="button"
+                    disabled={!selectedMaterialId}
+                    onClick={() => setSelectionLocked(true)}
+                    className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
+                  >
+                    {selectionLocked ? 'Selection Locked' : 'Lock Selection'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <div><span className="text-ds-ink-muted">Sheet Size</span><p className={`${mono} text-ds-ink`}>{resolvedSheetSize || '-'}</p></div>
+            <div><span className="text-ds-ink-muted">Qty / UPS</span><p className={`${mono} text-ds-ink`}>{calcQty.toLocaleString('en-IN')} / {calcUps.toLocaleString('en-IN')}</p></div>
+            <div>
+              <span className="text-ds-ink-muted">Wastage (sheets)</span>
+              <input
+                type="number"
+                min={0}
+                className={`${fieldInput} ${mono} mt-1`}
+                value={wastageSheetsInput}
+                onChange={(e) => setWastageSheetsInput(e.target.value)}
+                onBlur={(e) => {
+                  const n = Math.max(0, Math.floor(Number(e.target.value || 0)))
+                  const next = Number.isFinite(n) ? n : 150
+                  setWastageSheetsInput(String(next))
+                  const specNow = (line.specOverrides || {}) as Record<string, unknown>
+                  const update = { ...specNow, wastageSheets: next } as Record<string, unknown>
+                  updateRow(line.id, { specOverrides: update })
+                  void onSaveLine(line.id, { specOverrides: update })
+                  void loadReadiness()
+                }}
+              />
+            </div>
+            <div><span className="text-ds-ink-muted">Base Sheets (Qty / UPS)</span><p className={`${mono} text-ds-ink`}>{calcBaseSheets.toLocaleString('en-IN')}</p></div>
+            <div><span className="text-ds-ink-muted">Total Required (Base + Wastage)</span><p className={`${mono} text-ds-ink`}>{calcRequiredSheets.toLocaleString('en-IN')}</p></div>
+            <div />
             <div><span className="text-ds-ink-muted">Material Code</span><p className={`${mono} text-ds-ink`}>{readiness?.materialCode || '-'}</p></div>
             <div><span className="text-ds-ink-muted">Board Type</span><p className="text-ds-ink">{readiness?.boardType || '-'}</p></div>
             <div><span className="text-ds-ink-muted">Board Classification</span><p className="text-ds-ink">{readiness?.boardClassification || '-'}</p></div>
             <div><span className="text-ds-ink-muted">Size</span><p className={`${mono} text-ds-ink`}>{readiness?.size || '-'}</p></div>
             <div><span className="text-ds-ink-muted">GSM</span><p className={`${mono} text-ds-ink`}>{readiness?.gsm ? `${readiness.gsm} GSM` : '-'}</p></div>
-            <div><span className="text-ds-ink-muted">Required Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.requiredSheets || 0).toLocaleString('en-IN')}</p></div>
+            <div><span className="text-ds-ink-muted">Required Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.requiredSheets || calcRequiredSheets).toLocaleString('en-IN')}</p></div>
             <div><span className="text-ds-ink-muted">Available Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.availableSheets || 0).toLocaleString('en-IN')}</p></div>
             <div><span className="text-ds-ink-muted">Reserved Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.reservedSheets || 0).toLocaleString('en-IN')}</p></div>
             <div><span className="text-ds-ink-muted">Incoming Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.incomingSheets || 0).toLocaleString('en-IN')}</p></div>

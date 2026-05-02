@@ -26,6 +26,7 @@ type PR = {
 }
 
 type Stage = PrUiStage
+
 type TraceabilityPayload = {
   pr: {
     id: string
@@ -63,6 +64,18 @@ type TraceabilityPayload = {
   timeline: Array<{ at: string; event: string; detail: string }>
 }
 
+type GroupedCard = {
+  key: string
+  materialCode: string
+  description: string
+  unit: string
+  totalQty: number
+  jobs: Set<string>
+  rows: PR[]
+  requiredDates: string[]
+  priority: 'urgent' | 'normal'
+}
+
 const STAGES: Array<{ key: Stage; label: string; accent: string }> = [
   { key: 'draft', label: PR_STAGE_LABEL.draft, accent: 'border-orange-400/50' },
   { key: 'approved', label: PR_STAGE_LABEL.approved, accent: 'border-sky-400/50' },
@@ -74,7 +87,9 @@ export default function PurchaseRequisitionsPage() {
   const [list, setList] = useState<PR[]>([])
   const [loading, setLoading] = useState(true)
   const [movingId, setMovingId] = useState<string | null>(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
   const [search, setSearch] = useState('')
+  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set())
   const [traceOpen, setTraceOpen] = useState(false)
   const [traceLoading, setTraceLoading] = useState(false)
   const [traceData, setTraceData] = useState<TraceabilityPayload | null>(null)
@@ -120,6 +135,51 @@ export default function PurchaseRequisitionsPage() {
     return byStage
   }, [list, search])
 
+  const cardsByStage = useMemo(() => {
+    const result: Record<Stage, GroupedCard[]> = {
+      draft: [],
+      approved: [],
+      ordered: [],
+      received: [],
+    }
+
+    for (const stage of STAGES) {
+      const rows = grouped[stage.key]
+      const groupedByMaterial = Object.values(
+        rows.reduce<Record<string, GroupedCard>>((acc, r) => {
+          const key = r.materialId
+          if (!acc[key]) {
+            acc[key] = {
+              key,
+              materialCode: r.material.materialCode,
+              description: r.material.description,
+              unit: r.material.unit,
+              totalQty: 0,
+              jobs: new Set<string>(),
+              rows: [],
+              requiredDates: [],
+              priority: 'normal',
+            }
+          }
+          acc[key].totalQty += Number(r.qtyRequired)
+          if (r.sourceJobCardId) acc[key].jobs.add(r.sourceJobCardId)
+          const linked = Array.isArray(r.linkedShortages) ? r.linkedShortages : []
+          for (const l of linked) {
+            if (l.jobCardId) acc[key].jobs.add(l.jobCardId)
+            if (l.requiredByDate) acc[key].requiredDates.push(l.requiredByDate)
+          }
+          const hasIncoming = stage.key !== 'draft'
+          if (linked.length > 0 && !hasIncoming) acc[key].priority = 'urgent'
+          acc[key].rows.push(r)
+          return acc
+        }, {}),
+      )
+      result[stage.key] = groupedByMaterial
+    }
+
+    return result
+  }, [grouped])
+
   async function moveStage(pr: PR, stage: Stage) {
     setMovingId(pr.id)
     try {
@@ -144,7 +204,82 @@ export default function PurchaseRequisitionsPage() {
     }
   }
 
-  if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
+  async function deleteCard(prId: string) {
+    if (!window.confirm('Delete this PR card?')) return
+    setMovingId(prId)
+    try {
+      const res = await fetch(`/api/purchase-requisitions/${prId}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to delete card')
+      fetchList()
+      setSelectedCardIds((prev) => {
+        const next = new Set(prev)
+        next.delete(prId)
+        return next
+      })
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to delete card')
+    } finally {
+      setMovingId(null)
+    }
+  }
+
+  async function bulkMoveSelected(stage: Stage) {
+    if (selectedCardIds.size === 0) return
+    const selected = list.filter((r) => selectedCardIds.has(r.id))
+    setBulkBusy(true)
+    try {
+      for (const pr of selected) {
+        const body: Record<string, unknown> = { stage }
+        if (stage === 'ordered' && !pr.poReference) {
+          body.poReference = `AUTO-${new Date().toISOString().slice(0, 10)}-${pr.material.materialCode}`
+        }
+        const res = await fetch(`/api/purchase-requisitions/${pr.id}/stage`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error((data as { error?: string }).error || `Failed moving ${pr.material.materialCode}`)
+        }
+      }
+      fetchList()
+      setSelectedCardIds(new Set())
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Bulk move failed')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  async function bulkDeleteSelected() {
+    if (selectedCardIds.size === 0) return
+    if (!window.confirm(`Delete ${selectedCardIds.size} selected PR card(s)?`)) return
+    const selected = list.filter((r) => selectedCardIds.has(r.id))
+    setBulkBusy(true)
+    try {
+      for (const pr of selected) {
+        const res = await fetch(`/api/purchase-requisitions/${pr.id}`, { method: 'DELETE' })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error((data as { error?: string }).error || `Failed deleting ${pr.material.materialCode}`)
+        }
+      }
+      fetchList()
+      setSelectedCardIds(new Set())
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Bulk delete failed')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
 
   async function openTraceability(prId: string) {
     setTraceOpen(true)
@@ -162,61 +297,106 @@ export default function PurchaseRequisitionsPage() {
     }
   }
 
+  if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
+
   return (
     <div className="p-4 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-ds-warning">Purchase Request Kanban</h1>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search material / job / reason"
-          className="w-full max-w-sm rounded-lg border border-ds-line/60 bg-ds-card px-3 py-2 text-sm"
-        />
+        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search material / job / reason"
+            className="w-full max-w-sm rounded-lg border border-ds-line/60 bg-ds-card px-3 py-2 text-sm"
+          />
+          <span className="text-xs text-ds-ink-muted">{selectedCardIds.size} selected</span>
+          <button
+            type="button"
+            disabled={selectedCardIds.size === 0 || bulkBusy}
+            onClick={() => void bulkMoveSelected('ordered')}
+            className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40"
+          >
+            Move Selected → Ordered
+          </button>
+          <button
+            type="button"
+            disabled={selectedCardIds.size === 0 || bulkBusy}
+            onClick={() => void bulkMoveSelected('received')}
+            className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40"
+          >
+            Move Selected → Received
+          </button>
+          <button
+            type="button"
+            disabled={selectedCardIds.size === 0 || bulkBusy}
+            onClick={() => void bulkDeleteSelected()}
+            className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
+          >
+            Delete Selected
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
         {STAGES.map((stage) => {
           const rows = grouped[stage.key]
-          const groupedByMaterial = Object.values(
-            rows.reduce<Record<string, { key: string; materialCode: string; description: string; unit: string; totalQty: number; jobs: Set<string>; rows: PR[]; requiredDates: string[]; priority: 'urgent' | 'normal' }>>((acc, r) => {
-              const key = r.materialId
-              if (!acc[key]) {
-                acc[key] = {
-                  key,
-                  materialCode: r.material.materialCode,
-                  description: r.material.description,
-                  unit: r.material.unit,
-                  totalQty: 0,
-                  jobs: new Set<string>(),
-                  rows: [],
-                  requiredDates: [],
-                  priority: 'normal',
-                }
-              }
-              acc[key].totalQty += Number(r.qtyRequired)
-              if (r.sourceJobCardId) acc[key].jobs.add(r.sourceJobCardId)
-              const linked = Array.isArray(r.linkedShortages) ? r.linkedShortages : []
-              for (const l of linked) {
-                if (l.jobCardId) acc[key].jobs.add(l.jobCardId)
-                if (l.requiredByDate) acc[key].requiredDates.push(l.requiredByDate)
-              }
-              const hasIncoming = stage.key !== 'draft'
-              if (linked.length > 0 && !hasIncoming) acc[key].priority = 'urgent'
-              acc[key].rows.push(r)
-              return acc
-            }, {}),
-          )
-
+          const groupedByMaterial = cardsByStage[stage.key]
           return (
             <div key={stage.key} className={`rounded-xl border ${stage.accent} bg-ds-card/30 p-3`}>
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-ds-ink">{stage.label}</h2>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={groupedByMaterial.length > 0 && groupedByMaterial.every((g) => selectedCardIds.has(g.rows[0]!.id))}
+                    onChange={(e) => {
+                      setSelectedCardIds((prev) => {
+                        const next = new Set(prev)
+                        for (const g of groupedByMaterial) {
+                          const id = g.rows[0]!.id
+                          if (e.target.checked) next.add(id)
+                          else next.delete(id)
+                        }
+                        return next
+                      })
+                    }}
+                    className="h-4 w-4"
+                  />
+                  <h2 className="text-sm font-semibold text-ds-ink">{stage.label}</h2>
+                </div>
                 <span className="rounded border border-ds-line/40 px-2 py-0.5 text-xs text-ds-ink-muted">{rows.length}</span>
               </div>
 
               <div className="space-y-2">
                 {groupedByMaterial.map((g) => (
                   <div key={`${stage.key}-${g.key}`} className="rounded-lg border border-ds-line/40 bg-background p-2">
+                    <div className="mb-1 flex items-start justify-between gap-2">
+                      <label className="mt-0.5 inline-flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedCardIds.has(g.rows[0]!.id)}
+                          onChange={(e) => {
+                            const id = g.rows[0]!.id
+                            setSelectedCardIds((prev) => {
+                              const next = new Set(prev)
+                              if (e.target.checked) next.add(id)
+                              else next.delete(id)
+                              return next
+                            })
+                          }}
+                          className="h-4 w-4"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={movingId != null || bulkBusy}
+                        onClick={() => void deleteCard(g.rows[0]!.id)}
+                        className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
+                      >
+                        Delete card
+                      </button>
+                    </div>
+
                     <button
                       type="button"
                       className="text-left text-sm font-semibold text-ds-ink underline-offset-2 hover:underline"
@@ -251,7 +431,7 @@ export default function PurchaseRequisitionsPage() {
                         <button
                           key={to.key}
                           type="button"
-                          disabled={movingId != null}
+                          disabled={movingId != null || bulkBusy}
                           onClick={() => void moveStage(g.rows[0]!, to.key)}
                           className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40"
                         >
@@ -271,6 +451,7 @@ export default function PurchaseRequisitionsPage() {
           )
         })}
       </div>
+
       <TraceabilityDrawer
         open={traceOpen}
         loading={traceLoading}

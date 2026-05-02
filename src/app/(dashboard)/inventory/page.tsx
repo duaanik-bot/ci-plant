@@ -160,6 +160,7 @@ function InventoryPageContent() {
   })
   const [paperLedgerSort, setPaperLedgerSort] = useState<'oldest' | 'newest'>('oldest')
   const [hubSearchPo, setHubSearchPo] = useState('')
+  const [paperSearch, setPaperSearch] = useState('')
   const [debouncedHubPo, setDebouncedHubPo] = useState('')
   const [drawerRow, setDrawerRow] = useState<PaperLedgerRow | null>(null)
   const [genealogy, setGenealogy] = useState<{ steps: GenealogyStep[] } | null>(null)
@@ -181,6 +182,7 @@ function InventoryPageContent() {
   const [adjustMode, setAdjustMode] = useState<'single' | 'bulk'>('single')
   const [bulkAdjustInput, setBulkAdjustInput] = useState('')
   const [bulkAdjustSubmitting, setBulkAdjustSubmitting] = useState(false)
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<Set<string>>(new Set())
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
   const [materialDrawerLoading, setMaterialDrawerLoading] = useState(false)
@@ -243,7 +245,7 @@ function InventoryPageContent() {
           gsm: ledgerGsm,
           board: ledgerBoard,
         }),
-        loadPaperWarehouse(hubSearchPo),
+        loadPaperWarehouse(''),
         fetch('/api/job-cards')
           .then((r) => r.json())
           .then((list) => setJobCards(Array.isArray(list) ? list : [])),
@@ -256,7 +258,7 @@ function InventoryPageContent() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedHubPo, hubSearchPo, ledgerGsm, ledgerBoard, loadPaperLedger, loadPaperWarehouse])
+  }, [debouncedHubPo, ledgerGsm, ledgerBoard, loadPaperLedger, loadPaperWarehouse])
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedHubPo(hubSearchPo), 320)
@@ -330,6 +332,30 @@ function InventoryPageContent() {
     })
     return r
   }, [paperLedger, paperLedgerSort])
+
+  const filteredPaperWarehouseRows = useMemo(() => {
+    const q = paperSearch.trim().toLowerCase()
+    if (!q) return paperWarehouseRows
+    return paperWarehouseRows.filter((row) => {
+      const hay = [
+        row.size_display || '',
+        row.board_classification_id || '',
+        row.gsm == null ? '' : String(row.gsm),
+        row.material_code || '',
+        row.material_id || '',
+        row.board_type_id || '',
+        String(row.available_sheets),
+        String(row.reserved_sheets),
+        String(row.incoming_sheets),
+        String(row.shortage_sheets),
+        String(row.reorder_level),
+        row.status || '',
+      ]
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
+    })
+  }, [paperSearch, paperWarehouseRows])
 
   const filteredJobCards = useMemo(() => {
     const q = jobSearch.trim().toLowerCase()
@@ -407,10 +433,6 @@ function InventoryPageContent() {
       toast.error('Enter valid quantity')
       return
     }
-    if (!adjustReason.trim() || !adjustRemarks.trim()) {
-      toast.error('Reason and remarks are required')
-      return
-    }
     setAdjustSubmitting(true)
     try {
       const res = await fetch('/api/inventory/adjust', {
@@ -421,8 +443,8 @@ function InventoryPageContent() {
           qty,
           direction: adjustDirection,
           bucket: adjustBucket,
-          reasonCode: adjustReason.trim(),
-          remarks: adjustRemarks.trim(),
+          ...(adjustReason.trim() ? { reasonCode: adjustReason.trim() } : {}),
+          ...(adjustRemarks.trim() ? { remarks: adjustRemarks.trim() } : {}),
         }),
       })
       const j = await res.json().catch(() => ({}))
@@ -473,8 +495,8 @@ function InventoryPageContent() {
       for (let idx = 0; idx < lines.length; idx += 1) {
         const raw = lines[idx]!
         const parts = raw.split(',').map((p) => p.trim())
-        if (parts.length < 6) {
-          failures.push(`Line ${idx + 1}: use 6 fields`)
+        if (parts.length < 4) {
+          failures.push(`Line ${idx + 1}: use at least 4 fields`)
           continue
         }
         const [materialToken, qtyToken, directionToken, bucketToken, reasonCode, remarks] = parts
@@ -491,8 +513,8 @@ function InventoryPageContent() {
           failures.push(`Line ${idx + 1}: material not found (${materialToken || '-'})`)
           continue
         }
-        if (!Number.isFinite(qty) || qty <= 0 || !direction || !bucket || !reasonCode || !remarks) {
-          failures.push(`Line ${idx + 1}: invalid qty/direction/bucket/reason/remarks`)
+        if (!Number.isFinite(qty) || qty <= 0 || !direction || !bucket) {
+          failures.push(`Line ${idx + 1}: invalid qty/direction/bucket`)
           continue
         }
 
@@ -504,8 +526,8 @@ function InventoryPageContent() {
             qty,
             direction,
             bucket,
-            reasonCode,
-            remarks,
+            ...(reasonCode ? { reasonCode } : {}),
+            ...(remarks ? { remarks } : {}),
           }),
         })
         const payload = await res.json().catch(() => ({}))
@@ -569,7 +591,38 @@ function InventoryPageContent() {
     }
   }
 
+  async function deletePaperRow(row: PaperWarehouseRow) {
+    const first = window.confirm(
+      `Delete paper row for ${row.material_code}?\nThis removes the warehouse row permanently.`,
+    )
+    if (!first) return
+    const token = window.prompt(`Second confirmation: type DELETE ${row.material_code} to continue.`)
+    if (token !== `DELETE ${row.material_code}`) {
+      toast.error('Delete cancelled: confirmation token mismatch')
+      return
+    }
+    try {
+      const res = await fetch(`/api/inventory/paper-warehouse/${row.material_id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Delete failed')
+      toast.success('Paper warehouse row deleted')
+      setSelectedMaterialIds((prev) => {
+        const next = new Set(prev)
+        next.delete(row.material_id)
+        return next
+      })
+      await reloadAll()
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed')
+    }
+  }
+
   const paperWarehouseOnlyMode = true
+  const allRowsSelected =
+    filteredPaperWarehouseRows.length > 0 &&
+    filteredPaperWarehouseRows.every((r) => selectedMaterialIds.has(r.material_id))
   if (paperWarehouseOnlyMode) {
     return (
       <div className="w-full px-4 py-3">
@@ -580,6 +633,25 @@ function InventoryPageContent() {
             className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
           >
             Adjust Stock
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedMaterialIds.size === 0) {
+                toast.error('Select at least one row')
+                return
+              }
+              const lines = filteredPaperWarehouseRows
+                .filter((r) => selectedMaterialIds.has(r.material_id))
+                .map((r) => `${r.material_code}, 0, add, available, , `)
+                .join('\n')
+              setAdjustMode('bulk')
+              setBulkAdjustInput(lines)
+              setAdjustOpen(true)
+            }}
+            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+          >
+            Bulk Add/Remove
           </button>
           <Link
             href="/inventory/flow"
@@ -623,14 +695,14 @@ function InventoryPageContent() {
                   </p>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-                <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
-                <div className="rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></div>
-                <div className="rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></div>
-                <div className="rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></div>
-                <div className="rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></div>
-                <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
-                <div className="rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
+              <div className="flex flex-nowrap items-stretch gap-2 overflow-x-auto text-xs">
+                <div className="min-w-[120px] rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></div>
+                <div className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></div>
+                <div className="min-w-[120px] rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></div>
+                <div className="min-w-[120px] rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></div>
+                <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
+                <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
+                <div className="min-w-[120px] rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
               </div>
             </div>
 
@@ -638,8 +710,8 @@ function InventoryPageContent() {
               Search raw material
               <input
                 type="text"
-                value={hubSearchPo}
-                onChange={(e) => setHubSearchPo(e.target.value)}
+                value={paperSearch}
+                onChange={(e) => setPaperSearch(e.target.value)}
                 placeholder="material code / board type / classification / size / gsm"
                 className={`mt-1 w-full max-w-md rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
               />
@@ -673,6 +745,17 @@ function InventoryPageContent() {
               <table className="w-full text-sm">
                 <thead className="bg-background text-left border-b border-ds-line/40">
                   <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
+                    <th className="px-3 py-2 w-10">
+                      <input
+                        type="checkbox"
+                        checked={allRowsSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedMaterialIds(new Set(filteredPaperWarehouseRows.map((r) => r.material_id)))
+                          else setSelectedMaterialIds(new Set())
+                        }}
+                        className="h-4 w-4"
+                      />
+                    </th>
                     <th className="px-3 py-2">Size</th>
                     <th className="px-3 py-2">Board classification</th>
                     <th className="px-3 py-2">GSM</th>
@@ -689,8 +772,23 @@ function InventoryPageContent() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ds-card">
-                  {paperWarehouseRows.map((row) => (
+                  {filteredPaperWarehouseRows.map((row) => (
                     <tr key={row.material_id} className="hover:bg-ds-main/40">
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedMaterialIds.has(row.material_id)}
+                          onChange={(e) => {
+                            setSelectedMaterialIds((prev) => {
+                              const next = new Set(prev)
+                              if (e.target.checked) next.add(row.material_id)
+                              else next.delete(row.material_id)
+                              return next
+                            })
+                          }}
+                          className="h-4 w-4"
+                        />
+                      </td>
                       <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>
                         <button
                           type="button"
@@ -771,6 +869,13 @@ function InventoryPageContent() {
                           >
                             - Remove
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => void deletePaperRow(row)}
+                            className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
+                          >
+                            Delete row
+                          </button>
                           {row.shortage_sheets > 0 ? (
                             <a
                               href={`/inventory/purchase-requisitions?materialId=${encodeURIComponent(row.material_id)}`}
@@ -785,7 +890,7 @@ function InventoryPageContent() {
                   ))}
                 </tbody>
               </table>
-              {paperWarehouseRows.length === 0 && (
+              {filteredPaperWarehouseRows.length === 0 && (
                 <p className="p-6 text-center text-ds-ink-faint text-sm">
                   No paper warehouse rows found.
                 </p>
@@ -1004,12 +1109,12 @@ function InventoryPageContent() {
             ) : (
               <>
                 <p className="text-xs text-ds-ink-faint">
-                  One line per entry: <span className={ledgerMono}>materialCode or materialId, qty, add|subtract, available|reserved|quarantine|fg, reasonCode, remarks</span>
+                  One line per entry: <span className={ledgerMono}>materialCode or materialId, qty, add|subtract, available|reserved|quarantine|fg, [reasonCode], [remarks]</span>
                 </p>
                 <textarea
                   value={bulkAdjustInput}
                   onChange={(e) => setBulkAdjustInput(e.target.value)}
-                  placeholder={`TEST-MAT-123, 100, add, available, trial_load, Trial load opening stock\nTEST-MAT-123, 20, subtract, available, trial_fix, Count correction`}
+                  placeholder={`TEST-MAT-123, 100, add, available, trial_load, Trial load opening stock\nTEST-MAT-123, 20, subtract, available`}
                   className="min-h-[180px] w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
                 />
                 <button
@@ -1047,14 +1152,14 @@ function InventoryPageContent() {
                 </p>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-              <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
-              <div className="rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></div>
-              <div className="rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></div>
-              <div className="rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></div>
-              <div className="rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></div>
-              <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
-              <div className="rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
+            <div className="flex flex-nowrap items-stretch gap-2 overflow-x-auto text-xs">
+              <div className="min-w-[120px] rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></div>
+              <div className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></div>
+              <div className="min-w-[120px] rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></div>
+              <div className="min-w-[120px] rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></div>
+              <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
+              <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
+              <div className="min-w-[120px] rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
             </div>
           </div>
 
@@ -1062,8 +1167,8 @@ function InventoryPageContent() {
             Search raw material
             <input
               type="text"
-              value={hubSearchPo}
-              onChange={(e) => setHubSearchPo(e.target.value)}
+              value={paperSearch}
+              onChange={(e) => setPaperSearch(e.target.value)}
               placeholder="material code / board type / classification / size / gsm"
               className={`mt-1 w-full max-w-md rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
             />
@@ -1113,7 +1218,7 @@ function InventoryPageContent() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-ds-card">
-                {paperWarehouseRows.map((row) => (
+                {filteredPaperWarehouseRows.map((row) => (
                   <tr key={row.material_id} className="hover:bg-ds-main/40">
                     <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>
                       <button
@@ -1195,7 +1300,7 @@ function InventoryPageContent() {
                 ))}
               </tbody>
             </table>
-            {paperWarehouseRows.length === 0 && (
+            {filteredPaperWarehouseRows.length === 0 && (
               <p className="p-6 text-center text-ds-ink-faint text-sm">
                 No paper warehouse rows found.
               </p>

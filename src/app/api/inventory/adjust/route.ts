@@ -11,8 +11,8 @@ const schema = z.object({
   qty: z.number().positive(),
   direction: z.enum(['add', 'subtract']),
   bucket: z.enum(['quarantine', 'available', 'reserved', 'fg']),
-  reasonCode: z.string().min(2).max(64),
-  remarks: z.string().min(3).max(500),
+  reasonCode: z.string().min(2).max(64).optional(),
+  remarks: z.string().min(1).max(500).optional(),
 })
 
 export async function POST(req: NextRequest) {
@@ -28,7 +28,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Validation failed', details: parsed.error.flatten() }, { status: 400 })
   }
 
-  const { materialId, qty, direction, bucket, reasonCode, remarks } = parsed.data
+  const { materialId, qty, direction, bucket } = parsed.data
+  const reasonCode = (parsed.data.reasonCode || 'manual_adjust').trim()
+  const remarks = (parsed.data.remarks || 'manual adjustment').trim()
   const sign = direction === 'add' ? 1 : -1
   const signedQty = sign * qty
 
