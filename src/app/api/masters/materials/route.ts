@@ -52,6 +52,24 @@ function computeDescription(boardType: string | null | undefined, gsm: number | 
   return [board, gsmPart, attrs].filter(Boolean).join(' · ')
 }
 
+function defaultSheetsPerPacket(boardType: string | null | undefined): number | null {
+  const key = (boardType || '').trim().toLowerCase()
+  if (!key) return null
+  if (key.includes('sbs')) return 100
+  if (key.includes('dup') || key.includes('duplex')) return 144
+  return null
+}
+
+function computePacketWeight(lengthIn: number | null | undefined, widthIn: number | null | undefined, gsm: number | null | undefined, sheetsPerPacket: number | null | undefined): number | null {
+  const l = Number(lengthIn)
+  const w = Number(widthIn)
+  const g = Number(gsm)
+  const s = Number(sheetsPerPacket)
+  if (!Number.isFinite(l) || !Number.isFinite(w) || !Number.isFinite(g) || !Number.isFinite(s) || l <= 0 || w <= 0 || g <= 0 || s <= 0) return null
+  const sheetWeight = (l * w * g) / 3100 / 5 / s
+  return Number((sheetWeight * s).toFixed(3))
+}
+
 const createSchema = z.object({
   autoGenerateCode: z.boolean().default(true),
   materialCode: z.string().optional(),
@@ -63,8 +81,8 @@ const createSchema = z.object({
   leadTimeDays: z.number().int().min(0).default(7),
   supplierId: z.string().uuid().optional().nullable(),
   weightedAvgCost: z.number().min(0).default(0),
-  packetWeight: z.number().positive(),
-  sheetsPerPacket: z.number().int().positive(),
+  packetWeight: z.number().positive().optional().nullable(),
+  sheetsPerPacket: z.number().int().positive().optional().nullable(),
   active: z.boolean().default(true),
   boardType: z.string().optional().nullable(),
   boardClassification: z.string().optional().nullable(),
@@ -158,8 +176,12 @@ export async function POST(req: NextRequest) {
   if (!data.sheetLength || data.sheetLength <= 0) fields.sheetLength = 'Sheet length is required'
   if (!data.sheetWidth || data.sheetWidth <= 0) fields.sheetWidth = 'Sheet width is required'
   if (!data.gsm || data.gsm <= 0) fields.gsm = 'GSM is required'
-  if (!data.packetWeight || data.packetWeight <= 0) fields.packetWeight = 'Packet weight is required'
-  if (!data.sheetsPerPacket || data.sheetsPerPacket <= 0) fields.sheetsPerPacket = 'Sheets per packet is required'
+  const resolvedSheetsPerPacket = data.sheetsPerPacket ?? defaultSheetsPerPacket(data.boardType)
+  const resolvedPacketWeight =
+    data.packetWeight ??
+    computePacketWeight(data.sheetLength, data.sheetWidth, data.gsm, resolvedSheetsPerPacket)
+  if (!resolvedSheetsPerPacket || resolvedSheetsPerPacket <= 0) fields.sheetsPerPacket = 'Sheets per packet is required'
+  if (!resolvedPacketWeight || resolvedPacketWeight <= 0) fields.packetWeight = 'Packet weight is required'
   if (Object.keys(fields).length > 0) {
     return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
   }
@@ -237,8 +259,8 @@ export async function POST(req: NextRequest) {
       leadTimeDays: data.leadTimeDays,
       supplierId: data.supplierId || null,
       weightedAvgCost: data.weightedAvgCost,
-      maxDailyUsage: data.packetWeight,
-      maxStorageQty: data.sheetsPerPacket,
+      maxDailyUsage: resolvedPacketWeight,
+      maxStorageQty: resolvedSheetsPerPacket,
       physicalStockSheets,
       shortageSheets,
       totalWeightKg,

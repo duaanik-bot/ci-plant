@@ -30,6 +30,15 @@ function calcSheetWeightByFactoryRule(lengthIn: number, widthIn: number, gsm: nu
   return parseFloat(((lengthIn * widthIn * gsm) / 3100 / 5 / sheetsPerPacket).toFixed(4))
 }
 
+function defaultSheetsPerPacket(boardType: string): number | null {
+  const key = boardType.trim().toLowerCase()
+  if (!key) return null
+  if (key.includes('sbs')) return 100
+  if (key.includes('dup')) return 144
+  if (key.includes('duplex')) return 144
+  return null
+}
+
 function stockHealth(available: number, reorder: number, safety: number): 'green' | 'yellow' | 'red' {
   if (available <= safety) return 'red'
   if (available <= reorder) return 'yellow'
@@ -116,6 +125,15 @@ export default function MaterialForm({ mode, initialData }: Props) {
   })
 
   const qtyAvailable = initialData?.qtyAvailable ?? 0
+
+  useEffect(() => {
+    const current = Number(f.sheetsPerPacket)
+    if (Number.isFinite(current) && current > 0) return
+    const autoDefault = defaultSheetsPerPacket(f.boardType)
+    if (autoDefault != null) {
+      setF((prev) => ({ ...prev, sheetsPerPacket: String(autoDefault) }))
+    }
+  }, [f.boardType, f.sheetsPerPacket])
 
   useEffect(() => {
     fetch('/api/masters/suppliers')
@@ -211,8 +229,16 @@ export default function MaterialForm({ mode, initialData }: Props) {
 
     setDeleting(true)
     try {
-      const res = await fetch(`/api/masters/materials/${initialData.id}`, { method: 'DELETE' })
-      const data = await res.json().catch(() => ({}))
+      let res = await fetch(`/api/masters/materials/${initialData.id}`, { method: 'DELETE' })
+      let data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const forceOk = window.confirm(
+          'This material has linked logs/records. Do you want force delete and remove associated logs?',
+        )
+        if (!forceOk) throw new Error(data.error || 'Failed to delete')
+        res = await fetch(`/api/masters/materials/${initialData.id}?force=1`, { method: 'DELETE' })
+        data = await res.json().catch(() => ({}))
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to delete')
       toast.success('Material deleted')
       router.push('/masters/materials')
@@ -369,11 +395,6 @@ export default function MaterialForm({ mode, initialData }: Props) {
               {fieldErrors.sheetWidth && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.sheetWidth}</p>}
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Sheet weight (g)</label>
-              <input type="text" readOnly value={sheetWeight > 0 ? `${sheetWeight} g` : '—'} className={`${cls} opacity-60 cursor-not-allowed`} />
-              <p className="text-xs text-ds-ink-faint mt-0.5">= L x W x GSM / 3100 / 5 / sheets-per-packet</p>
-            </div>
-            <div>
               <label className="block text-ds-ink-muted mb-1">Total sheets in packet / bundle</label>
               <input
                 type="number"
@@ -382,9 +403,14 @@ export default function MaterialForm({ mode, initialData }: Props) {
                 value={f.sheetsPerPacket}
                 onChange={(e) => patch('sheetsPerPacket', e.target.value)}
                 className={`${cls} border ${errCls('sheetsPerPacket')}`}
-                placeholder="e.g. 100"
+                placeholder={defaultSheetsPerPacket(f.boardType) != null ? String(defaultSheetsPerPacket(f.boardType)) : 'e.g. 100'}
               />
               {fieldErrors.sheetsPerPacket && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.sheetsPerPacket}</p>}
+            </div>
+            <div>
+              <label className="block text-ds-ink-muted mb-1">Sheet weight (g)</label>
+              <input type="text" readOnly value={sheetWeight > 0 ? `${sheetWeight} g` : '—'} className={`${cls} opacity-60 cursor-not-allowed`} />
+              <p className="text-xs text-ds-ink-faint mt-0.5">= L x W x GSM / 3100 / 5 / sheets-per-packet</p>
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Packet Weight</label>

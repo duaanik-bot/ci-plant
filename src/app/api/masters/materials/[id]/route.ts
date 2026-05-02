@@ -14,6 +14,24 @@ function toOptionalNumber(value: unknown): number | undefined {
 
 const UNITS = ['sheets', 'packets', 'kg', 'grs', 'tonnes', 'litres', 'metres', 'pieces'] as const
 
+function defaultSheetsPerPacket(boardType: string | null | undefined): number | null {
+  const key = (boardType || '').trim().toLowerCase()
+  if (!key) return null
+  if (key.includes('sbs')) return 100
+  if (key.includes('dup') || key.includes('duplex')) return 144
+  return null
+}
+
+function computePacketWeight(lengthIn: number | null | undefined, widthIn: number | null | undefined, gsm: number | null | undefined, sheetsPerPacket: number | null | undefined): number | null {
+  const l = Number(lengthIn)
+  const w = Number(widthIn)
+  const g = Number(gsm)
+  const s = Number(sheetsPerPacket)
+  if (!Number.isFinite(l) || !Number.isFinite(w) || !Number.isFinite(g) || !Number.isFinite(s) || l <= 0 || w <= 0 || g <= 0 || s <= 0) return null
+  const sheetWeight = (l * w * g) / 3100 / 5 / s
+  return Number((sheetWeight * s).toFixed(3))
+}
+
 const updateSchema = z.object({
   materialCode: z.string().min(1).optional(),
   description: z.string().optional(),
@@ -134,8 +152,16 @@ export async function PUT(
   const nextGsm = data.gsm ?? existing.gsm
   const nextSheetLength = data.sheetLength ?? (existing.sheetLength != null ? Number(existing.sheetLength) : null)
   const nextSheetWidth = data.sheetWidth ?? (existing.sheetWidth != null ? Number(existing.sheetWidth) : null)
-  const nextPacketWeight = data.packetWeight ?? Number(existing.maxDailyUsage)
-  const nextSheetsPerPacket = data.sheetsPerPacket ?? (existing.maxStorageQty != null ? Number(existing.maxStorageQty) : null)
+  const nextSheetsPerPacket =
+    data.sheetsPerPacket ??
+    (existing.maxStorageQty != null ? Number(existing.maxStorageQty) : null) ??
+    defaultSheetsPerPacket(nextBoardType)
+  const existingPacketWeight = Number(existing.maxDailyUsage)
+  const nextPacketWeight =
+    data.packetWeight ??
+    (existingPacketWeight > 0
+      ? existingPacketWeight
+      : computePacketWeight(nextSheetLength, nextSheetWidth, nextGsm, nextSheetsPerPacket))
   const fields: Record<string, string> = {}
   if (!nextBoardType?.trim()) fields.boardType = 'Board Type is required'
   if (!nextBoardClassification?.trim()) fields.boardClassification = 'Board Classification is required'
@@ -226,7 +252,7 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { error, user } = await requireRole('operations_head', 'md')
@@ -236,7 +262,23 @@ export async function DELETE(
   const existing = await db.inventory.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Material not found' }, { status: 404 })
 
-  await db.inventory.delete({ where: { id } })
+  const force = req.nextUrl.searchParams.get('force') === '1' || req.nextUrl.searchParams.get('force') === 'true'
+
+  if (!force) {
+    await db.inventory.delete({ where: { id } })
+  } else {
+    await db.$transaction(async (tx) => {
+      await tx.grnShortageAllocation.deleteMany({ where: { materialId: id } })
+      await tx.materialReservation.deleteMany({ where: { materialId: id } })
+      await tx.materialShortage.deleteMany({ where: { materialId: id } })
+      await tx.purchaseRequisition.deleteMany({ where: { materialId: id } })
+      await tx.stockMovement.deleteMany({ where: { materialId: id } })
+      await tx.sheetIssue.deleteMany({ where: { materialId: id } })
+      await tx.wasteRecord.deleteMany({ where: { materialId: id } })
+      await tx.bomLine.deleteMany({ where: { materialId: id } })
+      await tx.inventory.delete({ where: { id } })
+    })
+  }
 
   await createAuditLog({
     userId: user!.id,
