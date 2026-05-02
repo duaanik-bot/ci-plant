@@ -27,6 +27,10 @@ function parsePosInt(value: string | null): number | null {
   return i > 0 ? i : null
 }
 
+function normalizeText(value: string | null | undefined): string {
+  return (value || '').trim().toLowerCase()
+}
+
 async function resolvePlanningContext(id: string, opts?: { requireJobCard?: boolean }) {
   const line = await db.poLineItem.findUnique({
     where: { id },
@@ -106,10 +110,21 @@ async function resolveMaterialFromSpec(line: Record<string, unknown> & {
     }
   }
 
+  const boardTypeNorm = boardTypeRaw.trim()
+  const boardClassificationNorm = boardClassificationRaw?.trim() || null
   const matches = await db.inventory.findMany({
     where: {
       active: true,
-      boardType: { equals: boardTypeRaw, mode: 'insensitive' },
+      OR: [
+        { boardType: { equals: boardTypeNorm, mode: 'insensitive' } },
+        { boardClassification: { equals: boardTypeNorm, mode: 'insensitive' } },
+        ...(boardClassificationNorm
+          ? [
+              { boardType: { equals: boardClassificationNorm, mode: 'insensitive' as const } },
+              { boardClassification: { equals: boardClassificationNorm, mode: 'insensitive' as const } },
+            ]
+          : []),
+      ],
       ...(boardClassificationRaw
         ? { boardClassification: { equals: boardClassificationRaw, mode: 'insensitive' as const } }
         : {}),
@@ -184,9 +199,24 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const baseRequired = Math.max(1, Math.ceil(qtyBase / upsBase))
   const requiredSheets = Math.max(1, baseRequired + wastageSheets) || Math.max(1, Number(requirement.requiredSheets) || 0)
   const requiredSizePair = parseSheetSizeToPair(auto.resolvedSheetSize || '')
+  const boardTypeNorm = auto.boardTypeRaw?.trim() || null
+  const boardClassNorm = auto.boardClassificationRaw?.trim() || null
   const baseInventoryWhere = {
     active: true,
-    ...(auto.boardTypeRaw ? { boardType: { equals: auto.boardTypeRaw, mode: 'insensitive' as const } } : {}),
+    ...(boardTypeNorm
+      ? {
+          OR: [
+            { boardType: { equals: boardTypeNorm, mode: 'insensitive' as const } },
+            { boardClassification: { equals: boardTypeNorm, mode: 'insensitive' as const } },
+            ...(boardClassNorm
+              ? [
+                  { boardType: { equals: boardClassNorm, mode: 'insensitive' as const } },
+                  { boardClassification: { equals: boardClassNorm, mode: 'insensitive' as const } },
+                ]
+              : []),
+          ],
+        }
+      : {}),
     sheetLength: { gt: 0 },
     sheetWidth: { gt: 0 },
   }
@@ -209,7 +239,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
 
   const withClassification = inventoryCandidatesAll.filter((m) => {
     if (!auto.boardClassificationRaw) return true
-    return (m.boardClassification || '').trim().toLowerCase() === auto.boardClassificationRaw.trim().toLowerCase()
+    const target = auto.boardClassificationRaw.trim().toLowerCase()
+    return (
+      (m.boardClassification || '').trim().toLowerCase() === target ||
+      (m.boardType || '').trim().toLowerCase() === target
+    )
   })
   const gsmWithin = (rows: typeof inventoryCandidatesAll, tolerance: number) =>
     rows.filter((m) => {
@@ -275,6 +309,28 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
           ? widerToleranceSuggestions
           : Array.from(byId.values()).slice(0, 10).map((o) => ({ ...o, matchType: o.matchType, status: o.status }))
 
+  const withBoardMatchMode = (opt: (typeof suggestedBoardOptions)[number]) => {
+    const reqType = normalizeText(auto.boardTypeRaw)
+    const reqClass = normalizeText(auto.boardClassificationRaw)
+    const matType = normalizeText(opt.boardType)
+    const matClass = normalizeText(opt.boardClassification)
+    const isTypeExact = !!reqType && matType === reqType
+    const isTypeViaClass = !!reqType && matClass === reqType
+    const isClassViaType = !!reqClass && matType === reqClass
+    const isClassExact = !!reqClass && matClass === reqClass
+    const boardMatchMode =
+      isTypeExact || isClassExact
+        ? 'exact'
+        : isTypeViaClass || isClassViaType
+          ? 'cross_field'
+          : 'fallback'
+    return {
+      ...opt,
+      boardMatchMode,
+    }
+  }
+  const suggestedBoardOptionsWithMode = suggestedBoardOptions.map(withBoardMatchMode)
+
   const closestAvailableOptions =
     strictSuggestions.length === 0
       ? Array.from(byId.values())
@@ -297,7 +353,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   }
   console.log('[planning-cutfit-debug]', debug)
   const selectedSuggestion = selectedMaterialId
-    ? suggestedBoardOptions.find((o) => o.materialId === selectedMaterialId) ?? null
+    ? suggestedBoardOptionsWithMode.find((o) => o.materialId === selectedMaterialId) ?? null
     : null
   const availableSheets = Math.max(0, Number(material?.qtyAvailable) || 0)
   const reservedSheets = Math.max(0, Number(material?.qtyReserved) || 0)
@@ -314,7 +370,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
 
   return NextResponse.json({
     planningId: id,
-    jobCardId: ctx.jobCard.id,
+    jobCardId: ctx.jobCard?.id ?? null,
     materialId,
     materialCode: material?.materialCode ?? null,
     boardType: material?.boardType ?? auto.boardTypeRaw ?? null,
@@ -329,7 +385,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     ups: upsBase,
     wastageSheets,
     baseRequiredSheets: baseRequired,
-    suggestedBoardOptions,
+    suggestedBoardOptions: suggestedBoardOptionsWithMode,
     closestAvailableOptions,
     noMaterialsAtAll,
     debugMessage:
@@ -357,6 +413,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
             ? 'none'
             : 'unknown',
     suggestionDebug: debug,
+    mappingSafety: {
+      requestedBoardType: auto.boardTypeRaw ?? null,
+      requestedBoardClassification: auto.boardClassificationRaw ?? null,
+      candidatePoolCount: inventoryCandidatesAll.length,
+      strictPoolCount: strictSet.length,
+      strategyUsed:
+        strictSuggestions.length > 0
+          ? 'strict'
+          : relaxedNoClassSuggestions.length > 0
+            ? 'fallback_without_classification'
+            : widerToleranceSuggestions.length > 0
+              ? 'fallback_wider_gsm_tolerance'
+              : 'closest_only',
+    },
   })
 }
 

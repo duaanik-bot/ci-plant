@@ -33,6 +33,9 @@ function calcSheetWeightByFactoryRule(lengthIn: number, widthIn: number, gsm: nu
 function defaultSheetsPerPacket(boardType: string): number | null {
   const key = boardType.trim().toLowerCase()
   if (!key) return null
+  if (key.includes('fbb')) return 100
+  if (key.includes('saff')) return 144
+  // Legacy fallback
   if (key.includes('sbs')) return 100
   if (key.includes('dup')) return 144
   if (key.includes('duplex')) return 144
@@ -50,7 +53,6 @@ export type MaterialFormData = {
   description: string
   unit: string
   boardType: string
-  boardClassification: string
   attributes: string
   gsm: string
   sheetLength: string
@@ -76,7 +78,6 @@ const EMPTY: MaterialFormData = {
   description: '',
   unit: 'sheets',
   boardType: '',
-  boardClassification: '',
   attributes: '',
   gsm: '',
   sheetLength: '',
@@ -182,7 +183,6 @@ export default function MaterialForm({ mode, initialData }: Props) {
       description: autoDescription || f.description.trim() || undefined,
       unit: f.unit,
       boardType: f.boardType || null,
-      boardClassification: f.boardClassification || null,
       attributes: f.attributes.trim() || null,
       gsm: f.gsm ? Number(f.gsm) : null,
       sheetLength: f.sheetLength ? Number(f.sheetLength) : null,
@@ -331,9 +331,9 @@ export default function MaterialForm({ mode, initialData }: Props) {
           {fieldErrors.materialCode && <p className="text-xs text-red-400">{fieldErrors.materialCode}</p>}
         </div>
 
-        {/* Board Classification */}
+        {/* Board Type */}
         <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm">
-          <h3 className="text-ds-ink-muted font-medium mb-3">Board Classification</h3>
+          <h3 className="text-ds-ink-muted font-medium mb-3">Board Type</h3>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="block text-ds-ink-muted mb-1">Board Type</label>
@@ -345,17 +345,6 @@ export default function MaterialForm({ mode, initialData }: Props) {
                 placeholder="Select board type..."
               />
               {fieldErrors.boardType && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.boardType}</p>}
-            </div>
-            <div>
-              <label className="block text-ds-ink-muted mb-1">Board Classification</label>
-              <EffectSelect
-                category="Board Classification"
-                value={f.boardClassification}
-                onChange={(next) => patch('boardClassification', next)}
-                className={cls}
-                placeholder="Select classification..."
-              />
-              {fieldErrors.boardClassification && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.boardClassification}</p>}
             </div>
             <div className="md:col-span-2">
               <label className="block text-ds-ink-muted mb-1">Material attribute</label>

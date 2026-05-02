@@ -11,7 +11,6 @@ type ApiMaterial = {
   description: string
   unit: string
   boardType: string | null
-  boardClassification: string | null
   attributes: string | null
   gsm: number | null
   sheetLength: number | null
@@ -58,7 +57,6 @@ export default function EditMaterialPage() {
         description: data.description,
         unit: data.unit,
         boardType: data.boardType ?? '',
-        boardClassification: data.boardClassification ?? '',
         attributes: data.attributes ?? '',
         gsm: data.gsm != null ? String(data.gsm) : '',
         sheetLength: data.sheetLength != null ? String(data.sheetLength) : '',

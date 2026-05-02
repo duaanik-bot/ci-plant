@@ -55,6 +55,9 @@ function computeDescription(boardType: string | null | undefined, gsm: number | 
 function defaultSheetsPerPacket(boardType: string | null | undefined): number | null {
   const key = (boardType || '').trim().toLowerCase()
   if (!key) return null
+  if (key.includes('fbb')) return 100
+  if (key.includes('saff')) return 144
+  // Legacy fallback
   if (key.includes('sbs')) return 100
   if (key.includes('dup') || key.includes('duplex')) return 144
   return null
@@ -85,7 +88,6 @@ const createSchema = z.object({
   sheetsPerPacket: z.number().int().positive().optional().nullable(),
   active: z.boolean().default(true),
   boardType: z.string().optional().nullable(),
-  boardClassification: z.string().optional().nullable(),
   attributes: z.string().optional().nullable(),
   gsm: z.number().int().positive().optional().nullable(),
   sheetLength: z.number().positive().optional().nullable(),
@@ -122,7 +124,7 @@ export async function GET() {
       safetyStock: Number(m.safetyStock),
       active: m.active,
       boardType: m.boardType,
-      boardClassification: m.boardClassification,
+      boardClassification: m.boardType,
       gsm: m.gsm,
       sheetLength: m.sheetLength != null ? Number(m.sheetLength) : null,
       sheetWidth: m.sheetWidth != null ? Number(m.sheetWidth) : null,
@@ -152,7 +154,6 @@ export async function POST(req: NextRequest) {
     sheetsPerPacket: toOptionalNumber(body.sheetsPerPacket),
     supplierId: body.supplierId || null,
     gsm: toOptionalNumber(body.gsm),
-    boardClassification: typeof body.boardClassification === 'string' ? body.boardClassification : null,
     attributes: typeof body.attributes === 'string' ? body.attributes : null,
     sheetLength: toOptionalNumber(body.sheetLength),
     sheetWidth: toOptionalNumber(body.sheetWidth),
@@ -172,7 +173,6 @@ export async function POST(req: NextRequest) {
   const data = parsed.data
   const fields: Record<string, string> = {}
   if (!data.boardType?.trim()) fields.boardType = 'Board Type is required'
-  if (!data.boardClassification?.trim()) fields.boardClassification = 'Board Classification is required'
   if (!data.sheetLength || data.sheetLength <= 0) fields.sheetLength = 'Sheet length is required'
   if (!data.sheetWidth || data.sheetWidth <= 0) fields.sheetWidth = 'Sheet width is required'
   if (!data.gsm || data.gsm <= 0) fields.gsm = 'GSM is required'
@@ -247,7 +247,7 @@ export async function POST(req: NextRequest) {
       materialCode,
       description: finalDescription,
       boardType: data.boardType || null,
-      boardClassification: data.boardClassification || null,
+      boardClassification: data.boardType || null,
       sheetLength: data.sheetLength ?? null,
       sheetWidth: data.sheetWidth ?? null,
       gsm: data.gsm ?? null,

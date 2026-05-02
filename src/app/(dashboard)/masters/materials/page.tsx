@@ -19,7 +19,6 @@ type Material = {
   materialCode: string
   description: string
   unit: string
-  boardClassification: string | null
   attributes: string | null
   sheetLength: number | null
   sheetWidth: number | null
@@ -103,7 +102,6 @@ export default function MastersMaterialsPage() {
         m.materialCode,
         m.description,
         m.boardType ?? '',
-        m.boardClassification ?? '',
         m.attributes ?? '',
         m.gsm != null ? String(m.gsm) : '',
         String(m.packetWeight),
@@ -191,7 +189,7 @@ export default function MastersMaterialsPage() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search code, board type, board classification, size, GSM..."
+          placeholder="Search code, board type, size, GSM..."
           className="min-h-[40px] w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-card-foreground"
         />
       </div>
@@ -213,7 +211,6 @@ export default function MastersMaterialsPage() {
               </th>
               <th className={enterpriseThClass}>Product Code</th>
               <th className={enterpriseThClass}>Board Type</th>
-              <th className={enterpriseThClass}>Board Classification</th>
               <th className={enterpriseThClass}>Size</th>
               <th className={enterpriseThClass}>
                 <button type="button" onClick={() => toggleSort('gsm')}>GSM</button>
@@ -250,7 +247,6 @@ export default function MastersMaterialsPage() {
                   </td>
                   <td className={`${cellWrap} font-designing-queue`}>{m?.materialCode ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{m?.boardType ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{m?.boardClassification ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{sizeLabel}</td>
                   <td className={enterpriseTdMonoClass}>{m?.gsm ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{Number(m?.packetWeight ?? 0).toFixed(3)}</td>

@@ -79,6 +79,7 @@ type MaterialReadinessPanelData = {
     status: 'Ready' | 'Partial' | 'Shortage'
     tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
     gsmDelta: number | null
+    boardMatchMode?: 'exact' | 'cross_field' | 'fallback'
   }>
   closestAvailableOptions?: Array<{
     materialId: string
@@ -98,6 +99,7 @@ type MaterialReadinessPanelData = {
     status: 'Ready' | 'Partial' | 'Shortage'
     tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
     gsmDelta: number | null
+    boardMatchMode?: 'exact' | 'cross_field' | 'fallback'
   }>
   noMaterialsAtAll?: boolean
   debugMessage?: string | null
@@ -113,6 +115,13 @@ type MaterialReadinessPanelData = {
     finalSuggestions: number
     fallbackWithoutClassification: number
     fallbackWithWiderTolerance: number
+  } | null
+  mappingSafety?: {
+    requestedBoardType: string | null
+    requestedBoardClassification: string | null
+    candidatePoolCount: number
+    strictPoolCount: number
+    strategyUsed: string
   } | null
   status: 'green' | 'yellow' | 'red' | 'grey'
   materialCandidates?: Array<{ id: string; materialCode: string; description: string }>
@@ -209,6 +218,7 @@ export function PlanningJobDetailDrawer({
   const [optionDetailsOpen, setOptionDetailsOpen] = useState<Record<string, boolean>>({})
   const [optionDetailsLoading, setOptionDetailsLoading] = useState<Record<string, boolean>>({})
   const [optionDetailsByMaterial, setOptionDetailsByMaterial] = useState<Record<string, MaterialStockDetails | null>>({})
+  const [suggestionsWorkspaceOpen, setSuggestionsWorkspaceOpen] = useState(false)
 
   useEffect(() => {
     if (!line) {
@@ -327,6 +337,10 @@ export function PlanningJobDetailDrawer({
         suggestionDebug:
           out.suggestionDebug && typeof out.suggestionDebug === 'object'
             ? (out.suggestionDebug as MaterialReadinessPanelData['suggestionDebug'])
+            : null,
+        mappingSafety:
+          out.mappingSafety && typeof out.mappingSafety === 'object'
+            ? (out.mappingSafety as MaterialReadinessPanelData['mappingSafety'])
             : null,
         status:
           out.status === 'green' || out.status === 'yellow' || out.status === 'red' || out.status === 'grey'
@@ -825,6 +839,18 @@ export function PlanningJobDetailDrawer({
             <p className="text-[11px] text-ds-ink-faint">
               Suggestions are ranked by cuts, wastage, GSM match, and stock availability. User must manually lock material before reservation.
             </p>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-ds-ink-faint">
+                Mapping: {readiness?.mappingSafety?.strategyUsed || '-'} · candidates {readiness?.mappingSafety?.candidatePoolCount ?? 0} · strict {readiness?.mappingSafety?.strictPoolCount ?? 0}
+              </p>
+              <button
+                type="button"
+                className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
+                onClick={() => setSuggestionsWorkspaceOpen(true)}
+              >
+                Open Suggestion Workspace
+              </button>
+            </div>
             {!hasDecisionInputs ? (
               <p className="text-xs text-ds-warning">Suggestions load when Sheet Size, Qty, and UPS are available.</p>
             ) : readiness?.noMaterialsAtAll ? (
@@ -870,6 +896,9 @@ export function PlanningJobDetailDrawer({
                                 ? 'text-ds-warning'
                                 : 'text-ds-danger'
                           }`}>{opt.status}</span>
+                          <span className="text-[10px] text-ds-ink-faint">
+                            {opt.boardMatchMode === 'exact' ? 'Board exact' : opt.boardMatchMode === 'cross_field' ? 'Board mapped' : 'Board fallback'}
+                          </span>
                         </div>
                       </div>
                       <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-ds-ink-faint">
@@ -1398,6 +1427,78 @@ export function PlanningJobDetailDrawer({
           </Button>
         </div>
       </div>
+      <StandardDrawer
+        isOpen={suggestionsWorkspaceOpen}
+        onClose={() => setSuggestionsWorkspaceOpen(false)}
+        title="Suggestion Workspace"
+        metadata={<p className="text-xs text-ds-ink-faint">Extended view for material decision and safer mapping verification.</p>}
+        primaryAction={{
+          label: 'Close',
+          onClick: () => setSuggestionsWorkspaceOpen(false),
+        }}
+      >
+        <div className="space-y-3 text-xs text-ds-ink">
+          <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+            <p>
+              Required size: <span className={mono}>{resolvedSheetSize || '-'}</span> · Qty/UPS: <span className={mono}>{calcQty}/{calcUps}</span> · Required sheets: <span className={mono}>{calcRequiredSheets}</span>
+            </p>
+            <p className="mt-1 text-ds-ink-faint">
+              Strategy: {readiness?.mappingSafety?.strategyUsed || '-'} | Requested board type: {readiness?.mappingSafety?.requestedBoardType || '-'}
+            </p>
+          </div>
+          <div className="overflow-x-auto rounded border border-ds-line/40">
+            <table className="w-full min-w-[860px] table-auto text-left">
+              <thead className="bg-ds-elevated/30 text-[11px] uppercase tracking-wide text-ds-ink-faint">
+                <tr>
+                  <th className="px-2 py-2">Material</th>
+                  <th className="px-2 py-2">Parent Size</th>
+                  <th className="px-2 py-2">GSM</th>
+                  <th className="px-2 py-2">Cuts</th>
+                  <th className="px-2 py-2">Req Parent</th>
+                  <th className="px-2 py-2">Available</th>
+                  <th className="px-2 py-2">Yield/Waste</th>
+                  <th className="px-2 py-2">Match</th>
+                  <th className="px-2 py-2">Status</th>
+                  <th className="px-2 py-2">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {((((readiness?.suggestedBoardOptions?.length || 0) > 0
+                  ? readiness?.suggestedBoardOptions
+                  : readiness?.closestAvailableOptions) || [])).slice(0, 10).map((opt) => (
+                  <tr key={`ws-${opt.materialId}`} className="border-t border-ds-line/30">
+                    <td className="px-2 py-2">
+                      <p className={mono}>{opt.materialCode}</p>
+                      <p className="text-ds-ink-faint">{opt.boardType || '-'} / {opt.boardClassification || '-'}</p>
+                    </td>
+                    <td className={`px-2 py-2 ${mono}`}>{opt.size}</td>
+                    <td className={`px-2 py-2 ${mono}`}>{opt.gsm ?? '-'}</td>
+                    <td className={`px-2 py-2 ${mono}`}>{opt.cutsPerSheet}</td>
+                    <td className={`px-2 py-2 ${mono}`}>{opt.requiredParentSheets}</td>
+                    <td className={`px-2 py-2 ${mono}`}>{opt.availableSheets}</td>
+                    <td className={`px-2 py-2 ${mono}`}>{opt.yieldPct}% / {opt.wastagePct}%</td>
+                    <td className="px-2 py-2">
+                      <span>{opt.matchType}</span>
+                      <span className="ml-1 text-ds-ink-faint">({opt.boardMatchMode === 'exact' ? 'Board exact' : opt.boardMatchMode === 'cross_field' ? 'Board mapped' : 'Board fallback'})</span>
+                    </td>
+                    <td className="px-2 py-2">{opt.status}</td>
+                    <td className="px-2 py-2">
+                      <Button
+                        type="button"
+                        disabled={reserveBusy}
+                        onClick={() => void handleReserveMaterial(opt.materialId, opt.cutsPerSheet, opt.size)}
+                        className="h-7 px-2 text-xs"
+                      >
+                        {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </StandardDrawer>
     </StandardDrawer>
   )
 }

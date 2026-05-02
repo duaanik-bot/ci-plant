@@ -17,6 +17,9 @@ const UNITS = ['sheets', 'packets', 'kg', 'grs', 'tonnes', 'litres', 'metres', '
 function defaultSheetsPerPacket(boardType: string | null | undefined): number | null {
   const key = (boardType || '').trim().toLowerCase()
   if (!key) return null
+  if (key.includes('fbb')) return 100
+  if (key.includes('saff')) return 144
+  // Legacy fallback
   if (key.includes('sbs')) return 100
   if (key.includes('dup') || key.includes('duplex')) return 144
   return null
@@ -46,7 +49,6 @@ const updateSchema = z.object({
   sheetsPerPacket: z.number().int().positive().optional(),
   active: z.boolean().optional(),
   boardType: z.string().optional().nullable(),
-  boardClassification: z.string().optional().nullable(),
   attributes: z.string().optional().nullable(),
   gsm: z.number().int().positive().optional().nullable(),
   sheetLength: z.number().positive().optional().nullable(),
@@ -90,7 +92,7 @@ export async function GET(
     storageLocation: m.storageLocation,
     leadTimeDays: m.leadTimeDays,
     boardType: m.boardType,
-    boardClassification: m.boardClassification,
+    boardClassification: m.boardType,
     gsm: m.gsm,
     sheetLength: m.sheetLength != null ? Number(m.sheetLength) : null,
     sheetWidth: m.sheetWidth != null ? Number(m.sheetWidth) : null,
@@ -126,7 +128,6 @@ export async function PUT(
     sheetsPerPacket: toOptionalNumber(body.sheetsPerPacket),
     supplierId: body.supplierId === '' ? null : body.supplierId,
     gsm: toOptionalNumber(body.gsm),
-    boardClassification: typeof body.boardClassification === 'string' ? body.boardClassification : null,
     attributes: typeof body.attributes === 'string' ? body.attributes : null,
     sheetLength: toOptionalNumber(body.sheetLength),
     sheetWidth: toOptionalNumber(body.sheetWidth),
@@ -148,7 +149,6 @@ export async function PUT(
 
   const data = parsed.data
   const nextBoardType = data.boardType ?? existing.boardType
-  const nextBoardClassification = data.boardClassification ?? existing.boardClassification
   const nextGsm = data.gsm ?? existing.gsm
   const nextSheetLength = data.sheetLength ?? (existing.sheetLength != null ? Number(existing.sheetLength) : null)
   const nextSheetWidth = data.sheetWidth ?? (existing.sheetWidth != null ? Number(existing.sheetWidth) : null)
@@ -164,7 +164,6 @@ export async function PUT(
       : computePacketWeight(nextSheetLength, nextSheetWidth, nextGsm, nextSheetsPerPacket))
   const fields: Record<string, string> = {}
   if (!nextBoardType?.trim()) fields.boardType = 'Board Type is required'
-  if (!nextBoardClassification?.trim()) fields.boardClassification = 'Board Classification is required'
   if (!nextSheetLength || nextSheetLength <= 0) fields.sheetLength = 'Sheet length is required'
   if (!nextSheetWidth || nextSheetWidth <= 0) fields.sheetWidth = 'Sheet width is required'
   if (!nextGsm || nextGsm <= 0) fields.gsm = 'GSM is required'
@@ -230,7 +229,7 @@ export async function PUT(
       ...(data.sheetsPerPacket != null && { maxStorageQty: data.sheetsPerPacket }),
       ...(data.active !== undefined && { active: data.active }),
       ...(data.boardType !== undefined && { boardType: data.boardType || null }),
-      ...(data.boardClassification !== undefined && { boardClassification: data.boardClassification || null }),
+      ...(data.boardType !== undefined && { boardClassification: data.boardType || null }),
       ...(data.gsm !== undefined && { gsm: data.gsm ?? null }),
       ...(data.sheetLength !== undefined && { sheetLength: data.sheetLength ?? null }),
       ...(data.sheetWidth !== undefined && { sheetWidth: data.sheetWidth ?? null }),
