@@ -16,9 +16,18 @@ const GRAIN_DIRECTIONS = ['Long Grain', 'Short Grain']
 
 type Supplier = { id: string; name: string }
 
-function calcSheetWeight(l: number, w: number, gsm: number) {
-  if (!Number.isFinite(l) || !Number.isFinite(w) || !Number.isFinite(gsm) || l <= 0 || w <= 0 || gsm <= 0) return 0
-  return parseFloat(((l * w * gsm) / 1_000_000).toFixed(2))
+function calcSheetWeightByFactoryRule(lengthIn: number, widthIn: number, gsm: number, sheetsPerPacket: number) {
+  if (
+    !Number.isFinite(lengthIn) ||
+    !Number.isFinite(widthIn) ||
+    !Number.isFinite(gsm) ||
+    !Number.isFinite(sheetsPerPacket) ||
+    lengthIn <= 0 ||
+    widthIn <= 0 ||
+    gsm <= 0 ||
+    sheetsPerPacket <= 0
+  ) return 0
+  return parseFloat(((lengthIn * widthIn * gsm) / 3100 / 5 / sheetsPerPacket).toFixed(4))
 }
 
 function stockHealth(available: number, reorder: number, safety: number): 'green' | 'yellow' | 'red' {
@@ -49,6 +58,7 @@ export type MaterialFormData = {
   supplierId: string
   weightedAvgCost: string
   packetWeight: string
+  sheetsPerPacket: string
   active: boolean
 }
 
@@ -72,8 +82,9 @@ const EMPTY: MaterialFormData = {
   storageLocation: '',
   leadTimeDays: '7',
   supplierId: '',
-  weightedAvgCost: '0',
+  weightedAvgCost: '',
   packetWeight: '',
+  sheetsPerPacket: '',
   active: true,
 }
 
@@ -119,9 +130,21 @@ export default function MaterialForm({ mode, initialData }: Props) {
   }
 
   const sheetWeight = useMemo(
-    () => calcSheetWeight(Number(f.sheetLength), Number(f.sheetWidth), Number(f.gsm)),
-    [f.sheetLength, f.sheetWidth, f.gsm],
+    () =>
+      calcSheetWeightByFactoryRule(
+        Number(f.sheetLength),
+        Number(f.sheetWidth),
+        Number(f.gsm),
+        Number(f.sheetsPerPacket),
+      ),
+    [f.sheetLength, f.sheetWidth, f.gsm, f.sheetsPerPacket],
   )
+
+  const autoPacketWeight = useMemo(() => {
+    const sheetsPerPacket = Number(f.sheetsPerPacket)
+    if (!Number.isFinite(sheetsPerPacket) || sheetsPerPacket <= 0 || sheetWeight <= 0) return 0
+    return parseFloat((sheetWeight * sheetsPerPacket).toFixed(3))
+  }, [sheetWeight, f.sheetsPerPacket])
 
   const autoDescription = useMemo(() => {
     const board = f.boardType.trim()
@@ -157,7 +180,8 @@ export default function MaterialForm({ mode, initialData }: Props) {
       leadTimeDays: Number(f.leadTimeDays) || 7,
       supplierId: f.supplierId || null,
       weightedAvgCost: Number(f.weightedAvgCost) || 0,
-      packetWeight: f.packetWeight ? Number(f.packetWeight) : null,
+      packetWeight: autoPacketWeight > 0 ? autoPacketWeight : null,
+      sheetsPerPacket: f.sheetsPerPacket ? Number(f.sheetsPerPacket) : null,
       active: f.active,
     }
 
@@ -335,19 +359,32 @@ export default function MaterialForm({ mode, initialData }: Props) {
               {fieldErrors.gsm && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.gsm}</p>}
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Sheet length (mm)</label>
+              <label className="block text-ds-ink-muted mb-1">Sheet length (inches)</label>
               <input type="number" step="0.01" min={0} value={f.sheetLength} onChange={(e) => patch('sheetLength', e.target.value)} className={`${cls} border ${errCls('sheetLength')}`} />
               {fieldErrors.sheetLength && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.sheetLength}</p>}
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Sheet width (mm)</label>
+              <label className="block text-ds-ink-muted mb-1">Sheet width (inches)</label>
               <input type="number" step="0.01" min={0} value={f.sheetWidth} onChange={(e) => patch('sheetWidth', e.target.value)} className={`${cls} border ${errCls('sheetWidth')}`} />
               {fieldErrors.sheetWidth && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.sheetWidth}</p>}
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Sheet weight (g)</label>
               <input type="text" readOnly value={sheetWeight > 0 ? `${sheetWeight} g` : '—'} className={`${cls} opacity-60 cursor-not-allowed`} />
-              <p className="text-xs text-ds-ink-faint mt-0.5">= L x W x GSM / 1,000,000</p>
+              <p className="text-xs text-ds-ink-faint mt-0.5">= L x W x GSM / 3100 / 5 / sheets-per-packet</p>
+            </div>
+            <div>
+              <label className="block text-ds-ink-muted mb-1">Total sheets in packet / bundle</label>
+              <input
+                type="number"
+                min={1}
+                step="1"
+                value={f.sheetsPerPacket}
+                onChange={(e) => patch('sheetsPerPacket', e.target.value)}
+                className={`${cls} border ${errCls('sheetsPerPacket')}`}
+                placeholder="e.g. 100"
+              />
+              {fieldErrors.sheetsPerPacket && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.sheetsPerPacket}</p>}
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Packet Weight</label>
@@ -355,10 +392,10 @@ export default function MaterialForm({ mode, initialData }: Props) {
                 type="number"
                 min={0}
                 step="0.001"
-                value={f.packetWeight}
-                onChange={(e) => patch('packetWeight', e.target.value)}
-                className={`${cls} border ${errCls('packetWeight')}`}
-                placeholder="e.g. 12.5"
+                value={autoPacketWeight > 0 ? String(autoPacketWeight) : ''}
+                readOnly
+                className={`${cls} border ${errCls('packetWeight')} opacity-60 cursor-not-allowed`}
+                placeholder="Auto-calculated"
               />
               {fieldErrors.packetWeight && <p className="mt-0.5 text-xs text-red-400">{fieldErrors.packetWeight}</p>}
             </div>
@@ -370,19 +407,19 @@ export default function MaterialForm({ mode, initialData }: Props) {
               </select>
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Caliper (microns)</label>
+              <label className="block text-ds-ink-muted mb-1">Caliper (microns) (optional)</label>
               <input type="number" step="0.01" min={0} value={f.caliperMicrons} onChange={(e) => patch('caliperMicrons', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Brightness %</label>
+              <label className="block text-ds-ink-muted mb-1">Brightness % (optional)</label>
               <input type="number" step="0.1" min={0} max={100} value={f.brightnessPct} onChange={(e) => patch('brightnessPct', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Moisture %</label>
+              <label className="block text-ds-ink-muted mb-1">Moisture % (optional)</label>
               <input type="number" step="0.1" min={0} max={100} value={f.moisturePct} onChange={(e) => patch('moisturePct', e.target.value)} className={cls} />
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">HSN code</label>
+              <label className="block text-ds-ink-muted mb-1">HSN code (optional)</label>
               <input value={f.hsnCode} onChange={(e) => patch('hsnCode', e.target.value)} className={cls} placeholder="e.g. 4810" />
             </div>
           </div>
@@ -399,7 +436,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
               </select>
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Primary supplier</label>
+              <label className="block text-ds-ink-muted mb-1">Primary supplier (optional)</label>
               <select value={f.supplierId} onChange={(e) => patch('supplierId', e.target.value)} className={cls}>
                 <option value="">None</option>
                 {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -422,8 +459,8 @@ export default function MaterialForm({ mode, initialData }: Props) {
               <input value={f.storageLocation} onChange={(e) => patch('storageLocation', e.target.value)} className={cls} placeholder="e.g. Rack A-3" />
             </div>
             <div>
-              <label className="block text-ds-ink-muted mb-1">Weighted avg cost</label>
-              <input type="number" min={0} step="0.01" value={f.weightedAvgCost} onChange={(e) => patch('weightedAvgCost', e.target.value)} className={cls} />
+              <label className="block text-ds-ink-muted mb-1">Weighted avg cost (optional)</label>
+              <input type="number" min={0} step="0.01" value={f.weightedAvgCost} onChange={(e) => patch('weightedAvgCost', e.target.value)} className={cls} placeholder="Leave blank if not available" />
             </div>
             <div />
           </div>

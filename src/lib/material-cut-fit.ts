@@ -53,6 +53,11 @@ function n(v: unknown): number {
   return Number.isFinite(x) ? x : 0
 }
 
+function formatDim(value: number): string {
+  if (!Number.isFinite(value)) return '-'
+  return value.toString()
+}
+
 export function calculateCutsPerSheet(input: CutFitInput): number {
   const parentLength = n(input.parentLength)
   const parentWidth = n(input.parentWidth)
@@ -146,7 +151,7 @@ export function buildMaterialCutFitOptions(input: {
       boardType: m.boardType ?? null,
       boardClassification: m.boardClassification ?? null,
       gsm: m.gsm ?? null,
-      size: `${Math.round(parentLength)} x ${Math.round(parentWidth)}`,
+      size: `${formatDim(parentLength)} x ${formatDim(parentWidth)}`,
       availableSheets,
       cutsPerSheet,
       requiredParentSheets,

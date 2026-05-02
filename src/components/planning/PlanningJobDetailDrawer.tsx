@@ -137,10 +137,10 @@ function specPasting(line: PlanningGridLine): string {
   return ''
 }
 
-function toPositiveIntString(value: unknown): string {
+function toPositiveNumberString(value: unknown): string {
   const n = Number(value)
   if (!Number.isFinite(n) || n <= 0) return ''
-  return String(Math.floor(n))
+  return String(n)
 }
 
 export function PlanningJobDetailDrawer({
@@ -183,14 +183,14 @@ export function PlanningJobDetailDrawer({
     setSplitA('')
     const spec = (line.specOverrides || {}) as Record<string, unknown>
     setSheetLengthMm(
-      toPositiveIntString(spec.sheetLengthMm) ||
-        toPositiveIntString(line.materialQueue?.sheetLengthMm) ||
-        toPositiveIntString(line.carton?.blankLength),
+      toPositiveNumberString(spec.sheetLengthMm) ||
+        toPositiveNumberString(line.materialQueue?.sheetLengthMm) ||
+        toPositiveNumberString(line.carton?.blankLength),
     )
     setSheetWidthMm(
-      toPositiveIntString(spec.sheetWidthMm) ||
-        toPositiveIntString(line.materialQueue?.sheetWidthMm) ||
-        toPositiveIntString(line.carton?.blankWidth),
+      toPositiveNumberString(spec.sheetWidthMm) ||
+        toPositiveNumberString(line.materialQueue?.sheetWidthMm) ||
+        toPositiveNumberString(line.carton?.blankWidth),
     )
     const ws = Math.max(0, Math.floor(Number((spec.wastageSheets as number | undefined) ?? 150)))
     setWastageSheetsInput(String(Number.isFinite(ws) ? ws : 150))

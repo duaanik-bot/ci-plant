@@ -16,7 +16,7 @@ function asNonEmpty(value: unknown): string | null {
 
 function num(value: unknown): number | null {
   const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+  return Number.isFinite(n) && n > 0 ? n : null
 }
 
 export function resolveSheetSize(line: SizeSource): string {
@@ -63,5 +63,5 @@ export function parseSheetSizeToPair(sheetSize: string): { length: number; width
   const a = Number(parts[0])
   const b = Number(parts[1])
   if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) return null
-  return { length: Math.round(a), width: Math.round(b) }
+  return { length: a, width: b }
 }

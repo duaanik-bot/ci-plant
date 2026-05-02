@@ -32,6 +32,12 @@ function asNumber(v: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
+function formatSheetDim(value: unknown): string | null {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n.toString()
+}
+
 function dateBucketKey(d: Date | null | undefined): string {
   if (!d) return 'none'
   const iso = d.toISOString()
@@ -223,9 +229,9 @@ export async function createPurchaseRequestFromShortage(shortageId: string, clie
       }
     }
 
-    const sizeLabel = material.sheetLength && material.sheetWidth
-      ? `${Math.round(Number(material.sheetLength))}x${Math.round(Number(material.sheetWidth))}`
-      : null
+    const length = formatSheetDim(material.sheetLength)
+    const width = formatSheetDim(material.sheetWidth)
+    const sizeLabel = length && width ? `${length}x${width}` : null
 
     const pr = await tx.purchaseRequisition.create({
       data: {

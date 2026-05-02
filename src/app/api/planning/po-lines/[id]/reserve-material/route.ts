@@ -13,6 +13,12 @@ function n(v: unknown): number {
   return Number.isFinite(x) ? x : 0
 }
 
+function formatSheetDim(value: unknown): string | null {
+  const x = Number(value)
+  if (!Number.isFinite(x) || x <= 0) return null
+  return x.toString()
+}
+
 function parsePosInt(value: string | null): number | null {
   if (!value) return null
   const n = Number(value)
@@ -245,18 +251,18 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     materialCode: material?.materialCode ?? null,
     boardType: material?.boardType ?? auto.boardTypeRaw ?? null,
     boardClassification: material?.boardClassification ?? auto.boardClassificationRaw ?? null,
-    size:
-      material?.sheetLength && material?.sheetWidth
-        ? `${Math.round(Number(material.sheetLength))}x${Math.round(Number(material.sheetWidth))}`
-        : auto.resolvedSheetSize || null,
+    size: (() => {
+      const l = material ? formatSheetDim(material.sheetLength) : null
+      const w = material ? formatSheetDim(material.sheetWidth) : null
+      return l && w ? `${l}x${w}` : auto.resolvedSheetSize || null
+    })(),
     gsm: material?.gsm ?? auto.gsmRaw ?? null,
     qty: qtyBase,
     ups: upsBase,
     wastageSheets,
     baseRequiredSheets: baseRequired,
     suggestedBoardOptions,
-    requiredFinalSize:
-      requiredSizePair ? `${Math.round(requiredSizePair.length)} x ${Math.round(requiredSizePair.width)}` : null,
+    requiredFinalSize: requiredSizePair ? `${requiredSizePair.length} x ${requiredSizePair.width}` : null,
     selectedSuggestion,
     gsmTolerance,
     requiredSheets,

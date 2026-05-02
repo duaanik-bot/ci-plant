@@ -9,6 +9,12 @@ const nz = (v: unknown) => {
   return Number.isFinite(n) ? n : 0
 }
 
+const formatSheetDim = (value: unknown) => {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n.toString()
+}
+
 export async function GET(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { error } = await requireAuth()
   if (error) return error
@@ -130,10 +136,11 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
       materialCode: pr.material.materialCode,
       boardType: pr.material.boardType ?? '-',
       classification: pr.material.boardClassification ?? '-',
-      size:
-        pr.material.sheetLength && pr.material.sheetWidth
-          ? `${Math.round(Number(pr.material.sheetLength))}x${Math.round(Number(pr.material.sheetWidth))}`
-          : '-',
+      size: (() => {
+        const l = formatSheetDim(pr.material.sheetLength)
+        const w = formatSheetDim(pr.material.sheetWidth)
+        return l && w ? `${l}x${w}` : '-'
+      })(),
       gsm: pr.material.gsm ?? null,
     },
     linkedJobs,

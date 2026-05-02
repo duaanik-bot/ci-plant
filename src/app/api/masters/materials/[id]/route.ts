@@ -25,6 +25,7 @@ const updateSchema = z.object({
   supplierId: z.string().uuid().optional().nullable(),
   weightedAvgCost: z.number().min(0).optional(),
   packetWeight: z.number().positive().optional(),
+  sheetsPerPacket: z.number().int().positive().optional(),
   active: z.boolean().optional(),
   boardType: z.string().optional().nullable(),
   boardClassification: z.string().optional().nullable(),
@@ -64,6 +65,7 @@ export async function GET(
     qtyFg: Number(m.qtyFg),
     weightedAvgCost: Number(m.weightedAvgCost),
     packetWeight: Number(m.maxDailyUsage),
+    sheetsPerPacket: m.maxStorageQty != null ? Number(m.maxStorageQty) : null,
     reorderPoint: Number(m.reorderPoint),
     safetyStock: Number(m.safetyStock),
     active: m.active,
@@ -103,6 +105,7 @@ export async function PUT(
     leadTimeDays: toOptionalNumber(body.leadTimeDays),
     weightedAvgCost: toOptionalNumber(body.weightedAvgCost),
     packetWeight: toOptionalNumber(body.packetWeight),
+    sheetsPerPacket: toOptionalNumber(body.sheetsPerPacket),
     supplierId: body.supplierId === '' ? null : body.supplierId,
     gsm: toOptionalNumber(body.gsm),
     boardClassification: typeof body.boardClassification === 'string' ? body.boardClassification : null,
@@ -132,6 +135,7 @@ export async function PUT(
   const nextSheetLength = data.sheetLength ?? (existing.sheetLength != null ? Number(existing.sheetLength) : null)
   const nextSheetWidth = data.sheetWidth ?? (existing.sheetWidth != null ? Number(existing.sheetWidth) : null)
   const nextPacketWeight = data.packetWeight ?? Number(existing.maxDailyUsage)
+  const nextSheetsPerPacket = data.sheetsPerPacket ?? (existing.maxStorageQty != null ? Number(existing.maxStorageQty) : null)
   const fields: Record<string, string> = {}
   if (!nextBoardType?.trim()) fields.boardType = 'Board Type is required'
   if (!nextBoardClassification?.trim()) fields.boardClassification = 'Board Classification is required'
@@ -139,6 +143,7 @@ export async function PUT(
   if (!nextSheetWidth || nextSheetWidth <= 0) fields.sheetWidth = 'Sheet width is required'
   if (!nextGsm || nextGsm <= 0) fields.gsm = 'GSM is required'
   if (!nextPacketWeight || nextPacketWeight <= 0) fields.packetWeight = 'Packet weight is required'
+  if (!nextSheetsPerPacket || nextSheetsPerPacket <= 0) fields.sheetsPerPacket = 'Sheets per packet is required'
   if (Object.keys(fields).length > 0) {
     return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
   }
@@ -196,6 +201,7 @@ export async function PUT(
       ...(data.supplierId !== undefined && { supplierId: data.supplierId }),
       ...(data.weightedAvgCost != null && { weightedAvgCost: data.weightedAvgCost }),
       ...(data.packetWeight != null && { maxDailyUsage: data.packetWeight }),
+      ...(data.sheetsPerPacket != null && { maxStorageQty: data.sheetsPerPacket }),
       ...(data.active !== undefined && { active: data.active }),
       ...(data.boardType !== undefined && { boardType: data.boardType || null }),
       ...(data.boardClassification !== undefined && { boardClassification: data.boardClassification || null }),
