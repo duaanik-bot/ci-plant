@@ -21,6 +21,7 @@ import {
   type PlanningDesignerKey,
 } from '@/lib/planning-decision-spec'
 import { formatShortTimeAgo } from '@/lib/time-ago'
+import { resolveSheetSize } from '@/lib/planning-sheet-size'
 import { ACTION_PILL_BASE, ICON_BUTTON_BASE, PUSHED_CHIP_CLASS, STATUS_CHIP_BASE } from '@/components/design-system/tokens'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 import { useUiDensity } from '@/lib/ui-density'
@@ -240,14 +241,14 @@ function availableFgCount(r: PlanningGridLine): number {
 }
 
 function sheetSizeLabel(r: PlanningGridLine): string {
-  const fromDie = typeof r.dieMaster?.sheetSize === 'string' ? r.dieMaster.sheetSize.trim() : ''
-  if (fromDie) return fromDie
-  const len = Number(r.materialQueue?.sheetLengthMm)
-  const wid = Number(r.materialQueue?.sheetWidthMm)
-  if (Number.isFinite(len) && len > 0 && Number.isFinite(wid) && wid > 0) {
-    return `${Math.round(len)}×${Math.round(wid)}`
-  }
-  return '—'
+  return resolveSheetSize({
+    sheetSize: (r as unknown as Record<string, unknown>).sheetSize,
+    actualSheetSize: (r as unknown as Record<string, unknown>).actualSheetSize,
+    specOverrides: (r.specOverrides || {}) as Record<string, unknown>,
+    product: (r.carton || {}) as Record<string, unknown>,
+    carton: (r.carton || {}) as Record<string, unknown>,
+    materialQueue: (r.materialQueue || {}) as Record<string, unknown>,
+  })
 }
 
 function stockSignalMeta(signal: 'green' | 'yellow' | 'red'): { label: string; cls: string } {
@@ -257,6 +258,18 @@ function stockSignalMeta(signal: 'green' | 'yellow' | 'red'): { label: string; c
   if (signal === 'yellow') {
     return { label: 'Partial', cls: 'border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300' }
   }
+  return { label: 'Shortage', cls: 'border-rose-500/35 bg-rose-500/15 text-rose-700 dark:text-rose-300' }
+}
+
+function readinessMeta(
+  signal: 'green' | 'yellow' | 'red' | null,
+  hasMaterialHint: boolean,
+): { label: string; cls: string } {
+  if (!hasMaterialHint) {
+    return { label: 'No material', cls: 'border-ds-line/50 bg-ds-elevated/40 text-ds-ink-faint' }
+  }
+  if (signal === 'green') return { label: 'Ready', cls: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
+  if (signal === 'yellow') return { label: 'Partial', cls: 'border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300' }
   return { label: 'Shortage', cls: 'border-rose-500/35 bg-rose-500/15 text-rose-700 dark:text-rose-300' }
 }
 
@@ -1150,6 +1163,16 @@ export function PlanningDecisionGrid({
                 const allSheetSizes = Array.from(new Set(groupRows.map((r) => sheetSizeLabel(r))))
                 const sheetDisplay = allSheetSizes.length === 1 ? allSheetSizes[0]! : 'Mixed'
                 const fgTotal = groupRows.reduce((sum, r) => sum + availableFgCount(r), 0)
+                const groupSignal = groupRows.some((r) => r.planningLedger?.boardStockInsight?.stockSignal === 'red')
+                  ? 'red'
+                  : groupRows.some((r) => r.planningLedger?.boardStockInsight?.stockSignal === 'yellow')
+                    ? 'yellow'
+                    : 'green'
+                const groupHasMaterialHint = groupRows.some((r) => {
+                  const wanted = r.planningLedger?.boardStockInsight?.boardWanted
+                  return typeof wanted === 'string' && wanted.trim().length > 0
+                })
+                const groupReadiness = readinessMeta(groupSignal, groupHasMaterialHint)
                 const pm0 = readPlanningMeta(spec0)
                 const designerLabel0 = designerHandoffLabel(spec0, planCore0)
                 const isExpanded = expandedGroups.has(groupId)
@@ -1262,9 +1285,14 @@ export function PlanningDecisionGrid({
 
                       {/* Sheet Size */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className={`text-xs ${allSheetSizes.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
-                          {sheetDisplay}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-xs ${allSheetSizes.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+                            {sheetDisplay}
+                          </span>
+                          <span className={`inline-flex rounded border px-1 py-px text-[10px] ${groupReadiness.cls}`}>
+                            {groupReadiness.label}
+                          </span>
+                        </div>
                       </td>
 
                       {/* UPS */}
@@ -1344,6 +1372,12 @@ export function PlanningDecisionGrid({
                 const subCompleted = r.planningStatus !== 'pending'
                 const fgAvailable = availableFgCount(r)
                 const sheetSize = sheetSizeLabel(r)
+                const subSignal = r.planningLedger?.boardStockInsight?.stockSignal ?? 'red'
+                const subHasMaterialHint = (() => {
+                  const wanted = r.planningLedger?.boardStockInsight?.boardWanted
+                  return typeof wanted === 'string' && wanted.trim().length > 0
+                })()
+                const subReadiness = readinessMeta(subSignal, subHasMaterialHint)
                 return (
                   <Fragment key={`sub:${r.id}`}>
                     <tr
@@ -1390,7 +1424,12 @@ export function PlanningDecisionGrid({
                         </span>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
-                        <span className="text-xs text-ds-ink-muted">{sheetSize}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-ds-ink-muted">{sheetSize}</span>
+                          <span className={`inline-flex rounded border px-1 py-px text-[10px] ${subReadiness.cls}`}>
+                            {subReadiness.label}
+                          </span>
+                        </div>
                       </td>
                       <td className={`${cellBase} border-b border-ds-line/20 min-w-0 text-center`}>
                         <span className="text-xs font-medium text-ds-brand">{upsNum != null ? `×${upsNum}` : '—'}</span>
@@ -1459,6 +1498,12 @@ export function PlanningDecisionGrid({
               const rowActionFeedback = actionFeedbackByLineId[r.id]
               const fgAvailable = availableFgCount(r)
               const sheetSize = sheetSizeLabel(r)
+              const rowSignal = r.planningLedger?.boardStockInsight?.stockSignal ?? 'red'
+              const rowHasMaterialHint = (() => {
+                const wanted = r.planningLedger?.boardStockInsight?.boardWanted
+                return typeof wanted === 'string' && wanted.trim().length > 0
+              })()
+              const rowReadiness = readinessMeta(rowSignal, rowHasMaterialHint)
               const prev = idx > 0 ? sorted[idx - 1] : null
               const prevSpec = prev ? ((prev.specOverrides || {}) as Record<string, unknown>) : null
               const prevCore = prevSpec ? readPlanningCore(prevSpec) : null
@@ -1599,9 +1644,14 @@ export function PlanningDecisionGrid({
                       </p>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <p className="truncate text-xs font-medium text-ds-ink-muted" title={sheetSize}>
-                        {sheetSize}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="truncate text-xs font-medium text-ds-ink-muted" title={sheetSize}>
+                          {sheetSize}
+                        </p>
+                        <span className={`inline-flex rounded border px-1 py-px text-[10px] ${rowReadiness.cls}`}>
+                          {rowReadiness.label}
+                        </span>
+                      </div>
                     </td>
                     <td className={`${cellBase} min-w-0 text-center`}>
                       <p className="text-xs font-semibold text-ds-brand">

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect } from 'react'
 import { PR_STAGE_LABEL, dbStatusToUiStage, type PrUiStage } from '@/lib/purchase-requisition-status'
+import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 
 type PR = {
   id: string
@@ -25,6 +26,42 @@ type PR = {
 }
 
 type Stage = PrUiStage
+type TraceabilityPayload = {
+  pr: {
+    id: string
+    status: string
+    totalQty: number
+    priority: string
+    requiredByDate: string | null
+    poReference: string | null
+  }
+  material: {
+    materialCode: string
+    boardType: string
+    classification: string
+    size: string
+    gsm: number | null
+  }
+  linkedJobs: Array<{
+    shortageId: string
+    product: string
+    customer: string
+    poRef: string
+    jobCardNo: number | null
+    requiredSheets: number
+    shortageSheets: number
+    prStatus: string
+    requiredByDate: string | null
+  }>
+  stock: {
+    available: number
+    reserved: number
+    incoming: number
+    shortage: number
+    receivedViaGrn: number
+  }
+  timeline: Array<{ at: string; event: string; detail: string }>
+}
 
 const STAGES: Array<{ key: Stage; label: string; accent: string }> = [
   { key: 'draft', label: PR_STAGE_LABEL.draft, accent: 'border-orange-400/50' },
@@ -38,6 +75,9 @@ export default function PurchaseRequisitionsPage() {
   const [loading, setLoading] = useState(true)
   const [movingId, setMovingId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [traceOpen, setTraceOpen] = useState(false)
+  const [traceLoading, setTraceLoading] = useState(false)
+  const [traceData, setTraceData] = useState<TraceabilityPayload | null>(null)
 
   const fetchList = () => {
     fetch('/api/purchase-requisitions')
@@ -106,6 +146,22 @@ export default function PurchaseRequisitionsPage() {
 
   if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
+  async function openTraceability(prId: string) {
+    setTraceOpen(true)
+    setTraceLoading(true)
+    setTraceData(null)
+    try {
+      const res = await fetch(`/api/purchase-requests/${prId}/traceability`, { cache: 'no-store' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to load traceability')
+      setTraceData(data as TraceabilityPayload)
+    } catch {
+      setTraceData(null)
+    } finally {
+      setTraceLoading(false)
+    }
+  }
+
   return (
     <div className="p-4 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -161,7 +217,13 @@ export default function PurchaseRequisitionsPage() {
               <div className="space-y-2">
                 {groupedByMaterial.map((g) => (
                   <div key={`${stage.key}-${g.key}`} className="rounded-lg border border-ds-line/40 bg-background p-2">
-                    <p className="text-sm font-semibold text-ds-ink">{g.materialCode}</p>
+                    <button
+                      type="button"
+                      className="text-left text-sm font-semibold text-ds-ink underline-offset-2 hover:underline"
+                      onClick={() => void openTraceability(g.rows[0]!.id)}
+                    >
+                      {g.materialCode}
+                    </button>
                     <p className="text-xs text-ds-ink-faint line-clamp-2">{g.description}</p>
                     <p className="mt-1 text-xs text-ds-ink-muted">
                       Total: <span className="font-semibold text-ds-ink">{g.totalQty.toLocaleString('en-IN')} {g.unit}</span>
@@ -209,6 +271,101 @@ export default function PurchaseRequisitionsPage() {
           )
         })}
       </div>
+      <TraceabilityDrawer
+        open={traceOpen}
+        loading={traceLoading}
+        data={traceData}
+        onClose={() => {
+          setTraceOpen(false)
+          setTraceData(null)
+        }}
+      />
     </div>
+  )
+}
+
+function TraceabilityDrawer({
+  open,
+  loading,
+  data,
+  onClose,
+}: {
+  open: boolean
+  loading: boolean
+  data: TraceabilityPayload | null
+  onClose: () => void
+}) {
+  return (
+    <SlideOverPanel
+      title="PR Traceability"
+      isOpen={open}
+      onClose={onClose}
+      widthClass="max-w-2xl"
+      backdropClassName="bg-background/60"
+      panelClassName="border-l border-ds-line/40 bg-background shadow-2xl"
+    >
+      <div className="space-y-4 px-4 py-3 text-xs text-ds-ink-muted">
+        {loading ? (
+          <p>Loading…</p>
+        ) : !data ? (
+          <p>Legacy / reference missing</p>
+        ) : (
+          <>
+            <section className="rounded border border-ds-line/40 p-3">
+              <p className="text-ds-ink font-semibold">PR Summary</p>
+              <p>PR ID: {data.pr.id}</p>
+              <p>Status: {data.pr.status}</p>
+              <p>Total qty: {Number(data.pr.totalQty).toLocaleString('en-IN')}</p>
+              <p>Priority: {data.pr.priority}</p>
+              <p>Required by: {data.pr.requiredByDate ? new Date(data.pr.requiredByDate).toLocaleDateString('en-IN') : '-'}</p>
+            </section>
+            <section className="rounded border border-ds-line/40 p-3">
+              <p className="text-ds-ink font-semibold">Material</p>
+              <p>Code: {data.material.materialCode || '-'}</p>
+              <p>Board Type: {data.material.boardType || '-'}</p>
+              <p>Classification: {data.material.classification || '-'}</p>
+              <p>Size: {data.material.size || '-'}</p>
+              <p>GSM: {data.material.gsm ?? '-'}</p>
+            </section>
+            <section className="rounded border border-ds-line/40 p-3">
+              <p className="text-ds-ink font-semibold">Linked Products / Cartons</p>
+              {(data.linkedJobs || []).length === 0 ? (
+                <p>Legacy / reference missing</p>
+              ) : (
+                <ul className="space-y-1">
+                  {data.linkedJobs.map((j) => (
+                    <li key={j.shortageId} className="rounded border border-ds-line/30 px-2 py-1">
+                      {j.product || 'Legacy / reference missing'} · {j.customer || 'Legacy / reference missing'} · {j.poRef || 'Legacy / reference missing'} · JC#{j.jobCardNo ?? '-'} · Req {Number(j.requiredSheets).toLocaleString('en-IN')} · Short {Number(j.shortageSheets).toLocaleString('en-IN')}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section className="rounded border border-ds-line/40 p-3">
+              <p className="text-ds-ink font-semibold">Stock / Fulfillment</p>
+              <p>Available: {Number(data.stock.available).toLocaleString('en-IN')}</p>
+              <p>Reserved: {Number(data.stock.reserved).toLocaleString('en-IN')}</p>
+              <p>Incoming: {Number(data.stock.incoming).toLocaleString('en-IN')}</p>
+              <p>Received via GRN: {Number(data.stock.receivedViaGrn).toLocaleString('en-IN')}</p>
+              <p>Remaining shortage: {Number(data.stock.shortage).toLocaleString('en-IN')}</p>
+            </section>
+            <section className="rounded border border-ds-line/40 p-3">
+              <p className="text-ds-ink font-semibold">Timeline / Logs</p>
+              {(data.timeline || []).length === 0 ? (
+                <p>Legacy / reference missing</p>
+              ) : (
+                <ul className="space-y-1">
+                  {data.timeline.map((t, i) => (
+                    <li key={`${t.at}-${i}`} className="rounded border border-ds-line/30 px-2 py-1">
+                      {new Date(t.at).toLocaleString('en-IN')} · {t.event} · {t.detail}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </>
+        )}
+      </div>
+    </SlideOverPanel>
   )
 }

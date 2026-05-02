@@ -182,6 +182,7 @@ function InventoryPageContent() {
   const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
   const [materialDrawerLoading, setMaterialDrawerLoading] = useState(false)
   const [materialDrawerData, setMaterialDrawerData] = useState<MaterialDetailPayload | null>(null)
+  const [materialDrawerView, setMaterialDrawerView] = useState<'history' | 'reservations'>('history')
   const [deepLinkOpenedMaterialId, setDeepLinkOpenedMaterialId] = useState<string | null>(null)
 
   const loadPaperLedger = useCallback(
@@ -454,7 +455,8 @@ function InventoryPageContent() {
     }
   }
 
-  async function openMaterialDrawer(row: PaperWarehouseRow) {
+  async function openMaterialDrawer(row: PaperWarehouseRow, view: 'history' | 'reservations' = 'history') {
+    setMaterialDrawerView(view)
     setMaterialDrawerRow(row)
     setMaterialDrawerData(null)
     setMaterialDrawerLoading(true)
@@ -574,11 +576,11 @@ function InventoryPageContent() {
               <table className="w-full text-sm">
                 <thead className="bg-background text-left border-b border-ds-line/40">
                   <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
+                    <th className="px-3 py-2">Size</th>
+                    <th className="px-3 py-2">Board classification</th>
+                    <th className="px-3 py-2">GSM</th>
                     <th className="px-3 py-2">Material code</th>
                     <th className="px-3 py-2">Board type</th>
-                    <th className="px-3 py-2">Board classification</th>
-                    <th className="px-3 py-2">Size</th>
-                    <th className="px-3 py-2">GSM</th>
                     <th className="px-3 py-2">Available</th>
                     <th className="px-3 py-2">Reserved</th>
                     <th className="px-3 py-2">Free stock</th>
@@ -586,26 +588,44 @@ function InventoryPageContent() {
                     <th className="px-3 py-2">Shortage</th>
                     <th className="px-3 py-2">Reorder</th>
                     <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ds-card">
                   {paperWarehouseRows.map((row) => (
                     <tr key={row.material_id} className="hover:bg-ds-main/40">
-                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.material_code}</td>
-                      <td className="px-3 py-2 text-ds-ink-muted">
+                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>
                         <button
                           type="button"
-                          onClick={() => void openMaterialDrawer(row)}
+                          onClick={() => void openMaterialDrawer(row, 'history')}
                           className="underline underline-offset-2 hover:text-ds-ink"
                         >
-                          {row.board_type_id ?? '-'}
+                          {row.size_display || '-'}
                         </button>
                       </td>
                       <td className="px-3 py-2 text-ds-ink-muted">{row.board_classification_id ?? '-'}</td>
-                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.size_display}</td>
                       <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.gsm ?? '-'}</td>
+                      <td className="px-3 py-2 text-ds-ink">
+                        <button
+                          type="button"
+                          onClick={() => void openMaterialDrawer(row, 'history')}
+                          className={`underline underline-offset-2 hover:text-ds-ink ${ledgerMono}`}
+                        >
+                          {row.material_code}
+                        </button>
+                        <p className={`text-[10px] text-ds-ink-faint ${ledgerMono}`}>{row.material_id}</p>
+                      </td>
+                      <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
                       <td className={`px-3 py-2 text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
-                      <td className={`px-3 py-2 text-amber-300 ${ledgerMono}`}>{fmt(row.reserved_sheets)}</td>
+                      <td className="px-3 py-2 text-amber-300">
+                        <button
+                          type="button"
+                          onClick={() => void openMaterialDrawer(row, 'reservations')}
+                          className={`underline underline-offset-2 hover:text-amber-200 ${ledgerMono}`}
+                        >
+                          {fmt(row.reserved_sheets)}
+                        </button>
+                      </td>
                       <td
                         className={`px-3 py-2 ${ledgerMono} ${
                           row.available_sheets - row.reserved_sheets > 0
@@ -620,7 +640,36 @@ function InventoryPageContent() {
                       <td className={`px-3 py-2 text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
                       <td className={`px-3 py-2 text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
                       <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
-                      <td className="px-3 py-2 text-xs text-ds-ink-faint">{row.status}</td>
+                      <td className="px-3 py-2 text-xs">
+                        {(() => {
+                          const free = row.available_sheets - row.reserved_sheets
+                          const statusClass =
+                            row.shortage_sheets > 0
+                              ? 'text-rose-300'
+                              : free > 0
+                                ? 'text-emerald-300'
+                                : 'text-amber-300'
+                          const statusLabel =
+                            row.shortage_sheets > 0
+                              ? 'shortage'
+                              : free > 0
+                                ? 'healthy'
+                                : 'watch'
+                          return <span className={statusClass}>{statusLabel}</span>
+                        })()}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        {row.shortage_sheets > 0 ? (
+                          <a
+                            href={`/inventory/purchase-requisitions?materialId=${encodeURIComponent(row.material_id)}`}
+                            className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
+                          >
+                            Procure
+                          </a>
+                        ) : (
+                          <span className="text-ds-ink-faint">-</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -656,7 +705,9 @@ function InventoryPageContent() {
               </div>
 
               <div>
-                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Reserved by Jobs</p>
+                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">
+                  {materialDrawerView === 'reservations' ? 'Job Allocation' : 'Reserved by Jobs'}
+                </p>
                 {materialDrawerLoading ? (
                   <p className="text-ds-ink-faint">Loading…</p>
                 ) : !materialDrawerData || materialDrawerData.reservations.length === 0 ? (
@@ -800,13 +851,13 @@ function InventoryPageContent() {
           </div>
           <div className="overflow-x-auto rounded-lg border border-ds-line/40">
             <table className="w-full text-sm">
-              <thead className="bg-background text-left border-b border-ds-line/40">
+                <thead className="bg-background text-left border-b border-ds-line/40">
                 <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
+                  <th className="px-3 py-2">Size</th>
+                  <th className="px-3 py-2">Board classification</th>
+                  <th className="px-3 py-2">GSM</th>
                   <th className="px-3 py-2">Material code</th>
                   <th className="px-3 py-2">Board type</th>
-                  <th className="px-3 py-2">Board classification</th>
-                  <th className="px-3 py-2">Size</th>
-                  <th className="px-3 py-2">GSM</th>
                   <th className="px-3 py-2">Available</th>
                   <th className="px-3 py-2">Reserved</th>
                   <th className="px-3 py-2">Free stock</th>
@@ -814,18 +865,44 @@ function InventoryPageContent() {
                   <th className="px-3 py-2">Shortage</th>
                   <th className="px-3 py-2">Reorder</th>
                   <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ds-card">
                 {paperWarehouseRows.map((row) => (
                   <tr key={row.material_id} className="hover:bg-ds-main/40">
-                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.material_code}</td>
-                    <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
+                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>
+                      <button
+                        type="button"
+                        onClick={() => void openMaterialDrawer(row, 'history')}
+                        className="underline underline-offset-2 hover:text-ds-ink"
+                      >
+                        {row.size_display || '-'}
+                      </button>
+                    </td>
                     <td className="px-3 py-2 text-ds-ink-muted">{row.board_classification_id ?? '-'}</td>
-                    <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.size_display}</td>
                     <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{row.gsm ?? '-'}</td>
+                    <td className="px-3 py-2 text-ds-ink">
+                      <button
+                        type="button"
+                        onClick={() => void openMaterialDrawer(row, 'history')}
+                        className={`underline underline-offset-2 hover:text-ds-ink ${ledgerMono}`}
+                      >
+                        {row.material_code}
+                      </button>
+                      <p className={`text-[10px] text-ds-ink-faint ${ledgerMono}`}>{row.material_id}</p>
+                    </td>
+                    <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
                     <td className={`px-3 py-2 text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
-                    <td className={`px-3 py-2 text-amber-300 ${ledgerMono}`}>{fmt(row.reserved_sheets)}</td>
+                    <td className="px-3 py-2 text-amber-300">
+                      <button
+                        type="button"
+                        onClick={() => void openMaterialDrawer(row, 'reservations')}
+                        className={`underline underline-offset-2 hover:text-amber-200 ${ledgerMono}`}
+                      >
+                        {fmt(row.reserved_sheets)}
+                      </button>
+                    </td>
                     <td
                       className={`px-3 py-2 ${ledgerMono} ${
                         row.available_sheets - row.reserved_sheets > 0
@@ -840,7 +917,36 @@ function InventoryPageContent() {
                     <td className={`px-3 py-2 text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
                     <td className={`px-3 py-2 text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
                     <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
-                    <td className="px-3 py-2 text-xs text-ds-ink-faint">{row.status}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {(() => {
+                        const free = row.available_sheets - row.reserved_sheets
+                        const statusClass =
+                          row.shortage_sheets > 0
+                            ? 'text-rose-300'
+                            : free > 0
+                              ? 'text-emerald-300'
+                              : 'text-amber-300'
+                        const statusLabel =
+                          row.shortage_sheets > 0
+                            ? 'shortage'
+                            : free > 0
+                              ? 'healthy'
+                              : 'watch'
+                        return <span className={statusClass}>{statusLabel}</span>
+                      })()}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {row.shortage_sheets > 0 ? (
+                        <a
+                          href={`/inventory/purchase-requisitions?materialId=${encodeURIComponent(row.material_id)}`}
+                          className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
+                        >
+                          Procure
+                        </a>
+                      ) : (
+                        <span className="text-ds-ink-faint">-</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
