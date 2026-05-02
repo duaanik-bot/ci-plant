@@ -179,55 +179,118 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const baseRequired = Math.max(1, Math.ceil(qtyBase / upsBase))
   const requiredSheets = Math.max(1, baseRequired + wastageSheets) || Math.max(1, Number(requirement.requiredSheets) || 0)
   const requiredSizePair = parseSheetSizeToPair(auto.resolvedSheetSize || '')
-  const inventoryCandidates =
-    requiredSizePair && auto.boardTypeRaw && auto.gsmRaw
-      ? await db.inventory.findMany({
-          where: {
-            active: true,
-            boardType: { equals: auto.boardTypeRaw, mode: 'insensitive' },
-            ...(auto.boardClassificationRaw
-              ? { boardClassification: { equals: auto.boardClassificationRaw, mode: 'insensitive' as const } }
-              : {}),
-            gsm: { gte: auto.gsmRaw - gsmTolerance, lte: auto.gsmRaw + gsmTolerance },
-            sheetLength: { gt: 0 },
-            sheetWidth: { gt: 0 },
-          },
-          select: {
-            id: true,
-            materialCode: true,
-            boardType: true,
-            boardClassification: true,
-            gsm: true,
-            qtyAvailable: true,
-            sheetLength: true,
-            sheetWidth: true,
-          },
-          take: 80,
-        })
-      : []
-  const suggestedBoardOptions = requiredSizePair
+  const baseInventoryWhere = {
+    active: true,
+    ...(auto.boardTypeRaw ? { boardType: { equals: auto.boardTypeRaw, mode: 'insensitive' as const } } : {}),
+    sheetLength: { gt: 0 },
+    sheetWidth: { gt: 0 },
+  }
+  const inventoryCandidatesAll = requiredSizePair
+    ? await db.inventory.findMany({
+        where: baseInventoryWhere,
+        select: {
+          id: true,
+          materialCode: true,
+          boardType: true,
+          boardClassification: true,
+          gsm: true,
+          qtyAvailable: true,
+          sheetLength: true,
+          sheetWidth: true,
+        },
+        take: 200,
+      })
+    : []
+
+  const withClassification = inventoryCandidatesAll.filter((m) => {
+    if (!auto.boardClassificationRaw) return true
+    return (m.boardClassification || '').trim().toLowerCase() === auto.boardClassificationRaw.trim().toLowerCase()
+  })
+  const gsmWithin = (rows: typeof inventoryCandidatesAll, tolerance: number) =>
+    rows.filter((m) => {
+      if (auto.gsmRaw == null || m.gsm == null) return true
+      return Math.abs(Number(m.gsm) - Number(auto.gsmRaw)) <= tolerance
+    })
+
+  const strictSet = gsmWithin(withClassification, gsmTolerance)
+  const relaxedNoClassSet = gsmWithin(inventoryCandidatesAll, gsmTolerance)
+  const widerTolerance = Math.max(gsmTolerance, 20)
+  const widerToleranceSet = gsmWithin(inventoryCandidatesAll, widerTolerance)
+  const toCutFitInput = (rows: typeof inventoryCandidatesAll) =>
+    rows.map((m) => ({
+      materialId: m.id,
+      materialCode: m.materialCode,
+      boardType: m.boardType,
+      boardClassification: m.boardClassification,
+      gsm: m.gsm,
+      availableParentSheets: Number(m.qtyAvailable) || 0,
+      parentLength: Number(m.sheetLength) || 0,
+      parentWidth: Number(m.sheetWidth) || 0,
+    }))
+  const strictSuggestions = requiredSizePair
     ? buildMaterialCutFitOptions({
         requiredLength: requiredSizePair.length,
         requiredWidth: requiredSizePair.width,
         requiredFinalSheets: requiredSheets,
         requiredGsm: auto.gsmRaw ?? null,
-        config: {
-          gsmTolerance,
-          allowRotation: true,
-          maxSuggestions: 10,
-        },
-        materials: inventoryCandidates.map((m) => ({
-          materialId: m.id,
-          materialCode: m.materialCode,
-          boardType: m.boardType,
-          boardClassification: m.boardClassification,
-          gsm: m.gsm,
-          availableParentSheets: Number(m.qtyAvailable) || 0,
-          parentLength: Number(m.sheetLength) || 0,
-          parentWidth: Number(m.sheetWidth) || 0,
-        })),
+        config: { gsmTolerance, allowRotation: true, maxSuggestions: 10 },
+        materials: toCutFitInput(strictSet),
       })
     : []
+  const relaxedNoClassSuggestions = requiredSizePair
+    ? buildMaterialCutFitOptions({
+        requiredLength: requiredSizePair.length,
+        requiredWidth: requiredSizePair.width,
+        requiredFinalSheets: requiredSheets,
+        requiredGsm: auto.gsmRaw ?? null,
+        config: { gsmTolerance, allowRotation: true, maxSuggestions: 10 },
+        materials: toCutFitInput(relaxedNoClassSet),
+      })
+    : []
+  const widerToleranceSuggestions = requiredSizePair
+    ? buildMaterialCutFitOptions({
+        requiredLength: requiredSizePair.length,
+        requiredWidth: requiredSizePair.width,
+        requiredFinalSheets: requiredSheets,
+        requiredGsm: auto.gsmRaw ?? null,
+        config: { gsmTolerance: widerTolerance, allowRotation: true, maxSuggestions: 10 },
+        materials: toCutFitInput(widerToleranceSet),
+      })
+    : []
+  const byId = new Map<string, (typeof strictSuggestions)[number]>()
+  for (const s of [...strictSuggestions, ...relaxedNoClassSuggestions, ...widerToleranceSuggestions]) {
+    if (!byId.has(s.materialId)) byId.set(s.materialId, s)
+  }
+  const suggestedBoardOptions =
+    strictSuggestions.length > 0
+      ? strictSuggestions
+      : relaxedNoClassSuggestions.length > 0
+        ? relaxedNoClassSuggestions
+        : widerToleranceSuggestions.length > 0
+          ? widerToleranceSuggestions
+          : Array.from(byId.values()).slice(0, 10).map((o) => ({ ...o, matchType: o.matchType, status: o.status }))
+
+  const closestAvailableOptions =
+    strictSuggestions.length === 0
+      ? Array.from(byId.values())
+          .slice(0, 10)
+          .map((o) => ({ ...o, tags: Array.from(new Set([...(o.tags || []), 'Closest GSM' as const])) }))
+      : []
+  const noMaterialsAtAll = inventoryCandidatesAll.length === 0
+  const debug = {
+    requiredSize: requiredSizePair ? `${requiredSizePair.length}x${requiredSizePair.width}` : null,
+    requiredGsm: auto.gsmRaw ?? null,
+    tolerance: gsmTolerance,
+    boardType: auto.boardTypeRaw ?? null,
+    boardClassification: auto.boardClassificationRaw ?? null,
+    materialsFetched: inventoryCandidatesAll.length,
+    afterGsmFilter: strictSet.length,
+    afterSizeFit: strictSuggestions.length,
+    finalSuggestions: suggestedBoardOptions.length,
+    fallbackWithoutClassification: relaxedNoClassSuggestions.length,
+    fallbackWithWiderTolerance: widerToleranceSuggestions.length,
+  }
+  console.log('[planning-cutfit-debug]', debug)
   const selectedSuggestion = selectedMaterialId
     ? suggestedBoardOptions.find((o) => o.materialId === selectedMaterialId) ?? null
     : null
@@ -262,6 +325,12 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     wastageSheets,
     baseRequiredSheets: baseRequired,
     suggestedBoardOptions,
+    closestAvailableOptions,
+    noMaterialsAtAll,
+    debugMessage:
+      suggestedBoardOptions.length === 0 && !noMaterialsAtAll
+        ? 'No strict match found. Showing closest available materials.'
+        : null,
     requiredFinalSize: requiredSizePair ? `${requiredSizePair.length} x ${requiredSizePair.width}` : null,
     selectedSuggestion,
     gsmTolerance,
@@ -282,6 +351,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
           : auto.materialCandidates.length === 0
             ? 'none'
             : 'unknown',
+    suggestionDebug: debug,
   })
 }
 

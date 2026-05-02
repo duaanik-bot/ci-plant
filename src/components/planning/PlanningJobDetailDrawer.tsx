@@ -80,6 +80,40 @@ type MaterialReadinessPanelData = {
     tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
     gsmDelta: number | null
   }>
+  closestAvailableOptions?: Array<{
+    materialId: string
+    materialCode: string
+    boardType: string | null
+    boardClassification: string | null
+    gsm: number | null
+    size: string
+    availableSheets: number
+    cutsPerSheet: number
+    requiredParentSheets: number
+    shortageParentSheets: number
+    wastagePct: number
+    yieldPct: number
+    orientation: 'LxW' | 'WxL'
+    matchType: 'Exact' | 'Size Fit' | 'GSM Tolerance'
+    status: 'Ready' | 'Partial' | 'Shortage'
+    tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
+    gsmDelta: number | null
+  }>
+  noMaterialsAtAll?: boolean
+  debugMessage?: string | null
+  suggestionDebug?: {
+    requiredSize: string | null
+    requiredGsm: number | null
+    tolerance: number
+    boardType: string | null
+    boardClassification: string | null
+    materialsFetched: number
+    afterGsmFilter: number
+    afterSizeFit: number
+    finalSuggestions: number
+    fallbackWithoutClassification: number
+    fallbackWithWiderTolerance: number
+  } | null
   status: 'green' | 'yellow' | 'red' | 'grey'
   materialCandidates?: Array<{ id: string; materialCode: string; description: string }>
   materialMatchState?: 'matched' | 'multiple' | 'none' | 'unknown'
@@ -280,6 +314,20 @@ export function PlanningJobDetailDrawer({
                 !!o && typeof o.materialId === 'string' && typeof o.materialCode === 'string' && typeof o.size === 'string',
             )
           : [],
+        closestAvailableOptions: Array.isArray(out.closestAvailableOptions)
+          ? out.closestAvailableOptions.filter(
+              (
+                o,
+              ): o is NonNullable<MaterialReadinessPanelData['closestAvailableOptions']>[number] =>
+                !!o && typeof o.materialId === 'string' && typeof o.materialCode === 'string' && typeof o.size === 'string',
+            )
+          : [],
+        noMaterialsAtAll: Boolean(out.noMaterialsAtAll),
+        debugMessage: typeof out.debugMessage === 'string' ? out.debugMessage : null,
+        suggestionDebug:
+          out.suggestionDebug && typeof out.suggestionDebug === 'object'
+            ? (out.suggestionDebug as MaterialReadinessPanelData['suggestionDebug'])
+            : null,
         status:
           out.status === 'green' || out.status === 'yellow' || out.status === 'red' || out.status === 'grey'
             ? out.status
@@ -779,15 +827,25 @@ export function PlanningJobDetailDrawer({
             </p>
             {!hasDecisionInputs ? (
               <p className="text-xs text-ds-warning">Suggestions load when Sheet Size, Qty, and UPS are available.</p>
-            ) : (readiness?.suggestedBoardOptions?.length || 0) === 0 ? (
+            ) : readiness?.noMaterialsAtAll ? (
+              <p className="text-xs text-ds-warning">No materials exist in Paper Warehouse yet.</p>
+            ) : (readiness?.suggestedBoardOptions?.length || 0) === 0 && (readiness?.closestAvailableOptions?.length || 0) === 0 ? (
               <p className="text-xs text-ds-warning">No suitable stock found. Create PR?</p>
             ) : (
               <div className="space-y-2">
-                {(readiness?.suggestedBoardOptions || []).slice(0, 10).map((opt) => {
+                {!!readiness?.debugMessage && (
+                  <p className="text-xs text-ds-warning">{readiness.debugMessage}</p>
+                )}
+                {(
+                  ((readiness?.suggestedBoardOptions?.length || 0) > 0
+                    ? readiness?.suggestedBoardOptions
+                    : readiness?.closestAvailableOptions) || []
+                ).slice(0, 10).map((opt) => {
                   const selected = selectedMaterialId === opt.materialId
                   const openOpt = !!optionDetailsOpen[opt.materialId]
                   const optDetails = optionDetailsByMaterial[opt.materialId]
                   const optLoading = !!optionDetailsLoading[opt.materialId]
+                  const isFallback = (readiness?.suggestedBoardOptions?.length || 0) === 0
                   return (
                     <div
                       key={opt.materialId}
@@ -803,6 +861,7 @@ export function PlanningJobDetailDrawer({
                           {(opt.tags || []).map((tag) => (
                             <span key={tag} className="text-[10px] text-ds-success">{tag}</span>
                           ))}
+                          {isFallback ? <span className="text-[10px] text-ds-warning">Not Ideal - Check Manually</span> : null}
                           <span className="text-[10px] text-ds-ink-faint">{opt.matchType}</span>
                           <span className={`text-[10px] ${
                             opt.status === 'Ready'
@@ -883,7 +942,7 @@ export function PlanningJobDetailDrawer({
                 })}
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-ds-ink-faint">
-                    Selected: {selectedMaterialId ? readiness?.suggestedBoardOptions?.find((o) => o.materialId === selectedMaterialId)?.materialCode || selectedMaterialId : 'None'}
+                    Selected: {selectedMaterialId ? (readiness?.suggestedBoardOptions || readiness?.closestAvailableOptions || []).find((o) => o.materialId === selectedMaterialId)?.materialCode || selectedMaterialId : 'None'}
                   </p>
                   <button
                     type="button"
