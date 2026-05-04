@@ -221,6 +221,7 @@ export function PlanningJobDetailDrawer({
   const [optionDetailsLoading, setOptionDetailsLoading] = useState<Record<string, boolean>>({})
   const [optionDetailsByMaterial, setOptionDetailsByMaterial] = useState<Record<string, MaterialStockDetails | null>>({})
   const [suggestionsWorkspaceOpen, setSuggestionsWorkspaceOpen] = useState(false)
+  const [reserveInlineError, setReserveInlineError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!line) {
@@ -455,6 +456,7 @@ export function PlanningJobDetailDrawer({
 
   const handleReserveMaterial = useCallback(async (materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string) => {
     if (!line) return
+    setReserveInlineError(null)
     setReserveBusy(true)
     try {
       const chosenMaterialId = materialIdArg || selectedMaterialId || readiness?.materialId || ''
@@ -468,11 +470,35 @@ export function PlanningJobDetailDrawer({
         cutsPerSheetArg && parentSizeArg
           ? { cutsPerSheet: cutsPerSheetArg, size: parentSizeArg }
           : getSuggestionOption(chosenMaterialId)
+
+      const selectedCutsPerSheet = Number(selectedOption?.cutsPerSheet || 0)
+      const selectedRequiredParentSheets = Number((selectedOption as { requiredParentSheets?: number } | null)?.requiredParentSheets || 0)
+      if (!chosenMaterialId) {
+        const msg = 'No material selected'
+        setReserveInlineError(msg)
+        toast.error(msg)
+        return
+      }
+      if (!selectedCutsPerSheet || selectedCutsPerSheet <= 0 || !selectedRequiredParentSheets || selectedRequiredParentSheets <= 0) {
+        const msg = 'Invalid calculation data'
+        setReserveInlineError(msg)
+        toast.error(msg)
+        return
+      }
+      if (!line?.id) {
+        const msg = 'Planning context missing'
+        setReserveInlineError(msg)
+        toast.error(msg)
+        return
+      }
+
+      const availableBefore = Number(readiness?.availableSheets || 0)
+      const reserveQty = Math.min(availableBefore, requiredSheets)
       const res = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...(chosenMaterialId ? { materialId: chosenMaterialId } : {}),
+          materialId: chosenMaterialId,
           wastageSheets,
           requiredSheets,
           ...(selectedOption
@@ -482,9 +508,28 @@ export function PlanningJobDetailDrawer({
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const errData = data as { error?: string; retryable?: boolean; shortageId?: string }
+        const errData = data as {
+          error?: string
+          message?: string
+          errorCode?: string
+          retryable?: boolean
+          shortageId?: string
+          details?: unknown
+        }
+        console.error('[planning-reserve-debug]', {
+          materialId: chosenMaterialId || null,
+          requiredParentSheets: selectedRequiredParentSheets,
+          availableBefore,
+          reserveQty,
+          planningLineId: line.id || null,
+          errorCode: errData.errorCode || 'UNKNOWN',
+          message: errData.message || errData.error || 'Reservation failed. Please try again',
+          details: errData.details || null,
+        })
         if (errData.retryable && errData.shortageId) {
-          toast.error(errData.error || 'Reservation completed, but PR creation failed.', {
+          const retryMsg = errData.message || errData.error || 'Reservation completed, but PR creation failed.'
+          setReserveInlineError(retryMsg)
+          toast.error(retryMsg, {
             action: {
               label: 'Create PR for Shortage',
               onClick: async () => {
@@ -502,9 +547,12 @@ export function PlanningJobDetailDrawer({
           })
           return
         }
-        throw new Error(errData.error || 'Reservation failed')
+        const backendMessage = errData.message || errData.error || 'Reservation failed. Please try again'
+        setReserveInlineError(backendMessage)
+        throw new Error(backendMessage)
       }
       const out = data as { status: string; reservedSheets: number; shortageSheets: number; purchaseRequestId?: string | null }
+      setReserveInlineError(null)
       const msg =
         out.status === 'fully_reserved'
           ? `Fully reserved (${out.reservedSheets.toLocaleString('en-IN')} sheets).`
@@ -518,11 +566,13 @@ export function PlanningJobDetailDrawer({
       window.dispatchEvent(new Event('planning:refresh'))
       window.dispatchEvent(new Event('inventory:refresh'))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Reservation failed')
+      const errMessage = e instanceof Error ? e.message : 'Reservation failed. Please try again'
+      setReserveInlineError(errMessage)
+      toast.error(errMessage)
     } finally {
       setReserveBusy(false)
     }
-  }, [line, loadReadiness, selectedMaterialId, readiness?.materialId, wastageSheetsInput, getSuggestionOption])
+  }, [line, loadReadiness, selectedMaterialId, readiness?.materialId, readiness?.availableSheets, wastageSheetsInput, getSuggestionOption])
 
   const loadOptionDetails = useCallback(async (materialId: string) => {
     if (!materialId) return
@@ -1131,6 +1181,11 @@ export function PlanningJobDetailDrawer({
             </button>
             {noMaterialSelected ? <span className="text-xs text-ds-warning">No material selected.</span> : null}
           </div>
+          {reserveInlineError ? (
+            <div className="mt-2 rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">
+              {reserveInlineError}
+            </div>
+          ) : null}
           {stockDetailsOpen ? (
             <div className="rounded-ds-md border border-ds-line/40 bg-ds-elevated/30 p-3 text-xs space-y-3">
               {stockDetailsLoading ? (

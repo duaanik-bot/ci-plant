@@ -8,6 +8,25 @@ import { buildMaterialCutFitOptions } from '@/lib/material-cut-fit'
 
 export const dynamic = 'force-dynamic'
 
+type ReserveErrorCode = 'STOCK_CHANGED' | 'NO_MATERIAL' | 'INVALID_INPUT' | 'CONTEXT_MISSING' | 'UNKNOWN'
+
+function reserveError(
+  status: number,
+  errorCode: ReserveErrorCode,
+  message: string,
+  details?: Record<string, unknown>,
+) {
+  return NextResponse.json(
+    {
+      success: false,
+      errorCode,
+      message,
+      ...(details ? { details } : {}),
+    },
+    { status },
+  )
+}
+
 function n(v: unknown): number {
   const x = Number(v)
   return Number.isFinite(x) ? x : 0
@@ -458,6 +477,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   const ctx = await resolvePlanningContext(id, { requireJobCard: false })
   if ('error' in ctx) return ctx.error
   const { line, jobCard } = ctx
+  if (!line?.id) {
+    return reserveError(400, 'CONTEXT_MISSING', 'Planning context missing', { planningLineId: id || null })
+  }
 
   const spec = (line.specOverrides as Record<string, unknown> | null) || {}
   const core = (spec.planningCore as Record<string, unknown> | undefined) || {}
@@ -473,6 +495,12 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   const baseRequired = Math.max(1, Math.ceil(n(line.quantity) / ups))
   const computedRequired = Math.max(1, baseRequired + wastageSheets)
   const requiredSheets = Math.max(1, Math.floor(n(body.requiredSheets ?? computedRequired)))
+  if (!requiredSheets || requiredSheets <= 0) {
+    return reserveError(400, 'INVALID_INPUT', 'Invalid calculation data', {
+      requiredSheets,
+      planningLineId: id,
+    })
+  }
 
   const requirement = jobCard
     ? await calculateRequirement({ jobCardId: jobCard.id, planningId: id })
@@ -487,7 +515,22 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     materialId = auto.materialId
   }
   if (!materialId) {
-    return NextResponse.json({ error: 'No material mapped for this planning line' }, { status: 400 })
+    return reserveError(400, 'NO_MATERIAL', 'No material selected', {
+      planningLineId: id,
+      requestedMaterialId: typeof body.materialId === 'string' ? body.materialId.trim() : null,
+    })
+  }
+
+  const cutsPerSheet = Math.max(0, Math.floor(n(body.cutsPerSheet)))
+  const parentSize = typeof body.parentSize === 'string' ? body.parentSize.trim() : ''
+  if (!cutsPerSheet || !parentSize) {
+    return reserveError(400, 'INVALID_INPUT', 'Invalid calculation data', {
+      cutsPerSheet,
+      parentSize,
+      requiredSheets,
+      planningLineId: id,
+      materialId,
+    })
   }
 
   const specNow = ((line.specOverrides as Record<string, unknown> | null) || {}) as Record<string, unknown>
@@ -498,8 +541,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     wastageSheets,
     meta: {
       ...specMeta,
-      cutsPerSheet: Math.max(0, Math.floor(n(body.cutsPerSheet))),
-      parentSize: typeof body.parentSize === 'string' ? body.parentSize.trim() : '',
+      cutsPerSheet,
+      parentSize,
     },
   }
   await db.poLineItem.update({
@@ -526,7 +569,36 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         { status: 409 },
       )
     }
-    throw error
+    const message = error instanceof Error ? error.message : 'Reservation failed. Please try again'
+    const normalized = message.toLowerCase()
+    if (
+      normalized.includes('stock changed') ||
+      normalized.includes('available stock changed') ||
+      normalized.includes('concurrent')
+    ) {
+      return reserveError(409, 'STOCK_CHANGED', 'Stock changed. Please refresh and reserve again', {
+        planningLineId: id,
+        materialId,
+        requiredSheets,
+      })
+    }
+    if (normalized.includes('material') && normalized.includes('missing')) {
+      return reserveError(400, 'NO_MATERIAL', 'No material selected', {
+        planningLineId: id,
+        materialId,
+      })
+    }
+    if (normalized.includes('planning') && normalized.includes('missing')) {
+      return reserveError(400, 'CONTEXT_MISSING', 'Planning context missing', {
+        planningLineId: id,
+      })
+    }
+    return reserveError(500, 'UNKNOWN', 'Reservation failed. Please try again', {
+      planningLineId: id,
+      materialId,
+      requiredSheets,
+      rawError: message,
+    })
   }
 
   const shortageId =
