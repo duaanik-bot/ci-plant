@@ -180,8 +180,10 @@ type ReserveConfirmDraft = {
   availableSheets: number
   alreadyReservedSheets: number
   currentShortageSheets: number
+  reserveQtyInput: string
   reserveQty: number
   shortageQty: number
+  prQtyInput: string
   prQty: number
   leftoverAvailableAfterReserve: number
 }
@@ -556,8 +558,10 @@ export function PlanningJobDetailDrawer({
       availableSheets,
       alreadyReservedSheets: Math.max(0, Number(readiness?.reservedSheets || 0)),
       currentShortageSheets: Math.max(0, Number(readiness?.shortageSheets || 0)),
+      reserveQtyInput: String(reserveQty),
       reserveQty,
       shortageQty,
+      prQtyInput: String(shortageQty),
       prQty: shortageQty,
       leftoverAvailableAfterReserve: Math.max(0, availableSheets - reserveQty),
     })
@@ -570,7 +574,12 @@ export function PlanningJobDetailDrawer({
     if (!line || !reserveConfirm) return
     setReserveInlineError(null)
     setReserveModalError(null)
-    const safeReserveQty = Math.max(0, Math.floor(Number(reserveConfirm.reserveQty || 0)))
+    const parsedReserveQty = Number(reserveConfirm.reserveQtyInput)
+    if (!Number.isFinite(parsedReserveQty)) {
+      setReserveModalError('Reserve Qty must be numeric')
+      return
+    }
+    const safeReserveQty = Math.max(0, parsedReserveQty)
     const requiredParentSheets = Math.max(1, Math.floor(Number(reserveConfirm.requiredParentSheets || 0)))
     const maxReserve = Math.min(Math.max(0, Number(reserveConfirm.availableSheets || 0)), requiredParentSheets)
     if (safeReserveQty > maxReserve) {
@@ -579,7 +588,12 @@ export function PlanningJobDetailDrawer({
       return
     }
     const safeShortageQty = Math.max(0, requiredParentSheets - safeReserveQty)
-    const safePrQty = Math.max(0, Math.floor(Number(reserveConfirm.prQty || 0)))
+    const parsedPrQty = Number(reserveConfirm.prQtyInput)
+    if (!Number.isFinite(parsedPrQty)) {
+      setReserveModalError('PR Qty must be numeric')
+      return
+    }
+    const safePrQty = Math.max(0, parsedPrQty)
     if (safeShortageQty > 0 && safePrQty === 0) {
       setReserveModalError('Shortage will remain without PR.')
       return
@@ -814,6 +828,16 @@ export function PlanningJobDetailDrawer({
   const comboControl = 'border-ds-line/80 bg-ds-elevated/50'
   const comboInput = 'text-sm text-ds-ink'
   const noMaterialSelected = !readinessLoading && !(selectedMaterialId || readiness?.materialId)
+  const mappingLabel =
+    readiness?.mappingSafety?.strategyUsed === 'strict'
+      ? 'Strict match'
+      : readiness?.mappingSafety?.strategyUsed === 'fallback_without_classification'
+        ? 'Without classification match'
+        : readiness?.mappingSafety?.strategyUsed === 'fallback_wider_gsm_tolerance'
+          ? 'GSM tolerance match'
+          : readiness?.mappingSafety?.strategyUsed === 'closest_only'
+            ? 'Closest available option'
+            : '-'
   const statusTone =
     readiness?.status === 'green'
       ? 'border-ds-success/35 bg-ds-success/10 text-ds-success'
@@ -1020,8 +1044,14 @@ export function PlanningJobDetailDrawer({
               </select>
             </div>
           ) : null}
-          {readiness?.materialMatchState === 'none' ? (
-            <p className="text-xs text-ds-warning">No matching material in Paper Warehouse.</p>
+          {readiness?.materialMatchState === 'matched' ? (
+            <p className="text-xs text-ds-success">Matching material found.</p>
+          ) : null}
+          {readiness?.materialMatchState === 'none' && ((readiness?.suggestedBoardOptions?.length || 0) > 0 || (readiness?.closestAvailableOptions?.length || 0) > 0) ? (
+            <p className="text-xs text-ds-warning">No exact match found. Showing compatible alternatives.</p>
+          ) : null}
+          {readiness?.materialMatchState === 'none' && (readiness?.suggestedBoardOptions?.length || 0) === 0 && (readiness?.closestAvailableOptions?.length || 0) === 0 ? (
+            <p className="text-xs text-ds-warning">No suitable material found in Paper Warehouse.</p>
           ) : null}
           <div className="mt-2 space-y-2">
             <p className="text-xs font-semibold text-ds-ink">Suggested Board Options</p>
@@ -1030,7 +1060,7 @@ export function PlanningJobDetailDrawer({
             </p>
             <div className="flex items-center justify-between">
               <p className="text-[11px] text-ds-ink-faint">
-                Mapping: {readiness?.mappingSafety?.strategyUsed || '-'} · candidates {readiness?.mappingSafety?.candidatePoolCount ?? 0} · strict {readiness?.mappingSafety?.strictPoolCount ?? 0}
+                Mapping: {mappingLabel} · candidates {readiness?.mappingSafety?.candidatePoolCount ?? 0} · strict {readiness?.mappingSafety?.strictPoolCount ?? 0}
               </p>
               <button
                 type="button"
@@ -1812,22 +1842,42 @@ export function PlanningJobDetailDrawer({
                     <label className="block">
                       <span className="text-ds-ink-muted">Reserve Qty</span>
                       <input
-                        type="number"
-                        min={0}
-                        max={Math.min(reserveConfirm.availableSheets, reserveConfirm.requiredParentSheets)}
+                        type="text"
+                        inputMode="decimal"
                         className={`${fieldInput} ${mono}`}
-                        value={reserveConfirm.reserveQty}
+                        value={reserveConfirm.reserveQtyInput}
                         onChange={(e) => {
-                          const next = Math.max(0, Number(e.target.value || 0))
+                          const raw = e.target.value
+                          setReserveConfirm((prev) => prev ? { ...prev, reserveQtyInput: raw } : prev)
+                          const parsed = Number(raw)
+                          if (!Number.isFinite(parsed)) return
                           const cap = Math.min(reserveConfirm.availableSheets, reserveConfirm.requiredParentSheets)
-                          const reserveQty = Math.min(next, cap)
+                          const reserveQty = Math.min(Math.max(0, parsed), cap)
                           const shortageQty = Math.max(0, reserveConfirm.requiredParentSheets - reserveQty)
                           const leftoverAvailableAfterReserve = Math.max(0, reserveConfirm.availableSheets - reserveQty)
                           setReserveConfirm((prev) => prev ? {
                             ...prev,
                             reserveQty,
                             shortageQty,
+                            reserveQtyInput: raw,
                             prQty: reservePrEdited ? prev.prQty : shortageQty,
+                            prQtyInput: reservePrEdited ? prev.prQtyInput : String(shortageQty),
+                            leftoverAvailableAfterReserve,
+                          } : prev)
+                        }}
+                        onBlur={() => {
+                          const parsed = Number(reserveConfirm.reserveQtyInput)
+                          const cap = Math.min(reserveConfirm.availableSheets, reserveConfirm.requiredParentSheets)
+                          const reserveQty = Number.isFinite(parsed) ? Math.min(Math.max(0, parsed), cap) : Math.min(reserveConfirm.requiredParentSheets, reserveConfirm.availableSheets)
+                          const shortageQty = Math.max(0, reserveConfirm.requiredParentSheets - reserveQty)
+                          const leftoverAvailableAfterReserve = Math.max(0, reserveConfirm.availableSheets - reserveQty)
+                          setReserveConfirm((prev) => prev ? {
+                            ...prev,
+                            reserveQty,
+                            reserveQtyInput: String(reserveQty),
+                            shortageQty,
+                            prQty: reservePrEdited ? prev.prQty : shortageQty,
+                            prQtyInput: reservePrEdited ? prev.prQtyInput : String(shortageQty),
                             leftoverAvailableAfterReserve,
                           } : prev)
                         }}
@@ -1836,14 +1886,23 @@ export function PlanningJobDetailDrawer({
                     <label className="block">
                       <span className="text-ds-ink-muted">PR Qty</span>
                       <input
-                        type="number"
-                        min={0}
+                        type="text"
+                        inputMode="decimal"
                         className={`${fieldInput} ${mono}`}
-                        value={reserveConfirm.prQty}
+                        value={reserveConfirm.prQtyInput}
                         onChange={(e) => {
-                          const prQty = Math.max(0, Number(e.target.value || 0))
+                          const raw = e.target.value
                           setReservePrEdited(true)
-                          setReserveConfirm((prev) => prev ? { ...prev, prQty } : prev)
+                          setReserveConfirm((prev) => prev ? {
+                            ...prev,
+                            prQtyInput: raw,
+                            prQty: Number.isFinite(Number(raw)) ? Math.max(0, Number(raw)) : prev.prQty,
+                          } : prev)
+                        }}
+                        onBlur={() => {
+                          const parsed = Number(reserveConfirm.prQtyInput)
+                          const prQty = Number.isFinite(parsed) ? Math.max(0, parsed) : Math.max(0, reserveConfirm.prQty)
+                          setReserveConfirm((prev) => prev ? { ...prev, prQty, prQtyInput: String(prQty) } : prev)
                         }}
                       />
                     </label>

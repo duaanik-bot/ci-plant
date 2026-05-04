@@ -5,7 +5,10 @@ type DbClient = typeof db | Prisma.TransactionClient
 
 async function withTransaction<T>(client: DbClient, fn: (tx: Prisma.TransactionClient) => Promise<T>) {
   if ('$transaction' in client) {
-    return client.$transaction(async (tx) => fn(tx))
+    return client.$transaction(async (tx) => fn(tx), {
+      maxWait: 5000,
+      timeout: 15000,
+    })
   }
   return fn(client)
 }
@@ -185,7 +188,23 @@ export async function createShortage(
 
 export async function createPurchaseRequestFromShortage(shortageId: string, client: DbClient = db) {
   return withTransaction(client, async (tx) => {
-    const shortage = await tx.materialShortage.findUnique({ where: { id: shortageId } })
+    const shortage = await tx.materialShortage.findUnique({
+      where: { id: shortageId },
+      select: {
+        id: true,
+        materialId: true,
+        jobCardId: true,
+        planningId: true,
+        sourcePoLineId: true,
+        triggerReason: true,
+        shortageQty: true,
+        allocatedQty: true,
+        remainingQty: true,
+        status: true,
+        purchaseReqId: true,
+        requiredByDate: true,
+      },
+    })
     if (!shortage) throw new Error('Shortage not found')
 
     if (shortage.purchaseReqId) {
@@ -214,7 +233,10 @@ export async function createPurchaseRequestFromShortage(shortageId: string, clie
     })
     if (openForMaterial) {
       const linkedShortage = openForMaterial.shortageId
-        ? await tx.materialShortage.findUnique({ where: { id: openForMaterial.shortageId } })
+        ? await tx.materialShortage.findUnique({
+            where: { id: openForMaterial.shortageId },
+            select: { planningId: true, requiredByDate: true },
+          })
         : null
       const openBucket = dateBucketKey(linkedShortage?.requiredByDate ?? null)
       const openPriority = await shortagePriorityKey(linkedShortage?.planningId ?? null, tx)
@@ -256,6 +278,7 @@ export async function createPurchaseRequestFromShortage(shortageId: string, clie
         triggerReason: [
           shortage.triggerReason || 'planning_shortage_auto',
           shortage.planningId ? `line:${shortage.planningId}` : null,
+          shortage.sourcePoLineId ? `poLine:${shortage.sourcePoLineId}` : null,
           cartonRef ? `carton:${cartonRef}` : null,
           poRef ? `po:${poRef}` : null,
         ]
@@ -500,12 +523,12 @@ export async function reserveMaterialForPlanning(
             data: {
               materialId,
               planningId,
-              sourcePoLineId: planningId,
               jobCardId: null,
               shortageQty,
               allocatedQty: 0,
               remainingQty: shortageQty,
               status: 'open',
+              sourcePoLineId: planningId,
               triggerReason: 'planning_shortage',
               requiredByDate: planningLine.po?.deliveryRequiredBy ?? null,
             },
