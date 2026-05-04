@@ -273,6 +273,22 @@ function readinessMeta(
   return { label: 'Shortage', cls: 'border-rose-500/35 bg-rose-500/15 text-rose-700 dark:text-rose-300' }
 }
 
+function planningPriorityMeta(input: {
+  signal: 'green' | 'yellow' | 'red'
+  poDate?: string | null
+}): { label: 'High' | 'Medium' | 'Low'; cls: string } {
+  const now = Date.now()
+  const dueMs = input.poDate ? new Date(input.poDate).getTime() : NaN
+  const isUrgentDate = Number.isFinite(dueMs) && (dueMs - now) / 86400000 <= 2
+  if (input.signal === 'red' || isUrgentDate) {
+    return { label: 'High', cls: 'border-rose-500/35 bg-rose-500/15 text-rose-700 dark:text-rose-300' }
+  }
+  if (input.signal === 'yellow') {
+    return { label: 'Medium', cls: 'border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300' }
+  }
+  return { label: 'Low', cls: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
+}
+
 type SortKey = 'cartonName' | 'cartonSize' | 'qty' | 'board' | 'gsm' | 'coating' | 'batch'
 
 function batchSortId(r: PlanningGridLine): string {
@@ -1504,6 +1520,7 @@ export function PlanningDecisionGrid({
                 return typeof wanted === 'string' && wanted.trim().length > 0
               })()
               const rowReadiness = readinessMeta(rowSignal, rowHasMaterialHint)
+              const rowPriority = planningPriorityMeta({ signal: rowSignal, poDate: r.po.poDate })
               const prev = idx > 0 ? sorted[idx - 1] : null
               const prevSpec = prev ? ((prev.specOverrides || {}) as Record<string, unknown>) : null
               const prevCore = prevSpec ? readPlanningCore(prevSpec) : null
@@ -1732,6 +1749,11 @@ export function PlanningDecisionGrid({
                     <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible border-l border-ds-line/30 bg-inherit`}>
                       {/* ── DC-style compact action cell ── */}
                       <div className="w-full rounded-md border border-ds-line/35 bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="mb-1">
+                          <span className={`inline-flex rounded border px-1 py-px text-[10px] ${rowPriority.cls}`}>
+                            Priority {rowPriority.label}
+                          </span>
+                        </div>
                         <div className="mb-1 flex min-w-0 flex-wrap items-center justify-start gap-1">
                           <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus]}`}>
                             {BATCH_STATUS_LABEL[bStatus]}

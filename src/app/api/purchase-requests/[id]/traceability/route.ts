@@ -32,12 +32,13 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
         { purchaseReqId: pr.id },
         ...(pr.shortageId ? [{ id: pr.shortageId }] : []),
         ...(pr.sourceJobCardId ? [{ jobCardId: pr.sourceJobCardId, materialId: pr.materialId }] : []),
+        ...(pr.sourcePlanningId ? [{ planningId: pr.sourcePlanningId, materialId: pr.materialId }] : []),
       ],
     },
     orderBy: { createdAt: 'asc' },
   })
 
-  const jobIds = Array.from(new Set(shortages.map((s) => s.jobCardId)))
+  const jobIds = Array.from(new Set(shortages.map((s) => s.jobCardId).filter((v): v is string => !!v)))
   const jobs = jobIds.length
     ? await db.productionJobCard.findMany({
         where: { id: { in: jobIds } },
@@ -77,7 +78,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
     : []
 
   const linkedJobs = shortages.map((s) => {
-    const jc = jobMap.get(s.jobCardId)
+    const jc = s.jobCardId ? jobMap.get(s.jobCardId) : undefined
     const line = jc ? lineByJobNo.get(jc.jobCardNumber) : undefined
     return {
       shortageId: s.id,

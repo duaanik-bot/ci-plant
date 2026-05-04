@@ -100,10 +100,27 @@ export async function GET(req: NextRequest) {
       acc.shortage += r.shortage_sheets
       acc.value += r.est_value_inr
       if (r.ageing_risk === 'high') acc.ageingRisk += r.est_value_inr
+      if (r.age_days > 180) acc.staleStock += r.est_value_inr
+      if (r.packet_weight > 0) acc.fastMoving += 1
+      else acc.slowMoving += 1
       return acc
     },
-    { totalPhysical: 0, available: 0, reserved: 0, incoming: 0, shortage: 0, value: 0, ageingRisk: 0 },
+    {
+      totalPhysical: 0,
+      available: 0,
+      reserved: 0,
+      incoming: 0,
+      shortage: 0,
+      value: 0,
+      ageingRisk: 0,
+      staleStock: 0,
+      fastMoving: 0,
+      slowMoving: 0,
+    },
   )
 
-  return NextResponse.json({ rows: mapped, kpi })
+  const freeStock = kpi.available - kpi.reserved
+  const incomingRequiredMismatch = Math.max(0, kpi.shortage - kpi.incoming)
+
+  return NextResponse.json({ rows: mapped, kpi: { ...kpi, freeStock, incomingRequiredMismatch } })
 }

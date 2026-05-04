@@ -206,6 +206,27 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       },
     })
 
+    // Link planning-stage shortages/PR references to the newly created job card
+    // without creating duplicate shortage records.
+    await tx.materialShortage.updateMany({
+      where: {
+        planningId: li.id,
+        jobCardId: null,
+      },
+      data: {
+        jobCardId: jcRow.id,
+      },
+    })
+    await tx.purchaseRequisition.updateMany({
+      where: {
+        sourcePlanningId: li.id,
+        sourceJobCardId: null,
+      },
+      data: {
+        sourceJobCardId: jcRow.id,
+      },
+    })
+
     if (li.dyeId) {
       await tx.dye.update({
         where: { id: li.dyeId },

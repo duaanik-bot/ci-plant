@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
-import { calculateRequirement, reserveMaterial, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
+import { calculateRequirement, reserveMaterial, reserveMaterialForPlanning, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
 import { parseSheetSizeToPair, resolveSheetSize } from '@/lib/planning-sheet-size'
 import { buildMaterialCutFitOptions } from '@/lib/material-cut-fit'
 
@@ -360,11 +360,28 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const incomingSheets = Math.max(0, Number(material?.qtyQuarantine) || 0)
   const shortageSheets = materialId ? Math.max(0, requiredSheets - availableSheets) : requiredSheets
 
-  const pr = materialId && ctx.jobCard
+  const pr = materialId
     ? await db.purchaseRequisition.findFirst({
-        where: { materialId, sourceJobCardId: ctx.jobCard.id },
+        where: {
+          materialId,
+          OR: [
+            ...(ctx.jobCard ? [{ sourceJobCardId: ctx.jobCard.id }] : []),
+            { sourcePlanningId: id },
+          ],
+        },
         orderBy: { raisedAt: 'desc' },
-        select: { status: true, expectedDelivery: true },
+        select: { id: true, status: true, expectedDelivery: true },
+      })
+    : null
+  const openShortage = materialId
+    ? await db.materialShortage.findFirst({
+        where: {
+          materialId,
+          planningId: id,
+          status: 'open',
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
       })
     : null
 
@@ -400,8 +417,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     reservedSheets,
     incomingSheets,
     shortageSheets,
+    prId: pr?.id ?? null,
     prStatus: pr?.status ?? 'not_created',
     grnEta: pr?.expectedDelivery ? pr.expectedDelivery.toISOString() : null,
+    shortageId: openShortage?.id ?? null,
+    linkedShortageId: openShortage?.id ?? null,
     status: readinessStatus(requiredSheets, availableSheets, reservedSheets, shortageSheets, Boolean(materialId)),
     materialCandidates: auto.materialCandidates,
     materialMatchState:
@@ -435,7 +455,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   if (error) return error
 
   const { id } = await context.params
-  const ctx = await resolvePlanningContext(id, { requireJobCard: true })
+  const ctx = await resolvePlanningContext(id, { requireJobCard: false })
   if ('error' in ctx) return ctx.error
   const { line, jobCard } = ctx
 
@@ -454,7 +474,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   const computedRequired = Math.max(1, baseRequired + wastageSheets)
   const requiredSheets = Math.max(1, Math.floor(n(body.requiredSheets ?? computedRequired)))
 
-  const requirement = await calculateRequirement({ jobCardId: jobCard.id, planningId: id })
+  const requirement = jobCard
+    ? await calculateRequirement({ jobCardId: jobCard.id, planningId: id })
+    : { materialId: null as string | null }
   let materialId = requirement.materialId
   if (typeof body.materialId === 'string' && body.materialId.trim()) {
     const pick = await db.inventory.findUnique({ where: { id: body.materialId.trim() }, select: { id: true } })
@@ -485,9 +507,13 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     data: { specOverrides: nextSpec as unknown as Prisma.JsonObject },
   })
 
-  let result: Awaited<ReturnType<typeof reserveMaterial>>
+  let result:
+    | Awaited<ReturnType<typeof reserveMaterial>>
+    | Awaited<ReturnType<typeof reserveMaterialForPlanning>>
   try {
-    result = await reserveMaterial(materialId, jobCard.id, requiredSheets, id)
+    result = jobCard
+      ? await reserveMaterial(materialId, jobCard.id, requiredSheets, id)
+      : await reserveMaterialForPlanning(materialId, requiredSheets, id)
   } catch (error) {
     if (error instanceof ShortagePrRecoveryError) {
       return NextResponse.json(
@@ -503,16 +529,26 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     throw error
   }
 
+  const shortageId =
+    'shortage' in result &&
+    result.shortage &&
+    typeof result.shortage === 'object' &&
+    'id' in result.shortage &&
+    typeof (result.shortage as { id?: unknown }).id === 'string'
+      ? (result.shortage as { id: string }).id
+      : null
+
   return NextResponse.json({
     success: true,
     planningId: id,
-    jobCardId: jobCard.id,
+    jobCardId: jobCard?.id ?? null,
     materialId,
     requiredSheets,
     reservedSheets: result.reservedSheets,
     shortageSheets: result.shortageSheets,
     status: result.status,
     purchaseRequestId: result.purchaseRequest?.id ?? null,
-    shortageId: result.shortage?.id ?? null,
+    shortageId,
+    linkedShortageId: shortageId,
   })
 }

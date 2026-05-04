@@ -157,7 +157,13 @@ function InventoryPageContent() {
     shortage: 0,
     value: 0,
     ageingRisk: 0,
+    freeStock: 0,
+    staleStock: 0,
+    fastMoving: 0,
+    slowMoving: 0,
+    incomingRequiredMismatch: 0,
   })
+  const [warehouseKpiFilter, setWarehouseKpiFilter] = useState<'all' | 'shortage' | 'available' | 'reserved' | 'incoming' | 'free' | 'stale' | 'fast' | 'slow' | 'mismatch'>('all')
   const [paperLedgerSort, setPaperLedgerSort] = useState<'oldest' | 'newest'>('oldest')
   const [hubSearchPo, setHubSearchPo] = useState('')
   const [paperSearch, setPaperSearch] = useState('')
@@ -225,8 +231,26 @@ function InventoryPageContent() {
             shortage: Number(data.kpi.shortage) || 0,
             value: Number(data.kpi.value) || 0,
             ageingRisk: Number(data.kpi.ageingRisk) || 0,
+            freeStock: Number(data.kpi.freeStock) || 0,
+            staleStock: Number(data.kpi.staleStock) || 0,
+            fastMoving: Number(data.kpi.fastMoving) || 0,
+            slowMoving: Number(data.kpi.slowMoving) || 0,
+            incomingRequiredMismatch: Number(data.kpi.incomingRequiredMismatch) || 0,
           }
-        : { totalPhysical: 0, available: 0, reserved: 0, incoming: 0, shortage: 0, value: 0, ageingRisk: 0 },
+        : {
+            totalPhysical: 0,
+            available: 0,
+            reserved: 0,
+            incoming: 0,
+            shortage: 0,
+            value: 0,
+            ageingRisk: 0,
+            freeStock: 0,
+            staleStock: 0,
+            fastMoving: 0,
+            slowMoving: 0,
+            incomingRequiredMismatch: 0,
+          },
     )
   }, [])
 
@@ -335,8 +359,7 @@ function InventoryPageContent() {
 
   const filteredPaperWarehouseRows = useMemo(() => {
     const q = paperSearch.trim().toLowerCase()
-    if (!q) return paperWarehouseRows
-    return paperWarehouseRows.filter((row) => {
+    const rows = paperWarehouseRows.filter((row) => {
       const hay = [
         row.size_display || '',
         row.board_classification_id || '',
@@ -353,9 +376,22 @@ function InventoryPageContent() {
       ]
         .join(' ')
         .toLowerCase()
-      return hay.includes(q)
+      return q ? hay.includes(q) : true
     })
-  }, [paperSearch, paperWarehouseRows])
+    return rows.filter((row) => {
+      const free = Number(row.available_sheets || 0) - Number(row.reserved_sheets || 0)
+      if (warehouseKpiFilter === 'shortage') return Number(row.shortage_sheets || 0) > 0
+      if (warehouseKpiFilter === 'available') return Number(row.available_sheets || 0) > 0
+      if (warehouseKpiFilter === 'reserved') return Number(row.reserved_sheets || 0) > 0
+      if (warehouseKpiFilter === 'incoming') return Number(row.incoming_sheets || 0) > 0
+      if (warehouseKpiFilter === 'free') return free > 0
+      if (warehouseKpiFilter === 'stale') return Number(row.age_days || 0) > 180
+      if (warehouseKpiFilter === 'fast') return Number(row.packet_weight || 0) > 0
+      if (warehouseKpiFilter === 'slow') return Number(row.packet_weight || 0) <= 0
+      if (warehouseKpiFilter === 'mismatch') return Number(row.shortage_sheets || 0) > Number(row.incoming_sheets || 0)
+      return true
+    })
+  }, [paperSearch, paperWarehouseRows, warehouseKpiFilter])
 
   const filteredJobCards = useMemo(() => {
     const q = jobSearch.trim().toLowerCase()
@@ -696,10 +732,15 @@ function InventoryPageContent() {
                 )}
               </div>
               <div className="flex flex-nowrap items-stretch gap-2 overflow-x-auto text-xs">
-                <div className="min-w-[120px] rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></div>
-                <div className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></div>
-                <div className="min-w-[120px] rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></div>
-                <div className="min-w-[120px] rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></div>
+                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'shortage' ? 'all' : 'shortage'))} className="min-w-[120px] rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></button>
+                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'available' ? 'all' : 'available'))} className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-left">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></button>
+                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'reserved' ? 'all' : 'reserved'))} className="min-w-[120px] rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-left">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></button>
+                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'incoming' ? 'all' : 'incoming'))} className="min-w-[120px] rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-left">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></button>
+                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'free' ? 'all' : 'free'))} className="min-w-[120px] rounded border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-left">Free Stock <div className={`${ledgerMono} text-sm text-cyan-300`}>{fmt(paperWarehouseKpi.freeStock)}</div></button>
+                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'stale' ? 'all' : 'stale'))} className="min-w-[120px] rounded border border-red-900/70 bg-red-950/50 px-3 py-2 text-left">Stale (&gt;180d) <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.staleStock)}</div></button>
+                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'fast' ? 'all' : 'fast'))} className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-left">Fast-moving <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.fastMoving)}</div></button>
+                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'slow' ? 'all' : 'slow'))} className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2 text-left">Slow-moving <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.slowMoving)}</div></button>
+                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'mismatch' ? 'all' : 'mismatch'))} className="min-w-[120px] rounded border border-ds-warning/35 bg-ds-warning/10 px-3 py-2 text-left">Incoming mismatch <div className={`${ledgerMono} text-sm text-ds-warning`}>{fmt(paperWarehouseKpi.incomingRequiredMismatch)}</div></button>
                 <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
                 <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
                 <div className="min-w-[120px] rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
@@ -955,6 +996,15 @@ function InventoryPageContent() {
                 ) : !materialDrawerData || !Array.isArray(materialDrawerData.shortages) || materialDrawerData.shortages.length === 0 ? (
                   <p className="text-ds-ink-faint">No open shortages.</p>
                 ) : (
+                  <>
+                  <div className="mb-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1.5">
+                    <p className="text-ds-ink">
+                      Total shortage across jobs: {materialDrawerData.shortages.reduce((acc, s) => acc + Number(s.pendingShortage || 0), 0).toLocaleString('en-IN')} sheets
+                    </p>
+                    {materialDrawerData.shortages.length > 1 ? (
+                      <p className="text-ds-ink-faint">Merged PR opportunity: {materialDrawerData.shortages.length} jobs share this material.</p>
+                    ) : null}
+                  </div>
                   <ul className="space-y-2">
                     {materialDrawerData.shortages.map((s) => (
                       <li key={s.id} className="rounded border border-ds-line/40 px-2 py-1.5">
@@ -971,6 +1021,7 @@ function InventoryPageContent() {
                       </li>
                     ))}
                   </ul>
+                  </>
                 )}
               </div>
 
@@ -1153,10 +1204,11 @@ function InventoryPageContent() {
               )}
             </div>
             <div className="flex flex-nowrap items-stretch gap-2 overflow-x-auto text-xs">
-              <div className="min-w-[120px] rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></div>
-              <div className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></div>
-              <div className="min-w-[120px] rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></div>
-              <div className="min-w-[120px] rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></div>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'shortage' ? 'all' : 'shortage'))} className="min-w-[120px] rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'available' ? 'all' : 'available'))} className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-left">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'reserved' ? 'all' : 'reserved'))} className="min-w-[120px] rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-left">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'incoming' ? 'all' : 'incoming'))} className="min-w-[120px] rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-left">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'free' ? 'all' : 'free'))} className="min-w-[120px] rounded border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-left">Free Stock <div className={`${ledgerMono} text-sm text-cyan-300`}>{fmt(paperWarehouseKpi.freeStock)}</div></button>
               <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
               <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
               <div className="min-w-[120px] rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>

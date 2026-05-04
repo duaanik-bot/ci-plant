@@ -141,7 +141,7 @@ export async function calculateRequirement(input: { jobCardId?: string; planning
 
 export async function createShortage(
   materialId: string,
-  jobCardId: string,
+  jobCardId: string | null,
   planningId: string | null,
   shortageQty: number,
   client: DbClient = db,
@@ -164,8 +164,10 @@ export async function createShortage(
       : await tx.materialShortage.create({
           data: {
             materialId,
-            jobCardId,
+            jobCardId: jobCardId ?? undefined,
             planningId: planningId ?? undefined,
+            sourcePoLineId: planningId ?? undefined,
+            triggerReason: planningId ? 'planning_shortage' : 'jobcard_shortage',
             shortageQty,
             remainingQty: shortageQty,
             status: 'open',
@@ -202,11 +204,11 @@ export async function createPurchaseRequestFromShortage(shortageId: string, clie
 
     const shortageBucket = dateBucketKey(shortage.requiredByDate ?? null)
     const shortagePriority = await shortagePriorityKey(shortage.planningId, tx)
-    const openForMaterial = await tx.purchaseRequisition.findFirst({
-      where: {
-        materialId: shortage.materialId,
-        status: { in: ['pending', 'approved', 'converted_to_po'] },
-        supplierId: material.supplierId ?? null,
+      const openForMaterial = await tx.purchaseRequisition.findFirst({
+        where: {
+          materialId: shortage.materialId,
+          status: { in: ['pending', 'approved', 'converted_to_po'] },
+          supplierId: material.supplierId ?? null,
       },
       orderBy: { raisedAt: 'desc' },
     })
@@ -221,7 +223,7 @@ export async function createPurchaseRequestFromShortage(shortageId: string, clie
           where: { id: openForMaterial.id },
           data: {
             qtyRequired: { increment: shortage.remainingQty },
-            triggerReason: `${openForMaterial.triggerReason}; merged-shortage:${shortage.id}; job:${shortage.jobCardId}`,
+            triggerReason: `${openForMaterial.triggerReason}; merged-shortage:${shortage.id}; ${shortage.jobCardId ? `job:${shortage.jobCardId}` : `planning:${shortage.planningId ?? '-'}`}`,
           },
         })
         await tx.materialShortage.update({ where: { id: shortage.id }, data: { purchaseReqId: merged.id } })
@@ -233,19 +235,40 @@ export async function createPurchaseRequestFromShortage(shortageId: string, clie
     const width = formatSheetDim(material.sheetWidth)
     const sizeLabel = length && width ? `${length}x${width}` : null
 
+    const planningLine = shortage.planningId
+      ? await tx.poLineItem.findUnique({
+          where: { id: shortage.planningId },
+          select: {
+            id: true,
+            cartonName: true,
+            po: { select: { poNumber: true, deliveryRequiredBy: true } },
+          },
+        })
+      : null
+    const cartonRef = planningLine?.cartonName?.trim() || ''
+    const poRef = planningLine?.po?.poNumber?.trim() || ''
+
     const pr = await tx.purchaseRequisition.create({
       data: {
         materialId: shortage.materialId,
         qtyRequired: shortage.remainingQty,
         estimatedValue: 0,
-        triggerReason: 'planning_shortage_auto',
+        triggerReason: [
+          shortage.triggerReason || 'planning_shortage_auto',
+          shortage.planningId ? `line:${shortage.planningId}` : null,
+          cartonRef ? `carton:${cartonRef}` : null,
+          poRef ? `po:${poRef}` : null,
+        ]
+          .filter(Boolean)
+          .join(';'),
         status: 'pending',
         raisedBy: 'system',
         boardType: material.boardType ?? undefined,
         sizeLabel: sizeLabel ?? undefined,
         gsm: material.gsm ?? undefined,
-        sourceJobCardId: shortage.jobCardId,
+        sourceJobCardId: shortage.jobCardId ?? undefined,
         sourcePlanningId: shortage.planningId ?? undefined,
+        expectedDelivery: planningLine?.po?.deliveryRequiredBy ?? undefined,
         shortageId: shortage.id,
       },
     })
@@ -372,6 +395,146 @@ export async function reserveMaterial(
         `Reservation saved with shortage, but PR creation failed. You can retry using "Create PR for Shortage". (${msg})`,
       )
     }
+  }
+
+  return {
+    ...txResult,
+    purchaseRequest,
+  }
+}
+
+export async function reserveMaterialForPlanning(
+  materialId: string,
+  requiredSheets: number,
+  planningId: string,
+  client: DbClient = db,
+) {
+  if (requiredSheets <= 0) throw new Error('Required sheets must be positive')
+  if (!planningId) throw new Error('Planning line is required')
+
+  const txResult = await withTransaction(client, async (tx) => {
+    const planningLine = await tx.poLineItem.findUnique({
+      where: { id: planningId },
+      select: {
+        id: true,
+        cartonName: true,
+        po: { select: { poNumber: true, deliveryRequiredBy: true } },
+      },
+    })
+    if (!planningLine) throw new Error('Planning line not found')
+
+    const material = await tx.inventory.findUnique({ where: { id: materialId } })
+    if (!material) throw new Error('Material not found')
+
+    const available = Math.max(0, asNumber(material.qtyAvailable))
+    const reserveQty = Math.min(available, requiredSheets)
+    const shortageQty = Math.max(0, requiredSheets - reserveQty)
+
+    if (reserveQty > 0) {
+      const updated = await tx.inventory.updateMany({
+        where: { id: materialId, qtyAvailable: { gte: reserveQty } },
+        data: {
+          qtyAvailable: { decrement: reserveQty },
+          qtyReserved: { increment: reserveQty },
+        },
+      })
+      if (updated.count === 0) {
+        throw new Error('Stock changed. Please refresh and reserve again.')
+      }
+
+      await tx.stockMovement.create({
+        data: {
+          materialId,
+          movementType: 'reserve',
+          qty: reserveQty,
+          refType: 'planning_reserve',
+          refId: planningId,
+        },
+      })
+    }
+
+    const existingShortage = await tx.materialShortage.findFirst({
+      where: {
+        materialId,
+        planningId,
+        jobCardId: null,
+        status: 'open',
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        shortageQty: true,
+        remainingQty: true,
+        allocatedQty: true,
+      },
+    })
+    const currentOpenShortage = existingShortage ? Math.max(0, asNumber(existingShortage.remainingQty)) : 0
+    const shortageDelta = shortageQty - currentOpenShortage
+    if (shortageDelta !== 0) {
+      await tx.inventory.update({
+        where: { id: materialId },
+        data:
+          shortageDelta > 0
+            ? { shortageSheets: { increment: shortageDelta } }
+            : { shortageSheets: { decrement: Math.abs(shortageDelta) } },
+      })
+    }
+
+    let shortage: { id: string } | null = null
+    if (shortageQty > 0) {
+      shortage = existingShortage
+        ? await tx.materialShortage.update({
+            where: { id: existingShortage.id },
+            data: {
+              shortageQty,
+              remainingQty: shortageQty,
+              planningId,
+              sourcePoLineId: planningId,
+              triggerReason: 'planning_shortage',
+              status: 'open',
+              requiredByDate: planningLine.po?.deliveryRequiredBy ?? null,
+            },
+            select: { id: true },
+          })
+        : await tx.materialShortage.create({
+            data: {
+              materialId,
+              planningId,
+              sourcePoLineId: planningId,
+              jobCardId: null,
+              shortageQty,
+              allocatedQty: 0,
+              remainingQty: shortageQty,
+              status: 'open',
+              triggerReason: 'planning_shortage',
+              requiredByDate: planningLine.po?.deliveryRequiredBy ?? null,
+            },
+            select: { id: true },
+          })
+    } else if (existingShortage) {
+      await tx.materialShortage.update({
+        where: { id: existingShortage.id },
+        data: {
+          remainingQty: 0,
+          status: 'closed',
+        },
+      })
+    }
+
+    const status = shortageQty > 0 ? 'partial_shortage' : 'fully_reserved'
+    return {
+      status,
+      requiredSheets,
+      reservedSheets: reserveQty,
+      shortageSheets: shortageQty,
+      shortage,
+    }
+  })
+
+  let purchaseRequest: { id: string } | null = null
+  if (txResult.shortage?.id) {
+    const pr = await createPurchaseRequestFromShortage(txResult.shortage.id, db)
+    purchaseRequest = { id: pr.id }
   }
 
   return {

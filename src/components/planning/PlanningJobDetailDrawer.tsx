@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Layers, PauseCircle, Star } from 'lucide-react'
 import { toast } from 'sonner'
@@ -53,6 +53,8 @@ type MaterialReadinessPanelData = {
   reservedSheets: number
   incomingSheets: number
   shortageSheets: number
+  shortageId?: string | null
+  prId?: string | null
   prStatus: string
   grnEta: string | null
   qty?: number
@@ -281,7 +283,6 @@ export function PlanningJobDetailDrawer({
     }
     setReadinessLoading(true)
     try {
-      const qs = selectedMaterialId ? `?materialId=${encodeURIComponent(selectedMaterialId)}` : ''
       const spec = (line.specOverrides || {}) as Record<string, unknown>
       const meta = readPlanningMeta(spec)
       const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
@@ -308,6 +309,8 @@ export function PlanningJobDetailDrawer({
         reservedSheets: Number(out.reservedSheets) || 0,
         incomingSheets: Number(out.incomingSheets) || 0,
         shortageSheets: Number(out.shortageSheets) || 0,
+        shortageId: typeof out.shortageId === 'string' ? out.shortageId : null,
+        prId: typeof out.prId === 'string' ? out.prId : null,
         prStatus: typeof out.prStatus === 'string' ? out.prStatus : 'not_created',
         grnEta: typeof out.grnEta === 'string' ? out.grnEta : null,
         qty: Number(out.qty) || 0,
@@ -411,6 +414,45 @@ export function PlanningJobDetailDrawer({
     }
   }, [line, remarksDraft, onSave, onClose, updateRow])
 
+  const getSuggestionOption = useCallback((materialId: string) => {
+    return (
+      (readiness?.suggestedBoardOptions || []).find((o) => o.materialId === materialId) ||
+      (readiness?.closestAvailableOptions || []).find((o) => o.materialId === materialId) ||
+      null
+    )
+  }, [readiness?.suggestedBoardOptions, readiness?.closestAvailableOptions])
+
+  const lockSelectionOnly = useCallback(async (materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string) => {
+    if (!line) return
+    const chosenMaterialId = materialIdArg || selectedMaterialId || readiness?.materialId || ''
+    if (!chosenMaterialId) {
+      toast.error('Select a material first')
+      return
+    }
+    const option =
+      cutsPerSheetArg && parentSizeArg
+        ? ({ cutsPerSheet: cutsPerSheetArg, size: parentSizeArg, requiredParentSheets: 0 } as const)
+        : getSuggestionOption(chosenMaterialId)
+    const specNow = (line.specOverrides || {}) as Record<string, unknown>
+    const specMeta = readPlanningMeta(specNow)
+    const nextSpec: Record<string, unknown> = {
+      ...specNow,
+      planningMaterialId: chosenMaterialId,
+      meta: {
+        ...specMeta,
+        cutsPerSheet: Number(option?.cutsPerSheet || 0),
+        parentSize: String(option?.size || ''),
+        requiredParentSheets: Number(option?.requiredParentSheets || 0),
+      },
+    }
+    updateRow(line.id, { specOverrides: nextSpec })
+    await onSaveLine(line.id, { specOverrides: nextSpec })
+    setSelectedMaterialId(chosenMaterialId)
+    setSelectionLocked(true)
+    await loadReadiness()
+    toast.success('Material locked for planning.')
+  }, [line, selectedMaterialId, readiness?.materialId, getSuggestionOption, updateRow, onSaveLine, loadReadiness])
+
   const handleReserveMaterial = useCallback(async (materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string) => {
     if (!line) return
     setReserveBusy(true)
@@ -425,7 +467,7 @@ export function PlanningJobDetailDrawer({
       const selectedOption =
         cutsPerSheetArg && parentSizeArg
           ? { cutsPerSheet: cutsPerSheetArg, size: parentSizeArg }
-          : (readiness?.suggestedBoardOptions || []).find((o) => o.materialId === chosenMaterialId) || null
+          : getSuggestionOption(chosenMaterialId)
       const res = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -480,7 +522,7 @@ export function PlanningJobDetailDrawer({
     } finally {
       setReserveBusy(false)
     }
-  }, [line, loadReadiness, selectedMaterialId, readiness?.materialId, wastageSheetsInput, readiness?.suggestedBoardOptions])
+  }, [line, loadReadiness, selectedMaterialId, readiness?.materialId, wastageSheetsInput, getSuggestionOption])
 
   const loadOptionDetails = useCallback(async (materialId: string) => {
     if (!materialId) return
@@ -653,6 +695,13 @@ export function PlanningJobDetailDrawer({
           ? `Required ${Math.max(0, readiness.requiredSheets).toLocaleString('en-IN')} sheets. No stock available. Shortage ${Math.max(0, readiness.shortageSheets).toLocaleString('en-IN')}.`
           : 'No matching material selected.'
     : 'No material selected.'
+  const readinessAction = (() => {
+    if (!readiness || noMaterialSelected) return 'Select material'
+    if (readiness.status === 'green') return 'Ready for Artwork'
+    if (readiness.status === 'yellow') return 'Shortage PR created / pending'
+    if (readiness.status === 'red') return 'Create PR required'
+    return 'Select material'
+  })()
   const hasDecisionInputs =
     !!resolvedSheetSize && resolvedSheetSize !== '-' &&
     calcQty > 0 &&
@@ -813,6 +862,10 @@ export function PlanningJobDetailDrawer({
             <p className="mt-1 text-xs text-ds-ink-muted">
               {readinessLoading ? 'Loading material readiness…' : noMaterialSelected ? 'No material selected.' : materialSummary}
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-ds-ink-faint">Next action:</span>
+              <span className="font-medium text-ds-ink">{readinessAction}</span>
+            </div>
           </div>
           {readiness?.materialMatchState === 'multiple' && (readiness.materialCandidates?.length ?? 0) > 1 ? (
             <div>
@@ -922,6 +975,14 @@ export function PlanningJobDetailDrawer({
                         </Button>
                         <button
                           type="button"
+                          disabled={reserveBusy}
+                          onClick={() => void lockSelectionOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
+                          className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
+                        >
+                          Lock Only
+                        </button>
+                        <button
+                          type="button"
                           className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
                           onClick={() => {
                             const next = !openOpt
@@ -1021,8 +1082,39 @@ export function PlanningJobDetailDrawer({
             <div><span className="text-ds-ink-muted">Reserved Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.reservedSheets || 0).toLocaleString('en-IN')}</p></div>
             <div><span className="text-ds-ink-muted">Incoming Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.incomingSheets || 0).toLocaleString('en-IN')}</p></div>
             <div><span className="text-ds-ink-muted">Shortage Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.shortageSheets || 0).toLocaleString('en-IN')}</p></div>
+            <div><span className="text-ds-ink-muted">PR Created</span><p className={`${mono} text-ds-ink`}>{readiness?.prId ? 'Yes' : 'No'}</p></div>
             <div><span className="text-ds-ink-muted">PR Status</span><p className="text-ds-ink">{readiness?.prStatus || '-'}</p></div>
             <div><span className="text-ds-ink-muted">GRN ETA</span><p className={`${mono} text-ds-ink`}>{readiness?.grnEta ? new Date(readiness.grnEta).toLocaleDateString('en-IN') : '-'}</p></div>
+            <div className="col-span-2 flex flex-wrap items-center gap-2">
+              {readiness?.prId ? (
+                <Link
+                  href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(readiness.prId)}`}
+                  className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
+                >
+                  View PR
+                </Link>
+              ) : null}
+              {!readiness?.prId && readiness?.shortageId ? (
+                <button
+                  type="button"
+                  className="text-xs font-medium text-ds-warning underline-offset-2 hover:underline"
+                  onClick={async () => {
+                    const retry = await fetch(`/api/material-shortages/${readiness.shortageId}/create-pr`, { method: 'POST' })
+                    const out = await retry.json().catch(() => ({}))
+                    if (!retry.ok) {
+                      toast.error((out as { error?: string }).error || 'Retry PR creation failed')
+                      return
+                    }
+                    toast.success('Purchase Request created for shortage.')
+                    await loadReadiness()
+                    window.dispatchEvent(new Event('planning:refresh'))
+                    window.dispatchEvent(new Event('inventory:refresh'))
+                  }}
+                >
+                  Retry PR creation
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="mt-2 flex items-center justify-between gap-2">
             <button
@@ -1465,8 +1557,13 @@ export function PlanningJobDetailDrawer({
               <tbody>
                 {((((readiness?.suggestedBoardOptions?.length || 0) > 0
                   ? readiness?.suggestedBoardOptions
-                  : readiness?.closestAvailableOptions) || [])).slice(0, 10).map((opt) => (
-                  <tr key={`ws-${opt.materialId}`} className="border-t border-ds-line/30">
+                  : readiness?.closestAvailableOptions) || [])).slice(0, 10).map((opt) => {
+                  const openOpt = !!optionDetailsOpen[opt.materialId]
+                  const optDetails = optionDetailsByMaterial[opt.materialId]
+                  const optLoading = !!optionDetailsLoading[opt.materialId]
+                  return (
+                  <Fragment key={`ws-${opt.materialId}`}>
+                  <tr className="border-t border-ds-line/30">
                     <td className="px-2 py-2">
                       <p className={mono}>{opt.materialCode}</p>
                       <p className="text-ds-ink-faint">{opt.boardType || '-'} / {opt.boardClassification || '-'}</p>
@@ -1483,17 +1580,59 @@ export function PlanningJobDetailDrawer({
                     </td>
                     <td className="px-2 py-2">{opt.status}</td>
                     <td className="px-2 py-2">
-                      <Button
-                        type="button"
-                        disabled={reserveBusy}
-                        onClick={() => void handleReserveMaterial(opt.materialId, opt.cutsPerSheet, opt.size)}
-                        className="h-7 px-2 text-xs"
-                      >
-                        {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
-                      </Button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          disabled={reserveBusy}
+                          onClick={() => void handleReserveMaterial(opt.materialId, opt.cutsPerSheet, opt.size)}
+                          className="h-7 px-2 text-xs"
+                        >
+                          {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
+                        </Button>
+                        <button
+                          type="button"
+                          disabled={reserveBusy}
+                          onClick={() => void lockSelectionOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
+                          className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
+                        >
+                          Lock Only
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
+                          onClick={() => {
+                            const next = !openOpt
+                            setOptionDetailsOpen((prev) => ({ ...prev, [opt.materialId]: next }))
+                            if (next && !optionDetailsByMaterial[opt.materialId]) {
+                              void loadOptionDetails(opt.materialId)
+                            }
+                          }}
+                        >
+                          {openOpt ? 'Hide Details' : 'View Details'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
-                ))}
+                  {openOpt ? (
+                    <tr className="border-t border-ds-line/20 bg-ds-elevated/20">
+                      <td className="px-2 py-2 text-xs text-ds-ink-faint" colSpan={10}>
+                        {optLoading ? (
+                          <p>Loading…</p>
+                        ) : !optDetails ? (
+                          <p>-</p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-1">
+                            <span>Available: {Math.max(0, readiness?.availableSheets || 0).toLocaleString('en-IN')}</span>
+                            <span>Reserved: {Math.max(0, readiness?.reservedSheets || 0).toLocaleString('en-IN')}</span>
+                            <span>Incoming: {Math.max(0, readiness?.incomingSheets || 0).toLocaleString('en-IN')}</span>
+                            <span>Shortage: {Math.max(0, readiness?.shortageSheets || 0).toLocaleString('en-IN')}</span>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
+                )})}
               </tbody>
             </table>
           </div>

@@ -79,7 +79,9 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
 
   const shortageJobCards = shortages.length
     ? await db.productionJobCard.findMany({
-        where: { id: { in: shortages.map((s) => s.jobCardId) } },
+        where: {
+          id: { in: shortages.map((s) => s.jobCardId).filter((v): v is string => typeof v === 'string' && v.length > 0) },
+        },
         select: { id: true, jobCardNumber: true, status: true },
       })
     : []
@@ -133,12 +135,12 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
       }
     }),
     shortages: shortages.map((s) => {
-      const jc = shortageJobCardMap.get(s.jobCardId)
+      const jc = s.jobCardId ? shortageJobCardMap.get(s.jobCardId) : null
       const materialIncoming = Number(material.qtyQuarantine ?? 0)
       const priority = materialIncoming > 0 ? 'normal' : 'urgent'
       return {
         id: s.id,
-        jobCardId: s.jobCardId,
+        jobCardId: s.jobCardId ?? 'Legacy / reference missing',
         jobCardNumber: jc?.jobCardNumber ?? null,
         planningId: s.planningId,
         requiredQty: Number(s.shortageQty),

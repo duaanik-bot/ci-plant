@@ -1948,8 +1948,10 @@ model MaterialReservation {
 model MaterialShortage {
   id              String   @id @default(uuid())
   materialId      String   @map("material_id")
-  jobCardId       String   @map("job_card_id")
+  jobCardId       String?  @map("job_card_id")
   planningId      String?  @map("planning_id")
+  sourcePoLineId  String?  @map("source_po_line_id")
+  triggerReason   String?  @map("trigger_reason") @db.VarChar(64)
   shortageQty     Decimal  @map("shortage_qty") @db.Decimal(12, 3)
   allocatedQty    Decimal  @default(0) @map("allocated_qty") @db.Decimal(12, 3)
   remainingQty    Decimal  @map("remaining_qty") @db.Decimal(12, 3)
@@ -1960,7 +1962,7 @@ model MaterialShortage {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   material Inventory         @relation(fields: [materialId], references: [id], onDelete: Cascade)
-  jobCard  ProductionJobCard @relation(fields: [jobCardId], references: [id], onDelete: Cascade)
+  jobCard  ProductionJobCard? @relation(fields: [jobCardId], references: [id], onDelete: SetNull)
 
   @@index([materialId, status])
   @@index([jobCardId, status])

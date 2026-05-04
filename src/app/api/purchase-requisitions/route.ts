@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
       })
     : []
 
-  const jobIds = Array.from(new Set(shortages.map((s) => s.jobCardId)))
+  const jobIds = Array.from(new Set(shortages.map((s) => s.jobCardId).filter((v): v is string => !!v)))
   const jobCards = jobIds.length
     ? await db.productionJobCard.findMany({
         where: { id: { in: jobIds } },
@@ -88,8 +88,8 @@ export async function GET(req: NextRequest) {
       linkedShortages: shortages
         .filter((s) => s.purchaseReqId === r.id)
         .map((s) => ({
-          jobCardId: s.jobCardId,
-          jobCardNumber: jobMap.get(s.jobCardId)?.jobCardNumber ?? null,
+          jobCardId: s.jobCardId ?? null,
+          jobCardNumber: s.jobCardId ? (jobMap.get(s.jobCardId)?.jobCardNumber ?? null) : null,
           planningId: s.planningId,
           requiredByDate: s.requiredByDate ? s.requiredByDate.toISOString() : null,
           pendingShortage: Number(s.remainingQty),
