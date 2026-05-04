@@ -51,6 +51,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
         reservedSheets: true,
         shortageSheets: true,
         status: true,
+        updatedAt: true,
         jobCard: {
           select: {
             id: true,
@@ -126,12 +127,15 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
         reservedSheets: Number(r.reservedSheets),
         shortageSheets: Number(r.shortageSheets),
         status: r.status,
-        jobCard: {
-          id: r.jobCard.id,
-          jobCardNumber: r.jobCard.jobCardNumber,
-          status: r.jobCard.status,
-          customerName: r.jobCard.customer.name,
-        },
+        reservedAt: r.updatedAt.toISOString(),
+        jobCard: r.jobCard
+          ? {
+              id: r.jobCard.id,
+              jobCardNumber: r.jobCard.jobCardNumber,
+              status: r.jobCard.status,
+              customerName: r.jobCard.customer.name,
+            }
+          : null,
       }
     }),
     shortages: shortages.map((s) => {
