@@ -469,17 +469,40 @@ export function PlanningJobDetailDrawer({
       const selectedOption =
         cutsPerSheetArg && parentSizeArg
           ? { cutsPerSheet: cutsPerSheetArg, size: parentSizeArg }
-          : getSuggestionOption(chosenMaterialId)
+          : getSuggestionOption(chosenMaterialId) ||
+            (() => {
+              const metaCuts = Number(meta.cutsPerSheet || 0)
+              const metaParentSize = typeof meta.parentSize === 'string' ? meta.parentSize.trim() : ''
+              if (metaCuts > 0 && metaParentSize) {
+                return {
+                  cutsPerSheet: metaCuts,
+                  size: metaParentSize,
+                  requiredParentSheets: Math.max(1, Math.ceil(requiredSheets / metaCuts)),
+                }
+              }
+              return null
+            })()
 
       const selectedCutsPerSheet = Number(selectedOption?.cutsPerSheet || 0)
-      const selectedRequiredParentSheets = Number((selectedOption as { requiredParentSheets?: number } | null)?.requiredParentSheets || 0)
+      const selectedParentSize = String(selectedOption?.size || '').trim()
+      const selectedRequiredParentSheets = Math.max(
+        0,
+        Number((selectedOption as { requiredParentSheets?: number } | null)?.requiredParentSheets || 0) ||
+          (selectedCutsPerSheet > 0 ? Math.ceil(requiredSheets / selectedCutsPerSheet) : 0),
+      )
       if (!chosenMaterialId) {
         const msg = 'No material selected'
         setReserveInlineError(msg)
         toast.error(msg)
         return
       }
-      if (!selectedCutsPerSheet || selectedCutsPerSheet <= 0 || !selectedRequiredParentSheets || selectedRequiredParentSheets <= 0) {
+      if (
+        !selectedCutsPerSheet ||
+        selectedCutsPerSheet <= 0 ||
+        !selectedRequiredParentSheets ||
+        selectedRequiredParentSheets <= 0 ||
+        !selectedParentSize
+      ) {
         const msg = 'Invalid calculation data'
         setReserveInlineError(msg)
         toast.error(msg)
@@ -501,9 +524,8 @@ export function PlanningJobDetailDrawer({
           materialId: chosenMaterialId,
           wastageSheets,
           requiredSheets,
-          ...(selectedOption
-            ? { cutsPerSheet: selectedOption.cutsPerSheet, parentSize: selectedOption.size }
-            : {}),
+          cutsPerSheet: selectedCutsPerSheet,
+          parentSize: selectedParentSize,
         }),
       })
       const data = await res.json().catch(() => ({}))
