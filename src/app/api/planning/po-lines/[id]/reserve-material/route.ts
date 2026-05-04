@@ -16,11 +16,14 @@ function reserveError(
   message: string,
   details?: Record<string, unknown>,
 ) {
+  const includeDebug = process.env.NODE_ENV !== 'production' || process.env.CI_TRIAL_MODE === '1'
   return NextResponse.json(
     {
       success: false,
       errorCode,
       message,
+      ...(includeDebug ? { debugMessage: typeof details?.rawError === 'string' ? details.rawError : undefined } : {}),
+      ...(includeDebug ? { failingFunction: 'planning.reserve-material.POST' } : {}),
       ...(details ? { details } : {}),
     },
     { status },
@@ -488,13 +491,17 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     materialId?: string
     wastageSheets?: number
     requiredSheets?: number
+    requiredParentSheets?: number
+    reserveQty?: number
+    shortageQty?: number
+    prQty?: number
     cutsPerSheet?: number
     parentSize?: string
   }
   const wastageSheets = Math.max(0, Math.floor(n(body.wastageSheets ?? spec.wastageSheets ?? core.wastageSheets ?? 150)))
   const baseRequired = Math.max(1, Math.ceil(n(line.quantity) / ups))
   const computedRequired = Math.max(1, baseRequired + wastageSheets)
-  const requiredSheets = Math.max(1, Math.floor(n(body.requiredSheets ?? computedRequired)))
+  const requiredSheets = Math.max(1, Math.floor(n(body.requiredParentSheets ?? body.requiredSheets ?? computedRequired)))
   if (!requiredSheets || requiredSheets <= 0) {
     return reserveError(400, 'INVALID_INPUT', 'Invalid calculation data', {
       requiredSheets,
@@ -561,6 +568,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     if (error instanceof ShortagePrRecoveryError) {
       return NextResponse.json(
         {
+          success: false,
+          errorCode: 'UNKNOWN',
+          message: error.message,
           error: error.message,
           retryable: true,
           shortageId: error.shortageId,
@@ -569,6 +579,27 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         { status: 409 },
       )
     }
+    console.error('[planning-reserve-debug]', {
+      failingFunction: 'reserveMaterialForPlanning/reserveMaterial',
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      errorStack: error instanceof Error ? error.stack : null,
+      payload: {
+        planningLineId: id,
+        poLineId: id,
+        materialId,
+        cutsPerSheet,
+        requiredParentSheets: n(body.requiredParentSheets),
+        reserveQty: n(body.reserveQty),
+        shortageQty: n(body.shortageQty),
+        prQty: n(body.prQty),
+        selectedOptionData: {
+          parentSize,
+          requiredSheets,
+          wastageSheets,
+        },
+      },
+    })
     const message = error instanceof Error ? error.message : 'Reservation failed. Please try again'
     const normalized = message.toLowerCase()
     if (

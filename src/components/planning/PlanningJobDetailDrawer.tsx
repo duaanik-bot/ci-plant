@@ -167,6 +167,19 @@ type MaterialStockDetails = {
   }>
 }
 
+type ReserveConfirmDraft = {
+  materialId: string
+  materialCode: string
+  parentSize: string
+  gsm: number | null
+  cutsPerSheet: number
+  requiredParentSheets: number
+  availableSheets: number
+  reserveQty: number
+  shortageQty: number
+  prQty: number
+}
+
 function specFoil(line: PlanningGridLine): string {
   const s = (line.specOverrides || {}) as Record<string, unknown>
   const f = s.foilType
@@ -222,6 +235,9 @@ export function PlanningJobDetailDrawer({
   const [optionDetailsByMaterial, setOptionDetailsByMaterial] = useState<Record<string, MaterialStockDetails | null>>({})
   const [suggestionsWorkspaceOpen, setSuggestionsWorkspaceOpen] = useState(false)
   const [reserveInlineError, setReserveInlineError] = useState<string | null>(null)
+  const [reserveConfirmOpen, setReserveConfirmOpen] = useState(false)
+  const [reserveConfirm, setReserveConfirm] = useState<ReserveConfirmDraft | null>(null)
+  const [reserveModalError, setReserveModalError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!line) {
@@ -454,78 +470,110 @@ export function PlanningJobDetailDrawer({
     toast.success('Material locked for planning.')
   }, [line, selectedMaterialId, readiness?.materialId, getSuggestionOption, updateRow, onSaveLine, loadReadiness])
 
-  const handleReserveMaterial = useCallback(async (materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string) => {
+  const openReserveConfirmation = useCallback((materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string) => {
     if (!line) return
     setReserveInlineError(null)
+    setReserveModalError(null)
+    const chosenMaterialId = materialIdArg || selectedMaterialId || readiness?.materialId || ''
+    const spec = (line.specOverrides || {}) as Record<string, unknown>
+    const meta = readPlanningMeta(spec)
+    const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
+    const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
+    const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
+    const requiredSheets = Math.max(1, Math.ceil(qty / ups) + wastageSheets)
+    const selectedOption =
+      cutsPerSheetArg && parentSizeArg
+        ? { cutsPerSheet: cutsPerSheetArg, size: parentSizeArg }
+        : getSuggestionOption(chosenMaterialId) ||
+          (() => {
+            const metaCuts = Number(meta.cutsPerSheet || 0)
+            const metaParentSize = typeof meta.parentSize === 'string' ? meta.parentSize.trim() : ''
+            if (metaCuts > 0 && metaParentSize) {
+              return {
+                cutsPerSheet: metaCuts,
+                size: metaParentSize,
+                requiredParentSheets: Math.max(1, Math.ceil(requiredSheets / metaCuts)),
+              }
+            }
+            return null
+          })()
+    const selectedCutsPerSheet = Number(selectedOption?.cutsPerSheet || 0)
+    const selectedParentSize = String(selectedOption?.size || '').trim()
+    const selectedRequiredParentSheets = Math.max(
+      0,
+      Number((selectedOption as { requiredParentSheets?: number } | null)?.requiredParentSheets || 0) ||
+        (selectedCutsPerSheet > 0 ? Math.ceil(requiredSheets / selectedCutsPerSheet) : 0),
+    )
+    if (!chosenMaterialId) {
+      const msg = 'No material selected'
+      setReserveInlineError(msg)
+      toast.error(msg)
+      return
+    }
+    if (!selectedCutsPerSheet || selectedCutsPerSheet <= 0 || !selectedRequiredParentSheets || selectedRequiredParentSheets <= 0 || !selectedParentSize) {
+      const msg = 'Invalid calculation data'
+      setReserveInlineError(msg)
+      toast.error(msg)
+      return
+    }
+    const availableSheets = Math.max(0, Number(readiness?.availableSheets || 0))
+    const reserveQty = Math.min(availableSheets, selectedRequiredParentSheets)
+    const shortageQty = Math.max(0, selectedRequiredParentSheets - reserveQty)
+    const materialCode =
+      (readiness?.suggestedBoardOptions || readiness?.closestAvailableOptions || []).find((o) => o.materialId === chosenMaterialId)?.materialCode ||
+      readiness?.materialCode ||
+      chosenMaterialId
+    setReserveConfirm({
+      materialId: chosenMaterialId,
+      materialCode,
+      parentSize: selectedParentSize,
+      gsm: Number((readiness?.suggestedBoardOptions || readiness?.closestAvailableOptions || []).find((o) => o.materialId === chosenMaterialId)?.gsm ?? readiness?.gsm ?? null),
+      cutsPerSheet: selectedCutsPerSheet,
+      requiredParentSheets: selectedRequiredParentSheets,
+      availableSheets,
+      reserveQty,
+      shortageQty,
+      prQty: shortageQty,
+    })
+    setReserveConfirmOpen(true)
+  }, [line, selectedMaterialId, readiness, wastageSheetsInput, getSuggestionOption])
+
+  const handleReserveMaterial = useCallback(async () => {
+    if (!line || !reserveConfirm) return
+    setReserveInlineError(null)
+    setReserveModalError(null)
+    const safeReserveQty = Math.max(0, Math.floor(Number(reserveConfirm.reserveQty || 0)))
+    const requiredParentSheets = Math.max(1, Math.floor(Number(reserveConfirm.requiredParentSheets || 0)))
+    const maxReserve = Math.min(Math.max(0, Number(reserveConfirm.availableSheets || 0)), requiredParentSheets)
+    if (safeReserveQty > maxReserve) {
+      const msg = 'Reserve Qty cannot exceed available or required sheets'
+      setReserveModalError(msg)
+      return
+    }
+    const safeShortageQty = Math.max(0, requiredParentSheets - safeReserveQty)
+    const safePrQty = Math.max(0, Math.floor(Number(reserveConfirm.prQty || 0)))
+    if (safeShortageQty > 0 && safePrQty === 0) {
+      setReserveModalError('Shortage will remain without PR.')
+      return
+    }
     setReserveBusy(true)
     try {
-      const chosenMaterialId = materialIdArg || selectedMaterialId || readiness?.materialId || ''
       const spec = (line.specOverrides || {}) as Record<string, unknown>
       const meta = readPlanningMeta(spec)
-      const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
-      const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
       const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
-      const requiredSheets = Math.max(1, Math.ceil(qty / ups) + wastageSheets)
-      const selectedOption =
-        cutsPerSheetArg && parentSizeArg
-          ? { cutsPerSheet: cutsPerSheetArg, size: parentSizeArg }
-          : getSuggestionOption(chosenMaterialId) ||
-            (() => {
-              const metaCuts = Number(meta.cutsPerSheet || 0)
-              const metaParentSize = typeof meta.parentSize === 'string' ? meta.parentSize.trim() : ''
-              if (metaCuts > 0 && metaParentSize) {
-                return {
-                  cutsPerSheet: metaCuts,
-                  size: metaParentSize,
-                  requiredParentSheets: Math.max(1, Math.ceil(requiredSheets / metaCuts)),
-                }
-              }
-              return null
-            })()
-
-      const selectedCutsPerSheet = Number(selectedOption?.cutsPerSheet || 0)
-      const selectedParentSize = String(selectedOption?.size || '').trim()
-      const selectedRequiredParentSheets = Math.max(
-        0,
-        Number((selectedOption as { requiredParentSheets?: number } | null)?.requiredParentSheets || 0) ||
-          (selectedCutsPerSheet > 0 ? Math.ceil(requiredSheets / selectedCutsPerSheet) : 0),
-      )
-      if (!chosenMaterialId) {
-        const msg = 'No material selected'
-        setReserveInlineError(msg)
-        toast.error(msg)
-        return
-      }
-      if (
-        !selectedCutsPerSheet ||
-        selectedCutsPerSheet <= 0 ||
-        !selectedRequiredParentSheets ||
-        selectedRequiredParentSheets <= 0 ||
-        !selectedParentSize
-      ) {
-        const msg = 'Invalid calculation data'
-        setReserveInlineError(msg)
-        toast.error(msg)
-        return
-      }
-      if (!line?.id) {
-        const msg = 'Planning context missing'
-        setReserveInlineError(msg)
-        toast.error(msg)
-        return
-      }
-
-      const availableBefore = Number(readiness?.availableSheets || 0)
-      const reserveQty = Math.min(availableBefore, requiredSheets)
       const res = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          materialId: chosenMaterialId,
+          materialId: reserveConfirm.materialId,
           wastageSheets,
-          requiredSheets,
-          cutsPerSheet: selectedCutsPerSheet,
-          parentSize: selectedParentSize,
+          requiredSheets: requiredParentSheets,
+          requiredParentSheets,
+          reserveQty: safeReserveQty,
+          shortageQty: safeShortageQty,
+          prQty: safePrQty,
+          cutsPerSheet: reserveConfirm.cutsPerSheet || Number(meta.cutsPerSheet || 0),
+          parentSize: reserveConfirm.parentSize || String(meta.parentSize || ''),
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -539,18 +587,21 @@ export function PlanningJobDetailDrawer({
           details?: unknown
         }
         console.error('[planning-reserve-debug]', {
-          materialId: chosenMaterialId || null,
-          requiredParentSheets: selectedRequiredParentSheets,
-          availableBefore,
-          reserveQty,
+          materialId: reserveConfirm.materialId || null,
+          requiredParentSheets,
+          availableBefore: reserveConfirm.availableSheets,
+          reserveQty: safeReserveQty,
           planningLineId: line.id || null,
           errorCode: errData.errorCode || 'UNKNOWN',
-          message: errData.message || errData.error || 'Reservation failed. Please try again',
+          message: errData.message || errData.error || 'Reservation failed',
+          debugMessage: (errData as { debugMessage?: string }).debugMessage || null,
+          failingFunction: (errData as { failingFunction?: string }).failingFunction || null,
           details: errData.details || null,
         })
         if (errData.retryable && errData.shortageId) {
           const retryMsg = errData.message || errData.error || 'Reservation completed, but PR creation failed.'
           setReserveInlineError(retryMsg)
+          setReserveModalError(retryMsg)
           toast.error(retryMsg, {
             action: {
               label: 'Create PR for Shortage',
@@ -569,32 +620,31 @@ export function PlanningJobDetailDrawer({
           })
           return
         }
-        const backendMessage = errData.message || errData.error || 'Reservation failed. Please try again'
+        const backendMessage = errData.message || errData.error || 'Reservation failed'
         setReserveInlineError(backendMessage)
+        setReserveModalError(backendMessage)
         throw new Error(backendMessage)
       }
       const out = data as { status: string; reservedSheets: number; shortageSheets: number; purchaseRequestId?: string | null }
       setReserveInlineError(null)
-      const msg =
-        out.status === 'fully_reserved'
-          ? `Fully reserved (${out.reservedSheets.toLocaleString('en-IN')} sheets).`
-          : `Partial reserved (${out.reservedSheets.toLocaleString('en-IN')}) · shortage ${out.shortageSheets.toLocaleString('en-IN')}${out.purchaseRequestId ? ' · PR created' : ''}.`
+      setReserveModalError(null)
+      const msg = `Reserved ${out.reservedSheets.toLocaleString('en-IN')} sheets. PR created for ${Math.max(0, out.shortageSheets).toLocaleString('en-IN')} sheets.`
       toast.success(msg)
-      if (chosenMaterialId) {
-        setSelectedMaterialId(chosenMaterialId)
-        setSelectionLocked(true)
-      }
+      setSelectedMaterialId(reserveConfirm.materialId)
+      setSelectionLocked(true)
       await loadReadiness()
       window.dispatchEvent(new Event('planning:refresh'))
       window.dispatchEvent(new Event('inventory:refresh'))
+      setReserveConfirmOpen(false)
     } catch (e) {
-      const errMessage = e instanceof Error ? e.message : 'Reservation failed. Please try again'
+      const errMessage = e instanceof Error ? e.message : 'Reservation failed'
       setReserveInlineError(errMessage)
+      setReserveModalError(errMessage)
       toast.error(errMessage)
     } finally {
       setReserveBusy(false)
     }
-  }, [line, loadReadiness, selectedMaterialId, readiness?.materialId, readiness?.availableSheets, wastageSheetsInput, getSuggestionOption])
+  }, [line, reserveConfirm, loadReadiness, wastageSheetsInput])
 
   const loadOptionDetails = useCallback(async (materialId: string) => {
     if (!materialId) return
@@ -1040,7 +1090,7 @@ export function PlanningJobDetailDrawer({
                         <Button
                           type="button"
                           disabled={reserveBusy}
-                          onClick={() => void handleReserveMaterial(opt.materialId, opt.cutsPerSheet, opt.size)}
+                          onClick={() => openReserveConfirmation(opt.materialId, opt.cutsPerSheet, opt.size)}
                           className="h-8 px-2 text-xs"
                         >
                           {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
@@ -1661,7 +1711,7 @@ export function PlanningJobDetailDrawer({
                         <Button
                           type="button"
                           disabled={reserveBusy}
-                          onClick={() => void handleReserveMaterial(opt.materialId, opt.cutsPerSheet, opt.size)}
+                          onClick={() => openReserveConfirmation(opt.materialId, opt.cutsPerSheet, opt.size)}
                           className="h-7 px-2 text-xs"
                         >
                           {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
@@ -1714,6 +1764,95 @@ export function PlanningJobDetailDrawer({
             </table>
           </div>
         </div>
+      </StandardDrawer>
+      <StandardDrawer
+        isOpen={reserveConfirmOpen}
+        onClose={() => {
+          if (reserveBusy) return
+          setReserveConfirmOpen(false)
+        }}
+        title="Confirm Material Reservation"
+        metadata={<p className="text-xs text-ds-ink-faint">Review reserve and PR quantities before confirming.</p>}
+        primaryAction={{
+          label: 'Confirm Reserve',
+          loadingLabel: 'Reserving…',
+          loading: reserveBusy,
+          disabled: !reserveConfirm || reserveBusy,
+          onClick: () => { void handleReserveMaterial() },
+        }}
+        secondaryAction={{
+          label: 'Cancel',
+          disabled: reserveBusy,
+          onClick: () => setReserveConfirmOpen(false),
+        }}
+      >
+        {!reserveConfirm ? (
+          <p className="text-xs text-ds-ink-faint">No material selected.</p>
+        ) : (
+          <div className="space-y-3 text-xs">
+            <div className="grid grid-cols-2 gap-2">
+              <div><span className="text-ds-ink-muted">Material code</span><p className={mono}>{reserveConfirm.materialCode || '-'}</p></div>
+              <div><span className="text-ds-ink-muted">Parent size</span><p className={mono}>{reserveConfirm.parentSize || '-'}</p></div>
+              <div><span className="text-ds-ink-muted">GSM</span><p className={mono}>{reserveConfirm.gsm ?? '-'}</p></div>
+              <div><span className="text-ds-ink-muted">Cuts per sheet</span><p className={mono}>{reserveConfirm.cutsPerSheet}</p></div>
+              <div><span className="text-ds-ink-muted">Required parent sheets</span><p className={mono}>{reserveConfirm.requiredParentSheets}</p></div>
+              <div><span className="text-ds-ink-muted">Available sheets</span><p className={mono}>{reserveConfirm.availableSheets}</p></div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="text-ds-ink-muted">Reserve Qty</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={Math.min(reserveConfirm.availableSheets, reserveConfirm.requiredParentSheets)}
+                  className={`${fieldInput} ${mono}`}
+                  value={reserveConfirm.reserveQty}
+                  onChange={(e) => {
+                    const next = Math.max(0, Math.floor(Number(e.target.value || 0)))
+                    const cap = Math.min(reserveConfirm.availableSheets, reserveConfirm.requiredParentSheets)
+                    const reserveQty = Math.min(next, cap)
+                    const shortageQty = Math.max(0, reserveConfirm.requiredParentSheets - reserveQty)
+                    setReserveConfirm((prev) => prev ? {
+                      ...prev,
+                      reserveQty,
+                      shortageQty,
+                      prQty: Math.max(prev.prQty, shortageQty),
+                    } : prev)
+                  }}
+                />
+              </label>
+              <label className="block">
+                <span className="text-ds-ink-muted">PR Qty</span>
+                <input
+                  type="number"
+                  min={0}
+                  className={`${fieldInput} ${mono}`}
+                  value={reserveConfirm.prQty}
+                  onChange={(e) => {
+                    const prQty = Math.max(0, Math.floor(Number(e.target.value || 0)))
+                    setReserveConfirm((prev) => prev ? { ...prev, prQty } : prev)
+                  }}
+                />
+              </label>
+            </div>
+            <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+              <p><span className="text-ds-ink-muted">Suggested reserve qty:</span> <span className={mono}>{reserveConfirm.reserveQty}</span></p>
+              <p><span className="text-ds-ink-muted">Suggested shortage qty:</span> <span className={mono}>{reserveConfirm.shortageQty}</span></p>
+              <p><span className="text-ds-ink-muted">Suggested PR qty:</span> <span className={mono}>{reserveConfirm.prQty}</span></p>
+            </div>
+            {reserveConfirm.prQty < reserveConfirm.shortageQty ? (
+              <p className="text-ds-warning">PR Qty is lower than shortage qty.</p>
+            ) : null}
+            {reserveConfirm.shortageQty > 0 && reserveConfirm.prQty === 0 ? (
+              <p className="text-ds-warning">Shortage will remain without PR.</p>
+            ) : null}
+            {reserveModalError ? (
+              <div className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">
+                {reserveModalError}
+              </div>
+            ) : null}
+          </div>
+        )}
       </StandardDrawer>
     </StandardDrawer>
   )

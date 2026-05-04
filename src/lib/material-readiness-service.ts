@@ -533,8 +533,16 @@ export async function reserveMaterialForPlanning(
 
   let purchaseRequest: { id: string } | null = null
   if (txResult.shortage?.id) {
-    const pr = await createPurchaseRequestFromShortage(txResult.shortage.id, db)
-    purchaseRequest = { id: pr.id }
+    try {
+      const pr = await createPurchaseRequestFromShortage(txResult.shortage.id, db)
+      purchaseRequest = { id: pr.id }
+    } catch (error) {
+      const msg = error instanceof Error && error.message ? error.message : 'Purchase Request creation failed'
+      throw new ShortagePrRecoveryError(
+        txResult.shortage.id,
+        `Reservation saved with shortage, but PR creation failed. You can retry using "Create PR for Shortage". (${msg})`,
+      )
+    }
   }
 
   return {
