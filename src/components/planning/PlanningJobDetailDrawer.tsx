@@ -188,6 +188,33 @@ type ReserveConfirmDraft = {
   leftoverAvailableAfterReserve: number
 }
 
+type ReservationControlMode = 'adjust' | 'release' | 'generate_pr'
+
+type ReservationControlDraft = {
+  mode: ReservationControlMode
+  materialId: string
+  materialCode: string
+  requiredSheets: number
+  availableSheets: number
+  reservedSheetsTotal: number
+  currentReservedForLine: number
+  currentShortageSheets: number
+  prId: string | null
+  prStatus: string
+  prQtyCurrent: number
+  reserveQtyInput: string
+  reserveQty: number
+  releaseQtyInput: string
+  releaseQty: number
+  prQtyInput: string
+  prQty: number
+  shortageQty: number
+  leftoverAvailableAfterReserve: number
+  prImpactAction: 'keep' | 'reduce' | 'cancel_if_no_shortage'
+  warningMessage: string | null
+  jobCardStatus: string | null
+}
+
 function specFoil(line: PlanningGridLine): string {
   const s = (line.specOverrides || {}) as Record<string, unknown>
   const f = s.foilType
@@ -247,6 +274,10 @@ export function PlanningJobDetailDrawer({
   const [reserveConfirm, setReserveConfirm] = useState<ReserveConfirmDraft | null>(null)
   const [reserveModalError, setReserveModalError] = useState<string | null>(null)
   const [reservePrEdited, setReservePrEdited] = useState(false)
+  const [reservationControlOpen, setReservationControlOpen] = useState(false)
+  const [reservationControlBusy, setReservationControlBusy] = useState(false)
+  const [reservationControlError, setReservationControlError] = useState<string | null>(null)
+  const [reservationControl, setReservationControl] = useState<ReservationControlDraft | null>(null)
 
   useEffect(() => {
     if (!line) {
@@ -689,6 +720,160 @@ export function PlanningJobDetailDrawer({
       setReserveBusy(false)
     }
   }, [line, reserveConfirm, loadReadiness, wastageSheetsInput])
+
+  const openReservationControl = useCallback(async (mode: ReservationControlMode) => {
+    if (!line) return
+    const materialId = selectedMaterialId || readiness?.materialId || ''
+    if (!materialId) {
+      toast.error('No material selected')
+      return
+    }
+    setReservationControlError(null)
+    try {
+      const spec = (line.specOverrides || {}) as Record<string, unknown>
+      const meta = readPlanningMeta(spec)
+      const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
+      const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
+      const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
+      const requiredSheets = Math.max(0, Number(readiness?.requiredSheets || Math.ceil(qty / ups) + wastageSheets))
+      const params = new URLSearchParams({
+        materialId,
+        requiredSheets: String(requiredSheets),
+      })
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control?${params.toString()}`, { cache: 'no-store' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { message?: string }).message || 'Failed to load reservation snapshot')
+      const snap = data as {
+        materialCode: string
+        requiredSheets: number
+        availableSheets: number
+        reservedSheets: number
+        reservedForLine: number
+        shortageSheets: number
+        prId: string | null
+        prStatus: string
+        prQty: number
+        jobCard?: { status?: string | null } | null
+      }
+      const reserveQtyDefault = Math.min(Math.max(0, Number(snap.availableSheets || 0) + Number(snap.reservedForLine || 0)), Math.max(0, Number(snap.requiredSheets || 0)))
+      const shortageDefault = Math.max(0, Number(snap.requiredSheets || 0) - reserveQtyDefault)
+      const releaseQtyDefault = Math.max(0, Number(snap.reservedForLine || 0))
+      setReservationControl({
+        mode,
+        materialId,
+        materialCode: snap.materialCode || materialId,
+        requiredSheets: Math.max(0, Number(snap.requiredSheets || 0)),
+        availableSheets: Math.max(0, Number(snap.availableSheets || 0)),
+        reservedSheetsTotal: Math.max(0, Number(snap.reservedSheets || 0)),
+        currentReservedForLine: Math.max(0, Number(snap.reservedForLine || 0)),
+        currentShortageSheets: Math.max(0, Number(snap.shortageSheets || 0)),
+        prId: typeof snap.prId === 'string' ? snap.prId : null,
+        prStatus: typeof snap.prStatus === 'string' ? snap.prStatus : 'not_created',
+        prQtyCurrent: Math.max(0, Number(snap.prQty || 0)),
+        reserveQtyInput: String(reserveQtyDefault),
+        reserveQty: reserveQtyDefault,
+        releaseQtyInput: String(releaseQtyDefault),
+        releaseQty: releaseQtyDefault,
+        prQtyInput: String(mode === 'generate_pr' ? Math.max(0, Number(snap.shortageSheets || 0)) : shortageDefault),
+        prQty: mode === 'generate_pr' ? Math.max(0, Number(snap.shortageSheets || 0)) : shortageDefault,
+        shortageQty: shortageDefault,
+        leftoverAvailableAfterReserve: Math.max(0, Number(snap.availableSheets || 0) + Number(snap.reservedForLine || 0) - reserveQtyDefault),
+        prImpactAction: 'reduce',
+        warningMessage: null,
+        jobCardStatus: typeof snap.jobCard?.status === 'string' ? snap.jobCard.status : null,
+      })
+      setReservationControlOpen(true)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to open reservation control')
+    }
+  }, [line, selectedMaterialId, readiness?.materialId, readiness?.requiredSheets, wastageSheetsInput])
+
+  const updateReservationControlDerived = useCallback((draft: ReservationControlDraft) => {
+    if (draft.mode === 'release') {
+      const parsedRelease = Number(draft.releaseQtyInput)
+      const safeRelease = Number.isFinite(parsedRelease) ? Math.max(0, parsedRelease) : 0
+      const cappedRelease = Math.min(safeRelease, draft.currentReservedForLine)
+      const newReservedForLine = Math.max(0, draft.currentReservedForLine - cappedRelease)
+      const shortageQty = Math.max(0, draft.requiredSheets - newReservedForLine)
+      return {
+        ...draft,
+        releaseQty: cappedRelease,
+        shortageQty,
+        leftoverAvailableAfterReserve: Math.max(0, draft.availableSheets + cappedRelease),
+        warningMessage:
+          draft.prQty < shortageQty ? 'PR Qty is less than shortage. Remaining shortage will stay open.' : null,
+      }
+    }
+    const parsedReserve = Number(draft.reserveQtyInput)
+    const safeReserve = Number.isFinite(parsedReserve) ? Math.max(0, parsedReserve) : 0
+    const cap = Math.min(draft.requiredSheets, draft.availableSheets + draft.currentReservedForLine)
+    const reserveQty = Math.min(safeReserve, cap)
+    const shortageQty = Math.max(0, draft.requiredSheets - reserveQty)
+    return {
+      ...draft,
+      reserveQty,
+      shortageQty,
+      leftoverAvailableAfterReserve: Math.max(0, draft.availableSheets + draft.currentReservedForLine - reserveQty),
+      warningMessage:
+        draft.prQty < shortageQty ? 'PR Qty is less than shortage. Remaining shortage will stay open.' : null,
+    }
+  }, [])
+
+  const submitReservationControl = useCallback(async () => {
+    if (!line || !reservationControl) return
+    setReservationControlError(null)
+    setReservationControlBusy(true)
+    try {
+      const mode = reservationControl.mode
+      const body: Record<string, unknown> = {
+        materialId: reservationControl.materialId,
+        requiredSheets: reservationControl.requiredSheets,
+      }
+      if (mode === 'adjust') {
+        body.action = 'adjust'
+        body.targetReserveQty = reservationControl.reserveQty
+        body.prQty = reservationControl.prQty
+      } else if (mode === 'release') {
+        body.action = 'release'
+        body.releaseQty = reservationControl.releaseQty
+        body.prImpactAction = reservationControl.prImpactAction
+      } else {
+        body.action = 'generate_pr'
+        body.prQty = reservationControl.prQty
+        body.reservedSheets = reservationControl.currentReservedForLine
+      }
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const out = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((out as { message?: string }).message || 'Action failed')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+      window.dispatchEvent(new Event('inventory:refresh'))
+      setReservationControlOpen(false)
+      toast.success(
+        mode === 'generate_pr'
+          ? 'Purchase Request generated.'
+          : mode === 'release'
+            ? 'Reservation released successfully.'
+            : 'Reservation adjusted successfully.',
+      )
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Action failed'
+      console.error('[planning-reservation-control]', {
+        mode: reservationControl.mode,
+        planningId: line.id,
+        materialId: reservationControl.materialId,
+        error: msg,
+      })
+      setReservationControlError(msg)
+      toast.error(msg)
+    } finally {
+      setReservationControlBusy(false)
+    }
+  }, [line, reservationControl, loadReadiness])
 
   const handleAddToBatch = useCallback(() => {
     if (!line) return
@@ -1278,6 +1463,33 @@ export function PlanningJobDetailDrawer({
                   }}
                 >
                   Retry PR creation
+                </button>
+              ) : null}
+              {!!(selectedMaterialId || readiness?.materialId) ? (
+                <>
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
+                    onClick={() => void openReservationControl('adjust')}
+                  >
+                    Adjust Reservation
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-ds-warning underline-offset-2 hover:underline"
+                    onClick={() => void openReservationControl('release')}
+                  >
+                    Release / Unreserve
+                  </button>
+                </>
+              ) : null}
+              {!readiness?.prId && Math.max(0, readiness?.shortageSheets || 0) > 0 ? (
+                <button
+                  type="button"
+                  className="text-xs font-medium text-ds-warning underline-offset-2 hover:underline"
+                  onClick={() => void openReservationControl('generate_pr')}
+                >
+                  Generate PR
                 </button>
               ) : null}
             </div>
@@ -1959,6 +2171,189 @@ export function PlanningJobDetailDrawer({
                 onClick={() => { void handleReserveMaterial() }}
               >
                 {reserveBusy ? 'Reserving…' : 'Confirm Reserve'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {reservationControlOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-ds-line/50 bg-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
+              <h3 className="text-sm font-semibold text-ds-ink">
+                {reservationControl?.mode === 'adjust'
+                  ? 'Adjust Reservation'
+                  : reservationControl?.mode === 'release'
+                    ? 'Release Reservation'
+                    : 'Generate Purchase Request'}
+              </h3>
+              <button
+                type="button"
+                className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                disabled={reservationControlBusy}
+                onClick={() => setReservationControlOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[85vh] overflow-y-auto px-4 py-3">
+              {!reservationControl ? (
+                <p className="text-xs text-ds-ink-faint">-</p>
+              ) : (
+                <div className="space-y-3 text-xs">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><span className="text-ds-ink-muted">Material Code</span><p className={mono}>{reservationControl.materialCode}</p></div>
+                    <div><span className="text-ds-ink-muted">Required Sheets</span><p className={mono}>{reservationControl.requiredSheets}</p></div>
+                    <div><span className="text-ds-ink-muted">Before Available</span><p className={mono}>{reservationControl.availableSheets}</p></div>
+                    <div><span className="text-ds-ink-muted">Before Reserved</span><p className={mono}>{reservationControl.reservedSheetsTotal}</p></div>
+                    <div><span className="text-ds-ink-muted">Current Reserved (this line)</span><p className={mono}>{reservationControl.currentReservedForLine}</p></div>
+                    <div><span className="text-ds-ink-muted">Current Shortage</span><p className={mono}>{reservationControl.currentShortageSheets}</p></div>
+                  </div>
+                  {reservationControl.mode !== 'release' ? (
+                    <label className="block">
+                      <span className="text-ds-ink-muted">Reserve Qty</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={`${fieldInput} ${mono}`}
+                        value={reservationControl.reserveQtyInput}
+                        onChange={(e) => {
+                          const next = updateReservationControlDerived({
+                            ...reservationControl,
+                            reserveQtyInput: e.target.value,
+                          })
+                          setReservationControl(next)
+                        }}
+                        onBlur={() => {
+                          const n = Number(reservationControl.reserveQtyInput)
+                          const safe = Number.isFinite(n) ? Math.max(0, n) : 0
+                          const next = updateReservationControlDerived({
+                            ...reservationControl,
+                            reserveQtyInput: String(safe),
+                          })
+                          setReservationControl(next)
+                        }}
+                      />
+                    </label>
+                  ) : (
+                    <label className="block">
+                      <span className="text-ds-ink-muted">Release Qty</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={`${fieldInput} ${mono}`}
+                        value={reservationControl.releaseQtyInput}
+                        onChange={(e) => {
+                          const next = updateReservationControlDerived({
+                            ...reservationControl,
+                            releaseQtyInput: e.target.value,
+                          })
+                          setReservationControl(next)
+                        }}
+                        onBlur={() => {
+                          const n = Number(reservationControl.releaseQtyInput)
+                          const safe = Number.isFinite(n) ? Math.max(0, n) : 0
+                          const next = updateReservationControlDerived({
+                            ...reservationControl,
+                            releaseQtyInput: String(safe),
+                          })
+                          setReservationControl(next)
+                        }}
+                      />
+                    </label>
+                  )}
+                  <label className="block">
+                    <span className="text-ds-ink-muted">PR Qty</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className={`${fieldInput} ${mono}`}
+                      value={reservationControl.prQtyInput}
+                      onChange={(e) => {
+                        const raw = e.target.value
+                        const parsed = Number(raw)
+                        setReservationControl((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                prQtyInput: raw,
+                                prQty: Number.isFinite(parsed) ? Math.max(0, parsed) : prev.prQty,
+                                warningMessage:
+                                  Number.isFinite(parsed) && Math.max(0, parsed) < prev.shortageQty
+                                    ? 'PR Qty is less than shortage. Remaining shortage will stay open.'
+                                    : null,
+                              }
+                            : prev,
+                        )
+                      }}
+                    />
+                  </label>
+                  {reservationControl.mode === 'release' ? (
+                    <label className="block">
+                      <span className="text-ds-ink-muted">PR impact</span>
+                      <select
+                        className={fieldInput}
+                        value={reservationControl.prImpactAction}
+                        onChange={(e) =>
+                          setReservationControl((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  prImpactAction: e.target.value as 'keep' | 'reduce' | 'cancel_if_no_shortage',
+                                }
+                              : prev,
+                          )
+                        }
+                      >
+                        <option value="keep">Keep PR</option>
+                        <option value="reduce">Reduce PR</option>
+                        <option value="cancel_if_no_shortage">Cancel PR if no shortage remains</option>
+                      </select>
+                    </label>
+                  ) : null}
+                  <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2">
+                    <div><span className="text-ds-ink-muted">Shortage Qty</span><p className={mono}>{reservationControl.shortageQty}</p></div>
+                    <div><span className="text-ds-ink-muted">Leftover Available</span><p className={mono}>{reservationControl.leftoverAvailableAfterReserve}</p></div>
+                  </div>
+                  {reservationControl.jobCardStatus ? (
+                    <p className="text-ds-warning">
+                      Job Card linked ({reservationControl.jobCardStatus}). Release allowed with caution before production start.
+                    </p>
+                  ) : null}
+                  {reservationControl.warningMessage ? (
+                    <p className="text-ds-warning">{reservationControl.warningMessage}</p>
+                  ) : null}
+                  {reservationControlError ? (
+                    <div className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">
+                      {reservationControlError}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-ds-line/40 px-4 py-3">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={reservationControlBusy}
+                onClick={() => setReservationControlOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!reservationControl || reservationControlBusy}
+                onClick={() => {
+                  void submitReservationControl()
+                }}
+              >
+                {reservationControlBusy
+                  ? 'Saving…'
+                  : reservationControl?.mode === 'adjust'
+                    ? 'Confirm Adjustment'
+                    : reservationControl?.mode === 'release'
+                      ? 'Confirm Release'
+                      : 'Generate PR'}
               </Button>
             </div>
           </div>

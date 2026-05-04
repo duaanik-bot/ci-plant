@@ -135,6 +135,21 @@ type MaterialDetailPayload = {
   }>
 }
 
+type ProcureModalState = {
+  materialId: string
+  materialCode: string
+  boardType: string | null
+  size: string
+  gsm: number | null
+  shortages: Array<{
+    id: string
+    planningId: string | null
+    jobCardNumber: number | null
+    pendingShortage: number
+    requiredByDate: string | null
+  }>
+}
+
 function InventoryPageContent() {
   const searchParams = useSearchParams()
   const ledgerGsm = searchParams.get('ledgerGsm')?.trim() ?? ''
@@ -195,6 +210,13 @@ function InventoryPageContent() {
   const [materialDrawerData, setMaterialDrawerData] = useState<MaterialDetailPayload | null>(null)
   const [materialDrawerView, setMaterialDrawerView] = useState<'history' | 'reservations'>('history')
   const [deepLinkOpenedMaterialId, setDeepLinkOpenedMaterialId] = useState<string | null>(null)
+  const [procureOpen, setProcureOpen] = useState(false)
+  const [procureBusy, setProcureBusy] = useState(false)
+  const [procureError, setProcureError] = useState<string | null>(null)
+  const [procureState, setProcureState] = useState<ProcureModalState | null>(null)
+  const [procureShortageId, setProcureShortageId] = useState('')
+  const [procurePrQty, setProcurePrQty] = useState('')
+  const [procureBuffer, setProcureBuffer] = useState(false)
 
   const loadPaperLedger = useCallback(
     async (opts: { customerPo: string; gsm?: string; board?: string }) => {
@@ -627,6 +649,80 @@ function InventoryPageContent() {
     }
   }
 
+  async function openProcureModal(row: PaperWarehouseRow) {
+    setProcureError(null)
+    try {
+      const res = await fetch(`/api/inventory/paper-warehouse/${row.material_id}/details`, { cache: 'no-store' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to load shortage details')
+      const payload = data as MaterialDetailPayload
+      const shortages = (payload.shortages || [])
+        .filter((s) => Number(s.pendingShortage) > 0)
+        .map((s) => ({
+          id: s.id,
+          planningId: s.planningId,
+          jobCardNumber: s.jobCardNumber,
+          pendingShortage: Number(s.pendingShortage) || 0,
+          requiredByDate: s.requiredByDate,
+        }))
+      if (shortages.length === 0) {
+        toast.error('No open shortages linked to this material')
+        return
+      }
+      const first = shortages[0]
+      setProcureState({
+        materialId: row.material_id,
+        materialCode: row.material_code,
+        boardType: row.board_type_id ?? null,
+        size: row.size_display,
+        gsm: row.gsm ?? null,
+        shortages,
+      })
+      setProcureShortageId(first?.id || '')
+      setProcurePrQty(String(Math.max(0, Number(first?.pendingShortage || 0))))
+      setProcureBuffer(false)
+      setProcureOpen(true)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load shortage details')
+    }
+  }
+
+  async function submitProcure() {
+    if (!procureState || !procureShortageId) {
+      setProcureError('Select shortage first')
+      return
+    }
+    const baseQty = Math.max(0, Number(procurePrQty || 0))
+    const qty = procureBuffer ? Math.ceil(baseQty * 1.1) : baseQty
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setProcureError('PR Qty must be greater than 0')
+      return
+    }
+    setProcureBusy(true)
+    setProcureError(null)
+    try {
+      const res = await fetch(`/api/material-shortages/${procureShortageId}/create-pr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prQty: qty }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to generate PR')
+      toast.success('Purchase Request generated.')
+      setProcureOpen(false)
+      await reloadAll()
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to generate PR'
+      setProcureError(msg)
+      console.error('[planning-reservation-control]', { scope: 'paper-warehouse-procure', shortageId: procureShortageId, msg })
+      toast.error(msg)
+    } finally {
+      setProcureBusy(false)
+    }
+  }
+
   async function deletePaperRow(row: PaperWarehouseRow) {
     const first = window.confirm(
       `Delete paper row for ${row.material_code}?\nThis removes the warehouse row permanently.`,
@@ -918,12 +1014,13 @@ function InventoryPageContent() {
                             Delete row
                           </button>
                           {row.shortage_sheets > 0 ? (
-                            <a
-                              href={`/inventory/purchase-requisitions?materialId=${encodeURIComponent(row.material_id)}`}
+                            <button
+                              type="button"
+                              onClick={() => void openProcureModal(row)}
                               className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
                             >
                               Procure
-                            </a>
+                            </button>
                           ) : null}
                         </div>
                       </td>
@@ -1338,12 +1435,13 @@ function InventoryPageContent() {
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {row.shortage_sheets > 0 ? (
-                        <a
-                          href={`/inventory/purchase-requisitions?materialId=${encodeURIComponent(row.material_id)}`}
+                        <button
+                          type="button"
+                          onClick={() => void openProcureModal(row)}
                           className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
                         >
                           Procure
-                        </a>
+                        </button>
                       ) : (
                         <span className="text-ds-ink-faint">-</span>
                       )}
@@ -1620,6 +1718,88 @@ function InventoryPageContent() {
           </table>
         </div>
       </section>
+
+      <SlideOverPanel
+        title="Generate Purchase Request"
+        isOpen={procureOpen}
+        onClose={() => setProcureOpen(false)}
+        widthClass="max-w-md"
+      >
+        <div className="space-y-3 px-1 text-xs text-ds-ink">
+          {!procureState ? (
+            <p className="text-ds-ink-faint">-</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2">
+                <div><span className="text-ds-ink-muted">Material</span><p className={ledgerMono}>{procureState.materialCode}</p></div>
+                <div><span className="text-ds-ink-muted">Board Type</span><p>{procureState.boardType || '-'}</p></div>
+                <div><span className="text-ds-ink-muted">Size</span><p className={ledgerMono}>{procureState.size || '-'}</p></div>
+                <div><span className="text-ds-ink-muted">GSM</span><p className={ledgerMono}>{procureState.gsm ?? '-'}</p></div>
+              </div>
+              <label className="block text-xs text-ds-ink-faint">
+                Shortage reference
+                <select
+                  value={procureShortageId}
+                  onChange={(e) => {
+                    const id = e.target.value
+                    setProcureShortageId(id)
+                    const hit = procureState.shortages.find((s) => s.id === id)
+                    if (hit) setProcurePrQty(String(Math.max(0, hit.pendingShortage)))
+                  }}
+                  className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                >
+                  {procureState.shortages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.planningId ? `PL#${s.planningId.slice(0, 8)}` : `JC#${s.jobCardNumber ?? '-'}`} · shortage {fmt(s.pendingShortage)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-ds-ink-faint">
+                PR Qty
+                <input
+                  type="number"
+                  min={0}
+                  step="1"
+                  value={procurePrQty}
+                  onChange={(e) => setProcurePrQty(e.target.value)}
+                  className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-xs text-ds-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={procureBuffer}
+                  onChange={(e) => setProcureBuffer(e.target.checked)}
+                  className="rounded border-ds-line/50"
+                />
+                Add 10% buffer
+              </label>
+              {procureError ? (
+                <div className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300">{procureError}</div>
+              ) : null}
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded border border-ds-line/50 px-3 py-1.5 text-xs"
+                  onClick={() => setProcureOpen(false)}
+                  disabled={procureBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="rounded bg-ds-warning px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                  onClick={() => void submitProcure()}
+                  disabled={procureBusy}
+                >
+                  {procureBusy ? 'Generating…' : 'Generate PR'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </SlideOverPanel>
 
       <SlideOverPanel
         title="Adjust warehouse stock"
