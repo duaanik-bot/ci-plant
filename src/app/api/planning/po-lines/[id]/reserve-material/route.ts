@@ -53,6 +53,37 @@ function normalizeText(value: string | null | undefined): string {
   return (value || '').trim().toLowerCase()
 }
 
+async function getPlanningReservedByMaterial(
+  planningLineId: string,
+  materialIds: string[],
+): Promise<Record<string, number>> {
+  if (!planningLineId || materialIds.length === 0) return {}
+  const rows = await db.stockMovement.findMany({
+    where: {
+      refId: planningLineId,
+      materialId: { in: materialIds },
+      refType: {
+        in: ['planning_reserve', 'planning_adjust_increase', 'planning_release', 'planning_adjust_decrease'],
+      },
+    },
+    select: {
+      materialId: true,
+      refType: true,
+      qty: true,
+    },
+  })
+  const out: Record<string, number> = {}
+  for (const row of rows) {
+    const qty = Number(row.qty) || 0
+    const sign =
+      row.refType === 'planning_release' || row.refType === 'planning_adjust_decrease'
+        ? -1
+        : 1
+    out[row.materialId] = Math.max(0, (out[row.materialId] || 0) + sign * qty)
+  }
+  return out
+}
+
 async function resolvePlanningContext(id: string, opts?: { requireJobCard?: boolean }) {
   const line = await db.poLineItem.findUnique({
     where: { id },
@@ -359,6 +390,16 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
           .slice(0, 10)
           .map((o) => ({ ...o, tags: Array.from(new Set([...(o.tags || []), 'Closest GSM' as const])) }))
       : []
+  const candidateMaterialIds = Array.from(
+    new Set(
+      [
+        ...(suggestedBoardOptionsWithMode || []).map((o) => o.materialId),
+        ...(closestAvailableOptions || []).map((o) => o.materialId),
+        materialId || '',
+      ].filter(Boolean),
+    ),
+  )
+  const reservedByMaterial = await getPlanningReservedByMaterial(id, candidateMaterialIds)
   const noMaterialsAtAll = inventoryCandidatesAll.length === 0
   const debug = {
     requiredSize: requiredSizePair ? `${requiredSizePair.length}x${requiredSizePair.width}` : null,
@@ -426,6 +467,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     baseRequiredSheets: baseRequired,
     suggestedBoardOptions: suggestedBoardOptionsWithMode,
     closestAvailableOptions,
+    reservedByMaterial,
+    reservedForLine: materialId ? Math.max(0, Number(reservedByMaterial[materialId] || 0)) : 0,
     noMaterialsAtAll,
     debugMessage:
       suggestedBoardOptions.length === 0 && !noMaterialsAtAll
@@ -497,6 +540,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     prQty?: number
     cutsPerSheet?: number
     parentSize?: string
+    actionType?: 'reserve' | 'adjust'
   }
   const wastageSheets = Math.max(0, Math.floor(n(body.wastageSheets ?? spec.wastageSheets ?? core.wastageSheets ?? 150)))
   const baseRequired = Math.max(1, Math.ceil(n(line.quantity) / ups))
@@ -520,6 +564,24 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   if (!materialId) {
     const auto = await resolveMaterialFromSpec(line)
     materialId = auto.materialId
+  }
+
+  const actionType = body.actionType === 'adjust' ? 'adjust' : 'reserve'
+  if (actionType !== 'adjust') {
+    const alreadyReservedMap = await getPlanningReservedByMaterial(id, [materialId])
+    const alreadyReserved = Math.max(0, Number(alreadyReservedMap[materialId] || 0))
+    if (alreadyReserved > 0) {
+      return reserveError(
+        409,
+        'INVALID_INPUT',
+        'Material already reserved for this planning line. Use Adjust Reservation.',
+        {
+          planningLineId: id,
+          materialId,
+          reservedForLine: alreadyReserved,
+        },
+      )
+    }
   }
   if (!materialId) {
     return reserveError(400, 'NO_MATERIAL', 'No material selected', {

@@ -54,6 +54,8 @@ type PaperWarehouseRow = {
   est_value_inr: number
   age_days: number
   ageing_risk: 'low' | 'medium' | 'high'
+  open_pr_id?: string | null
+  open_pr_status?: string | null
 }
 
 type StockStateItem = {
@@ -182,6 +184,10 @@ function InventoryPageContent() {
   const [paperLedgerSort, setPaperLedgerSort] = useState<'oldest' | 'newest'>('oldest')
   const [hubSearchPo, setHubSearchPo] = useState('')
   const [paperSearch, setPaperSearch] = useState('')
+  const [boardTypeFilter, setBoardTypeFilter] = useState('all')
+  const [gsmFilter, setGsmFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [shortageOnly, setShortageOnly] = useState(false)
   const [debouncedHubPo, setDebouncedHubPo] = useState('')
   const [drawerRow, setDrawerRow] = useState<PaperLedgerRow | null>(null)
   const [genealogy, setGenealogy] = useState<{ steps: GenealogyStep[] } | null>(null)
@@ -217,6 +223,7 @@ function InventoryPageContent() {
   const [procureShortageId, setProcureShortageId] = useState('')
   const [procurePrQty, setProcurePrQty] = useState('')
   const [procureBuffer, setProcureBuffer] = useState(false)
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
 
   const loadPaperLedger = useCallback(
     async (opts: { customerPo: string; gsm?: string; board?: string }) => {
@@ -398,7 +405,12 @@ function InventoryPageContent() {
       ]
         .join(' ')
         .toLowerCase()
-      return q ? hay.includes(q) : true
+      if (q && !hay.includes(q)) return false
+      if (boardTypeFilter !== 'all' && (row.board_type_id || '') !== boardTypeFilter) return false
+      if (gsmFilter !== 'all' && String(row.gsm ?? '') !== gsmFilter) return false
+      if (statusFilter !== 'all' && (row.status || '').toLowerCase() !== statusFilter) return false
+      if (shortageOnly && Number(row.shortage_sheets || 0) <= 0) return false
+      return true
     })
     return rows.filter((row) => {
       const free = Number(row.available_sheets || 0) - Number(row.reserved_sheets || 0)
@@ -413,7 +425,35 @@ function InventoryPageContent() {
       if (warehouseKpiFilter === 'mismatch') return Number(row.shortage_sheets || 0) > Number(row.incoming_sheets || 0)
       return true
     })
-  }, [paperSearch, paperWarehouseRows, warehouseKpiFilter])
+  }, [paperSearch, paperWarehouseRows, warehouseKpiFilter, boardTypeFilter, gsmFilter, statusFilter, shortageOnly])
+
+  const boardTypeFilterOptions = useMemo(
+    () =>
+      Array.from(new Set(paperWarehouseRows.map((r) => r.board_type_id || '').filter(Boolean))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [paperWarehouseRows],
+  )
+
+  const gsmFilterOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          paperWarehouseRows
+            .map((r) => (r.gsm == null ? '' : String(r.gsm)))
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => Number(a) - Number(b)),
+    [paperWarehouseRows],
+  )
+
+  const statusFilterOptions = useMemo(
+    () =>
+      Array.from(new Set(paperWarehouseRows.map((r) => (r.status || '').toLowerCase()).filter(Boolean))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [paperWarehouseRows],
+  )
 
   const filteredJobCards = useMemo(() => {
     const q = jobSearch.trim().toLowerCase()
@@ -462,7 +502,21 @@ function InventoryPageContent() {
     }
   }
 
-  if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
+  if (loading) {
+    return (
+      <div className="w-full px-4 py-3">
+        <div className="rounded-xl border border-ds-line/40 bg-background p-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="h-16 animate-pulse rounded-lg border border-ds-line/30 bg-ds-elevated/30" />
+            ))}
+          </div>
+          <div className="mt-4 h-10 animate-pulse rounded-lg border border-ds-line/30 bg-ds-elevated/30" />
+          <div className="mt-3 h-64 animate-pulse rounded-lg border border-ds-line/30 bg-ds-elevated/30" />
+        </div>
+      </div>
+    )
+  }
 
   const fmt = (n: number) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
   const fmtVal = (n: number) => `₹${fmt(n)}`
@@ -652,6 +706,19 @@ function InventoryPageContent() {
   async function openProcureModal(row: PaperWarehouseRow) {
     setProcureError(null)
     try {
+      if (!row.material_id) {
+        toast.error('Material id missing')
+        return
+      }
+      if (Number(row.shortage_sheets || 0) <= 0) {
+        toast.error('No shortage available for PR')
+        return
+      }
+      if (row.open_pr_id) {
+        toast.info('PR already exists')
+        window.location.href = `/inventory/purchase-requisitions?prId=${encodeURIComponent(row.open_pr_id)}`
+        return
+      }
       const res = await fetch(`/api/inventory/paper-warehouse/${row.material_id}/details`, { cache: 'no-store' })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to load shortage details')
@@ -708,7 +775,12 @@ function InventoryPageContent() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to generate PR')
-      toast.success('Purchase Request generated.')
+      const payload = data as { purchaseRequestId?: string; reused?: boolean; message?: string }
+      if (payload.reused) {
+        toast.success('Existing PR reused')
+      } else {
+        toast.success(`PR created for ${qty.toLocaleString('en-IN')} sheets`)
+      }
       setProcureOpen(false)
       await reloadAll()
       window.dispatchEvent(new Event('inventory:refresh'))
@@ -758,64 +830,12 @@ function InventoryPageContent() {
   if (paperWarehouseOnlyMode) {
     return (
       <div className="w-full px-4 py-3">
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            type="button"
-            onClick={() => setAdjustOpen(true)}
-            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
-          >
-            Adjust Stock
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (selectedMaterialIds.size === 0) {
-                toast.error('Select at least one row')
-                return
-              }
-              const lines = filteredPaperWarehouseRows
-                .filter((r) => selectedMaterialIds.has(r.material_id))
-                .map((r) => `${r.material_code}, 0, add, available, , `)
-                .join('\n')
-              setAdjustMode('bulk')
-              setBulkAdjustInput(lines)
-              setAdjustOpen(true)
-            }}
-            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
-          >
-            Bulk Add/Remove
-          </button>
-          <Link
-            href="/inventory/flow"
-            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
-          >
-            Inventory Flow
-          </Link>
-          <Link
-            href="/inventory/simulation"
-            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
-          >
-            Live Simulation
-          </Link>
-          <Link
-            href="/inventory/purchase-requisitions"
-            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
-          >
-            Purchase Requisitions
-          </Link>
-          <Link
-            href="/inventory/grn"
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
-          >
-            Add Stock (GRN)
-          </Link>
-        </div>
         <section
           id="paper-ledger"
           className="rounded-xl border border-ds-line/40 overflow-hidden bg-background text-ds-ink"
         >
           <div className="p-4 md:p-6">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-4">
+            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-ds-warning">Paper Warehouse (Raw Materials)</h2>
                 <p className="text-xs text-ds-ink-faint mt-1 font-mono">
@@ -827,34 +847,131 @@ function InventoryPageContent() {
                   </p>
                 )}
               </div>
-              <div className="flex flex-nowrap items-stretch gap-2 overflow-x-auto text-xs">
-                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'shortage' ? 'all' : 'shortage'))} className="min-w-[120px] rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></button>
-                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'available' ? 'all' : 'available'))} className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-left">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></button>
-                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'reserved' ? 'all' : 'reserved'))} className="min-w-[120px] rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-left">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></button>
-                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'incoming' ? 'all' : 'incoming'))} className="min-w-[120px] rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-left">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></button>
-                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'free' ? 'all' : 'free'))} className="min-w-[120px] rounded border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-left">Free Stock <div className={`${ledgerMono} text-sm text-cyan-300`}>{fmt(paperWarehouseKpi.freeStock)}</div></button>
-                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'stale' ? 'all' : 'stale'))} className="min-w-[120px] rounded border border-red-900/70 bg-red-950/50 px-3 py-2 text-left">Stale (&gt;180d) <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.staleStock)}</div></button>
-                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'fast' ? 'all' : 'fast'))} className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-left">Fast-moving <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.fastMoving)}</div></button>
-                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'slow' ? 'all' : 'slow'))} className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2 text-left">Slow-moving <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.slowMoving)}</div></button>
-                <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'mismatch' ? 'all' : 'mismatch'))} className="min-w-[120px] rounded border border-ds-warning/35 bg-ds-warning/10 px-3 py-2 text-left">Incoming mismatch <div className={`${ledgerMono} text-sm text-ds-warning`}>{fmt(paperWarehouseKpi.incomingRequiredMismatch)}</div></button>
-                <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
-                <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
-                <div className="min-w-[120px] rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAdjustOpen(true)}
+                  className="rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                >
+                  Adjust Stock
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedMaterialIds.size === 0) {
+                      toast.error('Select at least one row')
+                      return
+                    }
+                    const lines = filteredPaperWarehouseRows
+                      .filter((r) => selectedMaterialIds.has(r.material_id))
+                      .map((r) => `${r.material_code}, 0, add, available, , `)
+                      .join('\n')
+                    setAdjustMode('bulk')
+                    setBulkAdjustInput(lines)
+                    setAdjustOpen(true)
+                  }}
+                  className="rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                >
+                  Bulk Add/Remove
+                </button>
+                <Link
+                  href="/inventory/flow"
+                  className="rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                >
+                  Inventory Flow
+                </Link>
+                <Link
+                  href="/inventory/purchase-requisitions"
+                  className="rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                >
+                  Purchase Requisitions
+                </Link>
+                <Link
+                  href="/inventory/grn"
+                  className="rounded-lg bg-ds-warning px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-95"
+                >
+                  Add Stock (GRN)
+                </Link>
               </div>
             </div>
 
-            <label className="block mb-3 text-xs text-ds-ink-faint uppercase tracking-wide">
-              Search raw material
-              <input
-                type="text"
-                value={paperSearch}
-                onChange={(e) => setPaperSearch(e.target.value)}
-                placeholder="material code / board type / classification / size / gsm"
-                className={`mt-1 w-full max-w-md rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
-              />
-            </label>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6 mb-4">
+              {[
+                { key: 'shortage' as const, label: 'Shortage', value: fmt(paperWarehouseKpi.shortage), tone: 'border-rose-500/30 bg-rose-500/5 text-rose-300' },
+                { key: 'available' as const, label: 'Available', value: fmt(paperWarehouseKpi.available), tone: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300' },
+                { key: 'reserved' as const, label: 'Reserved', value: fmt(paperWarehouseKpi.reserved), tone: 'border-amber-500/30 bg-amber-500/5 text-amber-300' },
+                { key: 'free' as const, label: 'Free Stock', value: fmt(paperWarehouseKpi.freeStock), tone: 'border-cyan-500/30 bg-cyan-500/5 text-cyan-300' },
+                { key: 'incoming' as const, label: 'Incoming', value: fmt(paperWarehouseKpi.incoming), tone: 'border-sky-500/30 bg-sky-500/5 text-sky-300' },
+                { key: 'all' as const, label: 'Total Stock', value: fmt(paperWarehouseKpi.totalPhysical), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
+                { key: 'stale' as const, label: 'Stale', value: fmtVal(paperWarehouseKpi.staleStock), tone: 'border-rose-500/30 bg-rose-500/5 text-rose-300' },
+                { key: 'fast' as const, label: 'Fast-moving', value: fmt(paperWarehouseKpi.fastMoving), tone: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300' },
+                { key: 'slow' as const, label: 'Slow-moving', value: fmt(paperWarehouseKpi.slowMoving), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
+                { key: 'mismatch' as const, label: 'Incoming Mismatch', value: fmt(paperWarehouseKpi.incomingRequiredMismatch), tone: 'border-ds-warning/35 bg-ds-warning/10 text-ds-warning' },
+                { key: 'all' as const, label: 'Inventory Value', value: fmtVal(paperWarehouseKpi.value), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
+                { key: 'all' as const, label: 'Ageing Risk', value: fmtVal(paperWarehouseKpi.ageingRisk), tone: 'border-rose-500/30 bg-rose-500/5 text-rose-300' },
+              ].map((kpi, i) => (
+                <button
+                  key={`${kpi.label}-${i}`}
+                  type="button"
+                  onClick={() => setWarehouseKpiFilter((f) => (f === kpi.key ? 'all' : kpi.key))}
+                  className={`h-16 rounded-lg border px-3 py-2 text-left shadow-sm transition hover:shadow ${kpi.tone} cursor-pointer`}
+                >
+                  <p className="text-[11px] uppercase tracking-wide text-ds-ink-faint">{kpi.label}</p>
+                  <p className={`${ledgerMono} text-lg font-semibold`}>{kpi.value}</p>
+                </button>
+              ))}
+            </div>
 
-            <div className="flex flex-wrap gap-2 mb-3">
+            <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex w-full items-center gap-2 lg:max-w-3xl">
+                <input
+                  type="text"
+                  value={paperSearch}
+                  onChange={(e) => setPaperSearch(e.target.value)}
+                  placeholder="Search by material code, board type, classification, size, GSM..."
+                  className={`w-full rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
+                />
+                <select
+                  value={boardTypeFilter}
+                  onChange={(e) => setBoardTypeFilter(e.target.value)}
+                  className="w-36 rounded-lg border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
+                >
+                  <option value="all">Board Type</option>
+                  {boardTypeFilterOptions.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+                <select
+                  value={gsmFilter}
+                  onChange={(e) => setGsmFilter(e.target.value)}
+                  className="w-24 rounded-lg border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
+                >
+                  <option value="all">GSM</option>
+                  {gsmFilterOptions.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="w-28 rounded-lg border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
+                >
+                  <option value="all">Status</option>
+                  {statusFilterOptions.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+                <label className="inline-flex items-center gap-1 rounded-lg border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink">
+                  <input
+                    type="checkbox"
+                    checked={shortageOnly}
+                    onChange={(e) => setShortageOnly(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  Shortage only
+                </label>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setPaperLedgerSort('oldest')}
@@ -878,10 +995,10 @@ function InventoryPageContent() {
                 Newest first
               </button>
             </div>
-            <div className="overflow-x-auto rounded-lg border border-ds-line/40">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto rounded-lg border border-ds-line/40 shadow-sm">
+              <table className="w-full table-auto text-sm">
                 <thead className="bg-background text-left border-b border-ds-line/40">
-                  <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
+                  <tr className="text-ds-ink-muted text-[12px] uppercase tracking-wide">
                     <th className="px-3 py-2 w-10">
                       <input
                         type="checkbox"
@@ -898,19 +1015,19 @@ function InventoryPageContent() {
                     <th className="px-3 py-2">GSM</th>
                     <th className="px-3 py-2">Material code</th>
                     <th className="px-3 py-2">Board type</th>
-                    <th className="px-3 py-2">Available</th>
-                    <th className="px-3 py-2">Reserved</th>
-                    <th className="px-3 py-2">Free stock</th>
-                    <th className="px-3 py-2">Incoming</th>
-                    <th className="px-3 py-2">Shortage</th>
-                    <th className="px-3 py-2">Reorder</th>
+                    <th className="px-3 py-2 text-right">Available</th>
+                    <th className="px-3 py-2 text-right">Reserved</th>
+                    <th className="px-3 py-2 text-right">Free stock</th>
+                    <th className="px-3 py-2 text-right">Incoming</th>
+                    <th className="px-3 py-2 text-right">Shortage</th>
+                    <th className="px-3 py-2 text-right">Reorder</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ds-card">
                   {filteredPaperWarehouseRows.map((row) => (
-                    <tr key={row.material_id} className="hover:bg-ds-main/40">
+                    <tr key={row.material_id} className="min-h-[52px] bg-background hover:bg-ds-main/30">
                       <td className="px-3 py-2">
                         <input
                           type="checkbox"
@@ -930,7 +1047,7 @@ function InventoryPageContent() {
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'history')}
-                          className="underline underline-offset-2 hover:text-ds-ink"
+                          className="hover:underline hover:underline-offset-2"
                         >
                           {row.size_display || '-'}
                         </button>
@@ -941,15 +1058,14 @@ function InventoryPageContent() {
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'history')}
-                          className={`underline underline-offset-2 hover:text-ds-ink ${ledgerMono}`}
+                          className={`${ledgerMono} hover:underline hover:underline-offset-2`}
                         >
                           {row.material_code}
                         </button>
-                        <p className={`text-[10px] text-ds-ink-faint ${ledgerMono}`}>{row.material_id}</p>
                       </td>
                       <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
-                      <td className={`px-3 py-2 text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
-                      <td className="px-3 py-2 text-amber-300">
+                      <td className={`px-3 py-2 text-right text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
+                      <td className="px-3 py-2 text-right text-amber-300">
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'reservations')}
@@ -959,7 +1075,7 @@ function InventoryPageContent() {
                         </button>
                       </td>
                       <td
-                        className={`px-3 py-2 ${ledgerMono} ${
+                        className={`px-3 py-2 text-right ${ledgerMono} ${
                           row.available_sheets - row.reserved_sheets > 0
                             ? 'text-emerald-300'
                             : row.available_sheets - row.reserved_sheets === 0
@@ -967,31 +1083,37 @@ function InventoryPageContent() {
                               : 'text-rose-300'
                         }`}
                       >
-                        {fmt(row.available_sheets - row.reserved_sheets)}
+                        {row.available_sheets - row.reserved_sheets < 0 ? (
+                          <span className="rounded border border-rose-500/35 bg-rose-500/10 px-1.5 py-0.5">
+                            {fmt(row.available_sheets - row.reserved_sheets)}
+                          </span>
+                        ) : (
+                          fmt(row.available_sheets - row.reserved_sheets)
+                        )}
                       </td>
-                      <td className={`px-3 py-2 text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
-                      <td className={`px-3 py-2 text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
-                      <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
+                      <td className={`px-3 py-2 text-right text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
+                      <td className={`px-3 py-2 text-right text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
+                      <td className={`px-3 py-2 text-right text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
                       <td className="px-3 py-2 text-xs">
                         {(() => {
                           const free = row.available_sheets - row.reserved_sheets
                           const statusClass =
                             row.shortage_sheets > 0
-                              ? 'text-rose-300'
+                              ? 'border-rose-500/35 bg-rose-500/10 text-rose-300'
                               : free > 0
-                                ? 'text-emerald-300'
-                                : 'text-amber-300'
+                                ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
+                                : 'border-amber-500/35 bg-amber-500/10 text-amber-300'
                           const statusLabel =
                             row.shortage_sheets > 0
                               ? 'shortage'
                               : free > 0
                                 ? 'healthy'
                                 : 'watch'
-                          return <span className={statusClass}>{statusLabel}</span>
+                          return <span className={`rounded border px-1.5 py-0.5 uppercase ${statusClass}`}>{statusLabel}</span>
                         })()}
                       </td>
                       <td className="px-3 py-2 text-xs">
-                        <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="relative flex items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => openAdjustForRow(row, 'add', 'available')}
@@ -1001,19 +1123,19 @@ function InventoryPageContent() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => openAdjustForRow(row, 'subtract', 'available')}
+                            onClick={() => setOpenActionMenuId((prev) => (prev === row.material_id ? null : row.material_id))}
                             className="rounded border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-amber-300 hover:bg-amber-500/20"
                           >
-                            - Remove
+                            ⋯
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => void deletePaperRow(row)}
-                            className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
-                          >
-                            Delete row
-                          </button>
-                          {row.shortage_sheets > 0 ? (
+                          {row.open_pr_id ? (
+                            <Link
+                              href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(row.open_pr_id)}`}
+                              className="rounded border border-ds-brand/35 bg-ds-brand/10 px-2 py-1 text-ds-brand hover:bg-ds-brand/20"
+                            >
+                              View PR
+                            </Link>
+                          ) : row.shortage_sheets > 0 ? (
                             <button
                               type="button"
                               onClick={() => void openProcureModal(row)}
@@ -1021,6 +1143,22 @@ function InventoryPageContent() {
                             >
                               Procure
                             </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              className="cursor-not-allowed rounded border border-ds-line/40 bg-ds-elevated/10 px-2 py-1 text-ds-ink-faint"
+                            >
+                              Procure
+                            </button>
+                          )}
+                          {openActionMenuId === row.material_id ? (
+                            <div className="absolute right-0 top-full z-20 mt-1 w-36 rounded border border-ds-line/40 bg-background p-1 shadow-lg">
+                              <button type="button" onClick={() => { setOpenActionMenuId(null); openAdjustForRow(row, 'subtract', 'available') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">Remove Stock</button>
+                              <button type="button" onClick={() => { setOpenActionMenuId(null); void deletePaperRow(row) }} className="block w-full rounded px-2 py-1 text-left text-rose-300 hover:bg-rose-500/10">Delete row</button>
+                              <button type="button" onClick={() => { setOpenActionMenuId(null); void openMaterialDrawer(row, 'history') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">View History</button>
+                              <button type="button" onClick={() => { setOpenActionMenuId(null); void openMaterialDrawer(row, 'reservations') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">View Reservations</button>
+                            </div>
                           ) : null}
                         </div>
                       </td>
@@ -1030,7 +1168,7 @@ function InventoryPageContent() {
               </table>
               {filteredPaperWarehouseRows.length === 0 && (
                 <p className="p-6 text-center text-ds-ink-faint text-sm">
-                  No paper warehouse rows found.
+                  No paper stock found.
                 </p>
               )}
             </div>

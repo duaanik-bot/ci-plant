@@ -126,6 +126,8 @@ type MaterialReadinessPanelData = {
     strategyUsed: string
   } | null
   status: 'green' | 'yellow' | 'red' | 'grey'
+  reservedForLine?: number
+  reservedByMaterial?: Record<string, number>
   materialCandidates?: Array<{ id: string; materialCode: string; description: string }>
   materialMatchState?: 'matched' | 'multiple' | 'none' | 'unknown'
 }
@@ -406,6 +408,11 @@ export function PlanningJobDetailDrawer({
           out.status === 'green' || out.status === 'yellow' || out.status === 'red' || out.status === 'grey'
             ? out.status
             : 'grey',
+        reservedForLine: Math.max(0, Number(out.reservedForLine || 0)),
+        reservedByMaterial:
+          out.reservedByMaterial && typeof out.reservedByMaterial === 'object'
+            ? (out.reservedByMaterial as Record<string, number>)
+            : {},
         materialCandidates: Array.isArray(out.materialCandidates)
           ? out.materialCandidates.filter(
               (v): v is { id: string; materialCode: string; description: string } =>
@@ -638,6 +645,7 @@ export function PlanningJobDetailDrawer({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          actionType: 'reserve',
           materialId: reserveConfirm.materialId,
           wastageSheets,
           requiredSheets: requiredParentSheets,
@@ -721,9 +729,9 @@ export function PlanningJobDetailDrawer({
     }
   }, [line, reserveConfirm, loadReadiness, wastageSheetsInput])
 
-  const openReservationControl = useCallback(async (mode: ReservationControlMode) => {
+  const openReservationControl = useCallback(async (mode: ReservationControlMode, preferredMaterialId?: string) => {
     if (!line) return
-    const materialId = selectedMaterialId || readiness?.materialId || ''
+    const materialId = preferredMaterialId || selectedMaterialId || readiness?.materialId || ''
     if (!materialId) {
       toast.error('No material selected')
       return
@@ -1272,6 +1280,8 @@ export function PlanningJobDetailDrawer({
                     : readiness?.closestAvailableOptions) || []
                 ).slice(0, 10).map((opt) => {
                   const selected = selectedMaterialId === opt.materialId
+                  const reservedForThisOption = Math.max(0, Number(readiness?.reservedByMaterial?.[opt.materialId] || 0))
+                  const hasActiveReservation = reservedForThisOption > 0
                   const openOpt = !!optionDetailsOpen[opt.materialId]
                   const optDetails = optionDetailsByMaterial[opt.materialId]
                   const optLoading = !!optionDetailsLoading[opt.materialId]
@@ -1316,22 +1326,46 @@ export function PlanningJobDetailDrawer({
                         </span>
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Button
-                          type="button"
-                          disabled={reserveBusy}
-                          onClick={() => openReserveConfirmation(opt.materialId, opt.cutsPerSheet, opt.size)}
-                          className="h-8 px-2 text-xs"
-                        >
-                          {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
-                        </Button>
-                        <button
-                          type="button"
-                          disabled={reserveBusy}
-                          onClick={() => void lockSelectionOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
-                          className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
-                        >
-                          Lock Only
-                        </button>
+                        {hasActiveReservation ? (
+                          <>
+                            <span className="rounded border border-ds-success/40 bg-ds-success/10 px-2 py-1 text-[11px] text-ds-success">
+                              Reserved
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void openReservationControl('adjust', opt.materialId)}
+                              className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                            >
+                              Adjust Reservation
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void openReservationControl('release', opt.materialId)}
+                              className="rounded border border-ds-warning/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10"
+                            >
+                              Release / Unreserve
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              type="button"
+                              disabled={reserveBusy}
+                              onClick={() => openReserveConfirmation(opt.materialId, opt.cutsPerSheet, opt.size)}
+                              className="h-8 px-2 text-xs"
+                            >
+                              {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
+                            </Button>
+                            <button
+                              type="button"
+                              disabled={reserveBusy}
+                              onClick={() => void lockSelectionOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
+                              className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
+                            >
+                              Lock Only
+                            </button>
+                          </>
+                        )}
                         <button
                           type="button"
                           className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
@@ -1465,19 +1499,19 @@ export function PlanningJobDetailDrawer({
                   Retry PR creation
                 </button>
               ) : null}
-              {!!(selectedMaterialId || readiness?.materialId) ? (
+              {Math.max(0, Number(readiness?.reservedForLine || 0)) > 0 ? (
                 <>
                   <button
                     type="button"
                     className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
-                    onClick={() => void openReservationControl('adjust')}
+                    onClick={() => void openReservationControl('adjust', selectedMaterialId || readiness?.materialId || undefined)}
                   >
                     Adjust Reservation
                   </button>
                   <button
                     type="button"
                     className="text-xs font-medium text-ds-warning underline-offset-2 hover:underline"
-                    onClick={() => void openReservationControl('release')}
+                    onClick={() => void openReservationControl('release', selectedMaterialId || readiness?.materialId || undefined)}
                   >
                     Release / Unreserve
                   </button>
@@ -1966,20 +2000,42 @@ export function PlanningJobDetailDrawer({
                       <div className="flex flex-wrap items-center gap-2">
                         <Button
                           type="button"
-                          disabled={reserveBusy}
+                          disabled={reserveBusy || Math.max(0, Number(readiness?.reservedByMaterial?.[opt.materialId] || 0)) > 0}
                           onClick={() => openReserveConfirmation(opt.materialId, opt.cutsPerSheet, opt.size)}
                           className="h-7 px-2 text-xs"
                         >
                           {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
                         </Button>
-                        <button
-                          type="button"
-                          disabled={reserveBusy}
-                          onClick={() => void lockSelectionOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
-                          className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
-                        >
-                          Lock Only
-                        </button>
+                        {Math.max(0, Number(readiness?.reservedByMaterial?.[opt.materialId] || 0)) > 0 ? (
+                          <>
+                            <span className="rounded border border-ds-success/40 bg-ds-success/10 px-2 py-1 text-[11px] text-ds-success">
+                              Reserved
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void openReservationControl('adjust', opt.materialId)}
+                              className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                            >
+                              Adjust Reservation
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void openReservationControl('release', opt.materialId)}
+                              className="rounded border border-ds-warning/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10"
+                            >
+                              Release / Unreserve
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={reserveBusy}
+                            onClick={() => void lockSelectionOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
+                            className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
+                          >
+                            Lock Only
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"

@@ -43,6 +43,24 @@ export async function GET(req: NextRequest) {
     },
   })
 
+  const openPrs = await db.purchaseRequisition.findMany({
+    where: {
+      status: { in: ['pending', 'approved', 'converted_to_po'] },
+    },
+    orderBy: { raisedAt: 'desc' },
+    select: {
+      id: true,
+      materialId: true,
+      status: true,
+    },
+  })
+  const prByMaterial = new Map<string, { id: string; status: string }>()
+  for (const pr of openPrs) {
+    if (!prByMaterial.has(pr.materialId)) {
+      prByMaterial.set(pr.materialId, { id: pr.id, status: pr.status })
+    }
+  }
+
   const mapped = rows
     .map((r) => {
       const length = r.sheetLength != null ? Number(r.sheetLength) : null
@@ -56,6 +74,7 @@ export async function GET(req: NextRequest) {
       const ageDays = Math.max(0, Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 86400000))
       const ageingRisk = ageDays > 60 ? 'high' : ageDays > 30 ? 'medium' : 'low'
       const status = shortage > 0 ? 'shortage' : available > 0 ? 'available' : incoming > 0 ? 'incoming' : 'reserved'
+      const openPr = prByMaterial.get(r.id) || null
       return {
         material_id: r.id,
         material_code: r.materialCode,
@@ -75,6 +94,8 @@ export async function GET(req: NextRequest) {
         est_value_inr: estValue,
         age_days: ageDays,
         ageing_risk: ageingRisk,
+        open_pr_id: openPr?.id ?? null,
+        open_pr_status: openPr?.status ?? null,
       }
     })
     .filter((r) => {
