@@ -30,6 +30,7 @@ export type MaterialCutFitOption = {
   cutsPerSheet: number
   requiredParentSheets: number
   shortageParentSheets: number
+  sizeDiff: number
   wastagePct: number
   yieldPct: number
   orientation: 'LxW' | 'WxL'
@@ -154,6 +155,7 @@ export function buildMaterialCutFitOptions(input: {
 
     const parentArea = parentLength * parentWidth
     const usedArea = cutsPerSheet * reqLength * reqWidth
+    const sizeDiff = Math.abs(parentArea - usedArea)
     const yieldPct = parentArea > 0 ? (usedArea / parentArea) * 100 : 0
     const wastagePct = Math.max(0, 100 - yieldPct)
     const requiredParentSheets = Math.max(1, Math.ceil(requiredFinalSheets / cutsPerSheet))
@@ -187,6 +189,7 @@ export function buildMaterialCutFitOptions(input: {
       cutsPerSheet,
       requiredParentSheets,
       shortageParentSheets,
+      sizeDiff: Number(sizeDiff.toFixed(4)),
       wastagePct: Number(wastagePct.toFixed(2)),
       yieldPct: Number(yieldPct.toFixed(2)),
       orientation: directMode === 'none' ? best.orientation : 'LxW',
@@ -198,11 +201,13 @@ export function buildMaterialCutFitOptions(input: {
   }
 
   options.sort((a, b) => {
-    if (a.wastagePct !== b.wastagePct) return a.wastagePct - b.wastagePct
     if (b.cutsPerSheet !== a.cutsPerSheet) return b.cutsPerSheet - a.cutsPerSheet
+    if (a.wastagePct !== b.wastagePct) return a.wastagePct - b.wastagePct
+    if (a.sizeDiff !== b.sizeDiff) return a.sizeDiff - b.sizeDiff
     const aExact = a.gsmDelta === 0 ? 1 : 0
     const bExact = b.gsmDelta === 0 ? 1 : 0
     if (bExact !== aExact) return bExact - aExact
+    if (b.freeSheets !== a.freeSheets) return b.freeSheets - a.freeSheets
     if (b.availableSheets !== a.availableSheets) return b.availableSheets - a.availableSheets
     return a.materialCode.localeCompare(b.materialCode)
   })

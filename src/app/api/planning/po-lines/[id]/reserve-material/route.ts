@@ -414,6 +414,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     }
   }
   const suggestedBoardOptionsWithMode = suggestedBoardOptions.map(withBoardMatchMode)
+  suggestedBoardOptionsWithMode.forEach((opt, idx) => {
+    console.log('[cutfit-ranking-debug]', {
+      rank: idx + 1,
+      materialId: opt.materialId,
+      materialCode: opt.materialCode,
+      size: opt.size,
+      cuts: opt.cutsPerSheet,
+      wastagePct: opt.wastagePct,
+      sizeDiff: (opt as { sizeDiff?: number }).sizeDiff ?? null,
+      gsmDelta: opt.gsmDelta ?? null,
+      freeStock: (opt as { freeSheets?: number }).freeSheets ?? null,
+      matchType: opt.matchType,
+    })
+  })
 
   const closestAvailableOptions =
     strictSuggestions.length === 0
