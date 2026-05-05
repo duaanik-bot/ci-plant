@@ -256,20 +256,6 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const boardClassNorm = auto.boardClassificationRaw?.trim() || null
   const baseInventoryWhere = {
     active: true,
-    ...(boardTypeNorm
-      ? {
-          OR: [
-            { boardType: { equals: boardTypeNorm, mode: 'insensitive' as const } },
-            { boardClassification: { equals: boardTypeNorm, mode: 'insensitive' as const } },
-            ...(boardClassNorm
-              ? [
-                  { boardType: { equals: boardClassNorm, mode: 'insensitive' as const } },
-                  { boardClassification: { equals: boardClassNorm, mode: 'insensitive' as const } },
-                ]
-              : []),
-          ],
-        }
-      : {}),
     sheetLength: { gt: 0 },
     sheetWidth: { gt: 0 },
   }
@@ -291,7 +277,18 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       })
     : []
 
-  const withClassification = inventoryCandidatesAll.filter((m) => {
+  const boardFiltered = inventoryCandidatesAll.filter((m) => {
+    if (!boardTypeNorm && !boardClassNorm) return true
+    const matType = normalizeText(m.boardType)
+    const matClass = normalizeText(m.boardClassification)
+    const reqType = normalizeText(boardTypeNorm)
+    const reqClass = normalizeText(boardClassNorm)
+    return (
+      (!!reqType && (matType === reqType || matClass === reqType)) ||
+      (!!reqClass && (matType === reqClass || matClass === reqClass))
+    )
+  })
+  const withClassification = boardFiltered.filter((m) => {
     if (!auto.boardClassificationRaw) return true
     const target = auto.boardClassificationRaw.trim().toLowerCase()
     return (
@@ -306,9 +303,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     })
 
   const strictSet = gsmWithin(withClassification, gsmTolerance)
-  const relaxedNoClassSet = gsmWithin(inventoryCandidatesAll, gsmTolerance)
+  const relaxedNoClassSet = gsmWithin(boardFiltered, gsmTolerance)
   const widerTolerance = Math.max(gsmTolerance, 20)
-  const widerToleranceSet = gsmWithin(inventoryCandidatesAll, widerTolerance)
+  const widerToleranceSet = gsmWithin(boardFiltered, widerTolerance)
+  const noBoardGsmSet = gsmWithin(inventoryCandidatesAll, gsmTolerance)
+  const noBoardWiderSet = gsmWithin(inventoryCandidatesAll, widerTolerance)
   const toCutFitInput = (rows: typeof inventoryCandidatesAll) =>
     rows.map((m) => ({
       materialId: m.id,
@@ -351,8 +350,34 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         materials: toCutFitInput(widerToleranceSet),
       })
     : []
+  const noBoardGsmSuggestions = requiredSizePair
+    ? buildMaterialCutFitOptions({
+        requiredLength: requiredSizePair.length,
+        requiredWidth: requiredSizePair.width,
+        requiredFinalSheets: requiredSheets,
+        requiredGsm: auto.gsmRaw ?? null,
+        config: { gsmTolerance, allowRotation: true, maxSuggestions: 10 },
+        materials: toCutFitInput(noBoardGsmSet),
+      })
+    : []
+  const noBoardWiderSuggestions = requiredSizePair
+    ? buildMaterialCutFitOptions({
+        requiredLength: requiredSizePair.length,
+        requiredWidth: requiredSizePair.width,
+        requiredFinalSheets: requiredSheets,
+        requiredGsm: auto.gsmRaw ?? null,
+        config: { gsmTolerance: widerTolerance, allowRotation: true, maxSuggestions: 10 },
+        materials: toCutFitInput(noBoardWiderSet),
+      })
+    : []
   const byId = new Map<string, (typeof strictSuggestions)[number]>()
-  for (const s of [...strictSuggestions, ...relaxedNoClassSuggestions, ...widerToleranceSuggestions]) {
+  for (const s of [
+    ...strictSuggestions,
+    ...relaxedNoClassSuggestions,
+    ...widerToleranceSuggestions,
+    ...noBoardGsmSuggestions,
+    ...noBoardWiderSuggestions,
+  ]) {
     if (!byId.has(s.materialId)) byId.set(s.materialId, s)
   }
   const suggestedBoardOptions =
@@ -362,6 +387,10 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         ? relaxedNoClassSuggestions
         : widerToleranceSuggestions.length > 0
           ? widerToleranceSuggestions
+          : noBoardGsmSuggestions.length > 0
+            ? noBoardGsmSuggestions
+            : noBoardWiderSuggestions.length > 0
+              ? noBoardWiderSuggestions
           : Array.from(byId.values()).slice(0, 10).map((o) => ({ ...o, matchType: o.matchType, status: o.status }))
 
   const withBoardMatchMode = (opt: (typeof suggestedBoardOptions)[number]) => {
@@ -410,11 +439,14 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     boardType: auto.boardTypeRaw ?? null,
     boardClassification: auto.boardClassificationRaw ?? null,
     materialsFetched: inventoryCandidatesAll.length,
+    boardFiltered: boardFiltered.length,
     afterGsmFilter: strictSet.length,
     afterSizeFit: strictSuggestions.length,
     finalSuggestions: suggestedBoardOptions.length,
     fallbackWithoutClassification: relaxedNoClassSuggestions.length,
     fallbackWithWiderTolerance: widerToleranceSuggestions.length,
+    fallbackNoBoardGsm: noBoardGsmSuggestions.length,
+    fallbackNoBoardWider: noBoardWiderSuggestions.length,
   }
   console.log('[planning-cutfit-debug]', debug)
   const selectedSuggestion = selectedMaterialId
