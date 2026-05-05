@@ -117,12 +117,13 @@ type MaterialDetailPayload = {
     reservedSheets: number
     shortageSheets: number
     status: string
+    reservedAt?: string | null
     jobCard: {
       id: string
       jobCardNumber: number
       status: string
       customerName: string
-    }
+    } | null
   }>
   shortages: Array<{
     id: string
@@ -134,6 +135,8 @@ type MaterialDetailPayload = {
     requiredByDate: string | null
     priority: 'urgent' | 'normal'
     status: string | null
+    prId?: string | null
+    prStatus?: string | null
   }>
 }
 
@@ -214,7 +217,7 @@ function InventoryPageContent() {
   const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
   const [materialDrawerLoading, setMaterialDrawerLoading] = useState(false)
   const [materialDrawerData, setMaterialDrawerData] = useState<MaterialDetailPayload | null>(null)
-  const [materialDrawerView, setMaterialDrawerView] = useState<'history' | 'reservations'>('history')
+  const [materialDrawerView, setMaterialDrawerView] = useState<'history' | 'reserved' | 'available' | 'shortage' | 'free'>('history')
   const [deepLinkOpenedMaterialId, setDeepLinkOpenedMaterialId] = useState<string | null>(null)
   const [procureOpen, setProcureOpen] = useState(false)
   const [procureBusy, setProcureBusy] = useState(false)
@@ -686,7 +689,10 @@ function InventoryPageContent() {
     }
   }
 
-  async function openMaterialDrawer(row: PaperWarehouseRow, view: 'history' | 'reservations' = 'history') {
+  async function openMaterialDrawer(
+    row: PaperWarehouseRow,
+    view: 'history' | 'reserved' | 'available' | 'shortage' | 'free' = 'history',
+  ) {
     setMaterialDrawerView(view)
     setMaterialDrawerRow(row)
     setMaterialDrawerData(null)
@@ -700,6 +706,106 @@ function InventoryPageContent() {
       toast.error(e instanceof Error ? e.message : 'Failed to load material details')
     } finally {
       setMaterialDrawerLoading(false)
+    }
+  }
+
+  async function adjustReservationFromDrawer(args: {
+    planningId: string
+    materialId: string
+    requiredSheets: number
+    currentReserved: number
+  }) {
+    const nextValue = window.prompt('Target reserve qty for this planning line:', String(Math.max(0, args.currentReserved)))
+    if (nextValue == null) return
+    const target = Number(nextValue)
+    if (!Number.isFinite(target) || target < 0) {
+      toast.error('Invalid reserve qty')
+      return
+    }
+    try {
+      const res = await fetch(`/api/planning/po-lines/${args.planningId}/reservation-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'adjust',
+          materialId: args.materialId,
+          requiredSheets: Math.max(0, Math.floor(args.requiredSheets)),
+          targetReserveQty: Math.max(0, target),
+          prImpactAction: 'reduce',
+        }),
+      })
+      const out = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((out as { message?: string }).message || 'Adjust failed')
+      toast.success('Reservation adjusted')
+      await reloadAll()
+      if (materialDrawerRow) await openMaterialDrawer(materialDrawerRow, materialDrawerView)
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Adjust failed')
+    }
+  }
+
+  async function releaseReservationFromDrawer(args: {
+    planningId: string
+    materialId: string
+    requiredSheets: number
+    currentReserved: number
+  }) {
+    const releaseValue = window.prompt('Release qty for this planning line:', String(Math.max(0, args.currentReserved)))
+    if (releaseValue == null) return
+    const releaseQty = Number(releaseValue)
+    if (!Number.isFinite(releaseQty) || releaseQty <= 0) {
+      toast.error('Invalid release qty')
+      return
+    }
+    try {
+      const res = await fetch(`/api/planning/po-lines/${args.planningId}/reservation-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'release',
+          materialId: args.materialId,
+          requiredSheets: Math.max(0, Math.floor(args.requiredSheets)),
+          releaseQty: Math.max(0, releaseQty),
+          prImpactAction: 'reduce',
+        }),
+      })
+      const out = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((out as { message?: string }).message || 'Release failed')
+      toast.success('Reservation released')
+      await reloadAll()
+      if (materialDrawerRow) await openMaterialDrawer(materialDrawerRow, materialDrawerView)
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Release failed')
+    }
+  }
+
+  async function generatePrFromDrawerShortage(shortageId: string, defaultQty: number) {
+    const qtyInput = window.prompt('PR qty for this shortage:', String(Math.max(0, defaultQty)))
+    if (qtyInput == null) return
+    const qty = Number(qtyInput)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error('Invalid PR qty')
+      return
+    }
+    try {
+      const res = await fetch(`/api/material-shortages/${shortageId}/create-pr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prQty: qty }),
+      })
+      const out = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((out as { error?: string }).error || 'PR action failed')
+      toast.success((out as { reused?: boolean }).reused ? 'Existing PR reused' : 'PR created')
+      await reloadAll()
+      if (materialDrawerRow) await openMaterialDrawer(materialDrawerRow, materialDrawerView)
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'PR action failed')
     }
   }
 
@@ -1064,11 +1170,19 @@ function InventoryPageContent() {
                         </button>
                       </td>
                       <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
-                      <td className={`px-3 py-2 text-right text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
+                      <td className="px-3 py-2 text-right text-emerald-300">
+                        <button
+                          type="button"
+                          onClick={() => void openMaterialDrawer(row, 'available')}
+                          className={`underline-offset-2 hover:underline ${ledgerMono}`}
+                        >
+                          {fmt(row.available_sheets)}
+                        </button>
+                      </td>
                       <td className="px-3 py-2 text-right text-amber-300">
                         <button
                           type="button"
-                          onClick={() => void openMaterialDrawer(row, 'reservations')}
+                          onClick={() => void openMaterialDrawer(row, 'reserved')}
                           className={`underline underline-offset-2 hover:text-amber-200 ${ledgerMono}`}
                         >
                           {fmt(row.reserved_sheets)}
@@ -1083,16 +1197,30 @@ function InventoryPageContent() {
                               : 'text-rose-300'
                         }`}
                       >
-                        {row.available_sheets - row.reserved_sheets < 0 ? (
-                          <span className="rounded border border-rose-500/35 bg-rose-500/10 px-1.5 py-0.5">
-                            {fmt(row.available_sheets - row.reserved_sheets)}
-                          </span>
-                        ) : (
-                          fmt(row.available_sheets - row.reserved_sheets)
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => void openMaterialDrawer(row, 'free')}
+                          className="underline-offset-2 hover:underline"
+                        >
+                          {row.available_sheets - row.reserved_sheets < 0 ? (
+                            <span className="rounded border border-rose-500/35 bg-rose-500/10 px-1.5 py-0.5">
+                              {fmt(row.available_sheets - row.reserved_sheets)}
+                            </span>
+                          ) : (
+                            fmt(row.available_sheets - row.reserved_sheets)
+                          )}
+                        </button>
                       </td>
                       <td className={`px-3 py-2 text-right text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
-                      <td className={`px-3 py-2 text-right text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
+                      <td className="px-3 py-2 text-right text-rose-300">
+                        <button
+                          type="button"
+                          onClick={() => void openMaterialDrawer(row, 'shortage')}
+                          className={`underline-offset-2 hover:underline ${ledgerMono}`}
+                        >
+                          {fmt(row.shortage_sheets)}
+                        </button>
+                      </td>
                       <td className={`px-3 py-2 text-right text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
                       <td className="px-3 py-2 text-xs">
                         {(() => {
@@ -1157,7 +1285,7 @@ function InventoryPageContent() {
                               <button type="button" onClick={() => { setOpenActionMenuId(null); openAdjustForRow(row, 'subtract', 'available') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">Remove Stock</button>
                               <button type="button" onClick={() => { setOpenActionMenuId(null); void deletePaperRow(row) }} className="block w-full rounded px-2 py-1 text-left text-rose-300 hover:bg-rose-500/10">Delete row</button>
                               <button type="button" onClick={() => { setOpenActionMenuId(null); void openMaterialDrawer(row, 'history') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">View History</button>
-                              <button type="button" onClick={() => { setOpenActionMenuId(null); void openMaterialDrawer(row, 'reservations') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">View Reservations</button>
+                              <button type="button" onClick={() => { setOpenActionMenuId(null); void openMaterialDrawer(row, 'reserved') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">View Reservations</button>
                             </div>
                           ) : null}
                         </div>
@@ -1187,97 +1315,213 @@ function InventoryPageContent() {
           panelClassName="border-l border-ds-line/40 bg-background shadow-2xl"
         >
           {materialDrawerRow ? (
-            <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-ds-ink-muted ${ledgerMono}`}>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Material</p>
-                <p className="text-sm text-ds-ink font-semibold">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p>
-                <p className="text-ds-ink-faint">
-                  {(materialDrawerData?.material.boardType ?? materialDrawerRow.board_type_id ?? '-') + ' · ' + (materialDrawerData?.material.gsm ?? materialDrawerRow.gsm ?? '-')}
+            <div className={`flex h-full flex-col text-xs text-ds-ink-muted ${ledgerMono}`}>
+              <div className="sticky top-0 z-10 border-b border-ds-line/40 bg-background px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-ds-ink-faint">
+                  {materialDrawerView === 'reserved'
+                    ? 'Reserved Stock'
+                    : materialDrawerView === 'available'
+                      ? 'Available Stock'
+                      : materialDrawerView === 'shortage'
+                        ? 'Shortage'
+                        : materialDrawerView === 'free'
+                          ? 'Free Stock'
+                          : 'Material History'}
                 </p>
+                <p className="text-sm font-semibold text-ds-ink">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p>
               </div>
+              <div className="flex-1 overflow-y-auto space-y-4 px-4 py-3">
+                <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+                  <div><span className="text-ds-ink-faint">Material Code</span><p className="text-ds-ink">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p></div>
+                  <div><span className="text-ds-ink-faint">Board Type</span><p className="text-ds-ink">{materialDrawerData?.material.boardType ?? materialDrawerRow.board_type_id ?? '-'}</p></div>
+                  <div><span className="text-ds-ink-faint">Classification</span><p className="text-ds-ink">{materialDrawerData?.material.boardClassification ?? materialDrawerRow.board_classification_id ?? '-'}</p></div>
+                  <div><span className="text-ds-ink-faint">GSM</span><p className="text-ds-ink">{String(materialDrawerData?.material.gsm ?? materialDrawerRow.gsm ?? '-')}</p></div>
+                  <div><span className="text-ds-ink-faint">Available</span><p className="text-emerald-300">{fmt(materialDrawerRow.available_sheets)}</p></div>
+                  <div><span className="text-ds-ink-faint">Reserved</span><p className="text-amber-300">{fmt(materialDrawerRow.reserved_sheets)}</p></div>
+                  <div><span className="text-ds-ink-faint">Shortage</span><p className="text-rose-300">{fmt(materialDrawerRow.shortage_sheets)}</p></div>
+                  <div><span className="text-ds-ink-faint">Free Stock</span><p className={(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? 'text-rose-300' : 'text-cyan-300'}>{fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p></div>
+                </div>
 
-              <div>
-                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">
-                  {materialDrawerView === 'reservations' ? 'Job Allocation' : 'Reserved by Jobs'}
-                </p>
-                {materialDrawerLoading ? (
-                  <p className="text-ds-ink-faint">Loading…</p>
-                ) : !materialDrawerData || materialDrawerData.reservations.length === 0 ? (
-                  <p className="text-ds-ink-faint">No active reservations.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {materialDrawerData.reservations.map((r) => (
-                      <li key={r.id} className="rounded border border-ds-line/40 px-2 py-1.5">
-                        <p className="text-ds-ink">
-                          Job Card: {r.jobCard.id} · JC#{r.jobCard.jobCardNumber} · {r.jobCard.customerName}
-                        </p>
-                        <p className="text-ds-ink-faint">
-                          {r.cartonName ?? 'Carton —'} {r.poNumber ? `· ${r.poNumber}` : ''}
-                        </p>
-                        <p className="text-ds-warning">
-                          Reserved {r.reservedSheets.toLocaleString('en-IN')} / Required {r.requiredSheets.toLocaleString('en-IN')}
-                        </p>
-                        <p className="text-ds-ink-faint">Status: {r.jobCard.status || '-'}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+                {materialDrawerView === 'reserved' ? (
+                  <div>
+                    <p className="mb-1 text-xs uppercase tracking-wide text-ds-ink-faint">Reserved by planning/job rows</p>
+                    {materialDrawerLoading ? (
+                      <p className="text-ds-ink-faint">Loading…</p>
+                    ) : !materialDrawerData || materialDrawerData.reservations.length === 0 ? (
+                      <p className="text-ds-ink-faint">No active reservations.</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {materialDrawerData.reservations.map((r) => (
+                          <li key={r.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                            <p className="text-ds-ink">
+                              {(r.planningId ? `PL#${r.planningId.slice(0, 8)}` : '-')}{r.jobCard?.jobCardNumber ? ` · JC#${r.jobCard.jobCardNumber}` : ''}
+                            </p>
+                            <p className="text-ds-ink-faint">{r.cartonName || '-'} {r.poNumber ? `· ${r.poNumber}` : ''}</p>
+                            <p className="text-ds-warning">Reserved {fmt(r.reservedSheets)} · Date {r.reservedAt ? new Date(r.reservedAt).toLocaleDateString('en-IN') : '-'}</p>
+                            <p className="text-ds-ink-faint">Status: {r.jobCard?.status || r.status || '-'}</p>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                disabled={!r.planningId}
+                                onClick={() => r.planningId && void adjustReservationFromDrawer({
+                                  planningId: r.planningId,
+                                  materialId: materialDrawerRow.material_id,
+                                  requiredSheets: r.requiredSheets,
+                                  currentReserved: r.reservedSheets,
+                                })}
+                                className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
+                              >
+                                Adjust Reservation
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!r.planningId}
+                                onClick={() => r.planningId && void releaseReservationFromDrawer({
+                                  planningId: r.planningId,
+                                  materialId: materialDrawerRow.material_id,
+                                  requiredSheets: r.requiredSheets,
+                                  currentReserved: r.reservedSheets,
+                                })}
+                                className="rounded border border-ds-warning/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-40"
+                              >
+                                Release / Unreserve
+                              </button>
+                              {r.planningId ? (
+                                <Link href={`/orders/planning?lineId=${encodeURIComponent(r.planningId)}`} className="rounded border border-ds-brand/40 px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/10">
+                                  View Planning / Job
+                                </Link>
+                              ) : null}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
 
-              <div>
-                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Shortage priority</p>
-                {materialDrawerLoading ? (
-                  <p className="text-ds-ink-faint">Loading…</p>
-                ) : !materialDrawerData || !Array.isArray(materialDrawerData.shortages) || materialDrawerData.shortages.length === 0 ? (
-                  <p className="text-ds-ink-faint">No open shortages.</p>
-                ) : (
-                  <>
-                  <div className="mb-2 rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1.5">
-                    <p className="text-ds-ink">
-                      Total shortage across jobs: {materialDrawerData.shortages.reduce((acc, s) => acc + Number(s.pendingShortage || 0), 0).toLocaleString('en-IN')} sheets
-                    </p>
-                    {materialDrawerData.shortages.length > 1 ? (
-                      <p className="text-ds-ink-faint">Merged PR opportunity: {materialDrawerData.shortages.length} jobs share this material.</p>
+                {materialDrawerView === 'available' ? (
+                  <div className="space-y-2">
+                    <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Available stock guidance</p>
+                    <div className="rounded border border-ds-line/40 p-2 text-ds-ink-faint">
+                      <p>Incoming: {fmt(materialDrawerRow.incoming_sheets)}</p>
+                      <p>Free Stock: {fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toast.info('Open a planning line to reserve this stock.')}
+                        className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                      >
+                        Reserve for Planning
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdjustMode('single')
+                          setAdjustMaterialId(materialDrawerRow.material_id)
+                          setAdjustBucket('available')
+                          setAdjustDirection('add')
+                          setAdjustOpen(true)
+                        }}
+                        className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                      >
+                        Adjust Stock
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMaterialDrawerView('history')}
+                        className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                      >
+                        View History
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {materialDrawerView === 'shortage' ? (
+                  <div>
+                    <p className="mb-1 text-xs uppercase tracking-wide text-ds-ink-faint">Shortage by planning/job</p>
+                    {materialDrawerLoading ? (
+                      <p className="text-ds-ink-faint">Loading…</p>
+                    ) : !materialDrawerData || materialDrawerData.shortages.length === 0 ? (
+                      <p className="text-ds-ink-faint">No open shortages.</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {materialDrawerData.shortages.map((s) => (
+                          <li key={s.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                            <p className="text-ds-ink">{s.planningId ? `PL#${s.planningId.slice(0, 8)}` : s.jobCardId} {s.jobCardNumber ? `· JC#${s.jobCardNumber}` : ''}</p>
+                            <p className="text-ds-ink-faint">Pending {fmt(s.pendingShortage)} / Required {fmt(s.requiredQty)}</p>
+                            <p className="text-ds-ink-faint">PR Status: {s.prStatus || '-'}</p>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                              {s.prId ? (
+                                <>
+                                  <Link href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(s.prId)}`} className="rounded border border-ds-brand/40 px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/10">View PR</Link>
+                                  <button type="button" onClick={() => s.prId && (window.location.href = `/inventory/purchase-requisitions?prId=${encodeURIComponent(s.prId)}`)} className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40">Adjust PR</button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => void generatePrFromDrawerShortage(s.id, s.pendingShortage)}
+                                  className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/20"
+                                >
+                                  Generate PR
+                                </button>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
+
+                {materialDrawerView === 'free' ? (
+                  <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+                    <p className="text-ds-ink">Free stock = Available - Reserved = {fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p>
+                    {(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? (
+                      <p className="mt-1 text-rose-300">
+                        Negative free stock means more stock is reserved than currently available.
+                      </p>
                     ) : null}
                   </div>
-                  <ul className="space-y-2">
-                    {materialDrawerData.shortages.map((s) => (
-                      <li key={s.id} className="rounded border border-ds-line/40 px-2 py-1.5">
-                        <p className="text-ds-ink">
-                          Job Card: {s.jobCardId} {s.jobCardNumber ? `· JC#${s.jobCardNumber}` : ''}
-                        </p>
-                        <p className="text-ds-ink-faint">
-                          Required {Number(s.requiredQty || 0).toLocaleString('en-IN')} · Pending {Number(s.pendingShortage || 0).toLocaleString('en-IN')}
-                        </p>
-                        <p className={s.priority === 'urgent' ? 'text-rose-300' : 'text-amber-300'}>
-                          Priority: {s.priority === 'urgent' ? 'Urgent' : 'Normal'}
-                          {s.requiredByDate ? ` · Required by ${new Date(s.requiredByDate).toLocaleDateString('en-IN')}` : ''}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                  </>
-                )}
-              </div>
+                ) : null}
 
-              <div>
-                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-1">Recent stock logs</p>
-                {materialDrawerLoading ? (
-                  <p className="text-ds-ink-faint">Loading…</p>
-                ) : !materialDrawerData || materialDrawerData.logs.length === 0 ? (
-                  <p className="text-ds-ink-faint">No stock logs found.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {materialDrawerData.logs.map((log) => (
-                      <li key={log.id} className="rounded border border-ds-line/40 px-2 py-1.5">
-                        <p className="text-ds-ink">{log.movementType} · {log.qty.toLocaleString('en-IN')}</p>
-                        <p className="text-ds-ink-faint">
-                          {new Date(log.createdAt).toLocaleString()} · {log.refType ?? '—'} {log.refId ? `· ${log.refId.slice(0, 8)}` : ''}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div>
+                  <p className="mb-1 text-xs uppercase tracking-wide text-ds-ink-faint">Recent stock logs</p>
+                  {materialDrawerLoading ? (
+                    <p className="text-ds-ink-faint">Loading…</p>
+                  ) : !materialDrawerData || materialDrawerData.logs.length === 0 ? (
+                    <p className="text-ds-ink-faint">No stock logs found.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {materialDrawerData.logs.slice(0, 20).map((log) => (
+                        <li key={log.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                          <p className="text-ds-ink">{log.movementType} · {log.qty.toLocaleString('en-IN')}</p>
+                          <p className="text-ds-ink-faint">
+                            {new Date(log.createdAt).toLocaleString()} · {log.refType ?? '—'} {log.refId ? `· ${log.refId.slice(0, 8)}` : ''}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+              <div className="sticky bottom-0 border-t border-ds-line/40 bg-background px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMaterialDrawerView('history')}
+                    className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                  >
+                    Show full history
+                  </button>
+                  <Link
+                    href="/inventory"
+                    className="rounded border border-ds-brand/35 bg-ds-brand/10 px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/20"
+                  >
+                    Open Warehouse
+                  </Link>
+                </div>
               </div>
             </div>
           ) : null}
@@ -1533,7 +1777,7 @@ function InventoryPageContent() {
                     <td className="px-3 py-2 text-amber-300">
                       <button
                         type="button"
-                        onClick={() => void openMaterialDrawer(row, 'reservations')}
+                        onClick={() => void openMaterialDrawer(row, 'reserved')}
                         className={`underline underline-offset-2 hover:text-amber-200 ${ledgerMono}`}
                       >
                         {fmt(row.reserved_sheets)}

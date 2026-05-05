@@ -1059,6 +1059,9 @@ export function PlanningJobDetailDrawer({
     !!resolvedSheetSize && resolvedSheetSize !== '-' &&
     calcQty > 0 &&
     calcUps > 0
+  const strictSuggestionCount = readiness?.suggestedBoardOptions?.length || 0
+  const compatibleSuggestionCount = readiness?.closestAvailableOptions?.length || 0
+  const visibleSuggestionCount = strictSuggestionCount > 0 ? strictSuggestionCount : compatibleSuggestionCount
 
   return (
     <StandardDrawer
@@ -1237,14 +1240,12 @@ export function PlanningJobDetailDrawer({
               </select>
             </div>
           ) : null}
-          {readiness?.materialMatchState === 'matched' ? (
-            <p className="text-xs text-ds-success">Matching material found.</p>
-          ) : null}
-          {readiness?.materialMatchState === 'none' && ((readiness?.suggestedBoardOptions?.length || 0) > 0 || (readiness?.closestAvailableOptions?.length || 0) > 0) ? (
-            <p className="text-xs text-ds-warning">No exact match found. Showing compatible alternatives.</p>
-          ) : null}
-          {readiness?.materialMatchState === 'none' && (readiness?.suggestedBoardOptions?.length || 0) === 0 && (readiness?.closestAvailableOptions?.length || 0) === 0 ? (
-            <p className="text-xs text-ds-warning">No suitable material found in Paper Warehouse.</p>
+          {strictSuggestionCount > 0 ? (
+            <p className="text-xs text-ds-success">{strictSuggestionCount} exact match(es) found.</p>
+          ) : compatibleSuggestionCount > 0 ? (
+            <p className="text-xs text-ds-warning">{compatibleSuggestionCount} compatible option(s) found. No exact master match.</p>
+          ) : readiness?.materialMatchState === 'none' ? (
+            <p className="text-xs text-ds-warning">No suitable material found.</p>
           ) : null}
           <div className="mt-2 space-y-2">
             <p className="text-xs font-semibold text-ds-ink">Suggested Board Options</p>
@@ -1267,7 +1268,7 @@ export function PlanningJobDetailDrawer({
               <p className="text-xs text-ds-warning">Suggestions load when Sheet Size, Qty, and UPS are available.</p>
             ) : readiness?.noMaterialsAtAll ? (
               <p className="text-xs text-ds-warning">No materials exist in Paper Warehouse yet.</p>
-            ) : (readiness?.suggestedBoardOptions?.length || 0) === 0 && (readiness?.closestAvailableOptions?.length || 0) === 0 ? (
+            ) : visibleSuggestionCount === 0 ? (
               <p className="text-xs text-ds-warning">No suitable stock found. Create PR?</p>
             ) : (
               <div className="space-y-2">

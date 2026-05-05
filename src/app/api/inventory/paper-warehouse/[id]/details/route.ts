@@ -78,6 +78,19 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
     },
   })
 
+  const shortageIds = shortages.map((s) => s.id)
+  const shortagePrs = shortageIds.length
+    ? await db.purchaseRequisition.findMany({
+        where: { shortageId: { in: shortageIds } },
+        select: { id: true, shortageId: true, status: true },
+      })
+    : []
+  const prByShortageId = new Map(
+    shortagePrs
+      .filter((p): p is { id: string; shortageId: string; status: string } => typeof p.shortageId === 'string' && p.shortageId.length > 0)
+      .map((p) => [p.shortageId, p]),
+  )
+
   const shortageJobCards = shortages.length
     ? await db.productionJobCard.findMany({
         where: {
@@ -152,6 +165,8 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
         requiredByDate: s.requiredByDate ? s.requiredByDate.toISOString() : null,
         priority,
         status: jc?.status ?? null,
+        prId: prByShortageId.get(s.id)?.id ?? null,
+        prStatus: prByShortageId.get(s.id)?.status ?? null,
       }
     }),
   })
