@@ -12,6 +12,7 @@ export type MaterialCutFitOptionInput = {
   boardClassification: string | null
   gsm: number | null
   availableParentSheets: number
+  reservedParentSheets?: number
   parentLength: number
   parentWidth: number
 }
@@ -24,6 +25,8 @@ export type MaterialCutFitOption = {
   gsm: number | null
   size: string
   availableSheets: number
+  reservedSheets: number
+  freeSheets: number
   cutsPerSheet: number
   requiredParentSheets: number
   shortageParentSheets: number
@@ -135,9 +138,12 @@ export function buildMaterialCutFitOptions(input: {
     const wastagePct = Math.max(0, 100 - yieldPct)
     const requiredParentSheets = Math.max(1, Math.ceil(requiredFinalSheets / cutsPerSheet))
     const availableSheets = Math.max(0, n(m.availableParentSheets))
-    const shortageParentSheets = Math.max(0, requiredParentSheets - availableSheets)
+    const reservedSheets = Math.max(0, n(m.reservedParentSheets))
+    const freeSheets = availableSheets - reservedSheets
+    const reservableSheets = Math.max(0, freeSheets)
+    const shortageParentSheets = Math.max(0, requiredParentSheets - reservableSheets)
     const status: 'Ready' | 'Partial' | 'Shortage' =
-      shortageParentSheets <= 0 ? 'Ready' : availableSheets > 0 ? 'Partial' : 'Shortage'
+      reservableSheets >= requiredParentSheets ? 'Ready' : reservableSheets > 0 ? 'Partial' : 'Shortage'
 
     const sameSize =
       (Math.abs(parentLength - reqLength) < 0.0001 && Math.abs(parentWidth - reqWidth) < 0.0001) ||
@@ -153,6 +159,8 @@ export function buildMaterialCutFitOptions(input: {
       gsm: m.gsm ?? null,
       size: `${formatDim(parentLength)} x ${formatDim(parentWidth)}`,
       availableSheets,
+      reservedSheets,
+      freeSheets,
       cutsPerSheet,
       requiredParentSheets,
       shortageParentSheets,

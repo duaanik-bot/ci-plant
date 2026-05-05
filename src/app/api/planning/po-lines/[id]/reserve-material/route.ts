@@ -283,6 +283,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
           boardClassification: true,
           gsm: true,
           qtyAvailable: true,
+          qtyReserved: true,
           sheetLength: true,
           sheetWidth: true,
         },
@@ -316,6 +317,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       boardClassification: m.boardClassification,
       gsm: m.gsm,
       availableParentSheets: Number(m.qtyAvailable) || 0,
+      reservedParentSheets: Number(m.qtyReserved) || 0,
       parentLength: Number(m.sheetLength) || 0,
       parentWidth: Number(m.sheetWidth) || 0,
     }))
@@ -420,8 +422,9 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     : null
   const availableSheets = Math.max(0, Number(material?.qtyAvailable) || 0)
   const reservedSheets = Math.max(0, Number(material?.qtyReserved) || 0)
+  const freeSheets = availableSheets - reservedSheets
   const incomingSheets = Math.max(0, Number(material?.qtyQuarantine) || 0)
-  const shortageSheets = materialId ? Math.max(0, requiredSheets - availableSheets) : requiredSheets
+  const shortageSheets = materialId ? Math.max(0, requiredSheets - Math.max(0, freeSheets)) : requiredSheets
 
   const pr = materialId
     ? await db.purchaseRequisition.findFirst({
@@ -480,6 +483,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     requiredSheets,
     availableSheets,
     reservedSheets,
+    freeSheets,
     incomingSheets,
     shortageSheets,
     prId: pr?.id ?? null,

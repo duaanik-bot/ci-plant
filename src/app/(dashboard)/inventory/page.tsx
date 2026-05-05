@@ -155,6 +155,15 @@ type ProcureModalState = {
   }>
 }
 
+type ReleaseModalState = {
+  planningId: string
+  materialId: string
+  materialCode: string
+  reservationId: string | null
+  requiredSheets: number
+  currentReserved: number
+}
+
 function InventoryPageContent() {
   const searchParams = useSearchParams()
   const ledgerGsm = searchParams.get('ledgerGsm')?.trim() ?? ''
@@ -227,6 +236,11 @@ function InventoryPageContent() {
   const [procurePrQty, setProcurePrQty] = useState('')
   const [procureBuffer, setProcureBuffer] = useState(false)
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
+  const [releaseOpen, setReleaseOpen] = useState(false)
+  const [releaseBusy, setReleaseBusy] = useState(false)
+  const [releaseError, setReleaseError] = useState<string | null>(null)
+  const [releaseState, setReleaseState] = useState<ReleaseModalState | null>(null)
+  const [releaseQtyInput, setReleaseQtyInput] = useState('')
 
   const loadPaperLedger = useCallback(
     async (opts: { customerPo: string; gsm?: string; board?: string }) => {
@@ -723,7 +737,7 @@ function InventoryPageContent() {
       return
     }
     try {
-      const res = await fetch(`/api/planning/po-lines/${args.planningId}/reservation-control`, {
+      const res = await fetch(`/api/planning/po-lines/${releaseState.planningId}/reservation-control`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -751,22 +765,39 @@ function InventoryPageContent() {
     materialId: string
     requiredSheets: number
     currentReserved: number
+    materialCode?: string
+    reservationId?: string
   }) {
-    const releaseValue = window.prompt('Release qty for this planning line:', String(Math.max(0, args.currentReserved)))
-    if (releaseValue == null) return
-    const releaseQty = Number(releaseValue)
-    if (!Number.isFinite(releaseQty) || releaseQty <= 0) {
-      toast.error('Invalid release qty')
+    setReleaseError(null)
+    setReleaseState({
+      planningId: args.planningId,
+      materialId: args.materialId,
+      materialCode: args.materialCode || args.materialId,
+      reservationId: args.reservationId ?? null,
+      requiredSheets: Math.max(0, args.requiredSheets),
+      currentReserved: Math.max(0, args.currentReserved),
+    })
+    setReleaseQtyInput(String(Math.max(0, args.currentReserved)))
+    setReleaseOpen(true)
+  }
+
+  async function confirmReleaseFromDrawer() {
+    if (!releaseState) return
+    const releaseQty = Number(releaseQtyInput)
+    if (!Number.isFinite(releaseQty) || releaseQty <= 0 || releaseQty > releaseState.currentReserved) {
+      setReleaseError('Release qty must be > 0 and <= current reserved qty')
       return
     }
+    setReleaseBusy(true)
+    setReleaseError(null)
     try {
-      const res = await fetch(`/api/planning/po-lines/${args.planningId}/reservation-control`, {
+      const res = await fetch(`/api/planning/po-lines/${releaseState.planningId}/reservation-control`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'release',
-          materialId: args.materialId,
-          requiredSheets: Math.max(0, Math.floor(args.requiredSheets)),
+          materialId: releaseState.materialId,
+          requiredSheets: Math.max(0, Math.floor(releaseState.requiredSheets)),
           releaseQty: Math.max(0, releaseQty),
           prImpactAction: 'reduce',
         }),
@@ -774,12 +805,23 @@ function InventoryPageContent() {
       const out = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((out as { message?: string }).message || 'Release failed')
       toast.success('Reservation released')
+      setReleaseOpen(false)
       await reloadAll()
       if (materialDrawerRow) await openMaterialDrawer(materialDrawerRow, materialDrawerView)
       window.dispatchEvent(new Event('inventory:refresh'))
       window.dispatchEvent(new Event('planning:refresh'))
     } catch (e) {
+      console.error('[planning-unreserve-debug]', {
+        materialId: releaseState.materialId,
+        reservationId: releaseState.reservationId,
+        planningLineId: releaseState.planningId,
+        reservedQty: releaseState.currentReserved,
+        error: e instanceof Error ? e.message : String(e),
+      })
+      setReleaseError(e instanceof Error ? e.message : 'Release failed')
       toast.error(e instanceof Error ? e.message : 'Release failed')
+    } finally {
+      setReleaseBusy(false)
     }
   }
 
@@ -1379,6 +1421,8 @@ function InventoryPageContent() {
                                 onClick={() => r.planningId && void releaseReservationFromDrawer({
                                   planningId: r.planningId,
                                   materialId: materialDrawerRow.material_id,
+                                  materialCode: materialDrawerRow.material_code,
+                                  reservationId: r.id,
                                   requiredSheets: r.requiredSheets,
                                   currentReserved: r.reservedSheets,
                                 })}
@@ -2272,6 +2316,70 @@ function InventoryPageContent() {
           >
             {adjustSubmitting ? 'Saving...' : 'Save adjustment'}
           </button>
+        </div>
+      </SlideOverPanel>
+
+      <SlideOverPanel
+        title="Release Reservation"
+        isOpen={releaseOpen}
+        onClose={() => {
+          if (releaseBusy) return
+          setReleaseOpen(false)
+          setReleaseError(null)
+        }}
+        widthClass="max-w-md"
+      >
+        <div className="space-y-3 px-1 text-sm">
+          {!releaseState ? (
+            <p className="text-xs text-ds-ink-faint">No reservation selected.</p>
+          ) : (
+            <>
+              <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2 text-xs">
+                <p className="text-ds-ink">Material: {releaseState.materialCode}</p>
+                <p className="text-ds-ink-faint">Current reserved: {fmt(releaseState.currentReserved)}</p>
+                <p className="text-ds-ink-faint">Required sheets: {fmt(releaseState.requiredSheets)}</p>
+              </div>
+              <label className="block text-xs text-ds-ink-faint">
+                Release qty (partial/full)
+                <input
+                  type="number"
+                  min={0}
+                  step="0.001"
+                  value={releaseQtyInput}
+                  onChange={(e) => setReleaseQtyInput(e.target.value)}
+                  className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                />
+              </label>
+              <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2 text-xs text-ds-ink-faint">
+                <p>Available after release: {fmt((materialDrawerRow?.available_sheets || 0) + Math.max(0, Number(releaseQtyInput || 0)))}</p>
+                <p>Shortage after release: {fmt(Math.max(0, releaseState.requiredSheets - Math.max(0, releaseState.currentReserved - Math.max(0, Number(releaseQtyInput || 0)))))}</p>
+              </div>
+              {releaseError ? (
+                <p className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-300">{releaseError}</p>
+              ) : null}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={releaseBusy}
+                  onClick={() => {
+                    setReleaseOpen(false)
+                    setReleaseError(null)
+                  }}
+                  className="flex-1 rounded border border-ds-line/50 px-3 py-2 text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={releaseBusy}
+                  onClick={() => void confirmReleaseFromDrawer()}
+                  className="flex-1 rounded bg-ds-warning px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  {releaseBusy ? 'Releasing…' : 'Confirm Release'}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </SlideOverPanel>
     </div>
