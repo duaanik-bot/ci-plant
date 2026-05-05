@@ -53,6 +53,30 @@ function normalizeText(value: string | null | undefined): string {
   return (value || '').trim().toLowerCase()
 }
 
+function normalizeMasterValue(value: string | null | undefined): string {
+  return (value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+}
+
+function looksLikeColorTag(value: string | null | undefined): boolean {
+  const v = normalizeMasterValue(value)
+  if (!v) return false
+  return (
+    v.includes('colour') ||
+    v.includes('color') ||
+    v.includes('yellow') ||
+    v.includes('red') ||
+    v.includes('blue') ||
+    v.includes('green') ||
+    v.includes('white') ||
+    v.includes('black')
+  )
+}
+
 async function getPlanningReservedByMaterial(
   planningLineId: string,
   materialIds: string[],
@@ -127,12 +151,15 @@ async function resolveMaterialFromSpec(line: Record<string, unknown> & {
   materialQueue?: Record<string, unknown> | null
 }) {
   const spec = (line?.specOverrides as Record<string, unknown> | null) || {}
-  const boardTypeRaw =
-    (typeof line?.paperType === 'string' && line.paperType.trim()) ||
-    (typeof line?.materialQueue?.boardType === 'string' && line.materialQueue.boardType.trim()) ||
-    (typeof line?.carton?.paperType === 'string' && line.carton.paperType.trim()) ||
-    null
+  const boardTypeCandidates = [
+    typeof spec.boardType === 'string' ? spec.boardType.trim() : '',
+    typeof line?.materialQueue?.boardType === 'string' ? line.materialQueue.boardType.trim() : '',
+    typeof line?.carton?.paperType === 'string' ? line.carton.paperType.trim() : '',
+    typeof line?.paperType === 'string' ? line.paperType.trim() : '',
+  ].filter(Boolean)
+  const boardTypeRaw = boardTypeCandidates.find((v) => !looksLikeColorTag(v)) || boardTypeCandidates[0] || null
   const boardClassificationRaw =
+    (typeof spec.boardClassification === 'string' && spec.boardClassification.trim()) ||
     (typeof spec.boardGrade === 'string' && spec.boardGrade.trim()) ||
     null
   const gsmRaw =
@@ -279,10 +306,10 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
 
   const boardFiltered = inventoryCandidatesAll.filter((m) => {
     if (!boardTypeNorm && !boardClassNorm) return true
-    const matType = normalizeText(m.boardType)
-    const matClass = normalizeText(m.boardClassification)
-    const reqType = normalizeText(boardTypeNorm)
-    const reqClass = normalizeText(boardClassNorm)
+    const matType = normalizeMasterValue(m.boardType)
+    const matClass = normalizeMasterValue(m.boardClassification)
+    const reqType = normalizeMasterValue(boardTypeNorm)
+    const reqClass = normalizeMasterValue(boardClassNorm)
     return (
       (!!reqType && (matType === reqType || matClass === reqType)) ||
       (!!reqClass && (matType === reqClass || matClass === reqClass))
@@ -380,18 +407,37 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   ]) {
     if (!byId.has(s.materialId)) byId.set(s.materialId, s)
   }
+  const mergeSuggestionPools = (
+    pools: Array<(typeof strictSuggestions)>,
+    max = 10,
+  ): typeof strictSuggestions => {
+    const seen = new Set<string>()
+    const merged: typeof strictSuggestions = []
+    for (const pool of pools) {
+      for (const opt of pool) {
+        if (seen.has(opt.materialId)) continue
+        seen.add(opt.materialId)
+        merged.push(opt)
+        if (merged.length >= max) return merged
+      }
+    }
+    return merged
+  }
+  const fallbackMergedSuggestions = mergeSuggestionPools(
+    [
+      relaxedNoClassSuggestions,
+      widerToleranceSuggestions,
+      noBoardGsmSuggestions,
+      noBoardWiderSuggestions,
+    ],
+    10,
+  )
   const suggestedBoardOptions =
     strictSuggestions.length > 0
       ? strictSuggestions
-      : relaxedNoClassSuggestions.length > 0
-        ? relaxedNoClassSuggestions
-        : widerToleranceSuggestions.length > 0
-          ? widerToleranceSuggestions
-          : noBoardGsmSuggestions.length > 0
-            ? noBoardGsmSuggestions
-            : noBoardWiderSuggestions.length > 0
-              ? noBoardWiderSuggestions
-          : Array.from(byId.values()).slice(0, 10).map((o) => ({ ...o, matchType: o.matchType, status: o.status }))
+      : fallbackMergedSuggestions.length > 0
+        ? fallbackMergedSuggestions
+        : Array.from(byId.values()).slice(0, 10).map((o) => ({ ...o, matchType: o.matchType, status: o.status }))
 
   const withBoardMatchMode = (opt: (typeof suggestedBoardOptions)[number]) => {
     const reqType = normalizeText(auto.boardTypeRaw)

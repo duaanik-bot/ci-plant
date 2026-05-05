@@ -1,380 +1,424 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowRight, Star } from 'lucide-react'
+import { ArrowRight, CheckSquare, Square } from 'lucide-react'
 import { toast } from 'sonner'
-import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
-import {
-  INDUSTRIAL_PRIORITY_ROW_CLASS,
-  INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
-} from '@/lib/industrial-priority-ui'
+import { Button } from '@/components/design-system/Button'
 import { JobCardHubAuditDrawer } from '@/components/production/JobCardHubAuditDrawer'
-import clsx from 'clsx'
-
-const mono = 'font-designing-queue tabular-nums tracking-tight'
 
 type YieldMetrics = {
   yieldPercent: number | null
-  plannedWastePercent: number
-  unexplainedWastePercent: number
-  wastageVariancePercent: number | null
-  finishedGoodsCount: number
-  totalSheetsIssuedFloor: number
 }
 
 type JobCardRow = {
   id: string
   jobCardNumber: number
-  setNumber: string | null
-  assignedOperator: string | null
-  customer: { id: string; name: string }
-  requiredSheets: number
-  wastageSheets: number
-  totalSheets: number
-  sheetsIssued: number
   status: string
-  machine: { id: string; machineCode: string; capacityPerShift: number } | null
-  shiftOperator: { id: string; name: string } | null
-  openDowntime?: boolean
+  qaReleased: boolean
+  createdAt: string
+  assignedOperator: string | null
+  requiredSheets: number
+  sheetsIssued: number
+  customer: { id: string; name: string }
   poLine: {
     id: string
     cartonName: string
     cartonSize: string | null
     quantity: number
-    industrialPriority?: boolean
     poNumber: string
-    artworkCode: string | null
   } | null
   yield?: YieldMetrics
 }
 
-type MachineOpt = { id: string; machineCode: string; name: string }
+type UiStatus = 'draft' | 'ready' | 'material_pending' | 'released' | 'in_production' | 'completed'
+type Readiness = 'ready' | 'partial' | 'shortage' | 'not_mapped'
 
-type BoardReadiness = 'ready' | 'waiting' | 'not_ready'
-type UiStatus = 'pending' | 'ready' | 'pushed'
+const statusTone: Record<UiStatus, string> = {
+  draft: 'bg-slate-100 text-slate-700',
+  ready: 'bg-emerald-100 text-emerald-700',
+  material_pending: 'bg-amber-100 text-amber-700',
+  released: 'bg-sky-100 text-sky-700',
+  in_production: 'bg-indigo-100 text-indigo-700',
+  completed: 'bg-green-100 text-green-700',
+}
 
-function getBoardReadiness(row: JobCardRow): BoardReadiness {
+const readinessTone: Record<Readiness, string> = {
+  ready: 'bg-emerald-100 text-emerald-700',
+  partial: 'bg-amber-100 text-amber-700',
+  shortage: 'bg-rose-100 text-rose-700',
+  not_mapped: 'bg-slate-100 text-slate-700',
+}
+
+function mapStatus(row: JobCardRow): UiStatus {
+  const s = String(row.status || '').toLowerCase()
+  if (s === 'closed') return 'completed'
+  if (s === 'qa_released') return 'released'
+  if (s === 'in_progress' || s === 'final_qc') return 'in_production'
   if (row.requiredSheets > 0 && row.sheetsIssued >= row.requiredSheets) return 'ready'
-  if (row.sheetsIssued > 0) return 'waiting'
-  return 'not_ready'
+  if (row.sheetsIssued > 0) return 'material_pending'
+  return 'draft'
 }
 
-function boardReadinessMeta(r: BoardReadiness): { label: string; tooltip: string; dot: string } {
-  if (r === 'ready') return { label: 'Ready', tooltip: 'Board available', dot: 'bg-emerald-500' }
-  if (r === 'waiting') return { label: 'Waiting', tooltip: 'Board in procurement', dot: 'bg-amber-400' }
-  return { label: 'Not Ready', tooltip: 'Board missing', dot: 'bg-rose-500' }
+function mapReadiness(row: JobCardRow): Readiness {
+  if (!row.requiredSheets) return 'not_mapped'
+  if (row.sheetsIssued >= row.requiredSheets) return 'ready'
+  if (row.sheetsIssued > 0) return 'partial'
+  return 'shortage'
 }
 
-function getUiStatus(row: JobCardRow): UiStatus {
-  if (row.status === 'closed' || row.status === 'qa_released') return 'pushed'
-  if (row.status === 'in_progress' || row.status === 'final_qc') return 'ready'
-  return 'pending'
+function isDraftLike(row: JobCardRow) {
+  const s = String(row.status || '').toLowerCase()
+  return ['design_ready', 'pending', 'draft', 'archived'].includes(s)
 }
 
 export default function JobCardsPage() {
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const [list, setList] = useState<JobCardRow[]>([])
-  const [machines, setMachines] = useState<MachineOpt[]>([])
+  const [rows, setRows] = useState<JobCardRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [lastSync, setLastSync] = useState<string | null>(null)
-  const initialQ = searchParams.get('q') ?? ''
-  const initialStatus = (searchParams.get('status') as 'all' | UiStatus) ?? 'all'
-  const initialReadiness = (searchParams.get('readiness') as 'all' | BoardReadiness) ?? 'all'
-  const [qInput, setQInput] = useState(initialQ)
-  const [q, setQ] = useState(initialQ)
-  const [statusFilter, setStatusFilter] = useState<'all' | UiStatus>(
-    initialStatus === 'pending' || initialStatus === 'ready' || initialStatus === 'pushed' ? initialStatus : 'all',
-  )
-  const [readinessFilter, setReadinessFilter] = useState<'all' | BoardReadiness>(
-    initialReadiness === 'ready' || initialReadiness === 'waiting' || initialReadiness === 'not_ready'
-      ? initialReadiness
-      : 'all',
-  )
-
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | UiStatus>('all')
+  const [readinessFilter, setReadinessFilter] = useState<'all' | Readiness>('all')
+  const [clientFilter, setClientFilter] = useState<'all' | string>('all')
+  const [sortBy, setSortBy] = useState<'jobCardNumber' | 'product' | 'client' | 'qty' | 'date'>('jobCardNumber')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [auditRow, setAuditRow] = useState<JobCardRow | null>(null)
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  const loadJobCards = useCallback(async () => {
+  const load = useCallback(async () => {
+    setLoading(true)
     try {
-      const params = new URLSearchParams()
-      params.set('yieldMetrics', '1')
-      if (q.trim()) params.set('q', q.trim())
-
-      const jcRes = await fetch(`/api/job-cards?${params}`)
-      const jcJson = await jcRes.json()
-      setList(Array.isArray(jcJson) ? jcJson : [])
-      setLastSync(new Date().toLocaleString())
+      const res = await fetch('/api/job-cards?yieldMetrics=1', { cache: 'no-store' })
+      const data = await res.json()
+      setRows(Array.isArray(data) ? data : [])
     } catch {
       toast.error('Failed to load job cards')
     } finally {
       setLoading(false)
     }
-  }, [q])
-
-  useEffect(() => {
-    fetch('/api/machines')
-      .then((r) => r.json())
-      .then((j) => setMachines(Array.isArray(j) ? j : []))
-      .catch(() => {})
   }, [])
 
   useEffect(() => {
-    const t = window.setTimeout(() => setQ(qInput), 320)
-    return () => window.clearTimeout(t)
-  }, [qInput])
+    void load()
+  }, [load])
 
-  useEffect(() => {
-    setLoading(true)
-    void loadJobCards()
-  }, [loadJobCards])
+  const clients = useMemo(
+    () => Array.from(new Set(rows.map((r) => r.customer?.name).filter(Boolean))).sort(),
+    [rows],
+  )
 
-  const loadRef = useRef(loadJobCards)
-  loadRef.current = loadJobCards
-  useEffect(() => {
-    const onPri = () => {
-      void loadRef.current()
-    }
-    window.addEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
-    return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
-  }, [])
-
-  const sortedList = useMemo(() => {
-    const copy = [...list]
-    copy.sort((a, b) => {
-      const pa = a.poLine?.industrialPriority === true ? 1 : 0
-      const pb = b.poLine?.industrialPriority === true ? 1 : 0
-      if (pa !== pb) return pb - pa
-      const rank: Record<UiStatus, number> = { pending: 0, ready: 1, pushed: 2 }
-      const d = rank[getUiStatus(a)] - rank[getUiStatus(b)]
-      if (d !== 0) return d
-      return a.jobCardNumber - b.jobCardNumber
-    })
-    return copy
-  }, [list])
-
-  const visibleList = useMemo(() => {
-    return sortedList.filter((jc) => {
-      const st = getUiStatus(jc)
-      const br = getBoardReadiness(jc)
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const out = rows.filter((r) => {
+      const st = mapStatus(r)
+      const rd = mapReadiness(r)
       if (statusFilter !== 'all' && st !== statusFilter) return false
-      if (readinessFilter !== 'all' && br !== readinessFilter) return false
-      return true
+      if (readinessFilter !== 'all' && rd !== readinessFilter) return false
+      if (clientFilter !== 'all' && r.customer?.name !== clientFilter) return false
+      if (!q) return true
+      const hay = [
+        String(r.jobCardNumber),
+        r.poLine?.cartonName || '',
+        r.customer?.name || '',
+        r.poLine?.poNumber || '',
+      ]
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
     })
-  }, [readinessFilter, sortedList, statusFilter])
 
-  useEffect(() => {
-    const params = new URLSearchParams()
-    if (qInput.trim()) params.set('q', qInput.trim())
-    if (statusFilter !== 'all') params.set('status', statusFilter)
-    if (readinessFilter !== 'all') params.set('readiness', readinessFilter)
-    const next = params.toString()
-    const current = searchParams.toString()
-    if (next !== current) {
-      router.replace(next ? `${pathname}?${next}` : pathname)
-    }
-  }, [pathname, qInput, readinessFilter, router, searchParams, statusFilter])
+    out.sort((a, b) => {
+      let av: string | number = ''
+      let bv: string | number = ''
+      if (sortBy === 'jobCardNumber') {
+        av = a.jobCardNumber
+        bv = b.jobCardNumber
+      } else if (sortBy === 'product') {
+        av = a.poLine?.cartonName || ''
+        bv = b.poLine?.cartonName || ''
+      } else if (sortBy === 'client') {
+        av = a.customer?.name || ''
+        bv = b.customer?.name || ''
+      } else if (sortBy === 'qty') {
+        av = a.poLine?.quantity || 0
+        bv = b.poLine?.quantity || 0
+      } else {
+        av = new Date(a.createdAt).getTime()
+        bv = new Date(b.createdAt).getTime()
+      }
+      const base = av > bv ? 1 : av < bv ? -1 : 0
+      return sortDir === 'asc' ? base : -base
+    })
+    return out
+  }, [rows, search, statusFilter, readinessFilter, clientFilter, sortBy, sortDir])
 
-  useEffect(() => {
-    window.sessionStorage.setItem('job-card-visible-order', visibleList.map((r) => r.id).join(','))
-  }, [visibleList])
+  const allChecked = filtered.length > 0 && filtered.every((r) => selected.has(r.id))
 
-  if (loading && list.length === 0) {
-    return (
-      <div className="min-h-[40vh] flex items-center justify-center bg-background text-ds-ink-faint text-sm">
-        Loading job card hub…
-      </div>
-    )
+  const toggleAll = () => {
+    if (allChecked) setSelected(new Set())
+    else setSelected(new Set(filtered.map((r) => r.id)))
   }
 
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectedRows = rows.filter((r) => selected.has(r.id))
+
+  const bulkRelease = async () => {
+    const releasable = selectedRows.filter((r) => mapStatus(r) !== 'released' && mapStatus(r) !== 'completed')
+    if (releasable.length === 0) return toast.error('No eligible rows for release')
+    setBusy(true)
+    try {
+      await Promise.all(
+        releasable.map((r) =>
+          fetch(`/api/job-cards/${r.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'qa_released', qaReleased: true }),
+          }),
+        ),
+      )
+      toast.success(`Released ${releasable.length} job card(s)`)
+      setSelected(new Set())
+      await load()
+    } catch {
+      toast.error('Bulk release failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const bulkArchive = async () => {
+    const blocked = selectedRows.filter((r) => !isDraftLike(r))
+    if (blocked.length > 0) return toast.error('Only Draft/Pending job cards can be archived')
+    setBusy(true)
+    try {
+      await Promise.all(
+        selectedRows.map((r) =>
+          fetch(`/api/job-cards/${r.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'archived' }),
+          }),
+        ),
+      )
+      toast.success(`Archived ${selectedRows.length} job card(s)`)
+      setSelected(new Set())
+      await load()
+    } catch {
+      toast.error('Bulk archive failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const bulkAssignOperator = async () => {
+    const name = window.prompt('Assign operator name')
+    if (!name) return
+    setBusy(true)
+    try {
+      await Promise.all(
+        selectedRows.map((r) =>
+          fetch(`/api/job-cards/${r.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assignedOperator: name }),
+          }),
+        ),
+      )
+      toast.success(`Assigned operator to ${selectedRows.length} job card(s)`)
+      await load()
+    } catch {
+      toast.error('Bulk assign failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clearQueue = async () => {
+    setBusy(true)
+    try {
+      const res = await fetch('/api/job-cards/clear-queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Clear queue failed')
+      toast.success(`Cleared ${data.cleared || 0} draft/pending job card(s)`)
+      setClearConfirmOpen(false)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Clear queue failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const sortHeader = (key: typeof sortBy, label: string) => (
+    <button
+      type="button"
+      className="font-semibold uppercase tracking-wide text-ds-ink-muted text-xs"
+      onClick={() => {
+        if (sortBy === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+        else {
+          setSortBy(key)
+          setSortDir('asc')
+        }
+      }}
+    >
+      {label}
+    </button>
+  )
+
   return (
-    <div className="min-h-0 flex flex-col bg-background text-ds-ink">
-      <div className="border-b border-ds-line/40 px-4 py-3 flex flex-wrap items-center gap-3">
+    <div className="p-4 space-y-3">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold text-ds-warning tracking-tight">Job Card Hub</h1>
-          <p className="text-xs text-ds-ink-faint mt-0.5">High-density ledger · live audit</p>
+          <h1 className="text-lg font-semibold">Job Card Queue</h1>
+          <p className="text-xs text-ds-ink-faint">Customer PO → Planning → AW → Job Card</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 ml-auto">
-          <Link
-            href="/orders/planning"
-            className="px-3 py-1.5 rounded-lg border border-ds-line/50 text-ds-ink-muted text-xs hover:bg-ds-card"
-          >
-            Planning
-          </Link>
-          <a
-            href="/api/job-cards/reconciliation-export"
-            className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-xs hover:bg-ds-card"
-          >
-            Manual export (material batches)
-          </a>
-          <Link
-            href="/production/job-cards/new"
-            className="px-3 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-xs font-medium"
-          >
-            New job card
-          </Link>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => setClearConfirmOpen(true)}>Clear Job Card Queue</Button>
+          <Link href="/production/job-cards/new" className="px-3 py-2 rounded-md bg-ds-warning text-primary-foreground text-sm">Add Job Card</Link>
         </div>
       </div>
 
-      <div className="px-4 py-3 space-y-3 border-b border-ds-line/50">
-        <div className="flex flex-wrap gap-2 items-center">
-          <input
-            type="search"
-            placeholder="Search customer…"
-            value={qInput}
-            onChange={(e) => setQInput(e.target.value)}
-            className="min-w-[220px] flex-1 max-w-md px-3 py-2 rounded-lg bg-ds-main border border-ds-line/50 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:outline-none focus:ring-1 focus:ring-ds-warning/35"
-          />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'all' | UiStatus)}
-              className="px-2 py-2 rounded-md bg-ds-main border border-ds-line/50 text-ds-ink text-sm"
-            >
-              <option value="all">All status</option>
-              <option value="pending">Pending</option>
-              <option value="ready">Ready</option>
-              <option value="pushed">Pushed to Planning</option>
-            </select>
-            <select
-              value={readinessFilter}
-              onChange={(e) => setReadinessFilter(e.target.value as 'all' | BoardReadiness)}
-              className="px-2 py-2 rounded-md bg-ds-main border border-ds-line/50 text-ds-ink text-sm"
-            >
-              <option value="all">All board readiness</option>
-              <option value="ready">Ready</option>
-              <option value="waiting">Waiting</option>
-              <option value="not_ready">Not Ready</option>
-            </select>
-          </div>
-      </div>
-
-      {visibleList.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center px-4">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold text-ds-ink">No Job Cards Yet</h2>
-            <p className="mt-1 text-sm text-ds-ink-faint">Jobs pushed from AW Queue will appear here</p>
-          </div>
+      <div className="rounded-xl border border-ds-line/50 bg-ds-card p-3 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by product/client/PO/job card" className="md:col-span-2 px-3 py-2 rounded-md border border-ds-line/50 bg-background text-sm" />
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className="px-3 py-2 rounded-md border border-ds-line/50 bg-background text-sm">
+            <option value="all">All status</option>
+            <option value="draft">Draft</option>
+            <option value="ready">Ready</option>
+            <option value="material_pending">Material Pending</option>
+            <option value="released">Released</option>
+            <option value="in_production">In Production</option>
+            <option value="completed">Completed</option>
+          </select>
+          <select value={readinessFilter} onChange={(e) => setReadinessFilter(e.target.value as any)} className="px-3 py-2 rounded-md border border-ds-line/50 bg-background text-sm">
+            <option value="all">All board readiness</option>
+            <option value="ready">Ready</option>
+            <option value="partial">Partial</option>
+            <option value="shortage">Shortage</option>
+            <option value="not_mapped">Not Mapped</option>
+          </select>
+          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="px-3 py-2 rounded-md border border-ds-line/50 bg-background text-sm">
+            <option value="all">All clients</option>
+            {clients.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
-      ) : (
-        <div className="flex-1 overflow-x-auto px-2 pb-4">
-          <table className="w-full text-sm min-w-[960px] border-collapse">
-          <thead>
-            <tr className="border-b border-ds-line/40 text-left">
-              <th className="py-2 pl-2 pr-1 w-8" aria-label="Priority" />
-              <th className="py-2 px-2 text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">
-                Product
-              </th>
-              <th className="py-2 px-2 text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">
-                Qty
-              </th>
-              <th className="py-2 px-2 text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">
-                Board readiness
-              </th>
-              <th className="py-2 px-2">
-                <span className="text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">
-                  Status
-                </span>
-              </th>
-              <th className="py-2 px-2 text-right text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">Open</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleList.map((jc) => {
-              const st = getUiStatus(jc)
-              const br = getBoardReadiness(jc)
-              const brMeta = boardReadinessMeta(br)
-              return (
-                <tr
-                  key={jc.id}
-                  className={clsx(
-                    'h-14 border-b border-ds-card/90 transition-all duration-150 hover:bg-ds-main/70 hover:shadow-sm',
-                    jc.poLine?.industrialPriority === true ? INDUSTRIAL_PRIORITY_ROW_CLASS : '',
-                    st === 'pushed' ? 'bg-emerald-500/10' : '',
-                  )}
-                >
-                  <td className="py-2 pl-2 pr-0 align-middle">
-                    {jc.poLine?.industrialPriority === true ? (
-                      <Star
-                        className={`h-4 w-4 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
-                        aria-label="Industrial priority"
-                      />
-                    ) : (
-                      <span className="inline-block w-4" />
-                    )}
-                  </td>
-                  <td className="py-2 px-2 align-middle">
-                    <div className="flex flex-col gap-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setAuditRow(jc)}
-                        className="w-fit font-semibold text-ds-ink hover:text-ds-warning"
-                      >
-                        {jc.poLine?.cartonName ?? '—'}
-                      </button>
-                      <span className="text-sm text-ds-ink-faint truncate" title={jc.customer?.name}>{jc.customer?.name ?? '—'}</span>
-                      <span className={`text-sm text-ds-ink-faint ${mono}`}>
-                        {jc.poLine?.poNumber ?? '—'} • {jc.poLine?.artworkCode ?? '—'}
-                      </span>
-                    </div>
-                  </td>
-                  <td className={`py-2 px-2 align-middle ${mono} text-ds-ink text-right`}>
-                    {jc.poLine?.quantity?.toLocaleString('en-IN') ?? '—'}
-                  </td>
-                  <td className="py-2 px-2 align-middle">
-                    <span
-                      className="inline-flex items-center gap-1.5 rounded border border-ds-line/50 bg-ds-main px-2 py-0.5 text-sm"
-                      title={brMeta.tooltip}
-                    >
-                      <span className={clsx('h-2 w-2 rounded-full', brMeta.dot)} />
-                      {brMeta.label}
-                    </span>
-                  </td>
-                  <td className="py-2 px-2 align-middle">
-                    <span
-                      className={clsx(
-                        'inline-flex items-center rounded border px-2 py-0.5 text-sm',
-                        st === 'pending' && 'border-ds-line/60 bg-ds-main text-ds-ink-muted',
-                        st === 'ready' && 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-                        st === 'pushed' && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-                      )}
-                    >
-                      {st === 'pending' ? 'Pending' : st === 'ready' ? 'Ready' : 'Pushed to Planning'}
-                    </span>
-                  </td>
-                  <td className="py-2 px-2 align-middle text-right">
-                    <Link
-                      href={`/production/job-cards/${jc.id}?returnTo=${encodeURIComponent(
-                        `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`,
-                      )}`}
-                      className="inline-flex items-center justify-center rounded border border-ds-line/60 bg-ds-main p-1 text-ds-ink-muted hover:text-ds-warning"
-                      aria-label={`Open full edit for job card ${jc.jobCardNumber}`}
-                    >
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
+
+        {selected.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-ds-line/50 bg-background px-3 py-2">
+            <span className="text-sm">{selected.size} selected</span>
+            <Button variant="secondary" onClick={bulkRelease} disabled={busy}>Bulk Push / Release</Button>
+            <Button variant="secondary" onClick={bulkArchive} disabled={busy}>Bulk Delete / Archive</Button>
+            <Button variant="secondary" onClick={bulkAssignOperator} disabled={busy}>Bulk Assign Operator</Button>
+            <Button variant="secondary" onClick={() => window.print()}>Bulk Print</Button>
+            <Button variant="secondary" onClick={() => setSelected(new Set())}>Clear Selection</Button>
+          </div>
+        )}
+
+        <div className="overflow-auto rounded-lg border border-ds-line/50">
+          <table className="w-full min-w-[1200px] text-sm">
+            <thead className="bg-background">
+              <tr className="text-left">
+                <th className="px-3 py-2 w-10">
+                  <button type="button" onClick={toggleAll}>{allChecked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}</button>
+                </th>
+                <th className="px-3 py-2">{sortHeader('jobCardNumber', 'Job Card No')}</th>
+                <th className="px-3 py-2">{sortHeader('product', 'Product')}</th>
+                <th className="px-3 py-2">{sortHeader('client', 'Client')}</th>
+                <th className="px-3 py-2">PO No</th>
+                <th className="px-3 py-2">{sortHeader('qty', 'Qty')}</th>
+                <th className="px-3 py-2">Board Readiness</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">{sortHeader('date', 'Date')}</th>
+                <th className="px-3 py-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={10} className="px-3 py-8 text-center text-ds-ink-faint">Loading…</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan={10} className="px-3 py-8 text-center text-ds-ink-faint">No job cards found.</td></tr>
+              ) : filtered.map((r) => {
+                const st = mapStatus(r)
+                const rd = mapReadiness(r)
+                return (
+                  <tr key={r.id} className="border-t border-ds-line/40 hover:bg-background">
+                    <td className="px-3 py-3">
+                      <button type="button" onClick={() => toggleOne(r.id)}>{selected.has(r.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}</button>
+                    </td>
+                    <td className="px-3 py-3 cursor-pointer" onClick={() => setAuditRow(r)}>JC-{r.jobCardNumber}</td>
+                    <td className="px-3 py-3 cursor-pointer" onClick={() => setAuditRow(r)}>{r.poLine?.cartonName || '-'}</td>
+                    <td className="px-3 py-3">{r.customer?.name || '-'}</td>
+                    <td className="px-3 py-3">{r.poLine?.poNumber || '-'}</td>
+                    <td className="px-3 py-3">{r.poLine?.quantity ?? 0}</td>
+                    <td className="px-3 py-3"><span className={`px-2 py-1 rounded-full text-xs ${readinessTone[rd]}`}>{rd.replace('_', ' ')}</span></td>
+                    <td className="px-3 py-3"><span className={`px-2 py-1 rounded-full text-xs ${statusTone[st]}`}>{st.replace('_', ' ')}</span></td>
+                    <td className="px-3 py-3">{new Date(r.createdAt).toLocaleDateString()}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        <Link href={`/production/job-cards/${r.id}`} className="text-xs text-ds-ink-muted hover:text-ds-warning">Open</Link>
+                        <a href={`/api/job-cards/${r.id}/card-pdf`} target="_blank" className="text-xs text-ds-ink-muted hover:text-ds-warning">Print</a>
+                        {st !== 'released' && st !== 'completed' && (
+                          <button className="text-xs text-ds-ink-muted hover:text-ds-warning" onClick={async () => {
+                            const res = await fetch(`/api/job-cards/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'qa_released', qaReleased: true }) })
+                            if (!res.ok) return toast.error('Release failed')
+                            toast.success('Released')
+                            await load()
+                          }}>Release</button>
+                        )}
+                        {isDraftLike(r) && (
+                          <button className="text-xs text-rose-600" onClick={async () => {
+                            const res = await fetch(`/api/job-cards/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'archived' }) })
+                            if (!res.ok) return toast.error('Archive failed')
+                            toast.success('Archived')
+                            await load()
+                          }}>Archive</button>
+                        )}
+                        <Link href={`/production/job-cards/${r.id}`} className="text-ds-ink-muted hover:text-ds-warning"><ArrowRight className="h-4 w-4" /></Link>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
           </table>
+        </div>
+      </div>
+
+      {clearConfirmOpen && (
+        <div className="fixed inset-0 z-[120] bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-xl bg-background border border-ds-line/50 p-4 space-y-3">
+            <h3 className="text-base font-semibold">Clear Job Card Queue</h3>
+            <p className="text-sm text-ds-ink-muted">
+              This will remove draft/pending job cards only. Released/In Production job cards will not be deleted.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setClearConfirmOpen(false)}>Cancel</Button>
+              <Button variant="primary" onClick={clearQueue} disabled={busy}>Confirm Clear</Button>
+            </div>
+          </div>
         </div>
       )}
 
-      <footer className="mt-auto border-t border-ds-line/40 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ds-ink-faint">
-        <span>
-          Live Data Stream Verified - Last Sync:{' '}
-          <span className={clsx(mono, 'text-ds-ink-muted')}>{lastSync ?? '—'}</span>.
-        </span>
-        <span className="text-ds-ink-faint">Anik Dua · Industrial priority star</span>
-      </footer>
-
-      <JobCardHubAuditDrawer
-        jobCardId={auditRow?.id ?? null}
-        jobCardNumber={auditRow?.jobCardNumber ?? null}
-        onClose={() => setAuditRow(null)}
-      />
+      {auditRow && (
+        <JobCardHubAuditDrawer
+          jobCardId={auditRow.id}
+          jobCardNumber={auditRow.jobCardNumber}
+          onClose={() => setAuditRow(null)}
+        />
+      )}
     </div>
   )
 }
