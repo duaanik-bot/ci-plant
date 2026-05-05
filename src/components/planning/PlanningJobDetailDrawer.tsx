@@ -518,9 +518,7 @@ export function PlanningJobDetailDrawer({
 
   const mainSuggestionOptions = useMemo(
     () =>
-      [...visibleSuggestionOptions]
-        .sort((a, b) => a.wastagePct - b.wastagePct)
-        .slice(0, 3),
+      [...visibleSuggestionOptions].slice(0, 3),
     [visibleSuggestionOptions],
   )
 
@@ -1038,13 +1036,13 @@ export function PlanningJobDetailDrawer({
   }, [line, loadReadiness, undoState])
 
   const applyBestSuggestion = useCallback(() => {
-    const best = visibleSuggestionOptions[0]
+    const best = mainSuggestionOptions[0]
     if (!best) {
       toast.error('No suggestions available')
       return
     }
     openReserveConfirmation(best.materialId, best.cutsPerSheet, best.size)
-  }, [openReserveConfirmation, visibleSuggestionOptions])
+  }, [mainSuggestionOptions, openReserveConfirmation])
 
   const handleAddToBatch = useCallback(() => {
     if (!line) return

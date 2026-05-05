@@ -34,6 +34,7 @@ import {
   INDUSTRIAL_PRIORITY_EVENT,
 } from '@/lib/industrial-priority-sync'
 import { PLANNING_DESIGNERS, readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
+import { resolveSheetSize } from '@/lib/planning-sheet-size'
 import { formatShortTimeAgo } from '@/lib/time-ago'
 import { isEmbossingRequired } from '@/lib/emboss-conditions'
 import {
@@ -707,7 +708,20 @@ function resolveAwSheetSize(spec: Record<string, unknown>): string {
   return ''
 }
 
-function hasToolingSheetSize(spec: Record<string, unknown>): boolean {
+function resolveAwSheetSizeFromRow(r: Row): string {
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  const planningResolved = resolveSheetSize({
+    ...(r as unknown as Record<string, unknown>),
+    specOverrides: spec,
+    spec,
+  } as Record<string, unknown>)
+  if (planningResolved && planningResolved !== '-') return planningResolved
+  return resolveAwSheetSize(spec) || '-'
+}
+
+function hasToolingSheetSize(r: Row, spec: Record<string, unknown>): boolean {
+  const resolved = resolveAwSheetSizeFromRow(r)
+  if (resolved && resolved !== '-') return true
   return !!resolveAwSheetSize(spec)
 }
 
@@ -842,6 +856,7 @@ export default function DesigningQueuePage() {
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [hubsMenuOpen, setHubsMenuOpen] = useState(false)
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null)
+  const [activeRowDrawer, setActiveRowDrawer] = useState<Row | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -1749,7 +1764,7 @@ export default function DesigningQueuePage() {
                   const groupFinalizeEligibleCount = groupRows.filter((r) => canFinalizePlateHubRow(r)).length
                   const groupMissingSheetCount = groupRows.filter((r) => {
                     const rs = (r.specOverrides || {}) as Record<string, unknown>
-                    return !hasToolingSheetSize(rs)
+                    return !hasToolingSheetSize(r, rs)
                   }).length
                   const groupRecallEligibleCount = groupRows.filter((r) =>
                     canRecallPlanningRow(r, ((r.specOverrides || {}) as Record<string, unknown>)),
@@ -1945,7 +1960,7 @@ export default function DesigningQueuePage() {
                           : null
                         const awPo = readAwPoStatus(spec)
                         const rowClosed = awPo === AW_PO_STATUS.CLOSED
-                        const missingSheetSize = !hasToolingSheetSize(spec)
+                        const missingSheetSize = !hasToolingSheetSize(r, spec)
                         const canFinalizeRow = canFinalizePlateHubRow(r)
                         const canRecallPlanning = canRecallPlanningRow(r, spec)
                         const jcState = awJobCardState(r)
@@ -1995,9 +2010,13 @@ export default function DesigningQueuePage() {
                                 <CustomerAvatar name={r.po.customer.name} logoUrl={r.po.customer.logoUrl} />
                                 <span className="min-w-0 truncate">{r.po.customer.name}</span>
                               </div>
-                              <div className={`min-w-0 truncate font-medium ${completed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>
+                              <button
+                                type="button"
+                                className={`min-w-0 truncate text-left font-medium underline-offset-2 hover:underline ${completed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+                                onClick={() => setActiveRowDrawer(r)}
+                              >
                                 {r.cartonName}
-                              </div>
+                              </button>
                               <div className={`${mono} text-ds-ink-faint`}>Set {r.setNumber ?? '—'} · {dQ}d</div>
                             </td>
                             <td className={`px-2 py-1 align-middle text-right text-xs ${mono} text-ds-ink`}>
@@ -2065,7 +2084,7 @@ export default function DesigningQueuePage() {
                 const spec = (r.specOverrides || {}) as Record<string, unknown>
                 const awPo = readAwPoStatus(spec)
                 const rowClosed = awPo === AW_PO_STATUS.CLOSED
-                const missingSheetSize = !hasToolingSheetSize(spec)
+                const missingSheetSize = !hasToolingSheetSize(r, spec)
                 const batchSeg = batchProgressSegments(spec)
                 const canFinalizeRow = canFinalizePlateHubRow(r)
                 const canRecallPlanning =
@@ -2146,9 +2165,13 @@ export default function DesigningQueuePage() {
                             <CustomerAvatar name={r.po?.customer?.name ?? '—'} logoUrl={r.po?.customer?.logoUrl} />
                             <span className="min-w-0 truncate">{r.po?.customer?.name ?? '—'}</span>
                           </div>
-                          <div className={`mt-0.5 min-w-0 font-medium ${completed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}>
+                          <button
+                            type="button"
+                            className={`mt-0.5 min-w-0 text-left font-medium underline-offset-2 hover:underline ${completed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+                            onClick={() => setActiveRowDrawer(r)}
+                          >
                             {r.cartonName ?? '—'}
-                          </div>
+                          </button>
                           {readPlanningCore(spec).layoutType === 'gang' ? (
                             <span className="mt-0.5 inline-block w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-xs font-semibold uppercase text-sky-700 dark:text-sky-300">
                               Gang print
@@ -2251,6 +2274,72 @@ export default function DesigningQueuePage() {
         </section>
         )}
       </div>
+
+      {activeRowDrawer && (
+        <div
+          className="fixed inset-0 z-[85] bg-black/40"
+          onClick={() => setActiveRowDrawer(null)}
+          role="presentation"
+        >
+          <aside
+            className="absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto border-l border-ds-line/40 bg-card p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-ds-ink">AW Job Details</h3>
+              <button
+                type="button"
+                className={`${ICON_BUTTON_TIGHT} text-ds-ink-muted hover:text-ds-ink`}
+                onClick={() => setActiveRowDrawer(null)}
+                aria-label="Close drawer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {(() => {
+              const spec = (activeRowDrawer.specOverrides || {}) as Record<string, unknown>
+              const resolvedSheet = resolveAwSheetSizeFromRow(activeRowDrawer)
+              const designer = resolvePlanningDesignerName(spec, userById) || '-'
+              const tooling = activeRowDrawer.readiness?.readyForProduction ? 'Ready' : 'Pending'
+              const pr = activeRowDrawer.readiness?.pipelinePhase ?? '-'
+              return (
+                <div className="space-y-3 text-xs">
+                  <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/40 p-3">
+                    <div><p className="text-ds-ink-faint">Product</p><p className="text-ds-ink">{activeRowDrawer.cartonName || '-'}</p></div>
+                    <div><p className="text-ds-ink-faint">Customer</p><p className="text-ds-ink">{activeRowDrawer.po.customer.name || '-'}</p></div>
+                    <div><p className="text-ds-ink-faint">PO Ref</p><p className="text-ds-ink">{activeRowDrawer.po.poNumber || '-'}</p></div>
+                    <div><p className="text-ds-ink-faint">Qty</p><p className="text-ds-ink">{activeRowDrawer.quantity?.toLocaleString('en-IN') || '-'}</p></div>
+                    <div><p className="text-ds-ink-faint">Sheet Size</p><p className="text-ds-ink">{resolvedSheet || '-'}</p></div>
+                    <div><p className="text-ds-ink-faint">UPS</p><p className="text-ds-ink">{rowUpsDisplay(spec)}</p></div>
+                    <div><p className="text-ds-ink-faint">Board Type</p><p className="text-ds-ink">{activeRowDrawer.paperType || '-'}</p></div>
+                    <div><p className="text-ds-ink-faint">GSM</p><p className="text-ds-ink">{(spec.gsm as string) || '-'}</p></div>
+                    <div><p className="text-ds-ink-faint">Designer</p><p className="text-ds-ink">{designer}</p></div>
+                    <div><p className="text-ds-ink-faint">Tooling</p><p className="text-ds-ink">{tooling}</p></div>
+                    <div><p className="text-ds-ink-faint">Job Card</p><p className="text-ds-ink">{activeRowDrawer.jobCard?.jobCardNumber ? `JC-${activeRowDrawer.jobCard.jobCardNumber}` : 'Not Created'}</p></div>
+                    <div><p className="text-ds-ink-faint">Pipeline</p><p className="text-ds-ink">{pr}</p></div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      className="h-8"
+                      onClick={() => void pushJobCardFromList(activeRowDrawer)}
+                      disabled={jobCardPushingId === activeRowDrawer.id || !canPushJobCardRow(activeRowDrawer)}
+                    >
+                      {jobCardPushingId === activeRowDrawer.id ? 'Pushing…' : 'Push to Job Card'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-8"
+                      onClick={() => void pushToolingFromList(activeRowDrawer, 'DIE')}
+                    >
+                      Push to Die Hub
+                    </Button>
+                  </div>
+                </div>
+              )
+            })()}
+          </aside>
+        </div>
+      )}
 
       <LightboxModal
         src={lightbox?.src ?? null}

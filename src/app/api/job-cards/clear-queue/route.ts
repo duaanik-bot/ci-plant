@@ -4,17 +4,9 @@ import { requireAuth, createAuditLog } from '@/lib/helpers'
 
 export const dynamic = 'force-dynamic'
 
-function isTrialMode() {
-  return process.env.CI_TRIAL_MODE === '1' || process.env.NODE_ENV !== 'production'
-}
-
 export async function POST(req: NextRequest) {
   const { error, user } = await requireAuth()
   if (error) return error
-
-  if (!isTrialMode()) {
-    return NextResponse.json({ error: 'Clear queue is allowed in trial mode only' }, { status: 403 })
-  }
 
   const body = await req.json().catch(() => ({})) as { confirm?: boolean }
   if (!body.confirm) {
