@@ -33,7 +33,7 @@ export type MaterialCutFitOption = {
   wastagePct: number
   yieldPct: number
   orientation: 'LxW' | 'WxL'
-  matchType: 'Exact' | 'Size Fit' | 'GSM Tolerance'
+  matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance'
   status: 'Ready' | 'Partial' | 'Shortage'
   tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
   gsmDelta: number | null
@@ -43,12 +43,14 @@ export type MaterialCutFitConfig = {
   gsmTolerance: number
   allowRotation: boolean
   maxSuggestions: number
+  directSizeTolerancePct: number
 }
 
 const DEFAULT_CONFIG: MaterialCutFitConfig = {
   gsmTolerance: 10,
   allowRotation: true,
   maxSuggestions: 10,
+  directSizeTolerancePct: 20,
 }
 
 function n(v: unknown): number {
@@ -104,6 +106,7 @@ export function buildMaterialCutFitOptions(input: {
     gsmTolerance: Math.max(0, n(input.config?.gsmTolerance ?? DEFAULT_CONFIG.gsmTolerance)),
     allowRotation: input.config?.allowRotation ?? DEFAULT_CONFIG.allowRotation,
     maxSuggestions: Math.max(1, Math.floor(n(input.config?.maxSuggestions ?? DEFAULT_CONFIG.maxSuggestions))),
+    directSizeTolerancePct: Math.max(0, n(input.config?.directSizeTolerancePct ?? DEFAULT_CONFIG.directSizeTolerancePct)),
   }
   if (reqLength <= 0 || reqWidth <= 0) return []
 
@@ -123,7 +126,24 @@ export function buildMaterialCutFitOptions(input: {
       },
       config.allowRotation,
     )
-    const cutsPerSheet = best.cuts
+    const toleranceLength = (reqLength * config.directSizeTolerancePct) / 100
+    const toleranceWidth = (reqWidth * config.directSizeTolerancePct) / 100
+    const sameSizeExact =
+      (Math.abs(parentLength - reqLength) < 0.0001 && Math.abs(parentWidth - reqWidth) < 0.0001) ||
+      (Math.abs(parentLength - reqWidth) < 0.0001 && Math.abs(parentWidth - reqLength) < 0.0001)
+    const withinTolerance =
+      (Math.abs(parentLength - reqLength) <= toleranceLength &&
+        Math.abs(parentWidth - reqWidth) <= toleranceWidth) ||
+      (Math.abs(parentLength - reqWidth) <= toleranceWidth &&
+        Math.abs(parentWidth - reqLength) <= toleranceLength)
+
+    const directMode: 'none' | 'direct_size' | 'special_cut' = sameSizeExact
+      ? 'direct_size'
+      : withinTolerance
+        ? 'special_cut'
+        : 'none'
+
+    const cutsPerSheet = directMode === 'none' ? best.cuts : 1
     if (cutsPerSheet <= 0) continue
 
     const gsm = m.gsm == null ? null : n(m.gsm)
@@ -145,11 +165,14 @@ export function buildMaterialCutFitOptions(input: {
     const status: 'Ready' | 'Partial' | 'Shortage' =
       reservableSheets >= requiredParentSheets ? 'Ready' : reservableSheets > 0 ? 'Partial' : 'Shortage'
 
-    const sameSize =
-      (Math.abs(parentLength - reqLength) < 0.0001 && Math.abs(parentWidth - reqWidth) < 0.0001) ||
-      (Math.abs(parentLength - reqWidth) < 0.0001 && Math.abs(parentWidth - reqLength) < 0.0001)
-    const matchType: 'Exact' | 'Size Fit' | 'GSM Tolerance' =
-      sameSize && gsmExact ? 'Exact' : gsmExact ? 'Size Fit' : 'GSM Tolerance'
+    const matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance' =
+      !gsmExact && gsmWithinTolerance
+        ? 'GSM Tolerance'
+        : directMode === 'direct_size'
+          ? 'Direct Size'
+          : directMode === 'special_cut'
+            ? 'Special Cut'
+            : 'Cut Fit'
 
     options.push({
       materialId: m.materialId,
@@ -166,7 +189,7 @@ export function buildMaterialCutFitOptions(input: {
       shortageParentSheets,
       wastagePct: Number(wastagePct.toFixed(2)),
       yieldPct: Number(yieldPct.toFixed(2)),
-      orientation: best.orientation,
+      orientation: directMode === 'none' ? best.orientation : 'LxW',
       matchType,
       status,
       tags: [],
@@ -175,8 +198,8 @@ export function buildMaterialCutFitOptions(input: {
   }
 
   options.sort((a, b) => {
-    if (b.cutsPerSheet !== a.cutsPerSheet) return b.cutsPerSheet - a.cutsPerSheet
     if (a.wastagePct !== b.wastagePct) return a.wastagePct - b.wastagePct
+    if (b.cutsPerSheet !== a.cutsPerSheet) return b.cutsPerSheet - a.cutsPerSheet
     const aExact = a.gsmDelta === 0 ? 1 : 0
     const bExact = b.gsmDelta === 0 ? 1 : 0
     if (bExact !== aExact) return bExact - aExact

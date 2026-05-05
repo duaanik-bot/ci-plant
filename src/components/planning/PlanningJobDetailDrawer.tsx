@@ -80,7 +80,7 @@ type MaterialReadinessPanelData = {
     wastagePct: number
     yieldPct: number
     orientation: 'LxW' | 'WxL'
-    matchType: 'Exact' | 'Size Fit' | 'GSM Tolerance'
+    matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance'
     status: 'Ready' | 'Partial' | 'Shortage'
     tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
     gsmDelta: number | null
@@ -102,7 +102,7 @@ type MaterialReadinessPanelData = {
     wastagePct: number
     yieldPct: number
     orientation: 'LxW' | 'WxL'
-    matchType: 'Exact' | 'Size Fit' | 'GSM Tolerance'
+    matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance'
     status: 'Ready' | 'Partial' | 'Shortage'
     tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
     gsmDelta: number | null
@@ -297,6 +297,8 @@ export function PlanningJobDetailDrawer({
   const [reservationControlBusy, setReservationControlBusy] = useState(false)
   const [reservationControlError, setReservationControlError] = useState<string | null>(null)
   const [reservationControl, setReservationControl] = useState<ReservationControlDraft | null>(null)
+  const [workspaceSortKey, setWorkspaceSortKey] = useState<'wastage' | 'cuts' | 'free' | 'gsm' | 'required'>('wastage')
+  const [workspaceSortDir, setWorkspaceSortDir] = useState<'asc' | 'desc'>('asc')
 
   useEffect(() => {
     if (!line) {
@@ -512,6 +514,39 @@ export function PlanningJobDetailDrawer({
           : readiness?.closestAvailableOptions) || []
       ).slice(0, 10),
     [readiness?.closestAvailableOptions, readiness?.suggestedBoardOptions],
+  )
+
+  const mainSuggestionOptions = useMemo(
+    () =>
+      [...visibleSuggestionOptions]
+        .sort((a, b) => a.wastagePct - b.wastagePct)
+        .slice(0, 3),
+    [visibleSuggestionOptions],
+  )
+
+  const workspaceSuggestionOptions = useMemo(() => {
+    const rows = [...visibleSuggestionOptions]
+    rows.sort((a, b) => {
+      const dir = workspaceSortDir === 'asc' ? 1 : -1
+      if (workspaceSortKey === 'wastage') return (a.wastagePct - b.wastagePct) * dir
+      if (workspaceSortKey === 'cuts') return (a.cutsPerSheet - b.cutsPerSheet) * dir
+      if (workspaceSortKey === 'free') return (a.freeSheets - b.freeSheets) * dir
+      if (workspaceSortKey === 'gsm') return ((a.gsm ?? 0) - (b.gsm ?? 0)) * dir
+      return (a.requiredParentSheets - b.requiredParentSheets) * dir
+    })
+    return rows
+  }, [visibleSuggestionOptions, workspaceSortDir, workspaceSortKey])
+
+  const toggleWorkspaceSort = useCallback(
+    (key: 'wastage' | 'cuts' | 'free' | 'gsm' | 'required') => {
+      if (workspaceSortKey === key) {
+        setWorkspaceSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+        return
+      }
+      setWorkspaceSortKey(key)
+      setWorkspaceSortDir(key === 'cuts' || key === 'free' ? 'desc' : 'asc')
+    },
+    [workspaceSortKey],
   )
 
   const loadOptionDetails = useCallback(async (materialId: string) => {
@@ -1413,7 +1448,7 @@ export function PlanningJobDetailDrawer({
                 {!!readiness?.debugMessage && (
                   <p className="text-xs text-ds-warning">{readiness.debugMessage}</p>
                 )}
-                {visibleSuggestionOptions.map((opt) => {
+                {mainSuggestionOptions.map((opt) => {
                   const selected = selectedMaterialId === opt.materialId
                   const reservedForThisOption = Math.max(0, Number(readiness?.reservedByMaterial?.[opt.materialId] || 0))
                   const hasActiveReservation = reservedForThisOption > 0
@@ -2116,20 +2151,38 @@ export function PlanningJobDetailDrawer({
                 <tr>
                   <th className="px-2 py-2">Material</th>
                   <th className="px-2 py-2">Parent Size</th>
-                  <th className="px-2 py-2">GSM</th>
-                  <th className="px-2 py-2">Cuts</th>
-                  <th className="px-2 py-2">Req Parent</th>
-                  <th className="px-2 py-2">Avail / Res / Free</th>
-                  <th className="px-2 py-2">Yield/Waste</th>
+                  <th className="px-2 py-2">
+                    <button type="button" className="hover:underline" onClick={() => toggleWorkspaceSort('gsm')}>
+                      GSM
+                    </button>
+                  </th>
+                  <th className="px-2 py-2">
+                    <button type="button" className="hover:underline" onClick={() => toggleWorkspaceSort('cuts')}>
+                      Cuts
+                    </button>
+                  </th>
+                  <th className="px-2 py-2">
+                    <button type="button" className="hover:underline" onClick={() => toggleWorkspaceSort('required')}>
+                      Req Parent
+                    </button>
+                  </th>
+                  <th className="px-2 py-2">
+                    <button type="button" className="hover:underline" onClick={() => toggleWorkspaceSort('free')}>
+                      Avail / Res / Free
+                    </button>
+                  </th>
+                  <th className="px-2 py-2">
+                    <button type="button" className="hover:underline" onClick={() => toggleWorkspaceSort('wastage')}>
+                      Yield/Waste
+                    </button>
+                  </th>
                   <th className="px-2 py-2">Match</th>
                   <th className="px-2 py-2">Status</th>
                   <th className="px-2 py-2">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {((((readiness?.suggestedBoardOptions?.length || 0) > 0
-                  ? readiness?.suggestedBoardOptions
-                  : readiness?.closestAvailableOptions) || [])).slice(0, 10).map((opt) => {
+                {workspaceSuggestionOptions.map((opt) => {
                   const openOpt = !!optionDetailsOpen[opt.materialId]
                   const optDetails = optionDetailsByMaterial[opt.materialId]
                   const optLoading = !!optionDetailsLoading[opt.materialId]
