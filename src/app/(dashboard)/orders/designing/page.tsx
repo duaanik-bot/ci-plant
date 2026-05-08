@@ -65,7 +65,10 @@ type Row = {
   quantity: number
   paperType: string | null
   coatingType: string | null
+  otherCoating?: string | null
   embossingLeafing: string | null
+  gsm?: number | null
+  cartonSize?: string | null
   setNumber: string | null
   planningStatus: string
   jobCardNumber: number | null
@@ -949,17 +952,23 @@ export default function DesigningQueuePage() {
     const spec = (activeRowDrawer.specOverrides || {}) as Record<string, unknown>
     const resolvedSheet = resolveAwSheetSizeFromRow(activeRowDrawer)
     const resolvedUps = rowUpsDisplay(spec)
+    const colorSpecCandidate =
+      (typeof spec.colorSpec === 'string' && spec.colorSpec.trim()) ||
+      (typeof spec.colourSpec === 'string' && spec.colourSpec.trim()) ||
+      (typeof spec.colour === 'string' && spec.colour.trim()) ||
+      (typeof spec.color === 'string' && spec.color.trim()) ||
+      ''
     setDrawerForm({
       cartonName: activeRowDrawer.cartonName || '',
-      cartonSize: activeRowDrawer.cartonName || '',
+      cartonSize: activeRowDrawer.cartonSize || '',
       quantity: String(activeRowDrawer.quantity || ''),
       sheetSize: resolvedSheet === '-' ? '' : resolvedSheet,
       ups: resolvedUps === '—' ? '' : resolvedUps,
-      gsm: String((spec.gsm as string) || activeRowDrawer.materialQueue?.gsm || ''),
+      gsm: String(spec.gsm ?? activeRowDrawer.gsm ?? activeRowDrawer.materialQueue?.gsm ?? ''),
       boardType: activeRowDrawer.paperType || '',
-      coating: activeRowDrawer.coatingType || '',
+      coating: activeRowDrawer.coatingType || activeRowDrawer.otherCoating || '',
       embossing: activeRowDrawer.embossingLeafing || '',
-      colorSpec: String(spec.colorSpec || ''),
+      colorSpec: colorSpecCandidate,
       setNumber: activeRowDrawer.setNumber || autoSetNumber(activeRowDrawer.id),
       artworkCode: activeRowDrawer.artworkCode || '',
       dieNumber: String(spec.dieNumber || ''),
@@ -2646,7 +2655,7 @@ export default function DesigningQueuePage() {
           role="presentation"
         >
           <aside
-            className="absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto border-l border-ds-line/40 bg-card p-4"
+            className="absolute right-0 top-0 h-full w-[min(96vw,820px)] max-w-[820px] overflow-hidden border-l border-ds-line/40 bg-card p-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
@@ -2678,7 +2687,8 @@ export default function DesigningQueuePage() {
                 : []
               const checklistOk = checklist.every((item) => item.ok)
               return (
-                <div className="space-y-3 text-xs">
+                <div className="flex h-[calc(100vh-70px)] flex-col text-xs">
+                  <div className="space-y-3 overflow-y-auto pr-1 pb-24">
                   <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/40 p-3">
                     <div><p className="text-ds-ink-faint">Product</p><p className="text-ds-ink">{activeRowDrawer.cartonName || '-'}</p></div>
                     <div><p className="text-ds-ink-faint">Customer</p><p className="text-ds-ink">{activeRowDrawer.po.customer.name || '-'}</p></div>
@@ -2790,49 +2800,52 @@ export default function DesigningQueuePage() {
                     ) : null}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      className="h-8"
-                      onClick={() => void pushJobCardFromList(activeRowDrawer)}
-                      disabled={jobCardPushingId === activeRowDrawer.id || !canPushJobCardRow(activeRowDrawer)}
-                    >
-                      {jobCardPushingId === activeRowDrawer.id ? 'Pushing…' : 'Push to Job Card'}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-8"
-                      onClick={() => void finalizeFromList(activeRowDrawer)}
-                    >
-                      Push to Plate Hub
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-8"
-                      onClick={() => void pushToolingFromList(activeRowDrawer, 'DIE')}
-                    >
-                      Push to Die Hub
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-8"
-                      onClick={() => void pushToolingFromList(activeRowDrawer, 'BLOCK')}
-                    >
-                      Push to Emboss Hub
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-8"
-                      onClick={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
-                    >
-                      Push to Shade Card Hub
-                    </Button>
-                    <Button
-                      className="h-8"
-                      onClick={() => void pushAllFromDrawer()}
-                      disabled={drawerPushAllBusy || !checklistOk}
-                    >
-                      {drawerPushAllBusy ? 'Pushing…' : 'Push All'}
-                    </Button>
+                  </div>
+                  <div className="mt-2 border-t border-ds-line/40 pt-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        className="h-8"
+                        onClick={() => void pushAllFromDrawer()}
+                        disabled={drawerPushAllBusy || !checklistOk}
+                      >
+                        {drawerPushAllBusy ? 'Pushing…' : 'Push All'}
+                      </Button>
+                      <Button
+                        className="h-8"
+                        onClick={() => void pushJobCardFromList(activeRowDrawer)}
+                        disabled={jobCardPushingId === activeRowDrawer.id || !canPushJobCardRow(activeRowDrawer)}
+                      >
+                        {jobCardPushingId === activeRowDrawer.id ? 'Pushing…' : 'Push to Job Card'}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-8"
+                        onClick={() => void finalizeFromList(activeRowDrawer)}
+                      >
+                        Push to Plate Hub
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-8"
+                        onClick={() => void pushToolingFromList(activeRowDrawer, 'DIE')}
+                      >
+                        Push to Die Hub
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-8"
+                        onClick={() => void pushToolingFromList(activeRowDrawer, 'BLOCK')}
+                      >
+                        Push to Emboss Hub
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-8"
+                        onClick={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
+                      >
+                        Push to Shade Card Hub
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )
