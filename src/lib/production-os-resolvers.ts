@@ -315,10 +315,61 @@ export function resolveRequirementFromLine(input: {
   const line = asDict(input.line)
   const specOverrides = asDict(line.specOverrides)
   const spec = asDict(line.spec)
+  const planningCore = asDict(specOverrides.planningCore)
+  const specMeta = asDict(spec.meta)
+  const specOverridesMeta = asDict(specOverrides.meta)
   const qty = Math.max(1, Math.floor(Number(input.qtyOverride ?? line.quantity ?? 1) || 1))
-  const ups = Math.max(1, Math.floor(Number(input.upsOverride ?? resolveUps(line) ?? specOverrides.ups ?? spec.ups ?? 1) || 1))
-  const wastage = Math.max(0, Math.floor(Number(input.wastageOverride ?? specOverrides.wastageSheets ?? spec.wastageSheets ?? 150) || 0))
+  const ups = Math.max(
+    1,
+    Math.floor(
+      Number(
+        input.upsOverride ??
+          resolveUps(line) ??
+          planningCore.ups ??
+          planningCore.upsPerSheet ??
+          specOverrides.ups ??
+          specOverridesMeta.ups ??
+          spec.ups ??
+          specMeta.ups ??
+          1,
+      ) || 1,
+    ),
+  )
   const baseSheets = Math.max(1, Math.ceil(qty / ups))
+  const wastageSheetsCandidate = Number(
+    input.wastageOverride ??
+      specOverrides.wastageSheets ??
+      planningCore.wastageSheets ??
+      spec.wastageSheets ??
+      null,
+  )
+  const wastagePctCandidate = Number(
+    specOverrides.wastagePct ??
+      planningCore.wastagePct ??
+      spec.wastagePct ??
+      specOverridesMeta.wastagePct ??
+      specMeta.wastagePct ??
+      null,
+  )
+  const wastageFromPct = Number.isFinite(wastagePctCandidate)
+    ? Math.max(0, Math.round((baseSheets * wastagePctCandidate) / 100))
+    : null
+  const usePctFallback =
+    (wastageSheetsCandidate == null || wastageSheetsCandidate <= 0) &&
+    wastageFromPct != null &&
+    wastageFromPct > 0
+  const wastage = Math.max(
+    0,
+    Math.floor(
+      usePctFallback
+        ? wastageFromPct
+        : Number.isFinite(wastageSheetsCandidate)
+          ? wastageSheetsCandidate
+          : wastageFromPct != null
+            ? wastageFromPct
+            : 150,
+    ) || 0,
+  )
   return {
     qty,
     ups,
