@@ -306,6 +306,7 @@ export default function JobCardDetailPage() {
   const [priority, setPriority] = useState<'Normal' | 'Urgent'>('Normal')
   const [activeSection, setActiveSection] = useState<'summary' | 'spec' | 'board' | 'tooling' | 'execution' | 'validation' | 'material' | 'printing' | 'operations' | 'media' | 'notes' | 'history'>('summary')
   const [hubPushing, setHubPushing] = useState(false)
+  const [livePushing, setLivePushing] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
   const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness | null>(null)
   const [materialTimeline, setMaterialTimeline] = useState<MaterialTimelineEvent[]>([])
@@ -594,8 +595,10 @@ export default function JobCardDetailPage() {
       const refreshed = await fetch(`/api/job-cards/${jc.id}?auditTimeline=1`).then((r) => r.json())
       setJc(refreshed)
       setLastSavedAt(Date.now())
+      return true
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save')
+      return false
     } finally {
       setSaving(false)
     }
@@ -611,8 +614,10 @@ export default function JobCardDetailPage() {
       toast.success(json.idempotent ? 'Already on cutting queue' : 'Enqueued for cutting')
       const refreshed = await fetch(`/api/job-cards/${jc.id}?auditTimeline=1`).then((r) => r.json())
       setJc(refreshed)
+      return true
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed')
+      return false
     } finally {
       setEnqueueingCut(false)
     }
@@ -668,7 +673,7 @@ export default function JobCardDetailPage() {
         setActiveSection(firstBlocking)
         sectionRefs.current[firstBlocking]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
         toast.error('Resolve validation items before release')
-        return
+        return false
       }
     }
     const nextRouting = {
@@ -680,7 +685,7 @@ export default function JobCardDetailPage() {
         priority,
       },
     }
-    await saveChanges({
+    return await saveChanges({
       shiftOperatorUserId: designerUserId || null,
       artworkApproved: jc.artworkApproved,
       finalQcPass: jc.finalQcPass,
@@ -688,6 +693,20 @@ export default function JobCardDetailPage() {
       status: release ? 'qa_released' : jc.status,
       postPressRouting: nextRouting,
     })
+  }
+
+  async function pushToLiveProduction() {
+    if (!jc) return
+    setLivePushing(true)
+    try {
+      const released = await saveExecution(true)
+      if (!released) return
+      const cutOk = await enqueueCutting()
+      if (!cutOk) return
+      toast.success('Pushed to Print Planning and Cutting')
+    } finally {
+      setLivePushing(false)
+    }
   }
 
   const returnTo = searchParams.get('returnTo') || '/production/job-cards'
@@ -830,7 +849,7 @@ export default function JobCardDetailPage() {
 
   return (
     <div className="min-h-screen bg-background text-ds-ink pb-24">
-      <div className="max-w-7xl mx-auto px-4 py-4 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 py-3 space-y-4">
         <div className="rounded-xl border border-ds-line/40 bg-card px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -913,9 +932,9 @@ export default function JobCardDetailPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-          <div className="xl:col-span-2 space-y-6">
-            <div ref={(el) => { sectionRefs.current.spec = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
+          <div className="xl:col-span-2 space-y-4">
+            <div ref={(el) => { sectionRefs.current.spec = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-2.5">
               <h2 className="text-sm font-semibold text-ds-ink">Printing & Finishing</h2>
               <div className="grid md:grid-cols-5 gap-3 text-xs">
                 <div><p className="text-ds-ink-faint mb-1">Coating</p><p>{jc.poLine?.coatingType ?? '—'}</p></div>
@@ -951,7 +970,7 @@ export default function JobCardDetailPage() {
               </div>
             </div>
 
-            <div ref={(el) => { sectionRefs.current.execution = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
+            <div ref={(el) => { sectionRefs.current.execution = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-2.5">
               <div className="space-y-2">
                 <h2 className="text-sm font-semibold text-ds-ink">Operations</h2>
               <div className="overflow-x-auto rounded border border-ds-line/40">
@@ -982,8 +1001,8 @@ export default function JobCardDetailPage() {
             </div>
           </div>
 
-          <div className="space-y-6">
-            <div ref={(el) => { sectionRefs.current.board = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
+          <div className="space-y-4">
+            <div ref={(el) => { sectionRefs.current.board = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-2.5">
               <h2 className="text-sm font-semibold text-ds-ink">Material & Sheet Config</h2>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div><p className="text-ds-ink-faint mb-1">Choose Paper</p><p>{paperDisplay}</p></div>
@@ -1062,7 +1081,18 @@ export default function JobCardDetailPage() {
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 border-t border-ds-line/40 bg-card/95 backdrop-blur px-4 py-2.5">
-        <div className="max-w-7xl mx-auto flex items-center justify-end gap-2">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            disabled={releaseBlocked || saving || enqueueingCut || livePushing}
+            onClick={() => void pushToLiveProduction()}
+            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-95 focus:outline-none focus:ring-1 focus:ring-emerald-600/40 disabled:opacity-40"
+          >
+            {livePushing ? 'Pushing Live…' : 'Push to Print Planning + Cutting'}
+          </button>
+          <button type="button" disabled={enqueueingCut || livePushing} onClick={() => void enqueueCutting()} className="rounded-md border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50">
+            {enqueueingCut ? 'Pushing Cutting…' : 'Push to Cutting'}
+          </button>
           <button type="button" disabled={saving} onClick={() => void saveExecution(false)} className="rounded-md border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50">Save Job Card</button>
           <button type="button" onClick={() => window.print()} className="rounded-md border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40">Print Job Card</button>
           <button type="button" disabled={releaseBlocked || saving} onClick={() => void saveExecution(true)} className="rounded-md bg-ds-brand px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-95 focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-40">Release to Production</button>
