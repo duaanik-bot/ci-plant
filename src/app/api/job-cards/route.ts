@@ -412,8 +412,9 @@ export async function POST(req: NextRequest) {
   })
   const isAwOrchestration = (orchestrationSource || '').toLowerCase() === 'aw_orchestration'
   const allowToolingOverride = process.env.CI_TRIAL_MODE === '1' || isAwOrchestration
+  const bypassToolingForAwOrchestration = isAwOrchestration
   if (!allGreen) {
-    if (!(toolingOverrideTrial === true && allowToolingOverride)) {
+    if (!(bypassToolingForAwOrchestration || (toolingOverrideTrial === true && allowToolingOverride))) {
       return NextResponse.json(
         {
           error: 'Tooling not ready — complete required tooling (or mark not required) before pushing Job Card.',
@@ -434,15 +435,19 @@ export async function POST(req: NextRequest) {
       )
     }
   }
-  if (!allGreen && toolingOverrideTrial === true && allowToolingOverride) {
+  if (!allGreen && (bypassToolingForAwOrchestration || (toolingOverrideTrial === true && allowToolingOverride))) {
     await createAuditLog({
       userId: user!.id,
       action: 'UPDATE',
       tableName: 'po_line_items',
       recordId: li.id,
       newValue: {
-        mode: 'trial_tooling_override',
-        reason: toolingOverrideReason || 'Manual trial override from AW push to job card',
+        mode: bypassToolingForAwOrchestration ? 'aw_orchestration_override' : 'trial_tooling_override',
+        reason:
+          toolingOverrideReason ||
+          (bypassToolingForAwOrchestration
+            ? 'AW orchestration override for trial flow'
+            : 'Manual trial override from AW push to job card'),
         orchestrationSource: orchestrationSource || 'aw_orchestration',
       },
     })
