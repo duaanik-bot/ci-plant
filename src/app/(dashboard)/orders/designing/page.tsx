@@ -562,7 +562,9 @@ function pushJobCardBlockReason(r: Row): string | null {
 
 function canRecallPlanningRow(r: Row, spec: Record<string, unknown>): boolean {
   const machineAllocated = !!String(spec.machineId || '').trim()
-  return !!r.readiness?.planningForwarded && !machineAllocated && !['in_production', 'closed'].includes(r.planningStatus)
+  if (machineAllocated) return false
+  if (['in_production', 'closed', 'pending'].includes(r.planningStatus)) return false
+  return true
 }
 
 function canFinalizePlateHubRow(r: Row): boolean {
@@ -889,6 +891,24 @@ export default function DesigningQueuePage() {
   const [hubsMenuOpen, setHubsMenuOpen] = useState(false)
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null)
   const [activeRowDrawer, setActiveRowDrawer] = useState<Row | null>(null)
+  const [drawerSaving, setDrawerSaving] = useState(false)
+  const [drawerPushAllBusy, setDrawerPushAllBusy] = useState(false)
+  const [drawerForm, setDrawerForm] = useState<{
+    cartonName: string
+    cartonSize: string
+    quantity: string
+    sheetSize: string
+    ups: string
+    gsm: string
+    boardType: string
+    coating: string
+    embossing: string
+    colorSpec: string
+    setNumber: string
+    artworkCode: string
+    dieNumber: string
+    embossBlockNumber: string
+  } | null>(null)
 
   const openRowDrawerFromClick = useCallback(
     (e: MouseEvent<HTMLElement>, row: Row) => {
@@ -898,6 +918,121 @@ export default function DesigningQueuePage() {
     },
     [],
   )
+
+  const autoSetNumber = useCallback((rowId: string) => {
+    const seed = Math.abs(
+      rowId
+        .split('')
+        .slice(0, 8)
+        .reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) | 0, Date.now() % 1000),
+    )
+    return String((seed % 9000) + 1000)
+  }, [])
+
+  useEffect(() => {
+    if (!activeRowDrawer) {
+      setDrawerForm(null)
+      return
+    }
+    const spec = (activeRowDrawer.specOverrides || {}) as Record<string, unknown>
+    const resolvedSheet = resolveAwSheetSizeFromRow(activeRowDrawer)
+    const resolvedUps = rowUpsDisplay(spec)
+    setDrawerForm({
+      cartonName: activeRowDrawer.cartonName || '',
+      cartonSize: activeRowDrawer.cartonName || '',
+      quantity: String(activeRowDrawer.quantity || ''),
+      sheetSize: resolvedSheet === '-' ? '' : resolvedSheet,
+      ups: resolvedUps === '—' ? '' : resolvedUps,
+      gsm: String((spec.gsm as string) || activeRowDrawer.materialQueue?.gsm || ''),
+      boardType: activeRowDrawer.paperType || '',
+      coating: activeRowDrawer.coatingType || '',
+      embossing: activeRowDrawer.embossingLeafing || '',
+      colorSpec: String(spec.colorSpec || ''),
+      setNumber: activeRowDrawer.setNumber || autoSetNumber(activeRowDrawer.id),
+      artworkCode: activeRowDrawer.artworkCode || '',
+      dieNumber: String(spec.dieNumber || ''),
+      embossBlockNumber: String(spec.embossBlockNumber || ''),
+    })
+  }, [activeRowDrawer, autoSetNumber])
+
+  async function saveDrawerDetails() {
+    if (!activeRowDrawer || !drawerForm) return
+    setDrawerSaving(true)
+    try {
+      const currentSpec = ((activeRowDrawer.specOverrides || {}) as Record<string, unknown>) || {}
+      const payload = {
+        cartonName: drawerForm.cartonName.trim() || activeRowDrawer.cartonName,
+        quantity: Number(drawerForm.quantity) > 0 ? Number(drawerForm.quantity) : activeRowDrawer.quantity,
+        paperType: drawerForm.boardType.trim() || null,
+        coatingType: drawerForm.coating.trim() || null,
+        embossingLeafing: drawerForm.embossing.trim() || null,
+        setNumber: drawerForm.setNumber.trim() || null,
+        artworkCode: drawerForm.artworkCode.trim() || null,
+        gsm: Number.isFinite(Number(drawerForm.gsm)) ? Number(drawerForm.gsm) : null,
+        specOverrides: {
+          ...currentSpec,
+          sheetSize: drawerForm.sheetSize.trim() || null,
+          actualSheetSize: drawerForm.sheetSize.trim() || null,
+          ups: Number.isFinite(Number(drawerForm.ups)) && Number(drawerForm.ups) > 0 ? Number(drawerForm.ups) : null,
+          colorSpec: drawerForm.colorSpec.trim() || null,
+          dieNumber: drawerForm.dieNumber.trim() || null,
+          embossBlockNumber: drawerForm.embossBlockNumber.trim() || null,
+        },
+      }
+      const res = await fetch(`/api/planning/po-lines/${activeRowDrawer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) throw new Error(json.error || 'Failed to save')
+      toast.success('AW details updated')
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save details')
+    } finally {
+      setDrawerSaving(false)
+    }
+  }
+
+  async function pushAllFromDrawer() {
+    if (!activeRowDrawer || !drawerForm) return
+    setDrawerPushAllBusy(true)
+    try {
+      await saveDrawerDetails()
+      const mergedSpec = {
+        ...(((activeRowDrawer.specOverrides || {}) as Record<string, unknown>) || {}),
+        sheetSize: drawerForm.sheetSize.trim() || null,
+        actualSheetSize: drawerForm.sheetSize.trim() || null,
+        ups: Number.isFinite(Number(drawerForm.ups)) && Number(drawerForm.ups) > 0 ? Number(drawerForm.ups) : null,
+        dieNumber: drawerForm.dieNumber.trim() || null,
+        embossBlockNumber: drawerForm.embossBlockNumber.trim() || null,
+      }
+      const mergedRow: Row = {
+        ...activeRowDrawer,
+        setNumber: drawerForm.setNumber.trim() || activeRowDrawer.setNumber,
+        artworkCode: drawerForm.artworkCode.trim() || activeRowDrawer.artworkCode,
+        paperType: drawerForm.boardType.trim() || activeRowDrawer.paperType,
+        coatingType: drawerForm.coating.trim() || activeRowDrawer.coatingType,
+        embossingLeafing: drawerForm.embossing.trim() || activeRowDrawer.embossingLeafing,
+        specOverrides: mergedSpec,
+      }
+
+      await pushToolingFromList(mergedRow, 'DIE')
+      if (isEmbossingRequired(mergedRow.embossingLeafing)) {
+        await pushToolingFromList(mergedRow, 'BLOCK')
+      }
+      await finalizeFromList(mergedRow)
+      window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')
+      await pushJobCardFromList(mergedRow)
+      toast.success('Pushed to hubs + Job Card')
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Push all failed')
+    } finally {
+      setDrawerPushAllBusy(false)
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -2419,7 +2554,42 @@ export default function DesigningQueuePage() {
                     <div><p className="text-ds-ink-faint">Job Card</p><p className="text-ds-ink">{activeRowDrawer.jobCard?.jobCardNumber ? `JC-${activeRowDrawer.jobCard.jobCardNumber}` : 'Not Created'}</p></div>
                     <div><p className="text-ds-ink-faint">Pipeline</p><p className="text-ds-ink">{pr}</p></div>
                   </div>
-                  <div className="flex items-center gap-2">
+
+                  {drawerForm ? (
+                    <div className="space-y-2 rounded border border-ds-line/40 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">Editable Carton & Specs</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Carton</span><input value={drawerForm.cartonName} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, cartonName: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Qty</span><input value={drawerForm.quantity} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, quantity: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Sheet Size</span><input value={drawerForm.sheetSize} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, sheetSize: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">UPS</span><input value={drawerForm.ups} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, ups: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Board Type</span><input value={drawerForm.boardType} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, boardType: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">GSM</span><input value={drawerForm.gsm} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, gsm: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Coating</span><input value={drawerForm.coating} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, coating: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Emboss / Foil</span><input value={drawerForm.embossing} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossing: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Colour / Spec</span><input value={drawerForm.colorSpec} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, colorSpec: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Artwork Code</span><input value={drawerForm.artworkCode} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, artworkCode: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Set Number</span><div className="flex gap-1"><input value={drawerForm.setNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /><button type="button" className="rounded border border-ds-line/60 px-2 text-[11px]" onClick={() => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: autoSetNumber(activeRowDrawer.id) }) : prev)}>Auto</button></div></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Die Number</span><input value={drawerForm.dieNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, dieNumber: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Emboss Block Number</span><input value={drawerForm.embossBlockNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossBlockNumber: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button variant="secondary" className="h-8" onClick={() => void saveDrawerDetails()} disabled={drawerSaving}>
+                          {drawerSaving ? 'Saving…' : 'Save Details'}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          className="h-8"
+                          onClick={() => void recallPlanning(activeRowDrawer)}
+                          disabled={recallingPlanningId === activeRowDrawer.id || !canRecallPlanningRow(activeRowDrawer, spec)}
+                        >
+                          {recallingPlanningId === activeRowDrawer.id ? 'Sending…' : 'Send Back to Planning'}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button
                       className="h-8"
                       onClick={() => void pushJobCardFromList(activeRowDrawer)}
@@ -2430,9 +2600,37 @@ export default function DesigningQueuePage() {
                     <Button
                       variant="secondary"
                       className="h-8"
+                      onClick={() => void finalizeFromList(activeRowDrawer)}
+                    >
+                      Push to Plate Hub
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-8"
                       onClick={() => void pushToolingFromList(activeRowDrawer, 'DIE')}
                     >
                       Push to Die Hub
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-8"
+                      onClick={() => void pushToolingFromList(activeRowDrawer, 'BLOCK')}
+                    >
+                      Push to Emboss Hub
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-8"
+                      onClick={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
+                    >
+                      Push to Shade Card Hub
+                    </Button>
+                    <Button
+                      className="h-8"
+                      onClick={() => void pushAllFromDrawer()}
+                      disabled={drawerPushAllBusy}
+                    >
+                      {drawerPushAllBusy ? 'Pushing…' : 'Push All'}
                     </Button>
                   </div>
                 </div>
