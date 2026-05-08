@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { resolveRequirementFromLine } from '@/lib/production-os-resolvers'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +21,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
   const planningLine = jc.jobCardNumber
     ? await db.poLineItem.findFirst({
         where: { jobCardNumber: jc.jobCardNumber },
-        select: { id: true },
+        select: { id: true, quantity: true, specOverrides: true, materialQueue: true, carton: true },
       })
     : null
 
@@ -87,6 +88,21 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
       at: reservation.createdAt.toISOString(),
       event: 'Planning requirement created',
       detail: `Required ${Number(reservation.requiredSheets).toLocaleString('en-IN')} sheets`,
+    })
+  } else if (planningLine) {
+    const req = resolveRequirementFromLine({
+      line: {
+        ...planningLine,
+        specOverrides: planningLine.specOverrides || {},
+        materialQueue: planningLine.materialQueue || {},
+        carton: planningLine.carton || {},
+      },
+      qtyOverride: planningLine.quantity ?? undefined,
+    })
+    events.push({
+      at: jc.createdAt.toISOString(),
+      event: 'Planning requirement created',
+      detail: `Required ${Number(req.requiredSheets).toLocaleString('en-IN')} sheets`,
     })
   }
 

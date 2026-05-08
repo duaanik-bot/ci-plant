@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { getPostPressRouting, isEmbossingRequired } from '@/lib/emboss-conditions'
-import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
+import { resolveRequirementFromLine, resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 
 type Stage = {
   id: string
@@ -748,6 +748,16 @@ export default function JobCardDetailPage() {
     materialQueue: jc.poLine?.materialQueue || {},
   })
   const upsDisplay = bible?.ups ?? resolvedUps ?? '—'
+  const planningRequirement = resolveRequirementFromLine({
+    line: {
+      ...(jc.poLine || {}),
+      specOverrides: jc.poLine?.specOverrides || {},
+      product: jc.poLine?.carton || {},
+      carton: jc.poLine?.carton || {},
+      materialQueue: jc.poLine?.materialQueue || {},
+    },
+    qtyOverride: jc.poLine?.quantity ?? undefined,
+  })
   const grainDisplay = bible?.grainDirection ?? jc.poLine?.materialQueue?.grainDirection ?? '—'
   const poDateDisplay = formatDateDisplay(jc.poLine?.po?.poDate)
   const lineSpec = (jc.poLine?.specOverrides || {}) as Record<string, unknown>
@@ -774,7 +784,15 @@ export default function JobCardDetailPage() {
     jc.issuedStockDisplay ||
     jc.boardMaterial?.batchLotNumber ||
     '—'
-  const requiredDisplay = materialReadiness?.requiredSheets ?? jc.requiredSheets
+  const requiredDisplay =
+    materialReadiness?.requiredSheets ??
+    jc.poLine?.materialQueue?.totalSheets ??
+    planningRequirement.requiredSheets ??
+    jc.requiredSheets
+  const wastageDisplay =
+    jc.wastageSheets > 0
+      ? jc.wastageSheets
+      : planningRequirement.wastageSheets
   const reservedDisplay = materialReadiness?.reservedSheets ?? jc.boardMaterial?.reservedSheets ?? 0
   const shortageDisplay = materialReadiness?.shortageSheets ?? jc.boardMaterial?.shortageSheets ?? 0
   const availableDisplay = materialReadiness?.availableStock ?? jc.boardMaterial?.availableStock ?? 0
@@ -971,9 +989,9 @@ export default function JobCardDetailPage() {
                 <div><p className="text-ds-ink-faint mb-1">Choose Paper</p><p>{paperDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Cut Size</p><p>{effectiveSheetSize || '—'}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Required Sheets</p><p>{Number(requiredDisplay).toLocaleString('en-IN')}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Wastage Sheets</p><p>{jc.wastageSheets.toLocaleString('en-IN')}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Wastage Sheets</p><p>{Number(wastageDisplay).toLocaleString('en-IN')}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Paper Divide</p><p>{upsDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Total Sheets</p><p>{jc.totalSheets.toLocaleString('en-IN')}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Total Sheets</p><p>{Number(requiredDisplay).toLocaleString('en-IN')}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Material Code</p><p>{materialCodeDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Board / GSM</p><p>{`${paperDisplay} / ${gsmDisplay}`}</p></div>
               </div>

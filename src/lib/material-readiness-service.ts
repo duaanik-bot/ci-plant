@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
+import { resolveRequirementFromLine } from '@/lib/production-os-resolvers'
 
 type DbClient = typeof db | Prisma.TransactionClient
 
@@ -250,8 +251,20 @@ async function resolveMaterialIdForLine(client: DbClient, line: { materialQueue:
   const spec = line.specOverrides && typeof line.specOverrides === 'object'
     ? (line.specOverrides as Record<string, unknown>)
     : {}
-  const explicit = typeof spec.planningMaterialId === 'string' ? spec.planningMaterialId : ''
-  if (explicit) {
+  const planningCore = spec.planningCore && typeof spec.planningCore === 'object'
+    ? (spec.planningCore as Record<string, unknown>)
+    : {}
+  const explicitCandidates = [
+    spec.planningMaterialId,
+    spec.materialId,
+    spec.selectedMaterialId,
+    spec.chosenMaterialId,
+    spec.inventoryMaterialId,
+    planningCore.materialId,
+  ]
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter(Boolean)
+  for (const explicit of explicitCandidates) {
     const hit = await client.inventory.findUnique({ where: { id: explicit }, select: { id: true } })
     if (hit) return hit.id
   }
@@ -285,7 +298,8 @@ export async function calculateRequirement(input: { jobCardId?: string; planning
     })
     if (!line) throw new Error('Planning line not found')
 
-    const requiredSheets = Math.max(0, asNumber(line.materialQueue?.totalSheets) || Math.ceil(line.quantity / 4))
+    const requiredFromResolver = resolveRequirementFromLine({ line }).requiredSheets
+    const requiredSheets = Math.max(0, asNumber(line.materialQueue?.totalSheets) || requiredFromResolver)
 
     if (!input.jobCardId) {
       const jc = line.jobCardNumber
@@ -305,7 +319,11 @@ export async function calculateRequirement(input: { jobCardId?: string; planning
   if (!jc) throw new Error('Job card not found')
 
   const requiredFromQueue = asNumber(line?.materialQueue?.totalSheets)
-  const requiredSheets = Math.max(0, requiredFromQueue || asNumber(jc.totalSheets) || asNumber(jc.requiredSheets))
+  const requiredFromResolver = line ? resolveRequirementFromLine({ line }).requiredSheets : 0
+  const requiredSheets = Math.max(
+    0,
+    requiredFromQueue || requiredFromResolver || asNumber(jc.totalSheets) || asNumber(jc.requiredSheets),
+  )
   const materialId = line ? await resolveMaterialIdForLine(client, line) : null
 
   return {
