@@ -151,6 +151,10 @@ export async function GET(
       where: { id: poLine.cartonId },
       select: {
         id: true,
+        artworkCode: true,
+        colourBreakdown: true,
+        printingType: true,
+        pastingStyle: true,
         coatingType: true,
         laminateType: true,
         foilType: true,

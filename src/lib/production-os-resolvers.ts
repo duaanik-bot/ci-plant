@@ -33,6 +33,7 @@ export function resolveSheetSize(line: unknown): string {
   const nestedOverridesSpec = asDict(specOverrides.spec)
   const planningSpec = asDict(planningLine.spec)
   const planningOverrides = asDict(planningLine.specOverrides)
+  const planningCore = asDict(planningOverrides.planningCore)
   const poSpec = asDict(poLine.spec)
   const poOverrides = asDict(poLine.specOverrides)
   const candidates: unknown[] = [
@@ -44,6 +45,8 @@ export function resolveSheetSize(line: unknown): string {
     planningLine.actualSheetSize,
     planningOverrides.sheetSize,
     planningOverrides.actualSheetSize,
+    planningCore.sheetSize,
+    planningCore.actualSheetSize,
     planningSpec.sheetSize,
     planningSpec.actualSheetSize,
     poLine.sheetSize,
@@ -91,6 +94,7 @@ export function resolveUps(line: unknown): number | null {
     specOverrides.ups,
     specOverridesMeta.ups,
     planningCore.upsPerSheet,
+    planningCore.ups,
     spec.ups,
     specMeta.ups,
     product.ups,

@@ -25,6 +25,9 @@ type CartonSpecs = {
   foilType: string | null
   embossingLeafing: string | null
   embossBlockId: string | null
+  colourBreakdown?: unknown
+  printingType?: string | null
+  pastingStyle?: string | null
 } | null
 
 type PoLine = {
@@ -730,7 +733,7 @@ export default function JobCardDetailPage() {
   const productName = jc.poLine?.cartonName ?? '—'
   const resolvedSheetSize = resolveSheetSize({
     ...(jc.poLine || {}),
-    specOverrides: {},
+    specOverrides: jc.poLine?.specOverrides || {},
     product: jc.poLine?.carton || {},
     carton: jc.poLine?.carton || {},
     materialQueue: jc.poLine?.materialQueue || {},
@@ -738,7 +741,7 @@ export default function JobCardDetailPage() {
   const sheetSizeDisplay = bible?.sheetSizeLabel ?? (resolvedSheetSize !== '-' ? resolvedSheetSize : '—')
   const resolvedUps = resolveUps({
     ...(jc.poLine || {}),
-    specOverrides: {},
+    specOverrides: jc.poLine?.specOverrides || {},
     product: jc.poLine?.carton || {},
     carton: jc.poLine?.carton || {},
     materialQueue: jc.poLine?.materialQueue || {},
@@ -752,8 +755,13 @@ export default function JobCardDetailPage() {
     (typeof lineSpec.colourSpec === 'string' && lineSpec.colourSpec.trim()) ||
     (typeof lineSpec.colour === 'string' && lineSpec.colour.trim()) ||
     (typeof lineSpec.color === 'string' && lineSpec.color.trim()) ||
-    (typeof jc.poLine?.carton?.coatingType === 'string' ? jc.poLine.carton.coatingType : '') ||
+    (typeof jc.poLine?.carton?.printingType === 'string' && jc.poLine.carton.printingType.trim()) ||
     '—'
+  const shadeFromCarton =
+    jc.poLine?.carton?.colourBreakdown && typeof jc.poLine.carton.colourBreakdown === 'object'
+      ? JSON.stringify(jc.poLine.carton.colourBreakdown)
+      : ''
+  const colorDisplay = colourSpec !== '—' ? colourSpec : shadeFromCarton || '—'
   const gsmDisplay = jc.poLine?.gsm ?? jc.poLine?.materialQueue?.gsm ?? jc.boardMaterial?.ledgerLink?.gsm ?? '—'
   const paperDisplay =
     jc.poLine?.paperType ??
@@ -891,7 +899,7 @@ export default function JobCardDetailPage() {
                 <div><p className="text-ds-ink-faint mb-1">Other Coating</p><p>{jc.poLine?.otherCoating ?? jc.poLine?.carton?.laminateType ?? 'None'}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Emboss / Leaf</p><p>{jc.poLine?.embossingLeafing ?? jc.poLine?.carton?.embossingLeafing ?? 'None'}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Paper</p><p>{paperDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Color / Spec</p><p>{colourSpec}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Color / Spec</p><p>{colorDisplay}</p></div>
               </div>
               <div className="grid md:grid-cols-5 gap-3 text-xs">
                 <div>
@@ -911,8 +919,8 @@ export default function JobCardDetailPage() {
                 <div><p className="text-ds-ink-faint mb-1">UPS</p><p>{upsDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">GSM</p><p>{gsmDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Dye Details</p><p>{dyeDetail && dyeDetail !== 'unavailable' ? `${dyeDetail.dyeNumber}` : '—'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Pasting</p><p>BSO</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Artwork</p><p>{jc.poLine?.carton?.artworkCode ?? '—'}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Pasting</p><p>{jc.poLine?.carton?.pastingStyle ?? 'BSO'}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Artwork</p><p>{jc.poLine?.artworkCode ?? jc.poLine?.carton?.artworkCode ?? '—'}</p></div>
               </div>
               <div>
                 <label className="block text-xs text-ds-ink-faint mb-1">Notes</label>
