@@ -15,8 +15,7 @@ export async function POST(req: NextRequest) {
 
   const candidates = await db.productionJobCard.findMany({
     where: {
-      status: { in: ['design_ready', 'pending', 'draft'] },
-      qaReleased: false,
+      status: { in: ['design_ready', 'pending', 'draft', 'archived'] },
     },
     select: {
       id: true,
@@ -27,7 +26,6 @@ export async function POST(req: NextRequest) {
 
   const testTagged = await db.productionJobCard.findMany({
     where: {
-      qaReleased: false,
       status: { notIn: ['in_progress', 'final_qc', 'qa_released', 'closed'] },
       OR: [
         { batchNumber: { contains: 'test', mode: 'insensitive' } },

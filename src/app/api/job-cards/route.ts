@@ -137,6 +137,7 @@ export async function GET(req: NextRequest) {
       quantity: number
       industrialPriority: boolean
       poNumber: string
+      customerName: string | null
       artworkCode: string | null
       dyeNumber: number | null
       shadeCode: string | null
@@ -174,7 +175,7 @@ export async function GET(req: NextRequest) {
         dimWidthMm: true,
         specOverrides: true,
         planningStatus: true,
-        po: { select: { isPriority: true, poNumber: true } },
+        po: { select: { isPriority: true, poNumber: true, customer: { select: { name: true } } } },
         materialQueue: {
           select: { boardType: true, gsm: true, ups: true, totalSheets: true },
         },
@@ -238,6 +239,7 @@ export async function GET(req: NextRequest) {
         quantity: l.quantity,
         industrialPriority: l.directorPriority === true || l.po.isPriority === true,
         poNumber: l.po.poNumber,
+        customerName: l.po.customer?.name ?? null,
         artworkCode: aw,
         dyeNumber: l.dieMaster?.dyeNumber ?? null,
         shadeCode: l.shadeCard?.shadeCode ?? null,
@@ -408,7 +410,8 @@ export async function POST(req: NextRequest) {
     shadeCardId: li.shadeCardId,
     shadeCard: li.shadeCard,
   })
-  const allowToolingOverride = process.env.CI_TRIAL_MODE === '1'
+  const isAwOrchestration = (orchestrationSource || '').toLowerCase() === 'aw_orchestration'
+  const allowToolingOverride = process.env.CI_TRIAL_MODE === '1' || isAwOrchestration
   if (!allGreen) {
     if (!(toolingOverrideTrial === true && allowToolingOverride)) {
       return NextResponse.json(

@@ -699,7 +699,7 @@ async function pushJobCardOnlyRow(
       wastageSheets: 0,
       idempotentIfExists: true,
       orchestrationSource: 'aw_orchestration',
-      toolingOverrideTrial: true,
+      toolingOverrideTrial: opts?.toolingOverrideTrial ?? true,
       toolingOverrideReason:
         opts?.toolingOverrideReason || 'Trial mode override from AW queue',
     }),

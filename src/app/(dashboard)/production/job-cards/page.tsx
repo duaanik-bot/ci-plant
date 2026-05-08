@@ -27,6 +27,7 @@ type JobCardRow = {
     cartonSize: string | null
     quantity: number
     poNumber: string
+    customerName?: string | null
   } | null
   yield?: YieldMetrics
 }
@@ -104,7 +105,10 @@ export default function JobCardsPage() {
   }, [load])
 
   const clients = useMemo(
-    () => Array.from(new Set(rows.map((r) => r.customer?.name).filter(Boolean))).sort(),
+    () =>
+      Array.from(
+        new Set(rows.map((r) => r.poLine?.customerName || r.customer?.name).filter(Boolean)),
+      ).sort(),
     [rows],
   )
 
@@ -115,12 +119,13 @@ export default function JobCardsPage() {
       const rd = mapReadiness(r)
       if (statusFilter !== 'all' && st !== statusFilter) return false
       if (readinessFilter !== 'all' && rd !== readinessFilter) return false
-      if (clientFilter !== 'all' && r.customer?.name !== clientFilter) return false
+      const clientName = r.poLine?.customerName || r.customer?.name || ''
+      if (clientFilter !== 'all' && clientName !== clientFilter) return false
       if (!q) return true
       const hay = [
         String(r.jobCardNumber),
         r.poLine?.cartonName || '',
-        r.customer?.name || '',
+        r.poLine?.customerName || r.customer?.name || '',
         r.poLine?.poNumber || '',
       ]
         .join(' ')
@@ -138,8 +143,8 @@ export default function JobCardsPage() {
         av = a.poLine?.cartonName || ''
         bv = b.poLine?.cartonName || ''
       } else if (sortBy === 'client') {
-        av = a.customer?.name || ''
-        bv = b.customer?.name || ''
+        av = a.poLine?.customerName || a.customer?.name || ''
+        bv = b.poLine?.customerName || b.customer?.name || ''
       } else if (sortBy === 'qty') {
         av = a.poLine?.quantity || 0
         bv = b.poLine?.quantity || 0
@@ -360,7 +365,7 @@ export default function JobCardsPage() {
                     </td>
                     <td className="px-3 py-3 cursor-pointer" onClick={() => setAuditRow(r)}>JC-{r.jobCardNumber}</td>
                     <td className="px-3 py-3 cursor-pointer" onClick={() => setAuditRow(r)}>{r.poLine?.cartonName || '-'}</td>
-                    <td className="px-3 py-3">{r.customer?.name || '-'}</td>
+                    <td className="px-3 py-3">{r.poLine?.customerName || r.customer?.name || '-'}</td>
                     <td className="px-3 py-3">{r.poLine?.poNumber || '-'}</td>
                     <td className="px-3 py-3">{r.poLine?.quantity ?? 0}</td>
                     <td className="px-3 py-3"><span className={`px-2 py-1 rounded-full text-xs ${readinessTone[rd]}`}>{rd.replace('_', ' ')}</span></td>
