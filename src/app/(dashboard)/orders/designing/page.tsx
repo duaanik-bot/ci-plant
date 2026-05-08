@@ -542,10 +542,8 @@ function canPushJobCardRow(r: Row): boolean {
     r.readiness?.approvalsComplete === true ||
     r.readiness?.artworkApproved === true ||
     (!!spec.customerApprovalPharma && !!spec.shadeCardQaTextApproval)
-  const toolingReadyOrNotRequired =
-    !!r.setNumber?.trim() && hasToolingSheetSize(r, spec) && resolveUps({ ...(r as unknown as Record<string, unknown>), specOverrides: spec, spec }) != null
   const rowClosed = readAwPoStatus(spec) === AW_PO_STATUS.CLOSED
-  return awApproved && toolingReadyOrNotRequired && !rowClosed && !hasLinkedJobCard(r)
+  return awApproved && !rowClosed && !hasLinkedJobCard(r)
 }
 
 function pushJobCardBlockReason(r: Row): string | null {
@@ -558,10 +556,6 @@ function pushJobCardBlockReason(r: Row): string | null {
     r.readiness?.artworkApproved === true ||
     (!!spec.customerApprovalPharma && !!spec.shadeCardQaTextApproval)
   if (!awApproved) return 'artwork approval pending'
-  if (!r.setNumber?.trim()) return 'set number missing'
-  if (!hasToolingSheetSize(r, spec)) return 'sheet size missing'
-  const ups = resolveUps({ ...(r as unknown as Record<string, unknown>), specOverrides: spec, spec })
-  if (ups == null) return 'UPS missing'
   return null
 }
 
@@ -705,13 +699,9 @@ async function pushJobCardOnlyRow(
       wastageSheets: 0,
       idempotentIfExists: true,
       orchestrationSource: 'aw_orchestration',
-      ...(opts?.toolingOverrideTrial
-        ? {
-            toolingOverrideTrial: true,
-            toolingOverrideReason:
-              opts.toolingOverrideReason || 'Manual trial override from AW queue',
-          }
-        : {}),
+      toolingOverrideTrial: true,
+      toolingOverrideReason:
+        opts?.toolingOverrideReason || 'Trial mode override from AW queue',
     }),
   })
   const json = (await res.json().catch(() => ({}))) as {
