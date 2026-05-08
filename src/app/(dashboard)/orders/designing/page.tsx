@@ -121,6 +121,8 @@ type User = { id: string; name: string }
 
 /** AW queue designer column filter. */
 type DesignerFilterValue = 'all' | 'unassigned' | string
+type DrawerPushStep = 'plate' | 'die' | 'emboss' | 'shade' | 'jobCard'
+type DrawerPushState = 'idle' | 'ok' | 'failed' | 'skipped'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const PREPRESS_AUDIT_LEAD = DEFAULT_PREPRESS_AUDIT_LEAD
@@ -893,6 +895,14 @@ export default function DesigningQueuePage() {
   const [activeRowDrawer, setActiveRowDrawer] = useState<Row | null>(null)
   const [drawerSaving, setDrawerSaving] = useState(false)
   const [drawerPushAllBusy, setDrawerPushAllBusy] = useState(false)
+  const [drawerPushStates, setDrawerPushStates] = useState<Record<DrawerPushStep, DrawerPushState>>({
+    plate: 'idle',
+    die: 'idle',
+    emboss: 'idle',
+    shade: 'idle',
+    jobCard: 'idle',
+  })
+  const [drawerPushErrors, setDrawerPushErrors] = useState<Partial<Record<DrawerPushStep, string>>>({})
   const [drawerForm, setDrawerForm] = useState<{
     cartonName: string
     cartonSize: string
@@ -932,6 +942,8 @@ export default function DesigningQueuePage() {
   useEffect(() => {
     if (!activeRowDrawer) {
       setDrawerForm(null)
+      setDrawerPushStates({ plate: 'idle', die: 'idle', emboss: 'idle', shade: 'idle', jobCard: 'idle' })
+      setDrawerPushErrors({})
       return
     }
     const spec = (activeRowDrawer.specOverrides || {}) as Record<string, unknown>
@@ -995,37 +1007,153 @@ export default function DesigningQueuePage() {
     }
   }
 
+  function buildMergedRowFromDrawerForm(): Row | null {
+    if (!activeRowDrawer || !drawerForm) return null
+    const mergedSpec = {
+      ...(((activeRowDrawer.specOverrides || {}) as Record<string, unknown>) || {}),
+      sheetSize: drawerForm.sheetSize.trim() || null,
+      actualSheetSize: drawerForm.sheetSize.trim() || null,
+      ups: Number.isFinite(Number(drawerForm.ups)) && Number(drawerForm.ups) > 0 ? Number(drawerForm.ups) : null,
+      dieNumber: drawerForm.dieNumber.trim() || null,
+      embossBlockNumber: drawerForm.embossBlockNumber.trim() || null,
+      colorSpec: drawerForm.colorSpec.trim() || null,
+    }
+    return {
+      ...activeRowDrawer,
+      setNumber: drawerForm.setNumber.trim() || activeRowDrawer.setNumber,
+      artworkCode: drawerForm.artworkCode.trim() || activeRowDrawer.artworkCode,
+      paperType: drawerForm.boardType.trim() || activeRowDrawer.paperType,
+      coatingType: drawerForm.coating.trim() || activeRowDrawer.coatingType,
+      embossingLeafing: drawerForm.embossing.trim() || activeRowDrawer.embossingLeafing,
+      specOverrides: mergedSpec,
+    }
+  }
+
+  async function dispatchHubStep(row: Row, step: DrawerPushStep): Promise<{ ok: boolean; error?: string }> {
+    try {
+      if (step === 'shade') {
+        window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')
+        return { ok: true }
+      }
+
+      if (step === 'jobCard') {
+        const jc = await pushJobCardOnlyRow(row)
+        return jc.ok ? { ok: true } : { ok: false, error: jc.error || 'Job card push failed' }
+      }
+
+      const spec = (row.specOverrides || {}) as Record<string, unknown>
+      const actualSheetSize = resolveAwSheetSizeFromRow(row)
+      const upsRaw = spec.ups ?? spec.numberOfUps
+      const ups = typeof upsRaw === 'number' && Number.isFinite(upsRaw) && upsRaw >= 1 ? Math.floor(upsRaw) : 1
+      const setN = (row.setNumber || '').trim()
+      const aw = (row.artworkCode || '').trim()
+
+      if (!setN) return { ok: false, error: 'Set number missing' }
+      if (!aw) return { ok: false, error: 'Artwork code missing' }
+      if (!actualSheetSize || actualSheetSize === '-') return { ok: false, error: 'Sheet size missing' }
+
+      if (step === 'plate') {
+        const body = {
+          poLineId: row.id,
+          setNumber: setN,
+          awCode: aw,
+          customerApproval: true,
+          qaTextCheckApproval: true,
+          status: 'PUSH_TO_PRODUCTION_QUEUE',
+        }
+        const res = await fetch('/api/plate-hub', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        const json = (await res.json().catch(() => ({}))) as { error?: string }
+        return res.ok || res.status === 409
+          ? { ok: true }
+          : { ok: false, error: json.error || 'Plate push failed' }
+      }
+
+      if (step === 'die') {
+        const body = {
+          toolType: 'DIE',
+          awCode: aw,
+          actualSheetSize,
+          ups,
+          jobId: row.id,
+          setNumber: setN,
+          source: 'NEW',
+        }
+        const res = await fetch('/api/tooling-hub/dispatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        const json = (await res.json().catch(() => ({}))) as { error?: string }
+        return res.ok ? { ok: true } : { ok: false, error: json.error || 'Die push failed' }
+      }
+
+      const body = {
+        toolType: 'BLOCK',
+        awCode: aw,
+        actualSheetSize,
+        blockType: String(row.embossingLeafing || 'Emboss').trim() || 'Emboss',
+        jobId: row.id,
+        setNumber: setN,
+        source: 'NEW',
+      }
+      const res = await fetch('/api/tooling-hub/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string }
+      return res.ok ? { ok: true } : { ok: false, error: json.error || 'Emboss push failed' }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Step failed' }
+    }
+  }
+
+  async function retryDrawerStep(step: DrawerPushStep) {
+    const row = buildMergedRowFromDrawerForm()
+    if (!row) return
+    setDrawerPushStates((prev) => ({ ...prev, [step]: 'idle' }))
+    const result = await dispatchHubStep(row, step)
+    setDrawerPushStates((prev) => ({ ...prev, [step]: result.ok ? 'ok' : 'failed' }))
+    setDrawerPushErrors((prev) => ({ ...prev, [step]: result.error }))
+    if (result.ok) {
+      toast.success(`${step} push completed`)
+      await load()
+    } else {
+      toast.error(result.error || `${step} push failed`)
+    }
+  }
+
   async function pushAllFromDrawer() {
     if (!activeRowDrawer || !drawerForm) return
     setDrawerPushAllBusy(true)
     try {
       await saveDrawerDetails()
-      const mergedSpec = {
-        ...(((activeRowDrawer.specOverrides || {}) as Record<string, unknown>) || {}),
-        sheetSize: drawerForm.sheetSize.trim() || null,
-        actualSheetSize: drawerForm.sheetSize.trim() || null,
-        ups: Number.isFinite(Number(drawerForm.ups)) && Number(drawerForm.ups) > 0 ? Number(drawerForm.ups) : null,
-        dieNumber: drawerForm.dieNumber.trim() || null,
-        embossBlockNumber: drawerForm.embossBlockNumber.trim() || null,
+      const mergedRow = buildMergedRowFromDrawerForm()
+      if (!mergedRow) return
+      const embossNeeded = isEmbossingRequired(mergedRow.embossingLeafing)
+      const nextStates: Record<DrawerPushStep, DrawerPushState> = {
+        plate: 'idle',
+        die: 'idle',
+        emboss: embossNeeded ? 'idle' : 'skipped',
+        shade: 'idle',
+        jobCard: 'idle',
       }
-      const mergedRow: Row = {
-        ...activeRowDrawer,
-        setNumber: drawerForm.setNumber.trim() || activeRowDrawer.setNumber,
-        artworkCode: drawerForm.artworkCode.trim() || activeRowDrawer.artworkCode,
-        paperType: drawerForm.boardType.trim() || activeRowDrawer.paperType,
-        coatingType: drawerForm.coating.trim() || activeRowDrawer.coatingType,
-        embossingLeafing: drawerForm.embossing.trim() || activeRowDrawer.embossingLeafing,
-        specOverrides: mergedSpec,
+      const nextErrors: Partial<Record<DrawerPushStep, string>> = {}
+      for (const step of (['plate', 'die', 'emboss', 'shade', 'jobCard'] as DrawerPushStep[])) {
+        if (step === 'emboss' && !embossNeeded) continue
+        const result = await dispatchHubStep(mergedRow, step)
+        nextStates[step] = result.ok ? 'ok' : 'failed'
+        if (!result.ok) nextErrors[step] = result.error || `${step} push failed`
       }
-
-      await pushToolingFromList(mergedRow, 'DIE')
-      if (isEmbossingRequired(mergedRow.embossingLeafing)) {
-        await pushToolingFromList(mergedRow, 'BLOCK')
-      }
-      await finalizeFromList(mergedRow)
-      window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')
-      await pushJobCardFromList(mergedRow)
-      toast.success('Pushed to hubs + Job Card')
+      setDrawerPushStates(nextStates)
+      setDrawerPushErrors(nextErrors)
+      const failed = Object.entries(nextStates).filter(([, s]) => s === 'failed').map(([k]) => k)
+      if (failed.length === 0) toast.success('Push All completed successfully')
+      else toast.error(`Push All partial failure: ${failed.join(', ')}`)
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Push all failed')
@@ -2538,6 +2666,17 @@ export default function DesigningQueuePage() {
               const designer = resolvePlanningDesignerName(spec, userById) || '-'
               const tooling = activeRowDrawer.readiness?.readyForProduction ? 'Ready' : 'Pending'
               const pr = activeRowDrawer.readiness?.pipelinePhase ?? '-'
+              const checklist = drawerForm
+                ? [
+                    { label: 'Sheet size', ok: drawerForm.sheetSize.trim().length > 0 },
+                    { label: 'UPS', ok: Number.isFinite(Number(drawerForm.ups)) && Number(drawerForm.ups) > 0 },
+                    { label: 'Set no', ok: drawerForm.setNumber.trim().length > 0 },
+                    { label: 'Artwork code', ok: drawerForm.artworkCode.trim().length > 0 },
+                    { label: 'Die number', ok: drawerForm.dieNumber.trim().length > 0 },
+                    { label: 'Emboss block no', ok: drawerForm.embossBlockNumber.trim().length > 0 || !isEmbossingRequired(drawerForm.embossing) },
+                  ]
+                : []
+              const checklistOk = checklist.every((item) => item.ok)
               return (
                 <div className="space-y-3 text-xs">
                   <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/40 p-3">
@@ -2557,6 +2696,21 @@ export default function DesigningQueuePage() {
 
                   {drawerForm ? (
                     <div className="space-y-2 rounded border border-ds-line/40 p-3">
+                      <div className="rounded border border-ds-line/50 bg-ds-elevated/20 p-2">
+                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">AW Push Readiness Checklist</p>
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                          {checklist.map((item) => (
+                            <div key={item.label} className="flex items-center gap-1.5">
+                              <span className={`inline-block h-1.5 w-1.5 rounded-full ${item.ok ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                              <span className={item.ok ? 'text-emerald-700' : 'text-rose-700'}>{item.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {!checklistOk ? (
+                          <p className="mt-1 text-[11px] text-rose-600">Complete all required fields before Push All.</p>
+                        ) : null}
+                      </div>
+
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">Editable Carton & Specs</p>
                       <div className="grid grid-cols-2 gap-2">
                         <label className="space-y-1"><span className="text-ds-ink-faint">Carton</span><input value={drawerForm.cartonName} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, cartonName: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
@@ -2588,6 +2742,53 @@ export default function DesigningQueuePage() {
                       </div>
                     </div>
                   ) : null}
+
+                  <div className="space-y-1 rounded border border-ds-line/40 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">Tooling Push Tracker</p>
+                    <div className="grid grid-cols-5 gap-1">
+                      {(['plate', 'die', 'emboss', 'shade', 'jobCard'] as DrawerPushStep[]).map((step) => {
+                        const state = drawerPushStates[step]
+                        const label = step === 'jobCard' ? 'Job Card' : step.charAt(0).toUpperCase() + step.slice(1)
+                        const cls =
+                          state === 'ok'
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                            : state === 'failed'
+                              ? 'border-rose-300 bg-rose-50 text-rose-700'
+                              : state === 'skipped'
+                                ? 'border-ds-line/50 bg-ds-elevated/20 text-ds-ink-faint'
+                                : 'border-ds-line/50 bg-ds-main text-ds-ink-faint'
+                        return (
+                          <div key={step} className={`rounded border px-2 py-1 text-center text-[11px] ${cls}`}>
+                            {label}: {state}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {Object.values(drawerPushStates).some((s) => s === 'failed') ? (
+                      <div className="rounded border border-rose-300 bg-rose-50 p-2">
+                        <p className="mb-1 text-[11px] font-medium text-rose-700">Failure Recovery</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(Object.entries(drawerPushStates) as [DrawerPushStep, DrawerPushState][])
+                            .filter(([, s]) => s === 'failed')
+                            .map(([step]) => (
+                              <button
+                                key={step}
+                                type="button"
+                                className="rounded border border-rose-300 px-2 py-1 text-[11px] text-rose-700 hover:bg-rose-100"
+                                onClick={() => void retryDrawerStep(step)}
+                              >
+                                Retry {step}
+                              </button>
+                            ))}
+                        </div>
+                        <p className="mt-1 text-[11px] text-rose-700">
+                          {Object.entries(drawerPushErrors)
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join(' • ')}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
 
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
@@ -2628,7 +2829,7 @@ export default function DesigningQueuePage() {
                     <Button
                       className="h-8"
                       onClick={() => void pushAllFromDrawer()}
-                      disabled={drawerPushAllBusy}
+                      disabled={drawerPushAllBusy || !checklistOk}
                     >
                       {drawerPushAllBusy ? 'Pushing…' : 'Push All'}
                     </Button>
