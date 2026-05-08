@@ -56,6 +56,8 @@ const createSchema = z.object({
   idempotentIfExists: z.boolean().optional(),
   postPressRouting: postPressRoutingSchema.optional(),
   orchestrationSource: z.string().max(64).optional(),
+  toolingOverrideTrial: z.boolean().optional(),
+  toolingOverrideReason: z.string().max(240).optional(),
 })
 
 export async function GET(req: NextRequest) {
@@ -305,6 +307,8 @@ export async function POST(req: NextRequest) {
     idempotentIfExists,
     postPressRouting: bodyPostPress,
     orchestrationSource,
+    toolingOverrideTrial,
+    toolingOverrideReason,
   } = parsed.data
 
   const shared = jobCardSchema.safeParse({
@@ -404,11 +408,41 @@ export async function POST(req: NextRequest) {
     shadeCardId: li.shadeCardId,
     shadeCard: li.shadeCard,
   })
+  const allowToolingOverride = process.env.CI_TRIAL_MODE === '1'
   if (!allGreen) {
-    return NextResponse.json(
-      { error: 'Tooling not ready — complete required tooling (or mark not required) before pushing Job Card.' },
-      { status: 400 },
-    )
+    if (!(toolingOverrideTrial === true && allowToolingOverride)) {
+      return NextResponse.json(
+        {
+          error: 'Tooling not ready — complete required tooling (or mark not required) before pushing Job Card.',
+          errorCode: 'TOOLING_BLOCKED',
+          overrideAllowed: allowToolingOverride,
+          blockingSegments: computeFivePointReadiness({
+            artworkLocksCompleted: awApproved ? 2 : 0,
+            platesStatus,
+            materialGate,
+            dieStatus,
+            embossingLeafing: li.embossingLeafing ?? li.carton?.embossingLeafing,
+            embossStatus,
+            shadeCardId: li.shadeCardId,
+            shadeCard: li.shadeCard,
+          }).segments.filter((s) => s.state === 'blocked').map((s) => s.abbr),
+        },
+        { status: 400 },
+      )
+    }
+  }
+  if (!allGreen && toolingOverrideTrial === true && allowToolingOverride) {
+    await createAuditLog({
+      userId: user!.id,
+      action: 'UPDATE',
+      tableName: 'po_line_items',
+      recordId: li.id,
+      newValue: {
+        mode: 'trial_tooling_override',
+        reason: toolingOverrideReason || 'Manual trial override from AW push to job card',
+        orchestrationSource: orchestrationSource || 'aw_orchestration',
+      },
+    })
   }
 
   let resolvedMachineId: string | null = bodyMachineId ?? null

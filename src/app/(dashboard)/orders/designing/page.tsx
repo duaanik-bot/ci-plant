@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -106,7 +106,14 @@ type Row = {
   }
   directorPriority?: boolean
   directorHold?: boolean
-  materialQueue?: { totalSheets: number } | null
+  materialQueue?: {
+    totalSheets: number
+    boardType?: string | null
+    gsm?: number | null
+    ups?: number | null
+    sheetLengthMm?: number | null
+    sheetWidthMm?: number | null
+  } | null
 }
 
 type Customer = { id: string; name: string; logoUrl?: string | null }
@@ -530,9 +537,27 @@ function canPushJobCardRow(r: Row): boolean {
     r.readiness?.approvalsComplete === true ||
     r.readiness?.artworkApproved === true ||
     (!!spec.customerApprovalPharma && !!spec.shadeCardQaTextApproval)
-  const toolingReadyOrNotRequired = !!r.setNumber?.trim() && hasToolingSheetSize(r, spec)
+  const toolingReadyOrNotRequired =
+    !!r.setNumber?.trim() && hasToolingSheetSize(r, spec) && resolveUps({ ...(r as unknown as Record<string, unknown>), specOverrides: spec, spec }) != null
   const rowClosed = readAwPoStatus(spec) === AW_PO_STATUS.CLOSED
   return awApproved && toolingReadyOrNotRequired && !rowClosed && !hasLinkedJobCard(r)
+}
+
+function pushJobCardBlockReason(r: Row): string | null {
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  const rowClosed = readAwPoStatus(spec) === AW_PO_STATUS.CLOSED
+  if (rowClosed) return 'row is closed'
+  if (hasLinkedJobCard(r)) return 'job card already created'
+  const awApproved =
+    r.readiness?.approvalsComplete === true ||
+    r.readiness?.artworkApproved === true ||
+    (!!spec.customerApprovalPharma && !!spec.shadeCardQaTextApproval)
+  if (!awApproved) return 'artwork approval pending'
+  if (!r.setNumber?.trim()) return 'set number missing'
+  if (!hasToolingSheetSize(r, spec)) return 'sheet size missing'
+  const ups = resolveUps({ ...(r as unknown as Record<string, unknown>), specOverrides: spec, spec })
+  if (ups == null) return 'UPS missing'
+  return null
 }
 
 function canRecallPlanningRow(r: Row, spec: Record<string, unknown>): boolean {
@@ -582,6 +607,8 @@ type JobCardOnlyResult = {
   ok: boolean
   error?: string
   idempotent?: boolean
+  errorCode?: string
+  overrideAllowed?: boolean
 }
 
 /** Plate Hub triage + job card creation in parallel (no dependency between legs). */
@@ -649,7 +676,10 @@ async function pushPlateHubAndCreateJobCardRow(r: Row): Promise<PlateJobOrchestr
   return { plate, jobCard, plateError, jobCardError }
 }
 
-async function pushJobCardOnlyRow(r: Row): Promise<JobCardOnlyResult> {
+async function pushJobCardOnlyRow(
+  r: Row,
+  opts?: { toolingOverrideTrial?: boolean; toolingOverrideReason?: string },
+): Promise<JobCardOnlyResult> {
   const mqSheets = r.materialQueue?.totalSheets
   const requiredSheets = Math.max(
     1,
@@ -668,10 +698,29 @@ async function pushJobCardOnlyRow(r: Row): Promise<JobCardOnlyResult> {
       wastageSheets: 0,
       idempotentIfExists: true,
       orchestrationSource: 'aw_orchestration',
+      ...(opts?.toolingOverrideTrial
+        ? {
+            toolingOverrideTrial: true,
+            toolingOverrideReason:
+              opts.toolingOverrideReason || 'Manual trial override from AW queue',
+          }
+        : {}),
     }),
   })
-  const json = (await res.json().catch(() => ({}))) as { error?: string; idempotent?: boolean }
-  if (!res.ok) return { ok: false, error: json.error || `Job card (${res.status})` }
+  const json = (await res.json().catch(() => ({}))) as {
+    error?: string
+    idempotent?: boolean
+    errorCode?: string
+    overrideAllowed?: boolean
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: json.error || `Job card (${res.status})`,
+      errorCode: json.errorCode,
+      overrideAllowed: json.overrideAllowed === true,
+    }
+  }
   return { ok: true, idempotent: json.idempotent === true || res.status === 200 }
 }
 
@@ -840,6 +889,15 @@ export default function DesigningQueuePage() {
   const [hubsMenuOpen, setHubsMenuOpen] = useState(false)
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null)
   const [activeRowDrawer, setActiveRowDrawer] = useState<Row | null>(null)
+
+  const openRowDrawerFromClick = useCallback(
+    (e: MouseEvent<HTMLElement>, row: Row) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('button,input,select,textarea,a,label,[data-no-row-open="1"]')) return
+      setActiveRowDrawer(row)
+    },
+    [],
+  )
 
   const load = useCallback(async () => {
     try {
@@ -1255,7 +1313,18 @@ export default function DesigningQueuePage() {
   const pushJobCardFromList = async (r: Row) => {
     setJobCardPushingId(r.id)
     try {
-      const out = await pushJobCardOnlyRow(r)
+      let out = await pushJobCardOnlyRow(r)
+      if (!out.ok && out.errorCode === 'TOOLING_BLOCKED' && out.overrideAllowed) {
+        const proceed = window.confirm(
+          'Tooling not fully ready. Continue with trial/admin override?',
+        )
+        if (proceed) {
+          out = await pushJobCardOnlyRow(r, {
+            toolingOverrideTrial: true,
+            toolingOverrideReason: 'Confirmed in AW queue override prompt',
+          })
+        }
+      }
       if (out.ok) {
         toast.success(out.idempotent ? 'Job card already existed' : 'Job card created')
       } else {
@@ -1506,11 +1575,22 @@ export default function DesigningQueuePage() {
       if (!row) continue
       if (!canPushJobCardRow(row)) {
         fail += 1
-        failReasons.push(`${row.po.poNumber}: blocked (approval/tooling missing)`)
+        failReasons.push(`${row.cartonName || row.po.poNumber}: ${pushJobCardBlockReason(row) || 'blocked'}`)
         continue
       }
       try {
-        const out = await pushJobCardOnlyRow(row)
+        let out = await pushJobCardOnlyRow(row)
+        if (!out.ok && out.errorCode === 'TOOLING_BLOCKED' && out.overrideAllowed) {
+          const proceed = window.confirm(
+            `Tooling not fully ready for ${row.cartonName || row.po.poNumber}. Continue with trial/admin override?`,
+          )
+          if (proceed) {
+            out = await pushJobCardOnlyRow(row, {
+              toolingOverrideTrial: true,
+              toolingOverrideReason: 'Confirmed in AW bulk override prompt',
+            })
+          }
+        }
         if (out.ok) {
           ok += 1
         } else {
@@ -1776,6 +1856,7 @@ export default function DesigningQueuePage() {
                   return (
                     <Fragment key={`aw-group:${groupId}`}>
                       <tr
+                        onClick={(e) => openRowDrawerFromClick(e, firstRow)}
                         className={`border-l-[3px] transition-colors ${
                           groupCompleted
                             ? 'border-emerald-500/70 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
@@ -1964,6 +2045,7 @@ export default function DesigningQueuePage() {
                         return (
                           <tr
                             key={`aw-sub:${r.id}`}
+                            onClick={(e) => openRowDrawerFromClick(e, r)}
                             className={`border-l-[3px] transition-colors ${
                               completed
                                 ? 'border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
@@ -2107,6 +2189,7 @@ export default function DesigningQueuePage() {
                 return (
                   <tr
                     key={r.id}
+                    onClick={(e) => openRowDrawerFromClick(e, r)}
                     className={`transition-colors ${
                       priRow
                         ? `${INDUSTRIAL_PRIORITY_ROW_CLASS} hover:bg-ds-warning/5 dark:hover:bg-ds-warning/12`

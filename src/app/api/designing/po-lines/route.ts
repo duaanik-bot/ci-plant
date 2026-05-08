@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const list = await db.poLineItem.findMany({
     where: {
       ...(customerId ? { po: { customerId } } : {}),
-      planningStatus: { in: ['planned', 'design_ready', 'job_card_created'] },
+      planningStatus: { in: ['pending', 'planned', 'design_ready', 'job_card_created'] },
     },
     orderBy: [
       { directorPriority: 'desc' },
@@ -36,9 +36,54 @@ export async function GET(req: NextRequest) {
           customer: { select: { id: true, name: true, logoUrl: true } },
         },
       },
-      materialQueue: { select: { totalSheets: true } },
+      materialQueue: {
+        select: {
+          totalSheets: true,
+          boardType: true,
+          gsm: true,
+          ups: true,
+          sheetLengthMm: true,
+          sheetWidthMm: true,
+        },
+      },
+      carton: {
+        select: {
+          blankLength: true,
+          blankWidth: true,
+          paperType: true,
+          gsm: true,
+        },
+      },
     },
   })
+
+  // Live-flow state repair: if a line is already handed to AW but still left at pending/planned,
+  // sync it once to design_ready so AW → Job Card handoff can proceed.
+  const syncToDesignReadyIds = list
+    .filter((li) => ['pending', 'planned'].includes(li.planningStatus))
+    .filter((li) => {
+      const spec = (li.specOverrides as Record<string, unknown> | null) || {}
+      const orch = readOrchestration(spec)
+      return (
+        !!spec.prePressSentToPlateHubAt ||
+        !!spec.planningQueueBumpAt ||
+        !!orch.planningForwardedAt ||
+        orch.planningFlowStatus === 'forwarded' ||
+        orch.planningFlowStatus === 'in_progress'
+      )
+    })
+    .map((li) => li.id)
+  if (syncToDesignReadyIds.length > 0) {
+    await db.poLineItem.updateMany({
+      where: { id: { in: syncToDesignReadyIds } },
+      data: { planningStatus: 'design_ready' },
+    })
+    for (const li of list) {
+      if (syncToDesignReadyIds.includes(li.id)) {
+        li.planningStatus = 'design_ready'
+      }
+    }
+  }
 
   // Attach minimal readiness flags on the server for stable UI
   const mapped = await Promise.all(
@@ -154,4 +199,3 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(mapped)
 }
-

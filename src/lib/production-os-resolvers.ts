@@ -23,6 +23,55 @@ function asPositiveNum(v: unknown): number | null {
 }
 
 export function resolveSheetSize(line: unknown): string {
+  const d = asDict(line)
+  const awItem = asDict((d as Dict).awItem)
+  const planningLine = asDict((d as Dict).planningLine)
+  const poLine = asDict((d as Dict).poLine)
+  const spec = asDict(d.spec)
+  const specOverrides = asDict(d.specOverrides)
+  const nestedSpec = asDict(spec.spec)
+  const nestedOverridesSpec = asDict(specOverrides.spec)
+  const planningSpec = asDict(planningLine.spec)
+  const planningOverrides = asDict(planningLine.specOverrides)
+  const poSpec = asDict(poLine.spec)
+  const poOverrides = asDict(poLine.specOverrides)
+  const candidates: unknown[] = [
+    d.sheetSize,
+    d.actualSheetSize,
+    awItem.sheetSize,
+    awItem.actualSheetSize,
+    planningLine.sheetSize,
+    planningLine.actualSheetSize,
+    planningOverrides.sheetSize,
+    planningOverrides.actualSheetSize,
+    planningSpec.sheetSize,
+    planningSpec.actualSheetSize,
+    poLine.sheetSize,
+    poLine.actualSheetSize,
+    poOverrides.sheetSize,
+    poOverrides.actualSheetSize,
+    poSpec.sheetSize,
+    poSpec.actualSheetSize,
+    specOverrides.sheetSize,
+    specOverrides.actualSheetSize,
+    spec.sheetSize,
+    spec.actualSheetSize,
+    nestedSpec.sheetSize,
+    nestedSpec.actualSheetSize,
+    nestedOverridesSpec.sheetSize,
+    nestedOverridesSpec.actualSheetSize,
+    asDict(d.carton).sheetSize,
+    asDict(d.product).sheetSize,
+  ]
+  for (const c of candidates) {
+    const t = asText(c)
+    if (t) return t
+  }
+  const carton = asDict(d.carton)
+  const product = asDict(d.product)
+  const blankLength = asPositiveNum(carton.blankLength ?? product.blankLength)
+  const blankWidth = asPositiveNum(carton.blankWidth ?? product.blankWidth)
+  if (blankLength != null && blankWidth != null) return `${blankLength}x${blankWidth}`
   return resolveSheetSizeLegacy(asDict(line))
 }
 
@@ -30,6 +79,9 @@ export function resolveUps(line: unknown): number | null {
   const d = asDict(line)
   const specOverrides = asDict(d.specOverrides)
   const spec = asDict(d.spec)
+  const specOverridesMeta = asDict(specOverrides.meta)
+  const specMeta = asDict(spec.meta)
+  const planningCore = asDict(specOverrides.planningCore)
   const product = asDict(d.product)
   const carton = asDict(d.carton)
   const productMaster = asDict((d as Dict).productMaster)
@@ -37,7 +89,10 @@ export function resolveUps(line: unknown): number | null {
   const candidates: unknown[] = [
     d.ups,
     specOverrides.ups,
+    specOverridesMeta.ups,
+    planningCore.upsPerSheet,
     spec.ups,
+    specMeta.ups,
     product.ups,
     carton.ups,
     productMaster.ups,
@@ -270,4 +325,3 @@ export function resolveRequirementFromLine(input: {
     sheetSizePair: parseSheetSizeToPair(resolveSheetSize(line)),
   }
 }
-

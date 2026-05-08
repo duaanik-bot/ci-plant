@@ -21,6 +21,7 @@ function num(value: unknown): number | null {
 
 export function resolveSheetSize(line: SizeSource): string {
   const spec = (line.specOverrides || line.spec || {}) as Record<string, unknown>
+  const meta = (spec.meta || {}) as Record<string, unknown>
   const planningCore = (spec.planningCore || {}) as Record<string, unknown>
   const nestedSpec = (spec.spec || {}) as Record<string, unknown>
   const product = (line.product || line.carton || {}) as Record<string, unknown>
@@ -32,6 +33,8 @@ export function resolveSheetSize(line: SizeSource): string {
     spec.sheet_size,
     nestedSpec.actualSheetSize,
     nestedSpec.sheetSize,
+    meta.cutSizeUsed,
+    meta.parentSize,
     planningCore.actualSheetSizeLabel,
     planningCore.sheetSize,
     planningCore.finalSheetSize,
