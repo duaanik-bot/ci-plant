@@ -1167,14 +1167,28 @@ export async function getMaterialReadiness(jobCardId: string, client: DbClient =
     }
   }
 
-  const [material, reservation, openShortage] = await Promise.all([
+  const [material, reservationByJob, reservationByPlanning, openShortageByJob, openShortageByPlanning] = await Promise.all([
     client.inventory.findUnique({ where: { id: req.materialId } }),
     client.materialReservation.findFirst({ where: { materialId: req.materialId, jobCardId } }),
+    req.planningId
+      ? client.materialReservation.findFirst({
+          where: { materialId: req.materialId, planningId: req.planningId },
+          orderBy: { createdAt: 'desc' },
+        })
+      : Promise.resolve(null),
     client.materialShortage.findFirst({
       where: { materialId: req.materialId, jobCardId, status: 'open' },
       orderBy: { createdAt: 'desc' },
     }),
+    req.planningId
+      ? client.materialShortage.findFirst({
+          where: { materialId: req.materialId, planningId: req.planningId, status: 'open' },
+          orderBy: { createdAt: 'desc' },
+        })
+      : Promise.resolve(null),
   ])
+  const reservation = reservationByJob ?? reservationByPlanning
+  const openShortage = openShortageByJob ?? openShortageByPlanning
 
   const prFromOpenShortage = openShortage?.purchaseReqId
     ? await client.purchaseRequisition.findUnique({ where: { id: openShortage.purchaseReqId } })
@@ -1183,7 +1197,13 @@ export async function getMaterialReadiness(jobCardId: string, client: DbClient =
   let pr = prFromOpenShortage
   if (!pr) {
     const shortages = await client.materialShortage.findMany({
-      where: { materialId: req.materialId, jobCardId },
+      where: {
+        materialId: req.materialId,
+        OR: [
+          { jobCardId },
+          ...(req.planningId ? [{ planningId: req.planningId }] : []),
+        ],
+      },
       orderBy: { createdAt: 'desc' },
       select: { id: true, purchaseReqId: true },
     })
@@ -1201,8 +1221,12 @@ export async function getMaterialReadiness(jobCardId: string, client: DbClient =
     if (!pr) {
       pr = await client.purchaseRequisition.findFirst({
         where: {
-          materialId: req.materialId,
-          sourceJobCardId: jobCardId,
+          OR: [
+            { materialId: req.materialId, sourceJobCardId: jobCardId },
+            ...(req.planningId
+              ? [{ materialId: req.materialId, sourcePlanningId: req.planningId }]
+              : []),
+          ],
         },
         orderBy: { raisedAt: 'desc' },
       })
@@ -1229,6 +1253,7 @@ export async function getMaterialReadiness(jobCardId: string, client: DbClient =
     grnEta: pr?.expectedDelivery ? pr.expectedDelivery.toISOString() : null,
     status,
     materialId: req.materialId,
+    materialCode: material?.materialCode ?? null,
     planningId: req.planningId,
   }
 }

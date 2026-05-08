@@ -17,11 +17,33 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
   const { id } = await context.params
   const jc = await db.productionJobCard.findUnique({ where: { id } })
   if (!jc) return NextResponse.json({ error: 'Job card not found' }, { status: 404 })
+  const planningLine = jc.jobCardNumber
+    ? await db.poLineItem.findFirst({
+        where: { jobCardNumber: jc.jobCardNumber },
+        select: { id: true },
+      })
+    : null
 
-  const [reservation, shortages] = await Promise.all([
+  const [reservationByJob, reservationByPlanning, shortagesByJob, shortagesByPlanning] = await Promise.all([
     db.materialReservation.findFirst({ where: { jobCardId: id } }),
+    planningLine
+      ? db.materialReservation.findFirst({
+          where: { planningId: planningLine.id },
+          orderBy: { createdAt: 'desc' },
+        })
+      : Promise.resolve(null),
     db.materialShortage.findMany({ where: { jobCardId: id }, orderBy: { createdAt: 'asc' } }),
+    planningLine
+      ? db.materialShortage.findMany({
+          where: { planningId: planningLine.id },
+          orderBy: { createdAt: 'asc' },
+        })
+      : Promise.resolve([]),
   ])
+  const reservation = reservationByJob ?? reservationByPlanning
+  const shortageMap = new Map<string, (typeof shortagesByJob)[number]>()
+  for (const s of [...shortagesByJob, ...shortagesByPlanning]) shortageMap.set(s.id, s)
+  const shortages = Array.from(shortageMap.values()).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
 
   const materialIds = Array.from(
     new Set([
@@ -33,7 +55,11 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
   const [prs, movements, allocations] = await Promise.all([
     db.purchaseRequisition.findMany({
       where: {
-        OR: [{ sourceJobCardId: id }, { shortageId: { in: shortages.map((s) => s.id) } }],
+        OR: [
+          { sourceJobCardId: id },
+          ...(planningLine ? [{ sourcePlanningId: planningLine.id }] : []),
+          { shortageId: { in: shortages.map((s) => s.id) } },
+        ],
       },
       orderBy: { raisedAt: 'asc' },
     }),

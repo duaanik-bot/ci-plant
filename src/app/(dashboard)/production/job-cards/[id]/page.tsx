@@ -84,6 +84,7 @@ type MaterialReadiness = {
   prStatus: string
   grnEta: string | null
   status: string
+  materialCode?: string | null
 }
 
 type MaterialTimelineEvent = {
@@ -768,7 +769,11 @@ export default function JobCardDetailPage() {
     jc.poLine?.materialQueue?.boardType ??
     jc.boardMaterial?.ledgerLink?.board ??
     '—'
-  const materialCodeDisplay = jc.issuedStockDisplay || jc.boardMaterial?.batchLotNumber || '—'
+  const materialCodeDisplay =
+    materialReadiness?.materialCode ||
+    jc.issuedStockDisplay ||
+    jc.boardMaterial?.batchLotNumber ||
+    '—'
   const requiredDisplay = materialReadiness?.requiredSheets ?? jc.requiredSheets
   const reservedDisplay = materialReadiness?.reservedSheets ?? jc.boardMaterial?.reservedSheets ?? 0
   const shortageDisplay = materialReadiness?.shortageSheets ?? jc.boardMaterial?.shortageSheets ?? 0
