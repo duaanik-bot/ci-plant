@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { getPostPressRouting, isEmbossingRequired } from '@/lib/emboss-conditions'
+import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 
 type Stage = {
   id: string
@@ -690,12 +691,22 @@ export default function JobCardDetailPage() {
   }
 
   const productName = jc.poLine?.cartonName ?? '—'
-  const sheetSizeDisplay =
-    bible?.sheetSizeLabel ??
-    (jc.poLine?.materialQueue
-      ? `${Number(jc.poLine.materialQueue.sheetLengthMm) || '—'}×${Number(jc.poLine.materialQueue.sheetWidthMm) || '—'} mm`
-      : '—')
-  const upsDisplay = bible?.ups ?? jc.poLine?.materialQueue?.ups ?? '—'
+  const resolvedSheetSize = resolveSheetSize({
+    ...(jc.poLine || {}),
+    specOverrides: {},
+    product: jc.poLine?.carton || {},
+    carton: jc.poLine?.carton || {},
+    materialQueue: jc.poLine?.materialQueue || {},
+  })
+  const sheetSizeDisplay = bible?.sheetSizeLabel ?? (resolvedSheetSize !== '-' ? resolvedSheetSize : '—')
+  const resolvedUps = resolveUps({
+    ...(jc.poLine || {}),
+    specOverrides: {},
+    product: jc.poLine?.carton || {},
+    carton: jc.poLine?.carton || {},
+    materialQueue: jc.poLine?.materialQueue || {},
+  })
+  const upsDisplay = bible?.ups ?? resolvedUps ?? '—'
   const grainDisplay = bible?.grainDirection ?? jc.poLine?.materialQueue?.grainDirection ?? '—'
 
   const boardStatus = boardReadiness

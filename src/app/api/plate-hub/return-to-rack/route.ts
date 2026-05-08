@@ -174,12 +174,6 @@ export async function POST(req: NextRequest) {
 
     for (const w of Array.from(wantedCanon)) {
       if (!neededCanonSet.has(w)) {
-        console.log('[plate-hub/return-to-rack] Requirement colour mismatch', {
-          returnedColourNames,
-          wantedCanon: Array.from(wantedCanon),
-          jobColours: needed.map((x) => x.name),
-          jobCanon: Array.from(neededCanonSet),
-        })
         const display =
           returnedColourNames.find((n) => plateColourCanonicalKey(n) === w) ?? w
         return NextResponse.json(

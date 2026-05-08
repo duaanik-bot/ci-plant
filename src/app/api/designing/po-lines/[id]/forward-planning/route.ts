@@ -73,7 +73,7 @@ export async function POST(
   const updated = await db.poLineItem.update({
     where: { id },
     data: {
-      planningStatus: 'planned',
+      planningStatus: 'design_ready',
       specOverrides: nextSpec as object,
     },
   })

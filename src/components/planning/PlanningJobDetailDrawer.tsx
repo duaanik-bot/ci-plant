@@ -11,7 +11,7 @@ import {
 } from '@/lib/master-enums'
 import { fetchMiniMasterOptions } from '@/lib/minimasters-options'
 import { mergePlanningMetaUps, readPlanningMeta } from '@/lib/planning-decision-spec'
-import { resolveSheetSize } from '@/lib/planning-sheet-size'
+import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
 import { StandardDrawer } from '@/components/design-system/StandardDrawer'
@@ -78,12 +78,18 @@ type MaterialReadinessPanelData = {
     requiredParentSheets: number
     shortageParentSheets: number
     wastagePct: number
+    sizeDeviationPct?: number
+    fitScore?: number
     yieldPct: number
     orientation: 'LxW' | 'WxL'
-    matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance'
+    matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance' | 'Compatible Size' | 'Fallback Option'
     status: 'Ready' | 'Partial' | 'Shortage'
-    tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
+    tags: Array<'Best Yield' | 'Lowest Wastage' | 'Closest GSM' | 'Most Available' | 'Exact Match' | 'GSM Tolerance' | 'Compatible Size' | 'Fallback Option' | 'Leftover Stock' | 'Leftover Reuse'>
     gsmDelta: number | null
+    sizeDiff?: number
+    matchRank?: number
+    isLeftover?: boolean
+    sourceTraceability?: string | null
     boardMatchMode?: 'exact' | 'cross_field' | 'fallback'
   }>
   closestAvailableOptions?: Array<{
@@ -100,12 +106,18 @@ type MaterialReadinessPanelData = {
     requiredParentSheets: number
     shortageParentSheets: number
     wastagePct: number
+    sizeDeviationPct?: number
+    fitScore?: number
     yieldPct: number
     orientation: 'LxW' | 'WxL'
-    matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance'
+    matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance' | 'Compatible Size' | 'Fallback Option'
     status: 'Ready' | 'Partial' | 'Shortage'
-    tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
+    tags: Array<'Best Yield' | 'Lowest Wastage' | 'Closest GSM' | 'Most Available' | 'Exact Match' | 'GSM Tolerance' | 'Compatible Size' | 'Fallback Option' | 'Leftover Stock' | 'Leftover Reuse'>
     gsmDelta: number | null
+    sizeDiff?: number
+    matchRank?: number
+    isLeftover?: boolean
+    sourceTraceability?: string | null
     boardMatchMode?: 'exact' | 'cross_field' | 'fallback'
   }>
   noMaterialsAtAll?: boolean
@@ -196,6 +208,19 @@ type ReserveConfirmDraft = {
   prQty: number
   leftoverAvailableAfterReserve: number
   currentReservedForLine: number
+  finalRequiredSheets: number
+  calculatedCutsPerSheet: number
+  selectedCutsPerSheetInput: string
+  isCutsManualOverride: boolean
+  overrideReason: string
+  selectedReason: string
+  leftoverLengthInput: string
+  leftoverWidthInput: string
+  leftoverQtyInput: string
+  leftoverRemarks: string
+  addLeftoverToWarehouse: boolean
+  leftoverWeightKg: number
+  cutSizeUsed: string
 }
 
 type ReservationUndoState = {
@@ -254,6 +279,53 @@ function toPositiveNumberString(value: unknown): string {
   return String(n)
 }
 
+function parseSizePair(raw: string): { length: number; width: number } | null {
+  const txt = String(raw || '').trim()
+  if (!txt) return null
+  const parts = txt
+    .replace(/[×*]/g, 'x')
+    .split('x')
+    .map((p) => Number(p.trim()))
+  if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return null
+  const length = Number(parts[0])
+  const width = Number(parts[1])
+  if (length <= 0 || width <= 0) return null
+  return { length, width }
+}
+
+function computeReserveDraftFromCuts(
+  prev: ReserveConfirmDraft,
+  nextCuts: number,
+  preservePrEdit: boolean,
+): ReserveConfirmDraft {
+  const cuts = Math.max(1, nextCuts)
+  const requiredParentSheets = Math.max(1, Math.ceil(prev.finalRequiredSheets / cuts))
+  const free = Math.max(0, prev.freeSheets)
+  const reserveQty = Math.min(requiredParentSheets, free)
+  const shortageQty = Math.max(0, requiredParentSheets - reserveQty)
+  const prQty = preservePrEdit ? prev.prQty : shortageQty
+  const prQtyInput = preservePrEdit ? prev.prQtyInput : String(shortageQty)
+  const leftoverAvailableAfterReserve = Math.max(0, free - reserveQty)
+  const leftoverQty = Number(prev.leftoverQtyInput) || 0
+  const leftoverLength = Number(prev.leftoverLengthInput) || 0
+  const leftoverWidth = Number(prev.leftoverWidthInput) || 0
+  const gsm = Number(prev.gsm || 0)
+  const leftoverWeightKg = Number(((leftoverLength * leftoverWidth * gsm * leftoverQty) / 1000000).toFixed(6))
+  return {
+    ...prev,
+    cutsPerSheet: cuts,
+    selectedCutsPerSheetInput: String(cuts),
+    requiredParentSheets,
+    reserveQty,
+    reserveQtyInput: String(reserveQty),
+    shortageQty,
+    prQty,
+    prQtyInput,
+    leftoverAvailableAfterReserve,
+    leftoverWeightKg,
+  }
+}
+
 export function PlanningJobDetailDrawer({
   line,
   open,
@@ -297,8 +369,8 @@ export function PlanningJobDetailDrawer({
   const [reservationControlBusy, setReservationControlBusy] = useState(false)
   const [reservationControlError, setReservationControlError] = useState<string | null>(null)
   const [reservationControl, setReservationControl] = useState<ReservationControlDraft | null>(null)
-  const [workspaceSortKey, setWorkspaceSortKey] = useState<'wastage' | 'cuts' | 'free' | 'gsm' | 'required'>('wastage')
-  const [workspaceSortDir, setWorkspaceSortDir] = useState<'asc' | 'desc'>('asc')
+  const [workspaceSortKey, setWorkspaceSortKey] = useState<'fit' | 'wastage' | 'sizeDeviation' | 'cuts' | 'free' | 'gsmDelta' | 'leftover' | 'gsm' | 'required'>('fit')
+  const [workspaceSortDir, setWorkspaceSortDir] = useState<'asc' | 'desc'>('desc')
 
   useEffect(() => {
     if (!line) {
@@ -323,6 +395,17 @@ export function PlanningJobDetailDrawer({
     setWastageSheetsInput(String(Number.isFinite(ws) ? ws : 150))
     setSelectionLocked(false)
   }, [line?.id, line?.remarks])
+
+  useEffect(() => {
+    setSelectedMaterialId('')
+    setReadiness(null)
+    setStockDetails(null)
+    setStockDetailsOpen(false)
+    setOptionDetailsOpen({})
+    setOptionDetailsByMaterial({})
+    setOptionDetailsLoading({})
+    setSuggestionsWorkspaceOpen(false)
+  }, [line?.id])
 
   useEffect(() => {
     let cancelled = false
@@ -526,9 +609,13 @@ export function PlanningJobDetailDrawer({
     const rows = [...visibleSuggestionOptions]
     rows.sort((a, b) => {
       const dir = workspaceSortDir === 'asc' ? 1 : -1
+      if (workspaceSortKey === 'fit') return ((a.fitScore ?? 0) - (b.fitScore ?? 0)) * dir
       if (workspaceSortKey === 'wastage') return (a.wastagePct - b.wastagePct) * dir
+      if (workspaceSortKey === 'sizeDeviation') return ((a.sizeDeviationPct ?? 0) - (b.sizeDeviationPct ?? 0)) * dir
       if (workspaceSortKey === 'cuts') return (a.cutsPerSheet - b.cutsPerSheet) * dir
       if (workspaceSortKey === 'free') return (a.freeSheets - b.freeSheets) * dir
+      if (workspaceSortKey === 'gsmDelta') return ((a.gsmDelta ?? Number.MAX_SAFE_INTEGER) - (b.gsmDelta ?? Number.MAX_SAFE_INTEGER)) * dir
+      if (workspaceSortKey === 'leftover') return ((a.isLeftover ? 1 : 0) - (b.isLeftover ? 1 : 0)) * dir
       if (workspaceSortKey === 'gsm') return ((a.gsm ?? 0) - (b.gsm ?? 0)) * dir
       return (a.requiredParentSheets - b.requiredParentSheets) * dir
     })
@@ -536,13 +623,17 @@ export function PlanningJobDetailDrawer({
   }, [visibleSuggestionOptions, workspaceSortDir, workspaceSortKey])
 
   const toggleWorkspaceSort = useCallback(
-    (key: 'wastage' | 'cuts' | 'free' | 'gsm' | 'required') => {
+    (key: 'fit' | 'wastage' | 'sizeDeviation' | 'cuts' | 'free' | 'gsmDelta' | 'leftover' | 'gsm' | 'required') => {
       if (workspaceSortKey === key) {
         setWorkspaceSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
         return
       }
       setWorkspaceSortKey(key)
-      setWorkspaceSortDir(key === 'cuts' || key === 'free' ? 'desc' : 'asc')
+      setWorkspaceSortDir(
+        key === 'fit' || key === 'cuts' || key === 'free' || key === 'leftover'
+          ? 'desc'
+          : 'asc',
+      )
     },
     [workspaceSortKey],
   )
@@ -651,12 +742,32 @@ export function PlanningJobDetailDrawer({
       (readiness?.suggestedBoardOptions || readiness?.closestAvailableOptions || []).find((o) => o.materialId === chosenMaterialId)?.materialCode ||
       readiness?.materialCode ||
       chosenMaterialId
+    const selectionReason = [
+      selectedMeta?.matchRank ? `Rank #${selectedMeta.matchRank}` : null,
+      selectedMeta?.tags?.includes('Exact Match') ? 'Exact size + GSM match' : null,
+      selectedMeta?.tags?.includes('Compatible Size') ? 'Compatible size fit' : null,
+      selectedMeta?.tags?.includes('GSM Tolerance') ? 'Within GSM tolerance' : null,
+      selectedMeta?.tags?.includes('Lowest Wastage') ? 'Lowest wastage' : null,
+      selectedMeta?.tags?.includes('Most Available') ? 'Best availability' : null,
+    ].filter(Boolean).join(' • ')
+    const reqPair = parseSizePair(readiness?.requiredFinalSize || '')
+    const parentPair = parseSizePair(selectedParentSize)
+    const autoLeftoverLength =
+      reqPair && parentPair
+        ? Math.max(0, Number((parentPair.length - reqPair.length).toFixed(4)))
+        : 0
+    const autoLeftoverWidth =
+      reqPair && parentPair
+        ? Math.max(0, Number((parentPair.width - reqPair.width).toFixed(4)))
+        : 0
     setReserveConfirm({
       materialId: chosenMaterialId,
       materialCode,
       parentSize: selectedParentSize,
       gsm: Number((readiness?.suggestedBoardOptions || readiness?.closestAvailableOptions || []).find((o) => o.materialId === chosenMaterialId)?.gsm ?? readiness?.gsm ?? null),
       cutsPerSheet: selectedCutsPerSheet,
+      calculatedCutsPerSheet: selectedCutsPerSheet,
+      selectedCutsPerSheetInput: String(selectedCutsPerSheet),
       requiredParentSheets: selectedRequiredParentSheets,
       availableSheets,
       reservedSheets,
@@ -670,6 +781,17 @@ export function PlanningJobDetailDrawer({
       prQty: shortageQty,
       leftoverAvailableAfterReserve: Math.max(0, reservable - reserveQty),
       currentReservedForLine: Math.max(0, Number(readiness?.reservedForLine || 0)),
+      finalRequiredSheets: requiredSheets,
+      isCutsManualOverride: false,
+      overrideReason: '',
+      selectedReason: selectionReason || 'Top ranked option based on fit and stock',
+      leftoverLengthInput: autoLeftoverLength > 0 ? String(autoLeftoverLength) : '',
+      leftoverWidthInput: autoLeftoverWidth > 0 ? String(autoLeftoverWidth) : '',
+      leftoverQtyInput: '',
+      leftoverRemarks: '',
+      addLeftoverToWarehouse: false,
+      leftoverWeightKg: 0,
+      cutSizeUsed: readiness?.requiredFinalSize || '',
     })
     setReservePrEdited(false)
     void loadOptionDetails(chosenMaterialId)
@@ -700,6 +822,13 @@ export function PlanningJobDetailDrawer({
       return
     }
     const safePrQty = Math.max(0, parsedPrQty)
+    if (
+      !reserveConfirm.isCutsManualOverride &&
+      reserveConfirm.cutsPerSheet > reserveConfirm.calculatedCutsPerSheet
+    ) {
+      setReserveModalError('Cuts per sheet cannot exceed calculated max without manual override')
+      return
+    }
     if (safeShortageQty > 0 && safePrQty === 0) {
       setReserveModalError('Shortage will remain without PR.')
       return
@@ -753,8 +882,19 @@ export function PlanningJobDetailDrawer({
           prQty: safePrQty,
           planningLineId: line.id,
           poLineId: line.id,
-          cutsPerSheet: reserveConfirm.cutsPerSheet || Number(meta.cutsPerSheet || 0),
+          cutsPerSheet: reserveConfirm.calculatedCutsPerSheet || Number(meta.cutsPerSheet || 0),
+          selectedCutsPerSheet: reserveConfirm.cutsPerSheet || Number(meta.cutsPerSheet || 0),
+          isCutsManualOverride: reserveConfirm.isCutsManualOverride,
+          overrideReason: reserveConfirm.overrideReason || null,
           parentSize: reserveConfirm.parentSize || String(meta.parentSize || ''),
+          leftover: {
+            addToWarehouse: reserveConfirm.addLeftoverToWarehouse,
+            leftoverLength: Number(reserveConfirm.leftoverLengthInput || 0),
+            leftoverWidth: Number(reserveConfirm.leftoverWidthInput || 0),
+            leftoverQty: Number(reserveConfirm.leftoverQtyInput || 0),
+            leftoverRemarks: reserveConfirm.leftoverRemarks || '',
+            cutSizeUsed: reserveConfirm.cutSizeUsed || '',
+          },
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -767,18 +907,6 @@ export function PlanningJobDetailDrawer({
           shortageId?: string
           details?: unknown
         }
-        console.error('[planning-reserve-debug]', {
-          materialId: reserveConfirm.materialId || null,
-          requiredParentSheets,
-          availableBefore: reserveConfirm.availableSheets,
-          reserveQty: safeReserveQty,
-          planningLineId: line.id || null,
-          errorCode: errData.errorCode || 'UNKNOWN',
-          message: errData.message || errData.error || 'Reservation failed',
-          debugMessage: (errData as { debugMessage?: string }).debugMessage || null,
-          failingFunction: (errData as { failingFunction?: string }).failingFunction || null,
-          details: errData.details || null,
-        })
         if (errData.retryable && errData.shortageId) {
           const retryMsg = errData.message || errData.error || 'Reservation completed, but PR creation failed.'
           setReserveInlineError(retryMsg)
@@ -987,15 +1115,6 @@ export function PlanningJobDetailDrawer({
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Action failed'
       setReadiness(readinessBefore)
-      if (reservationControl.mode === 'release') {
-        console.error('[planning-unreserve-debug]', {
-          materialId: reservationControl.materialId || null,
-          reservationId: null,
-          planningLineId: line.id || null,
-          reservedQty: reservationControl.currentReservedForLine || 0,
-          error: msg,
-        })
-      }
       console.error('[planning-reservation-control]', {
         mode: reservationControl.mode,
         planningId: line.id,
@@ -1157,9 +1276,15 @@ export function PlanningJobDetailDrawer({
   const spec = (line.specOverrides || {}) as Record<string, unknown>
   const renderUpsField = true
   const meta = readPlanningMeta(spec)
+  const resolvedUps = resolveUps({
+    ...line,
+    specOverrides: spec,
+    spec,
+    carton: (line.carton || {}) as Record<string, unknown>,
+  })
   const gangUpsStr =
-    renderUpsField && meta.ups != null && Number(meta.ups) >= 1
-      ? String(Math.floor(Number(meta.ups)))
+    renderUpsField && resolvedUps != null
+      ? String(Math.floor(Number(resolvedUps)))
       : ''
   const boardInput = String(spec.boardGrade || line.materialQueue?.boardType || '').trim()
   const resolvedSheetSize = resolveSheetSize({
@@ -1411,7 +1536,7 @@ export function PlanningJobDetailDrawer({
           <div className="mt-2 space-y-2">
             <p className="text-xs font-semibold text-ds-ink">Suggested Board Options</p>
             <p className="text-[11px] text-ds-ink-faint">
-              Suggestions are ranked by cuts, wastage, GSM match, and stock availability. User must manually lock material before reservation.
+              Suggestions are ranked by fit score (size, GSM, wastage, cuts, leftover reuse). User must manually lock material before reservation.
             </p>
             <div className="flex items-center justify-between">
               <p className="text-[11px] text-ds-ink-faint">
@@ -1437,7 +1562,7 @@ export function PlanningJobDetailDrawer({
             </div>
             {!hasDecisionInputs ? (
               <p className="text-xs text-ds-warning">Suggestions load when Sheet Size, Qty, and UPS are available.</p>
-            ) : readiness?.noMaterialsAtAll ? (
+            ) : readiness?.noMaterialsAtAll && visibleSuggestionCount === 0 ? (
               <p className="text-xs text-ds-warning">No materials exist in Paper Warehouse yet.</p>
             ) : visibleSuggestionCount === 0 ? (
               <p className="text-xs text-ds-warning">No suitable stock found. Create PR?</p>
@@ -1470,13 +1595,16 @@ export function PlanningJobDetailDrawer({
                             <span
                               key={tag}
                               className="text-[10px] text-ds-success"
-                              title={`Why this? ${tag === 'Best Yield' ? 'Highest cuts per parent sheet' : tag === 'Least Wastage' ? 'Lowest waste area among candidates' : tag === 'Closest GSM' ? 'Closest GSM to requested spec' : 'Best free stock availability'}`}
+                              title={`Why this? ${tag === 'Best Yield' ? 'Highest cuts per parent sheet' : tag === 'Lowest Wastage' ? 'Lowest waste area among candidates' : tag === 'Closest GSM' ? 'Closest GSM to requested spec' : tag === 'Leftover Reuse' ? 'Reuses leftover/offcut with strong fit' : 'Best free stock availability'}`}
                             >
                               {tag}
                             </span>
                           ))}
                           {isFallback ? <span className="text-[10px] text-ds-warning">Not Ideal - Check Manually</span> : null}
                           <span className="text-[10px] text-ds-ink-faint">{opt.matchType}</span>
+                          <span className="text-[10px] text-ds-ink-faint">Rank #{opt.matchRank ?? '-'}</span>
+                          <span className="text-[10px] text-ds-brand">Fit {Number(opt.fitScore ?? 0).toFixed(1)}%</span>
+                          {opt.isLeftover ? <span className="text-[10px] text-ds-brand">Leftover Stock</span> : null}
                           <span className={`text-[10px] ${
                             opt.status === 'Ready'
                               ? 'text-ds-success'
@@ -1496,11 +1624,16 @@ export function PlanningJobDetailDrawer({
                         <span>Reserved: {opt.reservedSheets}</span>
                         <span>Free: {opt.freeSheets}</span>
                         <span>Wastage: {opt.wastagePct}%</span>
+                        <span>Size Deviation: {Number(opt.sizeDeviationPct ?? 0).toFixed(2)}%</span>
+                        {opt.isLeftover ? <span>Leftover Size: {opt.size}</span> : <span />}
                         <span>Status: {opt.status}</span>
                         <span>
                           {opt.gsmDelta != null ? `GSM Δ ${opt.gsmDelta} (±${readiness?.gsmTolerance ?? 10})` : '-'}
                         </span>
                       </div>
+                      {opt.sourceTraceability ? (
+                        <p className="mt-1 text-[10px] text-ds-ink-faint">Source: {opt.sourceTraceability}</p>
+                      ) : null}
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         {hasActiveReservation ? (
                           <>
@@ -2144,9 +2277,14 @@ export function PlanningJobDetailDrawer({
             </p>
           </div>
           <div className="overflow-x-auto rounded border border-ds-line/40">
-            <table className="w-full min-w-[860px] table-auto text-left">
+            <table className="w-full min-w-[1080px] table-auto text-left">
               <thead className="bg-ds-elevated/30 text-[11px] uppercase tracking-wide text-ds-ink-faint">
                 <tr>
+                  <th className="px-2 py-2">
+                    <button type="button" className="hover:underline" onClick={() => toggleWorkspaceSort('fit')}>
+                      Fit Score
+                    </button>
+                  </th>
                   <th className="px-2 py-2">Material</th>
                   <th className="px-2 py-2">Parent Size</th>
                   <th className="px-2 py-2">
@@ -2174,6 +2312,21 @@ export function PlanningJobDetailDrawer({
                       Yield/Waste
                     </button>
                   </th>
+                  <th className="px-2 py-2">
+                    <button type="button" className="hover:underline" onClick={() => toggleWorkspaceSort('sizeDeviation')}>
+                      Size Dev %
+                    </button>
+                  </th>
+                  <th className="px-2 py-2">
+                    <button type="button" className="hover:underline" onClick={() => toggleWorkspaceSort('gsmDelta')}>
+                      GSM Δ
+                    </button>
+                  </th>
+                  <th className="px-2 py-2">
+                    <button type="button" className="hover:underline" onClick={() => toggleWorkspaceSort('leftover')}>
+                      Leftover
+                    </button>
+                  </th>
                   <th className="px-2 py-2">Match</th>
                   <th className="px-2 py-2">Status</th>
                   <th className="px-2 py-2">Action</th>
@@ -2187,9 +2340,13 @@ export function PlanningJobDetailDrawer({
                   return (
                   <Fragment key={`ws-${opt.materialId}`}>
                   <tr className="border-t border-ds-line/30">
+                    <td className={`px-2 py-2 ${mono}`}>{Number(opt.fitScore ?? 0).toFixed(1)}%</td>
                     <td className="px-2 py-2">
                       <p className={mono}>{opt.materialCode}</p>
                       <p className="text-ds-ink-faint">{opt.boardType || '-'} / {opt.boardClassification || '-'}</p>
+                      {opt.sourceTraceability ? (
+                        <p className="text-[10px] text-ds-ink-faint">{opt.sourceTraceability}</p>
+                      ) : null}
                     </td>
                     <td className={`px-2 py-2 ${mono}`}>{opt.size}</td>
                     <td className={`px-2 py-2 ${mono}`}>{opt.gsm ?? '-'}</td>
@@ -2197,6 +2354,9 @@ export function PlanningJobDetailDrawer({
                     <td className={`px-2 py-2 ${mono}`}>{opt.requiredParentSheets}</td>
                     <td className={`px-2 py-2 ${mono}`}>{opt.availableSheets} / {opt.reservedSheets} / {opt.freeSheets}</td>
                     <td className={`px-2 py-2 ${mono}`}>{opt.yieldPct}% / {opt.wastagePct}%</td>
+                    <td className={`px-2 py-2 ${mono}`}>{Number(opt.sizeDeviationPct ?? 0).toFixed(2)}%</td>
+                    <td className={`px-2 py-2 ${mono}`}>{opt.gsmDelta == null ? '-' : opt.gsmDelta}</td>
+                    <td className="px-2 py-2">{opt.isLeftover ? 'Leftover Reuse' : '-'}</td>
                     <td className="px-2 py-2">
                       <span>{opt.matchType}</span>
                       <span className="ml-1 text-ds-ink-faint">({opt.boardMatchMode === 'exact' ? 'Board exact' : opt.boardMatchMode === 'cross_field' ? 'Board mapped' : 'Board fallback'})</span>
@@ -2260,7 +2420,7 @@ export function PlanningJobDetailDrawer({
                   </tr>
                   {openOpt ? (
                     <tr className="border-t border-ds-line/20 bg-ds-elevated/20">
-                      <td className="px-2 py-2 text-xs text-ds-ink-faint" colSpan={10}>
+                      <td className="px-2 py-2 text-xs text-ds-ink-faint" colSpan={14}>
                         {optLoading ? (
                           <p>Loading…</p>
                         ) : !optDetails ? (
@@ -2333,13 +2493,74 @@ export function PlanningJobDetailDrawer({
                     <div><span className="text-ds-ink-muted">Material Code</span><p className={mono}>{reserveConfirm.materialCode || '-'}</p></div>
                     <div><span className="text-ds-ink-muted">Parent Size</span><p className={mono}>{reserveConfirm.parentSize || '-'}</p></div>
                     <div><span className="text-ds-ink-muted">GSM</span><p className={mono}>{reserveConfirm.gsm ?? '-'}</p></div>
-                    <div><span className="text-ds-ink-muted">Cuts per Sheet</span><p className={mono}>{reserveConfirm.cutsPerSheet}</p></div>
+                    <label className="block">
+                      <span className="text-ds-ink-muted">Cuts per Sheet</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={`${fieldInput} ${mono}`}
+                        value={reserveConfirm.selectedCutsPerSheetInput}
+                        onChange={(e) => {
+                          const raw = e.target.value
+                          const parsed = Number(raw)
+                          setReserveConfirm((prev) => {
+                            if (!prev) return prev
+                            if (!Number.isFinite(parsed)) return { ...prev, selectedCutsPerSheetInput: raw }
+                            const safe = Math.max(1, parsed)
+                            const capped =
+                              !prev.isCutsManualOverride && safe > prev.calculatedCutsPerSheet
+                                ? prev.calculatedCutsPerSheet
+                                : safe
+                            return computeReserveDraftFromCuts({ ...prev, selectedCutsPerSheetInput: raw }, capped, reservePrEdited)
+                          })
+                        }}
+                        onBlur={() => {
+                          const parsed = Number(reserveConfirm.selectedCutsPerSheetInput)
+                          const safe = Number.isFinite(parsed) ? Math.max(1, parsed) : reserveConfirm.calculatedCutsPerSheet
+                          const capped =
+                            !reserveConfirm.isCutsManualOverride && safe > reserveConfirm.calculatedCutsPerSheet
+                              ? reserveConfirm.calculatedCutsPerSheet
+                              : safe
+                          setReserveConfirm((prev) =>
+                            prev ? computeReserveDraftFromCuts({ ...prev, selectedCutsPerSheetInput: String(capped) }, capped, reservePrEdited) : prev,
+                          )
+                        }}
+                      />
+                    </label>
                     <div><span className="text-ds-ink-muted">Required Parent Sheets</span><p className={mono}>{reserveConfirm.requiredParentSheets}</p></div>
                     <div><span className="text-ds-ink-muted">Available Sheets</span><p className={mono}>{reserveConfirm.availableSheets}</p></div>
                     <div><span className="text-ds-ink-muted">Reserved Sheets</span><p className={mono}>{reserveConfirm.reservedSheets}</p></div>
                     <div><span className="text-ds-ink-muted">Free Sheets</span><p className={mono}>{reserveConfirm.freeSheets}</p></div>
                     <div><span className="text-ds-ink-muted">Already Reserved Sheets</span><p className={mono}>{reserveConfirm.alreadyReservedSheets}</p></div>
                     <div><span className="text-ds-ink-muted">Current Shortage Sheets</span><p className={mono}>{reserveConfirm.currentShortageSheets}</p></div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reserveConfirm.isCutsManualOverride}
+                        onChange={(e) =>
+                          setReserveConfirm((prev) =>
+                            prev ? { ...prev, isCutsManualOverride: e.target.checked } : prev,
+                          )
+                        }
+                      />
+                      <span className="text-ds-ink-muted">Manual Override</span>
+                    </label>
+                    {reserveConfirm.isCutsManualOverride ? (
+                      <input
+                        type="text"
+                        className={fieldInput}
+                        placeholder="Override reason (optional)"
+                        value={reserveConfirm.overrideReason}
+                        onChange={(e) =>
+                          setReserveConfirm((prev) => (prev ? { ...prev, overrideReason: e.target.value } : prev))
+                        }
+                      />
+                    ) : null}
+                    <p className="text-ds-ink-faint">
+                      Calculated cuts: <span className={mono}>{reserveConfirm.calculatedCutsPerSheet}</span> · Selected reason: {reserveConfirm.selectedReason}
+                    </p>
                   </div>
                   {reserveConfirm.freeSheets <= 0 ? (
                     <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
@@ -2426,6 +2647,95 @@ export function PlanningJobDetailDrawer({
                     </label>
                     <div><span className="text-ds-ink-muted">Shortage Qty</span><p className={`${mono} text-ds-ink`}>{reserveConfirm.shortageQty}</p></div>
                     <div><span className="text-ds-ink-muted">Leftover Available After Reserve</span><p className={`${mono} text-ds-ink`}>{reserveConfirm.leftoverAvailableAfterReserve}</p></div>
+                  </div>
+                  <div className="space-y-2 rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+                    <p className="text-ds-ink-muted">Leftover / Offcut Details</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div><span className="text-ds-ink-faint">Parent Sheet Size</span><p className={mono}>{reserveConfirm.parentSize || '-'}</p></div>
+                      <div><span className="text-ds-ink-faint">Cut Size Used</span><p className={mono}>{reserveConfirm.cutSizeUsed || '-'}</p></div>
+                      <div><span className="text-ds-ink-faint">Cuts Per Parent Sheet</span><p className={mono}>{reserveConfirm.cutsPerSheet}</p></div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={`${fieldInput} ${mono}`}
+                        placeholder="Leftover length"
+                        value={reserveConfirm.leftoverLengthInput}
+                        onChange={(e) =>
+                          setReserveConfirm((prev) => {
+                            if (!prev) return prev
+                            const leftoverLengthInput = e.target.value
+                            const leftoverLength = Number(leftoverLengthInput) || 0
+                            const leftoverWidth = Number(prev.leftoverWidthInput) || 0
+                            const leftoverQty = Number(prev.leftoverQtyInput) || 0
+                            const gsm = Number(prev.gsm || 0)
+                            const leftoverWeightKg = Number(((leftoverLength * leftoverWidth * gsm * leftoverQty) / 1000000).toFixed(6))
+                            return { ...prev, leftoverLengthInput, leftoverWeightKg }
+                          })
+                        }
+                      />
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={`${fieldInput} ${mono}`}
+                        placeholder="Leftover width"
+                        value={reserveConfirm.leftoverWidthInput}
+                        onChange={(e) =>
+                          setReserveConfirm((prev) => {
+                            if (!prev) return prev
+                            const leftoverWidthInput = e.target.value
+                            const leftoverLength = Number(prev.leftoverLengthInput) || 0
+                            const leftoverWidth = Number(leftoverWidthInput) || 0
+                            const leftoverQty = Number(prev.leftoverQtyInput) || 0
+                            const gsm = Number(prev.gsm || 0)
+                            const leftoverWeightKg = Number(((leftoverLength * leftoverWidth * gsm * leftoverQty) / 1000000).toFixed(6))
+                            return { ...prev, leftoverWidthInput, leftoverWeightKg }
+                          })
+                        }
+                      />
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={`${fieldInput} ${mono}`}
+                        placeholder="Leftover qty"
+                        value={reserveConfirm.leftoverQtyInput}
+                        onChange={(e) =>
+                          setReserveConfirm((prev) => {
+                            if (!prev) return prev
+                            const leftoverQtyInput = e.target.value
+                            const leftoverLength = Number(prev.leftoverLengthInput) || 0
+                            const leftoverWidth = Number(prev.leftoverWidthInput) || 0
+                            const leftoverQty = Number(leftoverQtyInput) || 0
+                            const gsm = Number(prev.gsm || 0)
+                            const leftoverWeightKg = Number(((leftoverLength * leftoverWidth * gsm * leftoverQty) / 1000000).toFixed(6))
+                            return { ...prev, leftoverQtyInput, leftoverWeightKg }
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div><span className="text-ds-ink-faint">Leftover Weight KG</span><p className={mono}>{reserveConfirm.leftoverWeightKg}</p></div>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={reserveConfirm.addLeftoverToWarehouse}
+                          onChange={(e) =>
+                            setReserveConfirm((prev) => (prev ? { ...prev, addLeftoverToWarehouse: e.target.checked } : prev))
+                          }
+                        />
+                        <span className="text-ds-ink-muted">Add leftover to Paper Warehouse</span>
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      className={fieldInput}
+                      placeholder="Leftover remarks"
+                      value={reserveConfirm.leftoverRemarks}
+                      onChange={(e) =>
+                        setReserveConfirm((prev) => (prev ? { ...prev, leftoverRemarks: e.target.value } : prev))
+                      }
+                    />
                   </div>
                   <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
                     <p className="mb-1 text-ds-ink-muted">Already Reserved Under This Material</p>

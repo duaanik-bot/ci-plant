@@ -757,7 +757,7 @@ export default function PlanningPage() {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              planningStatus: action === 'send_to_artwork' ? 'planned' : li.planningStatus,
+              planningStatus: action === 'send_to_artwork' ? 'design_ready' : li.planningStatus,
               specOverrides: { ...handoffSpec, planningCore },
               planningDecisionRevision: true,
             }),
@@ -852,7 +852,7 @@ export default function PlanningPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             setNumber: resolved,
-            planningStatus: 'planned',
+            planningStatus: 'design_ready',
             specOverrides: nextSpec,
             planningDecisionRevision: true,
           }),

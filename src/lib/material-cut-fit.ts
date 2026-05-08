@@ -1,3 +1,5 @@
+import { resolveCuts, resolveFitScore, resolveWastage } from '@/lib/production-os-resolvers'
+
 type CutFitInput = {
   parentLength: number
   parentWidth: number
@@ -15,6 +17,8 @@ export type MaterialCutFitOptionInput = {
   reservedParentSheets?: number
   parentLength: number
   parentWidth: number
+  sourceTraceability?: string | null
+  isLeftover?: boolean
 }
 
 export type MaterialCutFitOption = {
@@ -31,13 +35,39 @@ export type MaterialCutFitOption = {
   requiredParentSheets: number
   shortageParentSheets: number
   sizeDiff: number
+  sizeDeviationPct: number
   wastagePct: number
   yieldPct: number
+  usableAreaPct: number
+  fitScore: number
   orientation: 'LxW' | 'WxL'
-  matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance'
+  matchType:
+    | 'Cut Fit'
+    | 'Direct Size'
+    | 'Special Cut'
+    | 'GSM Tolerance'
+    | 'Compatible Size'
+    | 'Fallback Option'
   status: 'Ready' | 'Partial' | 'Shortage'
-  tags: Array<'Best Yield' | 'Least Wastage' | 'Closest GSM' | 'Most Available'>
+  tags: Array<
+    | 'Best Yield'
+    | 'Lowest Wastage'
+    | 'Closest GSM'
+    | 'Most Available'
+    | 'Exact Match'
+    | 'GSM Tolerance'
+    | 'Compatible Size'
+    | 'Fallback Option'
+    | 'Leftover Stock'
+    | 'Leftover Reuse'
+  >
   gsmDelta: number | null
+  isExactSize: boolean
+  isNearSize: boolean
+  isExactGsm: boolean
+  isGsmTolerance: boolean
+  isLeftover: boolean
+  sourceTraceability: string | null
 }
 
 export type MaterialCutFitConfig = {
@@ -77,18 +107,14 @@ export function calculateCutsPerSheet(input: CutFitInput): number {
 }
 
 function calculateBestCutsWithOrientation(input: CutFitInput, allowRotation: boolean): { cuts: number; orientation: 'LxW' | 'WxL' } {
-  const parentLength = n(input.parentLength)
-  const parentWidth = n(input.parentWidth)
-  const reqLength = n(input.reqLength)
-  const reqWidth = n(input.reqWidth)
-  if (parentLength <= 0 || parentWidth <= 0 || reqLength <= 0 || reqWidth <= 0) {
-    return { cuts: 0, orientation: 'LxW' }
-  }
-  const cutsA = Math.floor(parentLength / reqLength) * Math.floor(parentWidth / reqWidth)
-  if (!allowRotation) return { cuts: Math.max(0, cutsA), orientation: 'LxW' }
-  const cutsB = Math.floor(parentLength / reqWidth) * Math.floor(parentWidth / reqLength)
-  if (cutsB > cutsA) return { cuts: Math.max(0, cutsB), orientation: 'WxL' }
-  return { cuts: Math.max(0, cutsA), orientation: 'LxW' }
+  const out = resolveCuts({
+    parentLength: n(input.parentLength),
+    parentWidth: n(input.parentWidth),
+    reqLength: n(input.reqLength),
+    reqWidth: n(input.reqWidth),
+    allowRotation,
+  })
+  return { cuts: out.cutsPerSheet, orientation: out.orientation }
 }
 
 export function buildMaterialCutFitOptions(input: {
@@ -153,11 +179,15 @@ export function buildMaterialCutFitOptions(input: {
     const gsmWithinTolerance = gsmDelta != null && gsmDelta <= config.gsmTolerance
     if (requiredGsm != null && !(gsmExact || gsmWithinTolerance)) continue
 
-    const parentArea = parentLength * parentWidth
-    const usedArea = cutsPerSheet * reqLength * reqWidth
-    const sizeDiff = Math.abs(parentArea - usedArea)
-    const yieldPct = parentArea > 0 ? (usedArea / parentArea) * 100 : 0
-    const wastagePct = Math.max(0, 100 - yieldPct)
+    const waste = resolveWastage({
+      parentLength,
+      parentWidth,
+      reqLength,
+      reqWidth,
+      cutsPerSheet,
+    })
+    const { parentArea, usedArea, sizeDiff, sizeDeviationPct, utilizationPct: yieldPct, wastagePct } = waste
+    const usableAreaPct = yieldPct
     const requiredParentSheets = Math.max(1, Math.ceil(requiredFinalSheets / cutsPerSheet))
     const availableSheets = Math.max(0, n(m.availableParentSheets))
     const reservedSheets = Math.max(0, n(m.reservedParentSheets))
@@ -167,14 +197,32 @@ export function buildMaterialCutFitOptions(input: {
     const status: 'Ready' | 'Partial' | 'Shortage' =
       reservableSheets >= requiredParentSheets ? 'Ready' : reservableSheets > 0 ? 'Partial' : 'Shortage'
 
-    const matchType: 'Cut Fit' | 'Direct Size' | 'Special Cut' | 'GSM Tolerance' =
+    const isExactSize = sameSizeExact
+    const isNearSize = withinTolerance && !sameSizeExact
+    const isExactGsm = gsmExact
+    const isGsmTolerance = !gsmExact && gsmWithinTolerance
+    const isLeftover = m.isLeftover === true || String(m.materialCode || '').toUpperCase().startsWith('LEFTOVER-')
+    const matchType: MaterialCutFitOption['matchType'] =
       !gsmExact && gsmWithinTolerance
         ? 'GSM Tolerance'
         : directMode === 'direct_size'
           ? 'Direct Size'
           : directMode === 'special_cut'
             ? 'Special Cut'
-            : 'Cut Fit'
+          : 'Cut Fit'
+
+    const fitScore = resolveFitScore({
+      isExactSize,
+      isNearSize,
+      isExactGsm,
+      isGsmTolerance,
+      gsmDelta,
+      gsmTolerance: config.gsmTolerance,
+      wastagePct,
+      sizeDeviationPct,
+      cutsPerSheet,
+      isLeftover,
+    })
 
     options.push({
       materialId: m.materialId,
@@ -190,20 +238,40 @@ export function buildMaterialCutFitOptions(input: {
       requiredParentSheets,
       shortageParentSheets,
       sizeDiff: Number(sizeDiff.toFixed(4)),
+      sizeDeviationPct: Number(sizeDeviationPct.toFixed(2)),
       wastagePct: Number(wastagePct.toFixed(2)),
       yieldPct: Number(yieldPct.toFixed(2)),
+      usableAreaPct: Number(usableAreaPct.toFixed(2)),
+      fitScore,
       orientation: directMode === 'none' ? best.orientation : 'LxW',
       matchType,
       status,
       tags: [],
       gsmDelta,
+      isExactSize,
+      isNearSize,
+      isExactGsm,
+      isGsmTolerance,
+      isLeftover,
+      sourceTraceability: m.sourceTraceability || null,
     })
   }
 
   options.sort((a, b) => {
-    if (b.cutsPerSheet !== a.cutsPerSheet) return b.cutsPerSheet - a.cutsPerSheet
+    if (b.fitScore !== a.fitScore) return b.fitScore - a.fitScore
+
+    const aP1 = a.isExactSize && a.isExactGsm ? 1 : 0
+    const bP1 = b.isExactSize && b.isExactGsm ? 1 : 0
+    if (bP1 !== aP1) return bP1 - aP1
+
+    const aP2 = (a.isExactSize || a.isNearSize) && (a.isExactGsm || a.isGsmTolerance) ? 1 : 0
+    const bP2 = (b.isExactSize || b.isNearSize) && (b.isExactGsm || b.isGsmTolerance) ? 1 : 0
+    if (bP2 !== aP2) return bP2 - aP2
+
     if (a.wastagePct !== b.wastagePct) return a.wastagePct - b.wastagePct
     if (a.sizeDiff !== b.sizeDiff) return a.sizeDiff - b.sizeDiff
+    if (b.cutsPerSheet !== a.cutsPerSheet) return b.cutsPerSheet - a.cutsPerSheet
+    if (a.isLeftover !== b.isLeftover) return a.isLeftover ? -1 : 1
     const aExact = a.gsmDelta === 0 ? 1 : 0
     const bExact = b.gsmDelta === 0 ? 1 : 0
     if (bExact !== aExact) return bExact - aExact
@@ -220,9 +288,14 @@ export function buildMaterialCutFitOptions(input: {
     const mostAvailable = Math.max(...limited.map((o) => o.availableSheets))
     limited.forEach((o) => {
       if (o.yieldPct === bestYield) o.tags.push('Best Yield')
-      if (o.wastagePct === leastWastage) o.tags.push('Least Wastage')
+      if (o.wastagePct === leastWastage) o.tags.push('Lowest Wastage')
       if (o.gsmDelta != null && o.gsmDelta === minGsmDelta) o.tags.push('Closest GSM')
       if (o.availableSheets === mostAvailable) o.tags.push('Most Available')
+      if (o.isExactSize && o.isExactGsm) o.tags.push('Exact Match')
+      if (o.isGsmTolerance) o.tags.push('GSM Tolerance')
+      if (o.isNearSize) o.tags.push('Compatible Size')
+      if (o.isLeftover) o.tags.push('Leftover Stock')
+      if (o.isLeftover && (o.isExactSize || o.wastagePct <= 10)) o.tags.push('Leftover Reuse')
     })
   }
 

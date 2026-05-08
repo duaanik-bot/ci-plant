@@ -78,8 +78,6 @@ export async function POST(req: NextRequest) {
     dueDate: bodyObj.dueDate,
   }
 
-  console.log('[POST /api/jobs] Request body:', JSON.stringify(bodyObj, null, 2))
-
   const parsed = createJobSchema.safeParse(input)
   if (!parsed.success) {
     const flattened = parsed.error.flatten()
@@ -88,11 +86,6 @@ export async function POST(req: NextRequest) {
       const msg = Array.isArray(arr) && arr[0] ? String(arr[0]) : 'Invalid'
       fields[key] = msg
     }
-    console.log('[POST /api/jobs] Zod validation failed:', {
-      fieldErrors: flattened.fieldErrors,
-      formErrors: flattened.formErrors,
-      issues: parsed.error.issues,
-    })
     return NextResponse.json(
       {
         error: 'Validation failed',

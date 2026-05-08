@@ -3,8 +3,16 @@ import type { Prisma } from '@prisma/client'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { calculateRequirement, reserveMaterial, reserveMaterialForPlanning, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
-import { parseSheetSizeToPair, resolveSheetSize } from '@/lib/planning-sheet-size'
+import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import { buildMaterialCutFitOptions } from '@/lib/material-cut-fit'
+import {
+  resolveBoardReadiness,
+  resolveMaterial as resolveMaterialState,
+  resolveSheetSize,
+  resolveRequirementFromLine,
+  resolveReservationState,
+  resolveShortageState,
+} from '@/lib/production-os-resolvers'
 
 export const dynamic = 'force-dynamic'
 
@@ -227,16 +235,12 @@ async function resolveMaterialFromSpec(line: Record<string, unknown> & {
 }
 
 function readinessStatus(
-  requiredSheets: number,
-  availableSheets: number,
-  reservedSheets: number,
-  shortageSheets: number,
-  hasMaterial: boolean,
+  resolved: ReturnType<typeof resolveBoardReadiness>,
 ): 'green' | 'yellow' | 'red' | 'grey' {
-  if (!hasMaterial) return 'grey'
-  if (shortageSheets > 0 || availableSheets <= 0) return 'red'
-  if (availableSheets < requiredSheets || reservedSheets < requiredSheets) return 'yellow'
-  return 'green'
+  if (resolved === 'No Material') return 'grey'
+  if (resolved === 'Ready') return 'green'
+  if (resolved === 'Partial') return 'yellow'
+  return 'red'
 }
 
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -264,20 +268,24 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     selectedMaterialId
       ? await db.inventory.findUnique({ where: { id: selectedMaterialId } })
       : null
-  const materialId = selectedMaterial?.id ?? requirement.materialId ?? auto.materialId
+  const materialId = resolveMaterialState({
+    selectedMaterialId: selectedMaterial?.id ?? null,
+    requirementMaterialId: requirement.materialId ?? null,
+    autoMaterialId: auto.materialId ?? null,
+  }).materialId
   const material = selectedMaterial ?? (materialId ? await db.inventory.findUnique({ where: { id: materialId } }) : null)
 
-  const spec = (ctx.line.specOverrides as Record<string, unknown> | null) || {}
-  const core = (spec.planningCore as Record<string, unknown> | undefined) || {}
-  const qtyBase = qtyOverride ?? Math.max(1, Math.floor(n(ctx.line.quantity)))
-  const upsBase =
-    upsOverride ??
-    Math.max(1, Math.floor(n((spec.meta as Record<string, unknown> | undefined)?.ups ?? core.ups ?? 1)))
-  const wastageSheets =
-    wastageSheetsOverride ??
-    Math.max(0, Math.floor(n(spec.wastageSheets ?? core.wastageSheets ?? 150)))
-  const baseRequired = Math.max(1, Math.ceil(qtyBase / upsBase))
-  const requiredSheets = Math.max(1, baseRequired + wastageSheets) || Math.max(1, Number(requirement.requiredSheets) || 0)
+  const requirementFromLine = resolveRequirementFromLine({
+    line: ctx.line,
+    qtyOverride: qtyOverride ?? undefined,
+    upsOverride: upsOverride ?? undefined,
+    wastageOverride: wastageSheetsOverride ?? undefined,
+  })
+  const qtyBase = requirementFromLine.qty
+  const upsBase = requirementFromLine.ups
+  const wastageSheets = requirementFromLine.wastageSheets
+  const baseRequired = requirementFromLine.baseSheets
+  const requiredSheets = Math.max(requirementFromLine.requiredSheets, Math.max(1, Number(requirement.requiredSheets) || 0))
   const requiredSizePair = parseSheetSizeToPair(auto.resolvedSheetSize || '')
   const boardTypeNorm = auto.boardTypeRaw?.trim() || null
   const boardClassNorm = auto.boardClassificationRaw?.trim() || null
@@ -292,6 +300,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         select: {
           id: true,
           materialCode: true,
+          attributes: true,
           boardType: true,
           boardClassification: true,
           gsm: true,
@@ -346,6 +355,18 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       reservedParentSheets: Number(m.qtyReserved) || 0,
       parentLength: Number(m.sheetLength) || 0,
       parentWidth: Number(m.sheetWidth) || 0,
+      isLeftover: String(m.materialCode || '').toUpperCase().startsWith('LEFTOVER-'),
+      sourceTraceability: (() => {
+        const raw = typeof m.attributes === 'string' ? m.attributes : ''
+        if (!raw) return null
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>
+          const t = parsed.traceability
+          return typeof t === 'string' ? t : null
+        } catch {
+          return null
+        }
+      })(),
     }))
   const strictSuggestions = requiredSizePair
     ? buildMaterialCutFitOptions({
@@ -454,32 +475,30 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         : isTypeViaClass || isClassViaType
           ? 'cross_field'
           : 'fallback'
+    const derivedMatchType =
+      boardMatchMode === 'fallback'
+        ? 'Fallback Option'
+        : opt.matchType === 'Cut Fit' && !(opt.isExactSize || opt.isNearSize)
+          ? 'Compatible Size'
+          : opt.matchType
+
     return {
       ...opt,
       boardMatchMode,
+      matchType: derivedMatchType,
     }
   }
-  const suggestedBoardOptionsWithMode = suggestedBoardOptions.map(withBoardMatchMode)
-  suggestedBoardOptionsWithMode.forEach((opt, idx) => {
-    console.log('[cutfit-ranking-debug]', {
-      rank: idx + 1,
-      materialId: opt.materialId,
-      materialCode: opt.materialCode,
-      size: opt.size,
-      cuts: opt.cutsPerSheet,
-      wastagePct: opt.wastagePct,
-      sizeDiff: (opt as { sizeDiff?: number }).sizeDiff ?? null,
-      gsmDelta: opt.gsmDelta ?? null,
-      freeStock: (opt as { freeSheets?: number }).freeSheets ?? null,
-      matchType: opt.matchType,
-    })
-  })
+  const suggestedBoardOptionsWithMode = suggestedBoardOptions.map(withBoardMatchMode).map((opt, idx) => ({
+    ...opt,
+    matchRank: idx + 1,
+  }))
 
   const closestAvailableOptions =
     strictSuggestions.length === 0
       ? Array.from(byId.values())
           .slice(0, 10)
-          .map((o) => ({ ...o, tags: Array.from(new Set([...(o.tags || []), 'Closest GSM' as const])) }))
+          .map((o) => withBoardMatchMode({ ...o, tags: Array.from(new Set([...(o.tags || []), 'Closest GSM' as const])) }))
+          .map((o, idx) => ({ ...o, matchRank: idx + 1 }))
       : []
   const candidateMaterialIds = Array.from(
     new Set(
@@ -508,18 +527,46 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     fallbackNoBoardGsm: noBoardGsmSuggestions.length,
     fallbackNoBoardWider: noBoardWiderSuggestions.length,
   }
-  console.log('[planning-cutfit-debug]', debug)
   const selectedSuggestion = selectedMaterialId
     ? suggestedBoardOptionsWithMode.find((o) => o.materialId === selectedMaterialId) ?? null
     : null
   const availableSheets = Math.max(0, Number(material?.qtyAvailable) || 0)
   const reservedSheets = Math.max(0, Number(material?.qtyReserved) || 0)
-  const freeSheets = availableSheets - reservedSheets
+  const reservationState = resolveReservationState({
+    requiredSheets,
+    availableSheets,
+    reservedSheets,
+  })
+  const freeSheets = reservationState.freeStock
   const incomingSheets = Math.max(0, Number(material?.qtyQuarantine) || 0)
-  const shortageSheets = materialId ? Math.max(0, requiredSheets - Math.max(0, freeSheets)) : requiredSheets
+  const shortageSheets = materialId
+    ? resolveShortageState({
+        requiredSheets,
+        reserveQty: reservationState.reserveQty,
+      }).shortageSheets
+    : requiredSheets
 
-  const pr = materialId
-    ? await db.purchaseRequisition.findFirst({
+  const openShortage = materialId
+    ? await db.materialShortage.findFirst({
+        where: {
+          materialId,
+          planningId: id,
+          status: { in: ['open', 'closed'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, purchaseReqId: true },
+      })
+    : null
+  let pr: { id: string; status: string; expectedDelivery: Date | null } | null = null
+  if (materialId) {
+    if (openShortage?.purchaseReqId) {
+      pr = await db.purchaseRequisition.findUnique({
+        where: { id: openShortage.purchaseReqId },
+        select: { id: true, status: true, expectedDelivery: true },
+      })
+    }
+    if (!pr) {
+      pr = await db.purchaseRequisition.findFirst({
         where: {
           materialId,
           OR: [
@@ -530,18 +577,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         orderBy: { raisedAt: 'desc' },
         select: { id: true, status: true, expectedDelivery: true },
       })
-    : null
-  const openShortage = materialId
-    ? await db.materialShortage.findFirst({
-        where: {
-          materialId,
-          planningId: id,
-          status: 'open',
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true },
-      })
-    : null
+    }
+  }
 
   return NextResponse.json({
     planningId: id,
@@ -583,7 +620,15 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     grnEta: pr?.expectedDelivery ? pr.expectedDelivery.toISOString() : null,
     shortageId: openShortage?.id ?? null,
     linkedShortageId: openShortage?.id ?? null,
-    status: readinessStatus(requiredSheets, availableSheets, reservedSheets, shortageSheets, Boolean(materialId)),
+    status: readinessStatus(
+      resolveBoardReadiness({
+        materialSelected: Boolean(materialId),
+        requiredSheets,
+        availableSheets,
+        reservedSheets,
+        shortageSheets,
+      }),
+    ),
     materialCandidates: auto.materialCandidates,
     materialMatchState:
       materialId != null
@@ -637,6 +682,17 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     cutsPerSheet?: number
     parentSize?: string
     actionType?: 'reserve' | 'adjust'
+    selectedCutsPerSheet?: number
+    isCutsManualOverride?: boolean
+    overrideReason?: string
+    leftover?: {
+      addToWarehouse?: boolean
+      leftoverLength?: number
+      leftoverWidth?: number
+      leftoverQty?: number
+      leftoverRemarks?: string
+      cutSizeUsed?: string
+    }
   }
   const wastageSheets = Math.max(0, Math.floor(n(body.wastageSheets ?? spec.wastageSheets ?? core.wastageSheets ?? 150)))
   const baseRequired = Math.max(1, Math.ceil(n(line.quantity) / ups))
@@ -652,13 +708,13 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   const requirement = jobCard
     ? await calculateRequirement({ jobCardId: jobCard.id, planningId: id })
     : { materialId: null as string | null }
+  const auto = await resolveMaterialFromSpec(line)
   let materialId = requirement.materialId
   if (typeof body.materialId === 'string' && body.materialId.trim()) {
     const pick = await db.inventory.findUnique({ where: { id: body.materialId.trim() }, select: { id: true } })
     materialId = pick?.id ?? materialId
   }
   if (!materialId) {
-    const auto = await resolveMaterialFromSpec(line)
     materialId = auto.materialId
   }
 
@@ -686,7 +742,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     })
   }
 
-  const cutsPerSheet = Math.max(0, Math.floor(n(body.cutsPerSheet)))
+  const cutsPerSheet = Math.max(0, Number(n(body.selectedCutsPerSheet || body.cutsPerSheet).toFixed(4)))
   const parentSize = typeof body.parentSize === 'string' ? body.parentSize.trim() : ''
   if (!cutsPerSheet || !parentSize) {
     return reserveError(400, 'INVALID_INPUT', 'Invalid calculation data', {
@@ -706,9 +762,16 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     wastageSheets,
     meta: {
       ...specMeta,
+      calculatedCutsPerSheet: Number(n(body.cutsPerSheet).toFixed(4)),
+      selectedCutsPerSheet: cutsPerSheet,
+      isCutsManualOverride: Boolean(body.isCutsManualOverride),
+      cutsOverrideReason:
+        typeof body.overrideReason === 'string' && body.overrideReason.trim()
+          ? body.overrideReason.trim()
+          : null,
       cutsPerSheet,
       parentSize,
-    },
+      },
   }
   await db.poLineItem.update({
     where: { id },
@@ -737,25 +800,14 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         { status: 409 },
       )
     }
-    console.error('[planning-reserve-debug]', {
+    console.error('Planning reserve failed', {
       failingFunction: 'reserveMaterialForPlanning/reserveMaterial',
       errorName: error instanceof Error ? error.name : 'UnknownError',
       errorMessage: error instanceof Error ? error.message : 'Unknown error',
-      errorStack: error instanceof Error ? error.stack : null,
       payload: {
         planningLineId: id,
-        poLineId: id,
         materialId,
-        cutsPerSheet,
         requiredParentSheets: n(body.requiredParentSheets),
-        reserveQty: n(body.reserveQty),
-        shortageQty: n(body.shortageQty),
-        prQty: n(body.prQty),
-        selectedOptionData: {
-          parentSize,
-          requiredSheets,
-          wastageSheets,
-        },
       },
     })
     const message = error instanceof Error ? error.message : 'Reservation failed. Please try again'
@@ -799,6 +851,76 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       ? (result.shortage as { id: string }).id
       : null
 
+  let leftoverMaterialId: string | null = null
+  if (body.leftover?.addToWarehouse) {
+    const leftoverLength = Math.max(0, Number(n(body.leftover.leftoverLength).toFixed(4)))
+    const leftoverWidth = Math.max(0, Number(n(body.leftover.leftoverWidth).toFixed(4)))
+    const leftoverQty = Math.max(0, Number(n(body.leftover.leftoverQty).toFixed(3)))
+    if (leftoverLength > 0 && leftoverWidth > 0 && leftoverQty > 0) {
+      const sourceMaterial = await db.inventory.findUnique({
+        where: { id: materialId },
+        select: {
+          materialCode: true,
+          boardType: true,
+          boardClassification: true,
+          gsm: true,
+          unit: true,
+          weightedAvgCost: true,
+          supplierId: true,
+          category: true,
+          storageLocation: true,
+        },
+      })
+      const gsm = Number(sourceMaterial?.gsm ?? auto.gsmRaw ?? 0)
+      const leftoverWeightKg = Number(((leftoverLength * leftoverWidth * gsm * leftoverQty) / 1000000).toFixed(6))
+      const codeSeed = (sourceMaterial?.materialCode || materialId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16) || 'MAT'
+      const sizeCode = `${leftoverLength}x${leftoverWidth}`.replace(/[^0-9x]/g, '')
+      const leftoverCode = `LEFTOVER-${codeSeed}-${sizeCode}-${Date.now().toString().slice(-6)}`
+      const attributes = JSON.stringify({
+        leftover: true,
+        sourceMaterialId: materialId,
+        sourcePlanningId: id,
+        sourceJobCardId: jobCard?.id ?? null,
+        sourceParentSize: parentSize,
+        cutSizeUsed: body.leftover.cutSizeUsed || auto.resolvedSheetSize || null,
+        remarks: body.leftover.leftoverRemarks || null,
+        traceability: `Leftover generated from Planning Line ${id} / Material ${sourceMaterial?.materialCode || materialId}`,
+      })
+      const created = await db.inventory.create({
+        data: {
+          materialCode: leftoverCode,
+          description: `Leftover stock ${leftoverLength}x${leftoverWidth}`,
+          boardType: sourceMaterial?.boardType || auto.boardTypeRaw || null,
+          boardClassification: sourceMaterial?.boardClassification || auto.boardClassificationRaw || null,
+          sheetLength: leftoverLength,
+          sheetWidth: leftoverWidth,
+          gsm: sourceMaterial?.gsm ?? auto.gsmRaw ?? null,
+          attributes,
+          unit: sourceMaterial?.unit || 'sheets',
+          supplierId: sourceMaterial?.supplierId || null,
+          category: sourceMaterial?.category || 'C',
+          qtyAvailable: leftoverQty,
+          physicalStockSheets: leftoverQty,
+          totalWeightKg: leftoverWeightKg,
+          weightedAvgCost: sourceMaterial?.weightedAvgCost || 0,
+          storageLocation: sourceMaterial?.storageLocation || 'LEFTOVER',
+          active: true,
+        },
+        select: { id: true },
+      })
+      leftoverMaterialId = created.id
+      await db.stockMovement.create({
+        data: {
+          materialId: created.id,
+          movementType: 'leftover_create',
+          qty: leftoverQty,
+          refType: 'planning_leftover',
+          refId: id,
+        },
+      })
+    }
+  }
+
   return NextResponse.json({
     success: true,
     planningId: id,
@@ -811,5 +933,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     purchaseRequestId: result.purchaseRequest?.id ?? null,
     shortageId,
     linkedShortageId: shortageId,
+    leftoverMaterialId,
   })
 }

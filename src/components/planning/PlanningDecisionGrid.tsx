@@ -21,7 +21,7 @@ import {
   type PlanningDesignerKey,
 } from '@/lib/planning-decision-spec'
 import { formatShortTimeAgo } from '@/lib/time-ago'
-import { resolveSheetSize } from '@/lib/planning-sheet-size'
+import { resolveSheetSize } from '@/lib/production-os-resolvers'
 import { ACTION_PILL_BASE, ICON_BUTTON_BASE, PUSHED_CHIP_CLASS, STATUS_CHIP_BASE } from '@/components/design-system/tokens'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 import { useUiDensity } from '@/lib/ui-density'

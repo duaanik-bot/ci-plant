@@ -21,12 +21,20 @@ function num(value: unknown): number | null {
 
 export function resolveSheetSize(line: SizeSource): string {
   const spec = (line.specOverrides || line.spec || {}) as Record<string, unknown>
+  const planningCore = (spec.planningCore || {}) as Record<string, unknown>
+  const nestedSpec = (spec.spec || {}) as Record<string, unknown>
   const product = (line.product || line.carton || {}) as Record<string, unknown>
   const directCandidates: unknown[] = [
     line.sheetSize,
     line.actualSheetSize,
     spec.actualSheetSize,
     spec.sheetSize,
+    spec.sheet_size,
+    nestedSpec.actualSheetSize,
+    nestedSpec.sheetSize,
+    planningCore.actualSheetSizeLabel,
+    planningCore.sheetSize,
+    planningCore.finalSheetSize,
     product.sheetSize,
     product.actualSheetSize,
     line.carton && (line.carton as Record<string, unknown>).sheetSize,
@@ -38,11 +46,17 @@ export function resolveSheetSize(line: SizeSource): string {
 
   const len = num(
     spec.sheetLengthMm ??
+      spec.sheetLength ??
+      nestedSpec.sheetLengthMm ??
+      nestedSpec.sheetLength ??
       (line.materialQueue as Record<string, unknown> | null)?.sheetLengthMm ??
       product.blankLength,
   )
   const wid = num(
     spec.sheetWidthMm ??
+      spec.sheetWidth ??
+      nestedSpec.sheetWidthMm ??
+      nestedSpec.sheetWidth ??
       (line.materialQueue as Record<string, unknown> | null)?.sheetWidthMm ??
       product.blankWidth,
   )

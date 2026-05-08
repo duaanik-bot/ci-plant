@@ -19,6 +19,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
       description: true,
       boardType: true,
       boardClassification: true,
+      attributes: true,
       gsm: true,
       sheetLength: true,
       sheetWidth: true,
@@ -123,6 +124,44 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
       ...material,
       sheetLength: material.sheetLength ? Number(material.sheetLength) : null,
       sheetWidth: material.sheetWidth ? Number(material.sheetWidth) : null,
+      sourceTraceability: (() => {
+        const raw = typeof material.attributes === 'string' ? material.attributes : ''
+        if (!raw) return null
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>
+          const t = parsed.traceability
+          return typeof t === 'string' ? t : null
+        } catch {
+          return null
+        }
+      })(),
+      leftoverMeta: (() => {
+        const raw = typeof material.attributes === 'string' ? material.attributes : ''
+        if (!raw) return null
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>
+          const sourceMaterialId = typeof parsed.sourceMaterialId === 'string' ? parsed.sourceMaterialId : null
+          const sourcePlanningId = typeof parsed.sourcePlanningId === 'string' ? parsed.sourcePlanningId : null
+          const sourceJobCardId = typeof parsed.sourceJobCardId === 'string' ? parsed.sourceJobCardId : null
+          const sourceParentSize = typeof parsed.sourceParentSize === 'string' ? parsed.sourceParentSize : null
+          const leftoverSize = typeof parsed.leftoverSize === 'string' ? parsed.leftoverSize : null
+          const cutSizeUsed = typeof parsed.cutSizeUsed === 'string' ? parsed.cutSizeUsed : null
+          const remarks = typeof parsed.remarks === 'string' ? parsed.remarks : null
+          const isLeftover = parsed.leftover === true || String(material.materialCode || '').toUpperCase().startsWith('LEFTOVER-')
+          return {
+            isLeftover,
+            sourceMaterialId,
+            sourcePlanningId,
+            sourceJobCardId,
+            sourceParentSize,
+            leftoverSize,
+            cutSizeUsed,
+            remarks,
+          }
+        } catch {
+          return null
+        }
+      })(),
     },
     logs: logs.map((l) => ({
       ...l,

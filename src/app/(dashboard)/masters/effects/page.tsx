@@ -169,8 +169,6 @@ export default function EffectsMasterPage() {
         status: categoryForm.active ? 'active' : 'inactive',
         active: categoryForm.active,
       }
-      console.log('[EffectsMaster] createCategory payload', payload)
-
       const res = await fetch(
         '/api/masters/minimasters/categories',
         {
@@ -180,7 +178,6 @@ export default function EffectsMasterPage() {
         },
       )
       const json = (await readApiPayload<EffectCategory>(res)) as EffectCategory | ApiErrorPayload
-      console.log('[EffectsMaster] createCategory response', { ok: res.ok, status: res.status, data: json })
       if (!res.ok) {
         const api = json as ApiErrorPayload
         if (api.fields?.name) setCategoryErrors({ name: api.fields.name })
@@ -232,15 +229,12 @@ export default function EffectsMasterPage() {
         status: categoryForm.active,
         active: categoryForm.active,
       }
-      console.log('[EffectsMaster] updateCategory payload', payload)
-
       const res = await fetch(`/api/masters/minimasters/categories/${editingCategoryId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
       const json = (await readApiPayload<EffectCategory>(res)) as EffectCategory | ApiErrorPayload
-      console.log('[EffectsMaster] updateCategory response', { ok: res.ok, status: res.status, data: json })
       if (!res.ok) throw new Error((json as ApiErrorPayload).error || 'Save failed')
 
       await refreshAll(selectedCategoryId)

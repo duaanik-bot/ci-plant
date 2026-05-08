@@ -73,7 +73,16 @@ export async function GET(req: NextRequest) {
       const estValue = available * num(r.weightedAvgCost)
       const ageDays = Math.max(0, Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 86400000))
       const ageingRisk = ageDays > 60 ? 'high' : ageDays > 30 ? 'medium' : 'low'
-      const status = shortage > 0 ? 'shortage' : available > 0 ? 'available' : incoming > 0 ? 'incoming' : 'reserved'
+      const isLeftover = String(r.materialCode || '').toUpperCase().startsWith('LEFTOVER-')
+      const status = isLeftover
+        ? 'leftover'
+        : shortage > 0
+          ? 'shortage'
+          : available > 0
+            ? 'available'
+            : incoming > 0
+              ? 'incoming'
+              : 'reserved'
       const openPr = prByMaterial.get(r.id) || null
       return {
         material_id: r.id,
@@ -83,7 +92,7 @@ export async function GET(req: NextRequest) {
         length,
         width,
         gsm: r.gsm,
-        size_display: length && width ? `${Math.round(length)} x ${Math.round(width)}` : '-',
+        size_display: length && width ? `${length} x ${width}` : '-',
         available_sheets: available,
         reserved_sheets: reserved,
         incoming_sheets: incoming,

@@ -99,6 +99,17 @@ type MaterialDetailPayload = {
     gsm: number | null
     sheetLength: number | null
     sheetWidth: number | null
+    sourceTraceability?: string | null
+    leftoverMeta?: {
+      isLeftover: boolean
+      sourceMaterialId: string | null
+      sourcePlanningId: string | null
+      sourceJobCardId: string | null
+      sourceParentSize: string | null
+      leftoverSize: string | null
+      cutSizeUsed: string | null
+      remarks: string | null
+    } | null
   }
   logs: Array<{
     id: string
@@ -811,13 +822,6 @@ function InventoryPageContent() {
       window.dispatchEvent(new Event('inventory:refresh'))
       window.dispatchEvent(new Event('planning:refresh'))
     } catch (e) {
-      console.error('[planning-unreserve-debug]', {
-        materialId: releaseState.materialId,
-        reservationId: releaseState.reservationId,
-        planningLineId: releaseState.planningId,
-        reservedQty: releaseState.currentReserved,
-        error: e instanceof Error ? e.message : String(e),
-      })
       setReleaseError(e instanceof Error ? e.message : 'Release failed')
       toast.error(e instanceof Error ? e.message : 'Release failed')
     } finally {
@@ -1045,18 +1049,18 @@ function InventoryPageContent() {
 
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6 mb-4">
               {[
-                { key: 'shortage' as const, label: 'Shortage', value: fmt(paperWarehouseKpi.shortage), tone: 'border-rose-500/30 bg-rose-500/5 text-rose-300' },
-                { key: 'available' as const, label: 'Available', value: fmt(paperWarehouseKpi.available), tone: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300' },
-                { key: 'reserved' as const, label: 'Reserved', value: fmt(paperWarehouseKpi.reserved), tone: 'border-amber-500/30 bg-amber-500/5 text-amber-300' },
-                { key: 'free' as const, label: 'Free Stock', value: fmt(paperWarehouseKpi.freeStock), tone: 'border-cyan-500/30 bg-cyan-500/5 text-cyan-300' },
-                { key: 'incoming' as const, label: 'Incoming', value: fmt(paperWarehouseKpi.incoming), tone: 'border-sky-500/30 bg-sky-500/5 text-sky-300' },
+                { key: 'shortage' as const, label: 'Shortage', value: fmt(paperWarehouseKpi.shortage), tone: 'border-rose-500/45 bg-rose-500/8 text-rose-500' },
+                { key: 'available' as const, label: 'Available', value: fmt(paperWarehouseKpi.available), tone: 'border-emerald-500/45 bg-emerald-500/8 text-emerald-500' },
+                { key: 'reserved' as const, label: 'Reserved', value: fmt(paperWarehouseKpi.reserved), tone: 'border-amber-500/45 bg-amber-500/8 text-amber-600' },
+                { key: 'free' as const, label: 'Free Stock', value: fmt(paperWarehouseKpi.freeStock), tone: 'border-cyan-500/45 bg-cyan-500/8 text-cyan-600' },
+                { key: 'incoming' as const, label: 'Incoming', value: fmt(paperWarehouseKpi.incoming), tone: 'border-sky-500/45 bg-sky-500/8 text-sky-600' },
                 { key: 'all' as const, label: 'Total Stock', value: fmt(paperWarehouseKpi.totalPhysical), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
-                { key: 'stale' as const, label: 'Stale', value: fmtVal(paperWarehouseKpi.staleStock), tone: 'border-rose-500/30 bg-rose-500/5 text-rose-300' },
-                { key: 'fast' as const, label: 'Fast-moving', value: fmt(paperWarehouseKpi.fastMoving), tone: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300' },
+                { key: 'stale' as const, label: 'Stale', value: fmtVal(paperWarehouseKpi.staleStock), tone: 'border-rose-500/45 bg-rose-500/8 text-rose-500' },
+                { key: 'fast' as const, label: 'Fast-moving', value: fmt(paperWarehouseKpi.fastMoving), tone: 'border-emerald-500/45 bg-emerald-500/8 text-emerald-500' },
                 { key: 'slow' as const, label: 'Slow-moving', value: fmt(paperWarehouseKpi.slowMoving), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
                 { key: 'mismatch' as const, label: 'Incoming Mismatch', value: fmt(paperWarehouseKpi.incomingRequiredMismatch), tone: 'border-ds-warning/35 bg-ds-warning/10 text-ds-warning' },
                 { key: 'all' as const, label: 'Inventory Value', value: fmtVal(paperWarehouseKpi.value), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
-                { key: 'all' as const, label: 'Ageing Risk', value: fmtVal(paperWarehouseKpi.ageingRisk), tone: 'border-rose-500/30 bg-rose-500/5 text-rose-300' },
+                { key: 'all' as const, label: 'Ageing Risk', value: fmtVal(paperWarehouseKpi.ageingRisk), tone: 'border-rose-500/45 bg-rose-500/8 text-rose-500' },
               ].map((kpi, i) => (
                 <button
                   key={`${kpi.label}-${i}`}
@@ -1064,8 +1068,8 @@ function InventoryPageContent() {
                   onClick={() => setWarehouseKpiFilter((f) => (f === kpi.key ? 'all' : kpi.key))}
                   className={`h-16 rounded-lg border px-3 py-2 text-left shadow-sm transition hover:shadow ${kpi.tone} cursor-pointer`}
                 >
-                  <p className="text-[11px] uppercase tracking-wide text-ds-ink-faint">{kpi.label}</p>
-                  <p className={`${ledgerMono} text-lg font-semibold`}>{kpi.value}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-ds-ink-muted">{kpi.label}</p>
+                  <p className={`${ledgerMono} text-lg font-bold`}>{kpi.value}</p>
                 </button>
               ))}
             </div>
@@ -1175,7 +1179,7 @@ function InventoryPageContent() {
                 </thead>
                 <tbody className="divide-y divide-ds-card">
                   {filteredPaperWarehouseRows.map((row) => (
-                    <tr key={row.material_id} className="min-h-[52px] bg-background hover:bg-ds-main/30">
+                    <tr key={row.material_id} className="min-h-[52px] bg-background hover:bg-ds-main/50">
                       <td className="px-3 py-2">
                         <input
                           type="checkbox"
@@ -1206,13 +1210,13 @@ function InventoryPageContent() {
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'history')}
-                          className={`${ledgerMono} hover:underline hover:underline-offset-2`}
+                          className={`${ledgerMono} font-semibold text-ds-ink hover:underline hover:underline-offset-2`}
                         >
                           {row.material_code}
                         </button>
                       </td>
                       <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
-                      <td className="px-3 py-2 text-right text-emerald-300">
+                      <td className="px-3 py-2 text-right font-semibold text-emerald-500">
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'available')}
@@ -1221,11 +1225,11 @@ function InventoryPageContent() {
                           {fmt(row.available_sheets)}
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-right text-amber-300">
+                      <td className="px-3 py-2 text-right font-semibold text-amber-600">
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'reserved')}
-                          className={`underline underline-offset-2 hover:text-amber-200 ${ledgerMono}`}
+                          className={`underline decoration-amber-500/80 underline-offset-2 hover:text-amber-700 ${ledgerMono}`}
                         >
                           {fmt(row.reserved_sheets)}
                         </button>
@@ -1233,10 +1237,10 @@ function InventoryPageContent() {
                       <td
                         className={`px-3 py-2 text-right ${ledgerMono} ${
                           row.available_sheets - row.reserved_sheets > 0
-                            ? 'text-emerald-300'
+                            ? 'text-cyan-600'
                             : row.available_sheets - row.reserved_sheets === 0
-                              ? 'text-amber-300'
-                              : 'text-rose-300'
+                              ? 'text-amber-600'
+                              : 'text-rose-500'
                         }`}
                       >
                         <button
@@ -1253,8 +1257,8 @@ function InventoryPageContent() {
                           )}
                         </button>
                       </td>
-                      <td className={`px-3 py-2 text-right text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
-                      <td className="px-3 py-2 text-right text-rose-300">
+                      <td className={`px-3 py-2 text-right font-semibold text-sky-600 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-rose-500">
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'shortage')}
@@ -1268,18 +1272,22 @@ function InventoryPageContent() {
                         {(() => {
                           const free = row.available_sheets - row.reserved_sheets
                           const statusClass =
-                            row.shortage_sheets > 0
-                              ? 'border-rose-500/35 bg-rose-500/10 text-rose-300'
+                            row.status === 'leftover'
+                              ? 'border-violet-500/45 bg-violet-500/10 text-violet-700'
+                              : row.shortage_sheets > 0
+                              ? 'border-rose-500/45 bg-rose-500/10 text-rose-600'
                               : free > 0
-                                ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
-                                : 'border-amber-500/35 bg-amber-500/10 text-amber-300'
+                                ? 'border-emerald-500/45 bg-emerald-500/10 text-emerald-700'
+                                : 'border-amber-500/45 bg-amber-500/10 text-amber-700'
                           const statusLabel =
-                            row.shortage_sheets > 0
+                            row.status === 'leftover'
+                              ? 'leftover'
+                              : row.shortage_sheets > 0
                               ? 'shortage'
                               : free > 0
                                 ? 'healthy'
                                 : 'watch'
-                          return <span className={`rounded border px-1.5 py-0.5 uppercase ${statusClass}`}>{statusLabel}</span>
+                          return <span className={`rounded border px-1.5 py-0.5 font-semibold uppercase tracking-wide ${statusClass}`}>{statusLabel}</span>
                         })()}
                       </td>
                       <td className="px-3 py-2 text-xs">
@@ -1287,21 +1295,21 @@ function InventoryPageContent() {
                           <button
                             type="button"
                             onClick={() => openAdjustForRow(row, 'add', 'available')}
-                            className="rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-emerald-300 hover:bg-emerald-500/20"
+                            className="rounded border border-emerald-500/45 bg-emerald-500/10 px-2 py-1 font-medium text-emerald-700 hover:bg-emerald-500/20"
                           >
                             + Add
                           </button>
                           <button
                             type="button"
                             onClick={() => setOpenActionMenuId((prev) => (prev === row.material_id ? null : row.material_id))}
-                            className="rounded border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-amber-300 hover:bg-amber-500/20"
+                            className="rounded border border-amber-500/45 bg-amber-500/10 px-2 py-1 font-medium text-amber-700 hover:bg-amber-500/20"
                           >
                             ⋯
                           </button>
                           {row.open_pr_id ? (
                             <Link
                               href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(row.open_pr_id)}`}
-                              className="rounded border border-ds-brand/35 bg-ds-brand/10 px-2 py-1 text-ds-brand hover:bg-ds-brand/20"
+                              className="rounded border border-ds-brand/45 bg-ds-brand/10 px-2 py-1 font-medium text-ds-brand hover:bg-ds-brand/20"
                             >
                               View PR
                             </Link>
@@ -1309,7 +1317,7 @@ function InventoryPageContent() {
                             <button
                               type="button"
                               onClick={() => void openProcureModal(row)}
-                              className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
+                              className="rounded border border-rose-500/45 bg-rose-500/10 px-2 py-1 font-medium text-rose-600 hover:bg-rose-500/20"
                             >
                               Procure
                             </button>
@@ -1374,15 +1382,36 @@ function InventoryPageContent() {
               </div>
               <div className="flex-1 overflow-y-auto space-y-4 px-4 py-3">
                 <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
-                  <div><span className="text-ds-ink-faint">Material Code</span><p className="text-ds-ink">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p></div>
-                  <div><span className="text-ds-ink-faint">Board Type</span><p className="text-ds-ink">{materialDrawerData?.material.boardType ?? materialDrawerRow.board_type_id ?? '-'}</p></div>
-                  <div><span className="text-ds-ink-faint">Classification</span><p className="text-ds-ink">{materialDrawerData?.material.boardClassification ?? materialDrawerRow.board_classification_id ?? '-'}</p></div>
-                  <div><span className="text-ds-ink-faint">GSM</span><p className="text-ds-ink">{String(materialDrawerData?.material.gsm ?? materialDrawerRow.gsm ?? '-')}</p></div>
-                  <div><span className="text-ds-ink-faint">Available</span><p className="text-emerald-300">{fmt(materialDrawerRow.available_sheets)}</p></div>
-                  <div><span className="text-ds-ink-faint">Reserved</span><p className="text-amber-300">{fmt(materialDrawerRow.reserved_sheets)}</p></div>
-                  <div><span className="text-ds-ink-faint">Shortage</span><p className="text-rose-300">{fmt(materialDrawerRow.shortage_sheets)}</p></div>
-                  <div><span className="text-ds-ink-faint">Free Stock</span><p className={(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? 'text-rose-300' : 'text-cyan-300'}>{fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p></div>
+                  <div><span className="text-ds-ink-muted">Material Code</span><p className="font-semibold text-ds-ink">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p></div>
+                  <div><span className="text-ds-ink-muted">Board Type</span><p className="text-ds-ink">{materialDrawerData?.material.boardType ?? materialDrawerRow.board_type_id ?? '-'}</p></div>
+                  <div><span className="text-ds-ink-muted">Classification</span><p className="text-ds-ink">{materialDrawerData?.material.boardClassification ?? materialDrawerRow.board_classification_id ?? '-'}</p></div>
+                  <div><span className="text-ds-ink-muted">GSM</span><p className="text-ds-ink">{String(materialDrawerData?.material.gsm ?? materialDrawerRow.gsm ?? '-')}</p></div>
+                  <div><span className="text-ds-ink-muted">Available</span><p className="font-semibold text-emerald-600">{fmt(materialDrawerRow.available_sheets)}</p></div>
+                  <div><span className="text-ds-ink-muted">Reserved</span><p className="font-semibold text-amber-700">{fmt(materialDrawerRow.reserved_sheets)}</p></div>
+                  <div><span className="text-ds-ink-muted">Shortage</span><p className="font-semibold text-rose-600">{fmt(materialDrawerRow.shortage_sheets)}</p></div>
+                  <div><span className="text-ds-ink-muted">Free Stock</span><p className={`font-semibold ${(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? 'text-rose-600' : 'text-cyan-700'}`}>{fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p></div>
                 </div>
+                {materialDrawerData?.material.sourceTraceability ? (
+                  <p className="rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1 text-ds-ink-faint">
+                    {materialDrawerData.material.sourceTraceability}
+                  </p>
+                ) : null}
+                {materialDrawerData?.material.leftoverMeta?.isLeftover ? (
+                  <div className="rounded border border-ds-brand/30 bg-ds-brand/5 p-2">
+                    <p className="text-xs uppercase tracking-wide text-ds-brand">Leftover Stock</p>
+                    <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
+                      <div><span className="text-ds-ink-faint">Source Planning</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.sourcePlanningId || '-'}</p></div>
+                      <div><span className="text-ds-ink-faint">Source Job</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.sourceJobCardId || '-'}</p></div>
+                      <div><span className="text-ds-ink-faint">Original Parent</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.sourceParentSize || '-'}</p></div>
+                      <div><span className="text-ds-ink-faint">Leftover Size</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.leftoverSize || '-'}</p></div>
+                      <div><span className="text-ds-ink-faint">Cut Size Used</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.cutSizeUsed || '-'}</p></div>
+                      <div><span className="text-ds-ink-faint">Source Material</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.sourceMaterialId || '-'}</p></div>
+                    </div>
+                    {materialDrawerData.material.leftoverMeta.remarks ? (
+                      <p className="mt-1 text-ds-ink-faint">Remarks: {materialDrawerData.material.leftoverMeta.remarks}</p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {materialDrawerView === 'reserved' ? (
                   <div>
@@ -1399,7 +1428,7 @@ function InventoryPageContent() {
                               {(r.planningId ? `PL#${r.planningId.slice(0, 8)}` : '-')}{r.jobCard?.jobCardNumber ? ` · JC#${r.jobCard.jobCardNumber}` : ''}
                             </p>
                             <p className="text-ds-ink-faint">{r.cartonName || '-'} {r.poNumber ? `· ${r.poNumber}` : ''}</p>
-                            <p className="text-ds-warning">Reserved {fmt(r.reservedSheets)} · Date {r.reservedAt ? new Date(r.reservedAt).toLocaleDateString('en-IN') : '-'}</p>
+                            <p className="font-semibold text-amber-700">Reserved {fmt(r.reservedSheets)} · Date {r.reservedAt ? new Date(r.reservedAt).toLocaleDateString('en-IN') : '-'}</p>
                             <p className="text-ds-ink-faint">Status: {r.jobCard?.status || r.status || '-'}</p>
                             <div className="mt-1 flex flex-wrap gap-2">
                               <button
@@ -1727,14 +1756,14 @@ function InventoryPageContent() {
               )}
             </div>
             <div className="flex flex-nowrap items-stretch gap-2 overflow-x-auto text-xs">
-              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'shortage' ? 'all' : 'shortage'))} className="min-w-[120px] rounded border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left">Shortage <div className={`${ledgerMono} text-sm text-rose-300`}>{fmt(paperWarehouseKpi.shortage)}</div></button>
-              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'available' ? 'all' : 'available'))} className="min-w-[120px] rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-left">Available <div className={`${ledgerMono} text-sm text-emerald-300`}>{fmt(paperWarehouseKpi.available)}</div></button>
-              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'reserved' ? 'all' : 'reserved'))} className="min-w-[120px] rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-left">Reserved <div className={`${ledgerMono} text-sm text-amber-300`}>{fmt(paperWarehouseKpi.reserved)}</div></button>
-              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'incoming' ? 'all' : 'incoming'))} className="min-w-[120px] rounded border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-left">Incoming <div className={`${ledgerMono} text-sm text-sky-300`}>{fmt(paperWarehouseKpi.incoming)}</div></button>
-              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'free' ? 'all' : 'free'))} className="min-w-[120px] rounded border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-left">Free Stock <div className={`${ledgerMono} text-sm text-cyan-300`}>{fmt(paperWarehouseKpi.freeStock)}</div></button>
-              <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
-              <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
-              <div className="min-w-[120px] rounded border border-red-900/70 bg-red-950/50 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm text-red-200`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'shortage' ? 'all' : 'shortage'))} className="min-w-[120px] rounded border border-rose-500/45 bg-rose-500/10 px-3 py-2 text-left">Shortage <div className={`${ledgerMono} text-sm font-bold text-rose-600`}>{fmt(paperWarehouseKpi.shortage)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'available' ? 'all' : 'available'))} className="min-w-[120px] rounded border border-emerald-500/45 bg-emerald-500/10 px-3 py-2 text-left">Available <div className={`${ledgerMono} text-sm font-bold text-emerald-600`}>{fmt(paperWarehouseKpi.available)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'reserved' ? 'all' : 'reserved'))} className="min-w-[120px] rounded border border-amber-500/45 bg-amber-500/10 px-3 py-2 text-left">Reserved <div className={`${ledgerMono} text-sm font-bold text-amber-700`}>{fmt(paperWarehouseKpi.reserved)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'incoming' ? 'all' : 'incoming'))} className="min-w-[120px] rounded border border-sky-500/45 bg-sky-500/10 px-3 py-2 text-left">Incoming <div className={`${ledgerMono} text-sm font-bold text-sky-700`}>{fmt(paperWarehouseKpi.incoming)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'free' ? 'all' : 'free'))} className="min-w-[120px] rounded border border-cyan-500/45 bg-cyan-500/10 px-3 py-2 text-left">Free Stock <div className={`${ledgerMono} text-sm font-bold text-cyan-700`}>{fmt(paperWarehouseKpi.freeStock)}</div></button>
+              <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm font-bold text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
+              <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm font-bold text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
+              <div className="min-w-[120px] rounded border border-red-500/45 bg-rose-500/10 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm font-bold text-rose-600`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
             </div>
           </div>
 
@@ -1794,7 +1823,7 @@ function InventoryPageContent() {
               </thead>
               <tbody className="divide-y divide-ds-card">
                 {filteredPaperWarehouseRows.map((row) => (
-                  <tr key={row.material_id} className="hover:bg-ds-main/40">
+                  <tr key={row.material_id} className="hover:bg-ds-main/50">
                     <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>
                       <button
                         type="button"
@@ -1810,19 +1839,19 @@ function InventoryPageContent() {
                       <button
                         type="button"
                         onClick={() => void openMaterialDrawer(row, 'history')}
-                        className={`underline underline-offset-2 hover:text-ds-ink ${ledgerMono}`}
+                        className={`underline underline-offset-2 hover:text-ds-ink ${ledgerMono} font-semibold`}
                       >
                         {row.material_code}
                       </button>
                       <p className={`text-[10px] text-ds-ink-faint ${ledgerMono}`}>{row.material_id}</p>
                     </td>
                     <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
-                    <td className={`px-3 py-2 text-emerald-300 ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
-                    <td className="px-3 py-2 text-amber-300">
+                    <td className={`px-3 py-2 text-emerald-600 font-semibold ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
+                    <td className="px-3 py-2 text-amber-700 font-semibold">
                       <button
                         type="button"
                         onClick={() => void openMaterialDrawer(row, 'reserved')}
-                        className={`underline underline-offset-2 hover:text-amber-200 ${ledgerMono}`}
+                        className={`underline decoration-amber-500/80 underline-offset-2 hover:text-amber-800 ${ledgerMono}`}
                       >
                         {fmt(row.reserved_sheets)}
                       </button>
@@ -1830,28 +1859,32 @@ function InventoryPageContent() {
                     <td
                       className={`px-3 py-2 ${ledgerMono} ${
                         row.available_sheets - row.reserved_sheets > 0
-                          ? 'text-emerald-300'
+                          ? 'text-cyan-700'
                           : row.available_sheets - row.reserved_sheets === 0
-                            ? 'text-amber-300'
-                            : 'text-rose-300'
+                            ? 'text-amber-700'
+                            : 'text-rose-600'
                       }`}
                     >
                       {fmt(row.available_sheets - row.reserved_sheets)}
                     </td>
-                    <td className={`px-3 py-2 text-sky-300 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
-                    <td className={`px-3 py-2 text-rose-300 ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
+                    <td className={`px-3 py-2 text-sky-700 font-semibold ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
+                    <td className={`px-3 py-2 text-rose-600 font-semibold ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
                     <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
                     <td className="px-3 py-2 text-xs">
                       {(() => {
                         const free = row.available_sheets - row.reserved_sheets
                         const statusClass =
-                          row.shortage_sheets > 0
-                            ? 'text-rose-300'
+                          row.status === 'leftover'
+                            ? 'text-violet-700'
+                            : row.shortage_sheets > 0
+                            ? 'text-rose-600'
                             : free > 0
-                              ? 'text-emerald-300'
-                              : 'text-amber-300'
+                              ? 'text-emerald-700'
+                              : 'text-amber-700'
                         const statusLabel =
-                          row.shortage_sheets > 0
+                          row.status === 'leftover'
+                            ? 'leftover'
+                            : row.shortage_sheets > 0
                             ? 'shortage'
                             : free > 0
                               ? 'healthy'
@@ -1864,7 +1897,7 @@ function InventoryPageContent() {
                         <button
                           type="button"
                           onClick={() => void openProcureModal(row)}
-                          className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300 hover:bg-rose-500/20"
+                          className="rounded border border-rose-500/45 bg-rose-500/10 px-2 py-1 font-medium text-rose-600 hover:bg-rose-500/20"
                         >
                           Procure
                         </button>

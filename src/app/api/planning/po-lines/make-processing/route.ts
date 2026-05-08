@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 /**
  * Bulk forward selected planning lines to the AW queue (gang-print / processing handoff).
- * Sets orchestration.awQueueHandoffAt, planningStatus → planned, and validates mix-set coating + GSM.
+ * Sets orchestration.awQueueHandoffAt, planningStatus → design_ready, and validates mix-set coating + GSM.
  */
 export async function POST(req: NextRequest) {
   const { error, user } = await requireAuth()
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
       return db.poLineItem.update({
         where: { id: line.id },
         data: {
-          planningStatus: 'planned',
+          planningStatus: 'design_ready',
           specOverrides: specOverrides as object,
         },
       })

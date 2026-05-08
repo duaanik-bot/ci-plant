@@ -34,7 +34,7 @@ import {
   INDUSTRIAL_PRIORITY_EVENT,
 } from '@/lib/industrial-priority-sync'
 import { PLANNING_DESIGNERS, readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
-import { resolveSheetSize } from '@/lib/planning-sheet-size'
+import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 import { formatShortTimeAgo } from '@/lib/time-ago'
 import { isEmbossingRequired } from '@/lib/emboss-conditions'
 import {
@@ -530,7 +530,7 @@ function canPushJobCardRow(r: Row): boolean {
     r.readiness?.approvalsComplete === true ||
     r.readiness?.artworkApproved === true ||
     (!!spec.customerApprovalPharma && !!spec.shadeCardQaTextApproval)
-  const toolingReadyOrNotRequired = r.readiness?.readyForProduction === true
+  const toolingReadyOrNotRequired = !!r.setNumber?.trim() && hasToolingSheetSize(r, spec)
   const rowClosed = readAwPoStatus(spec) === AW_PO_STATUS.CLOSED
   return awApproved && toolingReadyOrNotRequired && !rowClosed && !hasLinkedJobCard(r)
 }
@@ -685,27 +685,8 @@ function canPushToolingHubRow(r: Row): boolean {
 }
 
 function resolveAwSheetSize(spec: Record<string, unknown>): string {
-  const pick = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : '')
-  const planningCore = readPlanningCore(spec)
-  const aliases: unknown[] = [
-    spec.actualSheetSize,
-    spec.sheetSize,
-    spec.sheet_size,
-    (spec.spec as Record<string, unknown> | undefined)?.actualSheetSize,
-    (spec.spec as Record<string, unknown> | undefined)?.sheetSize,
-    (spec.dimensions as Record<string, unknown> | undefined)?.sheetSize,
-    planningCore.actualSheetSizeLabel,
-  ]
-  for (const item of aliases) {
-    const txt = pick(item)
-    if (txt) return txt
-  }
-  const len = Number(spec.sheetLengthMm)
-  const wid = Number(spec.sheetWidthMm)
-  if (Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0) {
-    return `${Math.floor(len)}×${Math.floor(wid)} mm`
-  }
-  return ''
+  const resolved = resolveSheetSize({ specOverrides: spec, spec })
+  return resolved === '-' ? '' : resolved
 }
 
 function resolveAwSheetSizeFromRow(r: Row): string {
@@ -742,6 +723,8 @@ function resolvePlanningDesignerName(
 }
 
 function rowUpsDisplay(spec: Record<string, unknown>): string {
+  const fromResolver = resolveUps({ specOverrides: spec, spec })
+  if (fromResolver != null) return String(fromResolver)
   const core = readPlanningCore(spec)
   const meta = readPlanningMeta(spec)
   const raw = spec.ups ?? spec.numberOfUps ?? core.ups ?? meta.ups
@@ -1517,22 +1500,35 @@ export default function DesigningQueuePage() {
     }
     let ok = 0
     let fail = 0
+    const failReasons: string[] = []
     for (const id of picked) {
       const row = rows.find((r) => r.id === id)
       if (!row) continue
       if (!canPushJobCardRow(row)) {
         fail += 1
+        failReasons.push(`${row.po.poNumber}: blocked (approval/tooling missing)`)
         continue
       }
       try {
-        await pushJobCardFromList(row)
-        ok += 1
-      } catch {
+        const out = await pushJobCardOnlyRow(row)
+        if (out.ok) {
+          ok += 1
+        } else {
+          fail += 1
+          failReasons.push(`${row.po.poNumber}: ${out.error || 'server error'}`)
+        }
+      } catch (e) {
         fail += 1
+        failReasons.push(`${row.po.poNumber}: ${e instanceof Error ? e.message : 'server error'}`)
       }
     }
+    await load()
+    router.refresh()
     if (ok) toast.success(`Pushed ${ok} row(s) to Job Card`)
-    if (fail) toast.error(`Failed for ${fail} row(s)`)
+    if (fail) {
+      const sample = failReasons.slice(0, 3).join(' | ')
+      toast.error(`Failed for ${fail} row(s): ${sample}${failReasons.length > 3 ? ' ...' : ''}`)
+    }
   }
 
   const finalizeGroupFromList = async (groupId: string, groupRows: Row[]) => {
@@ -2042,13 +2038,24 @@ export default function DesigningQueuePage() {
                               </div>
                             </td>
                             <td className="px-2 py-1 align-middle">
-                              {jcState === 'ready' ? (
-                                <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
-                                  Ready
-                                </span>
-                              ) : (
-                                <span className="text-xs text-ds-ink-faint">—</span>
-                              )}
+                              <div className="flex items-center justify-between gap-2">
+                                {jcState === 'ready' ? (
+                                  <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
+                                    Ready
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-ds-ink-faint">—</span>
+                                )}
+                                <button
+                                  type="button"
+                                  className="rounded px-1 text-xs text-ds-ink-faint hover:bg-ds-main/40 hover:text-ds-ink"
+                                  onClick={() => setActiveRowDrawer(r)}
+                                  aria-label="Open AW details"
+                                  title="Open details"
+                                >
+                                  →
+                                </button>
+                              </div>
                             </td>
                             <td className="px-2 py-1 align-middle">
                               <ActionsCell
@@ -2241,13 +2248,24 @@ export default function DesigningQueuePage() {
                       </div>
                     </td>
                     <td className="px-2 py-2 align-middle">
-                      {jcState === 'ready' ? (
-                        <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
-                          Ready
-                        </span>
-                      ) : (
-                        <span className="text-xs text-ds-ink-faint">—</span>
-                      )}
+                      <div className="flex items-center justify-between gap-2">
+                        {jcState === 'ready' ? (
+                          <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
+                            Ready
+                          </span>
+                        ) : (
+                          <span className="text-xs text-ds-ink-faint">—</span>
+                        )}
+                        <button
+                          type="button"
+                          className="rounded px-1 text-xs text-ds-ink-faint hover:bg-ds-main/40 hover:text-ds-ink"
+                          onClick={() => setActiveRowDrawer(r)}
+                          aria-label="Open AW details"
+                          title="Open details"
+                        >
+                          →
+                        </button>
+                      </div>
                     </td>
                     <td className="px-2 py-2 align-middle">
                       <ActionsCell
