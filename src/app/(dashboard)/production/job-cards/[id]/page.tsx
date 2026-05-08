@@ -33,12 +33,15 @@ type PoLine = {
   cartonName: string
   cartonSize: string | null
   quantity: number
+  artworkCode?: string | null
   paperType: string | null
   coatingType: string | null
+  otherCoating?: string | null
   embossingLeafing: string | null
   gsm: number | null
   dyeId: string | null
-  po: { poNumber: string }
+  specOverrides?: Record<string, unknown> | null
+  po: { poNumber: string; poDate?: string | null }
   carton: CartonSpecs
   materialQueue?: {
     sheetLengthMm: unknown
@@ -65,6 +68,9 @@ type BoardMaterial = {
   materialPendingWatermark: boolean
   warehouseHandshake: { issuedAt: string; custodianName: string } | null
   ledgerLink: { gsm: number; board: string } | null
+  reservedSheets?: number
+  shortageSheets?: number
+  availableStock?: number
 }
 
 type MaterialReadiness = {
@@ -169,6 +175,13 @@ type JobCard = {
   inventoryLocationPointer?: string | null
   grainFitStatus?: string
   auditTimeline?: AuditTimelineEntry[]
+}
+
+function formatDateDisplay(value: string | Date | null | undefined): string {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '-'
+  return d.toLocaleDateString('en-GB')
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -286,11 +299,9 @@ export default function JobCardDetailPage() {
   const [prePressRemarks, setPrePressRemarks] = useState('')
   const [boardReadiness, setBoardReadiness] = useState<'ready' | 'waiting' | 'not_ready'>('waiting')
   const [sheetSizeOverride, setSheetSizeOverride] = useState('')
-  const [machineId, setMachineId] = useState('')
   const [priority, setPriority] = useState<'Normal' | 'Urgent'>('Normal')
-  const [targetStartDate, setTargetStartDate] = useState('')
-  const [plannedCompletion, setPlannedCompletion] = useState('')
-  const [activeSection, setActiveSection] = useState<'summary' | 'spec' | 'board' | 'tooling' | 'execution' | 'validation' | 'material' | 'printing' | 'machine' | 'flow' | 'operations' | 'media' | 'notes' | 'history'>('summary')
+  const [activeSection, setActiveSection] = useState<'summary' | 'spec' | 'board' | 'tooling' | 'execution' | 'validation' | 'material' | 'printing' | 'operations' | 'media' | 'notes' | 'history'>('summary')
+  const [hubPushing, setHubPushing] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
   const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness | null>(null)
   const [materialTimeline, setMaterialTimeline] = useState<MaterialTimelineEvent[]>([])
@@ -299,10 +310,7 @@ export default function JobCardDetailPage() {
     prePressRemarks: string
     boardReadiness: 'ready' | 'waiting' | 'not_ready'
     sheetSizeOverride: string
-    machineId: string
     priority: 'Normal' | 'Urgent'
-    targetStartDate: string
-    plannedCompletion: string
     artworkApproved: boolean
     finalQcPass: boolean
   } | null>(null)
@@ -365,10 +373,7 @@ export default function JobCardDetailPage() {
         ? setup.boardReadiness
         : derivedBoard,
     )
-    setMachineId(typeof jc.postPressRouting?.printPlan?.machineId === 'string' ? jc.postPressRouting.printPlan.machineId : '')
     setPriority(setup.priority === 'Urgent' ? 'Urgent' : 'Normal')
-    setTargetStartDate(typeof setup.targetStartDate === 'string' ? setup.targetStartDate : '')
-    setPlannedCompletion(typeof setup.plannedCompletion === 'string' ? setup.plannedCompletion : '')
     const init = {
       designerUserId: jc.shiftOperator?.id ?? '',
       prePressRemarks: typeof setup.prePressRemarks === 'string' ? setup.prePressRemarks : '',
@@ -377,11 +382,7 @@ export default function JobCardDetailPage() {
           ? setup.boardReadiness
           : derivedBoard,
       sheetSizeOverride: typeof setup.sheetSize === 'string' ? setup.sheetSize : '',
-      machineId:
-        typeof jc.postPressRouting?.printPlan?.machineId === 'string' ? jc.postPressRouting.printPlan.machineId : '',
       priority: setup.priority === 'Urgent' ? 'Urgent' : 'Normal',
-      targetStartDate: typeof setup.targetStartDate === 'string' ? setup.targetStartDate : '',
-      plannedCompletion: typeof setup.plannedCompletion === 'string' ? setup.plannedCompletion : '',
       artworkApproved: jc.artworkApproved,
       finalQcPass: jc.finalQcPass,
     } as const
@@ -613,6 +614,47 @@ export default function JobCardDetailPage() {
     }
   }
 
+  async function pushToHubsFromJobCard() {
+    if (!jc?.poLine?.id) {
+      toast.error('PO line reference missing')
+      return
+    }
+    const spec = (jc.poLine.specOverrides || {}) as Record<string, unknown>
+    const artworkId =
+      String(spec.artworkId || '').trim() ||
+      String(jc.poLine.artworkCode || '').trim() ||
+      String(jc.poLine.id).trim()
+    const payload = {
+      poLineId: jc.poLine.id,
+      jobCardId: jc.id,
+      artworkId,
+      setNumber: String(jc.setNumber || '1'),
+      dieId: jc.poLine.dyeId || null,
+      embossBlockId: jc.embossBlockId || jc.poLine.carton?.embossBlockId || null,
+      plateSetId: jc.plateSetId || null,
+      dispatchDie: true,
+      dispatchEmboss: isEmbossingRequired(jc.poLine.embossingLeafing ?? jc.poLine.carton?.embossingLeafing),
+      dieSource: jc.poLine.dyeId ? 'OLD' : 'NEW',
+      embossSource: (jc.embossBlockId || jc.poLine.carton?.embossBlockId) ? 'OLD' : 'NEW',
+    } as const
+    setHubPushing(true)
+    try {
+      const res = await fetch('/api/tooling-hub/unified-dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error || 'Failed to push hubs')
+      toast.success('Pushed to hubs successfully')
+      setLastSavedAt(Date.now())
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to push hubs')
+    } finally {
+      setHubPushing(false)
+    }
+  }
+
   async function saveExecution(release: boolean) {
     if (!jc) return
     if (release) {
@@ -627,21 +669,11 @@ export default function JobCardDetailPage() {
     }
     const nextRouting = {
       ...(jc.postPressRouting ?? {}),
-      ...(release || jc.postPressRouting?.printPlan
-        ? {
-            printPlan: {
-              ...(jc.postPressRouting?.printPlan ?? { lane: 'triage' as const, order: 0 }),
-              machineId: machineId || null,
-            },
-          }
-        : {}),
       executionSetup: {
         prePressRemarks: prePressRemarks || null,
         boardReadiness,
         sheetSize: sheetSizeOverride || null,
         priority,
-        targetStartDate: targetStartDate || null,
-        plannedCompletion: plannedCompletion || null,
       },
     }
     await saveChanges({
@@ -684,6 +716,11 @@ export default function JobCardDetailPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [id, returnTo, router, jc, saveExecution])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setLastSavedAt(Date.now()), 15000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   if (!jc) {
     return (
       <div className={`min-h-[30vh] p-4 text-ds-ink-faint bg-background ${mono}`}>Loading…</div>
@@ -708,6 +745,26 @@ export default function JobCardDetailPage() {
   })
   const upsDisplay = bible?.ups ?? resolvedUps ?? '—'
   const grainDisplay = bible?.grainDirection ?? jc.poLine?.materialQueue?.grainDirection ?? '—'
+  const poDateDisplay = formatDateDisplay(jc.poLine?.po?.poDate)
+  const lineSpec = (jc.poLine?.specOverrides || {}) as Record<string, unknown>
+  const colourSpec =
+    (typeof lineSpec.colorSpec === 'string' && lineSpec.colorSpec.trim()) ||
+    (typeof lineSpec.colourSpec === 'string' && lineSpec.colourSpec.trim()) ||
+    (typeof lineSpec.colour === 'string' && lineSpec.colour.trim()) ||
+    (typeof lineSpec.color === 'string' && lineSpec.color.trim()) ||
+    (typeof jc.poLine?.carton?.coatingType === 'string' ? jc.poLine.carton.coatingType : '') ||
+    '—'
+  const gsmDisplay = jc.poLine?.gsm ?? jc.poLine?.materialQueue?.gsm ?? jc.boardMaterial?.ledgerLink?.gsm ?? '—'
+  const paperDisplay =
+    jc.poLine?.paperType ??
+    jc.poLine?.materialQueue?.boardType ??
+    jc.boardMaterial?.ledgerLink?.board ??
+    '—'
+  const materialCodeDisplay = jc.issuedStockDisplay || jc.boardMaterial?.batchLotNumber || '—'
+  const requiredDisplay = materialReadiness?.requiredSheets ?? jc.requiredSheets
+  const reservedDisplay = materialReadiness?.reservedSheets ?? jc.boardMaterial?.reservedSheets ?? 0
+  const shortageDisplay = materialReadiness?.shortageSheets ?? jc.boardMaterial?.shortageSheets ?? 0
+  const availableDisplay = materialReadiness?.availableStock ?? jc.boardMaterial?.availableStock ?? 0
 
   const boardStatus = boardReadiness
   const toolRows = [
@@ -729,10 +786,7 @@ export default function JobCardDetailPage() {
       prePressRemarks !== initialForm.prePressRemarks ||
       boardReadiness !== initialForm.boardReadiness ||
       sheetSizeOverride !== initialForm.sheetSizeOverride ||
-      machineId !== initialForm.machineId ||
       priority !== initialForm.priority ||
-      targetStartDate !== initialForm.targetStartDate ||
-      plannedCompletion !== initialForm.plannedCompletion ||
       jc.artworkApproved !== initialForm.artworkApproved ||
       jc.finalQcPass !== initialForm.finalQcPass)
   const statusLabel = jc.status === 'qa_released' || jc.status === 'closed' ? 'Released' : jc.status === 'in_progress' || jc.status === 'final_qc' ? 'Ready' : 'Draft'
@@ -767,6 +821,9 @@ export default function JobCardDetailPage() {
               <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" checked={jc.artworkApproved} onChange={(e) => update('artworkApproved', e.target.checked)} /> Customer OK</label>
               <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" checked={jc.finalQcPass} onChange={(e) => update('finalQcPass', e.target.checked)} /> QA OK</label>
               <a href={`/api/designing/po-lines/${jc.poLine?.id}/job-spec-pdf`} target="_blank" rel="noopener noreferrer" className="rounded border border-ds-line/50 px-3 py-1.5 text-xs">Job spec PDF</a>
+              <button type="button" disabled={hubPushing} onClick={() => void pushToHubsFromJobCard()} className="rounded border border-ds-line/50 px-3 py-1.5 text-xs disabled:opacity-50">
+                {hubPushing ? 'Pushing hubs…' : 'Push to Hubs'}
+              </button>
               <Link href="/orders/purchase-orders" className="rounded border border-ds-line/50 px-3 py-1.5 text-xs">Open PO</Link>
               <button type="button" onClick={() => window.print()} className="rounded border border-ds-line px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40">Print</button>
               <span className="text-xs text-ds-ink-faint">{isDirty ? 'Unsaved changes' : lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'No pending changes'}</span>
@@ -780,8 +837,6 @@ export default function JobCardDetailPage() {
               ['summary', 'Job Summary', 'summary'],
               ['material', 'Material & Sheet Config', 'board'],
               ['printing', 'Printing & Finishing', 'spec'],
-              ['machine', 'Machine Setup', 'execution'],
-              ['flow', 'Production Flow', 'tooling'],
               ['operations', 'Operations', 'execution'],
               ['media', 'Media Files', 'validation'],
               ['notes', 'Notes', 'spec'],
@@ -812,7 +867,7 @@ export default function JobCardDetailPage() {
               ['Set No', jc.setNumber ?? '—'],
               ['Client', jc.customer.name],
               ['PO No', jc.poLine?.po.poNumber ?? '—'],
-              ['PO Date', ((jc.poLine as unknown as { po?: { poDate?: string } })?.po?.poDate || '-')],
+              ['PO Date', poDateDisplay],
               ['Carton', productName],
               ['Size', jc.poLine?.cartonSize ?? '—'],
               ['Qty', Number(jc.poLine?.quantity || 0).toLocaleString('en-IN')],
@@ -833,10 +888,10 @@ export default function JobCardDetailPage() {
               <h2 className="text-sm font-semibold text-ds-ink">Printing & Finishing</h2>
               <div className="grid md:grid-cols-5 gap-3 text-xs">
                 <div><p className="text-ds-ink-faint mb-1">Coating</p><p>{jc.poLine?.coatingType ?? '—'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Other Coating</p><p>{jc.poLine?.carton?.laminateType ?? 'None'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Emboss / Leaf</p><p>{jc.poLine?.embossingLeafing ?? 'None'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Paper</p><p>{jc.poLine?.paperType ?? '—'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Color</p><p>{bible?.shadeCard?.shadeCode ? 'CMYK + P' : '—'}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Other Coating</p><p>{jc.poLine?.otherCoating ?? jc.poLine?.carton?.laminateType ?? 'None'}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Emboss / Leaf</p><p>{jc.poLine?.embossingLeafing ?? jc.poLine?.carton?.embossingLeafing ?? 'None'}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Paper</p><p>{paperDisplay}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Color / Spec</p><p>{colourSpec}</p></div>
               </div>
               <div className="grid md:grid-cols-5 gap-3 text-xs">
                 <div>
@@ -854,7 +909,7 @@ export default function JobCardDetailPage() {
                   )}
                 </div>
                 <div><p className="text-ds-ink-faint mb-1">UPS</p><p>{upsDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">GSM</p><p>{jc.poLine?.gsm ?? '—'}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">GSM</p><p>{gsmDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Dye Details</p><p>{dyeDetail && dyeDetail !== 'unavailable' ? `${dyeDetail.dyeNumber}` : '—'}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Pasting</p><p>BSO</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Artwork</p><p>{jc.poLine?.carton?.artworkCode ?? '—'}</p></div>
@@ -866,33 +921,8 @@ export default function JobCardDetailPage() {
             </div>
 
             <div ref={(el) => { sectionRefs.current.execution = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
-              <h2 className="text-sm font-semibold text-ds-ink">Machine Setup</h2>
-              <div className="grid md:grid-cols-4 gap-3 text-xs">
-                <div>
-                  <label className="block text-ds-ink-faint mb-1">Coating Machine</label>
-                  <select
-                    className={fieldClass}
-                    value={machineId}
-                    onChange={(e) => setMachineId(e.target.value)}
-                  >
-                    <option value="">Auto-assign</option>
-                    {machineId ? <option value={machineId}>{machineId}</option> : null}
-                  </select>
-                </div>
-                <div><label className="block text-ds-ink-faint mb-1">Other Coating Machine</label><input readOnly value="None" className={fieldClass} /></div>
-                <div><label className="block text-ds-ink-faint mb-1">Roll Used</label><input readOnly value="0" className={fieldClass} /></div>
-                <div><label className="block text-ds-ink-faint mb-1">Window Cutting</label><input readOnly value="None" className={fieldClass} /></div>
-                <div><label className="block text-ds-ink-faint mb-1">Dye Machine</label><input readOnly value={dieStoreCheck?.dieCode ?? 'Manual'} className={fieldClass} /></div>
-                <div><label className="block text-ds-ink-faint mb-1">Embossing / Leafing</label><input readOnly value={embossRequired ? 'Required' : 'None'} className={fieldClass} /></div>
-                <div>
-                  <label className="block text-ds-ink-faint mb-1">Priority</label>
-                  <select className={fieldClass} value={priority} onChange={(e) => setPriority(e.target.value as 'Normal' | 'Urgent')}><option>Normal</option><option>Urgent</option></select>
-                </div>
-                <div><label className="block text-ds-ink-faint mb-1">Target Start Date</label><input type="date" value={targetStartDate} onChange={(e) => setTargetStartDate(e.target.value)} className={fieldClass} /></div>
-                <div><label className="block text-ds-ink-faint mb-1">Planned Completion</label><input type="date" value={plannedCompletion} onChange={(e) => setPlannedCompletion(e.target.value)} className={fieldClass} /></div>
-              </div>
               <div className="space-y-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">Operations</h3>
+                <h2 className="text-sm font-semibold text-ds-ink">Operations</h2>
               <div className="overflow-x-auto rounded border border-ds-line/40">
                 <table className="min-w-full text-xs">
                   <thead className="bg-ds-main/40 text-ds-ink-faint">
@@ -908,7 +938,7 @@ export default function JobCardDetailPage() {
                     {stageChain.slice(0, 6).map((row) => (
                       <tr key={row.stage.id} className="border-t border-ds-line/30">
                         <td className="px-2 py-2">{row.stage.stageName}</td>
-                        <td className="px-2 py-2">{machineId || '—'}</td>
+                        <td className="px-2 py-2">{jc.postPressRouting?.printPlan?.machineId || '—'}</td>
                         <td className={`px-2 py-2 text-right ${mono}`}>{Number(jc.poLine?.quantity || 0).toLocaleString('en-IN')}</td>
                         <td className={`px-2 py-2 text-right ${mono}`}>{Number(row.stage.counter || 0).toLocaleString('en-IN')}</td>
                         <td className="px-2 py-2">{row.stage.status.replace(/_/g, ' ')}</td>
@@ -925,12 +955,14 @@ export default function JobCardDetailPage() {
             <div ref={(el) => { sectionRefs.current.board = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
               <h2 className="text-sm font-semibold text-ds-ink">Material & Sheet Config</h2>
               <div className="grid grid-cols-2 gap-3 text-xs">
-                <div><p className="text-ds-ink-faint mb-1">Choose Paper</p><p>{jc.poLine?.paperType ?? '—'}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Choose Paper</p><p>{paperDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Cut Size</p><p>{effectiveSheetSize || '—'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Required Sheets</p><p>{jc.requiredSheets.toLocaleString('en-IN')}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Required Sheets</p><p>{Number(requiredDisplay).toLocaleString('en-IN')}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Wastage Sheets</p><p>{jc.wastageSheets.toLocaleString('en-IN')}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Paper Divide</p><p>{upsDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Total Sheets</p><p>{jc.totalSheets.toLocaleString('en-IN')}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Material Code</p><p>{materialCodeDisplay}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Board / GSM</p><p>{`${paperDisplay} / ${gsmDisplay}`}</p></div>
               </div>
               <div className="grid grid-cols-3 gap-2 text-xs">
                 {[
@@ -953,10 +985,10 @@ export default function JobCardDetailPage() {
               <div className="rounded-lg border border-ds-line/40 bg-ds-main/30 p-3">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">Material Readiness</p>
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>Required Sheets: <span className="text-ds-ink">{materialReadiness?.requiredSheets ?? '-'}</span></div>
-                  <div>Reserved Sheets: <span className="text-ds-ink">{materialReadiness?.reservedSheets ?? '-'}</span></div>
-                  <div>Available Stock: <span className="text-ds-ink">{materialReadiness?.availableStock ?? '-'}</span></div>
-                  <div>Shortage: <span className="text-ds-ink">{materialReadiness?.shortageSheets ?? '-'}</span></div>
+                  <div>Required Sheets: <span className="text-ds-ink">{requiredDisplay}</span></div>
+                  <div>Reserved Sheets: <span className="text-ds-ink">{reservedDisplay}</span></div>
+                  <div>Available Stock: <span className="text-ds-ink">{availableDisplay}</span></div>
+                  <div>Shortage: <span className="text-ds-ink">{shortageDisplay}</span></div>
                   <div>Incoming (PR): <span className="text-ds-ink">{materialReadiness?.prStatus ?? '-'}</span></div>
                   <div>GRN ETA: <span className="text-ds-ink">{materialReadiness?.grnEta ? new Date(materialReadiness.grnEta).toLocaleDateString() : '-'}</span></div>
                 </div>
@@ -978,18 +1010,6 @@ export default function JobCardDetailPage() {
                 </div>
               </div>
               {boardStatus !== 'ready' ? <div className="rounded border border-ds-warning/40 bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning">Expected board delivery: {jc.boardMaterial?.warehouseHandshake?.issuedAt ? new Date(jc.boardMaterial.warehouseHandshake.issuedAt).toLocaleDateString() : 'TBD'}</div> : null}
-            </div>
-
-            <div ref={(el) => { sectionRefs.current.tooling = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">
-              <h2 className="text-sm font-semibold text-ds-ink">Production Flow</h2>
-              <div className="space-y-2 text-xs">
-                {toolRows.map((row) => (
-                  <div key={row.name} className="flex items-center justify-between rounded border border-ds-line/30 px-2 py-2">
-                    <div><p className="font-medium">{row.name}</p><p className="text-ds-ink-faint">{row.id} · {row.source}</p></div>
-                    <span className={`rounded border px-2 py-0.5 text-xs ${row.linked ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>{row.linked ? 'Linked' : 'Missing'}</span>
-                  </div>
-                ))}
-              </div>
             </div>
 
             <div ref={(el) => { sectionRefs.current.validation = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-3">

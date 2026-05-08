@@ -118,9 +118,9 @@ export async function GET(
   } =
     jc.jobCardNumber != null
       ? await db.poLineItem.findFirst({
-          where: { jobCardNumber: jc.jobCardNumber },
-          include: {
-            po: { select: { poNumber: true } },
+        where: { jobCardNumber: jc.jobCardNumber },
+        include: {
+            po: { select: { poNumber: true, poDate: true } },
             materialQueue: {
               select: {
                 sheetLengthMm: true,
@@ -550,4 +550,3 @@ export async function PUT(
 
   return NextResponse.json(updated)
 }
-
