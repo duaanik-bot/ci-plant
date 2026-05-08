@@ -53,6 +53,7 @@ const readinessTone: Record<Readiness, string> = {
 
 function mapStatus(row: JobCardRow): UiStatus {
   const s = String(row.status || '').toLowerCase()
+  if (s === 'archived') return 'completed'
   if (s === 'closed') return 'completed'
   if (s === 'qa_released') return 'released'
   if (s === 'in_progress' || s === 'final_qc') return 'in_production'
@@ -115,6 +116,7 @@ export default function JobCardsPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     const out = rows.filter((r) => {
+      if (String(r.status || '').toLowerCase() === 'archived') return false
       const st = mapStatus(r)
       const rd = mapReadiness(r)
       if (statusFilter !== 'all' && st !== statusFilter) return false
