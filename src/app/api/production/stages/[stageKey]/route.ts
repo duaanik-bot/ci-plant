@@ -42,13 +42,18 @@ export async function GET(
   const routingKey = postPressRoutingKeyByStageKey[stageKey]
   const where: {
     stageName: string
+    status?: { notIn: string[] }
     jobCard?: {
       postPressRouting?:
         | { path: string[]; equals: boolean }
         | { path: string[]; equals: string }
       AND?: { postPressRouting: { path: string[]; equals: string } }[]
     }
-  } = { stageName: stageLabel }
+  } = {
+    stageName: stageLabel,
+    // Hide rows removed via stage delete actions.
+    status: { notIn: ['archived', 'deleted'] },
+  }
   if (routingKey) {
     where.jobCard = {
       postPressRouting: { path: [routingKey], equals: true },
