@@ -301,7 +301,7 @@ function SortableCard({
         isDragging ? 'opacity-60 z-50' : ''
       }`}
     >
-      <div className="flex items-start justify-between gap-0.5">
+      <div className="flex items-start justify-between gap-1">
         <Link
           href={`/production/job-cards/${jc.id}`}
           onClick={(e) => e.stopPropagation()}
@@ -309,9 +309,22 @@ function SortableCard({
         >
           JC #{jc.jobCardNumber}
         </Link>
-        {pri ? (
-          <Star className={`h-3 w-3 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`} aria-label="Priority" />
-        ) : null}
+        <div className="flex items-center gap-1">
+          {pri ? (
+            <Star className={`h-3 w-3 shrink-0 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`} aria-label="Priority" />
+          ) : null}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              void onDelete(jc)
+            }}
+            className="rounded border border-rose-600/40 px-1.5 py-0.5 text-[10px] text-rose-600 hover:bg-rose-500/10"
+            title="Delete card"
+          >
+            Del
+          </button>
+        </div>
       </div>
       <p className="text-xs text-ds-ink-muted truncate leading-tight mt-0.5" title={po?.cartonName ?? ''}>
         {po?.cartonName ?? '—'}
@@ -332,31 +345,8 @@ function SortableCard({
           <span className="rounded border border-emerald-600/40 px-1.5 py-0.5 text-[10px] text-emerald-600">
             Pushed
           </span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              void onDelete(jc)
-            }}
-            className="rounded border border-rose-600/40 px-1.5 py-0.5 text-[10px] text-rose-600 hover:bg-rose-500/10"
-          >
-            Delete
-          </button>
         </div>
-      ) : (
-        <div className="mt-1">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              void onDelete(jc)
-            }}
-            className="rounded border border-rose-600/40 px-1.5 py-0.5 text-[10px] text-rose-600 hover:bg-rose-500/10"
-          >
-            Delete
-          </button>
-        </div>
-      )}
+      ) : null}
     </div>
   )
 }
