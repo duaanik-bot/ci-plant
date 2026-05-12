@@ -20,7 +20,7 @@ export {
 export function EnterpriseTableShell({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`w-full overflow-x-auto overflow-y-hidden shadow-ds-depth-sm ring-1 ring-neutral-200/80 dark:ring-ds-line/40 sm:rounded-ds-md ${className}`}
+      className={`w-full overflow-x-auto overflow-y-hidden rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] shadow-ds-depth-sm ${className}`}
     >
       {children}
     </div>

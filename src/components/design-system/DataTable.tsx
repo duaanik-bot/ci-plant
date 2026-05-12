@@ -3,11 +3,11 @@ import { cn } from '@/lib/cn'
 
 /** Class bundles for a minimal SaaS data table (no heavy borders, hover + selection via row class). */
 export const dataTable = {
-  wrap: 'min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-ds-md',
+  wrap: 'min-h-0 flex-1 overflow-y-auto overflow-x-auto rounded-ds-md',
   table: 'w-full table-fixed border-separate border-spacing-0 text-left',
   thead:
-    'sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--bg-muted)] backdrop-blur-sm shadow-sm',
-  th: 'px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-ds-ink-faint min-h-[50px] transition-colors duration-150',
+    'sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--bg-elevated)]/95 backdrop-blur-sm shadow-sm',
+  th: 'px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-ds-ink-faint min-h-[48px] transition-colors duration-150',
   thSortBtn:
     'inline-flex w-full min-w-0 items-center gap-0.5 text-left text-xs font-semibold uppercase tracking-wider text-ds-ink-muted transition hover:text-ds-ink',
   thSticky:
@@ -17,8 +17,8 @@ export const dataTable = {
       'w-full min-w-0 border-0 border-b border-[var(--border)] bg-transparent py-1.5 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:border-b-2 focus:border-[var(--brand-primary)] focus:outline-none focus:ring-0',
   },
   tr: {
-    body: 'border-b border-border/30 transition-[background-color] duration-200 ease-out',
-    hover: 'hover:bg-[var(--bg-muted)]',
+    body: 'border-b border-border/30 bg-[var(--bg-card)] transition-[background-color] duration-200 ease-out',
+    hover: 'hover:bg-[var(--bg-muted)]/80',
     selected:
       'bg-[var(--brand-bg-soft)] shadow-[inset_3px_0_0_0_var(--brand-primary)] ring-1 ring-inset ring-[var(--brand-primary)]/20',
   },
@@ -32,7 +32,7 @@ export const dataTable = {
     money: 'text-right font-medium tabular-nums text-ds-ink',
     moneyTotal: 'text-right text-base font-bold tabular-nums text-ds-success',
   },
-  empty: 'px-4 py-6 text-center text-sm text-ds-ink-muted',
+  empty: 'px-4 py-10 text-center text-sm text-ds-ink-muted',
 } as const
 
 export function DataTableFrame({

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { format, differenceInDays } from 'date-fns'
+import { Button, StatusBadge } from '@/components/design-system'
 import {
   EnterpriseTableShell,
   enterpriseTableClass,
@@ -31,6 +32,7 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
   const [customerFilter, setCustomerFilter] = useState('')
+  const [localSearch, setLocalSearch] = useState('')
 
   useEffect(() => {
     const params = new URLSearchParams()
@@ -47,34 +49,32 @@ export default function JobsPage() {
     return <div className="p-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
   }
 
-  const statusBadge = (status: string) => {
-    const colours: Record<string, string> = {
-      pending_artwork: 'bg-ds-warning/8 text-ds-warning dark:bg-ds-warning/12 dark:text-ds-warning',
-      artwork_approved: 'bg-blue-100 text-blue-900 dark:bg-blue-900/50 dark:text-blue-200',
-      in_production: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-200',
-      closed: 'bg-neutral-200 text-neutral-800 dark:bg-ds-elevated dark:text-ds-ink-muted',
-      dispatched: 'bg-purple-100 text-purple-900 dark:bg-purple-900/50 dark:text-purple-200',
-    }
+  const inputCls = 'ds-input h-9 min-w-[80px] py-1.5'
+  const filteredJobs = jobs.filter((job) => {
+    const q = localSearch.trim().toLowerCase()
+    if (!q) return true
     return (
-      <span className={`rounded px-2 py-0.5 text-xs font-medium ${colours[status] ?? 'bg-neutral-200 text-neutral-800 dark:bg-ds-elevated dark:text-ds-ink-muted'}`}>
-        {status.replace(/_/g, ' ')}
-      </span>
+      String(job.jobNumber ?? '').toLowerCase().includes(q) ||
+      String(job.productName ?? '').toLowerCase().includes(q) ||
+      String(job.customer?.name ?? '').toLowerCase().includes(q)
     )
-  }
-
-  const inputCls =
-    'min-h-[40px] min-w-[80px] rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-card-foreground'
+  })
 
   return (
     <div className="mx-auto max-w-6xl p-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Jobs</h1>
-        <Link href="/jobs/new" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-          New job
-        </Link>
+        <Link href="/jobs/new"><Button>New Job</Button></Link>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-4">
+      <div className="ds-toolbar mb-4">
+        <input
+          type="search"
+          placeholder="Search by job card, product, client…"
+          value={localSearch}
+          onChange={(e) => setLocalSearch(e.target.value)}
+          className="ds-toolbar-search"
+        />
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={inputCls}>
           <option value="">All statuses</option>
           <option value="pending_artwork">Pending artwork</option>
@@ -110,7 +110,7 @@ export default function JobsPage() {
             </tr>
           </thead>
           <tbody className={enterpriseTbodyClass}>
-            {jobs.map((job) => {
+            {filteredJobs.map((job) => {
               const due = new Date(job?.dueDate ?? '')
               const daysLeft = Number.isNaN(due.getTime()) ? '—' : differenceInDays(due, new Date())
               return (
@@ -119,7 +119,7 @@ export default function JobsPage() {
                   <td className={enterpriseTdClass}>{job?.customer?.name ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{job?.productName ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{job?.qtyOrdered ?? '—'}</td>
-                  <td className={enterpriseTdClass}>{statusBadge(job?.status ?? '')}</td>
+                  <td className={enterpriseTdClass}><StatusBadge status={(job?.status ?? '').replace(/_/g, ' ')} /></td>
                   <td className={enterpriseTdMonoClass}>{Number.isNaN(due.getTime()) ? '—' : format(due, 'dd MMM yyyy')}</td>
                   <td
                     className={`${enterpriseTdMonoClass} ${
@@ -129,17 +129,19 @@ export default function JobsPage() {
                     {daysLeft}
                   </td>
                   <td className={enterpriseTdClass}>
-                    <Link href={`/jobs/${job?.id ?? ''}`} className="mr-2 text-blue-600 hover:underline dark:text-blue-400">
-                      View
-                    </Link>
-                    <a
-                      href={`/api/jobs/${job?.id ?? ''}/card-pdf`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-ds-ink-faint hover:underline dark:text-ds-ink-muted"
-                    >
-                      PDF
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <Link href={`/jobs/${job?.id ?? ''}`} className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-500/15">
+                        View
+                      </Link>
+                      <a
+                        href={`/api/jobs/${job?.id ?? ''}/card-pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded border border-ds-line/70 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated"
+                      >
+                        PDF
+                      </a>
+                    </div>
                   </td>
                 </tr>
               )
@@ -147,7 +149,7 @@ export default function JobsPage() {
           </tbody>
         </table>
       </EnterpriseTableShell>
-      {jobs.length === 0 && <p className="py-8 text-center text-sm text-ds-ink-faint dark:text-ds-ink-muted">No jobs found.</p>}
+      {filteredJobs.length === 0 && <p className="ds-empty-state">No jobs match current filters. Try clearing filters or search.</p>}
     </div>
   )
 }

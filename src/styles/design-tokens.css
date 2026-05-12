@@ -11,7 +11,8 @@
   /* —— Semantic (app-wide) —— */
   --brand-primary: #f97316;
   --brand-primary-hover: #ea580c;
-  --brand-bg-soft: rgba(249, 115, 22, 0.1);
+  --brand-bg-soft: rgba(249, 115, 22, 0.12);
+  --brand-bg-strong: rgba(249, 115, 22, 0.2);
 
   --success: #22c55e;
   --success-bg: rgba(34, 197, 94, 0.12);
@@ -19,17 +20,25 @@
   --warning: #f59e0b;
   --warning-bg: rgba(245, 158, 11, 0.12);
 
+  --info: #0ea5e9;
+  --info-bg: rgba(14, 165, 233, 0.12);
+
   --error: #ef4444;
   --error-bg: rgba(239, 68, 68, 0.12);
+
+  --neutral: #64748b;
+  --neutral-bg: rgba(100, 116, 139, 0.12);
+  --tooling: #7c3aed;
+  --tooling-bg: rgba(124, 58, 237, 0.12);
 
   --text-primary: #111827;
   --text-secondary: #6b7280;
   --text-muted: #9ca3af;
 
-  --bg-main: #ffffff;
+  --bg-main: #f8fafc;
   --bg-card: #ffffff;
-  --bg-muted: #f9fafb;
-  --bg-elevated: #f9fafb;
+  --bg-muted: #f8fafc;
+  --bg-elevated: #f1f5f9;
 
   --border: #e5e7eb;
 
@@ -67,12 +76,18 @@
   --ds-warning-rgb: 245 158 11;
   --ds-error: var(--error);
   --ds-error-rgb: 239 68 68;
+  --ds-info: var(--info);
+  --ds-info-rgb: 14 165 233;
+  --ds-neutral: var(--neutral);
+  --ds-neutral-rgb: 100 116 139;
+  --ds-tooling: var(--tooling);
+  --ds-tooling-rgb: 124 58 237;
 
   --ds-radius-sm: 6px;
   --ds-radius-md: 10px;
   --ds-radius-lg: 12px;
 
-  --ds-shadow-elevated: 0 4px 24px rgba(15, 23, 42, 0.08);
+  --ds-shadow-elevated: 0 8px 28px rgba(15, 23, 42, 0.08);
 
   --ds-gradient-app-top: none;
   --ds-gradient-drawer: none;

@@ -16,6 +16,7 @@ import {
   INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
 } from '@/lib/industrial-priority-ui'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
+import { StatusBadge } from '@/components/design-system'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -215,6 +216,7 @@ export default function ProductionStagePage() {
   const [tab, setTab] = useState<'pending' | 'make_ready' | 'running' | 'hold' | 'completed'>('pending')
   const [savingStageId, setSavingStageId] = useState<string | null>(null)
   const [selectedStageRecordIds, setSelectedStageRecordIds] = useState<Set<string>>(new Set())
+  const [localSearch, setLocalSearch] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
   const [showDowntime, setShowDowntime] = useState(false)
   const [showTimeline, setShowTimeline] = useState(false)
@@ -359,10 +361,15 @@ export default function ProductionStagePage() {
   }
 
   const visibleList = useMemo(() => {
+    const search = localSearch.trim().toLowerCase()
     return list.filter((row) => {
       const p = getStageProgress(row)
       const status = String(p.status ?? row.stageRecord.status ?? 'pending').toLowerCase()
       const pushedQty = Number(p.pushedQty || 0)
+      const product = String(row.jobCard.productName ?? row.jobCard.poMeta?.cartonName ?? '').toLowerCase()
+      const client = String(row.jobCard.customer?.name ?? '').toLowerCase()
+      const job = String(row.jobCard.jobCardNumber ?? '').toLowerCase()
+      if (search && !product.includes(search) && !client.includes(search) && !job.includes(search)) return false
       if (tab === 'pending') {
         if (stickyPushTrackingEnabled && pushedQty > 0) return true
         return status === 'pending' || status === 'ready' || status === 'ready_to_receive'
@@ -372,7 +379,7 @@ export default function ProductionStagePage() {
       if (tab === 'hold') return status === 'hold' || status === 'blocked'
       return status === 'completed'
     })
-  }, [list, tab, stickyPushTrackingEnabled])
+  }, [list, tab, stickyPushTrackingEnabled, localSearch])
 
   const selectedCount = selectedStageRecordIds.size
   const allVisibleSelected = visibleList.length > 0 && visibleList.every((r) => selectedStageRecordIds.has(r.stageRecord.id))
@@ -588,15 +595,15 @@ export default function ProductionStagePage() {
 
   function statusClass(status: string): string {
     const s = status.toLowerCase()
-    if (s === 'make_ready_alert') return 'bg-amber-900/30 text-amber-300 border-amber-600'
-    if (s === 'make_ready_started') return 'bg-blue-900/40 text-blue-300 border-blue-600'
-    if (s === 'ready_to_receive') return 'bg-cyan-900/40 text-cyan-300 border-cyan-600'
-    if (s === 'partial_running') return 'bg-orange-900/40 text-orange-300 border-orange-600'
-    if (s === 'in_progress') return 'bg-blue-900/40 text-blue-300 border-blue-600'
-    if (s === 'completed') return 'bg-green-900/40 text-green-300 border-green-600'
-    if (s === 'hold' || s === 'blocked') return 'bg-zinc-800 text-zinc-300 border-zinc-600'
-    if (s === 'rework') return 'bg-rose-900/40 text-rose-300 border-rose-600'
-    return 'bg-ds-elevated text-ds-ink-muted border-ds-line/60'
+    if (s === 'make_ready_alert') return 'border-amber-500/45 bg-amber-500/12 text-amber-700'
+    if (s === 'make_ready_started') return 'border-sky-500/45 bg-sky-500/12 text-sky-700'
+    if (s === 'ready_to_receive') return 'border-cyan-500/45 bg-cyan-500/12 text-cyan-700'
+    if (s === 'partial_running') return 'border-orange-500/45 bg-orange-500/12 text-orange-700'
+    if (s === 'in_progress') return 'border-sky-500/45 bg-sky-500/12 text-sky-700'
+    if (s === 'completed') return 'border-emerald-500/45 bg-emerald-500/12 text-emerald-700'
+    if (s === 'hold' || s === 'blocked') return 'border-slate-500/45 bg-slate-500/12 text-slate-700'
+    if (s === 'rework') return 'border-rose-500/45 bg-rose-500/12 text-rose-700'
+    return 'border-ds-line/70 bg-ds-elevated text-ds-ink-muted'
   }
 
   function previousRequiredStageKey(row: Payload['jobCards'][number]): string | null {
@@ -1372,6 +1379,14 @@ export default function ProductionStagePage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value={localSearch}
+          onChange={(e) => setLocalSearch(e.target.value)}
+          className="ds-toolbar-search"
+          placeholder="Search by job card, product, client…"
+          aria-label="Search stage queue"
+        />
         {(['pending', 'make_ready', 'running', 'hold', 'completed'] as const).map((t) => {
           const count = list.filter((row) => {
             const s = String(getStageProgress(row).status ?? row.stageRecord.status ?? 'pending').toLowerCase()
@@ -1419,21 +1434,6 @@ export default function ProductionStagePage() {
           type="button"
           disabled={bulkBusy || selectedCount === 0}
           onClick={() =>
-            void runBulkAction('Bulk Partial Push', async (row) => {
-              const progress = getStageProgress(row)
-              const completedQty = Number(getRowCounter(row) || progress.completedQty || 0)
-              const pushQty = Math.max(0, completedQty - Number(progress.pushedQty || 0))
-              if (pushQty > 0) await pushToNext(row, pushQty, false, true)
-            })
-          }
-          className="rounded border border-amber-600/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-50"
-        >
-          Bulk Partial Push
-        </button>
-        <button
-          type="button"
-          disabled={bulkBusy || selectedCount === 0}
-          onClick={() =>
             void runBulkAction('Bulk Complete Push', async (row) => {
               await completeAndPushNext(row, true)
             })
@@ -1442,46 +1442,60 @@ export default function ProductionStagePage() {
         >
           Bulk Complete
         </button>
-        <button
-          type="button"
-          disabled={bulkBusy || selectedCount === 0}
-          onClick={() =>
-            void runBulkAction('Bulk Undo Push', async (row) => {
-              await bringBackFromNextStage(row, true)
-            })
-          }
-          className="rounded border border-blue-500/40 px-2 py-1 text-xs text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
-        >
-          Bulk Undo
-        </button>
-        <button
-          type="button"
-          disabled={bulkBusy || selectedCount === 0}
-          onClick={() =>
-            void runBulkAction('Bulk Rework Mark', async (row) => {
-              await saveStageInline(row, { status: 'rework', skipReload: true })
-            })
-          }
-          className="rounded border border-rose-600/40 px-2 py-1 text-xs text-rose-600 hover:bg-rose-500/10 disabled:opacity-50"
-        >
-          Bulk Rework
-        </button>
-        <button
-          type="button"
-          disabled={bulkBusy || selectedCount === 0}
-          onClick={() => void bulkDeleteFromStage()}
-          className="rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-600 hover:bg-rose-500/10 disabled:opacity-50"
-        >
-          {bulkBusy ? 'Working…' : 'Bulk Delete'}
-        </button>
-        <button
-          type="button"
-          disabled={bulkBusy}
-          onClick={() => void clearFromCurrentStageOnward()}
-          className="rounded border border-ds-warning/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-50"
-        >
-          Clear from {label} onward
-        </button>
+        <details className="relative">
+          <summary className="list-none cursor-pointer rounded border border-ds-line/60 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card">
+            More
+          </summary>
+          <div className="absolute right-0 z-20 mt-1 w-56 rounded-ds-sm border border-ds-line/70 bg-white p-1 shadow-lg">
+            <button
+              type="button"
+              disabled={bulkBusy || selectedCount === 0}
+              onClick={() =>
+                void runBulkAction('Bulk Partial Push', async (row) => {
+                  const progress = getStageProgress(row)
+                  const completedQty = Number(getRowCounter(row) || progress.completedQty || 0)
+                  const pushQty = Math.max(0, completedQty - Number(progress.pushedQty || 0))
+                  if (pushQty > 0) await pushToNext(row, pushQty, false, true)
+                })
+              }
+              className="block w-full rounded px-2 py-1.5 text-left text-xs text-ds-warning hover:bg-amber-50 disabled:opacity-50"
+            >
+              Bulk Partial Push
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy || selectedCount === 0}
+              onClick={() => void runBulkAction('Bulk Undo Push', async (row) => { await bringBackFromNextStage(row, true) })}
+              className="block w-full rounded px-2 py-1.5 text-left text-xs text-sky-600 hover:bg-sky-50 disabled:opacity-50"
+            >
+              Bulk Undo
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy || selectedCount === 0}
+              onClick={() => void runBulkAction('Bulk Rework Mark', async (row) => { await saveStageInline(row, { status: 'rework', skipReload: true }) })}
+              className="block w-full rounded px-2 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+            >
+              Bulk Rework
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy || selectedCount === 0}
+              onClick={() => void bulkDeleteFromStage()}
+              className="block w-full rounded px-2 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+            >
+              {bulkBusy ? 'Working…' : 'Bulk Delete'}
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => void clearFromCurrentStageOnward()}
+              className="block w-full rounded px-2 py-1.5 text-left text-xs text-ds-warning hover:bg-amber-50 disabled:opacity-50"
+            >
+              Clear from {label} onward
+            </button>
+          </div>
+        </details>
         <button
           type="button"
           disabled={bulkBusy || selectedCount === 0}
@@ -1622,13 +1636,16 @@ export default function ProductionStagePage() {
                     <div className="mt-1 text-[11px] text-ds-ink-faint">Open drawer for push qty and execution decisions.</div>
                   </td>
                   <td className="px-3 py-2">
-                    <span className={`px-2 py-0.5 rounded text-xs border ${statusClass(String(progress.status ?? stageRecord.status ?? 'pending'))}`}>
-                      {supervisorApprovalEnabled && progress.approvalStatus === 'pending'
-                        ? 'pending_approval'
-                        : String(progress.status ?? stageRecord.status ?? 'pending')}
-                    </span>
+                    <StatusBadge
+                      status={
+                        supervisorApprovalEnabled && progress.approvalStatus === 'pending'
+                          ? 'pending_approval'
+                          : String(progress.status ?? stageRecord.status ?? 'pending')
+                      }
+                      className={statusClass(String(progress.status ?? stageRecord.status ?? 'pending'))}
+                    />
                     {alreadyPushedQty > 0 && alreadyPushedQty < completedQty ? (
-                      <span className="ml-1 px-2 py-0.5 rounded text-[10px] border border-amber-500/60 text-amber-300 bg-amber-900/25">
+                      <span className="ml-1 rounded-full border border-amber-500/60 bg-amber-500/12 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                         partially_pushed
                       </span>
                     ) : null}
@@ -1651,29 +1668,36 @@ export default function ProductionStagePage() {
                       <button
                         type="button"
                         onClick={() => setSpotlight(row)}
-                        className="rounded border border-ds-warning/50 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10"
+                        className="rounded border border-ds-warning/50 bg-ds-warning/10 px-2 py-1 text-xs font-medium text-ds-warning hover:bg-ds-warning/15"
                       >
                         Open Decisions
                       </button>
-                      <button
-                        type="button"
-                        disabled={bulkBusy}
-                        onClick={() => void reverseRowStage(row)}
-                        className="rounded border border-blue-500/40 px-2 py-1 text-xs text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
-                      >
-                        Reverse
-                      </button>
-                      <button
-                        type="button"
-                        disabled={bulkBusy}
-                        onClick={() => void deleteRowFromStage(row)}
-                        className="rounded border border-rose-600/40 px-2 py-1 text-xs text-rose-600 hover:bg-rose-500/10 disabled:opacity-50"
-                      >
-                        Delete
-                      </button>
-                      <Link href={`/production/job-cards/${jobCard.id}`} className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-warning hover:bg-ds-main">
-                        Open
-                      </Link>
+                      <details className="relative">
+                        <summary className="list-none cursor-pointer rounded border border-ds-line/60 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card">
+                          More
+                        </summary>
+                        <div className="absolute right-0 z-20 mt-1 min-w-[8.5rem] rounded-ds-sm border border-ds-line/70 bg-white p-1 shadow-lg">
+                          <Link href={`/production/job-cards/${jobCard.id}`} className="block rounded px-2 py-1.5 text-xs text-ds-warning hover:bg-amber-50">
+                            Open Job Card
+                          </Link>
+                          <button
+                            type="button"
+                            disabled={bulkBusy}
+                            onClick={() => void reverseRowStage(row)}
+                            className="block w-full rounded px-2 py-1.5 text-left text-xs text-sky-600 hover:bg-sky-50 disabled:opacity-50"
+                          >
+                            Reverse
+                          </button>
+                          <button
+                            type="button"
+                            disabled={bulkBusy}
+                            onClick={() => void deleteRowFromStage(row)}
+                            className="block w-full rounded px-2 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </details>
                     </div>
                   </td>
                 </tr>

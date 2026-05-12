@@ -12,14 +12,26 @@
     @apply border-ds-brand/85 outline-none ring-2 ring-ds-brand/45;
   }
   .ds-input {
-    @apply w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/60 px-3 py-2.5 text-[15px] text-ds-ink shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out placeholder:text-ds-ink-faint;
+    @apply w-full rounded-ds-sm border border-ds-line/60 bg-white px-3 py-2.5 text-[14px] text-ds-ink shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out placeholder:text-ds-ink-faint;
   }
   /** Tabular numerals for amounts and counts (line totals use .ds-typo-total for green). */
   .ds-input-num {
     @apply tabular-nums tracking-tight text-ds-ink;
   }
   .ds-input:focus {
-    @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(249,115,22,0.22),0_0_14px_rgba(249,115,22,0.1)];
+    @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(249,115,22,0.2),0_4px_12px_rgba(15,23,42,0.08)];
+  }
+  .ds-toolbar {
+    @apply flex flex-wrap items-center gap-2 rounded-ds-md border border-ds-line/60 bg-white px-3 py-2 shadow-sm;
+  }
+  .ds-toolbar-search {
+    @apply ds-input h-9 min-w-[260px] max-w-[460px] py-1.5;
+  }
+  .ds-section-title {
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-ds-ink-faint;
+  }
+  .ds-empty-state {
+    @apply rounded-ds-md border border-dashed border-ds-line/70 bg-ds-elevated/40 px-6 py-10 text-center text-sm text-ds-ink-muted;
   }
   .ds-typo-label {
     @apply text-[12px] font-medium leading-snug text-ds-ink-muted;
@@ -152,6 +164,20 @@
     line-height: 1.35;
   }
 
+  input[type='search'] {
+    border: 1px solid var(--border);
+    background: #fff;
+    border-radius: var(--ds-radius-sm);
+    min-height: 36px;
+    padding: 0 12px;
+  }
+
+  input[type='search']:focus {
+    outline: none;
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
+  }
+
   button {
     font-weight: 500;
   }
@@ -163,8 +189,10 @@
   }
 
   th {
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     color: var(--text-secondary);
   }
 
@@ -172,6 +200,10 @@
     font-size: 13px;
     font-weight: 400;
     color: var(--text-primary);
+  }
+
+  input[type='checkbox'] {
+    accent-color: var(--brand-primary);
   }
 
   small {
