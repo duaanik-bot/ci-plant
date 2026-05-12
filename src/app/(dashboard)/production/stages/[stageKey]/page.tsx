@@ -1811,6 +1811,14 @@ export default function ProductionStagePage() {
             const pushedQty = Number(progress.pushedQty || 0)
             const availableToPush = Math.max(0, completedQty - pushedQty)
             const autoFromCounter = computeAutoFromCounter(row, getRowCounter(row))
+            const sheetInwardQty = getUpstreamSheets(row)
+            const upsForPasting = stageKey === 'pasting' ? pastingUps(row) : 0
+            const expectedCartons = stageKey === 'pasting' ? pastingExpectedCartons(row) : 0
+            const actualCartons = stageKey === 'pasting' ? completedQty : 0
+            const wastageCartons =
+              stageKey === 'pasting'
+                ? Number(wastageDrafts[row.stageRecord.id] ?? autoFromCounter.wastage ?? 0)
+                : 0
             const pushDraft = pushDrafts[row.stageRecord.id]
             const pushQty = pushDraft == null || pushDraft === '' ? autoFromCounter.pushQty : Number(pushDraft)
             const supervisorApprovalEnabled = getExecutionState(row).supervisorApprovalEnabled === true
@@ -1857,7 +1865,9 @@ export default function ProductionStagePage() {
                     />
                   </label>
                   <label className="space-y-1">
-                    <span className="text-ds-ink-faint">Wastage Qty</span>
+                    <span className="text-ds-ink-faint">
+                      Wastage Qty{stageKey === 'pasting' ? ' (cartons)' : ''}
+                    </span>
                     <input
                       value={wastageDrafts[row.stageRecord.id] ?? String(computeAutoFromCounter(row, getRowCounter(row)).wastage)}
                       readOnly
@@ -1870,6 +1880,38 @@ export default function ProductionStagePage() {
                   Status: <span className="text-ds-ink">{currentStatus}</span> · Available to push: <span className={mono}>{availableToPush.toLocaleString('en-IN')}</span>
                 </p>
                 {nextLabel ? <p className="text-[11px] text-ds-ink-faint">Next stage: {nextLabel}</p> : null}
+                {stageKey === 'pasting' ? (
+                  <div className="mt-3 rounded border border-ds-line/50 bg-ds-card/60 p-2.5">
+                    <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ds-ink-faint">
+                      Pasting Conversion Snapshot
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5">
+                        <p className="text-ds-ink-faint">Total sheets inward</p>
+                        <p className={`${mono} text-ds-ink`}>{sheetInwardQty.toLocaleString('en-IN')}</p>
+                      </div>
+                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5">
+                        <p className="text-ds-ink-faint">Total UPS</p>
+                        <p className={`${mono} text-ds-ink`}>{upsForPasting > 0 ? upsForPasting.toLocaleString('en-IN') : '—'}</p>
+                      </div>
+                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5">
+                        <p className="text-ds-ink-faint">Expected quantity (cartons)</p>
+                        <p className={`${mono} text-ds-ink`}>{expectedCartons.toLocaleString('en-IN')}</p>
+                      </div>
+                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5">
+                        <p className="text-ds-ink-faint">Actual counter (cartons)</p>
+                        <p className={`${mono} text-ds-ink`}>{actualCartons.toLocaleString('en-IN')}</p>
+                      </div>
+                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5 col-span-2">
+                        <p className="text-ds-ink-faint">Total wastage (cartons)</p>
+                        <p className={`${mono} text-ds-ink`}>{wastageCartons.toLocaleString('en-IN')}</p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[10px] text-ds-ink-faint">
+                      Sheet details: sheets inward × UPS = expected cartons.
+                    </p>
+                  </div>
+                ) : null}
                 {nextLabel && completedQty > 0 && availableToPush === 0 && pushedQty > 0 ? (
                   <div className="mt-1 flex items-center gap-2">
                     <p className="text-[11px] text-emerald-600">
