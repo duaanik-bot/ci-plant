@@ -449,7 +449,7 @@ export function PlanningDecisionGrid({
   const [holdReason, setHoldReason] = useState('')
   const [bulkHoldOpen, setBulkHoldOpen] = useState(false)
   const [bulkHoldReason, setBulkHoldReason] = useState('')
-  const [actionChoiceByKey, setActionChoiceByKey] = useState<Record<string, PlanningBatchDecisionAction | ''>>({})
+  const [actionChoiceByKey, setActionChoiceByKey] = useState<Record<string, 'push' | 'hold' | ''>>({})
   const [actionFeedbackByLineId, setActionFeedbackByLineId] = useState<
     Record<string, { ok: boolean; text: string }>
   >({})
@@ -493,7 +493,7 @@ export function PlanningDecisionGrid({
   const viewRows = useMemo(() => {
     return rows.filter((r) => {
       const pending = r.planningStatus === 'pending'
-      if (ledgerView === 'pending') return pending || recentlyPushedIds.has(r.id)
+      if (ledgerView === 'pending') return pending || r.planningStatus === 'design_ready' || recentlyPushedIds.has(r.id)
       return !pending
     })
   }, [rows, ledgerView, recentlyPushedIds])
@@ -530,8 +530,8 @@ export function PlanningDecisionGrid({
     const bucketed =
       ledgerView === 'pending'
         ? [...base].sort((a, b) => {
-            const aPushed = recentlyPushedIds.has(a.id) && a.planningStatus !== 'pending' ? 1 : 0
-            const bPushed = recentlyPushedIds.has(b.id) && b.planningStatus !== 'pending' ? 1 : 0
+            const aPushed = a.planningStatus !== 'pending' ? 1 : 0
+            const bPushed = b.planningStatus !== 'pending' ? 1 : 0
             if (aPushed !== bPushed) return aPushed - bPushed
             return 0
           })
@@ -622,15 +622,23 @@ export function PlanningDecisionGrid({
     const setReasonVal = mode === 'row' ? setHoldReason : setBulkHoldReason
 
     const actionLabel = (action: PlanningBatchDecisionAction) =>
-      action === 'approve_batch'
-        ? 'Approved'
-        : action === 'hold_batch'
-          ? 'Held'
-          : action === 'send_to_artwork'
-            ? 'To Artwork'
-            : action === 'release_to_production'
-              ? 'To Production'
+      action === 'hold_batch'
+        ? 'Held'
+        : action === 'send_to_artwork'
+          ? 'Pushed'
+          : action === 'release_to_production'
+            ? 'Pushed'
+            : action === 'approve_batch'
+              ? 'Pushed'
               : 'Resumed'
+
+    const resolvePushAction = (): PlanningBatchDecisionAction | null => {
+      if (canSend) return 'send_to_artwork'
+      if (canRelease) return 'release_to_production'
+      if (canApprove) return 'approve_batch'
+      if (canResume) return 'resume_from_hold'
+      return null
+    }
 
     const runAction = async (action: PlanningBatchDecisionAction, holdReasonArg?: string) => {
       const warnIfMissingHandoff = (id: string) => {
@@ -721,17 +729,13 @@ export function PlanningDecisionGrid({
     }
 
     const bulkTitle = 'Runs once per selected row using that row’s group state'
-    const rowTitleApprove = canApprove
-      ? 'Mark group ready (approved for next step)'
-      : 'Only available from Draft — click to try or see message'
+    const rowTitleApprove = 'Push selected line(s) ahead'
     const actionKey = mode === 'row' ? groupKey : `bulk:${groupKey}`
     const selectedAction = actionChoiceByKey[actionKey] ?? ''
-    const actionOptions: Array<{ value: PlanningBatchDecisionAction; label: string; enabled: boolean }> = [
-      { value: 'approve_batch', label: 'Approve', enabled: canApprove },
-      { value: 'hold_batch', label: 'Hold', enabled: canHold },
-      { value: 'send_to_artwork', label: 'To Artwork', enabled: canSend },
-      { value: 'release_to_production', label: 'To Production', enabled: canRelease },
-      { value: 'resume_from_hold', label: 'Resume', enabled: canResume },
+    const pushAction = resolvePushAction()
+    const actionOptions: Array<{ value: 'push' | 'hold'; label: string; enabled: boolean }> = [
+      { value: 'push', label: 'Push', enabled: !!pushAction },
+      { value: 'hold', label: 'Hold', enabled: canHold || canResume },
     ]
     const undoSnapshots = lineIds
       .map((id) => {
@@ -827,7 +831,7 @@ export function PlanningDecisionGrid({
               onChange={(e) =>
                 setActionChoiceByKey((prev) => ({
                   ...prev,
-                  [actionKey]: e.target.value as PlanningBatchDecisionAction | '',
+                  [actionKey]: e.target.value as 'push' | 'hold' | '',
                 }))
               }
               onClick={(e) => e.stopPropagation()}
@@ -848,11 +852,16 @@ export function PlanningDecisionGrid({
               onClick={(e) => {
                 e.stopPropagation()
                 if (!selectedAction) return
-                if (selectedAction === 'hold_batch') {
+                if (selectedAction === 'hold') {
                   openHold()
                   return
                 }
-                void runAction(selectedAction)
+                const next = resolvePushAction()
+                if (!next) {
+                  toast.error('Push is not available for this row right now')
+                  return
+                }
+                void runAction(next)
               }}
             >
               Apply

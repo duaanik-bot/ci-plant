@@ -232,7 +232,9 @@ export async function GET(req: NextRequest) {
       const availableTotalSheets = mainAvailableSheets + leftoverSheets
       const shortageSheets = Math.max(0, Number(requiredSheets ?? 0) - availableTotalSheets)
       let stockSignal: 'green' | 'yellow' | 'red' = 'red'
-      if (requiredSheets != null && availableTotalSheets >= requiredSheets) stockSignal = 'green'
+      if (materialGate.status === 'available') stockSignal = 'green'
+      else if (materialGate.status === 'ordered') stockSignal = 'yellow'
+      else if (requiredSheets != null && availableTotalSheets >= requiredSheets) stockSignal = 'green'
       else if (availableTotalSheets > 0) stockSignal = 'yellow'
 
       const suggestedBoardOptions = Array.from(
@@ -281,7 +283,7 @@ export async function GET(req: NextRequest) {
             availableMainSheets: mainAvailableSheets,
             availableLeftoverSheets: leftoverSheets,
             availableTotalSheets,
-            reservedSheets: shortageSheets,
+            reservedSheets: Math.max(0, Number(materialGate.netAvailable ?? 0)),
             shortageSheets,
             requiredSheets,
             stockSignal,
