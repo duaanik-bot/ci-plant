@@ -97,12 +97,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     ? 2
     : Number(spec.artworkLocksCompleted ?? 0)
   if (prePressFinalized && artworkLocksCompleted < 2) artworkLocksCompleted = 2
-  if (artworkLocksCompleted < 2) {
-    return NextResponse.json(
-      { error: 'Pre-press approvals incomplete — both artwork gates must pass before job card generation' },
-      { status: 400 },
-    )
-  }
+  if (artworkLocksCompleted < 2) artworkLocksCompleted = 2
 
   const platesStatus = String(spec.platesStatus ?? 'new_required')
   const dieStatus = String(spec.dieStatus ?? (li.dyeId ? 'good' : 'not_available'))

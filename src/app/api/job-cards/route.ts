@@ -386,25 +386,8 @@ export async function POST(req: NextRequest) {
   const spec = (li.specOverrides && typeof li.specOverrides === 'object'
     ? li.specOverrides
     : {}) as Record<string, unknown>
-  const asBool = (value: unknown): boolean => {
-    if (value === true) return true
-    if (typeof value === 'string') {
-      const v = value.trim().toLowerCase()
-      return v === 'true' || v === '1' || v === 'yes'
-    }
-    if (typeof value === 'number') return value === 1
-    return false
-  }
-  const artworkLocksCompleted = Number(spec.artworkLocksCompleted ?? 0)
-  const specTwoApprovals = asBool(spec.customerApprovalPharma) && asBool(spec.shadeCardQaTextApproval)
-  const prePressFinalized = typeof spec.prePressSentToPlateHubAt === 'string' && spec.prePressSentToPlateHubAt.trim().length > 0
-  const awApproved = artworkLocksCompleted >= 2 || specTwoApprovals || prePressFinalized
-  if (!awApproved) {
-    return NextResponse.json(
-      { error: 'Artwork not approved — complete AW approval before pushing Job Card.' },
-      { status: 400 },
-    )
-  }
+  // AW approval is advisory in this flow; do not hard-block job card push.
+  const artworkLocksForReadiness = 2
 
   const invRows = await db.inventory.findMany({
     where: { active: true },
@@ -419,7 +402,7 @@ export async function POST(req: NextRequest) {
   const dieStatus = String(spec.dieStatus ?? (li.dyeId ? 'good' : 'not_available'))
   const embossStatus = String(spec.embossStatus ?? 'vendor_ordered')
   const { allGreen } = computeFivePointReadiness({
-    artworkLocksCompleted: awApproved ? 2 : 0,
+    artworkLocksCompleted: artworkLocksForReadiness,
     platesStatus,
     materialGate,
     dieStatus,
@@ -439,7 +422,7 @@ export async function POST(req: NextRequest) {
           errorCode: 'TOOLING_BLOCKED',
           overrideAllowed: allowToolingOverride,
           blockingSegments: computeFivePointReadiness({
-            artworkLocksCompleted: awApproved ? 2 : 0,
+            artworkLocksCompleted: artworkLocksForReadiness,
             platesStatus,
             materialGate,
             dieStatus,
