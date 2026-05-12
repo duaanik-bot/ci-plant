@@ -458,10 +458,11 @@ export async function PUT(
       'Printing',
       'Chemical Coating',
       'Lamination',
-      'Embossing',
-      'Leafing',
       'Spot UV',
+      'Leafing/Foiling',
+      'Embossing',
       'Dye Cutting',
+      'Sorting',
       'Pasting',
     ]
     const printPlanLane = resolvePrintPlanLane(mergedPostPress)

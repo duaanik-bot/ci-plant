@@ -792,17 +792,7 @@ export default function ProductionStagePage() {
   }
 
   function stageLabelForKey(key: string): string {
-    if (key === 'cutting') return 'Cutting'
-    if (key === 'printing') return 'Printing'
-    if (key === 'chemical_coating') return 'Chemical Coating'
-    if (key === 'lamination') return 'Lamination'
-    if (key === 'spot_uv') return 'Spot UV'
-    if (key === 'leafing') return 'Leafing'
-    if (key === 'embossing') return 'Embossing'
-    if (key === 'dye_cutting') return 'Dye Cutting'
-    if (key === 'sorting') return 'Sorting'
-    if (key === 'pasting') return 'Pasting'
-    return key
+    return PRODUCTION_STAGES.find((s) => s.key === key)?.label ?? key
   }
 
   async function completeAndPushNext(row: Payload['jobCards'][number], skipReload = false) {
