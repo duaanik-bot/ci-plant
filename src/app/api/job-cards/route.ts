@@ -177,7 +177,14 @@ export async function GET(req: NextRequest) {
         planningStatus: true,
         po: { select: { isPriority: true, poNumber: true, customer: { select: { name: true } } } },
         materialQueue: {
-          select: { boardType: true, gsm: true, ups: true, totalSheets: true },
+          select: {
+            boardType: true,
+            gsm: true,
+            ups: true,
+            totalSheets: true,
+            sheetLengthMm: true,
+            sheetWidthMm: true,
+          },
         },
         carton: {
           select: {

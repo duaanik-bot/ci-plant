@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
@@ -19,6 +19,7 @@ type Line = {
 
 export default function NewBillPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [jobCards, setJobCards] = useState<JobCard[]>([])
   const [customerId, setCustomerId] = useState('')
   const [billDate, setBillDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -48,6 +49,35 @@ export default function NewBillPage() {
       .then((data) => setJobCards(Array.isArray(data) ? data : []))
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const jobCardId = searchParams.get('jobCardId')
+    if (!jobCardId) return
+    fetch(`/api/job-cards/${jobCardId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data || data.error) return
+        const cid = String(data.customer?.id || '')
+        if (cid) setCustomerId(cid)
+        const carton = String(data.poLine?.cartonName || '').trim()
+        const po = String(data.poLine?.po?.poNumber || '').trim()
+        const qty = Number(data.poLine?.quantity || 0)
+        const desc = carton ? `${carton}${po ? ` · PO ${po}` : ''}` : `Job Card #${data.jobCardNumber}`
+        setLines((prev) => {
+          const first = prev[0] ?? { description: '', quantity: '', rate: '', gstPct: '12', jobCardId: '' }
+          return [
+            {
+              ...first,
+              description: first.description || desc,
+              quantity: first.quantity || (qty > 0 ? String(qty) : ''),
+              jobCardId: first.jobCardId || String(jobCardId),
+            },
+            ...prev.slice(1),
+          ]
+        })
+      })
+      .catch(() => {})
+  }, [searchParams])
 
   const filteredJcs = customerId
     ? jobCards.filter((jc) => jc.customerId === customerId)

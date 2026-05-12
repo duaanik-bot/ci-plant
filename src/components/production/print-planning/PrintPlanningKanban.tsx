@@ -49,6 +49,7 @@ export type PrintPlanningJobCard = {
     numberOfColours: number | null
     colourBreakdown: string[]
   } | null
+  stages?: { id: string; stageName: string; status: string }[]
 }
 
 type JobCardAuditEvent = {
@@ -182,10 +183,12 @@ function SortableCard({
   jc,
   onOpenDetail,
   isSelected,
+  onVanish,
 }: {
   jc: PrintPlanningJobCard
   onOpenDetail: (id: string) => void
   isSelected: boolean
+  onVanish: (jc: PrintPlanningJobCard) => void
 }) {
   const po = jc.poLine
   const pri = po?.industrialPriority === true
@@ -193,19 +196,39 @@ function SortableCard({
     jc.postPressRouting && typeof jc.postPressRouting === 'object'
       ? ((jc.postPressRouting as Record<string, unknown>).executionSetup as Record<string, unknown> | undefined)
       : undefined
+  const cuttingStage = Array.isArray(jc.stages)
+    ? jc.stages.find((s) => String(s.stageName).toLowerCase() === 'cutting')
+    : null
+  const printingStage = Array.isArray(jc.stages)
+    ? jc.stages.find((s) => String(s.stageName).toLowerCase() === 'printing')
+    : null
+  const cuttingStatus = String(cuttingStage?.status ?? '').toLowerCase()
+  const printingCompleted = String(printingStage?.status ?? '').toLowerCase() === 'completed'
   const boardReadinessRaw = setup?.boardReadiness
   const boardReadiness =
     boardReadinessRaw === 'ready' || boardReadinessRaw === 'waiting' || boardReadinessRaw === 'not_ready'
       ? boardReadinessRaw
       : null
   const boardLabel =
-    boardReadiness === 'ready' ? 'Board ready' : boardReadiness === 'not_ready' ? 'Board blocked' : 'Board waiting'
+    cuttingStatus === 'completed'
+      ? 'Board completed'
+      : cuttingStatus === 'in_progress'
+        ? 'Board started'
+        : boardReadiness === 'ready'
+          ? 'Board ready'
+          : boardReadiness === 'not_ready'
+            ? 'Board blocked'
+            : 'Board waiting'
   const boardTone =
-    boardReadiness === 'ready'
+    cuttingStatus === 'completed'
       ? 'border-[var(--success)]/40 bg-[var(--success-bg)] text-[var(--success)]'
-      : boardReadiness === 'not_ready'
-        ? 'border-[var(--error)]/40 bg-[var(--error-bg)] text-[var(--error)]'
-        : 'border-[var(--warning)]/40 bg-[var(--warning-bg)] text-[var(--warning)]'
+      : cuttingStatus === 'in_progress'
+        ? 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+        : boardReadiness === 'ready'
+          ? 'border-[var(--success)]/40 bg-[var(--success-bg)] text-[var(--success)]'
+          : boardReadiness === 'not_ready'
+            ? 'border-[var(--error)]/40 bg-[var(--error-bg)] text-[var(--error)]'
+            : 'border-[var(--warning)]/40 bg-[var(--warning-bg)] text-[var(--warning)]'
   const platesReady = !!jc.plateSetId
   const plateLabel = platesReady ? 'Plates ready' : 'Plates pending'
   const plateTone = platesReady
@@ -270,6 +293,20 @@ function SortableCard({
       </div>
       <p className="mt-0.5 truncate text-[10px] text-ds-ink-faint">{colourHints}</p>
       <p className="text-xs text-ds-ink-faint truncate">{jc.customer.name}</p>
+      {printingCompleted ? (
+        <div className="mt-1">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              void onVanish(jc)
+            }}
+            className="rounded border border-emerald-600/40 px-1.5 py-0.5 text-[10px] text-emerald-500 hover:bg-emerald-500/10"
+          >
+            Vanish
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -351,6 +388,54 @@ export function PrintPlanningKanban() {
     }
   }, [])
 
+  const isVanished = useCallback((jc: PrintPlanningJobCard) => {
+    const rout = jc.postPressRouting
+    if (!rout || typeof rout !== 'object') return false
+    const pp = rout.printPlan
+    if (!pp || typeof pp !== 'object') return false
+    return (pp as Record<string, unknown>).vanished === true
+  }, [])
+
+  const vanishCard = useCallback(async (jc: PrintPlanningJobCard) => {
+    const rout = jc.postPressRouting && typeof jc.postPressRouting === 'object'
+      ? (jc.postPressRouting as Record<string, unknown>)
+      : {}
+    const pp = rout.printPlan && typeof rout.printPlan === 'object'
+      ? (rout.printPlan as Record<string, unknown>)
+      : {}
+    const res = await fetch(`/api/job-cards/${jc.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        postPressRouting: {
+          ...rout,
+          printPlan: {
+            ...pp,
+            vanished: true,
+            vanishedAt: new Date().toISOString(),
+          },
+        },
+      }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast.error(typeof json?.error === 'string' ? json.error : 'Failed to vanish card')
+      return
+    }
+    toast.success(`JC #${jc.jobCardNumber} hidden from Print Planning`)
+    setCards((prev) => prev.filter((x) => x.id !== jc.id))
+    setTriageIds((prev) => prev.filter((id) => id !== jc.id))
+    setMachineCols((prev) => {
+      const next: Record<string, string[]> = {}
+      for (const [k, vals] of Object.entries(prev)) next[k] = vals.filter((id) => id !== jc.id)
+      return next
+    })
+    if (detailId === jc.id) {
+      setDetailId(null)
+      setDetail(null)
+    }
+  }, [detailId])
+
   const reload = useCallback(async () => {
     setLoading(true)
     try {
@@ -363,7 +448,7 @@ export function PrintPlanningKanban() {
       const machList: Machine[] = Array.isArray(machJson) ? machJson : []
       if (!jcRes.ok) throw new Error(list?.error || 'Failed to load job cards')
 
-      const rows: PrintPlanningJobCard[] = Array.isArray(list) ? list : []
+      const rows: PrintPlanningJobCard[] = (Array.isArray(list) ? list : []).filter((r) => !isVanished(r))
       const sortedMachines = [...machList].sort((a, b) => a.machineCode.localeCompare(b.machineCode))
       const selected = sortedMachines.slice(0, 3)
       setMachines(selected)
@@ -377,7 +462,7 @@ export function PrintPlanningKanban() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [isVanished])
 
   useEffect(() => {
     void reload()
@@ -523,6 +608,7 @@ export function PrintPlanningKanban() {
                     jc={jc}
                     onOpenDetail={openDetail}
                     isSelected={detailId === id}
+                    onVanish={vanishCard}
                   />
                 )
               })}
@@ -551,6 +637,7 @@ export function PrintPlanningKanban() {
                         jc={jc}
                         onOpenDetail={openDetail}
                         isSelected={detailId === id}
+                        onVanish={vanishCard}
                       />
                     )
                   })}

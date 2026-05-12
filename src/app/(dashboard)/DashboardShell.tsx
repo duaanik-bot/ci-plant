@@ -214,34 +214,13 @@ export function DashboardShell({
         },
         {
           key: 'production',
-          label: 'Production',
+          label: 'Print Planning',
           items: [
             {
               label: 'Print Planning',
               href: '/production/print-planning',
               description: 'Plan and schedule print jobs',
               Icon: ClipboardPaste,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Coating Planning',
-              href: '/production/print-planning?planner=coating',
-              description: 'Plan and schedule coating jobs',
-              Icon: Layers,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Die Planning',
-              href: '/production/print-planning?planner=die',
-              description: 'Plan and schedule die cutting jobs',
-              Icon: Scissors,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Pasting Planning',
-              href: '/production/print-planning?planner=pasting',
-              description: 'Plan and schedule pasting jobs',
-              Icon: ClipboardCheck,
               iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
             },
           ],
@@ -266,14 +245,14 @@ export function DashboardShell({
             },
             {
               label: 'Coating',
-              href: '/production/stages/coating',
+              href: '/production/stages/chemical_coating',
               description: 'Coating line execution',
               Icon: Layers,
               iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
             },
             {
               label: 'Die',
-              href: '/production/stages/dye-cutting',
+              href: '/production/stages/dye_cutting',
               description: 'Die cutting & blanking',
               Icon: Scissors,
               iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',

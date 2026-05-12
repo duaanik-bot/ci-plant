@@ -34,6 +34,9 @@ export function resolveSheetSize(line: unknown): string {
   const planningSpec = asDict(planningLine.spec)
   const planningOverrides = asDict(planningLine.specOverrides)
   const planningCore = asDict(planningOverrides.planningCore)
+  const materialQueue = asDict(d.materialQueue)
+  const planningMaterialQueue = asDict(planningLine.materialQueue)
+  const poMaterialQueue = asDict(poLine.materialQueue)
   const poSpec = asDict(poLine.spec)
   const poOverrides = asDict(poLine.specOverrides)
   const candidates: unknown[] = [
@@ -72,6 +75,14 @@ export function resolveSheetSize(line: unknown): string {
   }
   const carton = asDict(d.carton)
   const product = asDict(d.product)
+  const mqPairs: Array<{ l: number | null; w: number | null }> = [
+    { l: asPositiveNum(materialQueue.sheetLengthMm), w: asPositiveNum(materialQueue.sheetWidthMm) },
+    { l: asPositiveNum(planningMaterialQueue.sheetLengthMm), w: asPositiveNum(planningMaterialQueue.sheetWidthMm) },
+    { l: asPositiveNum(poMaterialQueue.sheetLengthMm), w: asPositiveNum(poMaterialQueue.sheetWidthMm) },
+  ]
+  for (const p of mqPairs) {
+    if (p.l != null && p.w != null) return `${p.l}x${p.w}`
+  }
   const blankLength = asPositiveNum(carton.blankLength ?? product.blankLength)
   const blankWidth = asPositiveNum(carton.blankWidth ?? product.blankWidth)
   if (blankLength != null && blankWidth != null) return `${blankLength}x${blankWidth}`
@@ -80,23 +91,50 @@ export function resolveSheetSize(line: unknown): string {
 
 export function resolveUps(line: unknown): number | null {
   const d = asDict(line)
+  const awItem = asDict(d.awItem)
+  const planningLine = asDict(d.planningLine)
+  const poLine = asDict(d.poLine)
   const specOverrides = asDict(d.specOverrides)
   const spec = asDict(d.spec)
+  const awSpecOverrides = asDict(awItem.specOverrides)
+  const planningSpecOverrides = asDict(planningLine.specOverrides)
+  const poSpecOverrides = asDict(poLine.specOverrides)
   const specOverridesMeta = asDict(specOverrides.meta)
   const specMeta = asDict(spec.meta)
   const planningCore = asDict(specOverrides.planningCore)
+  const awPlanningCore = asDict(awSpecOverrides.planningCore)
+  const planningLineCore = asDict(planningSpecOverrides.planningCore)
+  const poLineCore = asDict(poSpecOverrides.planningCore)
+  const materialQueue = asDict(d.materialQueue)
+  const planningMaterialQueue = asDict(planningLine.materialQueue)
+  const poMaterialQueue = asDict(poLine.materialQueue)
   const product = asDict(d.product)
   const carton = asDict(d.carton)
   const productMaster = asDict((d as Dict).productMaster)
   const master = asDict((d as Dict).master)
   const candidates: unknown[] = [
     d.ups,
+    awItem.ups,
+    planningLine.ups,
+    poLine.ups,
     specOverrides.ups,
+    awSpecOverrides.ups,
+    planningSpecOverrides.ups,
+    poSpecOverrides.ups,
     specOverridesMeta.ups,
     planningCore.upsPerSheet,
     planningCore.ups,
+    awPlanningCore.upsPerSheet,
+    awPlanningCore.ups,
+    planningLineCore.upsPerSheet,
+    planningLineCore.ups,
+    poLineCore.upsPerSheet,
+    poLineCore.ups,
     spec.ups,
     specMeta.ups,
+    materialQueue.ups,
+    planningMaterialQueue.ups,
+    poMaterialQueue.ups,
     product.ups,
     carton.ups,
     productMaster.ups,

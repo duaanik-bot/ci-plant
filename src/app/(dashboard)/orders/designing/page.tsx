@@ -538,12 +538,8 @@ function awJobCardState(r: Row): 'ready' | 'pending' {
 
 function canPushJobCardRow(r: Row): boolean {
   const spec = (r.specOverrides || {}) as Record<string, unknown>
-  const awApproved =
-    r.readiness?.approvalsComplete === true ||
-    r.readiness?.artworkApproved === true ||
-    (!!spec.customerApprovalPharma && !!spec.shadeCardQaTextApproval)
   const rowClosed = readAwPoStatus(spec) === AW_PO_STATUS.CLOSED
-  return awApproved && !rowClosed && !hasLinkedJobCard(r)
+  return !rowClosed && !hasLinkedJobCard(r)
 }
 
 function pushJobCardBlockReason(r: Row): string | null {
@@ -551,11 +547,6 @@ function pushJobCardBlockReason(r: Row): string | null {
   const rowClosed = readAwPoStatus(spec) === AW_PO_STATUS.CLOSED
   if (rowClosed) return 'row is closed'
   if (hasLinkedJobCard(r)) return 'job card already created'
-  const awApproved =
-    r.readiness?.approvalsComplete === true ||
-    r.readiness?.artworkApproved === true ||
-    (!!spec.customerApprovalPharma && !!spec.shadeCardQaTextApproval)
-  if (!awApproved) return 'artwork approval pending'
   return null
 }
 
@@ -1827,7 +1818,7 @@ export default function DesigningQueuePage() {
       .filter((r): r is Row => !!r)
       .filter((r) => !canPushJobCardRow(r))
     if (ineligible.length > 0) {
-      toast.error('Some rows are blocked: AW approval + tooling readiness required before Job Card push.')
+      toast.error('Some rows are blocked: row is closed or already linked to a job card.')
     }
     let ok = 0
     let fail = 0

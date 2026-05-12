@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
+import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -11,8 +12,11 @@ type CuttingStatus = 'pending' | 'assigned' | 'running' | 'completed'
 
 type JobCardRow = {
   id: string
+  setNumber: string | null
   jobCardNumber: number
+  sheetsIssued: number
   status: string
+  postPressRouting?: Record<string, unknown> | null
   poLine: {
     id: string
     cartonName: string
@@ -25,9 +29,19 @@ type JobCardRow = {
       gsm: number
       ups: number
       totalSheets: number
+      sheetLengthMm: number | null
+      sheetWidthMm: number | null
     } | null
+    specOverrides?: Record<string, unknown> | null
   } | null
-  stages?: { id: string; stageName: string; status: string; operator: string | null }[]
+  requiredSheets: number
+  stages?: {
+    id: string
+    stageName: string
+    status: string
+    operator: string | null
+    counter: number | null
+  }[]
 }
 
 type LocalCuttingMeta = {
@@ -59,6 +73,8 @@ export default function CuttingQueuePage() {
   const [users, setUsers] = useState<Array<{ id: string; name: string }>>([])
   const [machines, setMachines] = useState<Array<{ id: string; machineCode: string; name: string }>>([])
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [counterEdits, setCounterEdits] = useState<Record<string, string>>({})
+  const [savingRow, setSavingRow] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   const deriveInitialStatus = useCallback((row: JobCardRow): CuttingStatus => {
@@ -123,14 +139,24 @@ export default function CuttingQueuePage() {
 
   const visibleRows = useMemo(() => {
     const role = String((session?.user as { role?: string } | undefined)?.role ?? '').toLowerCase()
-    if (role !== 'cutting_operator') return rows
-    const currentUserName = String(session?.user?.name ?? '').trim().toLowerCase()
-    return rows.filter((row) => {
+    const base =
+      role !== 'cutting_operator'
+        ? rows
+        : rows.filter((row) => {
       const meta = metaByJob[row.id]
       const assigned = String(meta?.operatorName ?? '').trim().toLowerCase()
-      return assigned !== '' && assigned === currentUserName
+          const currentUserName = String(session?.user?.name ?? '').trim().toLowerCase()
+          return assigned !== '' && assigned === currentUserName
+        })
+
+    // Keep completed rows visible but always pushed to the end.
+    return [...base].sort((a, b) => {
+      const sa = (metaByJob[a.id]?.status ?? deriveInitialStatus(a)) === 'completed' ? 1 : 0
+      const sb = (metaByJob[b.id]?.status ?? deriveInitialStatus(b)) === 'completed' ? 1 : 0
+      if (sa !== sb) return sa - sb
+      return a.jobCardNumber - b.jobCardNumber
     })
-  }, [rows, metaByJob, session?.user])
+  }, [rows, metaByJob, session?.user, deriveInitialStatus])
 
   const activeRow = activeJobId ? visibleRows.find((r) => r.id === activeJobId) ?? null : null
   const activeMeta =
@@ -160,6 +186,165 @@ export default function CuttingQueuePage() {
         ...patch,
       },
     }))
+  }
+
+  const cuttingStage = (row: JobCardRow) => (row.stages ?? []).find((s) => s.stageName === 'Cutting') ?? null
+
+  const getCounterValue = (row: JobCardRow) => {
+    const edited = counterEdits[row.id]
+    if (edited != null) return edited
+    const stage = cuttingStage(row)
+    if (stage?.counter != null && Number.isFinite(stage.counter)) return String(stage.counter)
+    return row.sheetsIssued > 0 ? String(row.sheetsIssued) : ''
+  }
+
+  async function saveRowCounter(row: JobCardRow) {
+    const stage = cuttingStage(row)
+    if (!stage) {
+      toast.error('Cutting stage missing for this job card')
+      return
+    }
+    const raw = (counterEdits[row.id] ?? '').trim()
+    const val = raw === '' ? 0 : Number(raw)
+    if (!Number.isFinite(val) || val < 0) {
+      toast.error('Actual counter must be a valid non-negative number')
+      return
+    }
+    setSavingRow(row.id)
+    try {
+      const prevPostPress =
+        row.postPressRouting && typeof row.postPressRouting === 'object'
+          ? (row.postPressRouting as Record<string, unknown>)
+          : {}
+      const prevExec =
+        prevPostPress.executionOrchestration && typeof prevPostPress.executionOrchestration === 'object'
+          ? (prevPostPress.executionOrchestration as Record<string, unknown>)
+          : {}
+      const stageProgress =
+        prevExec.stageProgress && typeof prevExec.stageProgress === 'object'
+          ? (prevExec.stageProgress as Record<string, unknown>)
+          : {}
+      const cuttingProgress =
+        stageProgress.cutting && typeof stageProgress.cutting === 'object'
+          ? (stageProgress.cutting as Record<string, unknown>)
+          : {}
+
+      const res = await fetch(`/api/job-cards/${row.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sheetsIssued: Math.floor(val),
+          postPressRouting: {
+            ...prevPostPress,
+            executionOrchestration: {
+              ...prevExec,
+              stageProgress: {
+                ...stageProgress,
+                cutting: {
+                  ...cuttingProgress,
+                  completedQty: Math.floor(val),
+                  pushedQty: Math.floor(val),
+                  status: stage?.status ?? 'pending',
+                },
+              },
+            },
+          },
+          stages: [
+            {
+              id: stage.id,
+              counter: Math.floor(val),
+              status: stage.status,
+            },
+          ],
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to save counter')
+      toast.success('Actual counter updated')
+      setCounterEdits((prev) => {
+        const next = { ...prev }
+        delete next[row.id]
+        return next
+      })
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save counter')
+    } finally {
+      setSavingRow(null)
+    }
+  }
+
+  async function updateCuttingStatus(row: JobCardRow, status: CuttingStatus) {
+    const stage = cuttingStage(row)
+    if (!stage) {
+      toast.error('Cutting stage missing for this job card')
+      return
+    }
+    setSavingRow(row.id)
+    try {
+      const stageStatus =
+        status === 'running' ? 'in_progress' : status === 'completed' ? 'completed' : status === 'assigned' ? 'ready' : 'pending'
+      const operatorName =
+        status === 'assigned' || status === 'running'
+          ? String(session?.user?.name ?? metaByJob[row.id]?.operatorName ?? '').trim() || null
+          : metaByJob[row.id]?.operatorName ?? null
+      const enteredCounter = Number((counterEdits[row.id] ?? '').trim())
+      const existingCounter = Number(stage.counter ?? 0)
+      const targetCounter = Number.isFinite(enteredCounter) && enteredCounter > 0 ? Math.floor(enteredCounter) : existingCounter
+      const safeCounter =
+        status === 'completed' ? Math.max(targetCounter, row.requiredSheets || row.sheetsIssued || 0) : Math.max(0, targetCounter)
+
+      const prevPostPress =
+        row.postPressRouting && typeof row.postPressRouting === 'object'
+          ? (row.postPressRouting as Record<string, unknown>)
+          : {}
+      const prevExec =
+        prevPostPress.executionOrchestration && typeof prevPostPress.executionOrchestration === 'object'
+          ? (prevPostPress.executionOrchestration as Record<string, unknown>)
+          : {}
+      const stageProgress =
+        prevExec.stageProgress && typeof prevExec.stageProgress === 'object'
+          ? (prevExec.stageProgress as Record<string, unknown>)
+          : {}
+      const cuttingProgress =
+        stageProgress.cutting && typeof stageProgress.cutting === 'object'
+          ? (stageProgress.cutting as Record<string, unknown>)
+          : {}
+
+      const res = await fetch(`/api/job-cards/${row.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sheetsIssued: safeCounter,
+          postPressRouting: {
+            ...prevPostPress,
+            executionOrchestration: {
+              ...prevExec,
+              printingQueuedAt:
+                status === 'completed' ? new Date().toISOString() : (prevExec.printingQueuedAt as string | undefined),
+              stageProgress: {
+                ...stageProgress,
+                cutting: {
+                  ...cuttingProgress,
+                  completedQty: safeCounter,
+                  pushedQty: safeCounter,
+                  status: stageStatus,
+                },
+              },
+            },
+          },
+          stages: [{ id: stage.id, status: stageStatus, operator: operatorName }],
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to update status')
+      updateMeta(row.id, { status, operatorName })
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update status')
+    } finally {
+      setSavingRow(null)
+    }
   }
 
   const counters = useMemo(() => {
@@ -214,14 +399,17 @@ export default function CuttingQueuePage() {
               <table className={`w-full text-xs ${mono}`}>
                 <thead className="text-ds-ink-faint text-xs font-semibold uppercase tracking-wider bg-ds-main/40">
                   <tr className="border-b border-border/40">
-                    <th className="text-left py-2 px-3">Carton Name</th>
-                    <th className="text-left py-2 px-3">Carton</th>
-                    <th className="text-left py-2 px-3">Qty</th>
-                    <th className="text-left py-2 px-3">Board</th>
-                    <th className="text-left py-2 px-3">Size</th>
-                    <th className="text-left py-2 px-3">Die Required</th>
-                    <th className="text-left py-2 px-3">Status</th>
                     <th className="text-left py-2 px-3">Operator</th>
+                    <th className="text-left py-2 px-3">Job Card No.</th>
+                    <th className="text-left py-2 px-3">Product / Carton Details</th>
+                    <th className="text-left py-2 px-3">Set No.</th>
+                    <th className="text-left py-2 px-3">Parent Sheet Size</th>
+                    <th className="text-left py-2 px-3">Required Sheets</th>
+                    <th className="text-left py-2 px-3">Paper Divide</th>
+                    <th className="text-left py-2 px-3">Cut Sheet Size</th>
+                    <th className="text-left py-2 px-3">Total Sheets Issued</th>
+                    <th className="text-left py-2 px-3">Actual Counter</th>
+                    <th className="text-left py-2 px-3">Production Status</th>
                     <th className="text-left py-2 px-3">Actions</th>
                   </tr>
                 </thead>
@@ -230,65 +418,120 @@ export default function CuttingQueuePage() {
                     const meta = metaByJob[r.id]
                     const status = meta?.status ?? deriveInitialStatus(r)
                     const mq = r.poLine?.materialQueue
-                    const board = mq ? `${mq.boardType}${mq.gsm ? ` · ${mq.gsm} GSM` : ''}` : '—'
+                    const stage = cuttingStage(r)
+                    const spec =
+                      r.poLine?.specOverrides && typeof r.poLine.specOverrides === 'object'
+                        ? (r.poLine.specOverrides as Record<string, unknown>)
+                        : {}
+                    const planningCore =
+                      spec.planningCore && typeof spec.planningCore === 'object'
+                        ? (spec.planningCore as Record<string, unknown>)
+                        : {}
+                    const ups = resolveUps(r.poLine ?? {})
+                    const parentSheet =
+                      (mq?.sheetLengthMm && mq?.sheetWidthMm)
+                        ? `${mq.sheetLengthMm}x${mq.sheetWidthMm}`
+                        : (typeof planningCore.parentSize === 'string' && planningCore.parentSize.trim())
+                          ? planningCore.parentSize.trim()
+                        : '—'
+                    const cutSheet = resolveSheetSize(r.poLine ?? {}) || r.poLine?.cartonSize || '—'
+                    const operatorDisplay = stage?.operator ?? meta?.operatorName ?? '—'
+                    const totalSheetsIssued =
+                      Number(stage?.counter ?? 0) > 0
+                        ? Number(stage?.counter ?? 0)
+                        : Number(r.sheetsIssued ?? 0) > 0
+                          ? Number(r.sheetsIssued ?? 0)
+                          : Number(mq?.totalSheets ?? 0) > 0
+                            ? Number(mq?.totalSheets ?? 0)
+                            : Number(r.requiredSheets ?? 0)
                     return (
                       <tr
                         key={r.id}
-                        className="border-b border-border/20 hover:bg-ds-main/30 cursor-pointer"
+                        className={`border-b border-border/20 hover:bg-ds-main/30 cursor-pointer ${status === 'completed' ? 'bg-emerald-500/12' : ''}`}
                         onClick={() => setActiveJobId(r.id)}
                       >
-                        <td className="py-1.5 px-3 text-ds-ink max-w-[14rem] truncate" title={r.poLine?.cartonName ?? ''}>
-                          {r.poLine?.cartonName ?? '—'}
-                          <span className="ml-1 text-ds-ink-faint">· JC #{r.jobCardNumber}</span>
-                        </td>
+                        <td className="py-1.5 px-3">{operatorDisplay}</td>
                         <td className="py-1.5 px-3">
                           <Link
                             href={`/production/job-cards/${r.id}`}
                             className="text-sky-400 hover:underline"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            PO {r.poLine?.poNumber ?? '—'}
+                            JC-{r.jobCardNumber}
                           </Link>
                         </td>
-                        <td className="py-1.5 px-3">{r.poLine?.quantity ?? '—'}</td>
-                        <td className="py-1.5 px-3">{board}</td>
-                        <td className="py-1.5 px-3">{r.poLine?.cartonSize ?? '—'}</td>
-                        <td className="py-1.5 px-3">{r.poLine?.dyeNumber != null ? `#${r.poLine.dyeNumber}` : 'Required'}</td>
+                        <td className="py-1.5 px-3 max-w-[18rem]">
+                          <div className="truncate text-ds-ink" title={r.poLine?.cartonName ?? ''}>
+                            {r.poLine?.cartonName ?? '—'}
+                          </div>
+                          <div className="text-ds-ink-faint truncate">
+                            PO {r.poLine?.poNumber ?? '—'} · Qty {r.poLine?.quantity ?? 0}
+                          </div>
+                        </td>
+                        <td className="py-1.5 px-3">{r.setNumber ?? '—'}</td>
+                        <td className="py-1.5 px-3">{parentSheet}</td>
+                        <td className="py-1.5 px-3">{r.requiredSheets}</td>
+                        <td className="py-1.5 px-3">{ups ?? mq?.ups ?? (typeof planningCore.paperDivide === 'number' ? planningCore.paperDivide : '—')}</td>
+                        <td className="py-1.5 px-3">{cutSheet}</td>
+                        <td className="py-1.5 px-3">{Number(totalSheetsIssued).toLocaleString('en-IN')}</td>
+                        <td className="py-1.5 px-3" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="w-24 rounded border border-ds-line/50 bg-background px-2 py-1 text-xs"
+                            value={getCounterValue(r)}
+                            onChange={(e) =>
+                              setCounterEdits((prev) => ({ ...prev, [r.id]: e.target.value.replace(/[^\d]/g, '') }))
+                            }
+                            onBlur={() => void saveRowCounter(r)}
+                          />
+                        </td>
                         <td className="py-1.5 px-3">
                           <span className={`rounded px-1.5 py-0.5 border text-xs uppercase tracking-wide ${statusTone(status)}`}>
                             {status}
                           </span>
                         </td>
-                        <td className="py-1.5 px-3">{meta?.operatorName ?? '—'}</td>
                         <td className="py-1.5 px-3">
                           <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
-                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
-                              onClick={() => setActiveJobId(r.id)}
+                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors disabled:opacity-50"
+                              onClick={() => void updateCuttingStatus(r, 'assigned')}
+                              disabled={savingRow === r.id}
                             >
                               Assign
                             </button>
                             <button
                               type="button"
-                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
-                              onClick={() => updateMeta(r.id, { status: 'running' })}
+                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors disabled:opacity-50"
+                              onClick={() => void updateCuttingStatus(r, 'running')}
+                              disabled={savingRow === r.id}
                             >
                               Start
                             </button>
                             <button
                               type="button"
-                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
-                              onClick={() => updateMeta(r.id, { status: 'assigned' })}
+                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors disabled:opacity-50"
+                              onClick={() => void updateCuttingStatus(r, 'assigned')}
+                              disabled={savingRow === r.id}
                             >
                               Hold
                             </button>
                             <button
                               type="button"
-                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
-                              onClick={() => updateMeta(r.id, { status: 'completed' })}
+                              className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors disabled:opacity-50"
+                              onClick={() => void updateCuttingStatus(r, 'completed')}
+                              disabled={savingRow === r.id}
                             >
                               Complete
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded border border-ds-warning/50 px-1.5 py-px text-xs text-ds-warning hover:bg-ds-warning/10 transition-colors disabled:opacity-50"
+                              onClick={() => void saveRowCounter(r)}
+                              disabled={savingRow === r.id}
+                            >
+                              {savingRow === r.id ? 'Saving…' : 'Save Counter'}
                             </button>
                           </div>
                         </td>

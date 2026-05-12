@@ -45,7 +45,21 @@ function formatStorageParts(parts: (string | null | undefined)[]): string {
 }
 
 const stageUpdateSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().uuid().optional(),
+  stageName: z
+    .enum([
+      'Cutting',
+      'Printing',
+      'Chemical Coating',
+      'Lamination',
+      'Embossing',
+      'Leafing',
+      'Spot UV',
+      'Dye Cutting',
+      'Pasting',
+      'Sorting',
+    ])
+    .optional(),
   status: z.string().optional(),
   operator: z.string().optional().nullable(),
   counter: z.number().int().optional().nullable(),
@@ -69,6 +83,16 @@ const updateSchema = z.object({
   postPressRouting: postPressRoutingSchema.optional().nullable(),
   stages: z.array(stageUpdateSchema).optional(),
 })
+
+function resolvePrintPlanLane(
+  postPress: unknown,
+): 'triage' | 'machine' | null {
+  if (!postPress || typeof postPress !== 'object') return null
+  const printPlan = (postPress as Record<string, unknown>).printPlan
+  if (!printPlan || typeof printPlan !== 'object') return null
+  const lane = (printPlan as Record<string, unknown>).lane
+  return lane === 'machine' || lane === 'triage' ? lane : null
+}
 
 export async function GET(
   req: NextRequest,
@@ -440,14 +464,24 @@ export async function PUT(
       'Dye Cutting',
       'Pasting',
     ]
+    const printPlanLane = resolvePrintPlanLane(mergedPostPress)
 
     if (data.stages?.length) {
-      const completedStageIds = new Set(
-        data.stages.filter((s) => s.status === 'completed').map((s) => s.id),
+      const completedStageRefs = new Set(
+        data.stages
+          .filter((s) => s.status === 'completed')
+          .map((s) => s.id ?? s.stageName)
+          .filter((v): v is string => typeof v === 'string' && v.length > 0),
       )
       await Promise.all(
-        data.stages.map((s) => {
-          const prev = existing.stages.find((r) => r.id === s.id)
+        data.stages.map(async (s) => {
+          const byId = s.id ? existing.stages.find((r) => r.id === s.id) : null
+          const byName = !byId && s.stageName ? existing.stages.find((r) => r.stageName === s.stageName) : null
+          const target = byId ?? byName
+          const targetId = target?.id ?? null
+          const targetStageName = target?.stageName ?? s.stageName ?? null
+          if (!targetId && !targetStageName) return
+          const prev = target
           const counterTicked =
             prev &&
             s.counter !== undefined &&
@@ -459,24 +493,40 @@ export async function PUT(
             s.status !== 'in_progress' &&
             prev?.status === 'in_progress'
 
-          return tx.productionStageRecord.update({
-            where: { id: s.id },
+          const payload = {
+            ...(s.status !== undefined ? { status: s.status } : {}),
+            ...(s.operator !== undefined ? { operator: s.operator } : {}),
+            ...(s.counter !== undefined ? { counter: s.counter } : {}),
+            ...(s.sheetSize !== undefined ? { sheetSize: s.sheetSize } : {}),
+            ...(s.excessSheets !== undefined ? { excessSheets: s.excessSheets } : {}),
+            ...(s.status === 'completed' ? { completedAt: new Date() } : {}),
+            ...(counterTicked ? { lastProductionTickAt: new Date() } : {}),
+            ...(becameInProgress ? { inProgressSince: new Date() } : {}),
+            ...(leftInProgress ? { inProgressSince: null } : {}),
+          }
+          if (targetId) {
+            return tx.productionStageRecord.update({
+              where: { id: targetId },
+              data: payload,
+            })
+          }
+          return tx.productionStageRecord.create({
             data: {
-              ...(s.status !== undefined ? { status: s.status } : {}),
-              ...(s.operator !== undefined ? { operator: s.operator } : {}),
-              ...(s.counter !== undefined ? { counter: s.counter } : {}),
-              ...(s.sheetSize !== undefined ? { sheetSize: s.sheetSize } : {}),
-              ...(s.excessSheets !== undefined ? { excessSheets: s.excessSheets } : {}),
-              ...(s.status === 'completed' ? { completedAt: new Date() } : {}),
-              ...(counterTicked ? { lastProductionTickAt: new Date() } : {}),
-              ...(becameInProgress ? { inProgressSince: new Date() } : {}),
-              ...(leftInProgress ? { inProgressSince: null } : {}),
+              jobCardId: id,
+              stageName: targetStageName!,
+              status: typeof payload.status === 'string' ? payload.status : 'pending',
+              operator: payload.operator ?? null,
+              counter: payload.counter ?? 0,
+              sheetSize: payload.sheetSize ?? null,
+              ...(payload.completedAt ? { completedAt: payload.completedAt } : {}),
+              ...(payload.lastProductionTickAt ? { lastProductionTickAt: payload.lastProductionTickAt } : {}),
+              ...(payload.inProgressSince ? { inProgressSince: payload.inProgressSince } : {}),
             },
           })
         }),
       )
 
-      if (completedStageIds.size > 0) {
+      if (completedStageRefs.size > 0) {
         const orderedStages = [...existing.stages].sort(
           (a, b) =>
             stageOrder.indexOf(a.stageName) - stageOrder.indexOf(b.stageName) ||
@@ -484,7 +534,11 @@ export async function PUT(
         )
         for (const s of data.stages) {
           if (s.status !== 'completed') continue
-          const rec = existing.stages.find((r) => r.id === s.id)
+          const rec = s.id
+            ? existing.stages.find((r) => r.id === s.id)
+            : s.stageName
+              ? existing.stages.find((r) => r.stageName === s.stageName)
+              : null
           if (!rec) continue
           const idx = orderedStages.findIndex((r) => r.id === rec.id)
           if (idx < 0 || idx >= orderedStages.length - 1) continue
@@ -494,6 +548,40 @@ export async function PUT(
             data: { status: 'ready' },
           })
         }
+      }
+    }
+
+    // Print planning handshake: when card is dropped from triage to a machine lane,
+    // ensure Printing stage exists and is ready so it reflects in Live Production queue.
+    if (printPlanLane === 'machine') {
+      const printingStage = await tx.productionStageRecord.findFirst({
+        where: { jobCardId: id, stageName: 'Printing' },
+        select: { id: true, status: true },
+      })
+      const operatorFromCard =
+        (data.assignedOperator !== undefined ? data.assignedOperator : header.assignedOperator) ?? null
+
+      if (!printingStage) {
+        await tx.productionStageRecord.create({
+          data: {
+            jobCardId: id,
+            stageName: 'Printing',
+            status: 'ready',
+            operator: operatorFromCard,
+            counter: 0,
+            sheetSize: null,
+          },
+        })
+      } else {
+        await tx.productionStageRecord.update({
+          where: { id: printingStage.id },
+          data: {
+            status: printingStage.status === 'pending' ? 'ready' : printingStage.status,
+            ...(data.assignedOperator !== undefined || header.assignedOperator !== undefined
+              ? { operator: operatorFromCard }
+              : {}),
+          },
+        })
       }
     }
 

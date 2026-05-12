@@ -24,19 +24,31 @@ export default function ProductionStagesHubPage() {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {PRODUCTION_STAGES.map((stage, index) => (
-            <Link
-              key={stage.key}
-              href={stage.key === 'cutting' ? '/production/cutting-queue' : `/production/stages/${stage.key}`}
-              className="flex items-center gap-3 rounded-xl border border-ds-line/40 bg-ds-main p-4 transition hover:border-ds-brand/50"
-            >
-              <span className={`flex h-10 w-10 items-center justify-center rounded-lg bg-ds-card text-ds-brand ${mono} text-sm`}>
-                {index + 1}
-              </span>
-              <div className="min-w-0">
-                <p className="truncate font-semibold text-ds-ink">{stage.label}</p>
-                <p className="text-xs text-ds-ink-faint">View job cards →</p>
+            <div key={stage.key} className="rounded-xl border border-ds-line/40 bg-ds-main p-4">
+              <div className="flex items-center gap-3">
+                <span className={`flex h-10 w-10 items-center justify-center rounded-lg bg-ds-card text-ds-brand ${mono} text-sm`}>
+                  {index + 1}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-ds-ink">{stage.label}</p>
+                  <p className="text-xs text-ds-ink-faint">Execution + triage</p>
+                </div>
               </div>
-            </Link>
+              <div className="mt-3 flex items-center gap-2">
+                <Link
+                  href={stage.key === 'cutting' ? '/production/cutting-queue' : `/production/stages/${stage.key}`}
+                  className="rounded-lg border border-ds-line/60 px-2.5 py-1.5 text-xs text-ds-ink transition hover:border-ds-brand/40 hover:text-ds-brand"
+                >
+                  Execution
+                </Link>
+                <Link
+                  href={`/production/stages/${stage.key}/triage`}
+                  className="rounded-lg border border-ds-line/60 px-2.5 py-1.5 text-xs text-ds-ink transition hover:border-ds-brand/40 hover:text-ds-brand"
+                >
+                  Triage
+                </Link>
+              </div>
+            </div>
           ))}
         </div>
       </div>

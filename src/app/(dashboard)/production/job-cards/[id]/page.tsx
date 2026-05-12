@@ -307,6 +307,7 @@ export default function JobCardDetailPage() {
   const [activeSection, setActiveSection] = useState<'summary' | 'spec' | 'board' | 'tooling' | 'execution' | 'validation' | 'material' | 'printing' | 'operations' | 'media' | 'notes' | 'history'>('summary')
   const [hubPushing, setHubPushing] = useState(false)
   const [livePushing, setLivePushing] = useState(false)
+  const [queuePushing, setQueuePushing] = useState<string | null>(null)
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
   const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness | null>(null)
   const [materialTimeline, setMaterialTimeline] = useState<MaterialTimelineEvent[]>([])
@@ -570,6 +571,16 @@ export default function JobCardDetailPage() {
     setJc((prev) => (prev ? { ...prev, [key]: value } : prev))
   }
 
+  async function persistApprovalFlag(field: 'artworkApproved' | 'finalQcPass', value: boolean) {
+    if (!jc) return
+    const prev = jc[field]
+    update(field, value as JobCard[typeof field])
+    const ok = await saveChanges({ [field]: value })
+    if (!ok) {
+      update(field, prev as JobCard[typeof field])
+    }
+  }
+
   const updateStage = (stageId: string, patch: Partial<Stage>) => {
     setJc((prev) => {
       if (!prev) return prev
@@ -664,12 +675,12 @@ export default function JobCardDetailPage() {
     }
   }
 
-  async function saveExecution(release: boolean) {
+  async function saveExecution(release: boolean, forceRelease = false) {
     if (!jc) return
     if (release) {
       const firstBlocking =
         !sheetDefined ? 'spec' : boardStatus !== 'ready' ? 'board' : !toolingReady ? 'tooling' : !awPoMatch ? 'validation' : null
-      if (firstBlocking) {
+      if (firstBlocking && !forceRelease) {
         setActiveSection(firstBlocking)
         sectionRefs.current[firstBlocking]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
         toast.error('Resolve validation items before release')
@@ -699,13 +710,101 @@ export default function JobCardDetailPage() {
     if (!jc) return
     setLivePushing(true)
     try {
-      const released = await saveExecution(true)
+      let released = await saveExecution(true)
+      if (!released) {
+        const proceed = window.confirm(
+          'Some readiness checks are pending. Continue push to Print Planning + Cutting in trial override mode?',
+        )
+        if (!proceed) return
+        released = await saveExecution(true, true)
+      }
       if (!released) return
       const cutOk = await enqueueCutting()
       if (!cutOk) return
       toast.success('Pushed to Print Planning and Cutting')
     } finally {
       setLivePushing(false)
+    }
+  }
+
+  async function queueStageReady(stageName: string) {
+    if (!jc) return false
+    const stage = jc.stages.find((s) => s.stageName === stageName)
+    if (!stage) return true
+    if (stage.status === 'ready' || stage.status === 'in_progress' || stage.status === 'completed') return true
+    return await saveChanges({
+      stages: [{ id: stage.id, status: 'ready' }],
+    })
+  }
+
+  async function stampExecutionQueue(stepKey: string) {
+    if (!jc) return false
+    const prevRouting =
+      jc.postPressRouting && typeof jc.postPressRouting === 'object'
+        ? (jc.postPressRouting as Record<string, unknown>)
+        : {}
+    const existingExec =
+      prevRouting.executionOrchestration && typeof prevRouting.executionOrchestration === 'object'
+        ? (prevRouting.executionOrchestration as Record<string, unknown>)
+        : {}
+    return await saveChanges({
+      postPressRouting: {
+        ...prevRouting,
+        executionOrchestration: {
+          ...existingExec,
+          [`${stepKey}QueuedAt`]: new Date().toISOString(),
+        },
+      },
+    })
+  }
+
+  async function pushQueueStep(stepKey: string) {
+    if (!jc) return
+    setQueuePushing(stepKey)
+    try {
+      if (stepKey === 'cutting') {
+        const ok = await enqueueCutting()
+        if (!ok) return
+        await stampExecutionQueue(stepKey)
+        toast.success('Queued to Cutting')
+        return
+      }
+      if (stepKey === 'printing') {
+        const ok = await saveExecution(true)
+        if (!ok) return
+        await stampExecutionQueue(stepKey)
+        toast.success('Queued to Print Planning')
+        return
+      }
+      if (stepKey === 'dispatch') {
+        const ok = await saveChanges({ status: 'final_qc' })
+        if (!ok) return
+        await stampExecutionQueue(stepKey)
+        toast.success('Queued to Dispatch Readiness')
+        return
+      }
+      if (stepKey === 'billing') {
+        await stampExecutionQueue(stepKey)
+        router.push(`/billing/new?jobCardId=${jc.id}`)
+        return
+      }
+      const stageMap: Record<string, string> = {
+        chemical_coating: 'Chemical Coating',
+        lamination: 'Lamination',
+        spot_uv: 'Spot UV',
+        leafing: 'Leafing',
+        embossing: 'Embossing',
+        dye_cutting: 'Dye Cutting',
+        pasting: 'Pasting',
+      }
+      const mapped = stageMap[stepKey]
+      if (!mapped) return
+      const ok = await queueStageReady(mapped)
+      if (!ok) return
+      await stampExecutionQueue(stepKey)
+      toast.success(`Queued to ${mapped}`)
+    } finally {
+      setQueuePushing(null)
     }
   }
 
@@ -780,23 +879,54 @@ export default function JobCardDetailPage() {
   const grainDisplay = bible?.grainDirection ?? jc.poLine?.materialQueue?.grainDirection ?? '—'
   const poDateDisplay = formatDateDisplay(jc.poLine?.po?.poDate)
   const lineSpec = (jc.poLine?.specOverrides || {}) as Record<string, unknown>
+  const asSpecText = (...vals: unknown[]) => {
+    for (const v of vals) {
+      if (typeof v === 'string' && v.trim()) return v.trim()
+    }
+    return null
+  }
+  const asSpecNum = (...vals: unknown[]) => {
+    for (const v of vals) {
+      const n = Number(v)
+      if (Number.isFinite(n)) return n
+    }
+    return null
+  }
+  const planningCore = (lineSpec.planningCore && typeof lineSpec.planningCore === 'object'
+    ? (lineSpec.planningCore as Record<string, unknown>)
+    : {}) as Record<string, unknown>
   const colourSpec =
-    (typeof lineSpec.colorSpec === 'string' && lineSpec.colorSpec.trim()) ||
-    (typeof lineSpec.colourSpec === 'string' && lineSpec.colourSpec.trim()) ||
-    (typeof lineSpec.colour === 'string' && lineSpec.colour.trim()) ||
-    (typeof lineSpec.color === 'string' && lineSpec.color.trim()) ||
-    (typeof jc.poLine?.carton?.printingType === 'string' && jc.poLine.carton.printingType.trim()) ||
+    asSpecText(
+      lineSpec.colorSpec,
+      lineSpec.colourSpec,
+      lineSpec.colour,
+      lineSpec.color,
+      lineSpec.printingType,
+      jc.poLine?.carton?.printingType,
+    ) ||
     '—'
   const shadeFromCarton =
     jc.poLine?.carton?.colourBreakdown && typeof jc.poLine.carton.colourBreakdown === 'object'
       ? JSON.stringify(jc.poLine.carton.colourBreakdown)
       : ''
   const colorDisplay = colourSpec !== '—' ? colourSpec : shadeFromCarton || '—'
-  const gsmDisplay = jc.poLine?.gsm ?? jc.poLine?.materialQueue?.gsm ?? jc.boardMaterial?.ledgerLink?.gsm ?? '—'
+  const gsmDisplay =
+    asSpecNum(
+      lineSpec.gsm,
+      planningCore.gsm,
+      jc.poLine?.gsm,
+      jc.poLine?.materialQueue?.gsm,
+      jc.boardMaterial?.ledgerLink?.gsm,
+    ) ?? '—'
   const paperDisplay =
-    jc.poLine?.paperType ??
-    jc.poLine?.materialQueue?.boardType ??
-    jc.boardMaterial?.ledgerLink?.board ??
+    asSpecText(
+      lineSpec.paperType,
+      lineSpec.boardType,
+      planningCore.boardType,
+      jc.poLine?.paperType,
+      jc.poLine?.materialQueue?.boardType,
+      jc.boardMaterial?.ledgerLink?.board,
+    ) ??
     '—'
   const materialCodeDisplay =
     materialReadiness?.materialCode ||
@@ -805,16 +935,35 @@ export default function JobCardDetailPage() {
     '—'
   const requiredDisplay =
     materialReadiness?.requiredSheets ??
+    asSpecNum(lineSpec.requiredSheets, planningCore.requiredSheets) ??
     jc.poLine?.materialQueue?.totalSheets ??
     planningRequirement.requiredSheets ??
     jc.requiredSheets
   const wastageDisplay =
     jc.wastageSheets > 0
       ? jc.wastageSheets
-      : planningRequirement.wastageSheets
-  const reservedDisplay = materialReadiness?.reservedSheets ?? jc.boardMaterial?.reservedSheets ?? 0
-  const shortageDisplay = materialReadiness?.shortageSheets ?? jc.boardMaterial?.shortageSheets ?? 0
-  const availableDisplay = materialReadiness?.availableStock ?? jc.boardMaterial?.availableStock ?? 0
+      : (asSpecNum(lineSpec.wastageSheets, planningCore.wastageSheets) ?? planningRequirement.wastageSheets)
+  const reservedDisplay =
+    materialReadiness?.reservedSheets ??
+    asSpecNum(lineSpec.reservedSheets, planningCore.reservedSheets) ??
+    jc.boardMaterial?.reservedSheets ??
+    0
+  const shortageDisplay =
+    materialReadiness?.shortageSheets ??
+    asSpecNum(lineSpec.shortageSheets, planningCore.shortageSheets) ??
+    jc.boardMaterial?.shortageSheets ??
+    0
+  const availableDisplay =
+    materialReadiness?.availableStock ??
+    asSpecNum(lineSpec.availableSheets, planningCore.availableSheets) ??
+    jc.boardMaterial?.availableStock ??
+    0
+  const coatingDisplay = asSpecText(lineSpec.coatingType, jc.poLine?.coatingType, jc.poLine?.carton?.coatingType) ?? '—'
+  const otherCoatingDisplay = asSpecText(lineSpec.otherCoating, jc.poLine?.otherCoating, jc.poLine?.carton?.laminateType) ?? 'None'
+  const embossDisplay = asSpecText(lineSpec.embossingLeafing, jc.poLine?.embossingLeafing, jc.poLine?.carton?.embossingLeafing) ?? 'None'
+  const pastingDisplay = asSpecText(lineSpec.pastingStyle, jc.poLine?.carton?.pastingStyle) ?? 'BSO'
+  const artworkDisplay = asSpecText(lineSpec.artworkCode, jc.poLine?.artworkCode, jc.poLine?.carton?.artworkCode) ?? '—'
+  const poDateFinal = poDateDisplay !== '-' ? poDateDisplay : formatDateDisplay(asSpecText(lineSpec.poDate, planningCore.poDate))
 
   const boardStatus = boardReadiness
   const toolRows = [
@@ -868,8 +1017,22 @@ export default function JobCardDetailPage() {
                 <option value="">Designer…</option>
                 {shiftOperators.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
-              <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" checked={jc.artworkApproved} onChange={(e) => update('artworkApproved', e.target.checked)} /> Customer OK</label>
-              <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" checked={jc.finalQcPass} onChange={(e) => update('finalQcPass', e.target.checked)} /> QA OK</label>
+              <label className="inline-flex items-center gap-1 text-xs">
+                <input
+                  type="checkbox"
+                  checked={jc.artworkApproved}
+                  onChange={(e) => void persistApprovalFlag('artworkApproved', e.target.checked)}
+                />{' '}
+                Customer OK
+              </label>
+              <label className="inline-flex items-center gap-1 text-xs">
+                <input
+                  type="checkbox"
+                  checked={jc.finalQcPass}
+                  onChange={(e) => void persistApprovalFlag('finalQcPass', e.target.checked)}
+                />{' '}
+                QA OK
+              </label>
               <a href={`/api/designing/po-lines/${jc.poLine?.id}/job-spec-pdf`} target="_blank" rel="noopener noreferrer" className="rounded border border-ds-line/50 px-3 py-1.5 text-xs">Job spec PDF</a>
               <button type="button" disabled={hubPushing} onClick={() => void pushToHubsFromJobCard()} className="rounded border border-ds-line/50 px-3 py-1.5 text-xs disabled:opacity-50">
                 {hubPushing ? 'Pushing hubs…' : 'Push to Hubs'}
@@ -909,6 +1072,35 @@ export default function JobCardDetailPage() {
           </div>
         </div>
 
+        <div className="rounded-lg border border-ds-line/40 bg-card px-3 py-2.5">
+          <p className="text-[11px] uppercase tracking-wide text-ds-ink-faint mb-2">Production Queue Flow</p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              ['cutting', 'Push Cutting'],
+              ['printing', 'Push Printing'],
+              ['chemical_coating', 'Push Coating'],
+              ['lamination', 'Push Lamination'],
+              ['spot_uv', 'Push Spot UV'],
+              ['leafing', 'Push Leafing'],
+              ['embossing', 'Push Emboss'],
+              ['dye_cutting', 'Push Die Cutting'],
+              ['pasting', 'Push Pasting'],
+              ['dispatch', 'Push Dispatch'],
+              ['billing', 'Push Billing'],
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => void pushQueueStep(k)}
+                disabled={saving || enqueueingCut || livePushing || queuePushing !== null}
+                className="rounded border border-ds-line/50 bg-ds-main px-2.5 py-1 text-xs text-ds-ink transition hover:bg-ds-main/70 disabled:opacity-50"
+              >
+                {queuePushing === k ? 'Pushing…' : label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div ref={(el) => { sectionRefs.current.summary = el }} className="space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">Job Summary</h2>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -917,7 +1109,7 @@ export default function JobCardDetailPage() {
               ['Set No', jc.setNumber ?? '—'],
               ['Client', jc.customer.name],
               ['PO No', jc.poLine?.po.poNumber ?? '—'],
-              ['PO Date', poDateDisplay],
+              ['PO Date', poDateFinal],
               ['Carton', productName],
               ['Size', jc.poLine?.cartonSize ?? '—'],
               ['Qty', Number(jc.poLine?.quantity || 0).toLocaleString('en-IN')],
@@ -937,9 +1129,9 @@ export default function JobCardDetailPage() {
             <div ref={(el) => { sectionRefs.current.spec = el }} className="rounded-xl border border-ds-line/40 bg-card p-4 space-y-2.5">
               <h2 className="text-sm font-semibold text-ds-ink">Printing & Finishing</h2>
               <div className="grid md:grid-cols-5 gap-3 text-xs">
-                <div><p className="text-ds-ink-faint mb-1">Coating</p><p>{jc.poLine?.coatingType ?? '—'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Other Coating</p><p>{jc.poLine?.otherCoating ?? jc.poLine?.carton?.laminateType ?? 'None'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Emboss / Leaf</p><p>{jc.poLine?.embossingLeafing ?? jc.poLine?.carton?.embossingLeafing ?? 'None'}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Coating</p><p>{coatingDisplay}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Other Coating</p><p>{otherCoatingDisplay}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Emboss / Leaf</p><p>{embossDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Paper</p><p>{paperDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Color / Spec</p><p>{colorDisplay}</p></div>
               </div>
@@ -961,8 +1153,8 @@ export default function JobCardDetailPage() {
                 <div><p className="text-ds-ink-faint mb-1">UPS</p><p>{upsDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">GSM</p><p>{gsmDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Dye Details</p><p>{dyeDetail && dyeDetail !== 'unavailable' ? `${dyeDetail.dyeNumber}` : '—'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Pasting</p><p>{jc.poLine?.carton?.pastingStyle ?? 'BSO'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Artwork</p><p>{jc.poLine?.artworkCode ?? jc.poLine?.carton?.artworkCode ?? '—'}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Pasting</p><p>{pastingDisplay}</p></div>
+                <div><p className="text-ds-ink-faint mb-1">Artwork</p><p>{artworkDisplay}</p></div>
               </div>
               <div>
                 <label className="block text-xs text-ds-ink-faint mb-1">Notes</label>
@@ -1084,14 +1276,27 @@ export default function JobCardDetailPage() {
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
-            disabled={releaseBlocked || saving || enqueueingCut || livePushing}
+            disabled={saving || enqueueingCut || livePushing || queuePushing !== null}
+            onClick={() => void pushQueueStep('printing')}
+            className="rounded-md border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50"
+          >
+            {queuePushing === 'printing' ? 'Pushing Print Planning…' : 'Push to Print Planning'}
+          </button>
+          <button
+            type="button"
+            disabled={enqueueingCut || livePushing || queuePushing !== null}
+            onClick={() => void enqueueCutting()}
+            className="rounded-md border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50"
+          >
+            {enqueueingCut ? 'Pushing Cutting…' : 'Push to Cutting'}
+          </button>
+          <button
+            type="button"
+            disabled={saving || enqueueingCut || livePushing}
             onClick={() => void pushToLiveProduction()}
             className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-95 focus:outline-none focus:ring-1 focus:ring-emerald-600/40 disabled:opacity-40"
           >
             {livePushing ? 'Pushing Live…' : 'Push to Print Planning + Cutting'}
-          </button>
-          <button type="button" disabled={enqueueingCut || livePushing} onClick={() => void enqueueCutting()} className="rounded-md border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50">
-            {enqueueingCut ? 'Pushing Cutting…' : 'Push to Cutting'}
           </button>
           <button type="button" disabled={saving} onClick={() => void saveExecution(false)} className="rounded-md border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50">Save Job Card</button>
           <button type="button" onClick={() => window.print()} className="rounded-md border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40">Print Job Card</button>
