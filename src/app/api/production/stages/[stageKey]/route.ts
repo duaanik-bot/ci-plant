@@ -55,8 +55,17 @@ export async function GET(
     status: { notIn: ['archived', 'deleted'] },
   }
   if (routingKey) {
-    where.jobCard = {
-      postPressRouting: { path: [routingKey], equals: true },
+    if (stageKey === 'chemical_coating') {
+      where.jobCard = {
+        OR: [
+          { postPressRouting: { path: ['chemicalCoating'], equals: true } },
+          { postPressRouting: { path: ['spotUv'], equals: true } },
+        ],
+      }
+    } else {
+      where.jobCard = {
+        postPressRouting: { path: [routingKey], equals: true },
+      }
     }
   }
   if (stageKey === 'printing') {
