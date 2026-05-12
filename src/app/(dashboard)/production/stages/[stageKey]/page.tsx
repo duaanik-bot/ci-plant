@@ -205,6 +205,8 @@ export default function ProductionStagePage() {
   const [savingStageId, setSavingStageId] = useState<string | null>(null)
   const [selectedStageRecordIds, setSelectedStageRecordIds] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [showDowntime, setShowDowntime] = useState(false)
+  const [showTimeline, setShowTimeline] = useState(false)
 
   const stageMeta = PRODUCTION_STAGES.find((s) => s.key === stageKey)
 
@@ -365,6 +367,10 @@ export default function ProductionStagePage() {
       else visibleList.forEach((r) => next.delete(r.stageRecord.id))
       return next
     })
+  }
+
+  function selectAllInCurrentTab() {
+    setSelectedStageRecordIds(new Set(visibleList.map((r) => r.stageRecord.id)))
   }
 
   if (loading) {
@@ -618,6 +624,7 @@ export default function ProductionStagePage() {
         | 'hold'
         | 'rework'
         | 'blocked'
+      skipReload?: boolean
     },
   ) {
     if (opts?.status === 'in_progress' || opts?.status === 'partial_running') {
@@ -730,7 +737,7 @@ export default function ProductionStagePage() {
         throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to save stage update')
       }
       toast.success(opts?.status ? `Marked ${opts.status}` : 'Stage updated')
-      await load()
+      if (!opts?.skipReload) await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save stage update')
     } finally {
@@ -784,11 +791,16 @@ export default function ProductionStagePage() {
     return key
   }
 
-  async function completeAndPushNext(row: Payload['jobCards'][number]) {
-    return pushToNext(row, Number(getRowCounter(row) || 0), true)
+  async function completeAndPushNext(row: Payload['jobCards'][number], skipReload = false) {
+    return pushToNext(row, Number(getRowCounter(row) || 0), true, skipReload)
   }
 
-  async function pushToNext(row: Payload['jobCards'][number], requestedPushQty: number, markCompleted: boolean) {
+  async function pushToNext(
+    row: Payload['jobCards'][number],
+    requestedPushQty: number,
+    markCompleted: boolean,
+    skipReload = false,
+  ) {
     const nextKey = nextRequiredStageKey(row)
     if (!nextKey) {
       toast.error('No next station configured')
@@ -811,7 +823,7 @@ export default function ProductionStagePage() {
     const checklist = checklistDrafts[row.stageRecord.id] ?? {}
     const requiredChecklist = stationChecklistKeys(stageKey)
     const allChecked = requiredChecklist.every((k) => checklist[k] === true)
-    if (requiredChecklist.length > 0 && !allChecked) {
+    if (markCompleted && requiredChecklist.length > 0 && !allChecked) {
       toast.error('Complete required quality checklist before push')
       return
     }
@@ -972,7 +984,7 @@ export default function ProductionStagePage() {
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to push next stage')
       toast.success(`${stationFinished ? 'Completed' : 'Partially pushed'} ${label} → ${nextLabel} (${pushQty})`)
-      await load()
+      if (!skipReload) await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to push next stage')
     } finally {
@@ -1034,7 +1046,7 @@ export default function ProductionStagePage() {
     await load()
   }
 
-  async function sendRework(row: Payload['jobCards'][number]) {
+  async function sendRework(row: Payload['jobCards'][number], skipReload = false) {
     const seq = requiredStageKeysForRow(row)
     const idx = seq.indexOf(stageKey)
     if (idx <= 0) {
@@ -1113,10 +1125,10 @@ export default function ProductionStagePage() {
       return
     }
     toast.success(`Sent ${qty} to ${targetLabel} for rework`)
-    await load()
+    if (!skipReload) await load()
   }
 
-  async function bringBackFromNextStage(row: Payload['jobCards'][number]) {
+  async function bringBackFromNextStage(row: Payload['jobCards'][number], skipReload = false) {
     const nextKey = nextRequiredStageKey(row)
     if (!nextKey) {
       toast.error('No next stage configured')
@@ -1148,7 +1160,7 @@ export default function ProductionStagePage() {
         throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to bring back from next stage')
       }
       toast.success(`Brought back from ${nextLabel}`)
-      await load()
+      if (!skipReload) await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to bring back from next stage')
     } finally {
@@ -1226,6 +1238,29 @@ export default function ProductionStagePage() {
     }
   }
 
+  async function runBulkAction(
+    label: string,
+    fn: (row: Payload['jobCards'][number]) => Promise<void>,
+  ) {
+    const targets = visibleList.filter((r) => selectedStageRecordIds.has(r.stageRecord.id))
+    if (targets.length === 0) {
+      toast.error('Select at least one row')
+      return
+    }
+    setBulkBusy(true)
+    try {
+      for (const row of targets) {
+        await fn(row)
+      }
+      toast.success(`${label} done for ${targets.length} row(s)`)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : `Failed: ${label}`)
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
   return (
     <>
     <IndustrialModuleShell
@@ -1284,6 +1319,77 @@ export default function ProductionStagePage() {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-ds-ink-faint">Selected: {selectedCount}</span>
+        <button
+          type="button"
+          disabled={bulkBusy || visibleList.length === 0}
+          onClick={() => selectAllInCurrentTab()}
+          className="rounded border border-ds-line/60 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card disabled:opacity-50"
+        >
+          Select All (Tab)
+        </button>
+        <button
+          type="button"
+          disabled={bulkBusy || selectedCount === 0}
+          onClick={() =>
+            void runBulkAction('Bulk Start', async (row) => {
+              await saveStageInline(row, { status: 'in_progress', skipReload: true })
+            })
+          }
+          className="rounded border border-blue-600/40 px-2 py-1 text-xs text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
+        >
+          Bulk Start
+        </button>
+        <button
+          type="button"
+          disabled={bulkBusy || selectedCount === 0}
+          onClick={() =>
+            void runBulkAction('Bulk Partial Push', async (row) => {
+              const progress = getStageProgress(row)
+              const completedQty = Number(getRowCounter(row) || progress.completedQty || 0)
+              const pushQty = Math.max(0, completedQty - Number(progress.pushedQty || 0))
+              if (pushQty > 0) await pushToNext(row, pushQty, false, true)
+            })
+          }
+          className="rounded border border-amber-600/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-50"
+        >
+          Bulk Partial Push
+        </button>
+        <button
+          type="button"
+          disabled={bulkBusy || selectedCount === 0}
+          onClick={() =>
+            void runBulkAction('Bulk Complete Push', async (row) => {
+              await completeAndPushNext(row, true)
+            })
+          }
+          className="rounded border border-emerald-600/40 px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-50"
+        >
+          Bulk Complete
+        </button>
+        <button
+          type="button"
+          disabled={bulkBusy || selectedCount === 0}
+          onClick={() =>
+            void runBulkAction('Bulk Undo Push', async (row) => {
+              await bringBackFromNextStage(row, true)
+            })
+          }
+          className="rounded border border-blue-500/40 px-2 py-1 text-xs text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
+        >
+          Bulk Undo
+        </button>
+        <button
+          type="button"
+          disabled={bulkBusy || selectedCount === 0}
+          onClick={() =>
+            void runBulkAction('Bulk Rework Mark', async (row) => {
+              await saveStageInline(row, { status: 'rework', skipReload: true })
+            })
+          }
+          className="rounded border border-rose-600/40 px-2 py-1 text-xs text-rose-600 hover:bg-rose-500/10 disabled:opacity-50"
+        >
+          Bulk Rework
+        </button>
         <button
           type="button"
           disabled={bulkBusy || selectedCount === 0}
@@ -1687,11 +1793,13 @@ export default function ProductionStagePage() {
                       onClick={() => void bringBackFromNextStage(row)}
                       className="rounded border border-blue-600/40 px-2 py-0.5 text-[11px] text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
                     >
-                      Bring Back
+                      Undo Last Push
                     </button>
                   </div>
                 ) : null}
-                <div className="mt-3 flex flex-wrap gap-1.5">
+                <div className="mt-3 sticky top-0 z-10 rounded-md border border-ds-line/40 bg-ds-main/95 p-2">
+                  <p className="mb-1 text-[10px] uppercase tracking-wide text-ds-ink-faint">Quick Actions</p>
+                  <div className="flex flex-wrap gap-1.5">
                   {currentStatus === 'completed' ? (
                     <>
                       <button
@@ -1714,14 +1822,6 @@ export default function ProductionStagePage() {
                     </>
                   ) : (
                     <>
-                      <button
-                        type="button"
-                        disabled={savingStageId === row.stageRecord.id}
-                        onClick={() => void saveStageInline(row)}
-                        className="rounded border border-ds-line/50 px-2 py-1 text-xs hover:bg-ds-card disabled:opacity-50"
-                      >
-                        Save
-                      </button>
                       <button
                         type="button"
                         disabled={savingStageId === row.stageRecord.id}
@@ -1763,11 +1863,36 @@ export default function ProductionStagePage() {
                       ) : null}
                       <button
                         type="button"
-                        disabled={savingStageId === row.stageRecord.id || availableToPush <= 0}
+                        disabled={
+                          savingStageId === row.stageRecord.id ||
+                          availableToPush <= 0 ||
+                          !stationChecklistKeys(stageKey).every(
+                            (k) => checklistDrafts[row.stageRecord.id]?.[k] === true,
+                          )
+                        }
                         onClick={() => void completeAndPushNext(row)}
                         className="rounded border border-emerald-600/40 px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-50"
                       >
                         Complete Push
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingStageId === row.stageRecord.id}
+                        onClick={() => void bringBackFromNextStage(row)}
+                        className="rounded border border-blue-600/40 px-2 py-1 text-xs text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
+                      >
+                        Undo Last Push
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingStageId === row.stageRecord.id}
+                        onClick={() => {
+                          setPushDrafts((prev) => ({ ...prev, [row.stageRecord.id]: '' }))
+                          setWastageDrafts((prev) => ({ ...prev, [row.stageRecord.id]: '' }))
+                        }}
+                        className="rounded border border-ds-line/50 px-2 py-1 text-xs hover:bg-ds-card disabled:opacity-50"
+                      >
+                        Cancel Push
                       </button>
                       <button
                         type="button"
@@ -1779,12 +1904,50 @@ export default function ProductionStagePage() {
                       </button>
                     </>
                   )}
+                  </div>
                 </div>
               </div>
             )
           })()}
           <div className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-3">
             <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-2">Quality checkpoint</p>
+            {(() => {
+              const keys = stationChecklistKeys(stageKey)
+              const selected = keys.filter((k) => checklistDrafts[spotlight.stageRecord.id]?.[k] === true).length
+              return (
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-ds-ink-faint">
+                    Quality: <span className="text-ds-ink">{selected}/{keys.length}</span>
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] hover:bg-ds-card"
+                      onClick={() =>
+                        setChecklistDrafts((prev) => ({
+                          ...prev,
+                          [spotlight.stageRecord.id]: Object.fromEntries(keys.map((k) => [k, true])),
+                        }))
+                      }
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] hover:bg-ds-card"
+                      onClick={() =>
+                        setChecklistDrafts((prev) => ({
+                          ...prev,
+                          [spotlight.stageRecord.id]: Object.fromEntries(keys.map((k) => [k, false])),
+                        }))
+                      }
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+              )
+            })()}
             <div className="grid grid-cols-1 gap-1.5">
               {stationChecklistKeys(stageKey).map((item) => {
                 const current = checklistDrafts[spotlight.stageRecord.id]?.[item] === true
@@ -1808,9 +1971,23 @@ export default function ProductionStagePage() {
                 )
               })}
             </div>
+            <p className="mt-2 text-[11px] text-ds-ink-faint">
+              Complete Push requires all quality checks.
+            </p>
           </div>
           <div className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-2">Downtime logging</p>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Downtime logging</p>
+              <button
+                type="button"
+                onClick={() => setShowDowntime((v) => !v)}
+                className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] hover:bg-ds-card"
+              >
+                {showDowntime ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {showDowntime ? (
+              <>
             <button
               type="button"
               className="rounded border border-ds-line/60 px-2 py-1 text-xs hover:bg-ds-card"
@@ -1880,9 +2057,21 @@ export default function ProductionStagePage() {
                   )
                 })}
             </div>
+              </>
+            ) : null}
           </div>
           <div className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-2">Production timeline</p>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Production timeline</p>
+              <button
+                type="button"
+                onClick={() => setShowTimeline((v) => !v)}
+                className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] hover:bg-ds-card"
+              >
+                {showTimeline ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {showTimeline ? (
             <div className="space-y-1 text-xs text-ds-ink-faint">
               {(Array.isArray(getExecutionState(spotlight).stagePushTrail)
                 ? getExecutionState(spotlight).stagePushTrail
@@ -1899,6 +2088,7 @@ export default function ProductionStagePage() {
                   )
                 })}
             </div>
+            ) : null}
           </div>
         </div>
       ) : null}
