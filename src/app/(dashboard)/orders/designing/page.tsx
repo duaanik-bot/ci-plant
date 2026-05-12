@@ -778,6 +778,21 @@ function rowUpsDisplay(spec: Record<string, unknown>): string {
   return '—'
 }
 
+function resolveAwGsmFromRow(r: Row): number | null {
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  const candidates: unknown[] = [
+    spec.gsm,
+    r.gsm,
+    r.materialQueue?.gsm,
+    r.carton?.gsm,
+  ]
+  for (const value of candidates) {
+    const n = Number(value)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return null
+}
+
 function rowBatchTypeDisplay(spec: Record<string, unknown>): string {
   const coreRaw = readPlanningCore(spec) as Record<string, unknown>
   const meta = readPlanningMeta(spec)
@@ -942,6 +957,7 @@ export default function DesigningQueuePage() {
     const spec = (activeRowDrawer.specOverrides || {}) as Record<string, unknown>
     const resolvedSheet = resolveAwSheetSizeFromRow(activeRowDrawer)
     const resolvedUps = rowUpsDisplay(spec)
+    const resolvedGsm = resolveAwGsmFromRow(activeRowDrawer)
     const colorSpecCandidate =
       (typeof spec.colorSpec === 'string' && spec.colorSpec.trim()) ||
       (typeof spec.colourSpec === 'string' && spec.colourSpec.trim()) ||
@@ -954,7 +970,7 @@ export default function DesigningQueuePage() {
       quantity: String(activeRowDrawer.quantity || ''),
       sheetSize: resolvedSheet === '-' ? '' : resolvedSheet,
       ups: resolvedUps === '—' ? '' : resolvedUps,
-      gsm: String(spec.gsm ?? activeRowDrawer.gsm ?? activeRowDrawer.materialQueue?.gsm ?? ''),
+      gsm: resolvedGsm != null ? String(resolvedGsm) : '',
       boardType: activeRowDrawer.paperType || '',
       coating: activeRowDrawer.coatingType || activeRowDrawer.otherCoating || '',
       embossing: activeRowDrawer.embossingLeafing || '',
@@ -2696,6 +2712,7 @@ export default function DesigningQueuePage() {
             {(() => {
               const spec = (activeRowDrawer.specOverrides || {}) as Record<string, unknown>
               const resolvedSheet = resolveAwSheetSizeFromRow(activeRowDrawer)
+              const resolvedGsm = resolveAwGsmFromRow(activeRowDrawer)
               const designer = resolvePlanningDesignerName(spec, userById) || '-'
               const tooling = activeRowDrawer.readiness?.readyForProduction ? 'Ready' : 'Pending'
               const pr = activeRowDrawer.readiness?.pipelinePhase ?? '-'
@@ -2721,7 +2738,7 @@ export default function DesigningQueuePage() {
                     <div><p className="text-ds-ink-faint">Sheet Size</p><p className="text-ds-ink">{resolvedSheet || '-'}</p></div>
                     <div><p className="text-ds-ink-faint">UPS</p><p className="text-ds-ink">{rowUpsDisplay(spec)}</p></div>
                     <div><p className="text-ds-ink-faint">Board Type</p><p className="text-ds-ink">{activeRowDrawer.paperType || '-'}</p></div>
-                    <div><p className="text-ds-ink-faint">GSM</p><p className="text-ds-ink">{(spec.gsm as string) || '-'}</p></div>
+                    <div><p className="text-ds-ink-faint">GSM</p><p className="text-ds-ink">{resolvedGsm != null ? String(resolvedGsm) : '-'}</p></div>
                     <div><p className="text-ds-ink-faint">Designer</p><p className="text-ds-ink">{designer}</p></div>
                     <div><p className="text-ds-ink-faint">Tooling</p><p className="text-ds-ink">{tooling}</p></div>
                     <div><p className="text-ds-ink-faint">Job Card</p><p className="text-ds-ink">{activeRowDrawer.jobCard?.jobCardNumber ? `JC-${activeRowDrawer.jobCard.jobCardNumber}` : 'Not Created'}</p></div>
