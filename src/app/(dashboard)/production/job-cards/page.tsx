@@ -205,6 +205,10 @@ export default function JobCardsPage() {
   const bulkArchive = async () => {
     const blocked = selectedRows.filter((r) => !isDraftLike(r))
     if (blocked.length > 0) return toast.error('Only Draft/Pending job cards can be archived')
+    const reason = window.prompt('Delete reason (required):', '')?.trim() ?? ''
+    if (reason.length < 3) return toast.error('Delete reason is required (min 3 characters)')
+    const token = window.prompt('Second confirmation: type DELETE to continue bulk delete.', '')?.trim() ?? ''
+    if (token !== 'DELETE') return
     setBusy(true)
     try {
       await Promise.all(
@@ -212,18 +216,57 @@ export default function JobCardsPage() {
           fetch(`/api/job-cards/${r.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'archived' }),
+            body: JSON.stringify({
+              status: 'archived',
+              postPressRouting: {
+                deleteMeta: {
+                  reason,
+                  by: 'job_card_queue_bulk',
+                  at: new Date().toISOString(),
+                },
+              },
+            }),
           }),
         ),
       )
-      toast.success(`Archived ${selectedRows.length} job card(s)`)
+      toast.success(`Deleted ${selectedRows.length} job card(s)`)
       setSelected(new Set())
       await load()
     } catch {
-      toast.error('Bulk archive failed')
+      toast.error('Bulk delete failed')
     } finally {
       setBusy(false)
     }
+  }
+
+  const deleteOne = async (r: JobCardRow) => {
+    if (!isDraftLike(r)) {
+      toast.error('Only Draft/Pending job cards can be deleted')
+      return
+    }
+    const ok = window.confirm(`Delete JC-${r.jobCardNumber}?`)
+    if (!ok) return
+    const reason = window.prompt('Delete reason (required):', '')?.trim() ?? ''
+    if (reason.length < 3) return toast.error('Delete reason is required (min 3 characters)')
+    const token = window.prompt('Type DELETE to confirm', '')?.trim() ?? ''
+    if (token !== 'DELETE') return
+    const res = await fetch(`/api/job-cards/${r.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: 'archived',
+        postPressRouting: {
+          deleteMeta: {
+            reason,
+            by: 'job_card_queue_row',
+            at: new Date().toISOString(),
+          },
+        },
+      }),
+    })
+    if (!res.ok) return toast.error('Delete failed')
+    toast.success(`Deleted JC-${r.jobCardNumber}`)
+    await load()
   }
 
   const bulkAssignOperator = async () => {
@@ -327,7 +370,7 @@ export default function JobCardsPage() {
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-ds-line/50 bg-background px-3 py-2">
             <span className="text-sm">{selected.size} selected</span>
             <Button variant="secondary" onClick={bulkRelease} disabled={busy}>Bulk Push / Release</Button>
-            <Button variant="secondary" onClick={bulkArchive} disabled={busy}>Bulk Delete / Archive</Button>
+            <Button variant="secondary" onClick={bulkArchive} disabled={busy}>Bulk Delete</Button>
             <Button variant="secondary" onClick={bulkAssignOperator} disabled={busy}>Bulk Assign Operator</Button>
             <Button variant="secondary" onClick={() => window.print()}>Bulk Print</Button>
             <Button variant="secondary" onClick={() => setSelected(new Set())}>Clear Selection</Button>
@@ -387,11 +430,8 @@ export default function JobCardsPage() {
                         )}
                         {isDraftLike(r) && (
                           <button className="text-xs text-rose-600" onClick={async () => {
-                            const res = await fetch(`/api/job-cards/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'archived' }) })
-                            if (!res.ok) return toast.error('Archive failed')
-                            toast.success('Archived')
-                            await load()
-                          }}>Archive</button>
+                            await deleteOne(r)
+                          }}>Delete</button>
                         )}
                         <Link href={`/production/job-cards/${r.id}`} className="text-ds-ink-muted hover:text-ds-warning"><ArrowRight className="h-4 w-4" /></Link>
                       </div>

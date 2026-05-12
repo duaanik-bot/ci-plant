@@ -104,6 +104,34 @@ function triageReadinessScore(jc: PrintPlanningJobCard): number {
   return boardScore + plateScore
 }
 
+function stageStatus(jc: PrintPlanningJobCard, name: string): string {
+  const s = Array.isArray(jc.stages)
+    ? jc.stages.find((x) => String(x.stageName).toLowerCase() === name.toLowerCase())
+    : null
+  return String(s?.status ?? '').toLowerCase()
+}
+
+function isPushedForward(jc: PrintPlanningJobCard): boolean {
+  const rout =
+    jc.postPressRouting && typeof jc.postPressRouting === 'object'
+      ? (jc.postPressRouting as Record<string, unknown>)
+      : {}
+  const ex =
+    rout.executionOrchestration && typeof rout.executionOrchestration === 'object'
+      ? (rout.executionOrchestration as Record<string, unknown>)
+      : {}
+  const progress =
+    ex.stageProgress && typeof ex.stageProgress === 'object'
+      ? (ex.stageProgress as Record<string, unknown>)
+      : {}
+  const printing =
+    progress.printing && typeof progress.printing === 'object'
+      ? (progress.printing as Record<string, unknown>)
+      : {}
+  const pushed = Number(printing.pushedQty ?? 0)
+  return Number.isFinite(pushed) && pushed > 0
+}
+
 function columnForJob(jc: PrintPlanningJobCard, pressIds: string[]): typeof TRIAGE | string {
   const machineSet = new Set(pressIds)
   const rout = jc.postPressRouting
@@ -134,6 +162,9 @@ function buildBoard(cards: PrintPlanningJobCard[], pressIds: string[]) {
       const ja = byId.get(a)
       const jb = byId.get(b)
       if (!ja || !jb) return 0
+      const aDone = stageStatus(ja, 'printing') === 'completed' || isPushedForward(ja) ? 1 : 0
+      const bDone = stageStatus(jb, 'printing') === 'completed' || isPushedForward(jb) ? 1 : 0
+      if (aDone !== bDone) return aDone - bDone
       const d = readPrintPlanOrder(ja) - readPrintPlanOrder(jb)
       if (d !== 0) return d
       const readinessDelta = triageReadinessScore(jb) - triageReadinessScore(ja)
@@ -183,12 +214,12 @@ function SortableCard({
   jc,
   onOpenDetail,
   isSelected,
-  onVanish,
+  onDelete,
 }: {
   jc: PrintPlanningJobCard
   onOpenDetail: (id: string) => void
   isSelected: boolean
-  onVanish: (jc: PrintPlanningJobCard) => void
+  onDelete: (jc: PrintPlanningJobCard) => void
 }) {
   const po = jc.poLine
   const pri = po?.industrialPriority === true
@@ -204,6 +235,7 @@ function SortableCard({
     : null
   const cuttingStatus = String(cuttingStage?.status ?? '').toLowerCase()
   const printingCompleted = String(printingStage?.status ?? '').toLowerCase() === 'completed'
+  const pushedForward = isPushedForward(jc)
   const boardReadinessRaw = setup?.boardReadiness
   const boardReadiness =
     boardReadinessRaw === 'ready' || boardReadinessRaw === 'waiting' || boardReadinessRaw === 'not_ready'
@@ -260,7 +292,9 @@ function SortableCard({
       {...listeners}
       onClick={() => onOpenDetail(jc.id)}
       className={`rounded border px-1.5 py-1.5 text-left cursor-grab active:cursor-grabbing ${
-        pri
+        printingCompleted || pushedForward
+          ? 'border-emerald-500/40 bg-emerald-500/10'
+          : pri
           ? 'border-ds-warning bg-ds-warning/8 shadow-[0_0_14px_rgba(245,158,11,0.25)]'
           : 'border-ds-line/60 bg-ds-card/95'
       } ${isSelected ? 'ring-2 ring-ds-warning/70 shadow-[0_0_0_1px_rgba(245,158,11,0.6)]' : ''} ${
@@ -293,20 +327,36 @@ function SortableCard({
       </div>
       <p className="mt-0.5 truncate text-[10px] text-ds-ink-faint">{colourHints}</p>
       <p className="text-xs text-ds-ink-faint truncate">{jc.customer.name}</p>
-      {printingCompleted ? (
+      {printingCompleted || pushedForward ? (
+        <div className="mt-1 flex items-center gap-1">
+          <span className="rounded border border-emerald-600/40 px-1.5 py-0.5 text-[10px] text-emerald-600">
+            Pushed
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              void onDelete(jc)
+            }}
+            className="rounded border border-rose-600/40 px-1.5 py-0.5 text-[10px] text-rose-600 hover:bg-rose-500/10"
+          >
+            Delete
+          </button>
+        </div>
+      ) : (
         <div className="mt-1">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              void onVanish(jc)
+              void onDelete(jc)
             }}
-            className="rounded border border-emerald-600/40 px-1.5 py-0.5 text-[10px] text-emerald-500 hover:bg-emerald-500/10"
+            className="rounded border border-rose-600/40 px-1.5 py-0.5 text-[10px] text-rose-600 hover:bg-rose-500/10"
           >
-            Vanish
+            Delete
           </button>
         </div>
-      ) : null}
+      )}
     </div>
   )
 }
@@ -396,7 +446,16 @@ export function PrintPlanningKanban() {
     return (pp as Record<string, unknown>).vanished === true
   }, [])
 
-  const vanishCard = useCallback(async (jc: PrintPlanningJobCard) => {
+  const deleteCard = useCallback(async (jc: PrintPlanningJobCard) => {
+    const ok = window.confirm(`Delete JC #${jc.jobCardNumber} from Print Planning?`)
+    if (!ok) return
+    const reason = window.prompt('Delete reason (required):', '')?.trim() ?? ''
+    if (reason.length < 3) {
+      toast.error('Delete reason is required (min 3 characters)')
+      return
+    }
+    const token = window.prompt('Type DELETE to confirm', '')?.trim() ?? ''
+    if (token !== 'DELETE') return
     const rout = jc.postPressRouting && typeof jc.postPressRouting === 'object'
       ? (jc.postPressRouting as Record<string, unknown>)
       : {}
@@ -407,22 +466,24 @@ export function PrintPlanningKanban() {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        status: 'archived',
         postPressRouting: {
           ...rout,
           printPlan: {
             ...pp,
-            vanished: true,
-            vanishedAt: new Date().toISOString(),
+            deletedFromPlanning: true,
+            deletedReason: reason,
+            deletedAt: new Date().toISOString(),
           },
         },
       }),
     })
     const json = await res.json().catch(() => ({}))
     if (!res.ok) {
-      toast.error(typeof json?.error === 'string' ? json.error : 'Failed to vanish card')
+      toast.error(typeof json?.error === 'string' ? json.error : 'Failed to delete card')
       return
     }
-    toast.success(`JC #${jc.jobCardNumber} hidden from Print Planning`)
+    toast.success(`JC #${jc.jobCardNumber} deleted`)
     setCards((prev) => prev.filter((x) => x.id !== jc.id))
     setTriageIds((prev) => prev.filter((id) => id !== jc.id))
     setMachineCols((prev) => {
@@ -608,7 +669,7 @@ export function PrintPlanningKanban() {
                     jc={jc}
                     onOpenDetail={openDetail}
                     isSelected={detailId === id}
-                    onVanish={vanishCard}
+                    onDelete={deleteCard}
                   />
                 )
               })}
@@ -637,7 +698,7 @@ export function PrintPlanningKanban() {
                         jc={jc}
                         onOpenDetail={openDetail}
                         isSelected={detailId === id}
-                        onVanish={vanishCard}
+                        onDelete={deleteCard}
                       />
                     )
                   })}

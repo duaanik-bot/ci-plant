@@ -232,6 +232,7 @@ function ActionsCell({
   onPushEmboss,
   onPushShadeCard,
   onRecallPlanning,
+  onDeleteRow,
   disablePushJobCard,
   disablePushPlate,
   disableRecall,
@@ -245,6 +246,7 @@ function ActionsCell({
   onPushEmboss: () => void
   onPushShadeCard: () => void
   onRecallPlanning: () => void
+  onDeleteRow: () => void
   disablePushJobCard?: boolean
   disablePushPlate?: boolean
   disableRecall?: boolean
@@ -316,6 +318,13 @@ function ActionsCell({
         className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition disabled:opacity-40"
       >
         {pushJobCardLabel ?? 'Push Job Card'}
+      </button>
+      <button
+        onClick={onDeleteRow}
+        className="px-2 py-1.5 text-xs rounded-md border border-rose-500/40 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300"
+        title="Delete row"
+      >
+        Delete
       </button>
 
       <div className="relative">
@@ -1810,6 +1819,29 @@ export default function DesigningQueuePage() {
     await load()
   }
 
+  const deleteAwRow = async (row: Row) => {
+    const ok = window.confirm(`Delete ${row.cartonName || row.po.poNumber}?`)
+    if (!ok) return
+    const reason = prompt('Enter delete reason (required):')?.trim() ?? ''
+    if (reason.length < 3) {
+      toast.error('Delete reason is required (minimum 3 characters)')
+      return
+    }
+    const token = prompt('Type DELETE to confirm row delete.')?.trim() ?? ''
+    if (token !== 'DELETE') return
+    const res = await fetch(`/api/planning/po-lines/${row.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+    if (!res.ok) {
+      toast.error('Failed to delete row')
+      return
+    }
+    toast.success('Row deleted')
+    await load()
+  }
+
   const bulkPushSelectedToJobCards = async () => {
     const picked = Array.from(selectedRowIds)
     if (picked.length === 0) return
@@ -1957,6 +1989,15 @@ export default function DesigningQueuePage() {
 
             <div className="flex items-center gap-2">
               <span className="text-xs text-ds-ink-faint">{selectedRowIds.size} Selected</span>
+              <Button
+                variant="utility"
+                type="button"
+                onClick={() => void bulkDeleteSelectedRows()}
+                disabled={selectedRowIds.size === 0 || bulkDeleting || bulkPushing || bulkToolingPushing != null}
+                className="h-9 px-3 text-xs border-rose-500/40 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300"
+              >
+                {bulkDeleting ? 'Deleting…' : 'Bulk Delete'}
+              </Button>
               <div className="relative">
                 <Button
                   variant="utility"
@@ -2400,6 +2441,7 @@ export default function DesigningQueuePage() {
                                 onPushEmboss={() => void pushToolingFromList(r, 'BLOCK')}
                                 onPushShadeCard={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
                                 onRecallPlanning={() => void recallPlanning(r)}
+                                onDeleteRow={() => void deleteAwRow(r)}
                                 disablePushJobCard={jobCardPushingId === r.id || !canPushJobCardRow(r)}
                                 disablePushPlate={finalizingId === r.id || rowClosed || !canFinalizeRow}
                                 disableRecall={recallingPlanningId === r.id || !canRecallPlanning || rowClosed}
@@ -2611,6 +2653,7 @@ export default function DesigningQueuePage() {
                         onPushEmboss={() => void pushToolingFromList(r, 'BLOCK')}
                         onPushShadeCard={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
                         onRecallPlanning={() => void recallPlanning(r)}
+                        onDeleteRow={() => void deleteAwRow(r)}
                         disablePushJobCard={jobCardPushingId === r.id || !canPushJobCardRow(r)}
                         disablePushPlate={finalizingId === r.id || rowClosed || !canFinalizeRow}
                         disableRecall={!showRecall || recallingPlanningId === r.id || !canRecallPlanning || rowClosed}
