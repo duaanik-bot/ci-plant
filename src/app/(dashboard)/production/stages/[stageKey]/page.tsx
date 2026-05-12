@@ -777,6 +777,20 @@ export default function ProductionStagePage() {
     return seq[idx + 1] ?? null
   }
 
+  function nextStagePushSummary(row: Payload['jobCards'][number]): { label: string; qty: number; partial: boolean } | null {
+    const nextKey = nextRequiredStageKey(row)
+    if (!nextKey) return null
+    const progress = getStageProgress(row)
+    const pushedQty = Math.max(0, Number(progress.pushedQty || 0))
+    if (pushedQty <= 0) return null
+    const completedQty = Math.max(0, Number(getRowCounter(row) || progress.completedQty || 0))
+    return {
+      label: stageLabelForKey(nextKey),
+      qty: pushedQty,
+      partial: pushedQty < completedQty,
+    }
+  }
+
   function stageLabelForKey(key: string): string {
     if (key === 'cutting') return 'Cutting'
     if (key === 'printing') return 'Printing'
@@ -933,7 +947,9 @@ export default function ProductionStagePage() {
                   status:
                     updatedPushed > 0 && updatedPushed < plannedQty
                       ? 'partial_running'
-                      : nextStageProgress.status ?? 'pending',
+                      : (nextStageProgress.status === 'in_progress' || nextStageProgress.status === 'completed'
+                          ? nextStageProgress.status
+                          : 'ready_to_receive'),
                   plannedQty: Number(nextStageProgress.plannedQty || 0) + pushQty,
                 },
               },
@@ -946,7 +962,9 @@ export default function ProductionStagePage() {
                     status:
                       updatedPushed > 0 && updatedPushed < plannedQty
                         ? 'partial_running'
-                        : String(existingNextTriageCard.status ?? 'pending'),
+                        : String(existingNextTriageCard.status === 'in_progress' || existingNextTriageCard.status === 'completed'
+                            ? existingNextTriageCard.status
+                            : 'ready_to_receive'),
                     sequenceNo: Number(existingNextTriageCard.sequenceNo ?? 9999),
                     priorityRank: Number(existingNextTriageCard.priorityRank ?? (row.jobCard.industrialPriority ? 1 : 100)),
                     expectedArrivalTime: new Date().toISOString(),
@@ -1238,6 +1256,31 @@ export default function ProductionStagePage() {
     }
   }
 
+  async function deleteRowFromStage(row: Payload['jobCards'][number]) {
+    const ok = window.confirm(`Delete JC-${row.jobCard.jobCardNumber} from ${label} queue?`)
+    if (!ok) return
+    const reason = window.prompt('Delete reason (required):', '')?.trim() ?? ''
+    if (reason.length < 3) {
+      toast.error('Delete reason is required (min 3 characters)')
+      return
+    }
+    const token = window.prompt('Type DELETE to confirm row delete', '')?.trim() ?? ''
+    if (token !== 'DELETE') return
+    try {
+      const json = await runStageControlAction({
+        action: 'bulk_delete_from_stage',
+        confirm: true,
+        stageRecordIds: [row.stageRecord.id],
+        reason,
+      })
+      const deleted = Number((json as { deleted?: number }).deleted ?? 0)
+      toast.success(`Deleted ${deleted > 0 ? deleted : 1} row from queue`)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete row')
+    }
+  }
+
   async function runBulkAction(
     label: string,
     fn: (row: Payload['jobCards'][number]) => Promise<void>,
@@ -1481,6 +1524,7 @@ export default function ProductionStagePage() {
               const nextLabel = nextKey ? stageLabelForKey(nextKey) : null
               const nextStageState = nextLabel ? row.jobCard.stageMap?.[nextLabel] : null
               const nextStarted = nextStageState?.status === 'in_progress' || nextStageState?.status === 'completed'
+              const pushSummary = nextStagePushSummary(row)
               return (
                 <tr
                   key={stageRecord.id}
@@ -1547,6 +1591,12 @@ export default function ProductionStagePage() {
                         partially_pushed
                       </span>
                     ) : null}
+                    {pushSummary ? (
+                      <div className="mt-1 text-[11px] text-emerald-600">
+                        {pushSummary.partial ? 'Partially pushed' : 'Pushed'} to next stage ({pushSummary.label}):{' '}
+                        {pushSummary.qty.toLocaleString('en-IN')}
+                      </div>
+                    ) : null}
                     <div className="mt-1 flex flex-wrap gap-1">
                       <span className="rounded-full border border-ds-line/60 px-1.5 py-0.5 text-[10px] text-ds-ink-faint">Queue #{triage.sequenceNo}</span>
                       <span className="rounded-full border border-ds-line/60 px-1.5 py-0.5 text-[10px] text-ds-ink-faint">Slot {triage.plannedStartTs === Number.MAX_SAFE_INTEGER ? '-' : new Date(triage.plannedStartTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -1571,6 +1621,14 @@ export default function ProductionStagePage() {
                         className="rounded border border-blue-500/40 px-2 py-1 text-xs text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
                       >
                         Reverse
+                      </button>
+                      <button
+                        type="button"
+                        disabled={bulkBusy}
+                        onClick={() => void deleteRowFromStage(row)}
+                        className="rounded border border-rose-600/40 px-2 py-1 text-xs text-rose-600 hover:bg-rose-500/10 disabled:opacity-50"
+                      >
+                        Delete
                       </button>
                       <Link href={`/production/job-cards/${jobCard.id}`} className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-warning hover:bg-ds-main">
                         Open
