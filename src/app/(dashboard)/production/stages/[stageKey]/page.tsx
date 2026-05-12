@@ -107,6 +107,7 @@ type JobCardSummary = {
     embossingLeafing: string | null
     gsm: number | null
     dyeId: string | null
+    ups?: number | null
     specOverrides: Record<string, unknown> | null
     carton: {
       artworkCode: string | null
@@ -772,12 +773,7 @@ export default function ProductionStagePage() {
 
   function pastingExpectedCartons(row: Payload['jobCards'][number]): number {
     const receivedSheets = getUpstreamSheets(row)
-    const spec = row.jobCard.poMeta?.specOverrides ?? {}
-    const planningCore =
-      spec.planningCore && typeof spec.planningCore === 'object'
-        ? (spec.planningCore as Record<string, unknown>)
-        : {}
-    const ups = Number((planningCore.ups as number | undefined) ?? 0) || 0
+    const ups = pastingUps(row)
     return ups > 0 ? receivedSheets * ups : receivedSheets
   }
 
@@ -787,8 +783,11 @@ export default function ProductionStagePage() {
       spec.planningCore && typeof spec.planningCore === 'object'
         ? (spec.planningCore as Record<string, unknown>)
         : {}
-    const ups = Number((planningCore.ups as number | undefined) ?? 0)
-    return Number.isFinite(ups) && ups >= 1 ? Math.floor(ups) : 0
+    const planningUps = Number((planningCore.ups as number | undefined) ?? 0)
+    if (Number.isFinite(planningUps) && planningUps >= 1) return Math.floor(planningUps)
+    const metaUps = Number(row.jobCard.poMeta?.ups ?? 0)
+    if (Number.isFinite(metaUps) && metaUps >= 1) return Math.floor(metaUps)
+    return 0
   }
 
   function requiredStageKeysForRow(row: Payload['jobCards'][number]): string[] {
@@ -1535,7 +1534,7 @@ export default function ProductionStagePage() {
                 typeof planningCore.sheetSize === 'string' && planningCore.sheetSize.trim()
                   ? planningCore.sheetSize.trim()
                   : poMeta?.cartonSize ?? '—'
-              const ups = Number((planningCore.ups as number | undefined) ?? 0) || 0
+              const ups = pastingUps(row)
               const expectedCartons = stageKey === 'pasting' ? pastingExpectedCartons(row) : null
               const defaultRequired =
                 stageKey === 'pasting'

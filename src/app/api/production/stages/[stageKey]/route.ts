@@ -243,6 +243,21 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
             dyeId: true,
             directorPriority: true,
             specOverrides: true,
+            materialQueue: { select: { ups: true } },
+            dieMaster: { select: { ups: true } },
+            carton: {
+              select: {
+                artworkCode: true,
+                coatingType: true,
+                laminateType: true,
+                foilType: true,
+                embossingLeafing: true,
+                printingType: true,
+                pastingStyle: true,
+                colourBreakdown: true,
+                dieMaster: { select: { ups: true } },
+              },
+            },
             po: { select: { isPriority: true, poNumber: true, poDate: true } },
           },
         })
@@ -263,6 +278,7 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
       embossingLeafing: string | null
       gsm: number | null
       dyeId: string | null
+      ups: number | null
       specOverrides: Record<string, unknown> | null
       carton: {
         artworkCode: string | null
@@ -296,7 +312,19 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
         gsm: l.gsm,
         dyeId: l.dyeId,
         specOverrides: (l.specOverrides as Record<string, unknown> | null) ?? null,
-        carton: null,
+        ups: null,
+        carton: l.carton
+          ? {
+              artworkCode: l.carton.artworkCode,
+              coatingType: l.carton.coatingType,
+              laminateType: l.carton.laminateType,
+              foilType: l.carton.foilType,
+              embossingLeafing: l.carton.embossingLeafing,
+              printingType: l.carton.printingType,
+              pastingStyle: l.carton.pastingStyle,
+              colourBreakdown: l.carton.colourBreakdown,
+            }
+          : null,
       })
       if (l.directorPriority || l.po.isPriority) {
         priorityByJc.set(l.jobCardNumber, true)
@@ -306,6 +334,17 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
         spec.planningCore && typeof spec.planningCore === 'object'
           ? (spec.planningCore as Record<string, unknown>)
           : null
+      const planningUps = Number(planningCore?.ups ?? 0)
+      const resolvedUps =
+        (Number.isFinite(planningUps) && planningUps >= 1 ? Math.floor(planningUps) : null) ??
+        (typeof l.materialQueue?.ups === 'number' && l.materialQueue.ups >= 1 ? Math.floor(l.materialQueue.ups) : null) ??
+        (typeof l.dieMaster?.ups === 'number' && l.dieMaster.ups >= 1 ? Math.floor(l.dieMaster.ups) : null) ??
+        (typeof l.carton?.dieMaster?.ups === 'number' && l.carton.dieMaster.ups >= 1 ? Math.floor(l.carton.dieMaster.ups) : null) ??
+        null
+      const existingMeta = poMetaByJc.get(l.jobCardNumber)
+      if (existingMeta) {
+        poMetaByJc.set(l.jobCardNumber, { ...existingMeta, ups: resolvedUps })
+      }
       const unifiedBody =
         spec.unifiedGroupBody && typeof spec.unifiedGroupBody === 'object'
           ? (spec.unifiedGroupBody as Record<string, unknown>)
