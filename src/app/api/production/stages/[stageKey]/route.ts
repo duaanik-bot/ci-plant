@@ -122,8 +122,7 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
   // Spot UV is part of coating execution, not a separate station queue.
   if (r.chemicalCoating || r.spotUv) out.push('chemical_coating')
   if (r.lamination) out.push('lamination')
-  if (r.leafing) out.push('leafing')
-  if (r.embossing) out.push('embossing')
+  // Leafing/Embossing are executed within Dye Cutting (single queue).
   out.push('dye_cutting', 'pasting', 'sorting')
   return out
 }

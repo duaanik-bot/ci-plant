@@ -94,6 +94,36 @@ function resolvePrintPlanLane(
   return lane === 'machine' || lane === 'triage' ? lane : null
 }
 
+const stageKeyByLabel: Record<string, string> = {
+  Cutting: 'cutting',
+  Printing: 'printing',
+  'Chemical Coating': 'chemical_coating',
+  Lamination: 'lamination',
+  'Spot UV': 'spot_uv',
+  Leafing: 'leafing',
+  Embossing: 'embossing',
+  'Dye Cutting': 'dye_cutting',
+  Pasting: 'pasting',
+  Sorting: 'sorting',
+}
+
+const stageLabelByKey: Record<string, string> = Object.fromEntries(
+  Object.entries(stageKeyByLabel).map(([label, key]) => [key, label]),
+)
+
+function requiredStageKeysForRouting(postPressRouting: unknown): string[] {
+  const pp =
+    postPressRouting && typeof postPressRouting === 'object'
+      ? (postPressRouting as Record<string, unknown>)
+      : {}
+  const out: string[] = ['cutting', 'printing']
+  if (pp.chemicalCoating === true || pp.spotUv === true) out.push('chemical_coating')
+  if (pp.lamination === true) out.push('lamination')
+  // Leafing/Embossing execute within Dye Cutting queue.
+  out.push('dye_cutting', 'pasting', 'sorting')
+  return out
+}
+
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -528,11 +558,7 @@ export async function PUT(
       )
 
       if (completedStageRefs.size > 0) {
-        const orderedStages = [...existing.stages].sort(
-          (a, b) =>
-            stageOrder.indexOf(a.stageName) - stageOrder.indexOf(b.stageName) ||
-            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-        )
+        const requiredSeq = requiredStageKeysForRouting(mergedPostPress ?? existing.postPressRouting)
         for (const s of data.stages) {
           if (s.status !== 'completed') continue
           const rec = s.id
@@ -541,9 +567,14 @@ export async function PUT(
               ? existing.stages.find((r) => r.stageName === s.stageName)
               : null
           if (!rec) continue
-          const idx = orderedStages.findIndex((r) => r.id === rec.id)
-          if (idx < 0 || idx >= orderedStages.length - 1) continue
-          const nextRec = orderedStages[idx + 1]
+          const currentKey = stageKeyByLabel[rec.stageName]
+          if (!currentKey) continue
+          const idx = requiredSeq.indexOf(currentKey)
+          if (idx < 0 || idx >= requiredSeq.length - 1) continue
+          const nextKey = requiredSeq[idx + 1]
+          const nextLabel = stageLabelByKey[nextKey]
+          const nextRec = existing.stages.find((r) => r.stageName === nextLabel)
+          if (!nextRec) continue
           await tx.productionStageRecord.update({
             where: { id: nextRec.id },
             data: { status: 'ready' },

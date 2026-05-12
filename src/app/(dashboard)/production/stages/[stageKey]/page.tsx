@@ -798,8 +798,7 @@ export default function ProductionStagePage() {
     // Spot UV runs within coating, not as a standalone stage.
     if (pp.chemicalCoating === true || pp.spotUv === true) out.push('chemical_coating')
     if (pp.lamination === true) out.push('lamination')
-    if (pp.leafing === true) out.push('leafing')
-    if (pp.embossing === true) out.push('embossing')
+    // Leafing/Embossing execute together at Die Cutting, not as separate station queues.
     out.push('dye_cutting', 'pasting', 'sorting')
     return out
   }
@@ -979,11 +978,8 @@ export default function ProductionStagePage() {
                 },
                 [nextKey]: {
                   ...nextStageProgress,
-                  // Keep handoff rows in pending until operator explicitly starts production.
-                  status:
-                    nextStageProgress.status === 'in_progress' || nextStageProgress.status === 'completed'
-                      ? nextStageProgress.status
-                      : 'pending',
+                  // Always land in pending after handoff; operator must press Start Production.
+                  status: 'pending',
                   plannedQty: Number(nextStageProgress.plannedQty || 0) + pushQty,
                 },
               },
@@ -993,11 +989,7 @@ export default function ProductionStagePage() {
                   ...nextStageTriage,
                   [nextTriageKey]: {
                     ...existingNextTriageCard,
-                    status: String(
-                      existingNextTriageCard.status === 'in_progress' || existingNextTriageCard.status === 'completed'
-                        ? existingNextTriageCard.status
-                        : 'pending',
-                    ),
+                    status: 'pending',
                     sequenceNo: Number(existingNextTriageCard.sequenceNo ?? 9999),
                     priorityRank: Number(existingNextTriageCard.priorityRank ?? (row.jobCard.industrialPriority ? 1 : 100)),
                     expectedArrivalTime: new Date().toISOString(),

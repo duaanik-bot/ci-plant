@@ -39,8 +39,7 @@ function requiredStageKeysForRouting(postPressRouting: unknown): string[] {
   // Spot UV is treated as a coating subtype, not an independent execution station.
   if (pp.chemicalCoating === true || pp.spotUv === true) out.push('chemical_coating')
   if (pp.lamination === true) out.push('lamination')
-  if (pp.leafing === true) out.push('leafing')
-  if (pp.embossing === true) out.push('embossing')
+  // Leafing/Embossing execute within Dye Cutting; no standalone handoff queue.
   out.push('dye_cutting', 'pasting', 'sorting')
   return out
 }
