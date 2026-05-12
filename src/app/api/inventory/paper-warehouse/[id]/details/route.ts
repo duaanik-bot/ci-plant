@@ -105,19 +105,58 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
   const planningIds = Array.from(
     new Set(reservations.map((r) => r.planningId).filter((v): v is string => typeof v === 'string' && v.length > 0)),
   )
+  const planningLogIds = Array.from(
+    new Set(
+      logs
+        .filter((l) => (l.refType || '').startsWith('planning_'))
+        .map((l) => l.refId)
+        .filter((v): v is string => typeof v === 'string' && v.length > 0),
+    ),
+  )
+  const jobCardLogIds = Array.from(
+    new Set(
+      logs
+        .filter((l) => (l.refType || '').startsWith('job_card_'))
+        .map((l) => l.refId)
+        .filter((v): v is string => typeof v === 'string' && v.length > 0),
+    ),
+  )
+  const allPlanningIds = Array.from(new Set([...planningIds, ...planningLogIds]))
 
-  const planningLines = planningIds.length
+  const planningLines = allPlanningIds.length
     ? await db.poLineItem.findMany({
-        where: { id: { in: planningIds } },
+        where: { id: { in: allPlanningIds } },
         select: {
           id: true,
           cartonName: true,
+          jobCardNumber: true,
           po: { select: { poNumber: true } },
         },
       })
     : []
+  const jobCardsFromPlanningNumbers = Array.from(
+    new Set(
+      planningLines
+        .map((line) => line.jobCardNumber)
+        .filter((v): v is number => typeof v === 'number' && Number.isFinite(v)),
+    ),
+  )
+  const jobCardsById = jobCardLogIds.length
+    ? await db.productionJobCard.findMany({
+        where: { id: { in: jobCardLogIds } },
+        select: { id: true, jobCardNumber: true, status: true, customer: { select: { name: true } } },
+      })
+    : []
+  const jobCardsByNumber = jobCardsFromPlanningNumbers.length
+    ? await db.productionJobCard.findMany({
+        where: { jobCardNumber: { in: jobCardsFromPlanningNumbers } },
+        select: { id: true, jobCardNumber: true, status: true, customer: { select: { name: true } } },
+      })
+    : []
 
   const lineById = new Map(planningLines.map((l) => [l.id, l]))
+  const jobCardById = new Map(jobCardsById.map((j) => [j.id, j]))
+  const jobCardByNumber = new Map(jobCardsByNumber.map((j) => [j.jobCardNumber, j]))
 
   return NextResponse.json({
     material: {
@@ -164,9 +203,49 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
       })(),
     },
     logs: logs.map((l) => ({
-      ...l,
+      id: l.id,
+      movementType: l.movementType,
       qty: Number(l.qty),
+      refType: l.refType,
+      refId: l.refId,
       createdAt: l.createdAt.toISOString(),
+      reservationContext: (() => {
+        if (!l.refType || !l.refId) return null
+        if (l.refType.startsWith('planning_')) {
+          const line = lineById.get(l.refId)
+          const linkedJob = line?.jobCardNumber ? jobCardByNumber.get(line.jobCardNumber) : null
+          return {
+            planningId: l.refId,
+            cartonName: line?.cartonName ?? null,
+            poNumber: line?.po.poNumber ?? null,
+            jobCard: linkedJob
+              ? {
+                  id: linkedJob.id,
+                  jobCardNumber: linkedJob.jobCardNumber,
+                  status: linkedJob.status,
+                  customerName: linkedJob.customer.name,
+                }
+              : null,
+          }
+        }
+        if (l.refType.startsWith('job_card_')) {
+          const job = jobCardById.get(l.refId)
+          return {
+            planningId: null,
+            cartonName: null,
+            poNumber: null,
+            jobCard: job
+              ? {
+                  id: job.id,
+                  jobCardNumber: job.jobCardNumber,
+                  status: job.status,
+                  customerName: job.customer.name,
+                }
+              : null,
+          }
+        }
+        return null
+      })(),
     })),
     reservations: reservations.map((r) => {
       const line = r.planningId ? lineById.get(r.planningId) : null

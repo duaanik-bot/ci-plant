@@ -118,6 +118,17 @@ type MaterialDetailPayload = {
     refType: string | null
     refId: string | null
     createdAt: string
+    reservationContext?: {
+      planningId: string | null
+      cartonName: string | null
+      poNumber: string | null
+      jobCard: {
+        id: string
+        jobCardNumber: number
+        status: string
+        customerName: string
+      } | null
+    } | null
   }>
   reservations: Array<{
     id: string
@@ -1570,6 +1581,20 @@ function InventoryPageContent() {
                       {materialDrawerData.logs.slice(0, 20).map((log) => (
                         <li key={log.id} className="rounded border border-ds-line/40 px-2 py-1.5">
                           <p className="text-ds-ink">{log.movementType} · {log.qty.toLocaleString('en-IN')}</p>
+                          {log.reservationContext ? (
+                            <div className="mt-0.5 space-y-0.5 text-ds-ink-faint">
+                              <p>
+                                {(log.reservationContext.planningId ? `PL#${log.reservationContext.planningId.slice(0, 8)}` : '-')}
+                                {log.reservationContext.jobCard?.jobCardNumber ? ` · JC#${log.reservationContext.jobCard.jobCardNumber}` : ''}
+                                {log.reservationContext.poNumber ? ` · PO ${log.reservationContext.poNumber}` : ''}
+                              </p>
+                              <p>
+                                {log.reservationContext.cartonName || '-'}
+                                {log.reservationContext.jobCard?.customerName ? ` · ${log.reservationContext.jobCard.customerName}` : ''}
+                                {log.reservationContext.jobCard?.status ? ` · ${log.reservationContext.jobCard.status}` : ''}
+                              </p>
+                            </div>
+                          ) : null}
                           <p className="text-ds-ink-faint">
                             {new Date(log.createdAt).toLocaleString()} · {log.refType ?? '—'} {log.refId ? `· ${log.refId.slice(0, 8)}` : ''}
                           </p>
