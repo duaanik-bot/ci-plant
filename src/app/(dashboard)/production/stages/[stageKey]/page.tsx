@@ -179,6 +179,16 @@ type ExecutionState = {
   checklistByStage?: Record<string, Record<string, boolean>>
 }
 
+const STAGES_WITH_STICKY_PUSH_TRACKING = new Set([
+  'printing',
+  'cutting',
+  'chemical_coating',
+  'lamination',
+  'spot_uv',
+  'dye_cutting',
+  'pasting',
+])
+
 function oeeBandClass(oee: number): string {
   if (oee >= 85) return 'text-emerald-500'
   if (oee >= 60) return 'text-ds-warning'
@@ -258,6 +268,7 @@ export default function ProductionStagePage() {
 
   const label = data?.stageLabel ?? stageMeta?.label ?? stageKey
   const rawList = data?.jobCards ?? []
+  const stickyPushTrackingEnabled = STAGES_WITH_STICKY_PUSH_TRACKING.has(stageKey)
 
   const list = useMemo(() => {
     const arr = [...rawList]
@@ -302,8 +313,18 @@ export default function ProductionStagePage() {
       }
       return sortDir === 'asc' ? cmp : -cmp
     })
+    if (stickyPushTrackingEnabled) {
+      const pendingRows: typeof arr = []
+      const pushedRows: typeof arr = []
+      for (const row of arr) {
+        const pushedQty = Number(getStageProgress(row).pushedQty || 0)
+        if (pushedQty > 0) pushedRows.push(row)
+        else pendingRows.push(row)
+      }
+      return [...pendingRows, ...pushedRows]
+    }
     return arr
-  }, [rawList, sortBy, sortDir])
+  }, [rawList, sortBy, sortDir, stickyPushTrackingEnabled])
 
   function getTriageMeta(row: Payload['jobCards'][number]): { sequenceNo: number; priorityRank: number; plannedStartTs: number } {
     const ppr = row.jobCard.postPressRouting && typeof row.jobCard.postPressRouting === 'object'
@@ -340,13 +361,17 @@ export default function ProductionStagePage() {
     return list.filter((row) => {
       const p = getStageProgress(row)
       const status = String(p.status ?? row.stageRecord.status ?? 'pending').toLowerCase()
-      if (tab === 'pending') return status === 'pending' || status === 'ready' || status === 'ready_to_receive'
+      const pushedQty = Number(p.pushedQty || 0)
+      if (tab === 'pending') {
+        if (stickyPushTrackingEnabled && pushedQty > 0) return true
+        return status === 'pending' || status === 'ready' || status === 'ready_to_receive'
+      }
       if (tab === 'make_ready') return status === 'make_ready_alert' || status === 'make_ready_started' || status === 'ready_to_receive'
       if (tab === 'running') return status === 'in_progress' || status === 'partial_running' || status === 'rework'
       if (tab === 'hold') return status === 'hold' || status === 'blocked'
       return status === 'completed'
     })
-  }, [list, tab])
+  }, [list, tab, stickyPushTrackingEnabled])
 
   const selectedCount = selectedStageRecordIds.size
   const allVisibleSelected = visibleList.length > 0 && visibleList.every((r) => selectedStageRecordIds.has(r.stageRecord.id))
@@ -1515,10 +1540,11 @@ export default function ProductionStagePage() {
               const nextStageState = nextLabel ? row.jobCard.stageMap?.[nextLabel] : null
               const nextStarted = nextStageState?.status === 'in_progress' || nextStageState?.status === 'completed'
               const pushSummary = nextStagePushSummary(row)
+              const pushedForTracking = stickyPushTrackingEnabled && alreadyPushedQty > 0
               return (
                 <tr
                   key={stageRecord.id}
-                  className={`hover:bg-ds-card/50 cursor-pointer ${String(progress.status ?? stageRecord.status ?? '').toLowerCase() === 'completed' ? 'bg-emerald-500/10' : ''}`}
+                  className={`hover:bg-ds-card/50 cursor-pointer ${(String(progress.status ?? stageRecord.status ?? '').toLowerCase() === 'completed' || pushedForTracking) ? 'bg-emerald-500/10' : ''}`}
                   onClick={() => setSpotlight(row)}
                 >
                   <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
