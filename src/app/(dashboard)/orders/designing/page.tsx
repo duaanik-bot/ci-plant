@@ -2695,7 +2695,7 @@ export default function DesigningQueuePage() {
           role="presentation"
         >
           <aside
-            className="absolute right-0 top-0 h-full w-[min(96vw,820px)] max-w-[820px] overflow-hidden border-l border-ds-line/40 bg-card p-4"
+            className="absolute right-0 top-0 flex h-full w-[min(96vw,820px)] max-w-[820px] flex-col overflow-y-auto border-l border-ds-line/40 bg-card p-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
@@ -2728,7 +2728,7 @@ export default function DesigningQueuePage() {
                 : []
               const checklistOk = checklist.every((item) => item.ok)
               return (
-                <div className="flex h-[calc(100vh-70px)] flex-col text-xs">
+                <div className="flex min-h-0 flex-1 flex-col text-xs">
                   <div className="space-y-3 overflow-y-auto pr-1 pb-24">
                   <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/40 p-3">
                     <div><p className="text-ds-ink-faint">Product</p><p className="text-ds-ink">{activeRowDrawer.cartonName || '-'}</p></div>

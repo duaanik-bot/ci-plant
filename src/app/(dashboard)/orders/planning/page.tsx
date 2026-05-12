@@ -685,7 +685,9 @@ export default function PlanningPage() {
   const suggestableLines = useMemo((): SuggestableLine[] => {
     const view = planningVisibleRows.filter((r) => {
       const pending = r.planningStatus === 'pending'
-      return ledgerView === 'pending' ? pending : !pending
+      return ledgerView === 'pending'
+        ? pending || r.planningStatus === 'design_ready' || recentlyPushedIds.has(r.id)
+        : !pending
     })
     const bumpAt = (r: Line) =>
       String(
@@ -705,7 +707,7 @@ export default function PlanningPage() {
             .map(({ r }) => r)
         : view
     return ordered.map(lineToSuggestable)
-  }, [planningVisibleRows, ledgerView])
+  }, [planningVisibleRows, ledgerView, recentlyPushedIds])
 
   const applyBatchDecision = useCallback(
     async (
@@ -1096,7 +1098,7 @@ export default function PlanningPage() {
     )
   }
 
-  const pendingCount = moduleFilteredRows.filter((r) => r.planningStatus === 'pending').length
+  const pendingCount = moduleFilteredRows.filter((r) => r.planningStatus === 'pending' || r.planningStatus === 'design_ready').length
   const processedCount = moduleFilteredRows.length - pendingCount
 
   return (

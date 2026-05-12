@@ -110,8 +110,16 @@ export function resolveUps(line: unknown): number | null {
   const poMaterialQueue = asDict(poLine.materialQueue)
   const product = asDict(d.product)
   const carton = asDict(d.carton)
+  const dieMaster = asDict(d.dieMaster)
   const productMaster = asDict((d as Dict).productMaster)
   const master = asDict((d as Dict).master)
+  let cartonSpecialInstructionsUps: number | null = null
+  if (typeof carton.specialInstructions === 'string' && carton.specialInstructions.trim()) {
+    try {
+      const parsed = JSON.parse(carton.specialInstructions) as Record<string, unknown>
+      cartonSpecialInstructionsUps = asPositiveNum(parsed.ups)
+    } catch {}
+  }
   const candidates: unknown[] = [
     d.ups,
     awItem.ups,
@@ -135,6 +143,8 @@ export function resolveUps(line: unknown): number | null {
     materialQueue.ups,
     planningMaterialQueue.ups,
     poMaterialQueue.ups,
+    dieMaster.ups,
+    cartonSpecialInstructionsUps,
     product.ups,
     carton.ups,
     productMaster.ups,

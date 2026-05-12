@@ -1233,6 +1233,20 @@ export function PlanningJobDetailDrawer({
         typeof spec.numberOfColours === 'number' && Number.isFinite(spec.numberOfColours)
           ? Math.floor(spec.numberOfColours)
           : line.carton?.numberOfColours ?? null
+      let mergedSpecialInstructions: Record<string, unknown> = {
+        notes: '',
+        brailleEnabled: false,
+        leafingEnabled: false,
+        embossingEnabled: false,
+        spotUvEnabled: false,
+      }
+      if (typeof line.carton?.specialInstructions === 'string' && line.carton.specialInstructions.trim()) {
+        try {
+          const parsed = JSON.parse(line.carton.specialInstructions) as Record<string, unknown>
+          mergedSpecialInstructions = { ...mergedSpecialInstructions, ...parsed }
+        } catch {}
+      }
+      mergedSpecialInstructions.ups = ups
       const res = await fetch(`/api/masters/cartons/${line.cartonId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1247,14 +1261,7 @@ export function PlanningJobDetailDrawer({
           blankLength: sheetLengthMm.trim() ? Number(sheetLengthMm.trim()) : undefined,
           blankWidth: sheetWidthMm.trim() ? Number(sheetWidthMm.trim()) : undefined,
           numberOfColours: numberOfColours ?? undefined,
-          specialInstructions: JSON.stringify({
-            notes: '',
-            brailleEnabled: false,
-            leafingEnabled: false,
-            embossingEnabled: false,
-            spotUvEnabled: false,
-            ups,
-          }),
+          specialInstructions: JSON.stringify(mergedSpecialInstructions),
         }),
       })
       const j = (await res.json().catch(() => ({}))) as { error?: string }
