@@ -781,6 +781,16 @@ export default function ProductionStagePage() {
     return ups > 0 ? receivedSheets * ups : receivedSheets
   }
 
+  function pastingUps(row: Payload['jobCards'][number]): number {
+    const spec = row.jobCard.poMeta?.specOverrides ?? {}
+    const planningCore =
+      spec.planningCore && typeof spec.planningCore === 'object'
+        ? (spec.planningCore as Record<string, unknown>)
+        : {}
+    const ups = Number((planningCore.ups as number | undefined) ?? 0)
+    return Number.isFinite(ups) && ups >= 1 ? Math.floor(ups) : 0
+  }
+
   function requiredStageKeysForRow(row: Payload['jobCards'][number]): string[] {
     const pp = row.jobCard.postPressRouting && typeof row.jobCard.postPressRouting === 'object'
       ? (row.jobCard.postPressRouting as Record<string, unknown>)
@@ -843,6 +853,17 @@ export default function ProductionStagePage() {
     if (!Number.isFinite(pushQty) || pushQty <= 0) {
       toast.error('Push qty must be greater than 0')
       return
+    }
+    if (stageKey === 'pasting') {
+      const ups = pastingUps(row)
+      if (ups <= 0) {
+        toast.error('UPS missing for this job. Set UPS in planning before pasting push.')
+        return
+      }
+      if (pushQty % ups !== 0) {
+        toast.error(`Pasting push qty must be a multiple of UPS (${ups})`)
+        return
+      }
     }
     const availableToPush = Math.max(0, completedQty - alreadyPushedQty)
     if (pushQty > availableToPush) {
@@ -959,12 +980,11 @@ export default function ProductionStagePage() {
                 },
                 [nextKey]: {
                   ...nextStageProgress,
+                  // Keep handoff rows in pending until operator explicitly starts production.
                   status:
-                    updatedPushed > 0 && updatedPushed < plannedQty
-                      ? 'partial_running'
-                      : (nextStageProgress.status === 'in_progress' || nextStageProgress.status === 'completed'
-                          ? nextStageProgress.status
-                          : 'ready_to_receive'),
+                    nextStageProgress.status === 'in_progress' || nextStageProgress.status === 'completed'
+                      ? nextStageProgress.status
+                      : 'pending',
                   plannedQty: Number(nextStageProgress.plannedQty || 0) + pushQty,
                 },
               },
@@ -974,12 +994,11 @@ export default function ProductionStagePage() {
                   ...nextStageTriage,
                   [nextTriageKey]: {
                     ...existingNextTriageCard,
-                    status:
-                      updatedPushed > 0 && updatedPushed < plannedQty
-                        ? 'partial_running'
-                        : String(existingNextTriageCard.status === 'in_progress' || existingNextTriageCard.status === 'completed'
-                            ? existingNextTriageCard.status
-                            : 'ready_to_receive'),
+                    status: String(
+                      existingNextTriageCard.status === 'in_progress' || existingNextTriageCard.status === 'completed'
+                        ? existingNextTriageCard.status
+                        : 'pending',
+                    ),
                     sequenceNo: Number(existingNextTriageCard.sequenceNo ?? 9999),
                     priorityRank: Number(existingNextTriageCard.priorityRank ?? (row.jobCard.industrialPriority ? 1 : 100)),
                     expectedArrivalTime: new Date().toISOString(),
