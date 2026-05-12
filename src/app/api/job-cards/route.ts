@@ -386,8 +386,19 @@ export async function POST(req: NextRequest) {
   const spec = (li.specOverrides && typeof li.specOverrides === 'object'
     ? li.specOverrides
     : {}) as Record<string, unknown>
+  const asBool = (value: unknown): boolean => {
+    if (value === true) return true
+    if (typeof value === 'string') {
+      const v = value.trim().toLowerCase()
+      return v === 'true' || v === '1' || v === 'yes'
+    }
+    if (typeof value === 'number') return value === 1
+    return false
+  }
   const artworkLocksCompleted = Number(spec.artworkLocksCompleted ?? 0)
-  const awApproved = artworkLocksCompleted >= 2 || !!(spec.customerApprovalPharma && spec.shadeCardQaTextApproval)
+  const specTwoApprovals = asBool(spec.customerApprovalPharma) && asBool(spec.shadeCardQaTextApproval)
+  const prePressFinalized = typeof spec.prePressSentToPlateHubAt === 'string' && spec.prePressSentToPlateHubAt.trim().length > 0
+  const awApproved = artworkLocksCompleted >= 2 || specTwoApprovals || prePressFinalized
   if (!awApproved) {
     return NextResponse.json(
       { error: 'Artwork not approved — complete AW approval before pushing Job Card.' },
