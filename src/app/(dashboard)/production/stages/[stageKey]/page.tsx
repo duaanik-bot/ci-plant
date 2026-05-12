@@ -783,7 +783,11 @@ export default function ProductionStagePage() {
       spec.planningCore && typeof spec.planningCore === 'object'
         ? (spec.planningCore as Record<string, unknown>)
         : {}
-    const planningUps = Number((planningCore.ups as number | undefined) ?? 0)
+    const planningUps = Number(
+      (planningCore.ups as number | undefined) ??
+      ((spec as Record<string, unknown>).ups as number | undefined) ??
+      0,
+    )
     if (Number.isFinite(planningUps) && planningUps >= 1) return Math.floor(planningUps)
     const metaUps = Number(row.jobCard.poMeta?.ups ?? 0)
     if (Number.isFinite(metaUps) && metaUps >= 1) return Math.floor(metaUps)

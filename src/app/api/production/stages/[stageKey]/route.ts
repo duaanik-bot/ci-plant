@@ -333,7 +333,7 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
         spec.planningCore && typeof spec.planningCore === 'object'
           ? (spec.planningCore as Record<string, unknown>)
           : null
-      const planningUps = Number(planningCore?.ups ?? 0)
+      const planningUps = Number(planningCore?.ups ?? spec.ups ?? 0)
       const resolvedUps =
         (Number.isFinite(planningUps) && planningUps >= 1 ? Math.floor(planningUps) : null) ??
         (typeof l.materialQueue?.ups === 'number' && l.materialQueue.ups >= 1 ? Math.floor(l.materialQueue.ups) : null) ??
