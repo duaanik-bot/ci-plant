@@ -340,7 +340,7 @@ export default function ProductionStagePage() {
     return list.filter((row) => {
       const p = getStageProgress(row)
       const status = String(p.status ?? row.stageRecord.status ?? 'pending').toLowerCase()
-      if (tab === 'pending') return status === 'pending' || status === 'ready'
+      if (tab === 'pending') return status === 'pending' || status === 'ready' || status === 'ready_to_receive'
       if (tab === 'make_ready') return status === 'make_ready_alert' || status === 'make_ready_started' || status === 'ready_to_receive'
       if (tab === 'running') return status === 'in_progress' || status === 'partial_running' || status === 'rework'
       if (tab === 'hold') return status === 'hold' || status === 'blocked'
