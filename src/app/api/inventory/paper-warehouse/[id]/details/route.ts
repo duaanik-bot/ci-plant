@@ -66,7 +66,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
   ])
 
   const shortages = await db.materialShortage.findMany({
-    where: { materialId: id, status: 'open' },
+    where: { materialId: id, status: { not: 'closed' } },
     orderBy: { createdAt: 'asc' },
     select: {
       id: true,
