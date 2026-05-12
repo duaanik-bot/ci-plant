@@ -925,6 +925,10 @@ export default function ProductionStagePage() {
       const updatedCompleted = completedQty
       const updatedPushed = alreadyPushedQty + pushQty
       const plannedQty = thisStage.plannedQty || (stageKey === 'pasting' ? pastingExpectedCartons(row) : row.jobCard.totalSheets || 0)
+      const nextStagePlannedIncrement =
+        nextKey === 'pasting'
+          ? pushQty * Math.max(1, pastingUps(row))
+          : pushQty
       const stationFinished = markCompleted && updatedPushed >= plannedQty
 
       const token = nextKey.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
@@ -984,7 +988,7 @@ export default function ProductionStagePage() {
                   ...nextStageProgress,
                   // Always land in pending after handoff; operator must press Start Production.
                   status: 'pending',
-                  plannedQty: Number(nextStageProgress.plannedQty || 0) + pushQty,
+                  plannedQty: Number(nextStageProgress.plannedQty || 0) + nextStagePlannedIncrement,
                 },
               },
               triageByStage: {
@@ -1508,8 +1512,8 @@ export default function ProductionStagePage() {
               <th className="px-3 py-2">Client</th>
               <th className="px-3 py-2">Input / Parent</th>
               <th className="px-3 py-2">Sheet / Cut</th>
-              <th className="px-3 py-2">Required</th>
-              <th className="px-3 py-2">Actual Counter</th>
+              <th className="px-3 py-2">{stageKey === 'pasting' ? 'Expected Qty' : 'Required'}</th>
+              <th className="px-3 py-2">{stageKey === 'pasting' ? 'Actual / Wastage' : 'Actual Counter'}</th>
               <th className="px-3 py-2">Status</th>
               <SortHeader columnKey="completedAt">Completed At</SortHeader>
               <th className="px-3 py-2">Actions</th>
@@ -1532,6 +1536,11 @@ export default function ProductionStagePage() {
                   : poMeta?.cartonSize ?? '—'
               const ups = pastingUps(row)
               const expectedCartons = stageKey === 'pasting' ? pastingExpectedCartons(row) : null
+              const actualCartons = stageKey === 'pasting' ? actual : null
+              const wastageCartons = stageKey === 'pasting' ? Math.max(0, Number(expectedCartons ?? 0) - Number(actualCartons ?? 0)) : null
+              const wastageSheets = stageKey === 'pasting' && ups > 0 && wastageCartons != null
+                ? Math.round(wastageCartons / ups)
+                : null
               const defaultRequired =
                 stageKey === 'pasting'
                   ? expectedCartons ?? jobCard.totalSheets
@@ -1606,7 +1615,9 @@ export default function ProductionStagePage() {
                   <td className="px-3 py-2">
                     <span className={`${mono}`}>{Number(getRowCounter(row) || 0).toLocaleString('en-IN')}</span>
                     <div className="text-[11px] text-ds-ink-faint mt-1">
-                      Pushed: {alreadyPushedQty.toLocaleString('en-IN')} · {stageKey === 'pasting' ? 'Short/Excess' : 'Balance'}: {Number(balance).toLocaleString('en-IN')}
+                      {stageKey === 'pasting'
+                        ? `Wastage: ${(wastageCartons ?? 0).toLocaleString('en-IN')} cartons${wastageSheets != null ? ` · ${wastageSheets.toLocaleString('en-IN')} sheets` : ''}`
+                        : `Pushed: ${alreadyPushedQty.toLocaleString('en-IN')} · Balance: ${Number(balance).toLocaleString('en-IN')}`}
                     </div>
                     <div className="mt-1 text-[11px] text-ds-ink-faint">Open drawer for push qty and execution decisions.</div>
                   </td>
@@ -1817,7 +1828,11 @@ export default function ProductionStagePage() {
             const actualCartons = stageKey === 'pasting' ? completedQty : 0
             const wastageCartons =
               stageKey === 'pasting'
-                ? Number(wastageDrafts[row.stageRecord.id] ?? autoFromCounter.wastage ?? 0)
+                ? Math.max(0, expectedCartons - actualCartons)
+                : 0
+            const wastageSheetsFromCartons =
+              stageKey === 'pasting' && upsForPasting > 0
+                ? Math.round(wastageCartons / upsForPasting)
                 : 0
             const pushDraft = pushDrafts[row.stageRecord.id]
             const pushQty = pushDraft == null || pushDraft === '' ? autoFromCounter.pushQty : Number(pushDraft)
@@ -1883,33 +1898,34 @@ export default function ProductionStagePage() {
                 {stageKey === 'pasting' ? (
                   <div className="mt-3 rounded border border-ds-line/50 bg-ds-card/60 p-2.5">
                     <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ds-ink-faint">
-                      Pasting Conversion Snapshot
+                      Pasting Decision Summary
                     </p>
-                    <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5">
-                        <p className="text-ds-ink-faint">Total sheets inward</p>
-                        <p className={`${mono} text-ds-ink`}>{sheetInwardQty.toLocaleString('en-IN')}</p>
-                      </div>
-                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5">
-                        <p className="text-ds-ink-faint">Total UPS</p>
-                        <p className={`${mono} text-ds-ink`}>{upsForPasting > 0 ? upsForPasting.toLocaleString('en-IN') : '—'}</p>
-                      </div>
-                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5">
-                        <p className="text-ds-ink-faint">Expected quantity (cartons)</p>
-                        <p className={`${mono} text-ds-ink`}>{expectedCartons.toLocaleString('en-IN')}</p>
-                      </div>
-                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5">
-                        <p className="text-ds-ink-faint">Actual counter (cartons)</p>
-                        <p className={`${mono} text-ds-ink`}>{actualCartons.toLocaleString('en-IN')}</p>
-                      </div>
-                      <div className="rounded border border-ds-line/40 bg-ds-main px-2 py-1.5 col-span-2">
-                        <p className="text-ds-ink-faint">Total wastage (cartons)</p>
-                        <p className={`${mono} text-ds-ink`}>{wastageCartons.toLocaleString('en-IN')}</p>
-                      </div>
+                    <div className="space-y-1.5 text-[11px]">
+                      <p className="text-ds-ink-faint">
+                        Total sheets passed down:{' '}
+                        <span className={`${mono} text-ds-ink`}>{sheetInwardQty.toLocaleString('en-IN')}</span>
+                        {' · '}
+                        UPS: <span className={`${mono} text-ds-ink`}>{upsForPasting > 0 ? upsForPasting.toLocaleString('en-IN') : '—'}</span>
+                      </p>
+                      <p className="text-ds-ink-faint">
+                        Expected quantity:{' '}
+                        <span className={`${mono} text-ds-ink`}>{expectedCartons.toLocaleString('en-IN')}</span> cartons
+                      </p>
+                      <p className="text-ds-ink-faint">
+                        Actual counter:{' '}
+                        <span className={`${mono} text-ds-ink`}>{actualCartons.toLocaleString('en-IN')}</span> cartons
+                      </p>
+                      <p className="text-ds-ink-faint">
+                        Total wastage:{' '}
+                        <span className={`${mono} text-ds-ink`}>{wastageCartons.toLocaleString('en-IN')}</span> cartons
+                        {upsForPasting > 0 ? (
+                          <>
+                            {' · '}
+                            <span className={`${mono} text-ds-ink`}>{wastageSheetsFromCartons.toLocaleString('en-IN')}</span> sheets
+                          </>
+                        ) : null}
+                      </p>
                     </div>
-                    <p className="mt-2 text-[10px] text-ds-ink-faint">
-                      Sheet details: sheets inward × UPS = expected cartons.
-                    </p>
                   </div>
                 ) : null}
                 {nextLabel && completedQty > 0 && availableToPush === 0 && pushedQty > 0 ? (
