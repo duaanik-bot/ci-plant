@@ -12,21 +12,26 @@ export function IndustrialModuleShell({
   title,
   subtitle,
   kpiRow,
+  headerAction,
   children,
   className = '',
 }: {
   title: string
   subtitle?: string
   kpiRow?: ReactNode
+  headerAction?: ReactNode
   children: ReactNode
   className?: string
 }) {
   return (
     <div className={`min-h-screen bg-background text-ds-ink ${className}`}>
-      <div className="mx-auto max-w-[1800px] space-y-4 p-3 md:p-4 pb-24">
-        <header className="space-y-1">
-          <h1 className="text-lg md:text-xl font-bold tracking-tight text-ds-warning">{title}</h1>
-          {subtitle ? <p className="text-xs text-ds-ink-faint">{subtitle}</p> : null}
+      <div className="mx-auto w-full max-w-none space-y-3 px-2 py-3 pb-24 sm:px-3 md:px-4">
+        <header className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h1 className="text-lg md:text-xl font-bold tracking-tight text-ds-warning">{title}</h1>
+            {subtitle ? <p className="text-xs text-ds-ink-faint">{subtitle}</p> : null}
+          </div>
+          {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
         </header>
         {kpiRow ? (
           <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-8">

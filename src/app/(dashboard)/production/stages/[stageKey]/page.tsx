@@ -1,11 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { PRODUCTION_STAGES } from '@/lib/constants'
-import { ChevronDown, ChevronUp, CircleDollarSign, Star } from 'lucide-react'
+import { ChevronDown, ChevronUp, CircleDollarSign, FileText, PanelRightOpen, RotateCcw, Star, Trash2 } from 'lucide-react'
 import { OperatorProfileDrawer } from '@/components/industrial/OperatorProfileDrawer'
 import { MachineHealthMeter } from '@/components/industrial/MachineHealthMeter'
 import { PmSpotlightDrawer } from '@/components/industrial/PmSpotlightDrawer'
@@ -17,8 +17,11 @@ import {
 } from '@/lib/industrial-priority-ui'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { StatusBadge } from '@/components/design-system'
+import { ICON_BUTTON_BASE } from '@/components/design-system/tokens'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
+const stageCellPad = 'px-1.5 py-1 align-middle'
+const stageHeadCell = 'px-1.5 py-1 font-semibold'
 
 type StageRecord = {
   id: string
@@ -202,6 +205,7 @@ export default function ProductionStagePage() {
   const stageKey = params.stageKey as string
   const [data, setData] = useState<Payload | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [sortBy, setSortBy] = useState<SortKey>('jobCardNumber')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [spotlight, setSpotlight] = useState<Payload['jobCards'][number] | null>(null)
@@ -213,6 +217,7 @@ export default function ProductionStagePage() {
   const [pushDrafts, setPushDrafts] = useState<Record<string, string>>({})
   const [wastageDrafts, setWastageDrafts] = useState<Record<string, string>>({})
   const [checklistDrafts, setChecklistDrafts] = useState<Record<string, Record<string, boolean>>>({})
+  const checklistInitedRef = useRef<Set<string>>(new Set())
   const [tab, setTab] = useState<'pending' | 'make_ready' | 'running' | 'hold' | 'completed'>('pending')
   const [savingStageId, setSavingStageId] = useState<string | null>(null)
   const [selectedStageRecordIds, setSelectedStageRecordIds] = useState<Set<string>>(new Set())
@@ -225,7 +230,12 @@ export default function ProductionStagePage() {
 
   const load = useCallback(async () => {
     if (!stageKey) return
-    setLoading(true)
+    // First load: full loading gate. Subsequent reloads: background refresh only.
+    if (data === null) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
     try {
       const r = await fetch(`/api/production/stages/${stageKey}`)
       const json = (await r.json()) as Payload & { error?: string }
@@ -233,11 +243,12 @@ export default function ProductionStagePage() {
       setData(json)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load')
-      setData(null)
+      if (data === null) setData(null)
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
-  }, [stageKey])
+  }, [stageKey, data])
 
   useEffect(() => {
     void load()
@@ -250,6 +261,23 @@ export default function ProductionStagePage() {
     window.addEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
     return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
   }, [load])
+
+  // Restore saved quality checklist from server when a drawer row is first opened.
+  useEffect(() => {
+    if (!spotlight) return
+    const id = spotlight.stageRecord.id
+    if (checklistInitedRef.current.has(id)) return
+    checklistInitedRef.current.add(id)
+    const ppr = spotlight.jobCard.postPressRouting
+    const ex = ppr && typeof ppr === 'object' ? (ppr as Record<string, unknown>).executionOrchestration : null
+    const byStage = ex && typeof ex === 'object' ? (ex as Record<string, unknown>).checklistByStage : null
+    const saved = byStage && typeof byStage === 'object'
+      ? (byStage as Record<string, Record<string, boolean>>)[stageKey]
+      : null
+    if (saved && typeof saved === 'object') {
+      setChecklistDrafts((prev) => ({ ...prev, [id]: { ...saved } }))
+    }
+  }, [spotlight?.stageRecord.id, stageKey])
 
   const stageKpis = useMemo(() => {
     const rows = data?.jobCards ?? []
@@ -468,14 +496,16 @@ export default function ProductionStagePage() {
   function SortHeader({
     columnKey,
     children,
+    className = '',
   }: {
     columnKey: SortKey
     children: React.ReactNode
+    className?: string
   }) {
     const active = sortBy === columnKey
     return (
       <th
-        className="px-4 py-2 cursor-pointer select-none hover:bg-ds-elevated/50 text-left"
+        className={`${stageHeadCell} cursor-pointer select-none text-left hover:bg-ds-elevated/50 ${className}`}
         onClick={() => toggleSort(columnKey)}
       >
         <span className="flex items-center gap-1">
@@ -780,8 +810,12 @@ export default function ProductionStagePage() {
 
   function pastingExpectedCartons(row: Payload['jobCards'][number]): number {
     const receivedSheets = getUpstreamSheets(row)
+    // Fall back to planned sheet count from PO/planning when no upstream stage has pushed yet
+    const sheetsIn = receivedSheets > 0
+      ? receivedSheets
+      : (row.jobCard.requiredSheets || row.jobCard.totalSheets || 0)
     const ups = pastingUps(row)
-    return ups > 0 ? receivedSheets * ups : receivedSheets
+    return ups > 0 ? Math.round(sheetsIn * ups) : sheetsIn
   }
 
   function pastingUps(row: Payload['jobCards'][number]): number {
@@ -810,7 +844,8 @@ export default function ProductionStagePage() {
     if (pp.chemicalCoating === true || pp.spotUv === true) out.push('chemical_coating')
     if (pp.lamination === true) out.push('lamination')
     // Leafing/Embossing execute together at Die Cutting, not as separate station queues.
-    out.push('dye_cutting', 'pasting', 'sorting')
+    // Sorting (QC reject pass) happens BEFORE pasting; pasting is the terminal production stage → Dispatch.
+    out.push('dye_cutting', 'sorting', 'pasting')
     return out
   }
 
@@ -1352,27 +1387,29 @@ export default function ProductionStagePage() {
         `${stageKpis.total} job card${stageKpis.total !== 1 ? 's' : ''} at this stage` +
         (['chemical_coating', 'lamination', 'spot_uv', 'leafing', 'embossing'].includes(stageKey)
           ? ' · Filtered by post-press routing'
-          : '')
+          : '') +
+        (refreshing ? ' · syncing…' : '')
       }
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
           <Link
             href="/production/stages"
-            className="text-sm text-ds-ink-muted hover:text-foreground"
+            className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-ds-ink-faint hover:bg-ds-elevated hover:text-ds-ink transition-colors"
           >
-            ← All stages
+            <span aria-hidden>←</span> All stages
           </Link>
+          <span className="text-ds-line/60 text-xs select-none">·</span>
           <Link
             href={`/production/stages/${stageKey}/triage`}
-            className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-card"
+            className="inline-flex items-center gap-1.5 rounded-md border border-ds-warning/30 bg-ds-warning/8 px-3 py-1.5 text-xs font-medium text-ds-warning hover:bg-ds-warning/15 transition-colors"
           >
             Open Triage
           </Link>
         </div>
         <Link
           href="/production/job-cards"
-          className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-card"
+          className="inline-flex items-center gap-1.5 rounded-md border border-ds-line/50 bg-ds-elevated/60 px-3 py-1.5 text-xs text-ds-ink-muted hover:border-ds-warning/30 hover:text-ds-warning transition-colors"
         >
           Job Cards
         </Link>
@@ -1408,13 +1445,13 @@ export default function ProductionStagePage() {
           )
         })}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-ds-ink-faint">Selected: {selectedCount}</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-ds-ink-faint tabular-nums">{selectedCount > 0 ? `${selectedCount} selected` : 'Select rows'}</span>
         <button
           type="button"
           disabled={bulkBusy || visibleList.length === 0}
           onClick={() => selectAllInCurrentTab()}
-          className="rounded border border-ds-line/60 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card disabled:opacity-50"
+          className="rounded-md border border-ds-line/50 px-2.5 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated disabled:opacity-40"
         >
           Select All (Tab)
         </button>
@@ -1426,7 +1463,7 @@ export default function ProductionStagePage() {
               await saveStageInline(row, { status: 'in_progress', skipReload: true })
             })
           }
-          className="rounded border border-blue-600/40 px-2 py-1 text-xs text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
+          className="rounded-md border border-ds-warning/35 px-2.5 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-40"
         >
           Bulk Start
         </button>
@@ -1438,12 +1475,12 @@ export default function ProductionStagePage() {
               await completeAndPushNext(row, true)
             })
           }
-          className="rounded border border-emerald-600/40 px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-50"
+          className="rounded-md border border-emerald-600/40 px-2.5 py-1 text-xs text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-40"
         >
           Bulk Complete
         </button>
         <details className="relative">
-          <summary className="list-none cursor-pointer rounded border border-ds-line/60 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card">
+          <summary className="list-none cursor-pointer rounded-md border border-ds-line/50 px-2.5 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated">
             More
           </summary>
           <div className="absolute right-0 z-20 mt-1 w-56 rounded-ds-sm border border-ds-line/70 bg-white p-1 shadow-lg">
@@ -1500,37 +1537,38 @@ export default function ProductionStagePage() {
           type="button"
           disabled={bulkBusy || selectedCount === 0}
           onClick={() => setSelectedStageRecordIds(new Set())}
-          className="rounded border border-ds-line/60 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card disabled:opacity-50"
+          className="rounded-md border border-ds-line/50 px-2.5 py-1 text-xs text-ds-ink-faint hover:bg-ds-elevated disabled:opacity-40"
         >
           Clear Selection
         </button>
       </div>
 
       <div className={industrialTableClassName()}>
-        <table className="w-full text-sm text-left border-collapse">
-          <thead className="bg-ds-main/90 text-ds-ink-muted border-b border-ds-line/40">
+        <table className="w-full min-w-full table-fixed border-collapse text-left text-sm leading-tight md:min-w-[1180px]">
+          <thead className="sticky top-0 z-[30] border-b border-ds-line/40 bg-ds-main/95 text-ds-ink-muted backdrop-blur">
             <tr>
-              <th className="px-3 py-2">
+              <th className={`${stageHeadCell} w-8 text-center`}>
                 <input
                   type="checkbox"
                   checked={allVisibleSelected}
                   onChange={(e) => toggleVisibleSelection(e.target.checked)}
                   aria-label="Select visible rows"
+                  className="h-3.5 w-3.5 accent-ds-brand"
                 />
               </th>
-              <th className="px-3 py-2">Operator</th>
-              <th className="px-3 py-2">Machine No.</th>
-              <SortHeader columnKey="jobCardNumber">Job Card No.</SortHeader>
-              <SortHeader columnKey="productName">Product / Carton Details</SortHeader>
-              <th className="px-3 py-2">Set No.</th>
-              <th className="px-3 py-2">Client</th>
-              <th className="px-3 py-2">Input / Parent</th>
-              <th className="px-3 py-2">Sheet / Cut</th>
-              <th className="px-3 py-2">{stageKey === 'pasting' ? 'Expected Qty' : 'Required'}</th>
-              <th className="px-3 py-2">{stageKey === 'pasting' ? 'Actual / Wastage' : 'Actual Counter'}</th>
-              <th className="px-3 py-2">Status</th>
-              <SortHeader columnKey="completedAt">Completed At</SortHeader>
-              <th className="px-3 py-2">Actions</th>
+              <th className={`${stageHeadCell} hidden w-[7rem] lg:table-cell`}>Operator</th>
+              <th className={`${stageHeadCell} hidden w-[5.75rem] lg:table-cell`}>Machine</th>
+              <SortHeader columnKey="jobCardNumber" className="hidden w-[6.5rem] md:table-cell">Job Card</SortHeader>
+              <SortHeader columnKey="productName" className="w-auto md:w-[15rem]">Product / Carton</SortHeader>
+              <th className={`${stageHeadCell} hidden w-[5rem] xl:table-cell`}>Set</th>
+              <th className={`${stageHeadCell} hidden w-[10rem] lg:table-cell`}>Client</th>
+              <th className={`${stageHeadCell} hidden w-[6.75rem] xl:table-cell`}>Input</th>
+              <th className={`${stageHeadCell} hidden w-[8rem] lg:table-cell`}>Sheet / Cut</th>
+              <th className={`${stageHeadCell} hidden w-[7rem] text-right sm:table-cell`}>{stageKey === 'pasting' ? 'Expected' : 'Required'}</th>
+              <th className={`${stageHeadCell} hidden w-[10rem] md:table-cell`}>{stageKey === 'pasting' ? 'Actual / Wastage' : 'Actual Counter'}</th>
+              <th className={`${stageHeadCell} hidden w-[7.25rem] sm:table-cell md:w-[12rem]`}>Status</th>
+              <SortHeader columnKey="completedAt" className="hidden w-[8rem] xl:table-cell">Completed</SortHeader>
+              <th className={`${stageHeadCell} sticky right-0 z-[31] w-[5.5rem] bg-ds-main/95 text-right sm:w-[7.5rem]`}>Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-ds-line/30">
@@ -1584,58 +1622,78 @@ export default function ProductionStagePage() {
                   className={`hover:bg-ds-card/50 cursor-pointer ${(String(progress.status ?? stageRecord.status ?? '').toLowerCase() === 'completed' || pushedForTracking) ? 'bg-emerald-500/10' : ''}`}
                   onClick={() => setSpotlight(row)}
                 >
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  <td className={`${stageCellPad} text-center`} onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selectedStageRecordIds.has(stageRecord.id)}
                       onChange={(e) => toggleRowSelection(stageRecord.id, e.target.checked)}
                       aria-label={`Select row ${stageRecord.id}`}
+                      className="h-3.5 w-3.5 accent-ds-brand"
                     />
                   </td>
-                  <td className="px-3 py-2">{getRowOperator(row) || '—'}</td>
-                  <td className="px-3 py-2">{jobCard.machine?.machineCode ?? '—'}</td>
-                  <td className="px-3 py-2 font-mono text-ds-warning">{jobCard.jobCardNumber}</td>
-                  <td className="px-3 py-2">
-                    <div className="text-ds-ink">{jobCard.productName ?? poMeta?.cartonName ?? '—'}</div>
-                    <div className="text-xs text-ds-ink-faint">
+                  <td className={`${stageCellPad} hidden truncate text-xs text-ds-ink lg:table-cell`} title={getRowOperator(row) || undefined}>{getRowOperator(row) || '—'}</td>
+                  <td className={`${stageCellPad} hidden truncate text-xs text-ds-ink-muted lg:table-cell`}>{jobCard.machine?.machineCode ?? '—'}</td>
+                  <td className={`${stageCellPad} hidden font-mono text-xs font-semibold text-ds-warning md:table-cell`}>{jobCard.jobCardNumber}</td>
+                  <td className={stageCellPad}>
+                    <div className="mb-0.5 flex min-w-0 items-center gap-1 md:hidden">
+                      <span className={`${mono} shrink-0 text-xs font-semibold text-ds-warning`}>JC-{jobCard.jobCardNumber}</span>
+                      <span className="truncate text-[11px] text-ds-ink-faint">{jobCard.machine?.machineCode ?? 'No machine'}</span>
+                    </div>
+                    <div className="line-clamp-2 break-words text-xs font-medium text-ds-ink" title={jobCard.productName ?? poMeta?.cartonName ?? undefined}>{jobCard.productName ?? poMeta?.cartonName ?? '—'}</div>
+                    <div className="line-clamp-2 text-[11px] leading-snug text-ds-ink-faint">
                       PO {poMeta?.poNumber ?? '—'} · Qty {Number(poMeta?.quantity ?? 0).toLocaleString('en-IN')}
+                      <span className="lg:hidden"> · {jobCard.customer.name}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1 sm:hidden">
+                      <StatusBadge
+                        status={
+                          supervisorApprovalEnabled && progress.approvalStatus === 'pending'
+                            ? 'pending_approval'
+                            : String(progress.status ?? stageRecord.status ?? 'pending')
+                        }
+                        className={statusClass(String(progress.status ?? stageRecord.status ?? 'pending'))}
+                      />
+                      {pushSummary ? (
+                        <span className="line-clamp-1 text-[10px] leading-none text-emerald-600">
+                          {pushSummary.qty.toLocaleString('en-IN')} pushed
+                        </span>
+                      ) : null}
                     </div>
                   </td>
-                  <td className="px-3 py-2">{jobCard.setNumber ?? '—'}</td>
-                  <td className="px-3 py-2">{jobCard.customer.name}</td>
-                  <td className="px-3 py-2">
+                  <td className={`${stageCellPad} hidden truncate text-xs xl:table-cell`}>{jobCard.setNumber ?? '—'}</td>
+                  <td className={`${stageCellPad} hidden truncate text-xs lg:table-cell`} title={jobCard.customer.name}>{jobCard.customer.name}</td>
+                  <td className={`${stageCellPad} hidden text-xs xl:table-cell`}>
                     {stageKey === 'cutting' ? (
-                      <span>{poMeta?.paperType ?? '—'}</span>
+                      <span className="line-clamp-2 break-words">{poMeta?.paperType ?? '—'}</span>
                     ) : (
-                      <span>{Number(received).toLocaleString('en-IN')}</span>
+                      <span className={mono}>{Number(received).toLocaleString('en-IN')}</span>
                     )}
                   </td>
-                  <td className="px-3 py-2">
-                    <div>{cutSize}</div>
-                    <div className="text-xs text-ds-ink-faint">
+                  <td className={`${stageCellPad} hidden text-xs lg:table-cell`}>
+                    <div className="truncate" title={cutSize}>{cutSize}</div>
+                    <div className="truncate text-[11px] text-ds-ink-faint">
                       {stageKey === 'cutting' || stageKey === 'pasting'
                         ? `UPS ${ups || '—'}`
                         : `GSM ${poMeta?.gsm ?? '—'}`}
                     </div>
                   </td>
-                  <td className="px-3 py-2">
+                  <td className={`${stageCellPad} hidden text-right text-xs sm:table-cell ${mono}`}>
                     {Number(defaultRequired).toLocaleString('en-IN')}
                     {stageKey === 'pasting' ? (
-                      <span className="ml-1 text-xs text-ds-ink-faint">cartons</span>
+                      <span className="ml-1 text-[11px] text-ds-ink-faint">cartons</span>
                     ) : (
-                      <span className="ml-1 text-xs text-ds-ink-faint">sheets</span>
+                      <span className="ml-1 text-[11px] text-ds-ink-faint">sheets</span>
                     )}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className={`${stageCellPad} hidden md:table-cell`}>
                     <span className={`${mono}`}>{Number(getRowCounter(row) || 0).toLocaleString('en-IN')}</span>
-                    <div className="text-[11px] text-ds-ink-faint mt-1">
+                    <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-ds-ink-faint">
                       {stageKey === 'pasting'
                         ? `Wastage: ${(wastageCartons ?? 0).toLocaleString('en-IN')} cartons${wastageSheets != null ? ` · ${wastageSheets.toLocaleString('en-IN')} sheets` : ''}`
                         : `Pushed: ${alreadyPushedQty.toLocaleString('en-IN')} · Balance: ${Number(balance).toLocaleString('en-IN')}`}
                     </div>
-                    <div className="mt-1 text-[11px] text-ds-ink-faint">Open drawer for push qty and execution decisions.</div>
                   </td>
-                  <td className="px-3 py-2">
+                  <td className={`${stageCellPad} hidden sm:table-cell`}>
                     <StatusBadge
                       status={
                         supervisorApprovalEnabled && progress.approvalStatus === 'pending'
@@ -1650,54 +1708,60 @@ export default function ProductionStagePage() {
                       </span>
                     ) : null}
                     {pushSummary ? (
-                      <div className="mt-1 text-[11px] text-emerald-600">
+                      <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-emerald-600">
                         {pushSummary.partial ? 'Partially pushed' : 'Pushed'} to next stage ({pushSummary.label}):{' '}
                         {pushSummary.qty.toLocaleString('en-IN')}
                       </div>
                     ) : null}
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      <span className="rounded-full border border-ds-line/60 px-1.5 py-0.5 text-[10px] text-ds-ink-faint">Queue #{triage.sequenceNo}</span>
-                      <span className="rounded-full border border-ds-line/60 px-1.5 py-0.5 text-[10px] text-ds-ink-faint">Slot {triage.plannedStartTs === Number.MAX_SAFE_INTEGER ? '-' : new Date(triage.plannedStartTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <div className="mt-1 hidden items-center gap-1 md:flex">
+                      <span className="text-[10px] text-ds-ink-faint">Q#{triage.sequenceNo}</span>
+                      {triage.plannedStartTs !== Number.MAX_SAFE_INTEGER ? (
+                        <span className="text-[10px] text-ds-ink-faint">· {new Date(triage.plannedStartTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      ) : null}
                     </div>
                   </td>
-                  <td className="px-3 py-2 text-xs text-ds-ink-muted">
+                  <td className={`${stageCellPad} hidden text-xs text-ds-ink-muted xl:table-cell`}>
                     {stageRecord.completedAt ? new Date(stageRecord.completedAt).toLocaleString() : '—'}
                   </td>
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex flex-wrap gap-1.5">
+                  <td className={`${stageCellPad} sticky right-0 z-10 bg-inherit text-right`} onClick={(e) => e.stopPropagation()}>
+                    <div className="grid grid-cols-2 place-items-end gap-1 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
                       <button
                         type="button"
+                        title="Open decisions drawer"
+                        aria-label="Open decisions drawer"
                         onClick={() => setSpotlight(row)}
-                        className="rounded border border-ds-warning/50 bg-ds-warning/10 px-2 py-1 text-xs font-medium text-ds-warning hover:bg-ds-warning/15"
+                        className="inline-flex items-center justify-center rounded-md border border-ds-warning/45 bg-ds-warning/10 p-1 text-ds-warning hover:bg-ds-warning/15 disabled:opacity-50"
                       >
-                        Open Decisions
+                        <PanelRightOpen className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
-                      <details className="relative">
-                        <summary className="list-none cursor-pointer rounded border border-ds-line/60 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card">
-                          More
-                        </summary>
-                        <div className="absolute right-0 z-20 mt-1 min-w-[8.5rem] rounded-ds-sm border border-ds-line/70 bg-white p-1 shadow-lg">
-                          <Link href={`/production/job-cards/${jobCard.id}`} className="block rounded px-2 py-1.5 text-xs text-ds-warning hover:bg-amber-50">
-                            Open Job Card
-                          </Link>
-                          <button
-                            type="button"
-                            disabled={bulkBusy}
-                            onClick={() => void reverseRowStage(row)}
-                            className="block w-full rounded px-2 py-1.5 text-left text-xs text-sky-600 hover:bg-sky-50 disabled:opacity-50"
-                          >
-                            Reverse
-                          </button>
-                          <button
-                            type="button"
-                            disabled={bulkBusy}
-                            onClick={() => void deleteRowFromStage(row)}
-                            className="block w-full rounded px-2 py-1.5 text-left text-xs text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </details>
+                      <Link
+                        href={`/production/job-cards/${jobCard.id}`}
+                        title="Open job card"
+                        aria-label={`Open job card ${jobCard.jobCardNumber}`}
+                        className={`${ICON_BUTTON_BASE} border border-ds-line/40 bg-ds-card/40 text-ds-ink-muted hover:border-ds-warning/45 hover:bg-ds-warning/8 hover:text-ds-warning`}
+                      >
+                        <FileText className="h-3.5 w-3.5" strokeWidth={2} />
+                      </Link>
+                      <button
+                        type="button"
+                        title="Reverse stage"
+                        aria-label="Reverse stage"
+                        disabled={bulkBusy}
+                        onClick={() => void reverseRowStage(row)}
+                        className={`${ICON_BUTTON_BASE} text-sky-600 hover:bg-sky-500/10 disabled:opacity-50`}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete from stage"
+                        aria-label="Delete from stage"
+                        disabled={bulkBusy}
+                        onClick={() => void deleteRowFromStage(row)}
+                        className={`${ICON_BUTTON_BASE} text-rose-600 hover:bg-rose-500/10 disabled:opacity-50`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1846,7 +1910,10 @@ export default function ProductionStagePage() {
             const pushedQty = Number(progress.pushedQty || 0)
             const availableToPush = Math.max(0, completedQty - pushedQty)
             const autoFromCounter = computeAutoFromCounter(row, getRowCounter(row))
-            const sheetInwardQty = getUpstreamSheets(row)
+            const _upstreamActual = getUpstreamSheets(row)
+            const sheetInwardQty = _upstreamActual > 0
+              ? _upstreamActual
+              : (row.jobCard.requiredSheets || row.jobCard.totalSheets || 0)
             const upsForPasting = stageKey === 'pasting' ? pastingUps(row) : 0
             const expectedCartons = stageKey === 'pasting' ? pastingExpectedCartons(row) : 0
             const actualCartons = stageKey === 'pasting' ? completedQty : 0
@@ -1867,20 +1934,32 @@ export default function ProductionStagePage() {
             const nextStarted = nextStageState?.status === 'in_progress' || nextStageState?.status === 'completed'
 
             return (
-              <div className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-3">
-                <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-2">{stageMeta?.label ?? 'Stage'} decisions</p>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <label className="space-y-1">
-                    <span className="text-ds-ink-faint">Operator</span>
-                    <input
-                      value={getRowOperator(row)}
-                      onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                      className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
-                      placeholder="Operator"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-ds-ink-faint">Actual Counter</span>
+              <div className="rounded-xl border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5 space-y-3">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-warning">{stageMeta?.label ?? 'Stage'} Decisions</p>
+
+                {/* ── Pasting: Expected outcome strip (shown FIRST) ── */}
+                {stageKey === 'pasting' ? (
+                  <div className="rounded-lg border border-ds-warning/20 bg-ds-warning/5 px-3 py-2.5 space-y-1.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-ds-warning/70">Expected Outcome</p>
+                    <div className={`flex items-center gap-2 flex-wrap text-xs ${mono}`}>
+                      <span className="text-ds-ink-faint">Sheets in:</span>
+                      <span className="text-ds-ink font-medium">{sheetInwardQty.toLocaleString('en-IN')}</span>
+                      <span className="text-ds-ink-faint">×</span>
+                      <span className="text-ds-ink-faint">UPS:</span>
+                      <span className="text-ds-ink font-medium">{upsForPasting > 0 ? upsForPasting : '—'}</span>
+                      <span className="text-ds-warning">→</span>
+                      <span className="text-ds-warning font-bold text-sm">{expectedCartons.toLocaleString('en-IN')} cartons</span>
+                    </div>
+                    {pushedQty > 0 && availableToPush === 0 ? (
+                      <p className="text-[11px] text-emerald-500 font-medium">✓ Fully pushed to Dispatch</p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {/* ── Pasting: Actual counter (full-width, prominent) ── */}
+                {stageKey === 'pasting' ? (
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-ds-ink-faint block">Actual Counter (cartons produced)</label>
                     <input
                       value={getRowCounter(row)}
                       onChange={(e) => {
@@ -1890,93 +1969,111 @@ export default function ProductionStagePage() {
                         setPushDrafts((prev) => ({ ...prev, [row.stageRecord.id]: String(auto.pushQty) }))
                         setWastageDrafts((prev) => ({ ...prev, [row.stageRecord.id]: String(auto.wastage) }))
                       }}
-                      className={`w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
+                      className={`w-full rounded-lg border border-ds-warning/30 bg-ds-card px-3 py-2.5 text-right text-xl font-bold text-ds-ink focus:border-ds-warning/60 focus:outline-none ${mono}`}
                       placeholder="0"
+                      inputMode="numeric"
                     />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-ds-ink-faint">Push Qty</span>
-                    <input
-                      value={pushDrafts[row.stageRecord.id] ?? String(autoFromCounter.pushQty)}
-                      onChange={(e) => setPushDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                      className={`w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
-                      placeholder={String(autoFromCounter.pushQty)}
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-ds-ink-faint">
-                      Wastage Qty{stageKey === 'pasting' ? ' (cartons)' : ''}
-                    </span>
-                    <input
-                      value={wastageDrafts[row.stageRecord.id] ?? String(computeAutoFromCounter(row, getRowCounter(row)).wastage)}
-                      readOnly
-                      className={`w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
-                      placeholder="0"
-                    />
-                  </label>
-                </div>
-                <p className="mt-2 text-[11px] text-ds-ink-faint">
-                  Status: <span className="text-ds-ink">{currentStatus}</span> · Available to push: <span className={mono}>{availableToPush.toLocaleString('en-IN')}</span>
-                </p>
-                {nextLabel ? <p className="text-[11px] text-ds-ink-faint">Next stage: {nextLabel}</p> : null}
-                {stageKey === 'pasting' ? (
-                  <div className="mt-3 rounded border border-ds-line/50 bg-ds-card/60 p-2.5">
-                    <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ds-ink-faint">
-                      Pasting Decision Summary
-                    </p>
-                    <div className="space-y-1.5 text-[11px]">
-                      <p className="text-ds-ink-faint">
-                        Total sheets passed down:{' '}
-                        <span className={`${mono} text-ds-ink`}>{sheetInwardQty.toLocaleString('en-IN')}</span>
-                        {' · '}
-                        UPS: <span className={`${mono} text-ds-ink`}>{upsForPasting > 0 ? upsForPasting.toLocaleString('en-IN') : '—'}</span>
-                      </p>
-                      <p className="text-ds-ink-faint">
-                        Expected quantity:{' '}
-                        <span className={`${mono} text-ds-ink`}>{expectedCartons.toLocaleString('en-IN')}</span> cartons
-                      </p>
-                      <p className="text-ds-ink-faint">
-                        Actual counter:{' '}
-                        <span className={`${mono} text-ds-ink`}>{actualCartons.toLocaleString('en-IN')}</span> cartons
-                      </p>
-                      <p className="text-ds-ink-faint">
-                        Total wastage:{' '}
-                        <span className={`${mono} text-ds-ink`}>{wastageCartons.toLocaleString('en-IN')}</span> cartons
-                        {upsForPasting > 0 ? (
-                          <>
-                            {' · '}
-                            <span className={`${mono} text-ds-ink`}>{wastageSheetsFromCartons.toLocaleString('en-IN')}</span> sheets
-                          </>
-                        ) : null}
-                      </p>
+                  </div>
+                ) : (
+                  /* ── Non-pasting: standard 2-col grid ── */
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <label className="space-y-1">
+                      <span className="text-ds-ink-faint">Operator</span>
+                      <input
+                        value={getRowOperator(row)}
+                        onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                        className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                        placeholder="Operator"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-ds-ink-faint">Actual Counter</span>
+                      <input
+                        value={getRowCounter(row)}
+                        onChange={(e) => {
+                          const nextRaw = e.target.value
+                          setCounterDrafts((prev) => ({ ...prev, [row.stageRecord.id]: nextRaw }))
+                          const auto = computeAutoFromCounter(row, nextRaw)
+                          setPushDrafts((prev) => ({ ...prev, [row.stageRecord.id]: String(auto.pushQty) }))
+                          setWastageDrafts((prev) => ({ ...prev, [row.stageRecord.id]: String(auto.wastage) }))
+                        }}
+                        className={`w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
+                        placeholder="0"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-ds-ink-faint">Push Qty</span>
+                      <input
+                        value={pushDrafts[row.stageRecord.id] ?? String(autoFromCounter.pushQty)}
+                        onChange={(e) => setPushDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                        className={`w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
+                        placeholder={String(autoFromCounter.pushQty)}
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-ds-ink-faint">Wastage Qty</span>
+                      <input
+                        value={wastageDrafts[row.stageRecord.id] ?? String(computeAutoFromCounter(row, getRowCounter(row)).wastage)}
+                        readOnly
+                        className={`w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
+                        placeholder="0"
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {/* ── Pasting: computed results row ── */}
+                {stageKey === 'pasting' && Number(getRowCounter(row)) > 0 ? (
+                  <div className={`grid grid-cols-3 gap-2 text-xs ${mono}`}>
+                    <div className="rounded-lg border border-ds-line/30 bg-ds-card/60 px-2.5 py-2 text-center">
+                      <p className="text-ds-ink-faint text-[10px] mb-0.5">Push Qty</p>
+                      <p className="text-ds-ink font-semibold">{autoFromCounter.pushQty.toLocaleString('en-IN')}</p>
+                    </div>
+                    <div className={`rounded-lg border px-2.5 py-2 text-center ${wastageCartons > 0 ? 'border-rose-500/20 bg-rose-500/5' : 'border-ds-line/30 bg-ds-card/60'}`}>
+                      <p className="text-ds-ink-faint text-[10px] mb-0.5">Wastage (cartons)</p>
+                      <p className={wastageCartons > 0 ? 'text-rose-400 font-semibold' : 'text-ds-ink font-semibold'}>{wastageCartons.toLocaleString('en-IN')}</p>
+                    </div>
+                    <div className={`rounded-lg border px-2.5 py-2 text-center ${wastageSheetsFromCartons > 0 ? 'border-rose-500/20 bg-rose-500/5' : 'border-ds-line/30 bg-ds-card/60'}`}>
+                      <p className="text-ds-ink-faint text-[10px] mb-0.5">Wastage (sheets)</p>
+                      <p className={wastageSheetsFromCartons > 0 ? 'text-rose-400 font-semibold' : 'text-ds-ink font-semibold'}>{upsForPasting > 0 ? wastageSheetsFromCartons.toLocaleString('en-IN') : '—'}</p>
                     </div>
                   </div>
                 ) : null}
-                {nextLabel && completedQty > 0 && availableToPush === 0 && pushedQty > 0 ? (
-                  <div className="mt-1 flex items-center gap-2">
-                    <p className="text-[11px] text-emerald-600">
-                      Already pushed to next stage ({nextLabel}): {pushedQty.toLocaleString('en-IN')}
-                    </p>
-                    <button
-                      type="button"
-                      disabled={savingStageId === row.stageRecord.id}
-                      onClick={() => void bringBackFromNextStage(row)}
-                      className="rounded border border-blue-600/40 px-2 py-0.5 text-[11px] text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
-                    >
-                      Undo Last Push
-                    </button>
-                  </div>
+
+                {/* ── Pasting: operator (secondary, below numbers) ── */}
+                {stageKey === 'pasting' ? (
+                  <label className="flex items-center gap-2 text-xs">
+                    <span className="text-ds-ink-faint w-16 shrink-0">Operator</span>
+                    <input
+                      value={getRowOperator(row)}
+                      onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                      className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                      placeholder="Operator name"
+                    />
+                  </label>
                 ) : null}
-                <div className="mt-3 sticky top-0 z-10 rounded-md border border-ds-line/40 bg-ds-main/95 p-2">
-                  <p className="mb-1 text-[10px] uppercase tracking-wide text-ds-ink-faint">Quick Actions</p>
-                  <div className="flex flex-wrap gap-1.5">
+
+                {/* ── Status line ── */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-ds-ink-faint">
+                  <span>Status: <span className="text-ds-ink capitalize">{currentStatus}</span></span>
+                  {stageKey !== 'pasting' ? (
+                    <span>Available to push: <span className={mono}>{availableToPush.toLocaleString('en-IN')}</span></span>
+                  ) : null}
+                  {nextLabel ? (
+                    <span>Next: <span className="text-ds-ink">{nextLabel}</span></span>
+                  ) : stageKey === 'pasting' ? (
+                    <span className="text-emerald-500 font-medium">→ Ready for Dispatch</span>
+                  ) : null}
+                </div>
+                {/* ── Actions ── */}
+                <div className="mt-3 flex flex-wrap gap-1.5">
                   {currentStatus === 'completed' ? (
                     <>
                       <button
                         type="button"
                         disabled={savingStageId === row.stageRecord.id || !!nextStarted}
                         onClick={() => void saveStageInline(row, { status: 'pending' })}
-                        className="rounded border border-ds-line/50 px-2 py-1 text-xs hover:bg-ds-card disabled:opacity-50"
+                        className="rounded-md border border-ds-line/50 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning disabled:opacity-40 transition-colors"
                         title={nextStarted ? 'Next station already started' : 'Reopen this stage'}
                       >
                         Reopen
@@ -1984,37 +2081,48 @@ export default function ProductionStagePage() {
                       {nextKey ? (
                         <Link
                           href={`/production/stages/${nextKey}`}
-                          className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-ink hover:bg-ds-card"
+                          className="rounded-md border border-ds-line/50 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
                         >
-                          View Next Stage
+                          View Next Stage →
+                        </Link>
+                      ) : stageKey === 'pasting' ? (
+                        <Link
+                          href="/dispatch"
+                          className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-3 py-1.5 text-xs text-emerald-400 hover:bg-emerald-500/15 transition-colors font-medium"
+                        >
+                          Go to Dispatch →
                         </Link>
                       ) : null}
                     </>
                   ) : (
                     <>
-                      <button
-                        type="button"
-                        disabled={savingStageId === row.stageRecord.id}
-                        onClick={() => void saveStageInline(row, { status: 'in_progress' })}
-                        className="rounded border border-blue-600/40 px-2 py-1 text-xs text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
-                      >
-                        Start Production
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingStageId === row.stageRecord.id || !Number.isFinite(pushQty) || pushQty <= 0 || pushQty > availableToPush}
-                        onClick={() => void pushToNext(row, pushQty, false)}
-                        className="rounded border border-amber-600/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-50"
-                      >
-                        Partial Push
-                      </button>
+                      {currentStatus !== 'in_progress' ? (
+                        <button
+                          type="button"
+                          disabled={savingStageId === row.stageRecord.id}
+                          onClick={() => void saveStageInline(row, { status: 'in_progress' })}
+                          className="rounded-md bg-ds-warning px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
+                        >
+                          Start Production
+                        </button>
+                      ) : null}
+                      {availableToPush > 0 ? (
+                        <button
+                          type="button"
+                          disabled={savingStageId === row.stageRecord.id || !Number.isFinite(pushQty) || pushQty <= 0 || pushQty > availableToPush}
+                          onClick={() => void pushToNext(row, pushQty, false)}
+                          className="rounded-md border border-ds-warning/40 px-3 py-1.5 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-40 transition-colors"
+                        >
+                          Partial Push
+                        </button>
+                      ) : null}
                       {supervisorApprovalEnabled ? (
                         <>
                           <button
                             type="button"
                             disabled={savingStageId === row.stageRecord.id}
                             onClick={() => void setApproval(row, 'approved', null)}
-                            className="rounded border border-violet-600/40 px-2 py-1 text-xs text-violet-600 hover:bg-violet-500/10 disabled:opacity-50"
+                            className="rounded-md border border-violet-500/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-500/10 disabled:opacity-40 transition-colors"
                           >
                             Approve
                           </button>
@@ -2025,7 +2133,7 @@ export default function ProductionStagePage() {
                               const remarks = prompt('Reject remarks', '')?.trim() ?? ''
                               void setApproval(row, 'rejected', remarks || null)
                             }}
-                            className="rounded border border-violet-600/40 px-2 py-1 text-xs text-violet-600 hover:bg-violet-500/10 disabled:opacity-50"
+                            className="rounded-md border border-violet-500/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-500/10 disabled:opacity-40 transition-colors"
                           >
                             Reject
                           </button>
@@ -2041,46 +2149,36 @@ export default function ProductionStagePage() {
                           )
                         }
                         onClick={() => void completeAndPushNext(row)}
-                        className="rounded border border-emerald-600/40 px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-50"
+                        className="rounded-md bg-ds-warning px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
                       >
                         Complete Push
                       </button>
-                      <button
-                        type="button"
-                        disabled={savingStageId === row.stageRecord.id}
-                        onClick={() => void bringBackFromNextStage(row)}
-                        className="rounded border border-blue-600/40 px-2 py-1 text-xs text-blue-600 hover:bg-blue-500/10 disabled:opacity-50"
-                      >
-                        Undo Last Push
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingStageId === row.stageRecord.id}
-                        onClick={() => {
-                          setPushDrafts((prev) => ({ ...prev, [row.stageRecord.id]: '' }))
-                          setWastageDrafts((prev) => ({ ...prev, [row.stageRecord.id]: '' }))
-                        }}
-                        className="rounded border border-ds-line/50 px-2 py-1 text-xs hover:bg-ds-card disabled:opacity-50"
-                      >
-                        Cancel Push
-                      </button>
+                      {pushedQty > 0 ? (
+                        <button
+                          type="button"
+                          disabled={savingStageId === row.stageRecord.id}
+                          onClick={() => void bringBackFromNextStage(row)}
+                          className="rounded-md border border-ds-line/50 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning disabled:opacity-40 transition-colors"
+                        >
+                          Undo Last Push
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         disabled={savingStageId === row.stageRecord.id}
                         onClick={() => void sendRework(row)}
-                        className="rounded border border-rose-600/40 px-2 py-1 text-xs text-rose-600 hover:bg-rose-500/10 disabled:opacity-50"
+                        className="rounded-md border border-rose-500/40 px-3 py-1.5 text-xs text-rose-400 hover:bg-rose-500/10 disabled:opacity-40 transition-colors"
                       >
                         Send Rework
                       </button>
                     </>
                   )}
-                  </div>
                 </div>
               </div>
             )
           })()}
-          <div className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-2">Quality checkpoint</p>
+          <div className="rounded-xl border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-warning mb-3">Quality Checkpoint</p>
             {(() => {
               const keys = stationChecklistKeys(stageKey)
               const selected = keys.filter((k) => checklistDrafts[spotlight.stageRecord.id]?.[k] === true).length
@@ -2092,7 +2190,7 @@ export default function ProductionStagePage() {
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] hover:bg-ds-card"
+                      className="rounded-md border border-ds-line/50 bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
                       onClick={() =>
                         setChecklistDrafts((prev) => ({
                           ...prev,
@@ -2104,7 +2202,7 @@ export default function ProductionStagePage() {
                     </button>
                     <button
                       type="button"
-                      className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] hover:bg-ds-card"
+                      className="rounded-md border border-ds-line/50 bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:border-rose-500/30 hover:text-rose-400 transition-colors"
                       onClick={() =>
                         setChecklistDrafts((prev) => ({
                           ...prev,
@@ -2112,17 +2210,24 @@ export default function ProductionStagePage() {
                         }))
                       }
                     >
-                      Clear All
+                      Clear
                     </button>
                   </div>
                 </div>
               )
             })()}
-            <div className="grid grid-cols-1 gap-1.5">
+            <div className="grid grid-cols-1 gap-2">
               {stationChecklistKeys(stageKey).map((item) => {
                 const current = checklistDrafts[spotlight.stageRecord.id]?.[item] === true
                 return (
-                  <label key={item} className="inline-flex items-center gap-2 text-xs text-ds-ink">
+                  <label
+                    key={item}
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                      current
+                        ? 'border-emerald-500/40 bg-emerald-500/8 text-emerald-400'
+                        : 'border-ds-line/40 bg-ds-elevated/40 text-ds-ink hover:border-ds-warning/30'
+                    }`}
+                  >
                     <input
                       type="checkbox"
                       checked={current}
@@ -2135,25 +2240,26 @@ export default function ProductionStagePage() {
                           },
                         }))
                       }
+                      className="h-3.5 w-3.5 accent-ds-warning"
                     />
-                    <span>{item}</span>
+                    <span className="capitalize">{item}</span>
                   </label>
                 )
               })}
             </div>
-            <p className="mt-2 text-[11px] text-ds-ink-faint">
-              Complete Push requires all quality checks.
+            <p className="mt-2.5 text-[11px] text-ds-ink-faint">
+              All checks required before Complete Push.
             </p>
           </div>
-          <div className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Downtime logging</p>
+          <div className="rounded-xl border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-ink-faint">Downtime</p>
               <button
                 type="button"
                 onClick={() => setShowDowntime((v) => !v)}
-                className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] hover:bg-ds-card"
+                className="rounded-md border border-ds-line/50 bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
               >
-                {showDowntime ? 'Hide' : 'Show'}
+                {showDowntime ? 'Collapse' : 'Log Downtime'}
               </button>
             </div>
             {showDowntime ? (
@@ -2230,15 +2336,15 @@ export default function ProductionStagePage() {
               </>
             ) : null}
           </div>
-          <div className="rounded-lg border border-ds-line/50 bg-ds-main px-3 py-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Production timeline</p>
+          <div className="rounded-xl border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-ink-faint">Production Timeline</p>
               <button
                 type="button"
                 onClick={() => setShowTimeline((v) => !v)}
-                className="rounded border border-ds-line/60 px-2 py-0.5 text-[11px] hover:bg-ds-card"
+                className="rounded-md border border-ds-line/50 bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
               >
-                {showTimeline ? 'Hide' : 'Show'}
+                {showTimeline ? 'Collapse' : 'Show'}
               </button>
             </div>
             {showTimeline ? (

@@ -1,6 +1,6 @@
 'use client'
 
-import { type ReactNode, useEffect } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { cn } from '@/lib/cn'
 
 export type StandardSlideOverOptions = {
@@ -12,14 +12,11 @@ export type StandardSlideOverOptions = {
 
 type SlideOverPanelProps = StandardSlideOverOptions & {
   title: ReactNode
-  /** Sticky header: one line of metadata under the title (e.g. PO # · status) */
   headerMeta?: ReactNode
   isOpen: boolean
   onClose: () => void
   children: ReactNode
-  /** Sticky footer (primary / secondary actions) */
   footer?: ReactNode
-  /** Defaults above app shell header so form fields are never hidden under top nav. */
   zIndexClass?: string
 }
 
@@ -29,10 +26,6 @@ const PANEL_BASE =
 const HEADER_FOOTER_PAD = 'px-4 py-3 md:px-6'
 const BODY_PAD = 'px-4 py-4 md:px-6'
 
-/**
- * Right-side system drawer: 38% width (clamped 420–640px), 100% height, subtle 25% black overlay.
- * Row switching updates children without remount; parent controls `isOpen` + row identity.
- */
 export function SlideOverPanel({
   title,
   headerMeta,
@@ -44,8 +37,25 @@ export function SlideOverPanel({
   panelClassName,
   footer,
   zIndexClass = 'z-[1100]',
-  animateEnter = true,
 }: SlideOverPanelProps) {
+  // `mounted` keeps the DOM alive after close so the exit animation plays
+  const [mounted, setMounted] = useState(isOpen)
+  const [visible, setVisible] = useState(isOpen)
+
+  useEffect(() => {
+    if (isOpen) {
+      setMounted(true)
+      // tiny delay to let the browser paint before starting the transition
+      const raf = requestAnimationFrame(() => setVisible(true))
+      return () => cancelAnimationFrame(raf)
+    } else {
+      setVisible(false)
+      // unmount after the 220ms exit transition completes
+      const t = setTimeout(() => setMounted(false), 220)
+      return () => clearTimeout(t)
+    }
+  }, [isOpen])
+
   useEffect(() => {
     if (!isOpen) return
     const onKey = (e: KeyboardEvent) => {
@@ -55,24 +65,36 @@ export function SlideOverPanel({
     return () => window.removeEventListener('keydown', onKey)
   }, [isOpen, onClose])
 
-  if (!isOpen) return null
+  if (!mounted) return null
 
   return (
-    <div className={cn('fixed inset-0 flex justify-end', zIndexClass)} role="presentation">
+    <div
+      className={cn('fixed inset-0 flex justify-end', zIndexClass)}
+      role="presentation"
+      aria-hidden={!isOpen}
+    >
+      {/* Backdrop — fades in/out */}
       <button
         type="button"
         aria-label="Close"
-        className={cn(backdropClassName, 'absolute inset-0 transition-opacity')}
         onClick={onClose}
+        className={cn(
+          backdropClassName,
+          'absolute inset-0 transition-opacity duration-200',
+          visible ? 'opacity-100' : 'opacity-0',
+        )}
       />
+
+      {/* Panel — slides in/out */}
       <div
         className={cn(
           'relative z-[1] flex h-full min-h-0 min-w-0 flex-col',
+          'transition-transform duration-200 ease-out',
+          visible ? 'translate-x-0' : 'translate-x-full',
           DRAWER_RAIL,
           PANEL_BASE,
           widthClass,
           panelClassName,
-          animateEnter && 'animate-ds-drawer-slide',
         )}
         role="dialog"
         aria-modal="true"
@@ -97,15 +119,15 @@ export function SlideOverPanel({
               className="shrink-0 rounded-ds-sm p-1.5 text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-ink"
               aria-label="Close"
             >
-              <span className="text-lg leading-none" aria-hidden>
-                ×
-              </span>
+              <span className="text-lg leading-none" aria-hidden>×</span>
             </button>
           </div>
         </header>
+
         <div className={cn('min-h-0 flex-1 overflow-y-auto overflow-x-hidden', BODY_PAD, 'md:pt-1')}>
           {children}
         </div>
+
         {footer ? (
           <footer
             className={cn(

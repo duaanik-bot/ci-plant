@@ -373,7 +373,11 @@ export default function JobCardDetailPage() {
     setDesignerUserId(jc.shiftOperator?.id ?? '')
     setPrePressRemarks(typeof setup.prePressRemarks === 'string' ? setup.prePressRemarks : '')
     setSheetSizeOverride(typeof setup.sheetSize === 'string' ? setup.sheetSize : '')
-    const derivedBoard = jc.boardMaterial?.boardStatus === 'available' ? 'ready' : 'waiting'
+    const bm = jc.boardMaterial
+    const boardCovered =
+      bm?.boardStatus === 'available' ||
+      ((bm?.reservedSheets ?? 0) > 0 && (bm?.reservedSheets ?? 0) >= (bm?.requiredSheets ?? 1))
+    const derivedBoard = boardCovered ? 'ready' : 'waiting'
     setBoardReadiness(
       setup.boardReadiness === 'ready' || setup.boardReadiness === 'waiting' || setup.boardReadiness === 'not_ready'
         ? setup.boardReadiness

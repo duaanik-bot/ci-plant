@@ -8,6 +8,7 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   experimental: {
+    viewTransition: true,
     serverComponentsExternalPackages: ['@prisma/client', 'bcryptjs'],
   },
 }

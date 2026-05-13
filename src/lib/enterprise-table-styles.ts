@@ -9,7 +9,7 @@ export const enterpriseTableClass =
 
 /** Table header row area */
 export const enterpriseTheadClass =
-  'border-b border-neutral-200 bg-white text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:border-ds-line/50 dark:bg-ds-elevated/80 dark:text-ds-ink-faint'
+  'border-b border-neutral-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-500 dark:border-ds-line/50 dark:bg-ds-elevated/80 dark:text-ds-ink-faint'
 
 /** Table body — dividers + base row background */
 export const enterpriseTbodyClass =
@@ -17,11 +17,11 @@ export const enterpriseTbodyClass =
 
 /** Body row — hover scan line */
 export const enterpriseTrClass =
-  'transition-[background-color,box-shadow] duration-150 ease-out hover:bg-neutral-50 dark:hover:bg-ds-elevated/30'
+  'transition-[background-color,box-shadow] duration-150 ease-out hover:bg-slate-50 dark:hover:bg-ds-elevated/30'
 
 /** Selected / active row — left brand rail (use on `<tr>`) */
 export const enterpriseTrSelectedClass =
-  'dark:bg-ds-elevated/35 dark:shadow-[inset_3px_0_0_0_#38BDF8] dark:ring-1 dark:ring-inset dark:ring-ds-brand/15'
+  'bg-orange-50/55 shadow-[inset_3px_0_0_0_#f97316] ring-1 ring-inset ring-orange-200/70 dark:bg-ds-elevated/35 dark:shadow-[inset_3px_0_0_0_#f97316] dark:ring-1 dark:ring-inset dark:ring-ds-brand/15'
 
 /** Header cell */
 export const enterpriseThClass =
@@ -39,7 +39,7 @@ export const enterpriseTdMonoClass = `${enterpriseTdClass} font-designing-queue 
 
 /** Secondary / muted cell */
 export const enterpriseTdMutedClass =
-  'px-4 py-3 text-sm text-neutral-600 dark:text-ds-ink-muted whitespace-nowrap overflow-hidden text-ellipsis'
+  'px-4 py-3 text-sm text-neutral-500 dark:text-ds-ink-muted whitespace-nowrap overflow-hidden text-ellipsis'
 
 /** Sub-label in table context */
 export const enterpriseTableSubLabelClass =
