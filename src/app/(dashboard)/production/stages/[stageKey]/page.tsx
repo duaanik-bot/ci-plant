@@ -809,11 +809,20 @@ export default function ProductionStagePage() {
   }
 
   function pastingExpectedCartons(row: Payload['jobCards'][number]): number {
+    // Prefer actual pushed qty from upstream stages (accounts for real wastage at die/sorting)
+    // Only fall back to planned sheets when no stage has run yet (brand-new job, nothing pushed)
+    const ex = getExecutionState(row)
+    const sp = ex.stageProgress && typeof ex.stageProgress === 'object'
+      ? (ex.stageProgress as Record<string, StageProgress>)
+      : {}
+    // Check if any production stage has ever pushed something
+    const anyStageHasPushed = Object.values(sp).some((s) => Number(s?.pushedQty ?? 0) > 0)
     const receivedSheets = getUpstreamSheets(row)
-    // Fall back to planned sheet count from PO/planning when no upstream stage has pushed yet
     const sheetsIn = receivedSheets > 0
       ? receivedSheets
-      : (row.jobCard.requiredSheets || row.jobCard.totalSheets || 0)
+      : anyStageHasPushed
+        ? 0 // upstream stages ran but didn't push to pasting yet — show 0 until actual handoff
+        : (row.jobCard.requiredSheets || row.jobCard.totalSheets || 0) // truly new job — show plan
     const ups = pastingUps(row)
     return ups > 0 ? Math.round(sheetsIn * ups) : sheetsIn
   }
@@ -878,6 +887,69 @@ export default function ProductionStagePage() {
     return pushToNext(row, Number(getRowCounter(row) || 0), true, skipReload)
   }
 
+  async function completePastingTerminal(row: Payload['jobCards'][number]) {
+    const counter = Number(getRowCounter(row) || 0)
+    if (counter <= 0) {
+      toast.error('Enter actual counter before completing pasting')
+      return
+    }
+    const checklist = checklistDrafts[row.stageRecord.id] ?? {}
+    const requiredChecklist = stationChecklistKeys(stageKey)
+    if (requiredChecklist.length > 0 && !requiredChecklist.every((k) => checklist[k] === true)) {
+      toast.error('Complete required quality checklist before completing')
+      return
+    }
+    const auto = computeAutoFromCounter(row, getRowCounter(row))
+    const wastageQty = auto.wastage
+    const progress = getStageProgress(row)
+    const postPress = row.jobCard.postPressRouting && typeof row.jobCard.postPressRouting === 'object'
+      ? (row.jobCard.postPressRouting as Record<string, unknown>)
+      : {}
+    const ex = getExecutionState(row)
+    const stageProgress = (ex.stageProgress && typeof ex.stageProgress === 'object')
+      ? (ex.stageProgress as Record<string, StageProgress>)
+      : {}
+    const updatedProgress = {
+      ...stageProgress,
+      [stageKey]: {
+        ...(stageProgress[stageKey] ?? {}),
+        completedQty: counter,
+        pushedQty: counter,
+        wastageQty,
+        status: 'completed',
+      },
+    }
+    setSavingStageId(row.stageRecord.id)
+    try {
+      const res = await fetch(`/api/production/stages/${stageKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stages: [{ id: row.stageRecord.id, operator: getRowOperator(row).trim() || null, counter, status: 'completed' }],
+          postPressRouting: {
+            ...postPress,
+            executionOrchestration: {
+              ...(ex as Record<string, unknown>),
+              stageProgress: updatedProgress,
+            },
+          },
+          jobCardId: row.jobCard.id,
+        }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error((j as { error?: string }).error || 'Save failed')
+      }
+      toast.success(`Pasting complete — ${counter.toLocaleString('en-IN')} cartons ready for Dispatch`)
+      await load()
+      setSpotlight(null)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSavingStageId(null)
+    }
+  }
+
   async function pushToNext(
     row: Payload['jobCards'][number],
     requestedPushQty: number,
@@ -886,7 +958,11 @@ export default function ProductionStagePage() {
   ) {
     const nextKey = nextRequiredStageKey(row)
     if (!nextKey) {
-      toast.error('No next station configured')
+      if (stageKey === 'pasting') {
+        await completePastingTerminal(row)
+      } else {
+        toast.error('No next station configured')
+      }
       return
     }
     const counter = Number(getRowCounter(row) || 0)
@@ -1812,93 +1888,97 @@ export default function ProductionStagePage() {
       widthClass="max-w-md"
     >
       {spotlight ? (
-        <div className="space-y-4 text-sm text-ds-ink-muted">
-          {spotlight.jobCard.oee ? (
-            <>
-              <p className={`${mono} text-2xl ${oeeBandClass(spotlight.jobCard.oee.oee)}`}>
-                OEE {spotlight.jobCard.oee.oee}%
-              </p>
-              <div className={`grid grid-cols-3 gap-2 text-xs ${mono}`}>
-                <div>
-                  <div className="text-ds-ink-faint">A</div>
-                  <div className="text-ds-ink">{spotlight.jobCard.oee.availability}%</div>
-                </div>
-                <div>
-                  <div className="text-ds-ink-faint">P</div>
-                  <div className="text-ds-ink">{spotlight.jobCard.oee.performance}%</div>
-                </div>
-                <div>
-                  <div className="text-ds-ink-faint">Q</div>
-                  <div className="text-ds-ink">{spotlight.jobCard.oee.quality}%</div>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wider text-ds-ink-faint mb-1">
-                  Live speedometer (sheets/h)
+        <div className="space-y-3 text-sm text-ds-ink-muted">
+          {/* OEE card */}
+          <div className="rounded-xl border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5 space-y-3">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-warning">Live OEE</p>
+            {spotlight.jobCard.oee ? (
+              <>
+                <p className={`${mono} text-2xl font-bold ${oeeBandClass(spotlight.jobCard.oee.oee)}`}>
+                  OEE {spotlight.jobCard.oee.oee}%
                 </p>
-                <div className="h-3 w-full rounded-full bg-ds-card border border-ds-line/40 overflow-hidden">
-                  <div
-                    className="h-full bg-[var(--warning)] transition-all duration-500"
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        spotlight.jobCard.oee.ratedSpeedPph > 0
-                          ? (spotlight.jobCard.oee.currentSpeedPph / spotlight.jobCard.oee.ratedSpeedPph) * 100
-                          : 0,
-                      )}%`,
-                    }}
-                  />
+                <div className={`grid grid-cols-3 gap-2 text-xs ${mono}`}>
+                  <div className="rounded-lg border border-ds-line/30 bg-ds-card/60 px-2 py-1.5 text-center">
+                    <div className="text-ds-ink-faint text-[10px] mb-0.5">Availability</div>
+                    <div className="text-ds-ink font-semibold">{spotlight.jobCard.oee.availability}%</div>
+                  </div>
+                  <div className="rounded-lg border border-ds-line/30 bg-ds-card/60 px-2 py-1.5 text-center">
+                    <div className="text-ds-ink-faint text-[10px] mb-0.5">Performance</div>
+                    <div className="text-ds-ink font-semibold">{spotlight.jobCard.oee.performance}%</div>
+                  </div>
+                  <div className="rounded-lg border border-ds-line/30 bg-ds-card/60 px-2 py-1.5 text-center">
+                    <div className="text-ds-ink-faint text-[10px] mb-0.5">Quality</div>
+                    <div className="text-ds-ink font-semibold">{spotlight.jobCard.oee.quality}%</div>
+                  </div>
                 </div>
-                <p className={`mt-1 ${mono} text-ds-ink`}>
-                  {spotlight.jobCard.oee.currentSpeedPph} / {Math.round(spotlight.jobCard.oee.ratedSpeedPph)} sh/h
-                  <span className="text-ds-ink-faint ml-2">limit</span>
-                </p>
-              </div>
-              {spotlight.jobCard.machine ? (
-                <div className="flex flex-wrap items-center gap-3">
-                  <p className="text-xs text-ds-ink-faint">
-                    Press {spotlight.jobCard.machine.machineCode} · {spotlight.jobCard.machine.name}
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-ds-ink-faint mb-1.5">
+                    Live speedometer (sheets/h)
                   </p>
-                  {spotlight.jobCard.machinePm?.hasSchedule ? (
-                    <MachineHealthMeter
-                      healthPct={spotlight.jobCard.machinePm.healthPct}
-                      hasSchedule
-                      onClick={() => setPmMachineId(spotlight.jobCard.machine!.id)}
-                      title="Open PM checklist"
+                  <div className="h-2 w-full rounded-full bg-ds-card border border-ds-line/40 overflow-hidden">
+                    <div
+                      className="h-full bg-ds-warning transition-all duration-500"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          spotlight.jobCard.oee.ratedSpeedPph > 0
+                            ? (spotlight.jobCard.oee.currentSpeedPph / spotlight.jobCard.oee.ratedSpeedPph) * 100
+                            : 0,
+                        )}%`,
+                      }}
                     />
-                  ) : null}
+                  </div>
+                  <p className={`mt-1.5 ${mono} text-xs text-ds-ink`}>
+                    {spotlight.jobCard.oee.currentSpeedPph} / {Math.round(spotlight.jobCard.oee.ratedSpeedPph)} sh/h
+                    <span className="text-ds-ink-faint ml-1.5">limit</span>
+                  </p>
                 </div>
-              ) : null}
-              {spotlight.jobCard.oee.downtimeLock ? (
-                <p className="text-rose-400 text-xs">Downtime lock — log reason on shopfloor terminal.</p>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-ds-ink-faint text-sm">No live OEE for this row (start stage to see metrics).</p>
-          )}
+                {spotlight.jobCard.machine ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-xs text-ds-ink-faint">
+                      Press {spotlight.jobCard.machine.machineCode} · {spotlight.jobCard.machine.name}
+                    </p>
+                    {spotlight.jobCard.machinePm?.hasSchedule ? (
+                      <MachineHealthMeter
+                        healthPct={spotlight.jobCard.machinePm.healthPct}
+                        hasSchedule
+                        onClick={() => setPmMachineId(spotlight.jobCard.machine!.id)}
+                        title="Open PM checklist"
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
+                {spotlight.jobCard.oee.downtimeLock ? (
+                  <p className="text-rose-400 text-xs font-medium">Downtime lock — log reason on shopfloor terminal.</p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-ds-ink-faint text-xs">No live OEE for this row — start stage to see metrics.</p>
+            )}
+          </div>
           {spotlight.jobCard.incentiveLedger?.incentiveEligible ? (
-            <div className="flex items-start gap-3 rounded-lg border border-emerald-500/50 bg-emerald-950/25 px-3 py-3">
-              <CircleDollarSign className="h-7 w-7 text-emerald-500 shrink-0" strokeWidth={1.75} />
-              <div className="space-y-1">
-                <p className="text-emerald-400 text-xs font-semibold uppercase tracking-wide">
-                  Incentive earned
-                </p>
-                <p className={`text-xs text-ds-ink-muted ${mono}`}>
-                  Ledger yield {spotlight.jobCard.incentiveLedger.yieldPercent ?? '—'}% · OEE{' '}
-                  {spotlight.jobCard.incentiveLedger.oeePct}%
-                </p>
-                {spotlight.jobCard.incentiveLedger.incentiveVerifiedAt ? (
-                  <p className="text-emerald-600 text-xs">Performance incentive verified</p>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={incentiveBusy}
-                    onClick={() => void verifyPerformanceIncentive(spotlight.jobCard.id)}
-                    className="mt-1 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-primary-foreground text-xs font-medium disabled:opacity-50"
-                  >
-                    {incentiveBusy ? '…' : 'Verify performance incentive'}
-                  </button>
-                )}
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/6 px-4 py-3.5">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-emerald-500 mb-2.5">Incentive Earned</p>
+              <div className="flex items-start gap-3">
+                <CircleDollarSign className="h-6 w-6 text-emerald-500 shrink-0 mt-0.5" strokeWidth={1.75} />
+                <div className="space-y-1.5">
+                  <p className={`text-xs text-ds-ink-muted ${mono}`}>
+                    Ledger yield {spotlight.jobCard.incentiveLedger.yieldPercent ?? '—'}% · OEE{' '}
+                    {spotlight.jobCard.incentiveLedger.oeePct}%
+                  </p>
+                  {spotlight.jobCard.incentiveLedger.incentiveVerifiedAt ? (
+                    <p className="text-emerald-500 text-xs font-medium">✓ Performance incentive verified</p>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={incentiveBusy}
+                      onClick={() => void verifyPerformanceIncentive(spotlight.jobCard.id)}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium disabled:opacity-50 transition-colors"
+                    >
+                      {incentiveBusy ? '…' : 'Verify performance incentive'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ) : null}

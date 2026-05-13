@@ -86,23 +86,21 @@ function MegaNavLink({ item }: { item: MegaNavItem }) {
   return (
     <Link
       href={item.href}
-      className="group flex gap-3 rounded-lg py-1.5 pl-2 pr-3 transition-colors duration-150 hover:bg-[var(--brand-bg-soft)]"
+      className="group flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3 transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-sm"
     >
-      <span
-        className={clsx(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg [&>svg]:h-4 [&>svg]:w-4',
-          item.iconWrap,
-        )}
-      >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18 [&>svg]:h-[18px] [&>svg]:w-[18px]">
         <Icon aria-hidden />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand-primary)]">
+        <span className="block text-[13px] font-semibold leading-tight text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand-primary)]">
           {item.label}
         </span>
-        <span className="mt-0.5 block text-xs leading-snug text-[var(--text-secondary)]">
+        <span className="mt-0.5 block truncate text-[11px] leading-snug text-[var(--text-secondary)]">
           {item.description}
         </span>
+      </span>
+      <span className="shrink-0 text-[var(--brand-primary)]/0 transition-all duration-150 group-hover:text-[var(--brand-primary)]/70 group-hover:translate-x-0.5">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden><path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </span>
     </Link>
   )
@@ -121,19 +119,22 @@ function BlockNavLink({
     <button
       type="button"
       onClick={() => (onNavigate ? onNavigate(item.href) : undefined)}
-      className="group w-full rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-3 text-left transition-colors hover:bg-[var(--bg-muted)]"
+      className="group relative w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3 text-left transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-sm"
     >
-      <div className="flex items-start gap-2.5">
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--bg-muted)] text-[var(--brand-primary)]">
-          <Icon className="h-4 w-4" aria-hidden />
+      <div className="flex items-center gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18">
+          <Icon className="h-[18px] w-[18px]" aria-hidden />
         </span>
-        <span className="min-w-0">
-          <span className="block text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--brand-primary)]">
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-semibold leading-tight text-[var(--text-primary)] transition-colors group-hover:text-[var(--brand-primary)]">
             {item.label}
           </span>
-          <span className="mt-0.5 block text-xs leading-snug text-[var(--text-secondary)]">
+          <span className="mt-0.5 block truncate text-[11px] leading-snug text-[var(--text-secondary)]">
             {description || 'Open module'}
           </span>
+        </span>
+        <span className="shrink-0 text-[var(--brand-primary)]/0 transition-all duration-150 group-hover:text-[var(--brand-primary)]/70 group-hover:translate-x-0.5">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden><path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </span>
       </div>
     </button>
@@ -506,19 +507,19 @@ export function DashboardShell({
                       {'items' in menu && openMenu === menu.key ? (
                         <div className="absolute left-0 top-full z-[70] pt-1 transition-all duration-150 ease-out">
                           <div className={clsx(
-                            'rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.1),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]',
+                            'rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_16px_48px_rgba(0,0,0,0.12),0_0_0_1px_rgba(249,115,22,0.08)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)]',
                             menu.key === 'live' || menu.key === 'production' || menu.key === 'masters'
-                              ? 'w-[760px] max-w-[calc(100vw-2rem)]'
+                              ? 'w-[780px] max-w-[calc(100vw-2rem)]'
                               : 'w-[520px] max-w-[calc(100vw-2rem)]',
                           )}>
                             {menu.key === 'live' ? (
-                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                              <p className="mb-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--brand-primary)]/70">
                                 Production Execution
                               </p>
                             ) : null}
                             <div
                               className={clsx(
-                                'grid gap-2',
+                                'grid gap-1.5',
                                 menu.items.length >= 6 ? 'grid-cols-3' : menu.items.length >= 3 ? 'grid-cols-2' : 'grid-cols-1',
                               )}
                             >
