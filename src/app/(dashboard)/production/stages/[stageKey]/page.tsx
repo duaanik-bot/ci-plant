@@ -711,7 +711,9 @@ export default function ProductionStagePage() {
       toast.error('Actual counter must be a valid non-negative number')
       return
     }
-    if (stageKey !== 'cutting' && counter != null && counter > 0 && (!Number.isFinite(received) || received <= 0)) {
+    // Pasting may receive 0 from upstream if handoff hasn't happened yet in executionOrchestration;
+    // allow save as long as the previous stage exists in stageMap or has pushed something.
+    if (stageKey !== 'cutting' && stageKey !== 'pasting' && counter != null && counter > 0 && (!Number.isFinite(received) || received <= 0)) {
       toast.error('Previous station not completed.')
       return
     }
@@ -808,21 +810,25 @@ export default function ProductionStagePage() {
     }
   }
 
-  function pastingExpectedCartons(row: Payload['jobCards'][number]): number {
-    // Prefer actual pushed qty from upstream stages (accounts for real wastage at die/sorting)
-    // Only fall back to planned sheets when no stage has run yet (brand-new job, nothing pushed)
+  // Returns the physical sheet count flowing into pasting, accounting for real upstream wastage.
+  // Priority: (1) actual pushed qty from sorting/die-cutting, (2) planned sheets if job hasn't started yet.
+  // Shows 0 when upstream stages have run but haven't handed off to pasting yet.
+  function pastingInboundSheets(row: Payload['jobCards'][number]): number {
+    const receivedSheets = getUpstreamSheets(row)
+    if (receivedSheets > 0) return receivedSheets
     const ex = getExecutionState(row)
     const sp = ex.stageProgress && typeof ex.stageProgress === 'object'
       ? (ex.stageProgress as Record<string, StageProgress>)
       : {}
-    // Check if any production stage has ever pushed something
     const anyStageHasPushed = Object.values(sp).some((s) => Number(s?.pushedQty ?? 0) > 0)
-    const receivedSheets = getUpstreamSheets(row)
-    const sheetsIn = receivedSheets > 0
-      ? receivedSheets
-      : anyStageHasPushed
-        ? 0 // upstream stages ran but didn't push to pasting yet — show 0 until actual handoff
-        : (row.jobCard.requiredSheets || row.jobCard.totalSheets || 0) // truly new job — show plan
+    // If a prior stage has run but hasn't reached pasting yet, show 0 (real handoff pending)
+    if (anyStageHasPushed) return 0
+    // Brand-new job with no activity — use planned sheet count as planning guide
+    return row.jobCard.requiredSheets || row.jobCard.totalSheets || 0
+  }
+
+  function pastingExpectedCartons(row: Payload['jobCards'][number]): number {
+    const sheetsIn = pastingInboundSheets(row)
     const ups = pastingUps(row)
     return ups > 0 ? Math.round(sheetsIn * ups) : sheetsIn
   }
@@ -1990,10 +1996,7 @@ export default function ProductionStagePage() {
             const pushedQty = Number(progress.pushedQty || 0)
             const availableToPush = Math.max(0, completedQty - pushedQty)
             const autoFromCounter = computeAutoFromCounter(row, getRowCounter(row))
-            const _upstreamActual = getUpstreamSheets(row)
-            const sheetInwardQty = _upstreamActual > 0
-              ? _upstreamActual
-              : (row.jobCard.requiredSheets || row.jobCard.totalSheets || 0)
+            const sheetInwardQty = stageKey === 'pasting' ? pastingInboundSheets(row) : getUpstreamSheets(row)
             const upsForPasting = stageKey === 'pasting' ? pastingUps(row) : 0
             const expectedCartons = stageKey === 'pasting' ? pastingExpectedCartons(row) : 0
             const actualCartons = stageKey === 'pasting' ? completedQty : 0
