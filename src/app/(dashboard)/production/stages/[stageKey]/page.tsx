@@ -811,19 +811,11 @@ export default function ProductionStagePage() {
   }
 
   // Returns the physical sheet count flowing into pasting, accounting for real upstream wastage.
-  // Priority: (1) actual pushed qty from sorting/die-cutting, (2) planned sheets if job hasn't started yet.
-  // Shows 0 when upstream stages have run but haven't handed off to pasting yet.
+  // Uses sorting's actual pushed qty when available (reflects real wastage from die/sorting).
+  // Falls back to planned sheets as a guide until the upstream handoff happens.
   function pastingInboundSheets(row: Payload['jobCards'][number]): number {
     const receivedSheets = getUpstreamSheets(row)
     if (receivedSheets > 0) return receivedSheets
-    const ex = getExecutionState(row)
-    const sp = ex.stageProgress && typeof ex.stageProgress === 'object'
-      ? (ex.stageProgress as Record<string, StageProgress>)
-      : {}
-    const anyStageHasPushed = Object.values(sp).some((s) => Number(s?.pushedQty ?? 0) > 0)
-    // If a prior stage has run but hasn't reached pasting yet, show 0 (real handoff pending)
-    if (anyStageHasPushed) return 0
-    // Brand-new job with no activity — use planned sheet count as planning guide
     return row.jobCard.requiredSheets || row.jobCard.totalSheets || 0
   }
 
