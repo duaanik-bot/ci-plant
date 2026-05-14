@@ -1111,15 +1111,19 @@ model VendorMaterialPurchaseOrder {
   procurementShortageFlag   String?   @map("procurement_shortage_flag") @db.VarChar(48)
   /// Committed replacement arrival — drives lead-buffer when flag is Awaiting_Replacement.
   replacementEtaAt          DateTime? @map("replacement_eta_at")
+  /// Source PR if this PO was created via the convert-to-po flow.
+  purchaseRequisitionId String?  @map("purchase_requisition_id")
   createdBy            String    @map("created_by")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
 
   supplier Supplier                        @relation(fields: [supplierId], references: [id])
+  purchaseRequisition PurchaseRequisition? @relation(fields: [purchaseRequisitionId], references: [id], onDelete: SetNull)
   lines    VendorMaterialPurchaseOrderLine[]
   receipts VendorMaterialReceipt[]
   qualityDebitNotes VendorQualityDebitNote[]
 
+  @@index([purchaseRequisitionId])
   @@map("vendor_material_purchase_orders")
 }
 
@@ -1961,6 +1965,7 @@ model PurchaseRequisition {
   createdAt        DateTime  @default(now()) @map("created_at")
 
   material Inventory @relation(fields: [materialId], references: [id])
+  vendorPurchaseOrders VendorMaterialPurchaseOrder[]
 
   @@map("purchase_requisitions")
 }

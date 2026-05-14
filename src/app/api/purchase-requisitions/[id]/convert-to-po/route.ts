@@ -7,8 +7,8 @@ import { createAuditLog } from '@/lib/audit'
 export const dynamic = 'force-dynamic'
 
 const bodySchema = z.object({
-  poReference: z.string().min(1).max(60),
   expectedDelivery: z.string().datetime().optional(),
+  supplierId: z.string().uuid().optional(),
 })
 
 export async function PUT(
@@ -27,7 +27,7 @@ export async function PUT(
   const parsed = bodySchema.safeParse(await req.json())
   if (!parsed.success) {
     return NextResponse.json(
-      { error: 'poReference required', details: parsed.error.flatten() },
+      { error: 'Invalid body', details: parsed.error.flatten() },
       { status: 400 }
     )
   }
@@ -41,30 +41,87 @@ export async function PUT(
     )
   }
 
+  const supplierId = pr.supplierId ?? parsed.data.supplierId
+  if (!supplierId) {
+    return NextResponse.json(
+      { error: 'PR has no supplier assigned — pass supplierId in body or assign on the PR before converting' },
+      { status: 400 }
+    )
+  }
+
+  if (!pr.boardType || pr.gsm == null) {
+    return NextResponse.json(
+      { error: 'PR is missing boardType or gsm — cannot create PO line' },
+      { status: 400 }
+    )
+  }
+
   const expectedDelivery = parsed.data.expectedDelivery
     ? new Date(parsed.data.expectedDelivery)
     : undefined
 
-  const updated = await db.purchaseRequisition.update({
-    where: { id },
-    data: {
-      status: 'converted_to_po',
-      poReference: parsed.data.poReference,
-      expectedDelivery,
-    },
+  const result = await db.$transaction(async (tx) => {
+    const now = new Date()
+    const yyyymmdd =
+      `${now.getFullYear()}` +
+      `${String(now.getMonth() + 1).padStart(2, '0')}` +
+      `${String(now.getDate()).padStart(2, '0')}`
+    const prefix = `PO-${yyyymmdd}-`
+    const sameDayCount = await tx.vendorMaterialPurchaseOrder.count({
+      where: { poNumber: { startsWith: prefix } },
+    })
+    const poNumber = `${prefix}${String(sameDayCount + 1).padStart(3, '0')}`
+
+    const newPo = await tx.vendorMaterialPurchaseOrder.create({
+      data: {
+        poNumber,
+        supplierId,
+        purchaseRequisitionId: pr.id,
+        requiredDeliveryDate: expectedDelivery,
+        createdBy: user!.id,
+        lines: {
+          create: [
+            {
+              boardGrade: pr.boardType!,
+              gsm: pr.gsm!,
+              totalSheets: 0,
+              totalWeightKg: pr.qtyRequired,
+              linkedPoLineIds: [],
+            },
+          ],
+        },
+      },
+    })
+
+    const updatedPr = await tx.purchaseRequisition.update({
+      where: { id: pr.id },
+      data: {
+        status: 'converted_to_po',
+        poReference: newPo.id,
+        expectedDelivery,
+      },
+    })
+
+    return { newPo, updatedPr }
   })
 
   await createAuditLog({
     userId: user!.id,
     action: 'UPDATE',
     tableName: 'purchase_requisitions',
-    recordId: updated.id,
-    oldValue: { status: pr.status },
-    newValue: { status: updated.status, poReference: parsed.data.poReference },
+    recordId: result.updatedPr.id,
+    oldValue: { status: pr.status, poReference: pr.poReference },
+    newValue: {
+      status: result.updatedPr.status,
+      poReference: result.newPo.id,
+      vendorPoNumber: result.newPo.poNumber,
+    },
   })
 
   return NextResponse.json({
     success: true,
-    message: 'Marked as converted to PO.',
+    message: 'Converted to vendor PO.',
+    purchaseOrderId: result.newPo.id,
+    poNumber: result.newPo.poNumber,
   })
 }
