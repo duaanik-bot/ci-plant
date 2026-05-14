@@ -51,17 +51,17 @@ export function PoDrawerSpotlightLines({
           const tr = toolingResults?.find((t) => t.key === i)
           const dot =
             tr?.signal === 'green'
-              ? 'bg-emerald-500'
+              ? 'bg-[var(--success-bg)]'
               : tr?.signal === 'yellow'
                 ? 'bg-ds-warning'
-                : 'bg-rose-500'
+                : 'bg-[var(--error-bg)]'
           const isSpotlight =
             active && lineItemMatchesDrawerQuery(li.cartonName, spotlightQuery)
           return (
             <li
               key={li.id}
               data-spotlight-match={isSpotlight ? 'true' : undefined}
-              className={`rounded-md border px-2 py-1.5 text-xs transition-colors ${
+              className={`rounded-ds-sm border px-2 py-1.5 text-xs transition-colors ${
                 isSpotlight
                   ? 'border-l-2 border-l-orange-500 bg-orange-500/10 border-ds-line/40'
                   : 'border border-ds-line/40 bg-background'

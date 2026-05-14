@@ -56,9 +56,9 @@ type LocalCuttingMeta = {
 function statusTone(status: CuttingStatus): string {
   switch (status) {
     case 'completed':
-      return 'border-emerald-600/50 text-emerald-300 bg-emerald-500/10'
+      return 'border-[var(--success)]/50 text-[var(--success)] bg-[var(--success-bg)]'
     case 'running':
-      return 'border-sky-600/50 text-sky-300 bg-sky-500/10'
+      return 'border-[var(--info)]/50 text-[var(--info)] bg-[var(--info-bg)]'
     case 'assigned':
       return 'border-ds-warning/60 text-ds-warning bg-ds-warning/10'
     default:
@@ -376,15 +376,15 @@ export default function CuttingQueuePage() {
           <span className={`rounded border border-ds-warning/40 bg-ds-warning/10 px-2 py-0.5 text-xs ${mono}`}>
             Assigned: {counters.assigned}
           </span>
-          <span className={`rounded border border-sky-600/40 bg-sky-500/10 px-2 py-0.5 text-xs ${mono}`}>
+          <span className={`rounded border border-[var(--info)]/40 bg-[var(--info-bg)] px-2 py-0.5 text-xs ${mono}`}>
             Running: {counters.running}
           </span>
-          <span className={`rounded border border-emerald-600/40 bg-emerald-500/10 px-2 py-0.5 text-xs ${mono}`}>
+          <span className={`rounded border border-[var(--success)]/40 bg-[var(--success-bg)] px-2 py-0.5 text-xs ${mono}`}>
             Completed: {counters.completed}
           </span>
         </div>
 
-        <div className="rounded-xl border border-border/40 bg-card overflow-hidden">
+        <div className="rounded-ds-lg border border-border/40 bg-card overflow-hidden">
           <div className={`px-3 py-2 border-b border-border/40 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>
             Cutting jobs
           </div>
@@ -447,14 +447,14 @@ export default function CuttingQueuePage() {
                     return (
                       <tr
                         key={r.id}
-                        className={`border-b border-border/20 hover:bg-ds-main/30 cursor-pointer ${status === 'completed' ? 'bg-emerald-500/12' : ''}`}
+                        className={`border-b border-border/20 hover:bg-ds-main/30 cursor-pointer ${status === 'completed' ? 'bg-[var(--success-bg)]' : ''}`}
                         onClick={() => setActiveJobId(r.id)}
                       >
                         <td className="py-1.5 px-3">{operatorDisplay}</td>
                         <td className="py-1.5 px-3">
                           <Link
                             href={`/production/job-cards/${r.id}`}
-                            className="text-sky-400 hover:underline"
+                            className="text-[var(--info)] hover:underline"
                             onClick={(e) => e.stopPropagation()}
                           >
                             JC-{r.jobCardNumber}
@@ -569,7 +569,7 @@ export default function CuttingQueuePage() {
             </div>
 
             <div className="space-y-3 p-4 text-xs">
-              <section className="rounded-lg border border-ds-line/40 p-2.5">
+              <section className="rounded-ds-md border border-ds-line/40 p-2.5">
                 <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Job Snapshot</p>
                 <div className="space-y-1">
                   <p><span className="text-ds-ink-faint">Carton:</span> {activeRow.poLine?.cartonName ?? '—'}</p>
@@ -579,7 +579,7 @@ export default function CuttingQueuePage() {
                 </div>
               </section>
 
-              <section className="rounded-lg border border-ds-line/40 p-2.5">
+              <section className="rounded-ds-md border border-ds-line/40 p-2.5">
                 <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Cutting Decisions</p>
                 <div className="space-y-2">
                   <label className="block">
@@ -637,18 +637,18 @@ export default function CuttingQueuePage() {
                 </div>
               </section>
 
-              <section className="rounded-lg border border-ds-line/40 p-2.5">
+              <section className="rounded-ds-md border border-ds-line/40 p-2.5">
                 <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Tooling Info</p>
                 <p><span className="text-ds-ink-faint">Die Number:</span> {activeRow.poLine?.dyeNumber != null ? `#${activeRow.poLine.dyeNumber}` : '—'}</p>
                 <p><span className="text-ds-ink-faint">Die Status:</span> {activeRow.poLine?.dyeNumber != null ? 'Available' : 'Required'}</p>
               </section>
 
-              <section className="rounded-lg border border-ds-line/40 p-2.5">
+              <section className="rounded-ds-md border border-ds-line/40 p-2.5">
                 <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-2 ${mono}`}>Execution Controls</p>
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    className="rounded border border-sky-600/40 px-3 py-1 text-sky-300"
+                    className="rounded border border-[var(--info)]/40 px-3 py-1 text-[var(--info)]"
                     onClick={() => updateMeta(activeRow.id, { status: 'running' })}
                   >
                     Start
@@ -662,7 +662,7 @@ export default function CuttingQueuePage() {
                   </button>
                   <button
                     type="button"
-                    className="rounded border border-emerald-600/40 px-3 py-1 text-emerald-300"
+                    className="rounded border border-[var(--success)]/40 px-3 py-1 text-[var(--success)]"
                     onClick={() => updateMeta(activeRow.id, { status: 'completed' })}
                   >
                     Complete

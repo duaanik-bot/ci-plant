@@ -130,14 +130,14 @@ export default function MastersMachinesPage() {
                 prev.size === list.length ? new Set() : new Set(list.map((m) => m.id)),
               )
             }
-            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
           >
             {selectedIds.size === list.length && list.length > 0 ? 'Unselect all' : 'Select all'}
           </button>
           <button
             type="button"
             onClick={() => setSelectedIds(new Set())}
-            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
           >
             Clear
           </button>
@@ -145,13 +145,13 @@ export default function MastersMachinesPage() {
             type="button"
             disabled={selectedIds.size === 0 || bulkDeleting}
             onClick={() => void handleBulkDelete()}
-            className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-sm text-rose-600 disabled:opacity-50 dark:text-rose-400"
+            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
           >
             {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
           </button>
           <Link
             href="/masters/machines/new"
-            className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+            className="rounded-ds-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
           >
             Add machine
           </Link>
@@ -191,7 +191,7 @@ export default function MastersMachinesPage() {
               return (
                 <tr
                   key={m.id}
-                  className={`${enterpriseTrClass} ${pm?.overdue ? 'bg-rose-50 dark:bg-rose-950/20' : ''}`}
+                  className={`${enterpriseTrClass} ${pm?.overdue ? 'bg-rose-50 dark:bg-[var(--error-bg)]' : ''}`}
                 >
                   <td className={enterpriseTdClass}>
                     <input
@@ -230,10 +230,10 @@ export default function MastersMachinesPage() {
                     <span
                       className={
                         m?.status === 'active'
-                          ? 'text-emerald-600 dark:text-emerald-400'
+                          ? 'text-[var(--success)] dark:text-[var(--success)]'
                           : m?.status === 'under_maintenance'
                             ? 'text-ds-warning dark:text-ds-warning'
-                            : 'text-rose-600 dark:text-rose-400'
+                            : 'text-[var(--error)] dark:text-[var(--error)]'
                       }
                     >
                       {(m?.status ?? '—').replace('_', ' ')}
@@ -241,19 +241,19 @@ export default function MastersMachinesPage() {
                   </td>
                   <td className={enterpriseTdMonoClass}>{m?.lastPmDate ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>
-                    <span className={m?.nextPmDue && new Date(m.nextPmDue) < new Date() ? 'text-rose-600 dark:text-rose-400' : ''}>
+                    <span className={m?.nextPmDue && new Date(m.nextPmDue) < new Date() ? 'text-[var(--error)] dark:text-[var(--error)]' : ''}>
                       {m?.nextPmDue ?? '—'}
                     </span>
                   </td>
                   <td className={enterpriseTdClass}>
-                    <Link href={`/masters/machines/${m?.id ?? ''}`} className="mr-2 text-blue-600 hover:underline dark:text-blue-400">
+                    <Link href={`/masters/machines/${m?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
                       Edit
                     </Link>
                     <button
                       type="button"
                       onClick={() => void handleDelete(m)}
                       disabled={deletingId === m.id}
-                      className="text-rose-600 hover:underline disabled:opacity-50 dark:text-rose-400"
+                      className="text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
                     >
                       {deletingId === m.id ? 'Deleting…' : 'Delete'}
                     </button>

@@ -8,14 +8,14 @@ export default function MastersDepartmentsPage() {
         <button
           type="button"
           disabled
-          className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground opacity-50"
+          className="rounded-ds-md bg-primary px-3 py-1.5 text-sm text-primary-foreground opacity-50"
           title="Department add flow is pending setup"
         >
           Add department
         </button>
       </div>
       <p className="text-sm text-ds-ink-faint">
-        Department module is pending setup. Use <Link href="/masters/users" className="text-blue-600 hover:underline">Users</Link> and role mapping for now.
+        Department module is pending setup. Use <Link href="/masters/users" className="text-[var(--info)] hover:underline">Users</Link> and role mapping for now.
       </p>
     </div>
   )

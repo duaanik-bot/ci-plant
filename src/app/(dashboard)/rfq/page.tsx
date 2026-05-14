@@ -39,7 +39,7 @@ export default function RfqPage() {
         <h1 className="text-xl font-bold text-ds-warning">RFQ Pipeline</h1>
         <Link
           href="/rfq/new"
-          className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+          className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
         >
           New RFQ
         </Link>
@@ -50,7 +50,7 @@ export default function RfqPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-1.5 rounded-lg bg-ds-elevated border border-ds-line/60 text-sm"
+          className="px-3 py-1.5 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-sm"
         >
           <option value="">All</option>
           <option value="received">RFQ received</option>
@@ -60,7 +60,7 @@ export default function RfqPage() {
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-ds-line/50">
+      <div className="overflow-x-auto rounded-ds-md border border-ds-line/50">
         <table className="w-full text-sm">
           <thead className="bg-ds-elevated text-left">
             <tr>

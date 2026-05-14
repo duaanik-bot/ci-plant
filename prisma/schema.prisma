@@ -543,25 +543,30 @@ model Ncr {
 // ─────────────────────────────────────────
 
 model Dispatch {
-  id              String    @id @default(uuid())
-  jobId           String    @map("job_id")
-  qtyDispatched   Int       @map("qty_dispatched")
-  vehicleNumber   String?   @map("vehicle_number") @db.VarChar(30)
-  driverName      String?   @map("driver_name") @db.VarChar(80)
-  ewayBillNumber  String?   @map("eway_bill_number") @db.VarChar(30)
-  ewayBillExpiry  DateTime? @map("eway_bill_expiry") @db.Date
-  qaReleaseBy     String?   @map("qa_release_by")
-  qaReleaseAt     DateTime? @map("qa_release_at")
-  dispatchedAt    DateTime? @map("dispatched_at")
-  podReceivedAt   DateTime? @map("pod_received_at")
-  podUrl          String?   @map("pod_url") // Cloudflare R2 path
-  status          String    @default("pending_qa") @db.VarChar(20)
+  id                  String    @id @default(uuid())
+  // Legacy Job FK — kept nullable for back-compat. New dispatches originating from the
+  // production-flow pasting completion populate `productionJobCardId` instead.
+  jobId               String?   @map("job_id")
+  productionJobCardId String?   @map("production_job_card_id")
+  qtyDispatched       Int       @map("qty_dispatched")
+  vehicleNumber       String?   @map("vehicle_number") @db.VarChar(30)
+  driverName          String?   @map("driver_name") @db.VarChar(80)
+  ewayBillNumber      String?   @map("eway_bill_number") @db.VarChar(30)
+  ewayBillExpiry      DateTime? @map("eway_bill_expiry") @db.Date
+  qaReleaseBy         String?   @map("qa_release_by")
+  qaReleaseAt         DateTime? @map("qa_release_at")
+  dispatchedAt        DateTime? @map("dispatched_at")
+  podReceivedAt       DateTime? @map("pod_received_at")
+  podUrl              String?   @map("pod_url") // Cloudflare R2 path
+  status              String    @default("pending_qa") @db.VarChar(20)
   // pending_qa | qa_released | dispatched | pod_received
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  job Job @relation(fields: [jobId], references: [id])
+  job     Job?               @relation(fields: [jobId], references: [id])
+  jobCard ProductionJobCard? @relation(fields: [productionJobCardId], references: [id], onDelete: SetNull)
 
+  @@index([productionJobCardId])
   @@map("dispatches")
 }
 
@@ -929,6 +934,7 @@ model PoLineItem {
   /// not_calculated | pending | on_order | dispatched (legacy) | paper_ordered (legacy) | received
   materialProcurementStatus String @default("not_calculated") @map("material_procurement_status") @db.VarChar(32)
   specOverrides    Json?         @map("spec_overrides")
+  tolerancePct     Decimal       @default(2.0) @map("tolerance_pct") @db.Decimal(5,2)
   /// Director Command Center — floor broadcast & WIP clocks (synced across modules).
   directorPriority              Boolean   @default(false) @map("director_priority")
   directorHold                  Boolean   @default(false) @map("director_hold")
@@ -950,9 +956,35 @@ model PoLineItem {
   shadeCard           ShadeCard?           @relation(fields: [shadeCardId], references: [id], onDelete: SetNull)
   materialQueue MaterialQueue?
   weightReconciliation MaterialWeightReconciliation?
+  shortExcessRecords ShortExcessRecord[]
 
   @@index([shadeCardId])
   @@map("po_line_items")
+}
+
+// ─────────────────────────────────────────
+// FINISHED GOODS SHORT & EXCESS RECONCILIATION
+// ─────────────────────────────────────────
+
+model ShortExcessRecord {
+  id           String    @id @default(uuid())
+  poLineItemId String    @map("po_line_item_id")
+  jobCardId    String?   @map("job_card_id")
+  billId       String?   @map("bill_id")
+  poQty        Int       @map("po_qty")
+  actualQty    Int       @map("actual_qty")
+  tolerancePct Decimal   @default(2.0) @map("tolerance_pct") @db.Decimal(5,2)
+  varianceQty  Int       @map("variance_qty")
+  /// open | closed | sent_to_planning | sent_to_fg
+  status       String    @default("open")
+  notes        String?
+  closedAt     DateTime? @map("closed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  poLineItem PoLineItem @relation(fields: [poLineItemId], references: [id])
+
+  @@map("short_excess_records")
 }
 
 // ─────────────────────────────────────────
@@ -1232,6 +1264,7 @@ model ProductionJobCard {
   shadeCardsIssued ShadeCard[] @relation("ShadeCardIssuedJobCard")
   materialReservations MaterialReservation[]
   materialShortages    MaterialShortage[]
+  dispatches           Dispatch[]
 
   @@map("production_job_cards")
 }

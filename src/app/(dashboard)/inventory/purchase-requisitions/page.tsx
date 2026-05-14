@@ -78,9 +78,9 @@ type GroupedCard = {
 
 const STAGES: Array<{ key: Stage; label: string; accent: string }> = [
   { key: 'draft', label: PR_STAGE_LABEL.draft, accent: 'border-orange-400/50' },
-  { key: 'approved', label: PR_STAGE_LABEL.approved, accent: 'border-sky-400/50' },
-  { key: 'ordered', label: PR_STAGE_LABEL.ordered, accent: 'border-indigo-400/50' },
-  { key: 'received', label: PR_STAGE_LABEL.received, accent: 'border-emerald-400/50' },
+  { key: 'approved', label: PR_STAGE_LABEL.approved, accent: 'border-[var(--info)]/50' },
+  { key: 'ordered', label: PR_STAGE_LABEL.ordered, accent: 'border-[var(--info)]/50' },
+  { key: 'received', label: PR_STAGE_LABEL.received, accent: 'border-[var(--success)]/50' },
 ]
 
 export default function PurchaseRequisitionsPage() {
@@ -308,7 +308,7 @@ export default function PurchaseRequisitionsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search material / job / reason"
-            className="w-full max-w-sm rounded-lg border border-ds-line/60 bg-ds-card px-3 py-2 text-sm"
+            className="w-full max-w-sm rounded-ds-md border border-ds-line/60 bg-ds-card px-3 py-2 text-sm"
           />
           <span className="text-xs text-ds-ink-muted">{selectedCardIds.size} selected</span>
           <button
@@ -331,7 +331,7 @@ export default function PurchaseRequisitionsPage() {
             type="button"
             disabled={selectedCardIds.size === 0 || bulkBusy}
             onClick={() => void bulkDeleteSelected()}
-            className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
+            className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-2 py-1 text-xs text-[var(--error)] hover:bg-[var(--error-bg)] disabled:opacity-40"
           >
             Delete Selected
           </button>
@@ -343,7 +343,7 @@ export default function PurchaseRequisitionsPage() {
           const rows = grouped[stage.key]
           const groupedByMaterial = cardsByStage[stage.key]
           return (
-            <div key={stage.key} className={`rounded-xl border ${stage.accent} bg-ds-card/30 p-3`}>
+            <div key={stage.key} className={`rounded-ds-lg border ${stage.accent} bg-ds-card/30 p-3`}>
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <input
@@ -369,7 +369,7 @@ export default function PurchaseRequisitionsPage() {
 
               <div className="space-y-2">
                 {groupedByMaterial.map((g) => (
-                  <div key={`${stage.key}-${g.key}`} className="rounded-lg border border-ds-line/40 bg-background p-2">
+                  <div key={`${stage.key}-${g.key}`} className="rounded-ds-md border border-ds-line/40 bg-background p-2">
                     <div className="mb-1 flex items-start justify-between gap-2">
                       <label className="mt-0.5 inline-flex items-center">
                         <input
@@ -391,7 +391,7 @@ export default function PurchaseRequisitionsPage() {
                         type="button"
                         disabled={movingId != null || bulkBusy}
                         onClick={() => void deleteCard(g.rows[0]!.id)}
-                        className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
+                        className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-2 py-1 text-xs text-[var(--error)] hover:bg-[var(--error-bg)] disabled:opacity-40"
                       >
                         Delete card
                       </button>
@@ -422,7 +422,7 @@ export default function PurchaseRequisitionsPage() {
                           ).toLocaleDateString('en-IN')
                         : '-'}
                     </p>
-                    <p className={g.priority === 'urgent' ? 'text-rose-300 text-xs' : 'text-amber-300 text-xs'}>
+                    <p className={g.priority === 'urgent' ? 'text-[var(--error)] text-xs' : 'text-[var(--warning)] text-xs'}>
                       Priority: {g.priority === 'urgent' ? 'Urgent' : 'Normal'}
                     </p>
 
@@ -442,7 +442,7 @@ export default function PurchaseRequisitionsPage() {
                   </div>
                 ))}
                 {groupedByMaterial.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-ds-line/40 p-3 text-center text-xs text-ds-ink-faint">
+                  <p className="rounded-ds-md border border-dashed border-ds-line/40 p-3 text-center text-xs text-ds-ink-faint">
                     No items in {stage.label.toLowerCase()}.
                   </p>
                 ) : null}

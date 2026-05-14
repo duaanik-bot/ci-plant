@@ -123,14 +123,14 @@ export default function JobsPage() {
                   <td className={enterpriseTdMonoClass}>{Number.isNaN(due.getTime()) ? '—' : format(due, 'dd MMM yyyy')}</td>
                   <td
                     className={`${enterpriseTdMonoClass} ${
-                      typeof daysLeft === 'number' && daysLeft < 2 ? 'font-semibold text-rose-600 dark:text-rose-400' : ''
+                      typeof daysLeft === 'number' && daysLeft < 2 ? 'font-semibold text-[var(--error)] dark:text-[var(--error)]' : ''
                     }`}
                   >
                     {daysLeft}
                   </td>
                   <td className={enterpriseTdClass}>
                     <div className="flex items-center gap-2">
-                      <Link href={`/jobs/${job?.id ?? ''}`} className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-500/15">
+                      <Link href={`/jobs/${job?.id ?? ''}`} className="rounded border border-[var(--info)]/40 bg-[var(--info-bg)] px-2 py-1 text-xs font-medium text-[var(--info)] hover:bg-[var(--info-bg)]">
                         View
                       </Link>
                       <a

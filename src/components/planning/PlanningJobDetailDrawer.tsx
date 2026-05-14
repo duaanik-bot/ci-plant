@@ -1872,7 +1872,7 @@ export function PlanningJobDetailDrawer({
             </div>
           </div>
           {reserveInlineError ? (
-            <div className="mt-2 rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">
+            <div className="mt-2 rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
               {reserveInlineError}
             </div>
           ) : null}
@@ -2452,7 +2452,7 @@ export function PlanningJobDetailDrawer({
       </StandardDrawer>
       {reserveConfirmOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
-          <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-ds-line/50 bg-card shadow-2xl">
+          <div className="w-full max-w-3xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <h3 className="text-sm font-semibold text-ds-ink">Confirm Material Reservation</h3>
               <button
@@ -2765,7 +2765,7 @@ export function PlanningJobDetailDrawer({
                     <p className="text-ds-warning">Shortage will remain without PR.</p>
                   ) : null}
                   {reserveModalError ? (
-                    <div className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">
+                    <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
                       {reserveModalError}
                     </div>
                   ) : null}
@@ -2801,7 +2801,7 @@ export function PlanningJobDetailDrawer({
       ) : null}
       {reservationControlOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
-          <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-ds-line/50 bg-card shadow-2xl">
+          <div className="w-full max-w-2xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <h3 className="text-sm font-semibold text-ds-ink">
                 {reservationControl?.mode === 'adjust'
@@ -2947,7 +2947,7 @@ export function PlanningJobDetailDrawer({
                     <p className="text-ds-warning">{reservationControl.warningMessage}</p>
                   ) : null}
                   {reservationControlError ? (
-                    <div className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">
+                    <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
                       {reservationControlError}
                     </div>
                   ) : null}

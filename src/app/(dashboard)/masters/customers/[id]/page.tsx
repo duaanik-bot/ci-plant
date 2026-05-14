@@ -94,7 +94,7 @@ export default function EditCustomerPage() {
   }
 
   if (loading) return <div className="text-ds-ink-muted">Loading…</div>
-  if (!customer) return <div className="text-red-400">Customer not found</div>
+  if (!customer) return <div className="text-[var(--error)]">Customer not found</div>
 
   return (
     <div className="max-w-lg">
@@ -105,22 +105,22 @@ export default function EditCustomerPage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              fieldErrors.name ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              fieldErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           />
-          {fieldErrors.name && <p className="mt-1 text-sm text-red-400">{fieldErrors.name}</p>}
+          {fieldErrors.name && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.name}</p>}
         </div>
         <div>
           <label className="block text-sm text-ds-ink-muted mb-1">GST number</label>
           <input
             value={gstNumber}
             onChange={(e) => setGstNumber(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              fieldErrors.gstNumber ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              fieldErrors.gstNumber ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           />
-          {fieldErrors.gstNumber && <p className="mt-1 text-sm text-red-400">{fieldErrors.gstNumber}</p>}
+          {fieldErrors.gstNumber && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.gstNumber}</p>}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -128,7 +128,7 @@ export default function EditCustomerPage() {
             <input
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
@@ -136,11 +136,11 @@ export default function EditCustomerPage() {
             <input
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-                fieldErrors.contactPhone ? 'border-red-500' : 'border-ds-line/60'
+              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+                fieldErrors.contactPhone ? 'border-[var(--error)]' : 'border-ds-line/60'
               }`}
             />
-            {fieldErrors.contactPhone && <p className="mt-1 text-sm text-red-400">{fieldErrors.contactPhone}</p>}
+            {fieldErrors.contactPhone && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.contactPhone}</p>}
           </div>
         </div>
         <div>
@@ -149,11 +149,11 @@ export default function EditCustomerPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              fieldErrors.email ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              fieldErrors.email ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           />
-          {fieldErrors.email && <p className="mt-1 text-sm text-red-400">{fieldErrors.email}</p>}
+          {fieldErrors.email && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.email}</p>}
         </div>
         <div>
           <label className="block text-sm text-ds-ink-muted mb-1">Billing address</label>
@@ -161,7 +161,7 @@ export default function EditCustomerPage() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -171,7 +171,7 @@ export default function EditCustomerPage() {
             min={0}
             value={creditLimit}
             onChange={(e) => setCreditLimit(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -202,13 +202,13 @@ export default function EditCustomerPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
+            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
           <Link
             href="/masters/customers"
-            className="px-4 py-2 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground"
+            className="px-4 py-2 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-foreground"
           >
             Cancel
           </Link>

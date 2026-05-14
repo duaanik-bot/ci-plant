@@ -140,9 +140,9 @@ function daysInQueue(createdAtIso: string): number {
 }
 
 function ageClass(days: number): string {
-  if (days <= 3) return 'text-emerald-400'
+  if (days <= 3) return 'text-[var(--success)]'
   if (days <= 7) return 'text-ds-warning'
-  return 'text-rose-400 animate-po-age-alert'
+  return 'text-[var(--error)] animate-po-age-alert'
 }
 
 function pipelineBadge(phase: Row['readiness']['pipelinePhase']) {
@@ -151,19 +151,19 @@ function pipelineBadge(phase: Row['readiness']['pipelinePhase']) {
     case 'finalized':
       return {
         label: 'Finalized',
-        className: `${base} bg-emerald-500/15 text-emerald-700 ring-emerald-500/35 dark:bg-emerald-500/20 dark:text-emerald-200`,
+        className: `${base} bg-[var(--success-bg)] text-[var(--success)] ring-[var(--success)]/35 dark:bg-[var(--success-bg)] dark:text-[var(--success)]`,
         pulse: false,
       }
     case 'revision':
       return {
         label: 'Revision required',
-        className: `${base} bg-rose-500/12 text-rose-700 ring-rose-500/30 dark:bg-rose-500/20 dark:text-rose-200`,
+        className: `${base} bg-[var(--error-bg)] text-[var(--error)] ring-[var(--error)]/30 dark:bg-[var(--error-bg)] dark:text-[var(--error)]`,
         pulse: false,
       }
     case 'awaiting_client':
       return {
         label: 'Awaiting client',
-        className: `${base} bg-blue-500/12 text-blue-700 ring-blue-500/30 dark:bg-blue-500/20 dark:text-blue-200`,
+        className: `${base} bg-[var(--info-bg)] text-[var(--info)] ring-[var(--info)]/30 dark:bg-[var(--info-bg)] dark:text-[var(--info)]`,
         pulse: true,
       }
     default:
@@ -315,13 +315,13 @@ function ActionsCell({
       <button
         onClick={onPushJobCard}
         disabled={disablePushJobCard}
-        className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition disabled:opacity-40"
+        className="px-3 py-1.5 text-sm rounded-ds-sm bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition disabled:opacity-40"
       >
         {pushJobCardLabel ?? 'Push Job Card'}
       </button>
       <button
         onClick={onDeleteRow}
-        className="px-2 py-1.5 text-xs rounded-md border border-rose-500/40 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300"
+        className="px-2 py-1.5 text-xs rounded-ds-sm border border-[var(--error)]/40 text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]"
         title="Delete row"
       >
         Delete
@@ -332,7 +332,7 @@ function ActionsCell({
           ref={triggerRef}
           type="button"
           onClick={() => setHubsOpen((v) => !v)}
-          className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] text-[var(--text-primary)]"
+          className="px-3 py-1.5 text-sm rounded-ds-sm border border-[var(--border)] text-[var(--text-primary)]"
         >
           Push to Hubs ▾
         </button>
@@ -342,7 +342,7 @@ function ActionsCell({
         ? createPortal(
             <div
               ref={menuRef}
-              className="fixed w-[240px] rounded-lg bg-[var(--bg-elevated)] border border-[var(--border)] shadow-lg"
+              className="fixed w-[240px] rounded-ds-md bg-[var(--bg-elevated)] border border-[var(--border)] shadow-lg"
               style={{ top: menuPos.top, left: menuPos.left, zIndex: 9999 }}
             >
               <div className="p-2 flex flex-col gap-1">
@@ -403,7 +403,7 @@ function ActionsCell({
       <button
         onClick={onRecallPlanning}
         disabled={disableRecall}
-        className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-40"
+        className="px-3 py-1.5 text-sm rounded-ds-sm border border-[var(--border)] text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-40"
       >
         {recallLabel ?? 'Send Back'}
       </button>
@@ -829,11 +829,11 @@ function SortHeader({
         {label}
         <span className="inline-flex flex-col -space-y-1.5" aria-hidden>
           <ChevronUp
-            className={`h-3 w-3 shrink-0 ${active && dir === 'asc' ? 'text-blue-600 dark:text-ds-warning' : 'text-ds-ink-faint dark:text-ds-ink-faint'}`}
+            className={`h-3 w-3 shrink-0 ${active && dir === 'asc' ? 'text-[var(--info)] dark:text-ds-warning' : 'text-ds-ink-faint dark:text-ds-ink-faint'}`}
             strokeWidth={2}
           />
           <ChevronDown
-            className={`h-3 w-3 shrink-0 ${active && dir === 'desc' ? 'text-blue-600 dark:text-ds-warning' : 'text-ds-ink-faint dark:text-ds-ink-faint'}`}
+            className={`h-3 w-3 shrink-0 ${active && dir === 'desc' ? 'text-[var(--info)] dark:text-ds-warning' : 'text-ds-ink-faint dark:text-ds-ink-faint'}`}
             strokeWidth={2}
           />
         </span>
@@ -854,7 +854,7 @@ function LightboxModal({ src, alt, onClose }: { src: string | null; alt: string;
     >
       <button
         type="button"
-        className="absolute right-3 top-3 rounded-lg border border-border bg-card p-2 text-ds-ink-muted hover:text-foreground"
+        className="absolute right-3 top-3 rounded-ds-md border border-border bg-card p-2 text-ds-ink-muted hover:text-foreground"
         onClick={onClose}
         aria-label="Close preview"
       >
@@ -1956,14 +1956,14 @@ export default function DesigningQueuePage() {
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
       <div className="w-full space-y-4 p-4 pb-10">
-        <section className="rounded-lg border border-ds-line/40 bg-card p-4">
+        <section className="rounded-ds-md border border-ds-line/40 bg-card p-4">
           <h1 className="text-[18px] font-semibold text-ds-ink">AW Queue</h1>
           <p className="mt-1 text-[13px] text-ds-ink-faint">
             {rows.length} Jobs • {readyCount} Ready • {Math.max(0, rows.length - readyCount)} Pending
           </p>
         </section>
 
-        <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3">
+        <section className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3">
           <div className="flex min-h-[56px] flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <div className="relative w-full max-w-[420px]">
@@ -2010,7 +2010,7 @@ export default function DesigningQueuePage() {
                 type="button"
                 onClick={() => void bulkDeleteSelectedRows()}
                 disabled={selectedRowIds.size === 0 || bulkDeleting || bulkPushing || bulkToolingPushing != null}
-                className="h-9 px-3 text-xs border-rose-500/40 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300"
+                className="h-9 px-3 text-xs border-[var(--error)]/40 text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]"
               >
                 {bulkDeleting ? 'Deleting…' : 'Bulk Delete'}
               </Button>
@@ -2025,7 +2025,7 @@ export default function DesigningQueuePage() {
                   Push to Hubs
                 </Button>
                 {hubsMenuOpen ? (
-                  <div className="absolute right-0 top-10 z-20 min-w-[10rem] rounded-lg border border-ds-line/60 bg-card p-1 shadow-lg">
+                  <div className="absolute right-0 top-10 z-20 min-w-[10rem] rounded-ds-md border border-ds-line/60 bg-card p-1 shadow-lg">
                     <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToPlateHub() }}>Plate</button>
                     <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToToolingHub('DIE') }}>Die</button>
                     <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToToolingHub('BLOCK') }}>Emboss</button>
@@ -2046,7 +2046,7 @@ export default function DesigningQueuePage() {
           </div>
         </section>
 
-        <section className="rounded-lg border border-ds-line/40 bg-card p-4">
+        <section className="rounded-ds-md border border-ds-line/40 bg-card p-4">
           <div className="flex flex-wrap items-center gap-2">
             {[
               { key: 'all' as const, label: 'All' },
@@ -2066,7 +2066,7 @@ export default function DesigningQueuePage() {
           </div>
         </section>
         {sortedRows.length === 0 ? (
-          <section className="flex min-h-[420px] items-center justify-center rounded-lg border border-ds-line/40 bg-card p-4">
+          <section className="flex min-h-[420px] items-center justify-center rounded-ds-md border border-ds-line/40 bg-card p-4">
             <div className="text-center">
               <ImageOff className="mx-auto h-10 w-10 text-ds-ink-faint" />
               <h3 className="mt-3 text-base font-semibold text-ds-ink">No artwork jobs yet</h3>
@@ -2083,7 +2083,7 @@ export default function DesigningQueuePage() {
             </div>
           </section>
         ) : (
-        <section className="rounded-lg border border-ds-line/40 bg-card p-4">
+        <section className="rounded-ds-md border border-ds-line/40 bg-card p-4">
         <EnterpriseTableShell>
           <table className="w-full min-w-[1020px] table-fixed border-collapse text-left text-xs">
             <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
@@ -2169,12 +2169,12 @@ export default function DesigningQueuePage() {
                         onClick={(e) => openRowDrawerFromClick(e, firstRow)}
                         className={`border-l-[3px] transition-colors ${
                           groupCompleted
-                            ? 'border-emerald-500/70 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
+                            ? 'border-[var(--success)]/70 bg-[var(--success-bg)] hover:bg-[var(--success-bg)] dark:bg-[var(--success-bg)] dark:hover:bg-[var(--success-bg)]'
                             : groupPlatePushedPending
-                              ? 'border-rose-300/70 bg-rose-500/5 hover:bg-rose-500/10 dark:bg-rose-500/10 dark:hover:bg-rose-500/16'
+                              ? 'border-[var(--error)]/70 bg-[var(--error-bg)] hover:bg-[var(--error-bg)] dark:bg-[var(--error-bg)] dark:hover:bg-[var(--error-bg)]'
                               : groupJobCardOnly
-                                  ? 'border-violet-300/70 bg-violet-500/5 hover:bg-violet-500/10 dark:bg-violet-500/10 dark:hover:bg-violet-500/16'
-                              : 'border-sky-500/70 bg-sky-500/5 hover:bg-sky-500/8'
+                                  ? 'border-[var(--tooling,#7c3aed)]/70 bg-[var(--tooling-bg,rgba(124,58,237,0.12))] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] dark:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] dark:hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))]'
+                              : 'border-[var(--info)]/70 bg-[var(--info-bg)] hover:bg-[var(--info-bg)]'
                         } ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}
                       >
                         <td className="px-2 py-1.5 align-middle text-center">
@@ -2208,7 +2208,7 @@ export default function DesigningQueuePage() {
                           />
                         </td>
                         <td className="px-2 py-1.5 align-middle text-xs leading-snug text-neutral-900 dark:text-ds-ink">
-                          <div className="mb-0.5 inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1 py-0.5 text-xs font-bold uppercase text-sky-600 dark:text-sky-300">
+                          <div className="mb-0.5 inline-flex items-center gap-1 rounded border border-[var(--info)]/40 bg-[var(--info-bg)] px-1 py-0.5 text-xs font-bold uppercase text-[var(--info)] dark:text-[var(--info)]">
                             <Layers className="h-3 w-3 shrink-0" aria-hidden /> Gang · {groupRows.length}
                           </div>
                           <div className="flex min-w-0 items-center gap-1 text-xs text-ds-ink-muted">
@@ -2220,7 +2220,7 @@ export default function DesigningQueuePage() {
                             {groupRows.map((r) => (
                               <span
                                 key={r.id}
-                                className={`min-w-0 truncate ${groupCompleted ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+                                className={`min-w-0 truncate ${groupCompleted ? 'text-[var(--success)] dark:text-[var(--success)]' : ''}`}
                                 title={r.cartonName}
                               >
                                 {r.cartonName}
@@ -2252,7 +2252,7 @@ export default function DesigningQueuePage() {
                         </td>
                         <td className="px-2 py-1.5 align-middle">
                           {groupJobCardReady === groupRows.length ? (
-                            <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
+                            <span className="rounded border border-[var(--success)]/40 bg-[var(--success-bg)] px-1.5 py-0.5 text-xs text-[var(--success)]">
                               Ready ({groupJobCardReady}/{groupRows.length})
                             </span>
                           ) : (
@@ -2273,7 +2273,7 @@ export default function DesigningQueuePage() {
                                   return next
                                 })
                               }}
-                              className="inline-flex items-center gap-0.5 rounded border border-sky-500/40 bg-sky-500/8 px-2 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-500/15 dark:text-sky-300"
+                              className="inline-flex items-center gap-0.5 rounded border border-[var(--info)]/40 bg-[var(--info-bg)] px-2 py-0.5 text-xs font-medium text-[var(--info)] hover:bg-[var(--info-bg)] dark:text-[var(--info)]"
                             >
                               {isExpanded ? '▲ Collapse' : `▼ ${groupRows.length} items`}
                             </button>
@@ -2301,7 +2301,7 @@ export default function DesigningQueuePage() {
                               }
                               className={`rounded border px-2 py-0.5 text-xs disabled:opacity-40 ${
                                 groupFinalizeEligibleCount > 0
-                                  ? 'border-emerald-500/40 text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-200'
+                                  ? 'border-[var(--success)]/40 text-[var(--success)] hover:bg-[var(--success-bg)] dark:text-[var(--success)]'
                                   : 'border-ds-line text-ds-warning hover:bg-ds-warning/10'
                               }`}
                             >
@@ -2320,7 +2320,7 @@ export default function DesigningQueuePage() {
                               }
                               className={`rounded border px-2 py-0.5 text-xs disabled:opacity-40 ${
                                 groupRecallEligibleCount > 0
-                                  ? 'border-rose-500/35 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300'
+                                  ? 'border-[var(--error)]/35 text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]'
                                   : 'border-ds-line text-ds-warning hover:bg-ds-warning/10'
                               }`}
                             >
@@ -2358,12 +2358,12 @@ export default function DesigningQueuePage() {
                             onClick={(e) => openRowDrawerFromClick(e, r)}
                             className={`border-l-[3px] transition-colors ${
                               completed
-                                ? 'border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
+                                ? 'border-[var(--success)]/50 bg-[var(--success-bg)] hover:bg-[var(--success-bg)] dark:bg-[var(--success-bg)] dark:hover:bg-[var(--success-bg)]'
                                 : platePushedOnly
-                                  ? 'border-rose-300/70 bg-rose-500/5 hover:bg-rose-500/10 dark:bg-rose-500/10 dark:hover:bg-rose-500/16'
+                                  ? 'border-[var(--error)]/70 bg-[var(--error-bg)] hover:bg-[var(--error-bg)] dark:bg-[var(--error-bg)] dark:hover:bg-[var(--error-bg)]'
                                   : jobCardOnly
-                                    ? 'border-violet-300/70 bg-violet-500/5 hover:bg-violet-500/10 dark:bg-violet-500/10 dark:hover:bg-violet-500/16'
-                                  : 'border-sky-500/30 bg-sky-500/3 hover:bg-sky-500/6'
+                                    ? 'border-[var(--tooling,#7c3aed)]/70 bg-[var(--tooling-bg,rgba(124,58,237,0.12))] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] dark:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] dark:hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))]'
+                                  : 'border-[var(--info)]/30 bg-[var(--info-bg)] hover:bg-[var(--info-bg)]'
                             } ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                           >
                             <td className="px-2 py-1 align-middle text-center">
@@ -2392,7 +2392,7 @@ export default function DesigningQueuePage() {
                               />
                             </td>
                             <td className="px-2 py-1 align-middle text-xs leading-snug text-ds-ink">
-                              <span className="text-sky-500/70">↳{si + 1}</span>{' '}
+                              <span className="text-[var(--info)]/70">↳{si + 1}</span>{' '}
                               <span className={`${mono} text-ds-warning`}>{r.po.poNumber}</span>
                               <div className="flex min-w-0 items-center gap-1 text-ds-ink-muted">
                                 <CustomerAvatar name={r.po.customer.name} logoUrl={r.po.customer.logoUrl} />
@@ -2400,7 +2400,7 @@ export default function DesigningQueuePage() {
                               </div>
                               <button
                                 type="button"
-                                className={`min-w-0 truncate text-left font-medium underline-offset-2 hover:underline ${completed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+                                className={`min-w-0 truncate text-left font-medium underline-offset-2 hover:underline ${completed ? 'text-[var(--success)] dark:text-[var(--success)]' : ''}`}
                                 onClick={() => setActiveRowDrawer(r)}
                               >
                                 {r.cartonName}
@@ -2418,7 +2418,7 @@ export default function DesigningQueuePage() {
                             <td className="px-2 py-1 align-middle">
                               <div className="flex flex-wrap items-center gap-1">
                                 {phase === 'awaiting_client' ? (
-                                  <span className="rounded border border-sky-500/45 bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-700 dark:text-sky-300">
+                                  <span className="rounded border border-[var(--info)]/45 bg-[var(--info-bg)] px-1.5 py-0.5 text-xs text-[var(--info)] dark:text-[var(--info)]">
                                     Awaiting client
                                   </span>
                                 ) : null}
@@ -2432,7 +2432,7 @@ export default function DesigningQueuePage() {
                             <td className="px-2 py-1 align-middle">
                               <div className="flex items-center justify-between gap-2">
                                 {jcState === 'ready' ? (
-                                  <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
+                                  <span className="rounded border border-[var(--success)]/40 bg-[var(--success-bg)] px-1.5 py-0.5 text-xs text-[var(--success)]">
                                     Ready
                                   </span>
                                 ) : (
@@ -2505,11 +2505,11 @@ export default function DesigningQueuePage() {
                       priRow
                         ? `${INDUSTRIAL_PRIORITY_ROW_CLASS} hover:bg-ds-warning/5 dark:hover:bg-ds-warning/12`
                         : completed
-                          ? 'border-l-2 border-emerald-500/70 bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
+                          ? 'border-l-2 border-[var(--success)]/70 bg-[var(--success-bg)] hover:bg-[var(--success-bg)] dark:bg-[var(--success-bg)] dark:hover:bg-[var(--success-bg)]'
                         : platePushedOnly
-                          ? 'border-l-2 border-rose-300/70 bg-rose-500/5 hover:bg-rose-500/10 dark:bg-rose-500/10 dark:hover:bg-rose-500/16'
+                          ? 'border-l-2 border-[var(--error)]/70 bg-[var(--error-bg)] hover:bg-[var(--error-bg)] dark:bg-[var(--error-bg)] dark:hover:bg-[var(--error-bg)]'
                           : jobCardOnly
-                            ? 'border-l-2 border-violet-300/70 bg-violet-500/5 hover:bg-violet-500/10 dark:bg-violet-500/10 dark:hover:bg-violet-500/16'
+                            ? 'border-l-2 border-[var(--tooling,#7c3aed)]/70 bg-[var(--tooling-bg,rgba(124,58,237,0.12))] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] dark:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] dark:hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))]'
                           : 'border-l-2 border-transparent hover:border-ds-warning hover:bg-neutral-50 dark:hover:bg-ds-elevated/50'
                     } ${r.directorHold ? 'opacity-45' : ''} ${rowClosed ? 'opacity-40 saturate-0' : ''} ${focusedRowId === r.id ? 'ring-1 ring-ds-warning/45' : ''}`}
                   >
@@ -2568,13 +2568,13 @@ export default function DesigningQueuePage() {
                           </div>
                           <button
                             type="button"
-                            className={`mt-0.5 min-w-0 text-left font-medium underline-offset-2 hover:underline ${completed ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+                            className={`mt-0.5 min-w-0 text-left font-medium underline-offset-2 hover:underline ${completed ? 'text-[var(--success)] dark:text-[var(--success)]' : ''}`}
                             onClick={() => setActiveRowDrawer(r)}
                           >
                             {r.cartonName ?? '—'}
                           </button>
                           {readPlanningCore(spec).layoutType === 'gang' ? (
-                            <span className="mt-0.5 inline-block w-fit rounded border border-sky-500/45 bg-sky-500/10 px-1 py-0.5 text-xs font-semibold uppercase text-sky-700 dark:text-sky-300">
+                            <span className="mt-0.5 inline-block w-fit rounded border border-[var(--info)]/45 bg-[var(--info-bg)] px-1 py-0.5 text-xs font-semibold uppercase text-[var(--info)] dark:text-[var(--info)]">
                               Gang print
                             </span>
                           ) : readPlanningCore(spec).savedAt ? (
@@ -2588,7 +2588,7 @@ export default function DesigningQueuePage() {
                               title="Batch progress"
                             >
                               <div
-                                className="h-full bg-emerald-600/90"
+                                className="h-full bg-[var(--success-bg)]"
                                 style={{ width: `${Math.round(batchSeg.shippedPct * 100)}%` }}
                               />
                               <div
@@ -2630,7 +2630,7 @@ export default function DesigningQueuePage() {
                     <td className="px-2 py-2 align-middle">
                       <div className="flex flex-wrap items-center gap-1">
                         {phase === 'awaiting_client' ? (
-                          <span className="rounded border border-sky-500/45 bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-700 dark:text-sky-300">
+                          <span className="rounded border border-[var(--info)]/45 bg-[var(--info-bg)] px-1.5 py-0.5 text-xs text-[var(--info)] dark:text-[var(--info)]">
                             Awaiting client
                           </span>
                         ) : null}
@@ -2644,7 +2644,7 @@ export default function DesigningQueuePage() {
                     <td className="px-2 py-2 align-middle">
                       <div className="flex items-center justify-between gap-2">
                         {jcState === 'ready' ? (
-                          <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
+                          <span className="rounded border border-[var(--success)]/40 bg-[var(--success-bg)] px-1.5 py-0.5 text-xs text-[var(--success)]">
                             Ready
                           </span>
                         ) : (
@@ -2752,13 +2752,13 @@ export default function DesigningQueuePage() {
                         <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                           {checklist.map((item) => (
                             <div key={item.label} className="flex items-center gap-1.5">
-                              <span className={`inline-block h-1.5 w-1.5 rounded-full ${item.ok ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                              <span className={item.ok ? 'text-emerald-700' : 'text-rose-700'}>{item.label}</span>
+                              <span className={`inline-block h-1.5 w-1.5 rounded-full ${item.ok ? 'bg-[var(--success-bg)]' : 'bg-[var(--error-bg)]'}`} />
+                              <span className={item.ok ? 'text-[var(--success)]' : 'text-[var(--error)]'}>{item.label}</span>
                             </div>
                           ))}
                         </div>
                         {!checklistOk ? (
-                          <p className="mt-1 text-[11px] text-rose-600">Complete all required fields before Push All.</p>
+                          <p className="mt-1 text-[11px] text-[var(--error)]">Complete all required fields before Push All.</p>
                         ) : null}
                       </div>
 
@@ -2802,9 +2802,9 @@ export default function DesigningQueuePage() {
                         const label = step === 'jobCard' ? 'Job Card' : step.charAt(0).toUpperCase() + step.slice(1)
                         const cls =
                           state === 'ok'
-                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                            ? 'border-[var(--success)] bg-emerald-50 text-[var(--success)]'
                             : state === 'failed'
-                              ? 'border-rose-300 bg-rose-50 text-rose-700'
+                              ? 'border-[var(--error)] bg-rose-50 text-[var(--error)]'
                               : state === 'skipped'
                                 ? 'border-ds-line/50 bg-ds-elevated/20 text-ds-ink-faint'
                                 : 'border-ds-line/50 bg-ds-main text-ds-ink-faint'
@@ -2816,8 +2816,8 @@ export default function DesigningQueuePage() {
                       })}
                     </div>
                     {Object.values(drawerPushStates).some((s) => s === 'failed') ? (
-                      <div className="rounded border border-rose-300 bg-rose-50 p-2">
-                        <p className="mb-1 text-[11px] font-medium text-rose-700">Failure Recovery</p>
+                      <div className="rounded border border-[var(--error)] bg-rose-50 p-2">
+                        <p className="mb-1 text-[11px] font-medium text-[var(--error)]">Failure Recovery</p>
                         <div className="flex flex-wrap gap-1.5">
                           {(Object.entries(drawerPushStates) as [DrawerPushStep, DrawerPushState][])
                             .filter(([, s]) => s === 'failed')
@@ -2825,14 +2825,14 @@ export default function DesigningQueuePage() {
                               <button
                                 key={step}
                                 type="button"
-                                className="rounded border border-rose-300 px-2 py-1 text-[11px] text-rose-700 hover:bg-rose-100"
+                                className="rounded border border-[var(--error)] px-2 py-1 text-[11px] text-[var(--error)] hover:bg-[var(--error-bg)]"
                                 onClick={() => void retryDrawerStep(step)}
                               >
                                 Retry {step}
                               </button>
                             ))}
                         </div>
-                        <p className="mt-1 text-[11px] text-rose-700">
+                        <p className="mt-1 text-[11px] text-[var(--error)]">
                           {Object.entries(drawerPushErrors)
                             .map(([k, v]) => `${k}: ${v}`)
                             .join(' • ')}

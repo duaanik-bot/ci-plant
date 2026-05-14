@@ -53,18 +53,18 @@ type DrawerPayload = {
 
 function statusChip(status: string): { label: string; cls: string } {
   if (status === 'qa_released' || status === 'closed') {
-    return { label: 'Released', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' }
+    return { label: 'Released', cls: 'border-[var(--success)]/40 bg-[var(--success-bg)]/10 text-[var(--success)]' }
   }
   if (status === 'in_progress' || status === 'final_qc') {
-    return { label: 'Ready', cls: 'border-amber-400/40 bg-amber-400/10 text-amber-300' }
+    return { label: 'Ready', cls: 'border-[var(--warning)]/40 bg-[var(--warning-bg)]/10 text-[var(--warning)]' }
   }
   return { label: 'Draft', cls: 'border-ds-line/50 bg-ds-main text-ds-ink-muted' }
 }
 
 function readinessMeta(ok: boolean | null): { label: string; dot: string; hint: string } {
-  if (ok === true) return { label: 'Ready', dot: 'bg-emerald-500', hint: 'Board available' }
-  if (ok === null) return { label: 'Waiting', dot: 'bg-amber-400', hint: 'Board in procurement' }
-  return { label: 'Not Ready', dot: 'bg-rose-500', hint: 'Board missing' }
+  if (ok === true) return { label: 'Ready', dot: 'bg-[var(--success-bg)]', hint: 'Board available' }
+  if (ok === null) return { label: 'Waiting', dot: 'bg-[var(--warning-bg)]', hint: 'Board in procurement' }
+  return { label: 'Not Ready', dot: 'bg-[var(--error-bg)]', hint: 'Board missing' }
 }
 
 export function JobCardDrawer({
@@ -138,7 +138,7 @@ export function JobCardDrawer({
 
         <CardSection title="Board Readiness">
           <div className="mb-2 text-xs text-ds-ink-faint">{data.boardType} · {data.gsm}</div>
-          <span className={`rounded px-2 py-1 text-xs ${data.boardReady ? 'bg-emerald-500/10 text-emerald-300' : data.boardWaiting ? 'bg-ds-warning/10 text-ds-warning' : 'bg-rose-500/10 text-rose-300'}`}>
+          <span className={`rounded px-2 py-1 text-xs ${data.boardReady ? 'bg-[var(--success-bg)]/10 text-[var(--success)]' : data.boardWaiting ? 'bg-ds-warning/10 text-ds-warning' : 'bg-[var(--error-bg)]/10 text-[var(--error)]'}`}>
             {data.boardReady ? 'Ready' : data.boardWaiting ? 'Waiting' : 'Not Ready'}
           </span>
         </CardSection>

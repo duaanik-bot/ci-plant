@@ -25,7 +25,7 @@ export default async function MastersLayout({
         >
           ← Customer POs
         </Link>
-        <Link href="/masters" className="text-base font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">
+        <Link href="/masters" className="text-base font-semibold text-[var(--info)] hover:text-[var(--info)] dark:text-[var(--info)]">
           Masters
         </Link>
       </div>

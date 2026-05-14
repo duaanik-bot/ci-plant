@@ -33,7 +33,7 @@ export default function EmbossLocationViewPage() {
 
       <div className="space-y-4">
         {Object.entries(data).map(([rack, blocks]) => (
-          <div key={rack} className="rounded-xl border border-ds-line/50 bg-ds-card p-3">
+          <div key={rack} className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-3">
             <div className="flex justify-between"><h2 className="text-sm font-semibold text-ds-ink">{rack}</h2><span className="text-xs text-ds-ink-faint">{blocks.length}/6 used</span></div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
               {Array.from({ length: 6 }, (_, i) => {

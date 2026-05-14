@@ -2,13 +2,15 @@ import type { ReactNode } from 'react'
 import { cn } from '@/lib/cn'
 
 type CardSectionProps = {
-  title: string
+  title?: string
   id?: string
   children: ReactNode
   className?: string
+  /** Optional right-aligned slot in the header (actions, badges) */
+  action?: ReactNode
 }
 
-export function CardSection({ title, id, children, className }: CardSectionProps) {
+export function CardSection({ title, id, children, className, action }: CardSectionProps) {
   return (
     <section
       id={id}
@@ -17,8 +19,34 @@ export function CardSection({ title, id, children, className }: CardSectionProps
         className,
       )}
     >
-      <h3 className="ds-typo-label mb-1.5 font-semibold uppercase tracking-wider text-ds-ink-faint">{title}</h3>
+      {title || action ? (
+        <div className="flex items-center justify-between gap-3">
+          {title ? <SectionLabel>{title}</SectionLabel> : <span />}
+          {action ? <div className="shrink-0">{action}</div> : null}
+        </div>
+      ) : null}
       {children}
     </section>
+  )
+}
+
+type SectionLabelProps = {
+  children: ReactNode
+  /** Use brand accent color instead of muted ink */
+  accent?: boolean
+  className?: string
+}
+
+export function SectionLabel({ children, accent, className }: SectionLabelProps) {
+  return (
+    <p
+      className={cn(
+        'text-[11px] font-semibold uppercase tracking-widest',
+        accent ? 'text-[var(--brand-primary)]' : 'text-ds-ink-faint',
+        className,
+      )}
+    >
+      {children}
+    </p>
   )
 }

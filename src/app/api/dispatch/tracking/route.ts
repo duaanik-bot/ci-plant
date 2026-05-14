@@ -17,25 +17,39 @@ export async function GET() {
           customer: { select: { id: true, name: true } },
         },
       },
+      jobCard: {
+        select: {
+          id: true,
+          jobCardNumber: true,
+          customer: { select: { id: true, name: true } },
+        },
+      },
     },
     orderBy: { dispatchedAt: 'desc' },
   })
 
-  const data = records.map((d) => ({
-    id: d.id,
-    status: d.status,
-    qtyDispatched: d.qtyDispatched,
-    vehicleNumber: d.vehicleNumber,
-    driverName: d.driverName,
-    ewayBillNumber: d.ewayBillNumber,
-    dispatchedAt: d.dispatchedAt,
-    podReceivedAt: d.podReceivedAt,
-    jobId: d.job.id,
-    jobNumber: d.job.jobNumber,
-    customerId: d.job.customer.id,
-    customerName: d.job.customer.name,
-  }))
+  const data = records.map((d) => {
+    // Prefer the production-flow jobCard when present; fall back to legacy Job.
+    const jc = d.jobCard
+    const job = d.job
+    const id = jc?.id ?? job?.id ?? ''
+    const number = jc ? `JC-${jc.jobCardNumber}` : job?.jobNumber ?? '—'
+    const customer = jc?.customer ?? job?.customer ?? { id: '', name: '—' }
+    return {
+      id: d.id,
+      status: d.status,
+      qtyDispatched: d.qtyDispatched,
+      vehicleNumber: d.vehicleNumber,
+      driverName: d.driverName,
+      ewayBillNumber: d.ewayBillNumber,
+      dispatchedAt: d.dispatchedAt,
+      podReceivedAt: d.podReceivedAt,
+      jobId: id,
+      jobNumber: number,
+      customerId: customer.id,
+      customerName: customer.name,
+    }
+  })
 
   return NextResponse.json(data)
 }
-

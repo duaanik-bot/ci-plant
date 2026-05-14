@@ -126,7 +126,7 @@ const RFQ_PIPELINE_STAGES = [
 
 function StatCardSkeleton() {
   return (
-    <div className="bg-ds-elevated rounded-xl p-5 border border-ds-line/50 animate-pulse">
+    <div className="bg-ds-elevated rounded-ds-lg p-5 border border-ds-line/50 animate-pulse">
       <div className="h-6 w-6 rounded bg-ds-elevated ml-auto mb-3" />
       <div className="h-9 w-16 bg-ds-elevated rounded mb-2" />
       <div className="h-4 w-24 bg-ds-elevated rounded" />
@@ -140,7 +140,7 @@ function dueDateClass(dueDate: string): string {
   today.setHours(0, 0, 0, 0)
   due.setHours(0, 0, 0, 0)
   const diff = due.getTime() - today.getTime()
-  if (diff < 0) return 'text-red-400'
+  if (diff < 0) return 'text-[var(--error)]'
   if (diff === 0) return 'text-ds-warning'
   return 'text-foreground'
 }
@@ -216,7 +216,7 @@ export default function DashboardClient() {
             <Link
               key={card.key}
               href={card.href}
-              className="bg-ds-elevated rounded-xl p-5 border border-ds-line/50 cursor-pointer hover:border-blue-500 transition-colors flex flex-col relative"
+              className="bg-ds-elevated rounded-ds-lg p-5 border border-ds-line/50 cursor-pointer hover:border-[var(--info-bg)] transition-colors flex flex-col relative"
             >
               <div className="absolute top-4 right-4 text-ds-ink-faint">
                 <Icon className="h-6 w-6" />
@@ -231,12 +231,12 @@ export default function DashboardClient() {
       {/* ROW 2 — THREE COLUMNS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* LEFT — Press Status — Live */}
-        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Press Status — Live</h2>
           {isLoading ? (
             <div className="space-y-2">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-3 animate-pulse">
+                <div key={i} className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-3 animate-pulse">
                   <div className="h-4 w-16 bg-ds-elevated rounded mb-2" />
                   <div className="h-3 w-full bg-ds-elevated rounded" />
                 </div>
@@ -253,16 +253,16 @@ export default function DashboardClient() {
                     : 'border-l-ds-line/50'
                 const dotColor =
                   p.status === 'active'
-                    ? 'bg-green-500'
+                    ? 'bg-[var(--success-bg)]'
                     : p.status === 'under_maintenance'
-                    ? 'bg-red-500'
+                    ? 'bg-[var(--error-bg)]'
                     : 'bg-ds-line/40'
                 const barPct = Math.min(100, (p.sheets / SHEETS_TARGET) * 100)
 
                 return (
                   <div
                     key={p.machineCode}
-                    className={`rounded-lg border border-ds-line/50 border-l-4 ${borderColor} bg-ds-elevated/60 p-3 space-y-2`}
+                    className={`rounded-ds-md border border-ds-line/50 border-l-4 ${borderColor} bg-ds-elevated/60 p-3 space-y-2`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-mono font-bold text-ds-warning">{p.machineCode}</span>
@@ -301,7 +301,7 @@ export default function DashboardClient() {
         </div>
 
         {/* MIDDLE — Active Jobs Pipeline */}
-        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4 flex flex-col">
+        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4 flex flex-col">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Active Jobs Pipeline</h2>
           <div className="space-y-2 overflow-y-auto max-h-80">
             {(pipeline || []).length === 0 && (
@@ -319,7 +319,7 @@ export default function DashboardClient() {
                 <Link
                   key={job.id}
                   href={`/workflow/${job.id}`}
-                  className="block rounded-lg bg-ds-elevated/60 border border-ds-line/50 px-3 py-2 hover:border-blue-500/60 transition-colors"
+                  className="block rounded-ds-md bg-ds-elevated/60 border border-ds-line/50 px-3 py-2 hover:border-[var(--info)]/60 transition-colors"
                 >
                   <div className="flex justify-between text-xs">
                     <span className="font-mono text-ds-warning">{job.jobNumber}</span>
@@ -329,7 +329,7 @@ export default function DashboardClient() {
                   <div className="flex items-center gap-0.5 mt-1.5 flex-wrap">
                     {Array.from({ length: WORKFLOW_STAGE_COUNT }, (_, i) =>
                       i < filled ? (
-                        <CircleDot key={i} className="h-2.5 w-2.5 text-blue-400 fill-blue-400" />
+                        <CircleDot key={i} className="h-2.5 w-2.5 text-[var(--info)] fill-blue-400" />
                       ) : (
                         <Circle key={i} className="h-2.5 w-2.5 text-ds-ink-faint" />
                       )
@@ -349,7 +349,7 @@ export default function DashboardClient() {
         </div>
 
         {/* RIGHT — Action Required */}
-        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4 flex flex-col">
+        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4 flex flex-col">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Action Required</h2>
           <div className="space-y-1 overflow-y-auto max-h-80">
             {(alerts || []).length === 0 && (
@@ -372,7 +372,7 @@ export default function DashboardClient() {
                   <p
                     className={`text-xs font-semibold ${
                       a.severity === 'critical'
-                        ? 'text-red-400'
+                        ? 'text-[var(--error)]'
                         : a.severity === 'warning'
                         ? 'text-ds-warning'
                         : 'text-ds-ink'
@@ -390,7 +390,7 @@ export default function DashboardClient() {
 
       {/* ROW 3 — Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
-        <div className="lg:col-span-3 rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="lg:col-span-3 rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Impressions This Week</h2>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={TREND_DATA}>
@@ -407,7 +407,7 @@ export default function DashboardClient() {
             </LineChart>
           </ResponsiveContainer>
         </div>
-        <div className="lg:col-span-2 rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="lg:col-span-2 rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Wastage % This Month</h2>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={WASTAGE_DATA} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
@@ -438,14 +438,14 @@ export default function DashboardClient() {
       </div>
 
       {/* ROW 4 — RFQ Pipeline */}
-      <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4 mb-6">
+      <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4 mb-6">
         <h2 className="text-sm font-semibold text-ds-ink mb-3">RFQ Pipeline</h2>
         <div className="flex flex-wrap items-center gap-2">
           {RFQ_PIPELINE_STAGES.map((stage, idx) => (
             <span key={stage.key} className="flex items-center gap-2">
               <Link
                 href={`/rfq?status=${stage.key}`}
-                className="bg-ds-elevated rounded-lg px-4 py-3 text-center hover:bg-ds-line/30 transition-colors min-w-[100px]"
+                className="bg-ds-elevated rounded-ds-md px-4 py-3 text-center hover:bg-ds-line/30 transition-colors min-w-[100px]"
               >
                 <span className="block text-xl font-bold text-foreground">
                   {rfqCountByStatus[stage.key] ?? 0}
@@ -462,11 +462,11 @@ export default function DashboardClient() {
 
       {/* ROW 5 — Three columns */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Stock Alerts</h2>
           <div className="space-y-2 overflow-y-auto max-h-48">
             {(stockAlerts || []).length === 0 ? (
-              <p className="text-sm text-green-400">All stock levels normal ✓</p>
+              <p className="text-sm text-[var(--success)]">All stock levels normal ✓</p>
             ) : (
               (stockAlerts || []).map((item) => {
                 const available = Number(item.qtyAvailable)
@@ -483,7 +483,7 @@ export default function DashboardClient() {
                     </span>
                     <span
                       className={`shrink-0 px-2 py-0.5 rounded text-xs font-medium ${
-                        critical ? 'bg-red-500/20 text-red-400' : 'bg-ds-warning/8 text-ds-warning'
+                        critical ? 'bg-[var(--error-bg)] text-[var(--error)]' : 'bg-ds-warning/8 text-ds-warning'
                       }`}
                     >
                       {critical ? 'Critical' : 'Warning'}
@@ -494,7 +494,7 @@ export default function DashboardClient() {
             )}
           </div>
         </div>
-        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Dispatch This Week</h2>
           <div className="space-y-2 overflow-y-auto max-h-48">
             {dispatchThisWeek.length === 0 ? (
@@ -527,11 +527,11 @@ export default function DashboardClient() {
             )}
           </div>
         </div>
-        <div className="rounded-xl bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Quality Overview</h2>
           <div className="space-y-2">
             {(openNcrs || []).length === 0 ? (
-              <p className="text-sm text-green-400">No open NCRs ✓</p>
+              <p className="text-sm text-[var(--success)]">No open NCRs ✓</p>
             ) : (
               <>
                 <p className="text-sm text-ds-ink-muted">
@@ -545,7 +545,7 @@ export default function DashboardClient() {
                 </p>
                 <Link
                   href="/qms/ncr"
-                  className="inline-block text-blue-400 text-sm mt-2 hover:underline"
+                  className="inline-block text-[var(--info)] text-sm mt-2 hover:underline"
                 >
                   View all NCRs →
                 </Link>

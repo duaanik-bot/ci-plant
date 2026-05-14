@@ -4,10 +4,9 @@ import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
 import { purchaseOrderSchema } from '@/lib/validations'
-import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
 import { dyeMapFromRows, poHasCriticalTooling } from '@/lib/po-tooling-critical'
 import { computePoReadiness } from '@/lib/po-readiness'
-import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
+import { buildPoNumber, createPurchaseOrderWithLines } from '@/lib/po-create'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,17 +88,6 @@ const createSchema = purchaseOrderSchema.omit({
   deliveryRequiredBy: z.string().optional().nullable(),
   lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
 })
-
-function buildPoNumber(existingMax: string | null): string {
-  const year = new Date().getFullYear()
-  const prefix = `CI-PO-${year}-`
-  if (!existingMax || !existingMax.startsWith(prefix)) {
-    return `${prefix}0001`
-  }
-  const lastSeq = parseInt(existingMax.replace(prefix, ''), 10) || 0
-  const nextSeq = String(lastSeq + 1).padStart(4, '0')
-  return `${prefix}${nextSeq}`
-}
 
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
@@ -257,63 +245,48 @@ export async function POST(req: NextRequest) {
 
   let created: Awaited<ReturnType<typeof db.purchaseOrder.create>>
   try {
-    created = await db.$transaction(async (tx) => {
-      const po = await tx.purchaseOrder.create({
-        data: {
-          poNumber,
-          customerId: data.customerId,
-          poDate: new Date(data.poDate),
-          deliveryRequiredBy: data.deliveryRequiredBy?.trim()
-            ? new Date(data.deliveryRequiredBy.trim())
-            : null,
-          remarks: data.remarks || null,
-          status: data.status || 'draft',
-          isPriority: data.isPriority === true,
-          createdBy: user!.id,
-        },
-      })
-
-      await Promise.all(
-        safeLineItems.map((li) =>
-          tx.poLineItem.create({
-            data: {
-              poId: po.id,
-              cartonId: li.cartonId,
-              cartonName: li.cartonName,
-              cartonSize: li.cartonSize || null,
-              quantity: li.quantity,
-              artworkCode: li.artworkCode || null,
-              backPrint: li.backPrint || 'No',
-              rate: li.rate != null ? li.rate : null,
-              gsm: li.gsm ?? null,
-              gstPct: li.gstPct,
-              coatingType: li.coatingType || null,
-              otherCoating: li.otherCoating || null,
-              embossingLeafing: li.embossingLeafing || null,
-              paperType: li.paperType || null,
-              dyeId: li.dyeId || null,
-              remarks: li.remarks || null,
-              setNumber: li.setNumber || null,
-              dieMasterId: li.dieMasterId || null,
-              toolingLocked: li.toolingLocked ?? true,
-              lineDieType: li.lineDieType || null,
-              dimLengthMm: li.dimLengthMm ?? null,
-              dimWidthMm: li.dimWidthMm ?? null,
-              dimHeightMm: li.dimHeightMm ?? null,
-              specOverrides: withDefaultPrePressAuditLead(
-                li.specOverrides && Object.keys(li.specOverrides).length > 0
-                  ? (li.specOverrides as Record<string, unknown>)
-                  : null,
-              ) as object,
-            },
-          })
-        )
-      )
-
-      await syncMaterialRequirementsForPurchaseOrder(po.id, tx)
-
-      return po
-    })
+    created = await db.$transaction((tx) =>
+      createPurchaseOrderWithLines(tx, {
+        poNumber,
+        customerId: data.customerId,
+        poDate: new Date(data.poDate),
+        deliveryRequiredBy: data.deliveryRequiredBy?.trim()
+          ? new Date(data.deliveryRequiredBy.trim())
+          : null,
+        remarks: data.remarks || null,
+        status: data.status || 'draft',
+        isPriority: data.isPriority === true,
+        createdBy: user!.id,
+        lineItems: safeLineItems.map((li) => ({
+          cartonId: li.cartonId,
+          cartonName: li.cartonName,
+          cartonSize: li.cartonSize || null,
+          quantity: li.quantity,
+          artworkCode: li.artworkCode || null,
+          backPrint: li.backPrint || 'No',
+          rate: li.rate ?? null,
+          gsm: li.gsm ?? null,
+          gstPct: li.gstPct,
+          coatingType: li.coatingType || null,
+          otherCoating: li.otherCoating || null,
+          embossingLeafing: li.embossingLeafing || null,
+          paperType: li.paperType || null,
+          dyeId: li.dyeId || null,
+          remarks: li.remarks || null,
+          setNumber: li.setNumber || null,
+          dieMasterId: li.dieMasterId || null,
+          toolingLocked: li.toolingLocked ?? true,
+          lineDieType: li.lineDieType || null,
+          dimLengthMm: li.dimLengthMm ?? null,
+          dimWidthMm: li.dimWidthMm ?? null,
+          dimHeightMm: li.dimHeightMm ?? null,
+          specOverrides:
+            li.specOverrides && Object.keys(li.specOverrides).length > 0
+              ? (li.specOverrides as Record<string, unknown>)
+              : null,
+        })),
+      }),
+    )
   } catch (err) {
     console.error('[POST /api/purchase-orders] DB error:', err)
     const message = err instanceof Error ? err.message : 'Database error while saving PO'

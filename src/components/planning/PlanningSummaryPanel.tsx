@@ -17,14 +17,14 @@ const mono = 'font-designing-queue tabular-nums tracking-tight'
 const STATUS_META: Record<string, { label: string; dot: string; text: string }> = {
   pending:    { label: 'Pending',    dot: 'bg-ds-warning',  text: 'text-ds-warning'  },
   planned:    { label: 'Planned',    dot: 'bg-ds-brand',    text: 'text-ds-brand'    },
-  processing: { label: 'Processing', dot: 'bg-sky-400',     text: 'text-sky-400'     },
+  processing: { label: 'Processing', dot: 'bg-[var(--info-bg)]',     text: 'text-[var(--info)]'     },
   closed:     { label: 'Closed',     dot: 'bg-ds-success',  text: 'text-ds-success'  },
 }
 
 const BATCH_META: Record<string, { label: string; dot: string }> = {
   draft:                  { label: 'Draft',        dot: 'bg-ds-ink-faint'  },
-  ready:                  { label: 'Ready',        dot: 'bg-sky-400'       },
-  approved_for_artwork:   { label: 'AW approved',  dot: 'bg-violet-400'    },
+  ready:                  { label: 'Ready',        dot: 'bg-[var(--info-bg)]'       },
+  approved_for_artwork:   { label: 'AW approved',  dot: 'bg-[var(--tooling-bg,rgba(124,58,237,0.12))]'    },
   released_to_production: { label: 'Production',   dot: 'bg-ds-success'    },
   hold:                   { label: 'On Hold',      dot: 'bg-ds-warning'    },
 }
@@ -173,8 +173,8 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
             <p className="mt-0.5 text-xs text-ds-ink-faint">Needs attention</p>
           </div>
           {priorityCount > 0 && (
-            <div className="rounded-ds-sm border border-yellow-500/30 bg-yellow-500/5 px-2.5 py-2 text-center">
-              <p className={`text-2xl font-bold leading-none text-yellow-400 ${mono}`}>
+            <div className="rounded-ds-sm border border-[var(--warning)]/30 bg-[var(--warning-bg)]/5 px-2.5 py-2 text-center">
+              <p className={`text-2xl font-bold leading-none text-[var(--warning)] ${mono}`}>
                 {priorityCount}
               </p>
               <p className="mt-0.5 text-xs text-ds-ink-faint">Director priority</p>

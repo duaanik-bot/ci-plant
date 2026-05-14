@@ -1477,7 +1477,7 @@ export default function NewPurchaseOrderPage() {
         </div>
         {fieldErrors.lines && <p className="text-xs text-ds-error">{fieldErrors.lines}</p>}
 
-        <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/20 p-4">
+        <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/20 p-4">
           <div className="grid items-center gap-x-3 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted" style={{ gridTemplateColumns: '48px minmax(340px,1.8fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}>
             <div className="text-center">S.No</div>
             <div>Carton</div>
@@ -1509,7 +1509,7 @@ export default function NewPurchaseOrderPage() {
                       setDetailLineIdx(idx)
                     }}
                     title="Click or Enter — line details & costing (Tab in drawer for fields)"
-                    className={`group grid cursor-pointer items-start gap-x-3 rounded-lg border border-ds-line/40 px-3 py-2 ${rowStripe} ${
+                    className={`group grid cursor-pointer items-start gap-x-3 rounded-ds-md border border-ds-line/40 px-3 py-2 ${rowStripe} ${
                       toolingRowPulse === idx ? 'po-tooling-row-sync-pulse' : ''
                     } ${rowRing} ${
                       detailLineIdx === null && kbRowIndex === idx
@@ -1551,7 +1551,7 @@ export default function NewPurchaseOrderPage() {
                         {stockInsightByIdx[idx]?.matches?.[0] ? (
                           <button
                             type="button"
-                            className="mt-1 w-full rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-left text-xs text-emerald-300"
+                            className="mt-1 w-full rounded border border-[var(--success)]/35 bg-[var(--success-bg)] px-2 py-1 text-left text-xs text-[var(--success)]"
                             onClick={(e) => {
                               e.stopPropagation()
                               setDetailLineIdx(idx)
@@ -1714,14 +1714,14 @@ export default function NewPurchaseOrderPage() {
       <SlideOverPanel title="Quick Create Customer" isOpen={qcCustomerOpen} onClose={() => setQcCustomerOpen(false)}>
         <form onSubmit={submitQuickCreateCustomer} className="space-y-3 text-sm">
           <div>
-            <label className="block text-xs text-ds-ink-muted mb-1">Name<span className="text-red-400">*</span></label>
+            <label className="block text-xs text-ds-ink-muted mb-1">Name<span className="text-[var(--error)]">*</span></label>
             <input
               type="text"
               value={qcCustomer.name}
               onChange={(e) => setQcCustomer((prev) => ({ ...prev, name: e.target.value }))}
-              className={`w-full px-3 py-2 rounded bg-ds-elevated border ${qcErrors.name ? 'border-red-500' : 'border-ds-line/60'} text-foreground`}
+              className={`w-full px-3 py-2 rounded bg-ds-elevated border ${qcErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'} text-foreground`}
             />
-            {qcErrors.name && <p className="text-xs text-red-400 mt-1">{qcErrors.name}</p>}
+            {qcErrors.name && <p className="text-xs text-[var(--error)] mt-1">{qcErrors.name}</p>}
           </div>
           <div>
             <label className="block text-xs text-ds-ink-muted mb-1">GST</label>

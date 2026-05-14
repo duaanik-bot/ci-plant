@@ -64,7 +64,7 @@ export default function DieDetailPage() {
       </div>
 
       {tab === 'overview' && (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm">
           <div className="grid md:grid-cols-4 gap-2">
             <Info k="Type" v={die.dieType} /><Info k="UPS" v={String(die.ups)} /><Info k="Sheet Size" v={die.sheetSize || '-'} /><Info k="Carton Size" v={die.cartonSize || '-'} />
             <Info k="Material" v={die.dieMaterial} /><Info k="Board Thickness" v={die.boardThickness || '-'} /><Info k="Rule Height" v={die.ruleHeight || '-'} /><Info k="Nicks" v={String(die.nickCount ?? '-')} />
@@ -72,20 +72,20 @@ export default function DieDetailPage() {
           </div>
           <div>
             <p className="text-ds-ink-muted mb-1">Impression Meter</p>
-            <div className="h-3 rounded bg-ds-elevated overflow-hidden"><div className={`${lifePct > 90 ? 'bg-red-500' : lifePct > 70 ? 'bg-ds-warning' : 'bg-green-500'} h-full`} style={{ width: `${lifePct}%` }} /></div>
+            <div className="h-3 rounded bg-ds-elevated overflow-hidden"><div className={`${lifePct > 90 ? 'bg-[var(--error-bg)]' : lifePct > 70 ? 'bg-ds-warning' : 'bg-[var(--success-bg)]'} h-full`} style={{ width: `${lifePct}%` }} /></div>
             <p className="text-xs text-ds-ink-muted mt-1">{die.impressionCount.toLocaleString()} / {die.maxImpressions.toLocaleString()} · Sharpenings {die.sharpenCount}/{die.maxSharpenCount}</p>
           </div>
         </div>
       )}
 
       {tab === 'issue' && (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-3">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3">
           <IssuePanel die={die} />
         </div>
       )}
 
       {tab === 'vendor' && (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
           <table className="w-full text-xs">
             <thead className="text-ds-ink-muted"><tr><th className="text-left">Order</th><th className="text-left">Type</th><th className="text-left">Vendor</th><th className="text-left">Status</th><th className="text-left">Expected</th></tr></thead>
             <tbody>{die.vendorOrders.map((o) => <tr key={o.id} className="border-t border-ds-line/40"><td className="py-1">{o.orderCode}</td><td>{o.orderType}</td><td>{o.vendorName}</td><td>{o.status}</td><td>{o.expectedBy ? new Date(o.expectedBy).toLocaleDateString('en-IN') : '-'}</td></tr>)}</tbody>
@@ -94,13 +94,13 @@ export default function DieDetailPage() {
       )}
 
       {tab === 'history' && (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
           {die.issueRecords.map((r) => <div key={r.id} className="border border-ds-line/40 rounded p-2">Issued to {r.issuedTo} · {new Date(r.issuedAt).toLocaleString('en-IN')} · {r.status}</div>)}
         </div>
       )}
 
       {tab === 'audit' && (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2 text-xs">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-xs">
           {die.auditLog.map((a) => <div key={a.id} className="grid grid-cols-3 border-b border-ds-line/40 pb-1"><span>{new Date(a.performedAt).toLocaleString('en-IN')}</span><span>{a.action}</span><span>{a.performedBy}</span></div>)}
         </div>
       )}

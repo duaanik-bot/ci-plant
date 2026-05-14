@@ -179,7 +179,7 @@ export function OperatorHandshakeDrawer({
                 pmWindows,
               })
             }
-            className="rounded border border-emerald-500/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+            className="rounded border border-[var(--success)]/50 bg-[var(--success-bg)]/10 px-3 py-1.5 text-xs font-medium text-[var(--success)] hover:bg-[var(--success-bg)]/20 disabled:opacity-40"
           >
             {saving ? 'Saving…' : 'Confirm handshake'}
           </button>

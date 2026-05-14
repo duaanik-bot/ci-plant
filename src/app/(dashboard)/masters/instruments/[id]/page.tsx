@@ -98,7 +98,7 @@ export default function EditInstrumentPage() {
   }
 
   if (loading) return <div className="text-ds-ink-muted">Loading…</div>
-  if (!inst) return <div className="text-red-400">Instrument not found</div>
+  if (!inst) return <div className="text-[var(--error)]">Instrument not found</div>
 
   return (
     <div className="max-w-lg">
@@ -109,7 +109,7 @@ export default function EditInstrumentPage() {
           <input
             value={instrumentName}
             onChange={(e) => setInstrumentName(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -117,7 +117,7 @@ export default function EditInstrumentPage() {
           <input
             value={specification}
             onChange={(e) => setSpecification(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -125,7 +125,7 @@ export default function EditInstrumentPage() {
           <input
             value={range}
             onChange={(e) => setRange(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -133,7 +133,7 @@ export default function EditInstrumentPage() {
           <input
             value={frequency}
             onChange={(e) => setFrequency(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -141,7 +141,7 @@ export default function EditInstrumentPage() {
           <input
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -151,7 +151,7 @@ export default function EditInstrumentPage() {
               type="date"
               value={lastCalibration}
               onChange={(e) => setLastCalibration(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
@@ -160,7 +160,7 @@ export default function EditInstrumentPage() {
               type="date"
               value={calibrationDue}
               onChange={(e) => setCalibrationDue(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
         </div>
@@ -171,7 +171,7 @@ export default function EditInstrumentPage() {
             min={1}
             value={calibrationFreqDays}
             onChange={(e) => setCalibrationFreqDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -180,7 +180,7 @@ export default function EditInstrumentPage() {
             value={certificateUrl}
             onChange={(e) => setCertificateUrl(e.target.value)}
             placeholder="https://..."
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -197,11 +197,11 @@ export default function EditInstrumentPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
+            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/instruments" className="px-4 py-2 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground">
+          <Link href="/masters/instruments" className="px-4 py-2 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-foreground">
             Cancel
           </Link>
         </div>

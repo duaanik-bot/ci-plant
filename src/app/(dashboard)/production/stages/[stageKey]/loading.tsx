@@ -2,7 +2,7 @@ export default function StageKeyLoading() {
   return (
     <div className="min-h-screen bg-background px-2 py-3 sm:px-3 md:px-4 space-y-3 pb-24">
       {/* Header */}
-      <div className="h-6 w-48 animate-pulse rounded-lg bg-ds-elevated" />
+      <div className="h-6 w-48 animate-pulse rounded-ds-md bg-ds-elevated" />
       <div className="h-3.5 w-72 animate-pulse rounded bg-ds-elevated/60" />
 
       {/* KPI tiles */}
@@ -10,7 +10,7 @@ export default function StageKeyLoading() {
         {Array.from({ length: 6 }).map((_, i) => (
           <div
             key={i}
-            className="h-16 animate-pulse rounded-lg border border-ds-line/30 bg-ds-elevated/50"
+            className="h-16 animate-pulse rounded-ds-md border border-ds-line/30 bg-ds-elevated/50"
           />
         ))}
       </div>
@@ -23,7 +23,7 @@ export default function StageKeyLoading() {
       </div>
 
       {/* Table skeleton */}
-      <div className="overflow-hidden rounded-lg border border-ds-line/40">
+      <div className="overflow-hidden rounded-ds-md border border-ds-line/40">
         {/* Head */}
         <div className="flex gap-4 border-b border-ds-line/30 bg-ds-elevated/60 px-3 py-2">
           {[8, 28, 40, 20, 20, 24, 16].map((w, i) => (
@@ -43,7 +43,7 @@ export default function StageKeyLoading() {
             <div className="h-3.5 w-20 animate-pulse rounded bg-ds-elevated/60" />
             <div className="h-3.5 w-20 animate-pulse rounded bg-ds-elevated/60" />
             <div className="h-3.5 w-24 animate-pulse rounded bg-ds-elevated/50" />
-            <div className="h-6 w-16 animate-pulse rounded-md bg-ds-elevated/60" />
+            <div className="h-6 w-16 animate-pulse rounded-ds-sm bg-ds-elevated/60" />
           </div>
         ))}
       </div>

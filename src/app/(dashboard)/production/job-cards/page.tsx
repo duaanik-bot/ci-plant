@@ -37,17 +37,17 @@ type Readiness = 'ready' | 'partial' | 'shortage' | 'not_mapped'
 
 const statusTone: Record<UiStatus, string> = {
   draft: 'bg-slate-100 text-slate-700',
-  ready: 'bg-emerald-100 text-emerald-700',
-  material_pending: 'bg-amber-100 text-amber-700',
-  released: 'bg-sky-100 text-sky-700',
-  in_production: 'bg-indigo-100 text-indigo-700',
-  completed: 'bg-green-100 text-green-700',
+  ready: 'bg-[var(--success-bg)] text-[var(--success)]',
+  material_pending: 'bg-[var(--warning-bg)] text-[var(--warning)]',
+  released: 'bg-[var(--info-bg)] text-[var(--info)]',
+  in_production: 'bg-[var(--info-bg)] text-[var(--info)]',
+  completed: 'bg-[var(--success-bg)] text-[var(--success)]',
 }
 
 const readinessTone: Record<Readiness, string> = {
-  ready: 'bg-emerald-100 text-emerald-700',
-  partial: 'bg-amber-100 text-amber-700',
-  shortage: 'bg-rose-100 text-rose-700',
+  ready: 'bg-[var(--success-bg)] text-[var(--success)]',
+  partial: 'bg-[var(--warning-bg)] text-[var(--warning)]',
+  shortage: 'bg-[var(--error-bg)] text-[var(--error)]',
   not_mapped: 'bg-slate-100 text-slate-700',
 }
 
@@ -337,14 +337,14 @@ export default function JobCardsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={() => setClearConfirmOpen(true)}>Clear Job Card Queue</Button>
-          <Link href="/production/job-cards/new" className="px-3 py-2 rounded-md bg-ds-warning text-primary-foreground text-sm">Add Job Card</Link>
+          <Link href="/production/job-cards/new" className="px-3 py-2 rounded-ds-sm bg-ds-warning text-primary-foreground text-sm">Add Job Card</Link>
         </div>
       </div>
 
-      <div className="rounded-xl border border-ds-line/50 bg-ds-card p-3 space-y-3">
+      <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-3 space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by product/client/PO/job card" className="md:col-span-2 px-3 py-2 rounded-md border border-ds-line/50 bg-background text-sm" />
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className="px-3 py-2 rounded-md border border-ds-line/50 bg-background text-sm">
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by product/client/PO/job card" className="md:col-span-2 px-3 py-2 rounded-ds-sm border border-ds-line/50 bg-background text-sm" />
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className="px-3 py-2 rounded-ds-sm border border-ds-line/50 bg-background text-sm">
             <option value="all">All status</option>
             <option value="draft">Draft</option>
             <option value="ready">Ready</option>
@@ -353,21 +353,21 @@ export default function JobCardsPage() {
             <option value="in_production">In Production</option>
             <option value="completed">Completed</option>
           </select>
-          <select value={readinessFilter} onChange={(e) => setReadinessFilter(e.target.value as any)} className="px-3 py-2 rounded-md border border-ds-line/50 bg-background text-sm">
+          <select value={readinessFilter} onChange={(e) => setReadinessFilter(e.target.value as any)} className="px-3 py-2 rounded-ds-sm border border-ds-line/50 bg-background text-sm">
             <option value="all">All board readiness</option>
             <option value="ready">Ready</option>
             <option value="partial">Partial</option>
             <option value="shortage">Shortage</option>
             <option value="not_mapped">Not Mapped</option>
           </select>
-          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="px-3 py-2 rounded-md border border-ds-line/50 bg-background text-sm">
+          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="px-3 py-2 rounded-ds-sm border border-ds-line/50 bg-background text-sm">
             <option value="all">All clients</option>
             {clients.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
 
         {selected.size > 0 && (
-          <div className="flex flex-wrap items-center gap-2 rounded-md border border-ds-line/50 bg-background px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 rounded-ds-sm border border-ds-line/50 bg-background px-3 py-2">
             <span className="text-sm">{selected.size} selected</span>
             <Button variant="secondary" onClick={bulkRelease} disabled={busy}>Bulk Push / Release</Button>
             <Button variant="secondary" onClick={bulkArchive} disabled={busy}>Bulk Delete</Button>
@@ -377,7 +377,7 @@ export default function JobCardsPage() {
           </div>
         )}
 
-        <div className="overflow-auto rounded-lg border border-ds-line/50">
+        <div className="overflow-auto rounded-ds-md border border-ds-line/50">
           <table className="w-full min-w-[1200px] text-sm">
             <thead className="bg-background">
               <tr className="text-left">
@@ -429,7 +429,7 @@ export default function JobCardsPage() {
                           }}>Release</button>
                         )}
                         {isDraftLike(r) && (
-                          <button className="text-xs text-rose-600" onClick={async () => {
+                          <button className="text-xs text-[var(--error)]" onClick={async () => {
                             await deleteOne(r)
                           }}>Delete</button>
                         )}
@@ -446,7 +446,7 @@ export default function JobCardsPage() {
 
       {clearConfirmOpen && (
         <div className="fixed inset-0 z-[120] bg-black/30 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-xl bg-background border border-ds-line/50 p-4 space-y-3">
+          <div className="w-full max-w-lg rounded-ds-lg bg-background border border-ds-line/50 p-4 space-y-3">
             <h3 className="text-base font-semibold">Clear Job Card Queue</h3>
             <p className="text-sm text-ds-ink-muted">
               This will remove draft/pending job cards only. Released/In Production job cards will not be deleted.

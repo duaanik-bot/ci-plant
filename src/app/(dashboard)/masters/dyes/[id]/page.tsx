@@ -162,11 +162,11 @@ export default function DyeEditPage() {
   const dims = parseDimensions(dye.sheetSize, dye.cartonSize)
 
   const lifePct = dye.maxImpressions > 0 ? Math.min(100, Math.round((dye.impressionCount / dye.maxImpressions) * 100)) : 0
-  let barColor = 'bg-green-500'
-  if (lifePct >= 80) barColor = 'bg-red-500'
+  let barColor = 'bg-[var(--success-bg)]'
+  if (lifePct >= 80) barColor = 'bg-[var(--error-bg)]'
   else if (lifePct >= 50) barColor = 'bg-ds-warning'
 
-  const cls = 'w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground'
+  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground'
 
   return (
     <div className="space-y-4">
@@ -225,9 +225,9 @@ export default function DyeEditPage() {
       {tab === 'usage' && (
         <div>
           <div className="flex justify-end mb-2">
-            <button type="button" onClick={() => setShowUsage(true)} className="px-3 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">Add usage</button>
+            <button type="button" onClick={() => setShowUsage(true)} className="px-3 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">Add usage</button>
           </div>
-          <div className="overflow-x-auto rounded-lg border border-ds-line/50">
+          <div className="overflow-x-auto rounded-ds-md border border-ds-line/50">
             <table className="w-full text-sm">
               <thead className="bg-ds-elevated text-ds-ink-muted">
                 <tr>
@@ -257,7 +257,7 @@ export default function DyeEditPage() {
 
           {showUsage && (
             <div className="fixed inset-0 bg-background/60 flex items-center justify-center z-50 p-4">
-              <form onSubmit={handleAddUsage} className="bg-ds-card border border-ds-line/50 rounded-lg p-4 max-w-md w-full space-y-3">
+              <form onSubmit={handleAddUsage} className="bg-ds-card border border-ds-line/50 rounded-ds-md p-4 max-w-md w-full space-y-3">
                 <h3 className="text-foreground font-medium">Log usage</h3>
                 <div>
                   <label className="block text-ds-ink-muted text-sm mb-1">Impressions *</label>
@@ -284,8 +284,8 @@ export default function DyeEditPage() {
                   <input type="text" value={usageForm.notes} onChange={(e) => setUsageForm((g) => ({ ...g, notes: e.target.value }))} className={cls} />
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <button type="button" onClick={() => setShowUsage(false)} className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
-                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
+                  <button type="button" onClick={() => setShowUsage(false)} className="px-3 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
+                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
                 </div>
               </form>
             </div>
@@ -297,9 +297,9 @@ export default function DyeEditPage() {
       {tab === 'maintenance' && (
         <div>
           <div className="flex justify-end mb-2">
-            <button type="button" onClick={() => setShowMaintenance(true)} className="px-3 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">Add maintenance</button>
+            <button type="button" onClick={() => setShowMaintenance(true)} className="px-3 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">Add maintenance</button>
           </div>
-          <div className="overflow-x-auto rounded-lg border border-ds-line/50">
+          <div className="overflow-x-auto rounded-ds-md border border-ds-line/50">
             <table className="w-full text-sm">
               <thead className="bg-ds-elevated text-ds-ink-muted">
                 <tr>
@@ -329,7 +329,7 @@ export default function DyeEditPage() {
 
           {showMaintenance && (
             <div className="fixed inset-0 bg-background/60 flex items-center justify-center z-50 p-4">
-              <form onSubmit={handleAddMaintenance} className="bg-ds-card border border-ds-line/50 rounded-lg p-4 max-w-md w-full space-y-3">
+              <form onSubmit={handleAddMaintenance} className="bg-ds-card border border-ds-line/50 rounded-ds-md p-4 max-w-md w-full space-y-3">
                 <h3 className="text-foreground font-medium">Log maintenance</h3>
                 <div>
                   <label className="block text-ds-ink-muted text-sm mb-1">Action type *</label>
@@ -356,8 +356,8 @@ export default function DyeEditPage() {
                   <input type="text" value={maintForm.notes} onChange={(e) => setMaintForm((g) => ({ ...g, notes: e.target.value }))} className={cls} />
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <button type="button" onClick={() => setShowMaintenance(false)} className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
-                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
+                  <button type="button" onClick={() => setShowMaintenance(false)} className="px-3 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
+                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
                 </div>
               </form>
             </div>

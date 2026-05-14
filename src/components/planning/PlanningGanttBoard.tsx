@@ -239,7 +239,7 @@ export function PlanningGanttBoard({
         })
 
         return (
-          <div key={machine.id} className="rounded-lg border border-border/10 bg-background p-2">
+          <div key={machine.id} className="rounded-ds-md border border-border/10 bg-background p-2">
             <div className={`flex items-center justify-between text-xs text-ds-ink-muted mb-1.5 ${mono}`}>
               <span className="text-ds-warning font-semibold">{machine.machineCode}</span>
               <span>

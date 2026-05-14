@@ -87,7 +87,7 @@ export default function RfqDetailPage() {
   }, [rfq?.status])
 
   if (isLoading) return <div className="p-4 text-ds-ink-muted">Loading RFQ…</div>
-  if (!rfq || (rfq as any).error) return <div className="p-4 text-red-400">RFQ not found.</div>
+  if (!rfq || (rfq as any).error) return <div className="p-4 text-[var(--error)]">RFQ not found.</div>
 
   const saveFeasibility = async () => {
     setSaving(true)
@@ -193,7 +193,7 @@ export default function RfqDetailPage() {
         </span>
       </div>
 
-      <section className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-4">
+      <section className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-4">
         <h2 className="font-semibold text-ds-ink mb-2">Stage 1 — RFQ</h2>
         <p className="text-sm text-ds-ink-muted">
           Estimated volume:{' '}
@@ -204,7 +204,7 @@ export default function RfqDetailPage() {
         </p>
       </section>
 
-      <section className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-4">
+      <section className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-4">
         <h2 className="font-semibold text-ds-ink mb-2">Stage 2 — Feasibility</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div>
@@ -261,7 +261,7 @@ export default function RfqDetailPage() {
             href={`/api/rfq/${id}/feasibility-pdf`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm text-blue-300 hover:underline"
+            className="text-sm text-[var(--info)] hover:underline"
           >
             Generate Feasibility PDF
           </a>
@@ -275,7 +275,7 @@ export default function RfqDetailPage() {
         </div>
       </section>
 
-      <section className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-4">
+      <section className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-4">
         <h2 className="font-semibold text-ds-ink mb-2">Stage 3 — Quotation</h2>
         <div className="flex items-center justify-between mb-2">
           <p className="text-sm text-ds-ink-muted">
@@ -373,7 +373,7 @@ export default function RfqDetailPage() {
             href={`/api/rfq/${id}/quotation-pdf`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm text-blue-300 hover:underline"
+            className="text-sm text-[var(--info)] hover:underline"
           >
             Generate Quotation PDF
           </a>
@@ -387,7 +387,7 @@ export default function RfqDetailPage() {
         </div>
       </section>
 
-      <section className="rounded-lg border border-ds-line/50 bg-ds-elevated/60 p-4">
+      <section className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-4">
         <h2 className="font-semibold text-ds-ink mb-2">Stage 4 — PO & Job</h2>
         <p className="text-sm text-ds-ink-muted">PO number: {rfq.poNumber || 'Not received'}</p>
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
@@ -422,7 +422,7 @@ export default function RfqDetailPage() {
             type="button"
             disabled={saving || !canConfirmPo}
             onClick={confirmPo}
-            className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-primary-foreground text-sm"
+            className="px-3 py-2 rounded bg-[var(--info-bg)] hover:bg-[var(--info-bg)] disabled:opacity-50 text-primary-foreground text-sm"
           >
             Confirm PO (Push to Production)
           </button>

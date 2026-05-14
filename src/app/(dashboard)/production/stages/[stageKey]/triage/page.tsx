@@ -284,15 +284,15 @@ export default function StageTriageBoardPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search Job/Client/Product/PO/Set"
-              className="w-56 rounded-lg border border-ds-line/60 bg-ds-main px-2.5 py-1.5 text-xs text-ds-ink"
+              className="w-56 rounded-ds-md border border-ds-line/60 bg-ds-main px-2.5 py-1.5 text-xs text-ds-ink"
             />
-            <div className="inline-flex rounded-lg border border-ds-line/60 bg-ds-main p-0.5 text-xs">
+            <div className="inline-flex rounded-ds-md border border-ds-line/60 bg-ds-main p-0.5 text-xs">
               {(['compact', 'comfortable', 'detailed'] as const).map((d) => (
                 <button
                   key={d}
                   type="button"
                   onClick={() => setDensity(d)}
-                  className={`rounded-md px-2 py-1 ${density === d ? 'bg-ds-warning/15 text-ds-warning' : 'text-ds-ink-muted'}`}
+                  className={`rounded-ds-sm px-2 py-1 ${density === d ? 'bg-ds-warning/15 text-ds-warning' : 'text-ds-ink-muted'}`}
                 >
                   {d}
                 </button>
@@ -309,7 +309,7 @@ export default function StageTriageBoardPage() {
           </div>
         </div>
         {groupingHints.length > 0 ? (
-          <div className="rounded-lg border border-ds-warning/40 bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning space-y-1">
+          <div className="rounded-ds-md border border-ds-warning/40 bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning space-y-1">
             {groupingHints.map((h) => (
               <div key={h}>{h}</div>
             ))}
@@ -323,7 +323,7 @@ export default function StageTriageBoardPage() {
             return (
               <div
                 key={col.key}
-                className="rounded-xl border border-ds-line/50 bg-ds-main min-h-[260px]"
+                className="rounded-ds-lg border border-ds-line/50 bg-ds-main min-h-[260px]"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={async () => {
                   if (!dragId) return
@@ -344,7 +344,7 @@ export default function StageTriageBoardPage() {
                       draggable
                       onDragStart={() => setDragId(c.row.stageRecord.id)}
                       onClick={() => setSpotlight(c.row)}
-                      className={`rounded-lg border border-ds-line/50 bg-ds-card text-xs cursor-grab active:cursor-grabbing hover:border-ds-warning/40 ${
+                      className={`rounded-ds-md border border-ds-line/50 bg-ds-card text-xs cursor-grab active:cursor-grabbing hover:border-ds-warning/40 ${
                         density === 'compact' ? 'p-1.5' : density === 'detailed' ? 'p-3' : 'p-2'
                       }`}
                     >
@@ -360,7 +360,7 @@ export default function StageTriageBoardPage() {
                         <span className="rounded-full border border-ds-line/60 px-1.5 py-0.5 text-[10px] text-ds-ink-muted">Queue #{c.triage.sequenceNo}</span>
                         <span className="rounded-full border border-ds-line/60 px-1.5 py-0.5 text-[10px] text-ds-ink-muted">Machine slot {c.triage.plannedStartTime ? new Date(c.triage.plannedStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</span>
                         {c.row.jobCard.industrialPriority ? (
-                          <span className="rounded-full border border-rose-500/60 bg-rose-900/20 px-1.5 py-0.5 text-[10px] text-rose-300">Urgent</span>
+                          <span className="rounded-full border border-[var(--error)]/60 bg-[var(--error-bg)] px-1.5 py-0.5 text-[10px] text-[var(--error)]">Urgent</span>
                         ) : null}
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-1">
@@ -389,7 +389,7 @@ export default function StageTriageBoardPage() {
                         <button
                           type="button"
                           disabled={busy}
-                          className="rounded border border-amber-600/40 px-1.5 py-0.5 text-[11px] text-amber-300 hover:bg-amber-900/20 disabled:opacity-50"
+                          className="rounded border border-[var(--warning)]/40 px-1.5 py-0.5 text-[11px] text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-50"
                           onClick={(e) => {
                             e.stopPropagation()
                             void patchCard(c.row, { status: 'make_ready_alert' })
@@ -415,7 +415,7 @@ export default function StageTriageBoardPage() {
       >
         {spotlight ? (
           <div className="space-y-3 text-sm">
-            <div className="sticky top-0 z-20 rounded-lg border border-ds-line/60 bg-ds-main px-3 py-2 shadow-sm">
+            <div className="sticky top-0 z-20 rounded-ds-md border border-ds-line/60 bg-ds-main px-3 py-2 shadow-sm">
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-designing-queue text-ds-warning">JC #{spotlight.jobCard.jobCardNumber}</span>
                 <span className="text-ds-ink">{spotlight.jobCard.productName ?? spotlight.jobCard.poMeta?.cartonName ?? '-'}</span>
@@ -424,7 +424,7 @@ export default function StageTriageBoardPage() {
                 <span className="rounded-full border border-ds-line/60 px-2 py-0.5 text-[10px] text-ds-ink-muted">ETA {triageMeta(spotlight, stageKey).expectedArrivalTime ? new Date(triageMeta(spotlight, stageKey).expectedArrivalTime!).toLocaleTimeString() : '-'}</span>
               </div>
             </div>
-            <div className="rounded-lg border border-ds-line/50 bg-ds-main p-3">
+            <div className="rounded-ds-md border border-ds-line/50 bg-ds-main p-3">
               <button type="button" className="w-full text-left text-xs text-ds-ink-faint" onClick={() => toggleSection('snapshot')}>Job Snapshot</button>
               {expanded.snapshot !== false ? (
                 <div className="mt-2 text-xs text-ds-ink-muted space-y-1">
@@ -436,32 +436,32 @@ export default function StageTriageBoardPage() {
               ) : null}
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div className="rounded-lg border border-ds-line/50 bg-ds-main p-3">
+              <div className="rounded-ds-md border border-ds-line/50 bg-ds-main p-3">
                 <button type="button" className="w-full text-left text-xs text-ds-ink-faint" onClick={() => toggleSection('flow')}>Stage Flow</button>
                 {expanded.flow !== false ? (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {['cutting', 'printing', 'chemical_coating', 'embossing', 'dye_cutting', 'pasting', 'sorting'].map((k) => {
                       const label = PRODUCTION_STAGES.find((s) => s.key === k)?.label ?? k
                       const st = spotlight.jobCard.stageMap?.[label]?.status ?? 'pending'
-                      const cls = st === 'completed' ? 'bg-emerald-100 text-emerald-700' : st === 'in_progress' ? 'bg-blue-100 text-blue-700' : st.includes('make_ready') ? 'bg-amber-100 text-amber-700' : st === 'hold' ? 'bg-zinc-200 text-zinc-700' : 'bg-ds-card text-ds-ink-muted'
+                      const cls = st === 'completed' ? 'bg-[var(--success-bg)] text-[var(--success)]' : st === 'in_progress' ? 'bg-[var(--info-bg)] text-[var(--info)]' : st.includes('make_ready') ? 'bg-[var(--warning-bg)] text-[var(--warning)]' : st === 'hold' ? 'bg-zinc-200 text-zinc-700' : 'bg-ds-card text-ds-ink-muted'
                       return <span key={k} className={`rounded-full px-2 py-0.5 text-[10px] ${cls}`}>{label}</span>
                     })}
                   </div>
                 ) : null}
               </div>
-              <div className="rounded-lg border border-ds-line/50 bg-ds-main p-3">
+              <div className="rounded-ds-md border border-ds-line/50 bg-ds-main p-3">
                 <button type="button" className="w-full text-left text-xs text-ds-ink-faint" onClick={() => toggleSection('warnings')}>Inline Warnings</button>
                 {expanded.warnings !== false ? (
                   <div className="mt-2 space-y-1 text-xs">
-                    {spotlight.jobCard.industrialPriority ? <div className="text-rose-600">⚠ Upcoming priority job.</div> : null}
-                    {triageMeta(spotlight, stageKey).status === 'hold' ? <div className="text-amber-700">⚠ Job on hold.</div> : null}
-                    {triageMeta(spotlight, stageKey).status === 'make_ready_alert' ? <div className="text-amber-700">⚠ Make-ready required.</div> : null}
+                    {spotlight.jobCard.industrialPriority ? <div className="text-[var(--error)]">⚠ Upcoming priority job.</div> : null}
+                    {triageMeta(spotlight, stageKey).status === 'hold' ? <div className="text-[var(--warning)]">⚠ Job on hold.</div> : null}
+                    {triageMeta(spotlight, stageKey).status === 'make_ready_alert' ? <div className="text-[var(--warning)]">⚠ Make-ready required.</div> : null}
                     <div className="text-ds-ink-muted">⚠ Verify tooling and material before start.</div>
                   </div>
                 ) : null}
               </div>
             </div>
-            <div className="rounded-lg border border-ds-line/50 bg-ds-main p-3">
+            <div className="rounded-ds-md border border-ds-line/50 bg-ds-main p-3">
               <button type="button" className="w-full text-left text-xs text-ds-ink-faint" onClick={() => toggleSection('activity')}>Live Activity Feed</button>
               {expanded.activity !== false ? (
                 <div className="mt-2 max-h-40 overflow-auto space-y-1">
@@ -474,13 +474,13 @@ export default function StageTriageBoardPage() {
                 </div>
               ) : null}
             </div>
-            <div className="sticky bottom-0 z-20 rounded-lg border border-ds-line/60 bg-ds-main px-2 py-2 shadow-md">
+            <div className="sticky bottom-0 z-20 rounded-ds-md border border-ds-line/60 bg-ds-main px-2 py-2 shadow-md">
               <div className="grid grid-cols-2 gap-2">
-                <button className="rounded border border-blue-600/40 px-2 py-1 text-xs text-blue-300 hover:bg-blue-900/20" onClick={() => void patchCard(spotlight, { status: 'in_progress' })}>Start</button>
-                <button className="rounded border border-amber-600/40 px-2 py-1 text-xs text-amber-300 hover:bg-amber-900/20" onClick={() => void patchCard(spotlight, { status: 'make_ready_alert' })}>Make-Ready</button>
+                <button className="rounded border border-[var(--info)]/40 px-2 py-1 text-xs text-[var(--info)] hover:bg-[var(--info-bg)]" onClick={() => void patchCard(spotlight, { status: 'in_progress' })}>Start</button>
+                <button className="rounded border border-[var(--warning)]/40 px-2 py-1 text-xs text-[var(--warning)] hover:bg-[var(--warning-bg)]" onClick={() => void patchCard(spotlight, { status: 'make_ready_alert' })}>Make-Ready</button>
                 <button className="rounded border border-cyan-600/40 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-900/20" onClick={() => void patchCard(spotlight, { status: 'ready_to_receive' })}>Ready Receive</button>
                 <button className="rounded border border-zinc-500/40 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900/20" onClick={() => void patchCard(spotlight, { status: 'hold' })}>Hold</button>
-                <button className="rounded border border-emerald-600/40 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-900/20" onClick={() => void patchCard(spotlight, { status: 'completed' })}>Complete</button>
+                <button className="rounded border border-[var(--success)]/40 px-2 py-1 text-xs text-[var(--success)] hover:bg-[var(--success-bg)]" onClick={() => void patchCard(spotlight, { status: 'completed' })}>Complete</button>
                 <button className="rounded border border-ds-line/60 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card" onClick={() => void patchCard(spotlight, { status: 'pending' })}>Reset</button>
               </div>
             </div>

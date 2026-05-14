@@ -123,11 +123,11 @@ export default function ArtworkJobPage() {
     )
   }
 
-  const statusBadge = art?.status === 'approved' ? 'bg-green-900/50 text-green-300' : art?.status === 'partially_approved' ? 'bg-ds-warning/12 text-ds-warning' : 'bg-ds-elevated text-ds-ink-muted'
+  const statusBadge = art?.status === 'approved' ? 'bg-[var(--success-bg)] text-[var(--success)]' : art?.status === 'partially_approved' ? 'bg-ds-warning/12 text-ds-warning' : 'bg-ds-elevated text-ds-ink-muted'
 
   return (
     <div className="p-4 max-w-3xl mx-auto space-y-6">
-      <div className="bg-ds-elevated rounded-lg p-4">
+      <div className="bg-ds-elevated rounded-ds-md p-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <h1 className="text-lg font-bold text-ds-warning">{data.job.jobNumber}</h1>
@@ -149,7 +149,7 @@ export default function ArtworkJobPage() {
               <span
                 key={n}
                 className={`px-3 py-1 rounded text-sm ${
-                  done ? 'bg-green-700 text-primary-foreground' : current ? 'bg-blue-700 text-primary-foreground' : 'bg-ds-line/30 text-ds-ink-muted'
+                  done ? 'bg-[var(--success-bg)] text-primary-foreground' : current ? 'bg-[var(--info-bg)] text-primary-foreground' : 'bg-ds-line/30 text-ds-ink-muted'
                 }`}
               >
                 Lock {n} {done ? '✓' : current ? '●' : '○'}
@@ -160,9 +160,9 @@ export default function ArtworkJobPage() {
       )}
 
       {!art && (
-        <div className="bg-ds-elevated rounded-lg p-4">
+        <div className="bg-ds-elevated rounded-ds-md p-4">
           <p className="text-ds-ink-muted mb-2">No artwork yet.</p>
-          <label className="inline-block px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground cursor-pointer">
+          <label className="inline-block px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground cursor-pointer">
             {uploading ? 'Uploading…' : 'Upload customer approval document'}
             <input
               type="file"
@@ -179,18 +179,18 @@ export default function ArtworkJobPage() {
         <>
           {/* Lock 1 */}
           <div
-            className={`rounded-lg p-4 border-2 ${
-              lock1Done ? 'bg-green-900/30 border-green-600' : 'bg-ds-elevated border-ds-line/60'
+            className={`rounded-ds-md p-4 border-2 ${
+              lock1Done ? 'bg-[var(--success-bg)] border-[var(--success)]' : 'bg-ds-elevated border-ds-line/60'
             }`}
           >
             <h2 className="font-semibold mb-2">
               Lock 1: {LOCK_NAMES[1]} {lock1Done && '✓'}
             </h2>
             {lock1Done ? (
-              <p className="text-green-300 text-sm">Customer doc uploaded and accepted.</p>
+              <p className="text-[var(--success)] text-sm">Customer doc uploaded and accepted.</p>
             ) : (
               <div className="flex items-center gap-4">
-                <span className="text-red-400 text-sm">Not completed</span>
+                <span className="text-[var(--error)] text-sm">Not completed</span>
                 <label className="px-3 py-1.5 rounded bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm cursor-pointer">
                   Upload document
                   <input
@@ -207,15 +207,15 @@ export default function ArtworkJobPage() {
 
           {/* Lock 2 */}
           <div
-            className={`rounded-lg p-4 border-2 ${
-              lock2Done ? 'bg-green-900/30 border-green-600' : 'bg-ds-elevated border-ds-line/60'
+            className={`rounded-ds-md p-4 border-2 ${
+              lock2Done ? 'bg-[var(--success-bg)] border-[var(--success)]' : 'bg-ds-elevated border-ds-line/60'
             }`}
           >
             <h2 className="font-semibold mb-2">
               Lock 2: {LOCK_NAMES[2]} {lock2Done && '✓'}
             </h2>
             {lock2Done ? (
-              <p className="text-green-300 text-sm">Checklist completed.</p>
+              <p className="text-[var(--success)] text-sm">Checklist completed.</p>
             ) : (
               <div className="space-y-2">
                 {LOCK_2_CHECKLIST.map((item) => (
@@ -235,7 +235,7 @@ export default function ArtworkJobPage() {
                   type="button"
                   disabled={!lock2AllChecked || submittingLock !== null}
                   onClick={() => submitLock(2)}
-                  className="mt-2 px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground text-sm"
+                  className="mt-2 px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground text-sm"
                 >
                   {submittingLock === 2 ? 'Submitting…' : 'Submit checklist'}
                 </button>
@@ -245,15 +245,15 @@ export default function ArtworkJobPage() {
 
           {/* Lock 3 */}
           <div
-            className={`rounded-lg p-4 border-2 ${
-              lock3Done ? 'bg-green-900/30 border-green-600' : 'bg-ds-elevated border-ds-line/60'
+            className={`rounded-ds-md p-4 border-2 ${
+              lock3Done ? 'bg-[var(--success-bg)] border-[var(--success)]' : 'bg-ds-elevated border-ds-line/60'
             }`}
           >
             <h2 className="font-semibold mb-2">
               Lock 3: {LOCK_NAMES[3]} {lock3Done && '✓'}
             </h2>
             {lock3Done ? (
-              <p className="text-green-300 text-sm">QA Manager sign-off done.</p>
+              <p className="text-[var(--success)] text-sm">QA Manager sign-off done.</p>
             ) : (
               <div>
                 <p className="text-ds-ink-muted text-sm mb-2">Version comparison — QA Manager sign-off.</p>
@@ -261,7 +261,7 @@ export default function ArtworkJobPage() {
                   type="button"
                   disabled={submittingLock !== null}
                   onClick={() => submitLock(3)}
-                  className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground text-sm"
+                  className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground text-sm"
                 >
                   {submittingLock === 3 ? 'Submitting…' : 'Sign off'}
                 </button>
@@ -271,8 +271,8 @@ export default function ArtworkJobPage() {
 
           {/* Lock 4 */}
           <div
-            className={`rounded-lg p-4 border-2 ${
-              lock4Done ? 'bg-green-900/30 border-green-600' : 'bg-ds-elevated border-ds-line/60'
+            className={`rounded-ds-md p-4 border-2 ${
+              lock4Done ? 'bg-[var(--success-bg)] border-[var(--success)]' : 'bg-ds-elevated border-ds-line/60'
             }`}
           >
             <h2 className="font-semibold mb-2">
@@ -280,7 +280,7 @@ export default function ArtworkJobPage() {
             </h2>
             {lock4Done && art.plateBarcode ? (
               <div className="flex flex-col items-center gap-2">
-                <p className="text-green-300 text-sm">Plate barcode generated.</p>
+                <p className="text-[var(--success)] text-sm">Plate barcode generated.</p>
                 <p className="font-mono text-lg">{art.plateBarcode}</p>
                 {plateBarcodeSvg && (
                   <img src={plateBarcodeSvg} alt="Plate barcode" className="w-48 h-48" />

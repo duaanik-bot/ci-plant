@@ -101,14 +101,14 @@ export default function MastersSuppliersPage() {
                 prev.size === list.length ? new Set() : new Set(list.map((s) => s.id)),
               )
             }
-            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
           >
             {selectedIds.size === list.length && list.length > 0 ? 'Unselect all' : 'Select all'}
           </button>
           <button
             type="button"
             onClick={() => setSelectedIds(new Set())}
-            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
           >
             Clear
           </button>
@@ -116,13 +116,13 @@ export default function MastersSuppliersPage() {
             type="button"
             disabled={selectedIds.size === 0 || bulkDeleting}
             onClick={() => void handleBulkDelete()}
-            className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-sm text-rose-600 disabled:opacity-50 dark:text-rose-400"
+            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
           >
             {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
           </button>
           <Link
             href="/masters/suppliers/new"
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-primary-foreground hover:bg-blue-700"
+            className="rounded-ds-md bg-[var(--info-bg)] px-3 py-1.5 text-sm text-primary-foreground hover:bg-[var(--info-bg)]"
           >
             Add supplier
           </Link>
@@ -183,19 +183,19 @@ export default function MastersSuppliersPage() {
                 </td>
                 <td className={enterpriseTdClass}>{s?.leadTimeDays ?? '—'} days</td>
                 <td className={enterpriseTdClass}>
-                  <span className={s?.active ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                  <span className={s?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>
                     {s?.active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
                 <td className={enterpriseTdClass}>
-                  <Link href={`/masters/suppliers/${s?.id ?? ''}`} className="mr-2 text-blue-600 hover:underline dark:text-blue-400">
+                  <Link href={`/masters/suppliers/${s?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
                     Edit
                   </Link>
                   <button
                     type="button"
                     onClick={() => void handleDelete(s)}
                     disabled={deletingId === s.id}
-                    className="text-rose-600 hover:underline disabled:opacity-50 dark:text-rose-400"
+                    className="text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
                   >
                     {deletingId === s.id ? 'Deleting…' : 'Delete'}
                   </button>

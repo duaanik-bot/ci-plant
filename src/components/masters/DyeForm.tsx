@@ -122,14 +122,14 @@ export default function DyeForm({ mode, initialData }: Props) {
   }
 
   const inpCls = (errKey?: string) =>
-    `w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground text-sm ${errKey && fieldErrors[errKey] ? 'border-red-500' : 'border-ds-line/60'}`
+    `w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground text-sm ${errKey && fieldErrors[errKey] ? 'border-[var(--error)]' : 'border-ds-line/60'}`
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
       <h2 className="text-lg font-semibold text-foreground">{mode === 'ADD' ? 'Add Die' : 'Edit Die'}</h2>
 
       {/* Die Number + Auto Toggle */}
-      <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm space-y-3">
+      <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm space-y-3">
         <div className="flex items-center justify-between">
           <label className="text-ds-ink-muted font-medium">Die Number</label>
           {mode === 'ADD' && (
@@ -149,11 +149,11 @@ export default function DyeForm({ mode, initialData }: Props) {
           placeholder={autoGenerate && mode === 'ADD' ? 'AUTO-GEN (assigned on save)' : 'Die number'}
           className={`${inpCls('dyeNumber')} ${(autoGenerate && mode === 'ADD') || mode === 'EDIT' ? 'opacity-50 cursor-not-allowed' : ''}`}
         />
-        {fieldErrors.dyeNumber && <p className="text-xs text-red-400">{fieldErrors.dyeNumber}</p>}
+        {fieldErrors.dyeNumber && <p className="text-xs text-[var(--error)]">{fieldErrors.dyeNumber}</p>}
       </div>
 
       {/* Type & UPS */}
-      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm">
+      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm">
         <div>
           <label className="block text-ds-ink-muted mb-1">Die type *</label>
           <select value={f.dyeType} onChange={(e) => patch('dyeType', e.target.value)} className={inpCls()}>
@@ -163,48 +163,48 @@ export default function DyeForm({ mode, initialData }: Props) {
         <div>
           <label className="block text-ds-ink-muted mb-1">UPS *</label>
           <input type="number" min={1} value={f.ups} onChange={(e) => patch('ups', e.target.value)} className={inpCls('ups')} />
-          {fieldErrors.ups && <p className="text-xs text-red-400">{fieldErrors.ups}</p>}
+          {fieldErrors.ups && <p className="text-xs text-[var(--error)]">{fieldErrors.ups}</p>}
         </div>
       </div>
 
       {/* Sheet Size (L x W) */}
-      <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm space-y-2">
+      <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm space-y-2">
         <label className="block text-ds-ink-muted font-medium">Sheet Size (mm) *</label>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <input type="number" step="0.01" min={0} placeholder="Length" value={f.sheetLength} onChange={(e) => patch('sheetLength', e.target.value)} className={inpCls('sheetLength')} />
-            {fieldErrors.sheetLength && <p className="text-xs text-red-400 mt-0.5">{fieldErrors.sheetLength}</p>}
+            {fieldErrors.sheetLength && <p className="text-xs text-[var(--error)] mt-0.5">{fieldErrors.sheetLength}</p>}
           </div>
           <div>
             <input type="number" step="0.01" min={0} placeholder="Width" value={f.sheetWidth} onChange={(e) => patch('sheetWidth', e.target.value)} className={inpCls('sheetWidth')} />
-            {fieldErrors.sheetWidth && <p className="text-xs text-red-400 mt-0.5">{fieldErrors.sheetWidth}</p>}
+            {fieldErrors.sheetWidth && <p className="text-xs text-[var(--error)] mt-0.5">{fieldErrors.sheetWidth}</p>}
           </div>
         </div>
         {f.sheetLength && f.sheetWidth && <p className="text-xs text-ds-ink-faint">Preview: {f.sheetLength}&times;{f.sheetWidth}</p>}
       </div>
 
       {/* Carton Size (L x W x H) */}
-      <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm space-y-2">
+      <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm space-y-2">
         <label className="block text-ds-ink-muted font-medium">Carton Size (mm) *</label>
         <div className="grid grid-cols-3 gap-3">
           <div>
             <input type="number" step="0.01" min={0} placeholder="L" value={f.cartonL} onChange={(e) => patch('cartonL', e.target.value)} className={inpCls('cartonL')} />
-            {fieldErrors.cartonL && <p className="text-xs text-red-400 mt-0.5">{fieldErrors.cartonL}</p>}
+            {fieldErrors.cartonL && <p className="text-xs text-[var(--error)] mt-0.5">{fieldErrors.cartonL}</p>}
           </div>
           <div>
             <input type="number" step="0.01" min={0} placeholder="W" value={f.cartonW} onChange={(e) => patch('cartonW', e.target.value)} className={inpCls('cartonW')} />
-            {fieldErrors.cartonW && <p className="text-xs text-red-400 mt-0.5">{fieldErrors.cartonW}</p>}
+            {fieldErrors.cartonW && <p className="text-xs text-[var(--error)] mt-0.5">{fieldErrors.cartonW}</p>}
           </div>
           <div>
             <input type="number" step="0.01" min={0} placeholder="H" value={f.cartonH} onChange={(e) => patch('cartonH', e.target.value)} className={inpCls('cartonH')} />
-            {fieldErrors.cartonH && <p className="text-xs text-red-400 mt-0.5">{fieldErrors.cartonH}</p>}
+            {fieldErrors.cartonH && <p className="text-xs text-[var(--error)] mt-0.5">{fieldErrors.cartonH}</p>}
           </div>
         </div>
         {f.cartonL && f.cartonW && f.cartonH && <p className="text-xs text-ds-ink-faint">Preview: {f.cartonL}&times;{f.cartonW}&times;{f.cartonH}</p>}
       </div>
 
       {/* Location & Condition & Max Impressions */}
-      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-lg border border-ds-line/50 p-4 text-sm">
+      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm">
         <div>
           <label className="block text-ds-ink-muted mb-1">Storage location</label>
           <input type="text" value={f.location} onChange={(e) => patch('location', e.target.value)} placeholder="e.g. Rack A-3" className={inpCls()} />
@@ -220,8 +220,8 @@ export default function DyeForm({ mode, initialData }: Props) {
       </div>
 
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={() => router.push('/masters/dyes')} className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
-        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium">
+        <button type="button" onClick={() => router.push('/masters/dyes')} className="px-3 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
+        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium">
           {saving ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
         </button>
       </div>

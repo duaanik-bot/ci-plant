@@ -544,14 +544,14 @@ function InventoryPageContent() {
   if (loading) {
     return (
       <div className="w-full px-4 py-3">
-        <div className="rounded-xl border border-ds-line/40 bg-background p-4">
+        <div className="rounded-ds-lg border border-ds-line/40 bg-background p-4">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
             {Array.from({ length: 12 }).map((_, i) => (
-              <div key={i} className="h-16 animate-pulse rounded-lg border border-ds-line/30 bg-ds-elevated/30" />
+              <div key={i} className="h-16 animate-pulse rounded-ds-md border border-ds-line/30 bg-ds-elevated/30" />
             ))}
           </div>
-          <div className="mt-4 h-10 animate-pulse rounded-lg border border-ds-line/30 bg-ds-elevated/30" />
-          <div className="mt-3 h-64 animate-pulse rounded-lg border border-ds-line/30 bg-ds-elevated/30" />
+          <div className="mt-4 h-10 animate-pulse rounded-ds-md border border-ds-line/30 bg-ds-elevated/30" />
+          <div className="mt-3 h-64 animate-pulse rounded-ds-md border border-ds-line/30 bg-ds-elevated/30" />
         </div>
       </div>
     )
@@ -561,9 +561,9 @@ function InventoryPageContent() {
   const fmtVal = (n: number) => `₹${fmt(n)}`
 
   function ageDotClass(bucket: PaperLedgerRow['ageBucket']) {
-    if (bucket === 'fresh') return 'bg-emerald-500'
+    if (bucket === 'fresh') return 'bg-[var(--success-bg)]'
     if (bucket === 'mature') return 'bg-ds-warning'
-    return 'bg-red-500 animate-pulse'
+    return 'bg-[var(--error-bg)] animate-pulse'
   }
 
   function ageLabel(bucket: PaperLedgerRow['ageBucket']) {
@@ -995,7 +995,7 @@ function InventoryPageContent() {
       <div className="w-full px-4 py-3">
         <section
           id="paper-ledger"
-          className="rounded-xl border border-ds-line/40 overflow-hidden bg-background text-ds-ink"
+          className="rounded-ds-lg border border-ds-line/40 overflow-hidden bg-background text-ds-ink"
         >
           <div className="p-4 md:p-6">
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1014,7 +1014,7 @@ function InventoryPageContent() {
                 <button
                   type="button"
                   onClick={() => setAdjustOpen(true)}
-                  className="rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                  className="rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
                 >
                   Adjust Stock
                 </button>
@@ -1033,25 +1033,25 @@ function InventoryPageContent() {
                     setBulkAdjustInput(lines)
                     setAdjustOpen(true)
                   }}
-                  className="rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                  className="rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
                 >
                   Bulk Add/Remove
                 </button>
                 <Link
                   href="/inventory/flow"
-                  className="rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                  className="rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
                 >
                   Inventory Flow
                 </Link>
                 <Link
                   href="/inventory/purchase-requisitions"
-                  className="rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                  className="rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
                 >
                   Purchase Requisitions
                 </Link>
                 <Link
                   href="/inventory/grn"
-                  className="rounded-lg bg-ds-warning px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-95"
+                  className="rounded-ds-md bg-ds-warning px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-95"
                 >
                   Add Stock (GRN)
                 </Link>
@@ -1060,24 +1060,24 @@ function InventoryPageContent() {
 
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6 mb-4">
               {[
-                { key: 'shortage' as const, label: 'Shortage', value: fmt(paperWarehouseKpi.shortage), tone: 'border-rose-500/45 bg-rose-500/8 text-rose-500' },
-                { key: 'available' as const, label: 'Available', value: fmt(paperWarehouseKpi.available), tone: 'border-emerald-500/45 bg-emerald-500/8 text-emerald-500' },
-                { key: 'reserved' as const, label: 'Reserved', value: fmt(paperWarehouseKpi.reserved), tone: 'border-amber-500/45 bg-amber-500/8 text-amber-600' },
+                { key: 'shortage' as const, label: 'Shortage', value: fmt(paperWarehouseKpi.shortage), tone: 'border-[var(--error)]/45 bg-[var(--error-bg)] text-[var(--error)]' },
+                { key: 'available' as const, label: 'Available', value: fmt(paperWarehouseKpi.available), tone: 'border-[var(--success)]/45 bg-[var(--success-bg)] text-[var(--success)]' },
+                { key: 'reserved' as const, label: 'Reserved', value: fmt(paperWarehouseKpi.reserved), tone: 'border-[var(--warning)]/45 bg-[var(--warning-bg)] text-[var(--warning)]' },
                 { key: 'free' as const, label: 'Free Stock', value: fmt(paperWarehouseKpi.freeStock), tone: 'border-cyan-500/45 bg-cyan-500/8 text-cyan-600' },
-                { key: 'incoming' as const, label: 'Incoming', value: fmt(paperWarehouseKpi.incoming), tone: 'border-sky-500/45 bg-sky-500/8 text-sky-600' },
+                { key: 'incoming' as const, label: 'Incoming', value: fmt(paperWarehouseKpi.incoming), tone: 'border-[var(--info)]/45 bg-[var(--info-bg)] text-[var(--info)]' },
                 { key: 'all' as const, label: 'Total Stock', value: fmt(paperWarehouseKpi.totalPhysical), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
-                { key: 'stale' as const, label: 'Stale', value: fmtVal(paperWarehouseKpi.staleStock), tone: 'border-rose-500/45 bg-rose-500/8 text-rose-500' },
-                { key: 'fast' as const, label: 'Fast-moving', value: fmt(paperWarehouseKpi.fastMoving), tone: 'border-emerald-500/45 bg-emerald-500/8 text-emerald-500' },
+                { key: 'stale' as const, label: 'Stale', value: fmtVal(paperWarehouseKpi.staleStock), tone: 'border-[var(--error)]/45 bg-[var(--error-bg)] text-[var(--error)]' },
+                { key: 'fast' as const, label: 'Fast-moving', value: fmt(paperWarehouseKpi.fastMoving), tone: 'border-[var(--success)]/45 bg-[var(--success-bg)] text-[var(--success)]' },
                 { key: 'slow' as const, label: 'Slow-moving', value: fmt(paperWarehouseKpi.slowMoving), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
                 { key: 'mismatch' as const, label: 'Incoming Mismatch', value: fmt(paperWarehouseKpi.incomingRequiredMismatch), tone: 'border-ds-warning/35 bg-ds-warning/10 text-ds-warning' },
                 { key: 'all' as const, label: 'Inventory Value', value: fmtVal(paperWarehouseKpi.value), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
-                { key: 'all' as const, label: 'Ageing Risk', value: fmtVal(paperWarehouseKpi.ageingRisk), tone: 'border-rose-500/45 bg-rose-500/8 text-rose-500' },
+                { key: 'all' as const, label: 'Ageing Risk', value: fmtVal(paperWarehouseKpi.ageingRisk), tone: 'border-[var(--error)]/45 bg-[var(--error-bg)] text-[var(--error)]' },
               ].map((kpi, i) => (
                 <button
                   key={`${kpi.label}-${i}`}
                   type="button"
                   onClick={() => setWarehouseKpiFilter((f) => (f === kpi.key ? 'all' : kpi.key))}
-                  className={`h-16 rounded-lg border px-3 py-2 text-left shadow-sm transition hover:shadow ${kpi.tone} cursor-pointer`}
+                  className={`h-16 rounded-ds-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${kpi.tone} cursor-pointer`}
                 >
                   <p className="text-[11px] uppercase tracking-wide text-ds-ink-muted">{kpi.label}</p>
                   <p className={`${ledgerMono} text-lg font-bold`}>{kpi.value}</p>
@@ -1092,12 +1092,12 @@ function InventoryPageContent() {
                   value={paperSearch}
                   onChange={(e) => setPaperSearch(e.target.value)}
                   placeholder="Search by material code, board type, classification, size, GSM..."
-                  className={`w-full rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
+                  className={`w-full rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
                 />
                 <select
                   value={boardTypeFilter}
                   onChange={(e) => setBoardTypeFilter(e.target.value)}
-                  className="w-36 rounded-lg border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
+                  className="w-36 rounded-ds-md border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
                 >
                   <option value="all">Board Type</option>
                   {boardTypeFilterOptions.map((opt) => (
@@ -1107,7 +1107,7 @@ function InventoryPageContent() {
                 <select
                   value={gsmFilter}
                   onChange={(e) => setGsmFilter(e.target.value)}
-                  className="w-24 rounded-lg border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
+                  className="w-24 rounded-ds-md border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
                 >
                   <option value="all">GSM</option>
                   {gsmFilterOptions.map((opt) => (
@@ -1117,14 +1117,14 @@ function InventoryPageContent() {
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-28 rounded-lg border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
+                  className="w-28 rounded-ds-md border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
                 >
                   <option value="all">Status</option>
                   {statusFilterOptions.map((opt) => (
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </select>
-                <label className="inline-flex items-center gap-1 rounded-lg border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink">
+                <label className="inline-flex items-center gap-1 rounded-ds-md border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink">
                   <input
                     type="checkbox"
                     checked={shortageOnly}
@@ -1138,7 +1138,7 @@ function InventoryPageContent() {
               <button
                 type="button"
                 onClick={() => setPaperLedgerSort('oldest')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
+                className={`rounded-ds-md px-3 py-1.5 text-xs font-medium border ${
                   paperLedgerSort === 'oldest'
                     ? 'bg-ds-warning border-ds-warning text-primary-foreground'
                     : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
@@ -1149,7 +1149,7 @@ function InventoryPageContent() {
               <button
                 type="button"
                 onClick={() => setPaperLedgerSort('newest')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
+                className={`rounded-ds-md px-3 py-1.5 text-xs font-medium border ${
                   paperLedgerSort === 'newest'
                     ? 'bg-ds-warning border-ds-warning text-primary-foreground'
                     : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
@@ -1158,7 +1158,7 @@ function InventoryPageContent() {
                 Newest first
               </button>
             </div>
-            <div className="overflow-x-auto rounded-lg border border-ds-line/40 shadow-sm">
+            <div className="overflow-x-auto rounded-ds-md border border-ds-line/40 shadow-sm">
               <table className="w-full table-auto text-sm">
                 <thead className="bg-background text-left border-b border-ds-line/40">
                   <tr className="text-ds-ink-muted text-[12px] uppercase tracking-wide">
@@ -1227,7 +1227,7 @@ function InventoryPageContent() {
                         </button>
                       </td>
                       <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
-                      <td className="px-3 py-2 text-right font-semibold text-emerald-500">
+                      <td className="px-3 py-2 text-right font-semibold text-[var(--success)]">
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'available')}
@@ -1236,11 +1236,11 @@ function InventoryPageContent() {
                           {fmt(row.available_sheets)}
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-right font-semibold text-amber-600">
+                      <td className="px-3 py-2 text-right font-semibold text-[var(--warning)]">
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'reserved')}
-                          className={`underline decoration-amber-500/80 underline-offset-2 hover:text-amber-700 ${ledgerMono}`}
+                          className={`underline decoration-amber-500/80 underline-offset-2 hover:text-[var(--warning)] ${ledgerMono}`}
                         >
                           {fmt(row.reserved_sheets)}
                         </button>
@@ -1250,8 +1250,8 @@ function InventoryPageContent() {
                           row.available_sheets - row.reserved_sheets > 0
                             ? 'text-cyan-600'
                             : row.available_sheets - row.reserved_sheets === 0
-                              ? 'text-amber-600'
-                              : 'text-rose-500'
+                              ? 'text-[var(--warning)]'
+                              : 'text-[var(--error)]'
                         }`}
                       >
                         <button
@@ -1260,7 +1260,7 @@ function InventoryPageContent() {
                           className="underline-offset-2 hover:underline"
                         >
                           {row.available_sheets - row.reserved_sheets < 0 ? (
-                            <span className="rounded border border-rose-500/35 bg-rose-500/10 px-1.5 py-0.5">
+                            <span className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-1.5 py-0.5">
                               {fmt(row.available_sheets - row.reserved_sheets)}
                             </span>
                           ) : (
@@ -1268,8 +1268,8 @@ function InventoryPageContent() {
                           )}
                         </button>
                       </td>
-                      <td className={`px-3 py-2 text-right font-semibold text-sky-600 ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
-                      <td className="px-3 py-2 text-right font-semibold text-rose-500">
+                      <td className={`px-3 py-2 text-right font-semibold text-[var(--info)] ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-[var(--error)]">
                         <button
                           type="button"
                           onClick={() => void openMaterialDrawer(row, 'shortage')}
@@ -1284,12 +1284,12 @@ function InventoryPageContent() {
                           const free = row.available_sheets - row.reserved_sheets
                           const statusClass =
                             row.status === 'leftover'
-                              ? 'border-violet-500/45 bg-violet-500/10 text-violet-700'
+                              ? 'border-[var(--tooling,#7c3aed)]/45 bg-[var(--tooling-bg,rgba(124,58,237,0.12))] text-[var(--tooling,#7c3aed)]'
                               : row.shortage_sheets > 0
-                              ? 'border-rose-500/45 bg-rose-500/10 text-rose-600'
+                              ? 'border-[var(--error)]/45 bg-[var(--error-bg)] text-[var(--error)]'
                               : free > 0
-                                ? 'border-emerald-500/45 bg-emerald-500/10 text-emerald-700'
-                                : 'border-amber-500/45 bg-amber-500/10 text-amber-700'
+                                ? 'border-[var(--success)]/45 bg-[var(--success-bg)] text-[var(--success)]'
+                                : 'border-[var(--warning)]/45 bg-[var(--warning-bg)] text-[var(--warning)]'
                           const statusLabel =
                             row.status === 'leftover'
                               ? 'leftover'
@@ -1306,14 +1306,14 @@ function InventoryPageContent() {
                           <button
                             type="button"
                             onClick={() => openAdjustForRow(row, 'add', 'available')}
-                            className="rounded border border-emerald-500/45 bg-emerald-500/10 px-2 py-1 font-medium text-emerald-700 hover:bg-emerald-500/20"
+                            className="rounded border border-[var(--success)]/45 bg-[var(--success-bg)] px-2 py-1 font-medium text-[var(--success)] hover:bg-[var(--success-bg)]"
                           >
                             + Add
                           </button>
                           <button
                             type="button"
                             onClick={() => setOpenActionMenuId((prev) => (prev === row.material_id ? null : row.material_id))}
-                            className="rounded border border-amber-500/45 bg-amber-500/10 px-2 py-1 font-medium text-amber-700 hover:bg-amber-500/20"
+                            className="rounded border border-[var(--warning)]/45 bg-[var(--warning-bg)] px-2 py-1 font-medium text-[var(--warning)] hover:bg-[var(--warning-bg)]"
                           >
                             ⋯
                           </button>
@@ -1328,7 +1328,7 @@ function InventoryPageContent() {
                             <button
                               type="button"
                               onClick={() => void openProcureModal(row)}
-                              className="rounded border border-rose-500/45 bg-rose-500/10 px-2 py-1 font-medium text-rose-600 hover:bg-rose-500/20"
+                              className="rounded border border-[var(--error)]/45 bg-[var(--error-bg)] px-2 py-1 font-medium text-[var(--error)] hover:bg-[var(--error-bg)]"
                             >
                               Procure
                             </button>
@@ -1344,7 +1344,7 @@ function InventoryPageContent() {
                           {openActionMenuId === row.material_id ? (
                             <div className="absolute right-0 top-full z-20 mt-1 w-36 rounded border border-ds-line/40 bg-background p-1 shadow-lg">
                               <button type="button" onClick={() => { setOpenActionMenuId(null); openAdjustForRow(row, 'subtract', 'available') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">Remove Stock</button>
-                              <button type="button" onClick={() => { setOpenActionMenuId(null); void deletePaperRow(row) }} className="block w-full rounded px-2 py-1 text-left text-rose-300 hover:bg-rose-500/10">Delete row</button>
+                              <button type="button" onClick={() => { setOpenActionMenuId(null); void deletePaperRow(row) }} className="block w-full rounded px-2 py-1 text-left text-[var(--error)] hover:bg-[var(--error-bg)]">Delete row</button>
                               <button type="button" onClick={() => { setOpenActionMenuId(null); void openMaterialDrawer(row, 'history') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">View History</button>
                               <button type="button" onClick={() => { setOpenActionMenuId(null); void openMaterialDrawer(row, 'reserved') }} className="block w-full rounded px-2 py-1 text-left hover:bg-ds-elevated/40">View Reservations</button>
                             </div>
@@ -1397,10 +1397,10 @@ function InventoryPageContent() {
                   <div><span className="text-ds-ink-muted">Board Type</span><p className="text-ds-ink">{materialDrawerData?.material.boardType ?? materialDrawerRow.board_type_id ?? '-'}</p></div>
                   <div><span className="text-ds-ink-muted">Classification</span><p className="text-ds-ink">{materialDrawerData?.material.boardClassification ?? materialDrawerRow.board_classification_id ?? '-'}</p></div>
                   <div><span className="text-ds-ink-muted">GSM</span><p className="text-ds-ink">{String(materialDrawerData?.material.gsm ?? materialDrawerRow.gsm ?? '-')}</p></div>
-                  <div><span className="text-ds-ink-muted">Available</span><p className="font-semibold text-emerald-600">{fmt(materialDrawerRow.available_sheets)}</p></div>
-                  <div><span className="text-ds-ink-muted">Reserved</span><p className="font-semibold text-amber-700">{fmt(materialDrawerRow.reserved_sheets)}</p></div>
-                  <div><span className="text-ds-ink-muted">Shortage</span><p className="font-semibold text-rose-600">{fmt(materialDrawerRow.shortage_sheets)}</p></div>
-                  <div><span className="text-ds-ink-muted">Free Stock</span><p className={`font-semibold ${(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? 'text-rose-600' : 'text-cyan-700'}`}>{fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p></div>
+                  <div><span className="text-ds-ink-muted">Available</span><p className="font-semibold text-[var(--success)]">{fmt(materialDrawerRow.available_sheets)}</p></div>
+                  <div><span className="text-ds-ink-muted">Reserved</span><p className="font-semibold text-[var(--warning)]">{fmt(materialDrawerRow.reserved_sheets)}</p></div>
+                  <div><span className="text-ds-ink-muted">Shortage</span><p className="font-semibold text-[var(--error)]">{fmt(materialDrawerRow.shortage_sheets)}</p></div>
+                  <div><span className="text-ds-ink-muted">Free Stock</span><p className={`font-semibold ${(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? 'text-[var(--error)]' : 'text-cyan-700'}`}>{fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p></div>
                 </div>
                 {materialDrawerData?.material.sourceTraceability ? (
                   <p className="rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1 text-ds-ink-faint">
@@ -1439,7 +1439,7 @@ function InventoryPageContent() {
                               {(r.planningId ? `PL#${r.planningId.slice(0, 8)}` : '-')}{r.jobCard?.jobCardNumber ? ` · JC#${r.jobCard.jobCardNumber}` : ''}
                             </p>
                             <p className="text-ds-ink-faint">{r.cartonName || '-'} {r.poNumber ? `· ${r.poNumber}` : ''}</p>
-                            <p className="font-semibold text-amber-700">Reserved {fmt(r.reservedSheets)} · Date {r.reservedAt ? new Date(r.reservedAt).toLocaleDateString('en-IN') : '-'}</p>
+                            <p className="font-semibold text-[var(--warning)]">Reserved {fmt(r.reservedSheets)} · Date {r.reservedAt ? new Date(r.reservedAt).toLocaleDateString('en-IN') : '-'}</p>
                             <p className="text-ds-ink-faint">Status: {r.jobCard?.status || r.status || '-'}</p>
                             <div className="mt-1 flex flex-wrap gap-2">
                               <button
@@ -1546,7 +1546,7 @@ function InventoryPageContent() {
                                 <button
                                   type="button"
                                   onClick={() => void generatePrFromDrawerShortage(s.id, s.pendingShortage)}
-                                  className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/20"
+                                  className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-2 py-1 text-xs text-[var(--error)] hover:bg-[var(--error-bg)]"
                                 >
                                   Generate PR
                                 </button>
@@ -1563,7 +1563,7 @@ function InventoryPageContent() {
                   <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
                     <p className="text-ds-ink">Free stock = Available - Reserved = {fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p>
                     {(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? (
-                      <p className="mt-1 text-rose-300">
+                      <p className="mt-1 text-[var(--error)]">
                         Negative free stock means more stock is reserved than currently available.
                       </p>
                     ) : null}
@@ -1632,7 +1632,7 @@ function InventoryPageContent() {
           widthClass="max-w-md"
         >
           <div className="space-y-3 px-1 text-sm">
-            <div className="inline-flex rounded-lg border border-ds-line/50 bg-background p-1">
+            <div className="inline-flex rounded-ds-md border border-ds-line/50 bg-background p-1">
               <button
                 type="button"
                 onClick={() => setAdjustMode('single')}
@@ -1765,7 +1765,7 @@ function InventoryPageContent() {
     <div className="w-full px-4 py-3">
       <section
         id="paper-ledger"
-        className="mb-8 rounded-xl border border-ds-line/40 overflow-hidden bg-background text-ds-ink"
+        className="mb-8 rounded-ds-lg border border-ds-line/40 overflow-hidden bg-background text-ds-ink"
       >
         <div className="p-4 md:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-4">
@@ -1781,14 +1781,14 @@ function InventoryPageContent() {
               )}
             </div>
             <div className="flex flex-nowrap items-stretch gap-2 overflow-x-auto text-xs">
-              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'shortage' ? 'all' : 'shortage'))} className="min-w-[120px] rounded border border-rose-500/45 bg-rose-500/10 px-3 py-2 text-left">Shortage <div className={`${ledgerMono} text-sm font-bold text-rose-600`}>{fmt(paperWarehouseKpi.shortage)}</div></button>
-              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'available' ? 'all' : 'available'))} className="min-w-[120px] rounded border border-emerald-500/45 bg-emerald-500/10 px-3 py-2 text-left">Available <div className={`${ledgerMono} text-sm font-bold text-emerald-600`}>{fmt(paperWarehouseKpi.available)}</div></button>
-              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'reserved' ? 'all' : 'reserved'))} className="min-w-[120px] rounded border border-amber-500/45 bg-amber-500/10 px-3 py-2 text-left">Reserved <div className={`${ledgerMono} text-sm font-bold text-amber-700`}>{fmt(paperWarehouseKpi.reserved)}</div></button>
-              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'incoming' ? 'all' : 'incoming'))} className="min-w-[120px] rounded border border-sky-500/45 bg-sky-500/10 px-3 py-2 text-left">Incoming <div className={`${ledgerMono} text-sm font-bold text-sky-700`}>{fmt(paperWarehouseKpi.incoming)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'shortage' ? 'all' : 'shortage'))} className="min-w-[120px] rounded border border-[var(--error)]/45 bg-[var(--error-bg)] px-3 py-2 text-left">Shortage <div className={`${ledgerMono} text-sm font-bold text-[var(--error)]`}>{fmt(paperWarehouseKpi.shortage)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'available' ? 'all' : 'available'))} className="min-w-[120px] rounded border border-[var(--success)]/45 bg-[var(--success-bg)] px-3 py-2 text-left">Available <div className={`${ledgerMono} text-sm font-bold text-[var(--success)]`}>{fmt(paperWarehouseKpi.available)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'reserved' ? 'all' : 'reserved'))} className="min-w-[120px] rounded border border-[var(--warning)]/45 bg-[var(--warning-bg)] px-3 py-2 text-left">Reserved <div className={`${ledgerMono} text-sm font-bold text-[var(--warning)]`}>{fmt(paperWarehouseKpi.reserved)}</div></button>
+              <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'incoming' ? 'all' : 'incoming'))} className="min-w-[120px] rounded border border-[var(--info)]/45 bg-[var(--info-bg)] px-3 py-2 text-left">Incoming <div className={`${ledgerMono} text-sm font-bold text-[var(--info)]`}>{fmt(paperWarehouseKpi.incoming)}</div></button>
               <button type="button" onClick={() => setWarehouseKpiFilter((f) => (f === 'free' ? 'all' : 'free'))} className="min-w-[120px] rounded border border-cyan-500/45 bg-cyan-500/10 px-3 py-2 text-left">Free Stock <div className={`${ledgerMono} text-sm font-bold text-cyan-700`}>{fmt(paperWarehouseKpi.freeStock)}</div></button>
               <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Total stock <div className={`${ledgerMono} text-sm font-bold text-ds-ink`}>{fmt(paperWarehouseKpi.totalPhysical)}</div></div>
               <div className="min-w-[120px] rounded border border-ds-line/40 bg-background px-3 py-2">Inventory value <div className={`${ledgerMono} text-sm font-bold text-ds-ink`}>{fmtVal(paperWarehouseKpi.value)}</div></div>
-              <div className="min-w-[120px] rounded border border-red-500/45 bg-rose-500/10 px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm font-bold text-rose-600`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
+              <div className="min-w-[120px] rounded border border-[var(--error)]/45 bg-[var(--error-bg)] px-3 py-2">Ageing risk <div className={`${ledgerMono} text-sm font-bold text-[var(--error)]`}>{fmtVal(paperWarehouseKpi.ageingRisk)}</div></div>
             </div>
           </div>
 
@@ -1799,7 +1799,7 @@ function InventoryPageContent() {
               value={paperSearch}
               onChange={(e) => setPaperSearch(e.target.value)}
               placeholder="material code / board type / classification / size / gsm"
-              className={`mt-1 w-full max-w-md rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
+              className={`mt-1 w-full max-w-md rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
             />
           </label>
 
@@ -1807,7 +1807,7 @@ function InventoryPageContent() {
             <button
               type="button"
               onClick={() => setPaperLedgerSort('oldest')}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
+              className={`rounded-ds-md px-3 py-1.5 text-xs font-medium border ${
                 paperLedgerSort === 'oldest'
                   ? 'bg-ds-warning border-ds-warning text-primary-foreground'
                   : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
@@ -1818,7 +1818,7 @@ function InventoryPageContent() {
             <button
               type="button"
               onClick={() => setPaperLedgerSort('newest')}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
+              className={`rounded-ds-md px-3 py-1.5 text-xs font-medium border ${
                 paperLedgerSort === 'newest'
                   ? 'bg-ds-warning border-ds-warning text-primary-foreground'
                   : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
@@ -1827,7 +1827,7 @@ function InventoryPageContent() {
               Newest first
             </button>
           </div>
-          <div className="overflow-x-auto rounded-lg border border-ds-line/40">
+          <div className="overflow-x-auto rounded-ds-md border border-ds-line/40">
             <table className="w-full text-sm">
                 <thead className="bg-background text-left border-b border-ds-line/40">
                 <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
@@ -1871,12 +1871,12 @@ function InventoryPageContent() {
                       <p className={`text-[10px] text-ds-ink-faint ${ledgerMono}`}>{row.material_id}</p>
                     </td>
                     <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
-                    <td className={`px-3 py-2 text-emerald-600 font-semibold ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
-                    <td className="px-3 py-2 text-amber-700 font-semibold">
+                    <td className={`px-3 py-2 text-[var(--success)] font-semibold ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
+                    <td className="px-3 py-2 text-[var(--warning)] font-semibold">
                       <button
                         type="button"
                         onClick={() => void openMaterialDrawer(row, 'reserved')}
-                        className={`underline decoration-amber-500/80 underline-offset-2 hover:text-amber-800 ${ledgerMono}`}
+                        className={`underline decoration-amber-500/80 underline-offset-2 hover:text-[var(--warning)] ${ledgerMono}`}
                       >
                         {fmt(row.reserved_sheets)}
                       </button>
@@ -1886,26 +1886,26 @@ function InventoryPageContent() {
                         row.available_sheets - row.reserved_sheets > 0
                           ? 'text-cyan-700'
                           : row.available_sheets - row.reserved_sheets === 0
-                            ? 'text-amber-700'
-                            : 'text-rose-600'
+                            ? 'text-[var(--warning)]'
+                            : 'text-[var(--error)]'
                       }`}
                     >
                       {fmt(row.available_sheets - row.reserved_sheets)}
                     </td>
-                    <td className={`px-3 py-2 text-sky-700 font-semibold ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
-                    <td className={`px-3 py-2 text-rose-600 font-semibold ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
+                    <td className={`px-3 py-2 text-[var(--info)] font-semibold ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
+                    <td className={`px-3 py-2 text-[var(--error)] font-semibold ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
                     <td className={`px-3 py-2 text-ds-ink ${ledgerMono}`}>{fmt(row.reorder_level)}</td>
                     <td className="px-3 py-2 text-xs">
                       {(() => {
                         const free = row.available_sheets - row.reserved_sheets
                         const statusClass =
                           row.status === 'leftover'
-                            ? 'text-violet-700'
+                            ? 'text-[var(--tooling,#7c3aed)]'
                             : row.shortage_sheets > 0
-                            ? 'text-rose-600'
+                            ? 'text-[var(--error)]'
                             : free > 0
-                              ? 'text-emerald-700'
-                              : 'text-amber-700'
+                              ? 'text-[var(--success)]'
+                              : 'text-[var(--warning)]'
                         const statusLabel =
                           row.status === 'leftover'
                             ? 'leftover'
@@ -1922,7 +1922,7 @@ function InventoryPageContent() {
                         <button
                           type="button"
                           onClick={() => void openProcureModal(row)}
-                          className="rounded border border-rose-500/45 bg-rose-500/10 px-2 py-1 font-medium text-rose-600 hover:bg-rose-500/20"
+                          className="rounded border border-[var(--error)]/45 bg-[var(--error-bg)] px-2 py-1 font-medium text-[var(--error)] hover:bg-[var(--error-bg)]"
                         >
                           Procure
                         </button>
@@ -1968,7 +1968,7 @@ function InventoryPageContent() {
             </div>
 
             {drawerRow.totalIssuedToFloor > 0 && (
-              <div className="rounded-lg border border-ds-warning/40 bg-ds-warning/8 p-3 space-y-1">
+              <div className="rounded-ds-md border border-ds-warning/40 bg-ds-warning/8 p-3 space-y-1">
                 <p className="text-xs uppercase text-ds-warning/90 font-semibold">Fragmented balance</p>
                 <p className="text-ds-ink-muted">
                   Already issued to floor:{' '}
@@ -1982,7 +1982,7 @@ function InventoryPageContent() {
             )}
 
             {drawerRow.suggestBalanceWriteOff && (
-              <div className="rounded-lg border border-rose-700/50 bg-rose-950/30 p-3 text-rose-200 text-xs">
+              <div className="rounded-ds-md border border-[var(--error)]/50 bg-[var(--error-bg)] p-3 text-[var(--error)] text-xs">
                 Remaining est. weight is under 50 kg — consider a <strong>balance write-off</strong> to keep inventory
                 clean.
               </div>
@@ -2016,7 +2016,7 @@ function InventoryPageContent() {
               </div>
             )}
 
-            <div className="rounded-lg border border-ds-line/50 bg-background p-3 space-y-3 ring-1 ring-ring/5">
+            <div className="rounded-ds-md border border-ds-line/50 bg-background p-3 space-y-3 ring-1 ring-ring/5">
               <p className="text-xs uppercase tracking-wide text-ds-warning/90 font-semibold">Issue to floor</p>
               <p className="text-xs text-ds-ink-faint">
                 Moves sheets from main warehouse to <strong className="text-ds-ink-muted">FLOOR</strong> stock (new split
@@ -2068,7 +2068,7 @@ function InventoryPageContent() {
                 type="button"
                 disabled={issueSubmitting}
                 onClick={() => void submitIssueToFloor()}
-                className="w-full rounded-md bg-ds-warning hover:bg-ds-warning py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                className="w-full rounded-ds-sm bg-ds-warning hover:bg-ds-warning py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {issueSubmitting ? 'Saving…' : 'Save — issue to floor'}
               </button>
@@ -2083,31 +2083,31 @@ function InventoryPageContent() {
           <button
             type="button"
             onClick={() => setAdjustOpen(true)}
-            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
           >
             Adjust Stock
           </button>
           <Link
             href="/inventory/flow"
-            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
           >
             Inventory Flow
           </Link>
           <Link
             href="/inventory/simulation"
-            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
           >
             Live Simulation
           </Link>
           <Link
             href="/inventory/purchase-requisitions"
-            className="px-4 py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm font-medium"
           >
             Purchase Requisitions
           </Link>
           <Link
             href="/inventory/grn"
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
           >
             Add Stock (GRN)
           </Link>
@@ -2156,7 +2156,7 @@ function InventoryPageContent() {
         </table>
       </div>
 
-      <section className="mt-8 rounded-xl border border-ds-line/40 bg-background">
+      <section className="mt-8 rounded-ds-lg border border-ds-line/40 bg-background">
         <div className="border-b border-ds-line/40 px-4 py-3">
           <h2 className="text-sm font-semibold text-ds-warning">Recent stock movements</h2>
         </div>
@@ -2260,7 +2260,7 @@ function InventoryPageContent() {
                 Add 10% buffer
               </label>
               {procureError ? (
-                <div className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-rose-300">{procureError}</div>
+                <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-2 py-1 text-[var(--error)]">{procureError}</div>
               ) : null}
               <div className="flex items-center justify-end gap-2">
                 <button
@@ -2413,7 +2413,7 @@ function InventoryPageContent() {
                 <p>Shortage after release: {fmt(Math.max(0, releaseState.requiredSheets - Math.max(0, releaseState.currentReserved - Math.max(0, Number(releaseQtyInput || 0)))))}</p>
               </div>
               {releaseError ? (
-                <p className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1 text-xs text-rose-300">{releaseError}</p>
+                <p className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-2 py-1 text-xs text-[var(--error)]">{releaseError}</p>
               ) : null}
               <div className="flex items-center gap-2">
                 <button

@@ -252,7 +252,7 @@ function CommandPaletteModal({
     >
       <div
         ref={panelRef}
-        className="flex h-[min(70vh,560px)] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl ring-1 ring-ring/20 backdrop-blur-xl"
+        className="flex h-[min(70vh,560px)] w-full max-w-xl flex-col overflow-hidden rounded-ds-lg border border-border bg-card shadow-2xl ring-1 ring-ring/20 backdrop-blur-xl"
         onKeyDown={onPaletteKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
@@ -312,7 +312,7 @@ function CommandPaletteModal({
                         data-flat-index={flatIndex}
                         onClick={() => void navigateTo(r, g.label)}
                         onMouseEnter={() => setSelectedFlat(flatIndex)}
-                        className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left transition ${
+                        className={`flex w-full items-start gap-2 rounded-ds-md px-2 py-2 text-left transition ${
                           active
                             ? 'border-l-2 border-l-[#f97316] bg-[#f97316]/[0.07] text-ds-ink shadow-[inset_0_0_24px_rgba(249,115,22,0.06)]'
                             : 'border-l-2 border-l-transparent text-ds-ink hover:bg-ds-elevated/40'
@@ -450,7 +450,7 @@ export function CommandPaletteTrigger({
               'max-w-none rounded-full border border-[var(--border)] bg-[var(--bg-card)] px-4 py-2.5 text-[var(--text-secondary)] shadow-[0_2px_14px_rgba(15,23,42,0.06),0_0_0_1px_rgba(249,115,22,0.07)] hover:border-[rgba(249,115,22,0.45)] hover:shadow-[0_6px_28px_rgba(15,23,42,0.1),0_0_24px_rgba(249,115,22,0.12)] dark:shadow-[0_2px_20px_rgba(0,0,0,0.35)]',
             )
           : clsx(
-              'max-w-xl rounded-lg border border-border bg-card/70 px-3 py-2 text-muted-foreground shadow-inner ring-1 ring-ring/20 backdrop-blur-md hover:border-primary/40 hover:bg-accent hover:text-accent-foreground',
+              'max-w-xl rounded-ds-md border border-border bg-card/70 px-3 py-2 text-muted-foreground shadow-inner ring-1 ring-ring/20 backdrop-blur-md hover:border-primary/40 hover:bg-accent hover:text-accent-foreground',
             ),
         className,
       )}
@@ -484,7 +484,7 @@ export function CommandPaletteTriggerIcon() {
     <button
       type="button"
       onClick={() => open()}
-      className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-primary"
+      className="rounded-ds-md p-2 text-muted-foreground hover:bg-accent hover:text-primary"
       aria-label="Open command palette"
     >
       <Search className="h-5 w-5" />

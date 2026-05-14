@@ -49,20 +49,20 @@ function MachineCard({
     if (!highlight || !cardRef.current) return
     const el = cardRef.current
     el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    el.classList.add('ring-2', 'ring-emerald-400/85', 'ring-offset-2', 'ring-offset-black')
+    el.classList.add('ring-2', 'ring-[var(--success)]/85', 'ring-offset-2', 'ring-offset-black')
     const t = window.setTimeout(() => {
-      el.classList.remove('ring-2', 'ring-emerald-400/85', 'ring-offset-2', 'ring-offset-black')
+      el.classList.remove('ring-2', 'ring-[var(--success)]/85', 'ring-offset-2', 'ring-offset-black')
     }, 2600)
     return () => window.clearTimeout(t)
   }, [highlight])
 
   const isPress = PRESS.includes(m.machineCode)
-  const statusCls = m.status === 'active' ? 'text-green-400' : m.status === 'under_maintenance' ? 'text-red-400' : 'text-ds-ink-muted'
+  const statusCls = m.status === 'active' ? 'text-[var(--success)]' : m.status === 'under_maintenance' ? 'text-[var(--error)]' : 'text-ds-ink-muted'
   return (
     <div
       ref={cardRef}
       data-machine-flow-id={m.id}
-      className="rounded-lg border border-ds-line/60 bg-ds-elevated/50 p-3 min-w-[140px]"
+      className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-3 min-w-[140px]"
     >
       <p className="font-mono text-ds-warning text-sm">{m.machineCode}</p>
       <p className="text-ds-ink-muted text-xs truncate">{m.name}</p>
@@ -135,7 +135,7 @@ export default function MachineFlowPage() {
         <section>
           <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">Pre-press</h2>
           <div className="flex flex-wrap gap-2">
-            <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
+            <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
               <p className="text-ds-ink-muted text-xs">Board Store</p>
             </div>
             {prepressItems.map((m) => (
@@ -146,7 +146,7 @@ export default function MachineFlowPage() {
                 highlight={highlightMachineId === m.id}
               />
             ))}
-            <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
+            <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
               <p className="text-ds-ink-muted text-xs">Plate QC & Store</p>
             </div>
           </div>
@@ -198,7 +198,7 @@ export default function MachineFlowPage() {
           <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">QC & Dispatch</h2>
           <div className="flex flex-wrap gap-2">
             {['Final QC Bench', 'Auto Counter', 'Packing Line', 'FG Warehouse', 'Dispatch Bay'].map((label) => (
-              <div key={label} className="rounded-lg border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
+              <div key={label} className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
                 <p className="text-ds-ink-muted text-xs">{label}</p>
               </div>
             ))}
@@ -206,7 +206,7 @@ export default function MachineFlowPage() {
         </section>
       </div>
 
-      <div className="mt-8 overflow-x-auto rounded-xl border border-ds-line/40 bg-background ring-1 ring-ring/5">
+      <div className="mt-8 overflow-x-auto rounded-ds-lg border border-ds-line/40 bg-background ring-1 ring-ring/5">
         <h2 className="text-sm font-semibold text-ds-ink-muted mb-2 px-4 pt-4">Machine ledger — changeover & PM health</h2>
         <table className={`w-full text-sm ${mono}`}>
           <thead className="bg-ds-main text-left text-neutral-500 text-xs uppercase tracking-wider">
@@ -223,7 +223,7 @@ export default function MachineFlowPage() {
             {pressItems.concat(postpressItems).concat(finishingItems).map((m) => (
               <tr
                 key={m.id}
-                className={m.pmHealth.overdue ? 'bg-rose-950/20 border-l-4 border-rose-600' : ''}
+                className={m.pmHealth.overdue ? 'bg-[var(--error-bg)] border-l-4 border-[var(--error)]' : ''}
               >
                 <td className="px-4 py-2 font-mono text-ds-warning">{m.machineCode}</td>
                 <td className="px-4 py-2">

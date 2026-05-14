@@ -59,9 +59,9 @@ function dotFromStored(entry: PaletteRecentStored): StatusDot {
 function StatusDotEl({ tone }: { tone: StatusDot }) {
   const cls =
     tone === 'green'
-      ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.45)]'
+      ? 'bg-[var(--success-bg)] shadow-[0_0_6px_rgba(16,185,129,0.45)]'
       : tone === 'red'
-        ? 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.45)]'
+        ? 'bg-[var(--error-bg)] shadow-[0_0_6px_rgba(244,63,94,0.45)]'
         : 'bg-ds-warning shadow-[0_0_6px_rgba(245,158,11,0.45)]'
   return <span className={`h-2 w-2 shrink-0 rounded-full ${cls}`} aria-hidden />
 }
@@ -180,7 +180,7 @@ export function DirectorWorkspaceSidebar({
         className={`group relative ${TRANSITION}`}
       >
         <div
-          className={`flex items-center gap-1 rounded-md border-l-2 pl-1.5 ${
+          className={`flex items-center gap-1 rounded-ds-sm border-l-2 pl-1.5 ${
             pinnedAccent ? 'border-[#f97316]' : 'border-transparent'
           }`}
         >
@@ -205,7 +205,7 @@ export function DirectorWorkspaceSidebar({
             type="button"
             title={collapsed ? tip : undefined}
             onClick={() => onItemActivate(entry)}
-            className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors duration-200 ease-in-out hover:bg-ds-elevated/60 ${
+            className={`flex min-w-0 flex-1 items-center gap-2 rounded-ds-sm px-1.5 py-1.5 text-left transition-colors duration-200 ease-in-out hover:bg-ds-elevated/60 ${
               active ? 'bg-[#f97316]/10 ring-1 ring-[#f97316]/40' : ''
             }`}
           >
@@ -263,7 +263,7 @@ export function DirectorWorkspaceSidebar({
         <button
           type="button"
           onClick={toggleCollapsed}
-          className="rounded-md p-1.5 text-ds-ink-faint transition-colors hover:bg-ds-elevated/80 hover:text-[#f97316]"
+          className="rounded-ds-sm p-1.5 text-ds-ink-faint transition-colors hover:bg-ds-elevated/80 hover:text-[#f97316]"
           title={collapsed ? 'Expand workspace' : 'Collapse workspace'}
           aria-expanded={!collapsed}
         >

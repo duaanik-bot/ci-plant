@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
+import { Badge, Button, CardSection } from '@/components/design-system'
 
 type Customer = { id: string; name: string; contactName?: string | null }
 type JobCard = { id: string; jobCardNumber: number; setNumber: string | null; customerId: string }
@@ -17,6 +18,27 @@ type Line = {
   jobCardId: string
 }
 
+type ReconRow = {
+  jobCardId: string
+  poLineItemId: string
+  cartonName: string
+  poNumber: string
+  poQty: number
+  billedQty: number
+  tolerancePct: number
+  flag: 'ok' | 'short' | 'excess'
+  varianceQty: number
+  flagged: boolean
+  flagging: boolean
+}
+
+function computeFlag(poQty: number, billedQty: number, tolerancePct: number): { flag: 'ok' | 'short' | 'excess'; varianceQty: number } {
+  const varianceQty = billedQty - poQty
+  const band = poQty * tolerancePct / 100
+  if (Math.abs(varianceQty) <= band) return { flag: 'ok', varianceQty }
+  return { flag: varianceQty < 0 ? 'short' : 'excess', varianceQty }
+}
+
 export default function NewBillPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -27,6 +49,10 @@ export default function NewBillPage() {
     { description: '', quantity: '', rate: '', gstPct: '12', jobCardId: '' },
   ])
   const [saving, setSaving] = useState(false)
+
+  const [savedBillId, setSavedBillId] = useState<string | null>(null)
+  const [reconRows, setReconRows] = useState<ReconRow[]>([])
+  const [reconLoading, setReconLoading] = useState(false)
 
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'billing-customer',
@@ -98,6 +124,42 @@ export default function NewBillPage() {
     setLines((prev) => prev.filter((_, i) => i !== idx))
   }
 
+  async function loadReconciliation(billId: string, submittedLines: Line[]) {
+    setReconLoading(true)
+    const linesWithJc = submittedLines.filter((l) => l.jobCardId && l.description && l.quantity && l.rate)
+    const rows: ReconRow[] = []
+    await Promise.all(
+      linesWithJc.map(async (line) => {
+        try {
+          const res = await fetch(`/api/job-cards/${line.jobCardId}`)
+          const data = await res.json()
+          if (!data || data.error || !data.poLine) return
+          const poQty = Number(data.poLine.quantity || 0)
+          const tolerancePct = Number(data.poLine.tolerancePct ?? 2)
+          const billedQty = Number(line.quantity)
+          const { flag, varianceQty } = computeFlag(poQty, billedQty, tolerancePct)
+          rows.push({
+            jobCardId: line.jobCardId,
+            poLineItemId: data.poLine.id,
+            cartonName: data.poLine.cartonName || line.description,
+            poNumber: data.poLine.po?.poNumber || '—',
+            poQty,
+            billedQty,
+            tolerancePct,
+            flag,
+            varianceQty,
+            flagged: false,
+            flagging: false,
+          })
+        } catch {
+          // skip line if fetch fails
+        }
+      })
+    )
+    setReconRows(rows.sort((a, b) => (a.flag === 'ok' ? 1 : -1)))
+    setReconLoading(false)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!customerId) {
@@ -128,8 +190,9 @@ export default function NewBillPage() {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Failed to create bill')
-      toast.success('Bill created')
-      router.push('/billing')
+      toast.success(`Bill ${json.billNumber} created`)
+      setSavedBillId(json.id)
+      await loadReconciliation(json.id, valid)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed')
     } finally {
@@ -137,60 +200,204 @@ export default function NewBillPage() {
     }
   }
 
-  return (
-    <form onSubmit={handleSubmit} className="p-4 max-w-4xl mx-auto space-y-4">
-      <h1 className="text-xl font-bold text-ds-warning">New Bill</h1>
+  async function flagToShortExcess(rowIdx: number) {
+    const row = reconRows[rowIdx]
+    if (!row || !savedBillId) return
+    setReconRows((prev) => prev.map((r, i) => i === rowIdx ? { ...r, flagging: true } : r))
+    try {
+      const res = await fetch('/api/short-excess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          poLineItemId: row.poLineItemId,
+          jobCardId: row.jobCardId,
+          billId: savedBillId,
+          poQty: row.poQty,
+          actualQty: row.billedQty,
+          tolerancePct: row.tolerancePct,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to flag')
+      setReconRows((prev) => prev.map((r, i) => i === rowIdx ? { ...r, flagged: true, flagging: false } : r))
+      toast.success('Flagged — visible in Short & Excess')
+    } catch {
+      toast.error('Failed to flag')
+      setReconRows((prev) => prev.map((r, i) => i === rowIdx ? { ...r, flagging: false } : r))
+    }
+  }
 
-      <div className="grid md:grid-cols-2 gap-4 rounded-xl bg-ds-card border border-ds-line/50 p-4 text-sm">
-        <div>
-          <MasterSearchSelect
-            label="Customer"
-            required
-            query={customerSearch.query}
-            onQueryChange={(value) => {
-              customerSearch.setQuery(value)
-              setCustomerId('')
-            }}
-            loading={customerSearch.loading}
-            options={customerSearch.options}
-            lastUsed={customerSearch.lastUsed}
-            onSelect={applyCustomer}
-            getOptionLabel={(c) => c.name}
-            getOptionMeta={(c) => c.contactName ?? ''}
-            placeholder="Type 1-2 letters to search customers..."
-            recentLabel="Recent customers"
-            loadingMessage="Searching customers..."
-            emptyMessage="No customer found."
-          />
+  const allFlagged = reconRows.filter((r) => r.flag !== 'ok').every((r) => r.flagged)
+
+  if (savedBillId) {
+    return (
+      <div className="mx-auto max-w-4xl space-y-4 p-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-[var(--brand-primary)]">PO Reconciliation</h1>
+          <Button variant="secondary" onClick={() => router.push('/billing')}>
+            ← Back to billing
+          </Button>
         </div>
-        <div>
-          <label className="block text-ds-ink-muted mb-1">Bill date</label>
-          <input
-            type="date"
-            value={billDate}
-            onChange={(e) => setBillDate(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
-          />
-        </div>
+
+        {reconLoading ? (
+          <CardSection>
+            <div className="animate-pulse py-6 text-center text-sm text-ds-ink-muted">
+              Checking PO quantities…
+            </div>
+          </CardSection>
+        ) : reconRows.length === 0 ? (
+          <CardSection>
+            <div className="py-4 text-center text-sm text-ds-ink-muted">
+              No job-card lines to reconcile. Bill saved successfully.
+            </div>
+          </CardSection>
+        ) : (
+          <CardSection
+            title={`Reconciliation · ${reconRows.length} line${reconRows.length !== 1 ? 's' : ''}`}
+            className="overflow-hidden p-0"
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--border)] text-[11px] font-semibold uppercase tracking-wider text-ds-ink-muted">
+                    <th className="px-4 py-2.5 text-left">Carton</th>
+                    <th className="px-3 py-2.5 text-left">PO #</th>
+                    <th className="px-3 py-2.5 text-right">PO Qty</th>
+                    <th className="px-3 py-2.5 text-right">Billed Qty</th>
+                    <th className="px-3 py-2.5 text-right">Variance</th>
+                    <th className="px-3 py-2.5 text-center">Tol%</th>
+                    <th className="px-3 py-2.5 text-center">Flag</th>
+                    <th className="px-3 py-2.5 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {reconRows.map((row, idx) => {
+                    const varianceClass =
+                      row.varianceQty < 0
+                        ? 'text-[var(--error)]'
+                        : row.varianceQty > 0
+                          ? 'text-[var(--warning)]'
+                          : 'text-[var(--success)]'
+                    return (
+                      <tr key={row.jobCardId} className="transition-colors hover:bg-[var(--bg-muted)]">
+                        <td className="px-4 py-3 font-medium text-ds-ink">{row.cartonName}</td>
+                        <td className="px-3 py-3 font-mono text-xs text-ds-ink-muted">{row.poNumber}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{row.poQty.toLocaleString('en-IN')}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{row.billedQty.toLocaleString('en-IN')}</td>
+                        <td className={`px-3 py-3 text-right font-medium tabular-nums ${varianceClass}`}>
+                          {row.varianceQty > 0 ? '+' : ''}{row.varianceQty.toLocaleString('en-IN')}
+                        </td>
+                        <td className="px-3 py-3 text-center text-xs text-ds-ink-muted">{row.tolerancePct}%</td>
+                        <td className="px-3 py-3 text-center">
+                          {row.flag === 'ok' && <Badge tone="success">OK</Badge>}
+                          {row.flag === 'short' && (
+                            <Badge tone="danger">SHORT {Math.abs(row.varianceQty).toLocaleString('en-IN')}</Badge>
+                          )}
+                          {row.flag === 'excess' && (
+                            <Badge tone="warning">EXCESS +{row.varianceQty.toLocaleString('en-IN')}</Badge>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          {row.flag !== 'ok' && (
+                            row.flagged ? (
+                              <span className="text-xs font-medium text-[var(--success)]">✓ Flagged</span>
+                            ) : (
+                              <Button
+                                variant="warning"
+                                className="px-2.5 py-1 text-xs"
+                                onClick={() => flagToShortExcess(idx)}
+                                disabled={row.flagging}
+                              >
+                                {row.flagging ? 'Flagging…' : '→ Short & Excess'}
+                              </Button>
+                            )
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardSection>
+        )}
+
+        {!reconLoading && (
+          <div className="flex justify-end gap-2">
+            {!allFlagged && reconRows.some((r) => r.flag !== 'ok' && !r.flagged) && (
+              <Button variant="ghost" onClick={() => router.push('/stores/short-excess')}>
+                Skip reconciliation
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              onClick={() => router.push(allFlagged && reconRows.some((r) => r.flag !== 'ok') ? '/stores/short-excess' : '/billing')}
+            >
+              {allFlagged && reconRows.some((r) => r.flag !== 'ok') ? 'View Short & Excess →' : 'Done'}
+            </Button>
+          </div>
+        )}
       </div>
+    )
+  }
 
-      <div className="rounded-xl bg-ds-card border border-ds-line/50 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-ds-ink">Line items</h2>
-          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg bg-ds-elevated text-foreground text-xs">
-            + Add line
-          </button>
+  return (
+    <form onSubmit={handleSubmit} className="mx-auto max-w-4xl space-y-4 p-4">
+      <h1 className="text-xl font-bold text-[var(--brand-primary)]">New Bill</h1>
+
+      <CardSection>
+        <div className="grid gap-4 text-sm md:grid-cols-2">
+          <div>
+            <MasterSearchSelect
+              label="Customer"
+              required
+              query={customerSearch.query}
+              onQueryChange={(value) => {
+                customerSearch.setQuery(value)
+                setCustomerId('')
+              }}
+              loading={customerSearch.loading}
+              options={customerSearch.options}
+              lastUsed={customerSearch.lastUsed}
+              onSelect={applyCustomer}
+              getOptionLabel={(c) => c.name}
+              getOptionMeta={(c) => c.contactName ?? ''}
+              placeholder="Type 1-2 letters to search customers..."
+              recentLabel="Recent customers"
+              loadingMessage="Searching customers..."
+              emptyMessage="No customer found."
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="bill-date" className="block text-xs font-medium text-ds-ink-muted">Bill date</label>
+            <input
+              id="bill-date"
+              type="date"
+              value={billDate}
+              onChange={(e) => setBillDate(e.target.value)}
+              className="ds-input"
+            />
+          </div>
         </div>
+      </CardSection>
+
+      <CardSection
+        title="Line items"
+        action={
+          <Button variant="secondary" onClick={addLine} className="px-3 py-1.5 text-xs">
+            + Add line
+          </Button>
+        }
+      >
         <div className="space-y-2">
           {lines.map((l, idx) => (
-            <div key={idx} className="grid grid-cols-12 gap-2 items-end text-sm">
+            <div key={idx} className="grid grid-cols-12 items-end gap-2 text-sm">
               <div className="col-span-4">
                 <input
                   type="text"
                   placeholder="Description"
                   value={l.description}
                   onChange={(e) => updateLine(idx, { description: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="ds-input"
                 />
               </div>
               <div className="col-span-1">
@@ -199,7 +406,7 @@ export default function NewBillPage() {
                   placeholder="Qty"
                   value={l.quantity}
                   onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="ds-input"
                 />
               </div>
               <div className="col-span-2">
@@ -208,7 +415,7 @@ export default function NewBillPage() {
                   placeholder="Rate"
                   value={l.rate}
                   onChange={(e) => updateLine(idx, { rate: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="ds-input"
                 />
               </div>
               <div className="col-span-1">
@@ -217,14 +424,14 @@ export default function NewBillPage() {
                   placeholder="GST%"
                   value={l.gstPct}
                   onChange={(e) => updateLine(idx, { gstPct: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="ds-input"
                 />
               </div>
               <div className="col-span-3">
                 <select
                   value={l.jobCardId}
                   onChange={(e) => updateLine(idx, { jobCardId: e.target.value })}
-                  className="w-full px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="ds-input cursor-pointer"
                 >
                   <option value="">No job card</option>
                   {filteredJcs.map((jc) => (
@@ -234,33 +441,30 @@ export default function NewBillPage() {
                   ))}
                 </select>
               </div>
-              <div className="col-span-1">
+              <div className="col-span-1 flex justify-center">
                 {lines.length > 1 && (
-                  <button type="button" onClick={() => removeLine(idx)} className="text-red-400 text-xs">
+                  <Button
+                    variant="ghost"
+                    aria-label="Remove line"
+                    className="px-2 py-1 text-[var(--error)] hover:text-[var(--error)]"
+                    onClick={() => removeLine(idx)}
+                  >
                     ✕
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
           ))}
         </div>
-      </div>
+      </CardSection>
 
       <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={() => router.push('/billing')}
-          className="px-3 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm"
-        >
+        <Button variant="secondary" onClick={() => router.push('/billing')}>
           Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={saving}
-          className="px-4 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
-        >
+        </Button>
+        <Button variant="primary" type="submit" disabled={saving}>
           {saving ? 'Saving…' : 'Create bill'}
-        </button>
+        </Button>
       </div>
     </form>
   )

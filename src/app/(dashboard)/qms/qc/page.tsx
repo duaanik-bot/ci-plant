@@ -106,14 +106,14 @@ export default function QcRecordsPage() {
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+          className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
         >
           {showForm ? 'Cancel' : 'Add QC record'}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="rounded-xl bg-ds-card border border-ds-line/50 p-4 space-y-3">
+        <form onSubmit={handleSubmit} className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">New QC record</h2>
           <div className="grid md:grid-cols-2 gap-3 text-sm">
             <div>
@@ -121,7 +121,7 @@ export default function QcRecordsPage() {
               <select
                 value={form.jobId}
                 onChange={(e) => setForm((f) => ({ ...f, jobId: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               >
                 <option value="">Select job…</option>
                 {jobs.map((j) => (
@@ -137,7 +137,7 @@ export default function QcRecordsPage() {
                 type="text"
                 value={form.checkType}
                 onChange={(e) => setForm((f) => ({ ...f, checkType: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               />
             </div>
             <div>
@@ -145,7 +145,7 @@ export default function QcRecordsPage() {
               <select
                 value={form.instrumentName}
                 onChange={(e) => setForm((f) => ({ ...f, instrumentName: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               >
                 {QC_INSTRUMENTS.map((inst) => (
                   <option key={inst} value={inst}>
@@ -159,7 +159,7 @@ export default function QcRecordsPage() {
               <select
                 value={form.result}
                 onChange={(e) => setForm((f) => ({ ...f, result: e.target.value as 'PASS' | 'FAIL' }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               >
                 <option value="PASS">PASS</option>
                 <option value="FAIL">FAIL</option>
@@ -171,7 +171,7 @@ export default function QcRecordsPage() {
                 type="text"
                 value={form.measuredValue}
                 onChange={(e) => setForm((f) => ({ ...f, measuredValue: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               />
             </div>
             <div>
@@ -182,14 +182,14 @@ export default function QcRecordsPage() {
                   placeholder="Min"
                   value={form.specMin}
                   onChange={(e) => setForm((f) => ({ ...f, specMin: e.target.value }))}
-                  className="flex-1 px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="flex-1 px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
                 <input
                   type="text"
                   placeholder="Max"
                   value={form.specMax}
                   onChange={(e) => setForm((f) => ({ ...f, specMax: e.target.value }))}
-                  className="flex-1 px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="flex-1 px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
                 />
               </div>
             </div>
@@ -211,14 +211,14 @@ export default function QcRecordsPage() {
                 type="text"
                 value={form.notes}
                 onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               />
             </div>
           </div>
           <button
             type="submit"
             disabled={saving}
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -240,7 +240,7 @@ export default function QcRecordsPage() {
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-ds-line/50">
+      <div className="overflow-x-auto rounded-ds-md border border-ds-line/50">
         <table className="w-full text-sm text-left">
           <thead className="bg-ds-elevated text-ds-ink-muted">
             <tr>
@@ -262,7 +262,7 @@ export default function QcRecordsPage() {
                 <td className="px-4 py-2 text-ds-ink-muted">{r.instrumentName}</td>
                 <td className="px-4 py-2 text-ds-ink-muted">{r.measuredValue ?? '—'}</td>
                 <td className="px-4 py-2">
-                  <span className={r.result === 'PASS' ? 'text-green-400' : 'text-red-400'}>
+                  <span className={r.result === 'PASS' ? 'text-[var(--success)]' : 'text-[var(--error)]'}>
                     {r.result}
                   </span>
                 </td>

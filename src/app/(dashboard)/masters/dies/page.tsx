@@ -69,7 +69,7 @@ export default function DiesPage() {
   }
 
   const inputCls =
-    'min-h-[40px] min-w-[80px] rounded-lg border border-border bg-card px-3 py-2 text-sm text-card-foreground'
+    'min-h-[40px] min-w-[80px] rounded-ds-md border border-border bg-card px-3 py-2 text-sm text-card-foreground'
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
@@ -78,17 +78,17 @@ export default function DiesPage() {
         <div className="flex flex-wrap gap-2">
           <Link
             href="/masters/dies/location-view"
-            className="rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
+            className="rounded-ds-md border border-neutral-200 px-3 py-2 text-sm text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
           >
             Die Location View
           </Link>
           <Link
             href="/masters/dies/vendor-orders"
-            className="rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
+            className="rounded-ds-md border border-neutral-200 px-3 py-2 text-sm text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
           >
             Vendor Orders
           </Link>
-          <Link href="/masters/dies/new" className="rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90">
+          <Link href="/masters/dies/new" className="rounded-ds-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90">
             Add Die
           </Link>
         </div>
@@ -195,7 +195,7 @@ export default function DiesPage() {
                   <td className={enterpriseTdClass}>{d?.condition ?? '—'}</td>
                   <td className={enterpriseTdClass}>{d?.status ?? '—'}</td>
                   <td className={enterpriseTdClass}>
-                    <Link href={`/masters/dies/${d?.id ?? ''}`} className="text-blue-600 hover:underline dark:text-blue-400">
+                    <Link href={`/masters/dies/${d?.id ?? ''}`} className="text-[var(--info)] hover:underline dark:text-[var(--info)]">
                       View Details
                     </Link>
                   </td>
@@ -211,7 +211,7 @@ export default function DiesPage() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3">
+    <div className="rounded-ds-lg border border-border bg-card p-3">
       <p className="text-xs uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">{label}</p>
       <p className="text-lg font-semibold text-neutral-900 dark:text-ds-ink">{value}</p>
     </div>
@@ -219,7 +219,7 @@ function Stat({ label, value }: { label: string; value: number }) {
 }
 
 function LifeBar({ pct }: { pct: number }) {
-  const cls = pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-ds-warning' : 'bg-green-500'
+  const cls = pct > 90 ? 'bg-[var(--error-bg)]' : pct > 70 ? 'bg-ds-warning' : 'bg-[var(--success-bg)]'
   return (
     <div className="h-2 w-20 overflow-hidden rounded bg-neutral-200 dark:bg-ds-elevated">
       <div className={`h-full ${cls}`} style={{ width: `${pct}%` }} />

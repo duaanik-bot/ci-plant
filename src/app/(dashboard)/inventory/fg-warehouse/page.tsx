@@ -61,10 +61,10 @@ export default function FgWarehousePage() {
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search material / product"
-        className="mb-3 w-full max-w-sm rounded-lg border border-ds-line/50 bg-background px-3 py-2 text-sm"
+        className="mb-3 w-full max-w-sm rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm"
       />
 
-      <div className="overflow-x-auto rounded-lg border border-ds-line/40">
+      <div className="overflow-x-auto rounded-ds-md border border-ds-line/40">
         <table className="w-full text-sm">
           <thead className="bg-background text-left border-b border-ds-line/40">
             <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">

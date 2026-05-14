@@ -94,7 +94,7 @@ export default function JobDetailPage() {
       </div>
 
       {tab === 'Overview' && (
-        <div className="space-y-2 bg-ds-elevated rounded-lg p-4">
+        <div className="space-y-2 bg-ds-elevated rounded-ds-md p-4">
           <p><span className="text-ds-ink-muted">Customer:</span> {job.customer.name}</p>
           <p><span className="text-ds-ink-muted">Product:</span> {job.productName}</p>
           <p><span className="text-ds-ink-muted">Qty ordered:</span> {job.qtyOrdered}</p>
@@ -114,7 +114,7 @@ export default function JobDetailPage() {
             <p className="text-ds-ink-muted">No stages yet.</p>
           ) : (
             job.stages.map((s) => (
-              <div key={s.id} className="bg-ds-elevated rounded-lg p-3 flex flex-wrap gap-4">
+              <div key={s.id} className="bg-ds-elevated rounded-ds-md p-3 flex flex-wrap gap-4">
                 <span>Stage {s.stageNumber}</span>
                 <span>{s.machine?.machineCode ?? '—'}</span>
                 <span>Started: {format(new Date(s.startedAt), 'dd MMM HH:mm')} by {s.starter.name}</span>
@@ -156,9 +156,9 @@ export default function JobDetailPage() {
             <p className="text-ds-ink-muted">No QC records.</p>
           ) : (
             job.qcRecords.map((qc) => (
-              <div key={qc.id} className="bg-ds-elevated rounded-lg p-3 flex gap-4">
+              <div key={qc.id} className="bg-ds-elevated rounded-ds-md p-3 flex gap-4">
                 <span>{qc.checkType}</span>
-                <span className={qc.result === 'PASS' ? 'text-green-400' : 'text-red-400'}>{qc.result}</span>
+                <span className={qc.result === 'PASS' ? 'text-[var(--success)]' : 'text-[var(--error)]'}>{qc.result}</span>
                 <span className="text-ds-ink-muted">{format(new Date(qc.checkedAt), 'dd MMM HH:mm')}</span>
               </div>
             ))
@@ -167,7 +167,7 @@ export default function JobDetailPage() {
       )}
 
       {tab === 'Artwork' && (
-        <div className="bg-ds-elevated rounded-lg p-4">
+        <div className="bg-ds-elevated rounded-ds-md p-4">
           {job.artwork ? (
             <p>Version {job.artwork.versionNumber}, status: {job.artwork.status}, locks: {job.artwork.locksCompleted}/4</p>
           ) : (
@@ -178,7 +178,7 @@ export default function JobDetailPage() {
       )}
 
       {tab === 'Cost' && (
-        <div className="bg-ds-elevated rounded-lg p-4">
+        <div className="bg-ds-elevated rounded-ds-md p-4">
           <p className="text-ds-ink-muted">Material cost actual vs planned — Phase 3/4.</p>
         </div>
       )}

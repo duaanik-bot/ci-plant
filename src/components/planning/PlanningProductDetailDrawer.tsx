@@ -88,7 +88,7 @@ export function PlanningProductDetailDrawer({
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-sm">
-          {err ? <p className="text-sm text-rose-400">{err}</p> : null}
+          {err ? <p className="text-sm text-[var(--error)]">{err}</p> : null}
           {loading ? <p className="text-ds-ink-faint">Loading…</p> : null}
           {!loading && data && (
             <>
@@ -128,7 +128,7 @@ export function PlanningProductDetailDrawer({
                   <li>
                     Plates / die:{' '}
                     {data.hub?.die ? (
-                      <span className="text-emerald-400">
+                      <span className="text-[var(--success)]">
                         Die {data.hub.die.dyeNumber}/{data.hub.die.ups} · {data.hub.die.sheetSize}
                       </span>
                     ) : (

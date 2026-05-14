@@ -100,7 +100,7 @@ export function MastersLayoutBody({ children }: { children: ReactNode }) {
   return (
     <ErrorBoundary moduleName="Masters">
       <div className="grid gap-4 md:grid-cols-[260px_1fr]">
-        <aside className="h-fit rounded-lg border border-ds-line/60 bg-card p-2">
+        <aside className="h-fit rounded-ds-md border border-ds-line/60 bg-card p-2">
           <div className="mb-2 px-1">
             <input
               type="text"
@@ -120,7 +120,7 @@ export function MastersLayoutBody({ children }: { children: ReactNode }) {
               return (
                 <section
                   key={group.key}
-                  className={`rounded-md border ${
+                  className={`rounded-ds-sm border ${
                     hasActiveItem
                       ? 'border-ds-brand/35 bg-ds-brand/5'
                       : 'border-ds-line/50 bg-transparent'
@@ -129,7 +129,7 @@ export function MastersLayoutBody({ children }: { children: ReactNode }) {
                   <button
                     type="button"
                     onClick={() => setOpenGroup((curr) => (curr === group.key ? '' : group.key))}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                    className="flex w-full items-center justify-between rounded-ds-sm px-2 py-2 text-left text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
                     aria-expanded={isOpen}
                   >
                     <span>{group.label}</span>

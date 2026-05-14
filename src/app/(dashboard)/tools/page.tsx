@@ -73,21 +73,21 @@ export default function ToolsHubPage() {
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
-        <section className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2">
+        <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2">
           <p className="text-xs text-ds-ink-muted">PLATE HUB</p>
           <p className="text-2xl">🖨️</p>
           <p className="text-sm text-ds-ink">
             {plateStats.inRack} in rack | {plateStats.issued} issued | {plateStats.ctpPending} CTP pending
           </p>
           <div className="h-2 rounded bg-ds-elevated overflow-hidden">
-            <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, plateStats.inRack * 10)}%` }} />
+            <div className="h-full bg-[var(--success-bg)]" style={{ width: `${Math.min(100, plateStats.inRack * 10)}%` }} />
           </div>
           <Link href="/pre-press/plate-store" className="text-sm text-ds-warning hover:underline">
             Open Plate Hub →
           </Link>
         </section>
 
-        <section className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2">
+        <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2">
           <p className="text-xs text-ds-ink-muted">DIE INVENTORY</p>
           <p className="text-2xl">✂️</p>
           <p className="text-sm text-ds-ink">
@@ -98,7 +98,7 @@ export default function ToolsHubPage() {
           </Link>
         </section>
 
-        <section className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2">
+        <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2">
           <p className="text-xs text-ds-ink-muted">EMBOSS BLOCKS</p>
           <p className="text-2xl">🔲</p>
           <p className="text-sm text-ds-ink">
@@ -111,7 +111,7 @@ export default function ToolsHubPage() {
         </section>
       </div>
 
-      <section className="rounded-xl border border-ds-line/50 bg-ds-card p-4">
+      <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
         <h2 className="text-sm font-semibold text-ds-ink mb-2">Alerts</h2>
         <div className="space-y-2 text-sm">
           {alerts.length === 0 ? <p className="text-ds-ink-faint">No tool-related alerts.</p> : null}

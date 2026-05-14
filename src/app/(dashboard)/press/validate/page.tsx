@@ -75,11 +75,11 @@ export default function PressValidatePage() {
 
       {!result ? (
         <>
-          <div id="press-qr-reader" className="rounded-lg overflow-hidden bg-background mb-4 hidden" />
+          <div id="press-qr-reader" className="rounded-ds-md overflow-hidden bg-background mb-4 hidden" />
           <button
             type="button"
             onClick={startScanner}
-            className="w-full py-6 px-4 rounded-xl bg-ds-warning hover:bg-ds-warning text-primary-foreground font-bold text-lg mb-4"
+            className="w-full py-6 px-4 rounded-ds-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground font-bold text-lg mb-4"
           >
             TAP TO SCAN PLATE
           </button>
@@ -91,12 +91,12 @@ export default function PressValidatePage() {
               onChange={(e) => setManualBarcode(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && validatePlate(manualBarcode)}
               placeholder="e.g. PLT-CI-JOB-2025-0001-XXXX"
-              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground font-mono"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground font-mono"
             />
             <button
               type="button"
               onClick={() => validatePlate(manualBarcode)}
-              className="mt-2 w-full py-2 rounded-lg bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm"
+              className="mt-2 w-full py-2 rounded-ds-md bg-ds-line/30 hover:bg-ds-line/40 text-foreground text-sm"
             >
               Validate
             </button>
@@ -104,10 +104,10 @@ export default function PressValidatePage() {
         </>
       ) : (
         <div
-          className={`flex-1 flex flex-col items-center justify-center p-6 rounded-xl text-center min-h-[60vh] ${
+          className={`flex-1 flex flex-col items-center justify-center p-6 rounded-ds-lg text-center min-h-[60vh] ${
             result.valid
-              ? 'bg-green-900/80 border-2 border-green-500'
-              : 'bg-red-900/80 border-2 border-red-500'
+              ? 'bg-[var(--success-bg)] border-2 border-[var(--success)]'
+              : 'bg-[var(--error-bg)] border-2 border-[var(--error)]'
           }`}
         >
           <p className="text-3xl font-bold mb-4 whitespace-pre-wrap">
@@ -120,7 +120,7 @@ export default function PressValidatePage() {
           <button
             type="button"
             onClick={() => { setResult(null); setManualBarcode('') }}
-            className="mt-8 w-full max-w-xs py-3 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground font-medium"
+            className="mt-8 w-full max-w-xs py-3 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-foreground font-medium"
           >
             Scan Another Plate
           </button>

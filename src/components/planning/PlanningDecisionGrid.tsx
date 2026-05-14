@@ -253,12 +253,12 @@ function sheetSizeLabel(r: PlanningGridLine): string {
 
 function stockSignalMeta(signal: 'green' | 'yellow' | 'red'): { label: string; cls: string } {
   if (signal === 'green') {
-    return { label: 'Available', cls: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
+    return { label: 'Available', cls: 'border-[var(--success)]/35 bg-[var(--success-bg)]/15 text-[var(--success)] dark:text-[var(--success)]' }
   }
   if (signal === 'yellow') {
-    return { label: 'Partial', cls: 'border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300' }
+    return { label: 'Partial', cls: 'border-[var(--warning)]/35 bg-[var(--warning-bg)]/15 text-[var(--warning)] dark:text-[var(--warning)]' }
   }
-  return { label: 'Shortage', cls: 'border-rose-500/35 bg-rose-500/15 text-rose-700 dark:text-rose-300' }
+  return { label: 'Shortage', cls: 'border-[var(--error)]/35 bg-[var(--error-bg)]/15 text-[var(--error)] dark:text-[var(--error)]' }
 }
 
 function readinessMeta(
@@ -268,9 +268,9 @@ function readinessMeta(
   if (!hasMaterialHint) {
     return { label: 'No material', cls: 'border-ds-line/50 bg-ds-elevated/40 text-ds-ink-faint' }
   }
-  if (signal === 'green') return { label: 'Ready', cls: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
-  if (signal === 'yellow') return { label: 'Partial', cls: 'border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300' }
-  return { label: 'Shortage', cls: 'border-rose-500/35 bg-rose-500/15 text-rose-700 dark:text-rose-300' }
+  if (signal === 'green') return { label: 'Ready', cls: 'border-[var(--success)]/35 bg-[var(--success-bg)]/15 text-[var(--success)] dark:text-[var(--success)]' }
+  if (signal === 'yellow') return { label: 'Partial', cls: 'border-[var(--warning)]/35 bg-[var(--warning-bg)]/15 text-[var(--warning)] dark:text-[var(--warning)]' }
+  return { label: 'Shortage', cls: 'border-[var(--error)]/35 bg-[var(--error-bg)]/15 text-[var(--error)] dark:text-[var(--error)]' }
 }
 
 function planningPriorityMeta(input: {
@@ -281,12 +281,12 @@ function planningPriorityMeta(input: {
   const dueMs = input.poDate ? new Date(input.poDate).getTime() : NaN
   const isUrgentDate = Number.isFinite(dueMs) && (dueMs - now) / 86400000 <= 2
   if (input.signal === 'red' || isUrgentDate) {
-    return { label: 'High', cls: 'border-rose-500/35 bg-rose-500/15 text-rose-700 dark:text-rose-300' }
+    return { label: 'High', cls: 'border-[var(--error)]/35 bg-[var(--error-bg)]/15 text-[var(--error)] dark:text-[var(--error)]' }
   }
   if (input.signal === 'yellow') {
-    return { label: 'Medium', cls: 'border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300' }
+    return { label: 'Medium', cls: 'border-[var(--warning)]/35 bg-[var(--warning-bg)]/15 text-[var(--warning)] dark:text-[var(--warning)]' }
   }
-  return { label: 'Low', cls: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
+  return { label: 'Low', cls: 'border-[var(--success)]/35 bg-[var(--success-bg)]/15 text-[var(--success)] dark:text-[var(--success)]' }
 }
 
 type SortKey = 'cartonName' | 'cartonSize' | 'qty' | 'board' | 'gsm' | 'coating' | 'batch'
@@ -818,10 +818,10 @@ export function PlanningDecisionGrid({
       >
         {mode === 'row' && onHold && core.batchHoldReason ? (
           <p
-            className="order-first max-w-full text-left text-xs leading-tight text-rose-700/90 dark:text-rose-200/90 line-clamp-1"
+            className="order-first max-w-full text-left text-xs leading-tight text-[var(--error)]/90 dark:text-[var(--error)]/90 line-clamp-1"
             title={core.batchHoldReason}
           >
-            <span className="font-semibold text-rose-300/95">Hold:</span> {core.batchHoldReason}
+            <span className="font-semibold text-[var(--error)]/95">Hold:</span> {core.batchHoldReason}
           </p>
         ) : null}
         <div className="flex min-w-0 flex-wrap items-center justify-start gap-1">
@@ -879,7 +879,7 @@ export function PlanningDecisionGrid({
             <button
               type="button"
               disabled={batchActionBusy}
-              className="shrink-0 rounded bg-rose-800 px-1.5 py-px text-xs text-white"
+              className="shrink-0 rounded bg-[var(--error-bg)] px-1.5 py-px text-xs text-white"
               onClick={(e) => {
                 e.stopPropagation()
                 void confirmHold()
@@ -1215,7 +1215,7 @@ export function PlanningDecisionGrid({
                       onClick={() => onRowBackgroundClick(firstRow.id)}
                       className={`border-l-[3px] border-ds-brand transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ds-brand/45 ${
                         groupCompleted
-                          ? 'bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
+                          ? 'bg-[var(--success-bg)]/10 hover:bg-[var(--success-bg)]/15 dark:bg-[var(--success-bg)]/20 dark:hover:bg-[var(--success-bg)]/24'
                           : someGroupSel
                             ? 'bg-ds-brand/12'
                             : 'bg-ds-brand/6 hover:bg-ds-brand/10'
@@ -1273,7 +1273,7 @@ export function PlanningDecisionGrid({
                               type="button"
                               onClick={(e) => { e.stopPropagation(); onRowBackgroundClick(r.id) }}
                               className={`line-clamp-2 break-words text-left text-xs font-semibold leading-tight transition-colors hover:text-ds-brand ${
-                                groupCompleted ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-ink'
+                                groupCompleted ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-ds-ink'
                               }`}
                               title={r.cartonName}
                             >
@@ -1355,7 +1355,7 @@ export function PlanningDecisionGrid({
 
                       {/* Group actions + expand */}
                       <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible border-l border-ds-line/30 bg-inherit`}>
-                        <div className="w-full rounded-md border border-ds-line/35 bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="w-full rounded-ds-sm border border-ds-line/35 bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
                           <div className="mb-1 flex min-w-0 flex-wrap items-center justify-start gap-1">
                             <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus0]}`}>
                               {BATCH_STATUS_LABEL[bStatus0]}
@@ -1410,7 +1410,7 @@ export function PlanningDecisionGrid({
                       onClick={() => onRowBackgroundClick(r.id)}
                       className={`border-l-[3px] border-ds-brand/40 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ds-brand/45 ${
                         subCompleted
-                          ? 'bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
+                          ? 'bg-[var(--success-bg)]/10 hover:bg-[var(--success-bg)]/15 dark:bg-[var(--success-bg)]/20 dark:hover:bg-[var(--success-bg)]/24'
                           : 'bg-ds-brand/3 hover:bg-ds-brand/6'
                       }`}
                     >
@@ -1430,7 +1430,7 @@ export function PlanningDecisionGrid({
                           title="Open item spec drawer"
                         >
                           <span className={`line-clamp-2 break-words text-xs font-semibold leading-tight transition-colors group-hover:text-ds-brand ${
-                            subCompleted ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-ink'
+                            subCompleted ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-ds-ink'
                           }`}>
                             {r.cartonName}
                           </span>
@@ -1547,7 +1547,7 @@ export function PlanningDecisionGrid({
                       recallHighlight
                         ? 'bg-ds-success/15 ring-1 ring-inset ring-ds-success/35'
                         : completedRow
-                          ? 'bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
+                          ? 'bg-[var(--success-bg)]/10 hover:bg-[var(--success-bg)]/15 dark:bg-[var(--success-bg)]/20 dark:hover:bg-[var(--success-bg)]/24'
                         : rowSel
                           ? dataTable.tr.selected
                           : sameBatchAsPrev
@@ -1562,7 +1562,7 @@ export function PlanningDecisionGrid({
                         recallHighlight
                           ? 'bg-ds-success/15'
                           : completedRow
-                            ? 'bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
+                            ? 'bg-[var(--success-bg)]/10 hover:bg-[var(--success-bg)]/15 dark:bg-[var(--success-bg)]/20 dark:hover:bg-[var(--success-bg)]/24'
                             : 'bg-ds-elevated'
                       }`}
                     >
@@ -1600,7 +1600,7 @@ export function PlanningDecisionGrid({
                             <button
                               type="button"
                               title="Delete line"
-                              className={`${ICON_BUTTON_BASE} h-6 w-6 rounded-ds-sm border border-rose-500/35 bg-rose-500/10 text-rose-700 duration-200 hover:border-rose-500/60 hover:bg-rose-500/15 dark:text-rose-300`}
+                              className={`${ICON_BUTTON_BASE} h-6 w-6 rounded-ds-sm border border-[var(--error)]/35 bg-[var(--error-bg)]/10 text-[var(--error)] duration-200 hover:border-[var(--error)]/60 hover:bg-[var(--error-bg)]/15 dark:text-[var(--error)]`}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 void onDeleteLine(r.id)
@@ -1624,7 +1624,7 @@ export function PlanningDecisionGrid({
                         title="Open product spec drawer"
                       >
                         <span className={`line-clamp-2 break-words text-sm font-semibold leading-tight group-hover:text-ds-brand transition-colors ${
-                          completedRow ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-ink'
+                          completedRow ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-ds-ink'
                         }`}>
                           {r.cartonName}
                         </span>
@@ -1757,7 +1757,7 @@ export function PlanningDecisionGrid({
                     </td>
                     <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible border-l border-ds-line/30 bg-inherit`}>
                       {/* ── DC-style compact action cell ── */}
-                      <div className="w-full rounded-md border border-ds-line/35 bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="w-full rounded-ds-sm border border-ds-line/35 bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
                         <div className="mb-1">
                           <span className={`inline-flex rounded border px-1 py-px text-[10px] ${rowPriority.cls}`}>
                             Priority {rowPriority.label}

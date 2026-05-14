@@ -343,7 +343,7 @@ export default function EffectsMasterPage() {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+      <div className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-[var(--text-primary)]">MiniMasters</h2>
@@ -361,7 +361,7 @@ export default function EffectsMasterPage() {
             <button
               type="button"
               onClick={openCreateCategory}
-              className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
+              className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
             >
               Add Category
             </button>
@@ -369,7 +369,7 @@ export default function EffectsMasterPage() {
               type="button"
               onClick={openCreateValue}
               disabled={!selectedCategoryId}
-              className="rounded-lg border border-[var(--border)] bg-[var(--brand)] px-3 py-2 text-sm text-[var(--brand-foreground)] disabled:opacity-50"
+              className="rounded-ds-md border border-[var(--border)] bg-[var(--brand)] px-3 py-2 text-sm text-[var(--brand-foreground)] disabled:opacity-50"
             >
               Add Value
             </button>
@@ -378,7 +378,7 @@ export default function EffectsMasterPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-[280px_1fr]">
-        <aside className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-3">
+        <aside className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3">
           <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Categories</h3>
           <div className="space-y-1">
             {categories.map((c) => {
@@ -389,7 +389,7 @@ export default function EffectsMasterPage() {
                   type="button"
                   onClick={() => setSelectedCategoryId(c.id)}
                   onDoubleClick={() => openEditCategory(c)}
-                  className={`flex w-full items-center justify-between rounded-md border px-2 py-2 text-left text-sm transition-colors ${
+                  className={`flex w-full items-center justify-between rounded-ds-sm border px-2 py-2 text-left text-sm transition-colors ${
                     selected
                       ? 'border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-primary)]'
                       : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]'
@@ -401,7 +401,7 @@ export default function EffectsMasterPage() {
               )
             })}
             {categories.length === 0 ? (
-              <div className="rounded-md border border-dashed border-[var(--border)] p-3 text-xs text-[var(--text-muted)]">
+              <div className="rounded-ds-sm border border-dashed border-[var(--border)] p-3 text-xs text-[var(--text-muted)]">
                 No categories yet. Click <span className="font-medium">Add Category</span> to create your first one.
               </div>
             ) : null}
@@ -426,7 +426,7 @@ export default function EffectsMasterPage() {
           ) : null}
         </aside>
 
-        <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-3">
+        <section className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3">
           <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{selectedCategory?.name ?? 'Values'}</h3>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
@@ -454,7 +454,7 @@ export default function EffectsMasterPage() {
                     <td className="px-3 py-3 text-[var(--text-muted)]">{v.impactOn || '—'}</td>
                     <td className="px-3 py-3 text-[var(--text-muted)]">{v.sortOrder}</td>
                     <td className="px-3 py-3">
-                      <span className="inline-flex rounded-md border border-[var(--border)] bg-[var(--bg-muted)] px-2 py-0.5 text-xs text-[var(--text-primary)]">
+                      <span className="inline-flex rounded-ds-sm border border-[var(--border)] bg-[var(--bg-muted)] px-2 py-0.5 text-xs text-[var(--text-primary)]">
                         {v.active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
@@ -497,7 +497,7 @@ export default function EffectsMasterPage() {
             </table>
           </div>
           {filteredValues.length === 0 ? (
-            <div className="mt-4 rounded-md border border-dashed border-[var(--border)] p-5 text-center">
+            <div className="mt-4 rounded-ds-sm border border-dashed border-[var(--border)] p-5 text-center">
               <p className="text-sm text-[var(--text-muted)]">
                 {selectedCategory ? 'No values found for this category.' : 'Select a category to view values.'}
               </p>
@@ -531,7 +531,7 @@ export default function EffectsMasterPage() {
               void updateCategory()
             }}
           >
-            <p className="rounded-md border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-xs text-[var(--text-muted)]">
+            <p className="rounded-ds-sm border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-xs text-[var(--text-muted)]">
               Create a category first (for example: Coating), then add detailed values from <span className="font-medium">Add Value</span>.
             </p>
             <div>
@@ -566,7 +566,7 @@ export default function EffectsMasterPage() {
               Active
             </label>
             <div className="pt-2">
-              <button type="submit" disabled={saving} className="rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+              <button type="submit" disabled={saving} className="rounded-ds-md bg-primary px-3 py-2 text-sm text-primary-foreground">
                 {saving ? 'Saving…' : 'Save'}
               </button>
             </div>
@@ -640,7 +640,7 @@ export default function EffectsMasterPage() {
               Active
             </label>
             <div className="pt-2">
-              <button type="submit" disabled={saving} className="rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+              <button type="submit" disabled={saving} className="rounded-ds-md bg-primary px-3 py-2 text-sm text-primary-foreground">
                 {saving ? 'Saving…' : 'Save'}
               </button>
             </div>

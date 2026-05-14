@@ -171,7 +171,7 @@ export default function NewJobPage() {
       </p>
 
       {formError && (
-        <div className="p-3 rounded-lg bg-red-900/30 border border-red-700 text-red-200 text-sm">
+        <div className="p-3 rounded-ds-md bg-[var(--error-bg)] border border-[var(--error)] text-[var(--error)] text-sm">
           {formError}
         </div>
       )}
@@ -180,7 +180,7 @@ export default function NewJobPage() {
         <button
           type="button"
           onClick={fillTestData}
-          className="px-3 py-1.5 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-ds-ink text-sm"
+          className="px-3 py-1.5 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-ds-ink text-sm"
         >
           Fill test data
         </button>
@@ -194,8 +194,8 @@ export default function NewJobPage() {
             value={customerId}
             onChange={(ev) => { setCustomerId(ev.target.value); setFieldErrors((prev) => ({ ...prev, customerId: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              (fieldErrors.customerId || requiredErrors.customerId) ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              (fieldErrors.customerId || requiredErrors.customerId) ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           >
             <option value="">Select customer</option>
@@ -204,7 +204,7 @@ export default function NewJobPage() {
             ))}
           </select>
           {(fieldErrors.customerId || requiredErrors.customerId) && (
-            <p className="mt-1 text-sm text-red-400">{fieldErrors.customerId || requiredErrors.customerId}</p>
+            <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.customerId || requiredErrors.customerId}</p>
           )}
         </div>
         <div>
@@ -214,12 +214,12 @@ export default function NewJobPage() {
             value={productName}
             onChange={(ev) => { setProductName(ev.target.value); setFieldErrors((prev) => ({ ...prev, productName: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              (fieldErrors.productName || requiredErrors.productName) ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              (fieldErrors.productName || requiredErrors.productName) ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           />
           {(fieldErrors.productName || requiredErrors.productName) && (
-            <p className="mt-1 text-sm text-red-400">{fieldErrors.productName || requiredErrors.productName}</p>
+            <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.productName || requiredErrors.productName}</p>
           )}
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -231,12 +231,12 @@ export default function NewJobPage() {
               value={qtyOrdered}
               onChange={(ev) => { setQtyOrdered(ev.target.value); setFieldErrors((prev) => ({ ...prev, qtyOrdered: '' })) }}
               required
-              className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-                (fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) ? 'border-red-500' : 'border-ds-line/60'
+              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+                (fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) ? 'border-[var(--error)]' : 'border-ds-line/60'
               }`}
             />
             {(fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) && (
-              <p className="mt-1 text-sm text-red-400">{fieldErrors.qtyOrdered || requiredErrors.qtyOrdered}</p>
+              <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.qtyOrdered || requiredErrors.qtyOrdered}</p>
             )}
           </div>
           <div>
@@ -247,12 +247,12 @@ export default function NewJobPage() {
               value={imposition}
               onChange={(ev) => { setImposition(ev.target.value); setFieldErrors((prev) => ({ ...prev, imposition: '' })) }}
               required
-              className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-                (fieldErrors.imposition || requiredErrors.imposition) ? 'border-red-500' : 'border-ds-line/60'
+              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+                (fieldErrors.imposition || requiredErrors.imposition) ? 'border-[var(--error)]' : 'border-ds-line/60'
               }`}
             />
             {(fieldErrors.imposition || requiredErrors.imposition) && (
-              <p className="mt-1 text-sm text-red-400">{fieldErrors.imposition || requiredErrors.imposition}</p>
+              <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.imposition || requiredErrors.imposition}</p>
             )}
           </div>
         </div>
@@ -263,17 +263,17 @@ export default function NewJobPage() {
             value={dueDate}
             onChange={(ev) => { setDueDate(ev.target.value); setFieldErrors((prev) => ({ ...prev, dueDate: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              (fieldErrors.dueDate || requiredErrors.dueDate) ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              (fieldErrors.dueDate || requiredErrors.dueDate) ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           />
           {(fieldErrors.dueDate || requiredErrors.dueDate) && (
-            <p className="mt-1 text-sm text-red-400">{fieldErrors.dueDate || requiredErrors.dueDate}</p>
+            <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.dueDate || requiredErrors.dueDate}</p>
           )}
         </div>
         <div>
           <label className="block text-sm text-ds-ink-muted mb-1">Machine sequence * (drag to reorder)</label>
-          <div className={`space-y-1 ${(fieldErrors.machineSequence || requiredErrors.machineSequence) ? 'rounded-lg border border-red-500' : ''}`}>
+          <div className={`space-y-1 ${(fieldErrors.machineSequence || requiredErrors.machineSequence) ? 'rounded-ds-md border border-[var(--error)]' : ''}`}>
             {machineOrder.map((id, i) => {
               const m = machines.find((x) => x.id === id)
               return (
@@ -289,7 +289,7 @@ export default function NewJobPage() {
             })}
           </div>
           {(fieldErrors.machineSequence || requiredErrors.machineSequence) && (
-            <p className="mt-1 text-sm text-red-400">{fieldErrors.machineSequence || requiredErrors.machineSequence}</p>
+            <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.machineSequence || requiredErrors.machineSequence}</p>
           )}
         </div>
         <div>
@@ -297,8 +297,8 @@ export default function NewJobPage() {
           <select
             value={boardMaterialId}
             onChange={(ev) => { setBoardMaterialId(ev.target.value); setFieldErrors((prev) => ({ ...prev, boardMaterialId: '' })) }}
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              fieldErrors.boardMaterialId ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              fieldErrors.boardMaterialId ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           >
             <option value="">None</option>
@@ -307,7 +307,7 @@ export default function NewJobPage() {
             ))}
           </select>
           {fieldErrors.boardMaterialId && (
-            <p className="mt-1 text-sm text-red-400">{fieldErrors.boardMaterialId}</p>
+            <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.boardMaterialId}</p>
           )}
         </div>
         <div>
@@ -316,11 +316,11 @@ export default function NewJobPage() {
             value={specialInstructions}
             onChange={(e) => setSpecialInstructions(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
 
-        <div className="p-4 rounded-lg bg-ds-elevated border border-ds-line/60">
+        <div className="p-4 rounded-ds-md bg-ds-elevated border border-ds-line/60">
           <p className="text-sm font-medium text-ds-ink-muted mb-2">BOM preview</p>
           <p>Net sheets: {netSheets}</p>
           <p>Approved sheets (with waste): {approvedSheets}</p>
@@ -331,7 +331,7 @@ export default function NewJobPage() {
         <button
           type="submit"
           disabled={submitting || !isFormValid}
-          className="w-full py-2.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium"
+          className="w-full py-2.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium"
         >
           {submitting ? 'Creating…' : isFormValid ? 'Create job' : 'Fill required fields to continue'}
         </button>

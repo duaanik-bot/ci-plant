@@ -249,7 +249,7 @@ function CartonDimensionsRow({
   return (
     <div
       className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:col-span-3 border-b border-border/40 sm:border-0 pb-2 sm:pb-0 ${
-        smartHighlight ? 'rounded-md px-1 -mx-1 border border-ds-warning/60' : ''
+        smartHighlight ? 'rounded-ds-sm px-1 -mx-1 border border-ds-warning/60' : ''
       }`}
     >
       <span className="text-ds-ink-faint shrink-0 text-xs flex items-center gap-1">
@@ -1865,12 +1865,12 @@ export default function DesigningDetailPage() {
             <div className="flex flex-wrap items-center gap-2 justify-end">
               <Link
                 href="/orders/designing"
-                className="px-2.5 py-1.5 rounded-lg border border-ds-line/50 text-ds-ink text-sm"
+                className="px-2.5 py-1.5 rounded-ds-md border border-ds-line/50 text-ds-ink text-sm"
               >
                 Back
               </Link>
               <div
-                className="inline-flex flex-wrap items-center gap-2 sm:gap-3 rounded-lg border border-ds-warning/45 bg-ds-warning/8 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.08)]"
+                className="inline-flex flex-wrap items-center gap-2 sm:gap-3 rounded-ds-md border border-ds-warning/45 bg-ds-warning/8 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.08)]"
                 role="group"
                 aria-label="Designer and approvals"
               >
@@ -1924,7 +1924,7 @@ export default function DesigningDetailPage() {
                 href={`/api/designing/po-lines/${poLineId}/job-spec-pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-2.5 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-elevated"
+                className="px-2.5 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-elevated"
               >
                 Job spec PDF
               </a>
@@ -1932,7 +1932,7 @@ export default function DesigningDetailPage() {
                 href={links.po}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-2.5 py-1.5 rounded-lg border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-elevated"
+                className="px-2.5 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-elevated"
               >
                 Open PO
               </Link>
@@ -1940,7 +1940,7 @@ export default function DesigningDetailPage() {
                 type="button"
                 disabled={savingSpecs || specLocked}
                 onClick={() => void saveAllSpecs()}
-                className="px-2.5 py-1.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+                className="px-2.5 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
               >
                 {savingSpecs ? 'Saving…' : 'Save specs'}
               </button>
@@ -1959,10 +1959,10 @@ export default function DesigningDetailPage() {
                         : 'Enter set #, artwork code, and both approvals'
                 }
                 onClick={() => void handleFinalize()}
-                className={`px-2.5 py-1.5 rounded-lg text-sm font-medium disabled:cursor-not-allowed ${
+                className={`px-2.5 py-1.5 rounded-ds-md text-sm font-medium disabled:cursor-not-allowed ${
                   plateHubSent
-                    ? 'border border-emerald-500 bg-emerald-950/50 text-emerald-500'
-                    : 'bg-emerald-600 hover:bg-emerald-500 disabled:bg-ds-elevated disabled:text-ds-ink-muted text-primary-foreground'
+                    ? 'border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)]'
+                    : 'bg-[var(--success-bg)] hover:bg-[var(--success-bg)] disabled:bg-ds-elevated disabled:text-ds-ink-muted text-primary-foreground'
                 }`}
               >
                 {plateHubSent ? 'Sent' : finalizing ? 'Sending…' : 'Finalize job'}
@@ -1981,7 +1981,7 @@ export default function DesigningDetailPage() {
       />
 
       <section className="max-w-7xl mx-auto w-full px-3">
-        <div className="rounded-lg border border-ds-line/40 bg-card px-3 py-2">
+        <div className="rounded-ds-md border border-ds-line/40 bg-card px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${techMono}`}>
@@ -2018,8 +2018,8 @@ export default function DesigningDetailPage() {
       <div className="flex-1 p-3 max-w-7xl mx-auto w-full space-y-1 pb-6 bg-background">
           <section
             className={clsx(
-              'rounded-xl bg-card border p-3 pb-2',
-              plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-ds-line/40',
+              'rounded-ds-lg bg-card border p-3 pb-2',
+              plateHubSent ? 'border-[var(--success)]/80 ring-1 ring-[var(--success)]/25' : 'border-ds-line/40',
             )}
           >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 items-start">
@@ -2028,7 +2028,7 @@ export default function DesigningDetailPage() {
               </h2>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-ds-ink-faint shrink-0">Job type</span>
-                <div className="inline-flex rounded-lg border border-border/50 overflow-hidden">
+                <div className="inline-flex rounded-ds-md border border-border/50 overflow-hidden">
                   <button
                     type="button"
                     disabled={specLocked}
@@ -2068,12 +2068,12 @@ export default function DesigningDetailPage() {
                 className={`mb-3 flex items-start gap-2 border-l-2 pl-2 py-0.5 text-xs leading-snug ${
                   section1ManualHubOk
                     ? 'border-ds-warning/80 text-ds-ink-muted'
-                    : 'border-rose-500/80 text-ds-ink-muted'
+                    : 'border-[var(--error)]/80 text-ds-ink-muted'
                 }`}
                 role="status"
               >
                 <AlertTriangle
-                  className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${section1ManualHubOk ? 'text-ds-warning' : 'text-rose-400'}`}
+                  className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${section1ManualHubOk ? 'text-ds-warning' : 'text-[var(--error)]'}`}
                   aria-hidden
                 />
                 <span>
@@ -2093,7 +2093,7 @@ export default function DesigningDetailPage() {
             ) : null}
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <span className="text-xs text-ds-ink-faint shrink-0">Pre-batch Printed</span>
-              <div className="inline-flex rounded-lg border border-border/50 overflow-hidden">
+              <div className="inline-flex rounded-ds-md border border-border/50 overflow-hidden">
                 <button
                   type="button"
                   disabled={specLocked}
@@ -2125,7 +2125,7 @@ export default function DesigningDetailPage() {
                     <button
                       type="button"
                       disabled={specLocked}
-                      className="rounded-md border border-ds-line/50 bg-ds-main px-2.5 py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-card disabled:opacity-50"
+                      className="rounded-ds-sm border border-ds-line/50 bg-ds-main px-2.5 py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-card disabled:opacity-50"
                     >
                       Batch details…
                     </button>
@@ -2189,7 +2189,7 @@ export default function DesigningDetailPage() {
                       <Dialog.Close asChild>
                         <button
                           type="button"
-                          className="mt-6 w-full rounded-md border border-ds-line/50 py-2 text-xs text-ds-ink-muted hover:bg-ds-card"
+                          className="mt-6 w-full rounded-ds-sm border border-ds-line/50 py-2 text-xs text-ds-ink-muted hover:bg-ds-card"
                         >
                           Close
                         </button>
@@ -2201,7 +2201,7 @@ export default function DesigningDetailPage() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2 items-start">
               <label className="block text-xs text-ds-ink-muted min-w-0">
-                Set # <span className="text-red-400">*</span>
+                Set # <span className="text-[var(--error)]">*</span>
                 {setLookupState === 'loading' ? (
                   <span className="ml-2 text-ds-ink-faint normal-case">Looking up…</span>
                 ) : null}
@@ -2232,7 +2232,7 @@ export default function DesigningDetailPage() {
               </label>
               <label className="block text-xs text-ds-ink-muted min-w-0">
                 <span className="flex items-center gap-1">
-                  AW code <span className="text-red-400">*</span>
+                  AW code <span className="text-[var(--error)]">*</span>
                   {smartLinked.awCode ? (
                     <LinkedIcon className="h-3 w-3 text-ds-warning shrink-0" aria-hidden />
                   ) : null}
@@ -2329,13 +2329,13 @@ export default function DesigningDetailPage() {
                 type="button"
                 disabled={savingSetAw || specLocked}
                 onClick={() => void saveSetAndAwCode()}
-                className="px-3 py-1.5 rounded-lg border border-ds-warning/50 bg-ds-warning/12 text-ds-ink text-xs font-medium hover:bg-ds-warning/12 disabled:opacity-50"
+                className="px-3 py-1.5 rounded-ds-md border border-ds-warning/50 bg-ds-warning/12 text-ds-ink text-xs font-medium hover:bg-ds-warning/12 disabled:opacity-50"
               >
                 {savingSetAw ? 'Saving…' : 'Save set & AW code'}
               </button>
               {artworkCodeInput.trim() ? (
                 <p
-                  className={`text-xs ${effectiveArtworkId ? 'text-emerald-500/80' : section1ManualHubOk ? 'text-ds-warning/85' : 'text-rose-400/85'}`}
+                  className={`text-xs ${effectiveArtworkId ? 'text-[var(--success)]/80' : section1ManualHubOk ? 'text-ds-warning/85' : 'text-[var(--error)]/85'}`}
                 >
                   {effectiveArtworkId
                     ? 'Artwork linked for die / emboss / send-all dispatch.'
@@ -2355,7 +2355,7 @@ export default function DesigningDetailPage() {
                     type="button"
                     disabled={specLocked}
                     onClick={() => void openSmartMatch()}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-sky-500/55 bg-sky-950/35 text-sky-100 text-xs font-semibold hover:bg-sky-950/60 shrink-0 disabled:opacity-40"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-ds-sm border border-[var(--info)]/55 bg-[var(--info-bg)] text-[var(--info)] text-xs font-semibold hover:bg-[var(--info-bg)] shrink-0 disabled:opacity-40"
                     title="Match dies within ±1 mm on L×W×H"
                   >
                     <Search className="h-3 w-3 shrink-0" aria-hidden />
@@ -2410,8 +2410,8 @@ export default function DesigningDetailPage() {
 
         <section
           className={clsx(
-            'rounded-xl bg-card border p-3 space-y-2',
-            plateHubSent ? 'border-emerald-500/80 ring-1 ring-emerald-500/25' : 'border-ds-line/40',
+            'rounded-ds-lg bg-card border p-3 space-y-2',
+            plateHubSent ? 'border-[var(--success)]/80 ring-1 ring-[var(--success)]/25' : 'border-ds-line/40',
           )}
         >
           <div className="flex flex-wrap items-start justify-between gap-2 border-b border-ds-line/40 pb-2">
@@ -2451,7 +2451,7 @@ export default function DesigningDetailPage() {
           <>
 
           <div className="grid md:grid-cols-2 gap-3">
-            <div className="space-y-3 rounded-lg border border-ds-line/40 bg-card p-3">
+            <div className="space-y-3 rounded-ds-md border border-ds-line/40 bg-card p-3">
               <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
                 Die inventory
               </h3>
@@ -2473,7 +2473,7 @@ export default function DesigningDetailPage() {
                 disabled={specLocked}
               />
               {line.dieMaster && designerCommand.dieSource === 'old' ? (
-                <div className="rounded-md border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
+                <div className="rounded-ds-sm border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
                   <p className="text-xs uppercase tracking-wide text-ds-warning font-semibold">
                     Tooling handshake — die
                   </p>
@@ -2481,7 +2481,7 @@ export default function DesigningDetailPage() {
                     Asset ID: {line.dieMaster.id} · Rack: {line.dieMaster.location?.trim() || '—'}
                   </p>
                   {dieReserveSent ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-emerald-500 bg-emerald-950/40 text-emerald-500 text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
                       <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                       Sent
                     </span>
@@ -2490,7 +2490,7 @@ export default function DesigningDetailPage() {
                       type="button"
                       disabled={reserveDieBusy || specLocked}
                       onClick={() => void pushDieReserveForJob()}
-                      className="px-2.5 py-1.5 rounded-md border border-sky-500/60 bg-sky-950/40 hover:bg-sky-950/65 disabled:opacity-50 text-sky-100 text-xs font-medium"
+                      className="px-2.5 py-1.5 rounded-ds-sm border border-[var(--info)]/60 bg-[var(--info-bg)] hover:bg-[var(--info-bg)] disabled:opacity-50 text-[var(--info)] text-xs font-medium"
                     >
                       {reserveDieBusy ? 'Updating…' : 'Push to Triage'}
                     </button>
@@ -2500,7 +2500,7 @@ export default function DesigningDetailPage() {
                       type="button"
                       disabled={specLocked}
                       onClick={() => void recallDieFromHub()}
-                      className="w-full px-2 py-1.5 rounded-md border border-ds-warning/50 bg-ds-warning/10 text-ds-ink text-xs font-semibold hover:bg-ds-warning/10 disabled:opacity-50"
+                      className="w-full px-2 py-1.5 rounded-ds-sm border border-ds-warning/50 bg-ds-warning/10 text-ds-ink text-xs font-semibold hover:bg-ds-warning/10 disabled:opacity-50"
                     >
                       Recall from Hub
                     </button>
@@ -2513,16 +2513,16 @@ export default function DesigningDetailPage() {
                     type="button"
                       disabled={savingDesignerCommand || specLocked}
                     onClick={() => void dieSendToVendor()}
-                    className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                    className="px-2.5 py-1.5 rounded-ds-sm bg-[var(--tooling-bg,rgba(124,58,237,0.12))] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                   >
                     Send to Vendor
                   </button>
                   {dieDispatchedToHub ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-emerald-500 bg-emerald-950/45 text-emerald-500 text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
                       <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                       <span>
                         Sent ·{' '}
-                        <span className="font-mono tabular-nums text-xs text-emerald-500">
+                        <span className="font-mono tabular-nums text-xs text-[var(--success)]">
                           {formatHubSentAt(designerCommand.dieLastIntentAt)}
                         </span>
                       </span>
@@ -2537,7 +2537,7 @@ export default function DesigningDetailPage() {
                           : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                       }
                       onClick={() => void diePushToHub()}
-                      className="px-2.5 py-1.5 rounded-md bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                      className="px-2.5 py-1.5 rounded-ds-sm bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
                       Push to Die Hub
                     </button>
@@ -2549,7 +2549,7 @@ export default function DesigningDetailPage() {
             </div>
 
             {embossRequired ? (
-              <div className="space-y-3 rounded-lg border border-ds-line/40 bg-card p-3">
+              <div className="space-y-3 rounded-ds-md border border-ds-line/40 bg-card p-3">
                 <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
                   Emboss blocks
                 </h3>
@@ -2561,7 +2561,7 @@ export default function DesigningDetailPage() {
                   disabled={specLocked}
                 />
                 {line.carton?.embossBlock && designerCommand.embossSource === 'old' ? (
-                  <div className="rounded-md border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
+                  <div className="rounded-ds-sm border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
                     <p className="text-xs uppercase tracking-wide text-ds-warning font-semibold">
                       Tooling handshake — emboss block
                     </p>
@@ -2570,7 +2570,7 @@ export default function DesigningDetailPage() {
                       {line.carton.embossBlock.storageLocation?.trim() || '—'}
                     </p>
                     {embossReserveSent ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-emerald-500 bg-emerald-950/40 text-emerald-500 text-xs font-medium">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
                         <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                         Sent
                       </span>
@@ -2579,7 +2579,7 @@ export default function DesigningDetailPage() {
                         type="button"
                         disabled={reserveEmbossBusy || specLocked}
                         onClick={() => void pushEmbossReserveForJob()}
-                        className="px-2.5 py-1.5 rounded-md border border-sky-500/60 bg-sky-950/40 hover:bg-sky-950/65 disabled:opacity-50 text-sky-100 text-xs font-medium"
+                        className="px-2.5 py-1.5 rounded-ds-sm border border-[var(--info)]/60 bg-[var(--info-bg)] hover:bg-[var(--info-bg)] disabled:opacity-50 text-[var(--info)] text-xs font-medium"
                       >
                         {reserveEmbossBusy ? 'Updating…' : 'Push to Triage'}
                       </button>
@@ -2598,16 +2598,16 @@ export default function DesigningDetailPage() {
                       type="button"
                       disabled={savingDesignerCommand || specLocked}
                       onClick={() => void embossSendToVendor()}
-                      className="px-2.5 py-1.5 rounded-md bg-violet-700/90 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                      className="px-2.5 py-1.5 rounded-ds-sm bg-[var(--tooling-bg,rgba(124,58,237,0.12))] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] disabled:opacity-40 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
                       Send to Vendor
                     </button>
                     {embossDispatchedToHub ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-emerald-500 bg-emerald-950/45 text-emerald-500 text-xs font-medium">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
                         <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                         <span>
                           Sent ·{' '}
-                          <span className="font-mono tabular-nums text-xs text-emerald-500">
+                          <span className="font-mono tabular-nums text-xs text-[var(--success)]">
                             {formatHubSentAt(designerCommand.embossLastIntentAt)}
                           </span>
                         </span>
@@ -2622,7 +2622,7 @@ export default function DesigningDetailPage() {
                             : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                         }
                         onClick={() => void embossPushToHub()}
-                        className="px-2.5 py-1.5 rounded-md bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                        className="px-2.5 py-1.5 rounded-ds-sm bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                       >
                         Push to Embossing Hub
                       </button>
@@ -2633,19 +2633,19 @@ export default function DesigningDetailPage() {
                 )}
               </div>
             ) : (
-              <div className="rounded-lg border border-ds-line/40 bg-card p-3 text-xs text-ds-ink-faint">
+              <div className="rounded-ds-md border border-ds-line/40 bg-card p-3 text-xs text-ds-ink-faint">
                 Emboss tooling not required for this carton (no embossing on spec).
               </div>
             )}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-ds-line/40 bg-card p-3">
+          <div className="space-y-3 rounded-ds-md border border-ds-line/40 bg-card p-3">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ds-line/40 pb-2 mb-2">
               <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
                 Plate hub — requirement
               </h3>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 rounded-md border border-cyan-600/55 bg-cyan-950/35 px-2 py-0.5 text-xs font-semibold text-cyan-100">
+                <span className="inline-flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 rounded-ds-sm border border-cyan-600/55 bg-cyan-950/35 px-2 py-0.5 text-xs font-semibold text-cyan-100">
                   <span>
                     Total plates:{' '}
                     <span className="font-mono tabular-nums text-cyan-50">{totalPlatesLive}</span>
@@ -2666,17 +2666,17 @@ export default function DesigningDetailPage() {
                         : 'POST /api/plate-hub with current Pantone and plate configuration'
                   }
                   onClick={() => void submitPlateHubFinalize(false)}
-                  className={`inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-semibold disabled:opacity-45 disabled:cursor-not-allowed ${
+                  className={`inline-flex items-center rounded-ds-sm px-2.5 py-0.5 text-xs font-semibold disabled:opacity-45 disabled:cursor-not-allowed ${
                     plateHubSent
-                      ? 'border border-emerald-500 bg-emerald-950/50 text-emerald-500'
-                      : 'border border-emerald-500/70 bg-emerald-700 hover:bg-emerald-600 text-primary-foreground'
+                      ? 'border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)]'
+                      : 'border border-[var(--success)]/70 bg-[var(--success-bg)] hover:bg-[var(--success-bg)] text-primary-foreground'
                   }`}
                 >
                   {plateHubSent ? 'Sent' : finalizing ? 'Sending…' : 'Push to Plate Hub'}
                 </button>
                 {plateHubSent ? (
                   <span
-                    className="text-xs text-emerald-400/90 font-designing-queue max-w-[8rem] truncate"
+                    className="text-xs text-[var(--success)]/90 font-designing-queue max-w-[8rem] truncate"
                     title="Plate hub orchestration"
                   >
                     {plateHubLiveLabel}
@@ -2738,14 +2738,14 @@ export default function DesigningDetailPage() {
               {(
                 [
                   ['standardC', 'C', 'border-cyan-500/70 bg-cyan-950/40 text-cyan-50'],
-                  ['standardM', 'M', 'border-fuchsia-500/70 bg-fuchsia-950/40 text-fuchsia-50'],
+                  ['standardM', 'M', 'border-[var(--tooling,#7c3aed)]/70 bg-[var(--tooling-bg,rgba(124,58,237,0.12))] text-fuchsia-50'],
                   ['standardY', 'Y', 'border-yellow-500/75 bg-yellow-950/35 text-yellow-50'],
                   ['standardK', 'K', 'border-ds-line/50 bg-ds-main/80 text-ds-ink'],
                 ] as const
               ).map(([key, lab, box]) => (
                 <label
                   key={key}
-                  className={`flex items-center gap-1.5 text-xs cursor-pointer rounded-md border px-2 py-1 ${box}`}
+                  className={`flex items-center gap-1.5 text-xs cursor-pointer rounded-ds-sm border px-2 py-1 ${box}`}
                 >
                   <input
                     type="checkbox"
@@ -2761,7 +2761,7 @@ export default function DesigningDetailPage() {
                   />
                   {lab}
                   {historyDesignerCommand?.plateRequirement[key] ? (
-                    <span className="text-xs text-emerald-300/90">Prev</span>
+                    <span className="text-xs text-[var(--success)]/90">Prev</span>
                   ) : null}
                 </label>
               ))}
@@ -2801,7 +2801,7 @@ export default function DesigningDetailPage() {
                     }
                   />
                   {historyDesignerCommand?.plateRequirement[key] ? (
-                    <span className="text-xs text-emerald-400/90">Previously used</span>
+                    <span className="text-xs text-[var(--success)]/90">Previously used</span>
                   ) : null}
                 </label>
                 )
@@ -2839,7 +2839,7 @@ export default function DesigningDetailPage() {
                 />
                 Drip-off plate
                 {historyDesignerCommand?.plateRequirement.dripOffPlate ? (
-                  <span className="text-xs text-emerald-400/90">Previously used</span>
+                  <span className="text-xs text-[var(--success)]/90">Previously used</span>
                 ) : null}
               </label>
               <label className="flex items-center gap-2 text-xs text-ds-ink cursor-pointer">
@@ -2857,7 +2857,7 @@ export default function DesigningDetailPage() {
                 />
                 Spot UV plate
                 {historyDesignerCommand?.plateRequirement.spotUvPlate ? (
-                  <span className="text-xs text-emerald-400/90">Previously used</span>
+                  <span className="text-xs text-[var(--success)]/90">Previously used</span>
                 ) : null}
               </label>
             </div>
@@ -2886,7 +2886,7 @@ export default function DesigningDetailPage() {
               </select>
               {historyDesignerCommand?.setType &&
               historyDesignerCommand.setType === designerCommand.setType ? (
-                <span className="text-xs text-emerald-400/90">Previously used</span>
+                <span className="text-xs text-[var(--success)]/90">Previously used</span>
               ) : null}
             </div>
           </div>
@@ -2894,7 +2894,7 @@ export default function DesigningDetailPage() {
           ) : null}
         </section>
 
-        <section className="rounded-xl bg-card border border-ds-line/40 px-3 py-2">
+        <section className="rounded-ds-lg bg-card border border-ds-line/40 px-3 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-xs font-semibold text-ds-ink shrink-0">Post-press routing</span>
             <div className="flex flex-wrap gap-1.5 text-xs">
@@ -2948,7 +2948,7 @@ function ToolSourceRow({
             type="button"
             disabled={disabled}
             onClick={() => onChange(k)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
+            className={`px-3 py-1.5 rounded-ds-md text-xs font-medium border ${
               value === k
                 ? 'bg-ds-warning/90 border-ds-warning text-primary-foreground'
                 : 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted'
@@ -2956,7 +2956,7 @@ function ToolSourceRow({
           >
             {k === 'new' ? 'New' : 'Old'}
             {historyValue === k ? (
-              <span className="ml-1.5 text-xs font-normal text-emerald-300/95">Previously used</span>
+              <span className="ml-1.5 text-xs font-normal text-[var(--success)]/95">Previously used</span>
             ) : null}
           </button>
         ))}
@@ -3003,7 +3003,7 @@ function RouteBadge({ label, active }: { label: string; active: boolean }) {
   return (
     <span
       className={`px-2 py-1 rounded border ${
-        active ? 'bg-blue-900/30 border-blue-600 text-blue-200' : 'bg-ds-elevated border-ds-line/50 text-ds-ink-muted'
+        active ? 'bg-[var(--info-bg)] border-[var(--info)] text-[var(--info)]' : 'bg-ds-elevated border-ds-line/50 text-ds-ink-muted'
       }`}
     >
       {label} {active ? '✓' : '—'}

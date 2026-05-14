@@ -86,9 +86,9 @@ function MegaNavLink({ item }: { item: MegaNavItem }) {
   return (
     <Link
       href={item.href}
-      className="group flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3 transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-sm"
+      className="group flex items-center gap-3 rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3 transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18 [&>svg]:h-[18px] [&>svg]:w-[18px]">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ds-sm bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18 [&>svg]:h-[18px] [&>svg]:w-[18px]">
         <Icon aria-hidden />
       </span>
       <span className="min-w-0 flex-1">
@@ -119,10 +119,10 @@ function BlockNavLink({
     <button
       type="button"
       onClick={() => (onNavigate ? onNavigate(item.href) : undefined)}
-      className="group relative w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3 text-left transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-sm"
+      className="group relative w-full overflow-hidden rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3 text-left transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
     >
       <div className="flex items-center gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ds-sm bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18">
           <Icon className="h-[18px] w-[18px]" aria-hidden />
         </span>
         <span className="min-w-0 flex-1">
@@ -152,6 +152,7 @@ export function DashboardShell({
 }) {
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [sessionStuck, setSessionStuck] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
   const { data: session, status } = useSession()
@@ -170,6 +171,15 @@ export function DashboardShell({
   useEffect(() => {
     if (status === 'unauthenticated') router.replace('/login')
   }, [status, router])
+
+  useEffect(() => {
+    if (status !== 'loading') {
+      setSessionStuck(false)
+      return
+    }
+    const t = setTimeout(() => setSessionStuck(true), 6000)
+    return () => clearTimeout(t)
+  }, [status])
 
   useEffect(() => {
     applyAccentPreset(getStoredAccentPreset())
@@ -281,7 +291,7 @@ export function DashboardShell({
             },
             {
               label: 'Short & Excess',
-              href: '/stores/approve-excess',
+              href: '/stores/short-excess',
               description: 'Reconcile shorts and warehouse excess',
               Icon: Scale,
               iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
@@ -353,7 +363,20 @@ export function DashboardShell({
   if (status === 'loading') {
     return (
       <AppLayout className="flex items-center justify-center text-sm text-ds-ink-muted">
-        Loading workspace...
+        {sessionStuck ? (
+          <div className="flex flex-col items-center gap-3 text-center">
+            <p>Workspace is taking longer than expected to load.</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
+            >
+              Reload
+            </button>
+          </div>
+        ) : (
+          'Loading workspace...'
+        )}
       </AppLayout>
     )
   }
@@ -367,6 +390,7 @@ export function DashboardShell({
   }
 
   return (
+    <ErrorBoundary moduleName="Dashboard">
     <CommandPaletteProvider>
       <AppLayout className="flex flex-col">
         <header
@@ -378,7 +402,7 @@ export function DashboardShell({
             <div className="mx-auto flex h-14 max-w-[1920px] items-center gap-3 px-4 sm:gap-4 sm:px-5">
               <Link
                 href="/orders/purchase-orders"
-                className="inline-flex min-w-0 shrink-0 items-center gap-2.5 rounded-md outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)]"
+                className="inline-flex min-w-0 shrink-0 items-center gap-2.5 rounded-ds-sm outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)]"
               >
                 <BrandLogoMark className="h-8 w-8 shrink-0 drop-shadow-sm" />
                 <span className="hidden truncate text-[15px] font-semibold leading-tight text-[var(--text-primary)] sm:inline">
@@ -393,10 +417,10 @@ export function DashboardShell({
                 <button
                   type="button"
                   aria-label="Notifications"
-                  className="relative grid h-10 w-10 place-items-center rounded-lg border border-transparent text-[var(--text-primary)] transition hover:border-[var(--border)] hover:bg-[var(--bg-muted)]"
+                  className="relative grid h-10 w-10 place-items-center rounded-ds-sm border border-transparent text-[var(--text-primary)] transition hover:border-[var(--border)] hover:bg-[var(--bg-muted)]"
                 >
                   <Bell className="h-4 w-4" />
-                  <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
+                  <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--error)]" />
                 </button>
               </div>
               <div className="flex items-center justify-end gap-0.5 sm:gap-1">
@@ -404,12 +428,12 @@ export function DashboardShell({
                   <CommandPaletteTriggerIcon />
                 </div>
                 <ThemeToggle />
-                <div className="hidden rounded-md border border-ds-line/70 bg-ds-elevated/40 p-0.5 shadow-sm xl:inline-flex">
+                <div className="hidden rounded-ds-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5 shadow-ds-depth-sm xl:inline-flex">
                   <button
                     type="button"
                     onClick={() => setUiDensity('dense')}
-                    className={`rounded px-2 py-1 text-xs ${
-                      uiDensity === 'dense' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'
+                    className={`rounded-ds-sm px-2 py-1 text-xs transition-colors ${
+                      uiDensity === 'dense' ? 'bg-[var(--brand-primary)] text-white' : 'text-ds-ink-muted hover:text-ds-ink'
                     }`}
                   >
                     Dense
@@ -417,8 +441,8 @@ export function DashboardShell({
                   <button
                     type="button"
                     onClick={() => setUiDensity('comfortable')}
-                    className={`rounded px-2 py-1 text-xs ${
-                      uiDensity === 'comfortable' ? 'bg-ds-brand text-white' : 'text-ds-ink-muted'
+                    className={`rounded-ds-sm px-2 py-1 text-xs transition-colors ${
+                      uiDensity === 'comfortable' ? 'bg-[var(--brand-primary)] text-white' : 'text-ds-ink-muted hover:text-ds-ink'
                     }`}
                   >
                     Comfortable
@@ -450,7 +474,7 @@ export function DashboardShell({
                 <button
                   type="button"
                   onClick={() => setMobileOpen((v) => !v)}
-                  className="rounded-md p-2 text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--bg-muted)] lg:hidden"
+                  className="rounded-ds-sm p-2 text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--bg-muted)] lg:hidden"
                   aria-label="Toggle navigation"
                 >
                   {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
@@ -475,7 +499,7 @@ export function DashboardShell({
                         <Link
                           href={menu.href}
                           className={clsx(
-                            'relative inline-flex items-center gap-1 rounded-md py-2.5 px-3 text-sm font-medium transition-colors duration-150',
+                            'relative inline-flex items-center gap-1 rounded-ds-sm py-2.5 px-3 text-sm font-medium transition-colors duration-150',
                             navHighlighted
                               ? 'text-[var(--brand-primary)] after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--brand-primary)]'
                               : 'text-[var(--text-primary)] hover:bg-[var(--bg-muted)]',
@@ -488,7 +512,7 @@ export function DashboardShell({
                           type="button"
                           onClick={() => setOpenMenu((prev) => (prev === menu.key ? null : menu.key))}
                           className={clsx(
-                            'relative inline-flex items-center gap-1 rounded-md py-2.5 pl-3 pr-2 text-sm font-medium transition-colors duration-150',
+                            'relative inline-flex items-center gap-1 rounded-ds-sm py-2.5 pl-3 pr-2 text-sm font-medium transition-colors duration-150',
                             navHighlighted
                               ? isProductionMega
                                 ? 'bg-[var(--brand-bg-soft)] text-[var(--brand-primary)]'
@@ -507,7 +531,7 @@ export function DashboardShell({
                       {'items' in menu && openMenu === menu.key ? (
                         <div className="absolute left-0 top-full z-[70] pt-1 transition-all duration-150 ease-out">
                           <div className={clsx(
-                            'rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_16px_48px_rgba(0,0,0,0.12),0_0_0_1px_rgba(249,115,22,0.08)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)]',
+                            'rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_16px_48px_rgba(0,0,0,0.12),0_0_0_1px_rgba(249,115,22,0.08)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)]',
                             menu.key === 'live' || menu.key === 'production' || menu.key === 'masters'
                               ? 'w-[780px] max-w-[calc(100vw-2rem)]'
                               : 'w-[520px] max-w-[calc(100vw-2rem)]',
@@ -569,7 +593,7 @@ export function DashboardShell({
                   <Link
                     key={menu.key}
                     href={menu.href}
-                    className={`block rounded-md py-[6px] px-[10px] text-sm font-medium transition-colors duration-150 ${
+                    className={`block rounded-ds-sm py-[6px] px-[10px] text-sm font-medium transition-colors duration-150 ${
                       isActiveMenu(menu)
                         ? 'bg-[var(--brand-bg-soft)] text-[var(--brand-primary)]'
                         : 'text-[var(--text-primary)] hover:bg-[var(--bg-muted)]'
@@ -580,7 +604,7 @@ export function DashboardShell({
                 ) : (
                   <div
                     key={menu.key}
-                    className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)] p-3"
+                    className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3"
                   >
                     <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
                       {menu.label}
@@ -605,7 +629,7 @@ export function DashboardShell({
                             setMobileOpen(false)
                             router.push(item.href)
                           }}
-                          className="flex h-9 items-center rounded-md px-2 py-[6px] text-sm text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--brand-bg-soft)] hover:text-[var(--brand-primary)]"
+                          className="flex h-9 items-center rounded-ds-sm px-2 py-[6px] text-sm text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--brand-bg-soft)] hover:text-[var(--brand-primary)]"
                         >
                           {item.label}
                         </button>
@@ -622,5 +646,6 @@ export function DashboardShell({
         </main>
       </AppLayout>
     </CommandPaletteProvider>
+    </ErrorBoundary>
   )
 }

@@ -45,7 +45,7 @@ export default function ApproveExcessListPage() {
             <li key={item.id}>
               <Link
                 href={`/stores/approve-excess/${item.id}`}
-                className="block p-4 rounded-lg bg-ds-elevated border border-ds-line/60 hover:border-ds-warning/50"
+                className="block p-4 rounded-ds-md bg-ds-elevated border border-ds-line/60 hover:border-ds-warning/50"
               >
                 <p className="font-mono text-ds-warning">{item.jobNumber}</p>
                 <p className="text-ds-ink-muted">{item.productName} · {item.materialCode}</p>

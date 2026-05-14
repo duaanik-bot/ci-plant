@@ -8,14 +8,14 @@ export default function MastersEmployeesPage() {
         <button
           type="button"
           disabled
-          className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground opacity-50"
+          className="rounded-ds-md bg-primary px-3 py-1.5 text-sm text-primary-foreground opacity-50"
           title="Employee add flow is pending setup"
         >
           Add employee
         </button>
       </div>
       <p className="text-sm text-ds-ink-faint">
-        Employee module is pending setup. Use <Link href="/masters/users" className="text-blue-600 hover:underline">Users</Link> for operator/admin identity until employee schema is finalized.
+        Employee module is pending setup. Use <Link href="/masters/users" className="text-[var(--info)] hover:underline">Users</Link> for operator/admin identity until employee schema is finalized.
       </p>
     </div>
   )

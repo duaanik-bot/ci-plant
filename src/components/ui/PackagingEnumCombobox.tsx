@@ -196,7 +196,7 @@ export function PackagingEnumCombobox({
         <ul
           id={listId}
           role="listbox"
-          className="absolute left-0 right-0 top-full z-50 mt-0.5 max-h-48 overflow-auto rounded-md border border-ds-line/70 bg-ds-elevated py-0.5 shadow-lg"
+          className="absolute left-0 right-0 top-full z-50 mt-0.5 max-h-48 overflow-auto rounded-ds-sm border border-ds-line/70 bg-ds-elevated py-0.5 shadow-lg"
         >
           {allowEmpty ? (
             <li

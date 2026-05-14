@@ -72,7 +72,7 @@ export default function MastersHomePage() {
   return (
     <div className="space-y-5">
       {groupedCards.map((section) => (
-        <section key={section.group} className="rounded-lg border border-ds-line/50 bg-card p-3">
+        <section key={section.group} className="rounded-ds-md border border-ds-line/50 bg-card p-3">
           <h3 className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-ds-ink-muted">
             {section.group}
           </h3>
@@ -81,9 +81,9 @@ export default function MastersHomePage() {
               <Link
                 key={c.href}
                 href={c.href}
-                className="block rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm ring-1 ring-ring/30 transition-colors hover:border-blue-300 hover:ring-blue-200/50 dark:hover:border-blue-600/50"
+                className="block rounded-ds-md border border-border bg-card p-4 text-card-foreground shadow-sm ring-1 ring-ring/30 transition-colors hover:border-[var(--info)] hover:ring-[var(--info)]/50 dark:hover:border-[var(--info)]/50"
               >
-                <span className="font-semibold text-blue-600 dark:text-blue-400">{c.label}</span>
+                <span className="font-semibold text-[var(--info)] dark:text-[var(--info)]">{c.label}</span>
                 <span className="mt-1 block text-sm text-ds-ink-faint dark:text-ds-ink-muted">{c.description}</span>
               </Link>
             ))}

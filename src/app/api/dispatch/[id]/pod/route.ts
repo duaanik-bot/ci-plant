@@ -29,7 +29,10 @@ export async function PUT(
 
   const existing = await db.dispatch.findUnique({
     where: { id },
-    include: { job: { select: { jobNumber: true, productName: true, customerId: true } } },
+    include: {
+      job: { select: { jobNumber: true, productName: true, customerId: true } },
+      jobCard: { select: { jobCardNumber: true, setNumber: true, customerId: true } },
+    },
   })
   if (!existing) {
     return NextResponse.json({ error: 'Dispatch not found' }, { status: 404 })
@@ -65,14 +68,29 @@ export async function PUT(
       },
     })
 
-    if (createDraftBill && existing.job?.customerId) {
+    // Either legacy Job or new ProductionJobCard owns the customer/line-item context.
+    const billSource = existing.jobCard
+      ? {
+          customerId: existing.jobCard.customerId,
+          label: `JC-${existing.jobCard.jobCardNumber}`,
+          product: existing.jobCard.setNumber ?? 'Dispatch',
+        }
+      : existing.job
+      ? {
+          customerId: existing.job.customerId,
+          label: existing.job.jobNumber,
+          product: existing.job.productName ?? 'Dispatch',
+        }
+      : null
+
+    if (createDraftBill && billSource) {
       const lastBill = await tx.bill.findFirst({
         where: { billNumber: { startsWith: `CI-BILL-${new Date().getFullYear()}-` } },
         orderBy: { billNumber: 'desc' },
         select: { billNumber: true },
       })
       const billNumber = nextBillNumber(lastBill)
-      const description = `${existing.job.jobNumber} – ${existing.job.productName ?? 'Dispatch'}`
+      const description = `${billSource.label} – ${billSource.product}`
       const quantity = existing.qtyDispatched
       const rate = 0
       const gstPct = 12
@@ -80,7 +98,7 @@ export async function PUT(
       const b = await tx.bill.create({
         data: {
           billNumber,
-          customerId: existing.job.customerId,
+          customerId: billSource.customerId,
           billDate: new Date(),
           subtotal: 0,
           gstAmount: 0,

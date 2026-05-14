@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { Search, AlertTriangle, FileDown, Pencil, Star, Trash2, X } from 'lucide-react'
+import { Search, AlertTriangle, FileDown, Pencil, Sparkles, Star, Trash2, X } from 'lucide-react'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
+import { PoImportDrawer } from '@/components/po/PoImportDrawer'
 import { CommandPaletteTriggerIcon } from '@/components/command-palette/CommandPalette'
 import { PoDrawerSpotlightLines } from '@/components/orders/PoDrawerSpotlightLines'
 import {
@@ -90,9 +91,9 @@ function poAgeCalendarDays(poDate: string): number {
 }
 
 function ageCellClass(days: number): string {
-  if (days <= 3) return 'text-emerald-400'
+  if (days <= 3) return 'text-[var(--success)]'
   if (days <= 7) return 'text-ds-warning'
-  return 'text-rose-400 animate-po-age-alert'
+  return 'text-[var(--error)] animate-po-age-alert'
 }
 
 function MiniHubColumn({ parts }: { parts: { n: number; c: string }[] }) {
@@ -127,22 +128,22 @@ function ReadinessTriBar({ r }: { r: PoReadiness }) {
       <MiniHubColumn
         parts={[
           { n: r.tooling.r, c: 'bg-ds-line/30' },
-          { n: r.tooling.y, c: 'bg-sky-500' },
-          { n: r.tooling.g, c: 'bg-emerald-500' },
+          { n: r.tooling.y, c: 'bg-[var(--info-bg)]' },
+          { n: r.tooling.g, c: 'bg-[var(--success-bg)]' },
         ]}
       />
       <MiniHubColumn
         parts={[
           { n: r.material.grey, c: 'bg-ds-line/30' },
-          { n: r.material.blue, c: 'bg-sky-500' },
-          { n: r.material.green, c: 'bg-emerald-500' },
+          { n: r.material.blue, c: 'bg-[var(--info-bg)]' },
+          { n: r.material.green, c: 'bg-[var(--success-bg)]' },
         ]}
       />
       <MiniHubColumn
         parts={[
           { n: r.production.grey, c: 'bg-ds-line/30' },
-          { n: r.production.blue, c: 'bg-sky-500' },
-          { n: r.production.green, c: 'bg-emerald-500' },
+          { n: r.production.blue, c: 'bg-[var(--info-bg)]' },
+          { n: r.production.green, c: 'bg-[var(--success-bg)]' },
         ]}
       />
     </div>
@@ -169,7 +170,7 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
   if (po.status === 'closed') {
     return {
       label: 'Dispatched',
-      className: 'bg-ds-warning/12 text-amber-800 ring-1 ring-ds-warning/35 dark:bg-ds-warning/8 dark:text-ds-warning',
+      className: 'bg-ds-warning/12 text-[var(--warning)] ring-1 ring-ds-warning/35 dark:bg-ds-warning/8 dark:text-ds-warning',
     }
   }
   if (po.status === 'sent_to_planning') {
@@ -181,7 +182,7 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
   if (po.status === 'approved') {
     return {
       label: 'Approved',
-      className: 'bg-violet-500/14 text-violet-800 ring-1 ring-violet-500/35 dark:bg-violet-500/20 dark:text-violet-300',
+      className: 'bg-[var(--tooling-bg,rgba(124,58,237,0.12))] text-[var(--tooling,#7c3aed)] ring-1 ring-[var(--tooling,#7c3aed)]/35 dark:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] dark:text-[var(--tooling,#7c3aed)]',
     }
   }
   if (po.status === 'confirmed') {
@@ -189,12 +190,12 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
     if (inProd) {
       return {
         label: 'In production',
-        className: 'bg-indigo-500/14 text-indigo-800 ring-1 ring-indigo-500/35 dark:bg-indigo-500/20 dark:text-indigo-400',
+        className: 'bg-[var(--info-bg)] text-[var(--info)] ring-1 ring-[var(--info)]/35 dark:bg-[var(--info-bg)] dark:text-[var(--info)]',
       }
     }
     return {
       label: 'Confirmed',
-      className: 'bg-emerald-500/14 text-emerald-800 ring-1 ring-emerald-500/30 dark:bg-emerald-500/20 dark:text-emerald-300',
+      className: 'bg-[var(--success-bg)] text-[var(--success)] ring-1 ring-[var(--success)]/30 dark:bg-[var(--success-bg)] dark:text-[var(--success)]',
     }
   }
   return {
@@ -227,16 +228,16 @@ function PoDeepFilterBar({
   return (
     <div className="flex w-full items-stretch gap-2">
       <div
-        className={`group flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-ds-card/50 px-3 py-1.5 text-sm backdrop-blur-md transition-all duration-300 ${
+        className={`group flex min-w-0 flex-1 items-center gap-2 rounded-ds-sm border bg-ds-card/50 px-3 py-1.5 text-sm backdrop-blur-md transition-all duration-300 ${
           filterActive
-            ? 'border-emerald-500/45 shadow-[0_0_16px_rgba(16,185,129,0.12)] ring-2 ring-emerald-500/30 dark:shadow-[0_0_32px_rgba(52,211,153,0.22),0_0_56px_rgba(245,158,11,0.12)] dark:ring-emerald-400/35'
+            ? 'border-[var(--success)]/45 shadow-[0_0_16px_rgba(16,185,129,0.12)] ring-2 ring-[var(--success)]/30 dark:shadow-[0_0_32px_rgba(52,211,153,0.22),0_0_56px_rgba(245,158,11,0.12)] dark:ring-[var(--success)]/35'
             : 'border-ds-warning/45 shadow-[0_0_8px_rgba(245,158,11,0.10)] ring-1 ring-ds-warning/35 dark:shadow-[0_0_14px_rgba(245,158,11,0.12)] dark:ring-ds-warning/40'
         }`}
       >
         <Search className="h-4 w-4 text-ds-warning shrink-0" aria-hidden />
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {value.trim().length >= 2 ? (
-            <span className="shrink-0 text-emerald-400/90 text-xs sm:text-sm">Filtering:</span>
+            <span className="shrink-0 text-[var(--success)]/90 text-xs sm:text-sm">Filtering:</span>
           ) : null}
           <input
             id="po-module-search"
@@ -254,7 +255,7 @@ function PoDeepFilterBar({
         <button
           type="button"
           onClick={() => onClear()}
-          className="shrink-0 self-center rounded-md border border-ds-line/50 bg-ds-card/60 px-2.5 py-2 text-ds-ink-faint backdrop-blur-md hover:border-ds-warning/40 hover:bg-ds-elevated/80 hover:text-ds-warning"
+          className="shrink-0 self-center rounded-ds-sm border border-ds-line/50 bg-ds-card/60 px-2.5 py-2 text-ds-ink-faint backdrop-blur-md hover:border-ds-warning/40 hover:bg-ds-elevated/80 hover:text-ds-warning"
           title="Clear list filter"
           aria-label="Clear list filter"
         >
@@ -298,6 +299,7 @@ export default function PurchaseOrdersPage() {
   const [priorityBusyId, setPriorityBusyId] = useState<string | null>(null)
   const [drawerPoId, setDrawerPoId] = useState<string | null>(null)
   const [drawerPo, setDrawerPo] = useState<DrawerPo | null>(null)
+  const [importDrawerOpen, setImportDrawerOpen] = useState(false)
   const [drawerLoading, setDrawerLoading] = useState(false)
   const [toolingResults, setToolingResults] = useState<ToolingResult[] | null>(null)
   const debouncedAuditFilter = useDebouncedValue(listFilterQuery, 350)
@@ -844,7 +846,7 @@ export default function PurchaseOrdersPage() {
 
   return (
     <div className="w-full space-y-3 px-3 py-3 pb-24 md:px-4 md:py-4">
-      <div className="sticky top-0 z-40 rounded-md border border-ds-line/60 bg-ds-main/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
+      <div className="sticky top-0 z-40 rounded-ds-sm border border-ds-line/60 bg-ds-main/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
         <div className="flex flex-wrap items-center gap-2">
           <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Customer POs
@@ -864,12 +866,12 @@ export default function PurchaseOrdersPage() {
             <button
               type="button"
               onClick={() => setShowColumnMenu((v) => !v)}
-              className="inline-flex h-8 items-center rounded-md border border-ds-line bg-ds-elevated/80 px-2 text-xs text-ds-ink shadow-sm"
+              className="inline-flex h-8 items-center rounded-ds-sm border border-ds-line bg-ds-elevated/80 px-2 text-xs text-ds-ink shadow-sm"
             >
               Columns
             </button>
             {showColumnMenu ? (
-              <div className="absolute right-0 z-50 mt-1 w-40 rounded-md border border-ds-line bg-ds-card p-2 text-xs shadow-lg">
+              <div className="absolute right-0 z-50 mt-1 w-40 rounded-ds-sm border border-ds-line bg-ds-card p-2 text-xs shadow-lg">
                 {(
                   [
                     ['age', 'Age'],
@@ -891,9 +893,18 @@ export default function PurchaseOrdersPage() {
               </div>
             ) : null}
           </div>
+          <button
+            type="button"
+            onClick={() => setImportDrawerOpen(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-ds-sm border border-ds-line bg-ds-card px-3 text-xs font-semibold text-ds-ink shadow-sm transition hover:bg-ds-bg-muted"
+            title="Upload a customer PO PDF — Claude extracts header + lines and matches them to your Carton master"
+          >
+            <Sparkles className="size-3.5 text-[var(--tooling,#7c3aed)]" />
+            Import PO (PDF)
+          </button>
           <Link
             href="/orders/purchase-orders/new"
-            className="inline-flex h-8 items-center justify-center rounded-md bg-ds-brand px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-ds-brand-hover"
+            className="inline-flex h-8 items-center justify-center rounded-ds-sm bg-ds-brand px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-ds-brand-hover"
           >
             New PO
           </Link>
@@ -929,21 +940,21 @@ export default function PurchaseOrdersPage() {
                   return next
                 })
               }
-              className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
             >
               {allVisibleSelected ? 'Unselect visible' : 'Select visible'}
             </button>
             <button
               type="button"
               onClick={() => setSelectedPoIds(new Set(viewRows.filter((p) => p.status === 'draft').map((p) => p.id)))}
-              className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
             >
               Select drafts
             </button>
             <button
               type="button"
               onClick={() => setSelectedPoIds(new Set())}
-              className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
             >
               Clear
             </button>
@@ -955,7 +966,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkUpdateStatus('confirmed')}
               disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null || bulkRevertingDraft}
-              className="h-8 rounded-md border border-emerald-500/40 px-2.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-300"
+              className="h-8 rounded-ds-sm border border-[var(--success)]/40 px-2.5 text-xs font-semibold text-[var(--success)] hover:bg-[var(--success-bg)] disabled:opacity-40 dark:text-[var(--success)]"
             >
               {bulkUpdatingStatus === 'confirmed' ? 'Confirming…' : 'Bulk confirm'}
             </button>
@@ -963,7 +974,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkRevertSelectedToDraft()}
               disabled={selectedPoIds.size === 0 || bulkRevertingDraft || bulkUpdatingStatus != null}
-              className="h-8 rounded-md border border-ds-line/60 px-2.5 text-xs font-semibold text-ds-ink hover:bg-ds-elevated/80 disabled:opacity-40"
+              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-semibold text-ds-ink hover:bg-ds-elevated/80 disabled:opacity-40"
             >
               {bulkRevertingDraft ? 'Reverting…' : 'Bulk move to draft'}
             </button>
@@ -971,7 +982,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkUpdateStatus('approved')}
               disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null || bulkRevertingDraft}
-              className="h-8 rounded-md border border-sky-500/40 px-2.5 text-xs font-semibold text-sky-700 hover:bg-sky-500/10 disabled:opacity-40 dark:text-sky-300"
+              className="h-8 rounded-ds-sm border border-[var(--info)]/40 px-2.5 text-xs font-semibold text-[var(--info)] hover:bg-[var(--info-bg)] disabled:opacity-40 dark:text-[var(--info)]"
             >
               {bulkUpdatingStatus === 'approved' ? 'Approving…' : 'Bulk approve'}
             </button>
@@ -983,7 +994,7 @@ export default function PurchaseOrdersPage() {
                 if (first) setDrawerPoId(first.id)
               }}
               disabled={selectedPoIds.size === 0}
-              className="h-8 rounded-md border border-ds-brand/40 px-2.5 text-xs font-semibold text-ds-brand disabled:opacity-40"
+              className="h-8 rounded-ds-sm border border-ds-brand/40 px-2.5 text-xs font-semibold text-ds-brand disabled:opacity-40"
             >
               Open first selected
             </button>
@@ -992,7 +1003,7 @@ export default function PurchaseOrdersPage() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 md:gap-3">
-        <div className="rounded-md border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
+        <div className="rounded-ds-sm border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
           <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Total active POs
           </div>
@@ -1003,7 +1014,7 @@ export default function PurchaseOrdersPage() {
             {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
           </div>
         </div>
-        <div className="rounded-md border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
+        <div className="rounded-ds-sm border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
           <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Pending line count
           </div>
@@ -1014,7 +1025,7 @@ export default function PurchaseOrdersPage() {
             {listFilterQuery.trim().length >= 2 ? 'Lines · matching POs' : 'Lines · confirmed POs'}
           </div>
         </div>
-        <div className="rounded-md border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
+        <div className="rounded-ds-sm border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
           <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Pending line items
           </div>
@@ -1025,18 +1036,18 @@ export default function PurchaseOrdersPage() {
             {listFilterQuery.trim().length >= 2 ? 'Σ qty · matching POs' : 'Σ qty · confirmed POs'}
           </div>
         </div>
-        <div className="rounded-md border border-emerald-500/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-emerald-500/90">
+        <div className="rounded-ds-sm border border-[var(--success)]/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--success)]/90">
             Live order book
           </div>
-          <div className={`mt-0.5 ds-typo-kpi text-emerald-700 dark:text-emerald-300 ${poMono}`}>
+          <div className={`mt-0.5 ds-typo-kpi text-[var(--success)] dark:text-[var(--success)] ${poMono}`}>
             {kpiLoading ? '—' : formatRupee(kpi?.liveOrderValue ?? 0)}
           </div>
-          <div className="text-xs text-emerald-700/80 mt-0.5">
+          <div className="text-xs text-[var(--success)]/80 mt-0.5">
             {listFilterQuery.trim().length >= 2 ? '₹ filtered order book' : '₹ total · confirmed'}
           </div>
         </div>
-        <div className="rounded-md border border-ds-warning/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
+        <div className="rounded-ds-sm border border-ds-warning/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
           <div className="text-xs font-semibold uppercase tracking-wider text-ds-warning/90">
             System velocity
           </div>
@@ -1110,9 +1121,9 @@ export default function PurchaseOrdersPage() {
                     po.isPriority === true
                       ? INDUSTRIAL_PRIORITY_ROW_CLASS
                       : pushedToPlanning
-                        ? 'bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/24'
+                        ? 'bg-[var(--success-bg)] hover:bg-[var(--success-bg)] dark:bg-[var(--success-bg)] dark:hover:bg-[var(--success-bg)]'
                         : criticalAge
-                          ? 'bg-amber-500/8 hover:bg-amber-500/12'
+                          ? 'bg-[var(--warning-bg)] hover:bg-[var(--warning-bg)]'
                           : po.status === 'closed'
                             ? 'bg-ds-elevated/25 hover:bg-ds-elevated/35'
                         : 'hover:bg-accent'
@@ -1159,20 +1170,20 @@ export default function PurchaseOrdersPage() {
                     <div className="flex min-w-0 flex-col gap-0.5">
                       <div className="flex flex-wrap items-center gap-1">
                         <span
-                          className={`${poMono} min-w-0 break-all text-xs font-bold ${pushedToPlanning ? 'text-emerald-700 dark:text-emerald-300' : 'text-ds-warning'}`}
+                          className={`${poMono} min-w-0 break-all text-xs font-bold ${pushedToPlanning ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-ds-warning'}`}
                           title={po.poNumber}
                         >
                           {po.poNumber}
                         </span>
                         {po.toolingCritical ? (
                           <span title="Critical tooling on one or more lines">
-                            <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" aria-hidden />
+                            <AlertTriangle className="h-3 w-3 text-[var(--error)] shrink-0" aria-hidden />
                           </span>
                         ) : null}
                       </div>
                       {po.deepMatchProductName ? (
                         <div
-                          className={`line-clamp-2 break-words text-xs leading-snug ${pushedToPlanning ? 'text-emerald-700/90 dark:text-emerald-300/90' : 'text-ds-warning/85'}`}
+                          className={`line-clamp-2 break-words text-xs leading-snug ${pushedToPlanning ? 'text-[var(--success)]/90 dark:text-[var(--success)]/90' : 'text-ds-warning/85'}`}
                           title={`Matched line: ${po.deepMatchProductName}`}
                         >
                           Matched: {po.deepMatchProductName}
@@ -1183,7 +1194,7 @@ export default function PurchaseOrdersPage() {
                   <td className={`w-[12rem] px-1.5 align-middle ${poDensity === 'dense' ? 'py-0.5' : 'py-1.5'}`}>
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[var(--bg-muted)] text-xs font-bold text-[var(--brand-primary)] ring-1 ring-[var(--border)]"
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-ds-sm bg-[var(--bg-muted)] text-xs font-bold text-[var(--brand-primary)] ring-1 ring-[var(--border)]"
                         aria-hidden
                       >
                         {customerInitials(po.customer?.name ?? '')}
@@ -1262,7 +1273,7 @@ export default function PurchaseOrdersPage() {
                           e.stopPropagation()
                           setDrawerPoId(po.id)
                         }}
-                        className="inline-flex items-center justify-center rounded-md border border-ds-line/40 bg-ds-card/40 px-1.5 py-1 text-ds-ink-muted hover:border-ds-warning/45 hover:bg-ds-warning/8 hover:text-ds-warning"
+                        className="inline-flex items-center justify-center rounded-ds-sm border border-ds-line/40 bg-ds-card/40 px-1.5 py-1 text-ds-ink-muted hover:border-ds-warning/45 hover:bg-ds-warning/8 hover:text-ds-warning"
                       >
                         <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -1271,7 +1282,7 @@ export default function PurchaseOrdersPage() {
                           type="button"
                           onClick={(e) => handleConfirm(po, e)}
                           disabled={confirmingId === po.id}
-                        className={`${ACTION_PILL_BASE} min-w-0 border-transparent bg-emerald-600 px-1.5 py-px text-xs text-primary-foreground hover:bg-emerald-700`}
+                        className={`${ACTION_PILL_BASE} min-w-0 border-transparent bg-[var(--success-bg)] px-1.5 py-px text-xs text-primary-foreground hover:bg-[var(--success-bg)]`}
                         >
                           {confirmingId === po.id ? '…' : 'Confirm'}
                         </button>
@@ -1282,7 +1293,7 @@ export default function PurchaseOrdersPage() {
                         aria-label="Delete purchase order"
                         onClick={(e) => handleDelete(po, e)}
                         disabled={deletingId === po.id}
-                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted hover:bg-red-950/50 hover:text-red-300`}
+                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted hover:bg-[var(--error-bg)] hover:text-[var(--error)]`}
                       >
                         <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -1344,7 +1355,7 @@ export default function PurchaseOrdersPage() {
                 {toolingBar.total > 0 ? (
                   <>
                     <div
-                      className="h-full bg-emerald-500 transition-[width]"
+                      className="h-full bg-[var(--success-bg)] transition-[width]"
                       style={{ width: `${(toolingBar.g / toolingBar.total) * 100}%` }}
                     />
                     <div
@@ -1352,7 +1363,7 @@ export default function PurchaseOrdersPage() {
                       style={{ width: `${(toolingBar.y / toolingBar.total) * 100}%` }}
                     />
                     <div
-                      className="h-full bg-rose-500 transition-[width]"
+                      className="h-full bg-[var(--error-bg)] transition-[width]"
                       style={{ width: `${(toolingBar.r / toolingBar.total) * 100}%` }}
                     />
                   </>
@@ -1387,7 +1398,7 @@ export default function PurchaseOrdersPage() {
                 value={drawerPo.status}
                 disabled={updatingId === drawerPo.id}
                 onChange={(e) => handleStatusChange(drawerPo, e.target.value)}
-                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                className="w-full rounded-ds-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
               >
                 <option value="draft">draft</option>
                 <option value="confirmed">confirmed</option>
@@ -1406,6 +1417,10 @@ export default function PurchaseOrdersPage() {
           </div>
         )}
       </SlideOverPanel>
+      <PoImportDrawer
+        isOpen={importDrawerOpen}
+        onClose={() => setImportDrawerOpen(false)}
+      />
     </div>
   )
 }

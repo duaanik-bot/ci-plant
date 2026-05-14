@@ -39,10 +39,10 @@ function pickMaterials(items: StockStateItem[]) {
 }
 
 function statusIndicator(available: number, reorderPoint: number) {
-  if (reorderPoint <= 0) return { text: '● Available', cls: 'text-green-400' }
-  if (available <= 0) return { text: '🔴 Critical', cls: 'text-red-400' }
+  if (reorderPoint <= 0) return { text: '● Available', cls: 'text-[var(--success)]' }
+  if (available <= 0) return { text: '🔴 Critical', cls: 'text-[var(--error)]' }
   if (available <= reorderPoint) return { text: '⚠ Below Reorder', cls: 'text-ds-warning' }
-  return { text: '● Available', cls: 'text-green-400' }
+  return { text: '● Available', cls: 'text-[var(--success)]' }
 }
 
 export default function SimulationPage() {
@@ -87,7 +87,7 @@ export default function SimulationPage() {
           <select
             value={selectedJobId}
             onChange={(e) => setSelectedJobId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           >
             <option value="">— Select job —</option>
             {jobs.map((j) => (
@@ -100,7 +100,7 @@ export default function SimulationPage() {
         <div className="flex items-end">
           <button
             type="button"
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
           >
             Simulate Stage Completion
           </button>
@@ -113,14 +113,14 @@ export default function SimulationPage() {
           return (
             <div
               key={m.id}
-              className="rounded-lg border border-ds-line/60 bg-ds-elevated/50 p-4"
+              className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-4"
             >
               <p className="font-mono text-ds-warning text-sm">{m.materialCode}</p>
               <p className="text-ds-ink-muted text-xs mb-2">{m.description}</p>
               <p className="text-2xl font-bold text-foreground">
                 {m.qtyAvailable.toLocaleString()} {m.unit}
               </p>
-              <p className="text-red-400 text-sm">Reserved: {m.qtyReserved.toLocaleString()} {m.unit}</p>
+              <p className="text-[var(--error)] text-sm">Reserved: {m.qtyReserved.toLocaleString()} {m.unit}</p>
               <p className="text-ds-ink-faint text-xs mt-1">Reorder: {m.reorderPoint.toLocaleString()}</p>
               <p className={`text-sm mt-2 ${status.cls}`}>{status.text}</p>
             </div>
@@ -129,23 +129,23 @@ export default function SimulationPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="rounded-lg border border-ds-warning/30 bg-ds-warning/8 p-4">
+        <div className="rounded-ds-md border border-ds-warning/30 bg-ds-warning/8 p-4">
           <h2 className="font-semibold text-ds-warning mb-2">WIP</h2>
           <p className="text-2xl font-bold text-foreground">
             {wipQty.toLocaleString()} units
           </p>
           <p className="text-ds-warning/80">Est. cost ₹{wipValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
         </div>
-        <div className="rounded-lg border border-blue-700/50 bg-blue-900/20 p-4">
-          <h2 className="font-semibold text-blue-300 mb-2">Finished Goods</h2>
+        <div className="rounded-ds-md border border-[var(--info)]/50 bg-[var(--info-bg)] p-4">
+          <h2 className="font-semibold text-[var(--info)] mb-2">Finished Goods</h2>
           <p className="text-2xl font-bold text-foreground">
             {fgQty.toLocaleString()} units
           </p>
-          <p className="text-blue-200/80">Value ₹{fgValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+          <p className="text-[var(--info)]/80">Value ₹{fgValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
         </div>
       </div>
 
-      <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/30 p-4">
+      <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-4">
         <h2 className="font-semibold text-ds-ink-muted mb-2">Activity log (last 20)</h2>
         <div className="max-h-64 overflow-y-auto space-y-1 text-sm">
           {activityLog.length === 0 && (

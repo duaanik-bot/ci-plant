@@ -24,7 +24,7 @@ export function RowStateLegend({
         <CircleHelp className="h-3.5 w-3.5" />
       </span>
       <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-warning" /> Priority</span>
-      <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Pushed</span>
+      <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--success-bg)]" /> Pushed</span>
       {includeSelected ? (
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ds-brand" /> {selectedLabel}</span>
       ) : (

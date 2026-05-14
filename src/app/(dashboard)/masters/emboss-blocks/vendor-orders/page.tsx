@@ -102,7 +102,7 @@ export default function EmbossVendorOrdersPage() {
                 <td className={enterpriseTdMonoClass}>
                   {o?.expectedBy ? new Date(o.expectedBy).toLocaleDateString('en-IN') : '—'}{' '}
                   {o.overdueDays > 0 ? (
-                    <span className="text-rose-600 dark:text-rose-400">OVERDUE {o.overdueDays}d</span>
+                    <span className="text-[var(--error)] dark:text-[var(--error)]">OVERDUE {o.overdueDays}d</span>
                   ) : null}
                 </td>
                 <td className={enterpriseTdClass}>{o?.priority ?? '—'}</td>
@@ -120,7 +120,7 @@ export default function EmbossVendorOrdersPage() {
                     <button
                       type="button"
                       onClick={() => markReceived(o.id)}
-                      className="text-sm text-emerald-600 hover:underline dark:text-emerald-400"
+                      className="text-sm text-[var(--success)] hover:underline dark:text-[var(--success)]"
                     >
                       Receive
                     </button>

@@ -101,14 +101,14 @@ export default function MastersInstrumentsPage() {
                 prev.size === list.length ? new Set() : new Set(list.map((i) => i.id)),
               )
             }
-            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
           >
             {selectedIds.size === list.length && list.length > 0 ? 'Unselect all' : 'Select all'}
           </button>
           <button
             type="button"
             onClick={() => setSelectedIds(new Set())}
-            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
           >
             Clear
           </button>
@@ -116,13 +116,13 @@ export default function MastersInstrumentsPage() {
             type="button"
             disabled={selectedIds.size === 0 || bulkDeleting}
             onClick={() => void handleBulkDelete()}
-            className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-sm text-rose-600 disabled:opacity-50 dark:text-rose-400"
+            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
           >
             {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
           </button>
           <Link
             href="/masters/instruments/new"
-            className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+            className="rounded-ds-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
           >
             Add instrument
           </Link>
@@ -175,7 +175,7 @@ export default function MastersInstrumentsPage() {
                   <span
                     className={
                       i?.calibrationDue && new Date(i.calibrationDue) < new Date()
-                        ? 'font-medium text-rose-600 dark:text-rose-400'
+                        ? 'font-medium text-[var(--error)] dark:text-[var(--error)]'
                         : ''
                     }
                   >
@@ -188,7 +188,7 @@ export default function MastersInstrumentsPage() {
                       href={i.certificateUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline dark:text-blue-400"
+                      className="text-[var(--info)] hover:underline dark:text-[var(--info)]"
                     >
                       View
                     </a>
@@ -197,14 +197,14 @@ export default function MastersInstrumentsPage() {
                   )}
                 </td>
                 <td className={enterpriseTdClass}>
-                  <Link href={`/masters/instruments/${i?.id ?? ''}`} className="mr-2 text-blue-600 hover:underline dark:text-blue-400">
+                  <Link href={`/masters/instruments/${i?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
                     Edit
                   </Link>
                   <button
                     type="button"
                     onClick={() => void handleDelete(i)}
                     disabled={deletingId === i.id}
-                    className="text-rose-600 hover:underline disabled:opacity-50 dark:text-rose-400"
+                    className="text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
                   >
                     {deletingId === i.id ? 'Deleting…' : 'Delete'}
                   </button>

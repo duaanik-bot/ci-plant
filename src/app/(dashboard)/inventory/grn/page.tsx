@@ -203,7 +203,7 @@ export default function GrnPage() {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground text-sm'
+  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground text-sm'
 
   return (
     <div className="p-4 max-w-2xl mx-auto">
@@ -213,7 +213,7 @@ export default function GrnPage() {
       <form onSubmit={handleSubmit} className="space-y-5">
 
         {/* Material Search */}
-        <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4">
+        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4">
           <MasterSearchSelect
             label="Material"
             required
@@ -276,7 +276,7 @@ export default function GrnPage() {
           )}
 
           {selectedMaterial ? (
-            <div className="mt-3 rounded-lg border border-ds-line/50 bg-ds-elevated/40 p-3">
+            <div className="mt-3 rounded-ds-md border border-ds-line/50 bg-ds-elevated/40 p-3">
               <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-2">Open Shortages</p>
               {openShortages.length === 0 ? (
                 <p className="text-xs text-ds-ink-faint">No open shortages for this material.</p>
@@ -299,18 +299,18 @@ export default function GrnPage() {
         </div>
 
         {/* Quantity Entry */}
-        <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 space-y-3">
+        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 space-y-3">
           <h3 className="text-ds-ink-muted text-sm font-medium">Received Quantity</h3>
 
           {/* Unit Toggle (only for board types) */}
           {isBoardType && sheetWeightG > 0 && (
-            <div className="flex gap-1 bg-ds-elevated rounded-lg p-0.5 w-fit text-sm">
+            <div className="flex gap-1 bg-ds-elevated rounded-ds-md p-0.5 w-fit text-sm">
               <button type="button" onClick={() => setEntryUnit('sheets')}
-                className={`px-3 py-1 rounded-md transition-colors ${entryUnit === 'sheets' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted hover:text-foreground'}`}>
+                className={`px-3 py-1 rounded-ds-sm transition-colors ${entryUnit === 'sheets' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted hover:text-foreground'}`}>
                 Sheets
               </button>
               <button type="button" onClick={() => setEntryUnit('kg')}
-                className={`px-3 py-1 rounded-md transition-colors ${entryUnit === 'kg' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted hover:text-foreground'}`}>
+                className={`px-3 py-1 rounded-ds-sm transition-colors ${entryUnit === 'kg' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted hover:text-foreground'}`}>
                 kg
               </button>
             </div>
@@ -349,20 +349,20 @@ export default function GrnPage() {
 
         {/* Tolerance Warning */}
         {toleranceWarning && (
-          <div className="bg-red-900/40 border border-red-700 rounded-lg p-3 text-sm space-y-2">
+          <div className="bg-[var(--error-bg)] border border-[var(--error)] rounded-ds-md p-3 text-sm space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-red-400 text-lg">&#9888;</span>
-              <span className="text-red-200">{toleranceWarning}</span>
+              <span className="text-[var(--error)] text-lg">&#9888;</span>
+              <span className="text-[var(--error)]">{toleranceWarning}</span>
             </div>
             <div className="flex items-center gap-2">
               <input type="checkbox" id="approvalOverride" checked={approvalOverride} onChange={(e) => setApprovalOverride(e.target.checked)} className="rounded border-ds-line/60" />
-              <label htmlFor="approvalOverride" className="text-red-300 text-xs">Manager approval granted &mdash; proceed with GRN</label>
+              <label htmlFor="approvalOverride" className="text-[var(--error)] text-xs">Manager approval granted &mdash; proceed with GRN</label>
             </div>
           </div>
         )}
 
         {/* Pricing */}
-        <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 space-y-3">
+        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 space-y-3">
           <h3 className="text-ds-ink-muted text-sm font-medium">Pricing</h3>
           <div className="grid grid-cols-2 gap-3">
             {isBoardType ? (
@@ -387,7 +387,7 @@ export default function GrnPage() {
         </div>
 
         {/* Batch & Pallet Tracking */}
-        <div className="bg-ds-card rounded-lg border border-ds-line/50 p-4 space-y-3">
+        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 space-y-3">
           <h3 className="text-ds-ink-muted text-sm font-medium">Batch & Pallet Tracking</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -415,7 +415,7 @@ export default function GrnPage() {
 
         {/* Submit */}
         <button type="submit" disabled={submitting || (toleranceWarning != null && !approvalOverride)}
-          className="w-full py-2.5 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium text-sm">
+          className="w-full py-2.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium text-sm">
           {submitting ? 'Posting...' : 'Post GRN'}
         </button>
       </form>

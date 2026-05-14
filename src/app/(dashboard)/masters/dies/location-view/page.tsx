@@ -28,12 +28,12 @@ export default function DieLocationViewPage() {
     <div className="p-4 max-w-7xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-ds-warning">Die Location View</h1>
-        <Link href="/masters/dies" className="px-3 py-2 rounded-lg border border-ds-line/60 text-ds-ink text-sm">Back</Link>
+        <Link href="/masters/dies" className="px-3 py-2 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm">Back</Link>
       </div>
       <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search die or carton" className="w-full md:w-96 px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm" />
       <div className="space-y-4">
         {Object.entries(data).map(([rack, dies]) => (
-          <div key={rack} className="rounded-xl border border-ds-line/50 bg-ds-card p-3">
+          <div key={rack} className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-3">
             <div className="flex justify-between"><h2 className="text-sm font-semibold text-ds-ink">{rack}</h2><span className="text-xs text-ds-ink-faint">{dies.length}/8 occupied</span></div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
               {Array.from({ length: 8 }, (_, i) => {

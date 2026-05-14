@@ -85,14 +85,14 @@ export function PlanningPoSummaryDrawer({
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-          {err ? <p className="text-sm text-rose-400">{err}</p> : null}
+          {err ? <p className="text-sm text-[var(--error)]">{err}</p> : null}
           {loading ? <p className="text-sm text-ds-ink-faint">Loading…</p> : null}
           {!loading && data && (
             <>
               <div className="grid gap-3 text-sm text-ds-ink">
                 <p>
                   <span className="text-ds-ink-faint">Status / payment:</span>{' '}
-                  <span className="text-emerald-400">{String(data.status ?? '—')}</span>
+                  <span className="text-[var(--success)]">{String(data.status ?? '—')}</span>
                 </p>
                 <p>
                   <span className="text-ds-ink-faint">Total (est. w/ GST on lines):</span>{' '}

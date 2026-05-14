@@ -1132,7 +1132,7 @@ export default function PlanningPage() {
               value={planningSearchQuery}
               onChange={(e) => setPlanningSearchQuery(e.target.value)}
               placeholder="Search in planning (carton / PO #)"
-              className="h-8 w-full rounded-md border border-ds-line/60 bg-ds-elevated/35 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+              className="h-8 w-full rounded-ds-sm border border-ds-line/60 bg-ds-elevated/35 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
             />
           </div>
           <BulkActionBar

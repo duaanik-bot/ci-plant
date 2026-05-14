@@ -923,7 +923,7 @@ export default function EditPurchaseOrderPage() {
       className="min-h-screen bg-background px-3 py-3 sm:px-4 space-y-3 pb-36 max-w-[1920px] mx-auto w-full"
     >
       {/* Director's glass — metadata */}
-      <div className="rounded-xl border border-border/40 bg-card/30 px-3 py-3 backdrop-blur-md sm:px-4">
+      <div className="rounded-ds-lg border border-border/40 bg-card/30 px-3 py-3 backdrop-blur-md sm:px-4">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/40 pb-3">
           <div className="min-w-0">
             <div className="text-xs font-medium uppercase tracking-wide text-ds-ink-muted">PO #</div>
@@ -939,10 +939,10 @@ export default function EditPurchaseOrderPage() {
                   return next
                 })
               }}
-              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-ds-warning focus:border-ds-brand focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-red-500/60' : ''} ${poSentToPlanning ? 'cursor-not-allowed opacity-80' : ''}`}
+              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-ds-warning focus:border-ds-brand focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-[var(--error)]/60' : ''} ${poSentToPlanning ? 'cursor-not-allowed opacity-80' : ''}`}
             />
             {fieldErrors.poNumber ? (
-              <span className="mt-0.5 block text-xs text-red-400">{fieldErrors.poNumber}</span>
+              <span className="mt-0.5 block text-xs text-[var(--error)]">{fieldErrors.poNumber}</span>
             ) : null}
           </div>
           <div className="flex shrink-0 max-w-md flex-col items-stretch gap-2 sm:items-end">
@@ -952,7 +952,7 @@ export default function EditPurchaseOrderPage() {
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
                 disabled={poSentToPlanning}
-                className="mt-1 w-full min-w-[10rem] rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40 sm:text-right enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
+                className="mt-1 w-full min-w-[10rem] rounded-ds-md border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40 sm:text-right enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
               >
                 <option value="draft">Draft</option>
                 <option value="confirmed">Confirmed</option>
@@ -989,13 +989,13 @@ export default function EditPurchaseOrderPage() {
                   type="button"
                   onClick={releaseToPlanning}
                   disabled={!canReleaseToPlanning || releasingToPlanning}
-                  className="w-full rounded-lg bg-ds-warning px-3 py-2 text-xs font-bold text-white shadow transition-colors hover:bg-ds-warning disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                  className="w-full rounded-ds-md bg-ds-warning px-3 py-2 text-xs font-bold text-white shadow transition-colors hover:bg-ds-warning disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
                 >
                   {releasingToPlanning ? 'Releasing…' : 'Release to Planning'}
                 </button>
               </div>
             ) : (
-              <p className="text-right text-xs leading-snug text-emerald-400/90">
+              <p className="text-right text-xs leading-snug text-[var(--success)]/90">
                 In Planning — lines are read-only.{' '}
                 <Link href="/orders/planning" className="font-semibold text-ds-warning underline underline-offset-2">
                   Open queue
@@ -1047,7 +1047,7 @@ export default function EditPurchaseOrderPage() {
               type="date"
               value={poDate}
               onChange={(e) => setPoDate(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
+              className="mt-1 w-full rounded-ds-md border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
             />
           </div>
           <div>
@@ -1056,7 +1056,7 @@ export default function EditPurchaseOrderPage() {
               type="date"
               value={deliveryRequiredBy}
               onChange={(e) => setDeliveryRequiredBy(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
+              className="mt-1 w-full rounded-ds-md border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
             />
           </div>
         </div>
@@ -1068,7 +1068,7 @@ export default function EditPurchaseOrderPage() {
               type="text"
               value={paymentTerms}
               onChange={(e) => setPaymentTerms(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
+              className="mt-1 w-full rounded-ds-md border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
               placeholder="e.g. 30 days"
             />
           </div>
@@ -1080,7 +1080,7 @@ export default function EditPurchaseOrderPage() {
               type="text"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
+              className="mt-1 w-full rounded-ds-md border border-ds-line/40 bg-ds-elevated/60 dark:bg-ds-elevated/80 px-2 py-1.5 text-xs font-bold text-ds-ink focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
             />
         </div>
       </div>
@@ -1103,7 +1103,7 @@ export default function EditPurchaseOrderPage() {
           </div>
           {fieldErrors.lines ? <p className="text-xs text-ds-error">{fieldErrors.lines}</p> : null}
 
-          <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/20 p-4">
+          <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/20 p-4">
             <div className="grid items-center gap-x-3 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted" style={{ gridTemplateColumns: '48px minmax(340px,1.8fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}>
               <div className="text-center">S.No</div>
               <div>Carton</div>
@@ -1132,7 +1132,7 @@ export default function EditPurchaseOrderPage() {
                           setDetailLineIdx(idx)
                         }}
                         className={cn(
-                          'group grid items-start gap-x-3 rounded-lg border border-ds-line/40 px-3 py-2',
+                          'group grid items-start gap-x-3 rounded-ds-md border border-ds-line/40 px-3 py-2',
                           rowStripe,
                           !poSentToPlanning && 'cursor-pointer',
                           detailLineIdx === null && kbRowIndex === idx
@@ -1292,7 +1292,7 @@ export default function EditPurchaseOrderPage() {
       </fieldset>
 
       {lines.some((l) => !!l.fgReservation) ? (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-elevated/30 p-3">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-elevated/30 p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ds-warning">
             FG reservation log
           </p>
@@ -1338,13 +1338,13 @@ export default function EditPurchaseOrderPage() {
                     }}
                   />
                   <div
-                    className="h-full flex-none bg-sky-500 transition-[width] duration-300"
+                    className="h-full flex-none bg-[var(--info-bg)] transition-[width] duration-300"
                     style={{
                       width: `${(supplyMaterialCounts.blue / supplyMaterialCounts.total) * 100}%`,
                     }}
                   />
                   <div
-                    className="h-full flex-none bg-emerald-500 transition-[width] duration-300"
+                    className="h-full flex-none bg-[var(--success-bg)] transition-[width] duration-300"
                     style={{
                       width: `${(supplyMaterialCounts.green / supplyMaterialCounts.total) * 100}%`,
                     }}
@@ -1387,14 +1387,14 @@ export default function EditPurchaseOrderPage() {
               <button
                 type="button"
                 onClick={() => router.push('/orders/purchase-orders')}
-                className="rounded-lg border border-ds-line/50 bg-ds-card/80 px-3 py-2 text-xs font-medium text-ds-ink hover:border-ds-line/50"
+                className="rounded-ds-md border border-ds-line/50 bg-ds-card/80 px-3 py-2 text-xs font-medium text-ds-ink hover:border-ds-line/50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={saving}
-                className="ci-btn-save-industrial rounded-lg px-5 py-2 text-xs font-semibold disabled:opacity-50"
+                className="ci-btn-save-industrial rounded-ds-md px-5 py-2 text-xs font-semibold disabled:opacity-50"
               >
                 {saving ? 'Saving…' : poSentToPlanning ? 'Save notes & exit' : 'Save changes'}
               </button>

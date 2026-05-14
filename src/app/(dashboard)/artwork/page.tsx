@@ -132,14 +132,14 @@ export default function ArtworkApprovalsPage() {
   const statusBadge = (item: ArtworkQueueItem) => {
     if (item.prePressFinalized) {
       return (
-        <span className="px-2 py-0.5 rounded text-xs bg-emerald-900/50 text-emerald-300">
+        <span className="px-2 py-0.5 rounded text-xs bg-[var(--success-bg)] text-[var(--success)]">
           Sent to Plate Hub ✓
         </span>
       )
     }
     if (item.approvalsComplete) {
       return (
-        <span className="px-2 py-0.5 rounded text-xs bg-blue-900/50 text-blue-300">
+        <span className="px-2 py-0.5 rounded text-xs bg-[var(--info-bg)] text-[var(--info)]">
           Approved — ready to finalize
         </span>
       )
@@ -189,7 +189,7 @@ export default function ArtworkApprovalsPage() {
         </div>
         <Link
           href="/orders/designing"
-          className="rounded-md bg-blue-600 px-3 py-2 text-sm text-primary-foreground hover:bg-blue-500"
+          className="rounded-ds-sm bg-[var(--info-bg)] px-3 py-2 text-sm text-primary-foreground hover:bg-[var(--info-bg)]"
         >
           Full Designing Queue
         </Link>
@@ -198,11 +198,11 @@ export default function ArtworkApprovalsPage() {
       {loading ? (
         <div className="text-ds-ink-muted py-8 text-center">Loading artwork queue…</div>
       ) : items.length === 0 ? (
-        <div className="rounded-lg border border-ds-line/40 bg-ds-main/40 p-8 text-center text-ds-ink-muted text-sm">
+        <div className="rounded-ds-md border border-ds-line/40 bg-ds-main/40 p-8 text-center text-ds-ink-muted text-sm">
           No items in the artwork queue.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-ds-line/50">
+        <div className="overflow-x-auto rounded-ds-md border border-ds-line/50">
           <table className="w-full text-sm">
             <thead className="bg-ds-elevated text-left">
               <tr>

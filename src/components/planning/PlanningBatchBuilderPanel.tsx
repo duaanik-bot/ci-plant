@@ -466,7 +466,7 @@ export function PlanningBatchBuilderPanel({
             type="button"
             onClick={() => void handleBreakGroupAsIs()}
             disabled={breakSelection.size === 0}
-            className="w-full rounded-lg border border-rose-500/45 bg-rose-500/8 px-3 py-2 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-500/12 dark:bg-rose-500/10 dark:text-rose-200 dark:hover:bg-rose-500/15 disabled:opacity-50"
+            className="w-full rounded-ds-md border border-[var(--error)]/45 bg-[var(--error-bg)]/8 px-3 py-2 text-xs font-semibold text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]/12 dark:bg-[var(--error-bg)]/10 dark:text-[var(--error)] dark:hover:bg-[var(--error-bg)]/15 disabled:opacity-50"
           >
             Break group (as-is) for selected
           </button>
@@ -486,7 +486,7 @@ export function PlanningBatchBuilderPanel({
               })
             }}
             disabled={lines.length < 2}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg bg-ds-warning px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-warning/90"
+            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-ds-md bg-ds-warning px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-warning/90"
           >
             <Plus className="h-4 w-4" aria-hidden />
             {lines.length < 2 ? 'Create group (select 2+)' : 'Create group'}
@@ -495,7 +495,7 @@ export function PlanningBatchBuilderPanel({
             type="button"
             onClick={() => void handleSendToArtwork()}
             disabled={sendingToArtwork}
-            className="h-8 w-full rounded-lg bg-ds-brand px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-brand/90 disabled:opacity-60"
+            className="h-8 w-full rounded-ds-md bg-ds-brand px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-brand/90 disabled:opacity-60"
           >
             {sendingToArtwork ? 'Sending…' : 'Send to Artwork'}
           </button>
@@ -503,7 +503,7 @@ export function PlanningBatchBuilderPanel({
             type="button"
             onClick={() => void handleMakeProcessingBatch()}
             disabled={makingProcessing}
-            className="h-8 w-full rounded-lg border border-ds-line bg-ds-elevated px-3 text-xs font-semibold text-ds-ink transition-colors hover:bg-ds-main disabled:opacity-60"
+            className="h-8 w-full rounded-ds-md border border-ds-line bg-ds-elevated px-3 text-xs font-semibold text-ds-ink transition-colors hover:bg-ds-main disabled:opacity-60"
           >
             {makingProcessing ? 'Sending…' : 'Make Processing'}
           </button>
@@ -519,7 +519,7 @@ export function PlanningBatchBuilderPanel({
                 },
               })
             }}
-            className="h-8 w-full rounded-lg border border-input bg-background px-3 text-xs text-muted-foreground transition-colors hover:bg-accent/10"
+            className="h-8 w-full rounded-ds-md border border-input bg-background px-3 text-xs text-muted-foreground transition-colors hover:bg-accent/10"
           >
             Clear selection
           </button>
@@ -534,7 +534,7 @@ export function PlanningBatchBuilderPanel({
           </p>
         </div>
 
-        <div className="rounded-md border border-ds-line/40 bg-ds-elevated/25 px-3 py-3 text-xs">
+        <div className="rounded-ds-sm border border-ds-line/40 bg-ds-elevated/25 px-3 py-3 text-xs">
           <p className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">Compatibility</p>
           <p className={`mt-1 text-xs text-ds-ink-muted ${mono}`}>
             All parameters for the selected jobs — Match means a single value; Mixed means variation (advisory only).
@@ -551,13 +551,13 @@ export function PlanningBatchBuilderPanel({
           </ul>
         </div>
 
-        <div className="rounded-md border border-ds-line/40 bg-ds-elevated/20 px-3 py-3">
+        <div className="rounded-ds-sm border border-ds-line/40 bg-ds-elevated/20 px-3 py-3">
           <label htmlFor="batch-designer" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Designer assignment
           </label>
           <select
             id="batch-designer"
-            className="h-10 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-3 text-sm leading-6 font-medium text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+            className="h-10 w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/40 px-3 text-sm leading-6 font-medium text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
             value={designer}
             onChange={(e) => {
               void applyDesignerToBatch(e.target.value)
@@ -570,7 +570,7 @@ export function PlanningBatchBuilderPanel({
           <p className={`mt-1 text-xs text-ds-ink-faint ${mono}`}>Designer is applied across all selected jobs.</p>
         </div>
 
-        <div className="rounded-md border border-ds-line/40 bg-ds-elevated/20 px-3 py-3">
+        <div className="rounded-ds-sm border border-ds-line/40 bg-ds-elevated/20 px-3 py-3">
           <p className="mb-2 block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Drawer-level carry forward
           </p>
@@ -587,7 +587,7 @@ export function PlanningBatchBuilderPanel({
                 value={sheetLengthMm}
                 onChange={(e) => setSheetLengthMm(e.target.value)}
                 placeholder="e.g. 720"
-                className="h-8 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+                className="h-8 w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
               />
             </div>
             <div>
@@ -602,7 +602,7 @@ export function PlanningBatchBuilderPanel({
                 value={sheetWidthMm}
                 onChange={(e) => setSheetWidthMm(e.target.value)}
                 placeholder="e.g. 1020"
-                className="h-8 w-full rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+                className="h-8 w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
               />
             </div>
           </div>
@@ -616,7 +616,7 @@ export function PlanningBatchBuilderPanel({
               onChange={(e) => setSpecialRemarks(e.target.value)}
               placeholder="Enter special manufacturing/planning remarks..."
               rows={3}
-              className="w-full resize-y rounded-md border border-ds-line/50 bg-ds-elevated/40 px-2.5 py-2 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+              className="w-full resize-y rounded-ds-sm border border-ds-line/50 bg-ds-elevated/40 px-2.5 py-2 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
             />
           </div>
           <p className={`mt-1 text-xs text-ds-ink-faint ${mono}`}>
@@ -639,7 +639,7 @@ export function PlanningBatchBuilderPanel({
               return (
                 <li
                   key={r.id}
-                  className="group flex items-start justify-between gap-2 rounded-md border border-ds-line/40 bg-background px-3 py-2"
+                  className="group flex items-start justify-between gap-2 rounded-ds-sm border border-ds-line/40 bg-background px-3 py-2"
                 >
                   <label className="mt-0.5 inline-flex items-center gap-1.5 text-xs text-ds-ink-muted">
                     <input
@@ -733,7 +733,7 @@ export function PlanningBatchBuilderPanel({
                         },
                       })
                     }}
-                    className="shrink-0 rounded p-0.5 text-ds-ink-faint transition-colors hover:bg-accent/20 hover:text-rose-300"
+                    className="shrink-0 rounded p-0.5 text-ds-ink-faint transition-colors hover:bg-accent/20 hover:text-[var(--error)]"
                     title="Remove from selection"
                     aria-label="Remove from selection"
                   >

@@ -182,7 +182,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
       {!hideLabel ? (
         <label className="block text-xs text-ds-ink-muted mb-1">
           {label}
-          {required ? <span className="text-red-400">*</span> : null}
+          {required ? <span className="text-[var(--error)]">*</span> : null}
         </label>
       ) : null}
       <input
@@ -226,15 +226,15 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
         disabled={disabled}
         autoComplete="off"
         className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-          error ? 'border-red-500' : 'border-ds-line/60'
+          error ? 'border-[var(--error)]' : 'border-ds-line/60'
         } text-foreground disabled:opacity-60 disabled:cursor-not-allowed ${inputClassName ?? ''}`}
       />
-      {error ? <p className="text-xs text-red-400 mt-1">{error}</p> : null}
+      {error ? <p className="text-xs text-[var(--error)] mt-1">{error}</p> : null}
 
       {showDropdown && mounted && dropdownPos
         ? createPortal(
         <div
-          className={`overflow-hidden rounded-lg border border-ds-line/50 bg-ds-card shadow-2xl ${dropdownClassName ?? ''}`}
+          className={`overflow-hidden rounded-ds-md border border-ds-line/50 bg-ds-card shadow-2xl ${dropdownClassName ?? ''}`}
           style={{
             position: 'fixed',
             top: dropdownPos.top,

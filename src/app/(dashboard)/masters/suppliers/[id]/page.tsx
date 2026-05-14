@@ -113,7 +113,7 @@ export default function EditSupplierPage() {
   }
 
   if (loading) return <div className="text-ds-ink-muted">Loading…</div>
-  if (!supplier) return <div className="text-red-400">Supplier not found</div>
+  if (!supplier) return <div className="text-[var(--error)]">Supplier not found</div>
 
   return (
     <div className="max-w-lg">
@@ -124,18 +124,18 @@ export default function EditSupplierPage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              fieldErrors.name ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              fieldErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           />
-          {fieldErrors.name && <p className="mt-1 text-sm text-red-400">{fieldErrors.name}</p>}
+          {fieldErrors.name && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.name}</p>}
         </div>
         <div>
           <label className="block text-sm text-ds-ink-muted mb-1">GST number</label>
           <input
             value={gstNumber}
             onChange={(e) => setGstNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -144,7 +144,7 @@ export default function EditSupplierPage() {
             <input
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
@@ -152,7 +152,7 @@ export default function EditSupplierPage() {
             <input
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
         </div>
@@ -162,7 +162,7 @@ export default function EditSupplierPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -171,7 +171,7 @@ export default function EditSupplierPage() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -197,7 +197,7 @@ export default function EditSupplierPage() {
             min={0}
             value={leadTimeDays}
             onChange={(e) => setLeadTimeDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -208,7 +208,7 @@ export default function EditSupplierPage() {
             value={paymentTermsDays}
             onChange={(e) => setPaymentTermsDays(e.target.value)}
             placeholder="0 = advance, 30 = Net 30"
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground font-mono tabular-nums"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground font-mono tabular-nums"
           />
           <p className="mt-1 text-xs text-ds-ink-faint">
             Drives projected payment date from GRN receipt (calendar days).
@@ -219,7 +219,7 @@ export default function EditSupplierPage() {
           <input
             value={paymentTerms}
             onChange={(e) => setPaymentTerms(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -236,11 +236,11 @@ export default function EditSupplierPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
+            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/suppliers" className="px-4 py-2 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground">
+          <Link href="/masters/suppliers" className="px-4 py-2 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-foreground">
             Cancel
           </Link>
         </div>

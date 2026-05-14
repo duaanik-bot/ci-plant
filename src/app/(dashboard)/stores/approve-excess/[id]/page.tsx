@@ -84,9 +84,9 @@ export default function ApproveExcessPage() {
   }
 
   if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
-  if (!issue) return <div className="p-4 text-red-400">Request not found.</div>
-  if (issue.approvedAt) return <div className="p-4 text-green-400">Already approved.</div>
-  if (issue.rejectedAt) return <div className="p-4 text-red-400">Already rejected.</div>
+  if (!issue) return <div className="p-4 text-[var(--error)]">Request not found.</div>
+  if (issue.approvedAt) return <div className="p-4 text-[var(--success)]">Already approved.</div>
+  if (issue.rejectedAt) return <div className="p-4 text-[var(--error)]">Already rejected.</div>
 
   const excessPct = issue.qtyApproved > 0 ? (issue.qtyRequested / issue.qtyApproved) * 100 : 0
 
@@ -94,7 +94,7 @@ export default function ApproveExcessPage() {
     <div className="min-h-screen bg-ds-card text-foreground p-4 max-w-lg mx-auto">
       <h1 className="text-xl font-bold text-ds-warning mb-4">Approve Excess Sheets</h1>
 
-      <div className="rounded-lg border border-ds-line/60 bg-ds-elevated/50 p-4 space-y-3 mb-6">
+      <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-4 space-y-3 mb-6">
         <p><span className="text-ds-ink-muted">Job:</span> {issue.jobNumber} — {issue.productName}</p>
         <p><span className="text-ds-ink-muted">Material:</span> {issue.materialCode} {issue.materialDescription}</p>
         <p><span className="text-ds-ink-muted">Approved qty:</span> {issue.qtyApproved.toLocaleString()} {issue.unit}</p>
@@ -113,13 +113,13 @@ export default function ApproveExcessPage() {
           type="button"
           onClick={handleApprove}
           disabled={!!action}
-          className="w-full py-3 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-primary-foreground font-bold text-lg"
+          className="w-full py-3 rounded-ds-md bg-[var(--success-bg)] hover:bg-[var(--success-bg)] disabled:opacity-50 text-primary-foreground font-bold text-lg"
         >
           {action === 'approve' ? '…' : 'APPROVE'}
         </button>
         <button
           type="button"
-          className="w-full py-2 rounded-lg border border-ds-warning text-ds-warning text-sm"
+          className="w-full py-2 rounded-ds-md border border-ds-warning text-ds-warning text-sm"
         >
           Escalate to next level
         </button>
@@ -129,13 +129,13 @@ export default function ApproveExcessPage() {
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
             placeholder="Rejection reason"
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground mb-2"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground mb-2"
           />
           <button
             type="button"
             onClick={handleReject}
             disabled={!!action || !rejectReason.trim()}
-            className="w-full py-2 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-50 text-foreground font-medium"
+            className="w-full py-2 rounded-ds-md bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:opacity-50 text-foreground font-medium"
           >
             {action === 'reject' ? '…' : 'REJECT'}
           </button>

@@ -456,7 +456,7 @@ export default function NewRfqPage() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* SECTION 1 — CLIENT DETAILS */}
-        <section className="rounded-lg border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-ds-ink">SECTION 1 — CLIENT DETAILS</h2>
           </div>
@@ -507,7 +507,7 @@ export default function NewRfqPage() {
             </div>
             <div>
               <label className="block text-xs text-ds-ink-muted mb-1">
-                Contact Person<span className="text-red-400">*</span>
+                Contact Person<span className="text-[var(--error)]">*</span>
               </label>
               <input
                 type="text"
@@ -520,7 +520,7 @@ export default function NewRfqPage() {
             </div>
             <div>
               <label className="block text-xs text-ds-ink-muted mb-1">
-                Phone<span className="text-red-400">*</span>
+                Phone<span className="text-[var(--error)]">*</span>
               </label>
               <input
                 type="tel"
@@ -546,7 +546,7 @@ export default function NewRfqPage() {
         </section>
 
         {/* SECTION 2 — PRODUCT REQUIREMENT */}
-        <section className="rounded-lg border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">
             SECTION 2 — PRODUCT REQUIREMENT
           </h2>
@@ -577,7 +577,7 @@ export default function NewRfqPage() {
             </div>
             <div>
               <label className="block text-xs text-ds-ink-muted mb-1">
-                Product Name<span className="text-red-400">*</span>
+                Product Name<span className="text-[var(--error)]">*</span>
               </label>
               <input
                 type="text"
@@ -586,16 +586,16 @@ export default function NewRfqPage() {
                   setCore((prev) => ({ ...prev, productName: e.target.value }))
                 }
                 className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                  errors.productName ? 'border-red-500' : 'border-ds-line/60'
+                  errors.productName ? 'border-[var(--error)]' : 'border-ds-line/60'
                 } text-foreground`}
               />
               {errors.productName && (
-                <p className="text-xs text-red-400 mt-1">{errors.productName}</p>
+                <p className="text-xs text-[var(--error)] mt-1">{errors.productName}</p>
               )}
             </div>
             <div>
               <label className="block text-xs text-ds-ink-muted mb-1">
-                Pack Type<span className="text-red-400">*</span>
+                Pack Type<span className="text-[var(--error)]">*</span>
               </label>
               <select
                 value={core.packType}
@@ -603,7 +603,7 @@ export default function NewRfqPage() {
                   setCore((prev) => ({ ...prev, packType: e.target.value }))
                 }
                 className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                  errors.packType ? 'border-red-500' : 'border-ds-line/60'
+                  errors.packType ? 'border-[var(--error)]' : 'border-ds-line/60'
                 } text-foreground`}
               >
                 <option value="">Select…</option>
@@ -635,7 +635,7 @@ export default function NewRfqPage() {
             <div className="flex gap-2">
               <div className="flex-1">
                 <label className="block text-xs text-ds-ink-muted mb-1">
-                  Annual Estimated Volume<span className="text-red-400">*</span>
+                  Annual Estimated Volume<span className="text-[var(--error)]">*</span>
                 </label>
                 <input
                   type="number"
@@ -645,11 +645,11 @@ export default function NewRfqPage() {
                     setCore((prev) => ({ ...prev, annualVolume: e.target.value }))
                   }
                   className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                    errors.annualVolume ? 'border-red-500' : 'border-ds-line/60'
+                    errors.annualVolume ? 'border-[var(--error)]' : 'border-ds-line/60'
                   } text-foreground`}
                 />
                 {errors.annualVolume && (
-                  <p className="text-xs text-red-400 mt-1">{errors.annualVolume}</p>
+                  <p className="text-xs text-[var(--error)] mt-1">{errors.annualVolume}</p>
                 )}
               </div>
               <div className="w-32">
@@ -723,7 +723,7 @@ export default function NewRfqPage() {
         </section>
 
         {/* SECTION 3 — PACKAGING SPECIFICATIONS */}
-        <section className="rounded-lg border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">
             SECTION 3 — PACKAGING SPECIFICATIONS
           </h2>
@@ -779,7 +779,7 @@ export default function NewRfqPage() {
             </div>
             <div>
               <label className="block text-xs text-ds-ink-muted mb-1">
-                GSM<span className="text-red-400">*</span>
+                GSM<span className="text-[var(--error)]">*</span>
               </label>
               <input
                 type="number"
@@ -787,10 +787,10 @@ export default function NewRfqPage() {
                 value={spec.gsm}
                 onChange={(e) => setSpec((prev) => ({ ...prev, gsm: e.target.value }))}
                 className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                  errors.gsm ? 'border-red-500' : 'border-ds-line/60'
+                  errors.gsm ? 'border-[var(--error)]' : 'border-ds-line/60'
                 } text-foreground`}
               />
-              {errors.gsm && <p className="text-xs text-red-400 mt-1">{errors.gsm}</p>}
+              {errors.gsm && <p className="text-xs text-[var(--error)] mt-1">{errors.gsm}</p>}
             </div>
             <div>
               <label className="block text-xs text-ds-ink-muted mb-1">Number of Colours</label>
@@ -925,7 +925,7 @@ export default function NewRfqPage() {
         </section>
 
         {/* SECTION 4 — PHARMA COMPLIANCE */}
-        <section className="rounded-lg border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">
             SECTION 4 — PHARMA COMPLIANCE
           </h2>
@@ -1047,7 +1047,7 @@ export default function NewRfqPage() {
         </section>
 
         {/* SECTION 5 — COMMERCIAL */}
-        <section className="rounded-lg border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">SECTION 5 — COMMERCIAL</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div>
@@ -1153,7 +1153,7 @@ export default function NewRfqPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-6 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium text-sm"
+            className="px-6 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium text-sm"
           >
             {submitting ? 'Saving…' : 'Create RFQ'}
           </button>
@@ -1168,7 +1168,7 @@ export default function NewRfqPage() {
         <form onSubmit={submitQuickCreateCustomer} className="space-y-3 text-sm">
           <div>
             <label className="block text-xs text-ds-ink-muted mb-1">
-              Name<span className="text-red-400">*</span>
+              Name<span className="text-[var(--error)]">*</span>
             </label>
             <input
               type="text"
@@ -1177,11 +1177,11 @@ export default function NewRfqPage() {
                 setQcCustomer((prev) => ({ ...prev, name: e.target.value }))
               }
               className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                qcErrors.name ? 'border-red-500' : 'border-ds-line/60'
+                qcErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'
               } text-foreground`}
             />
             {qcErrors.name && (
-              <p className="text-xs text-red-400 mt-1">{qcErrors.name}</p>
+              <p className="text-xs text-[var(--error)] mt-1">{qcErrors.name}</p>
             )}
           </div>
           <div>
@@ -1260,7 +1260,7 @@ export default function NewRfqPage() {
             <button
               type="submit"
               disabled={qcSubmitting}
-              className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+              className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
             >
               {qcSubmitting ? 'Saving…' : 'Save Customer'}
             </button>

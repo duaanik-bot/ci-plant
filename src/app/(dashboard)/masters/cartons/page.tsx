@@ -135,14 +135,14 @@ export default function CartonMasterPage() {
                 prev.size === filtered.length ? new Set() : new Set(filtered.map((c) => c.id)),
               )
             }
-            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
           >
             {selectedIds.size === filtered.length && filtered.length > 0 ? 'Unselect all' : 'Select all'}
           </button>
           <button
             type="button"
             onClick={() => setSelectedIds(new Set())}
-            className="rounded-lg border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
           >
             Clear
           </button>
@@ -150,11 +150,11 @@ export default function CartonMasterPage() {
             type="button"
             disabled={selectedIds.size === 0 || bulkDeleting}
             onClick={() => void handleBulkDelete()}
-            className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-sm text-rose-600 disabled:opacity-50 dark:text-rose-400"
+            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
           >
             {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
           </button>
-          <Link href="/masters/cartons/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
+          <Link href="/masters/cartons/new" className="rounded-ds-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
             Add carton
           </Link>
         </div>
@@ -166,7 +166,7 @@ export default function CartonMasterPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search clients, board grades, GSM, size, carton..."
-          className="min-h-[40px] w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-card-foreground"
+          className="min-h-[40px] w-full rounded-ds-md border border-border bg-card px-3 py-2 text-sm text-card-foreground"
         />
       </div>
 
@@ -223,19 +223,19 @@ export default function CartonMasterPage() {
                 <td className={enterpriseTdMutedClass}>{c?.paperType ?? '—'}</td>
                 <td className={enterpriseTdMonoClass}>{c?.rate != null ? `₹${c.rate.toFixed(2)}` : '—'}</td>
                 <td className={cellWrap}>
-                  <span className={c?.active ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                  <span className={c?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>
                     {c?.active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
                 <td className={cellWrap}>
-                  <Link href={`/masters/cartons/${c?.id ?? ''}`} className="mr-2 text-blue-600 hover:underline dark:text-blue-400">
+                  <Link href={`/masters/cartons/${c?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
                     Edit
                   </Link>
                   <button
                     type="button"
                     onClick={() => void handleDelete(c)}
                     disabled={deletingId === c.id}
-                    className="text-rose-600 hover:underline disabled:opacity-50 dark:text-rose-400"
+                    className="text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
                   >
                     {deletingId === c.id ? 'Deleting…' : 'Delete'}
                   </button>

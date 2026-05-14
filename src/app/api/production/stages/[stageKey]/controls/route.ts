@@ -28,7 +28,6 @@ const orderedStageKeys = [
   'embossing',
   'dye_cutting',
   'pasting',
-  'sorting',
 ] as const
 
 function requiredStageKeysForRouting(postPressRouting: unknown): string[] {
@@ -39,8 +38,8 @@ function requiredStageKeysForRouting(postPressRouting: unknown): string[] {
   // Spot UV is treated as a coating subtype, not an independent execution station.
   if (pp.chemicalCoating === true || pp.spotUv === true) out.push('chemical_coating')
   if (pp.lamination === true) out.push('lamination')
-  // Leafing/Embossing execute within Dye Cutting; no standalone handoff queue.
-  out.push('dye_cutting', 'pasting', 'sorting')
+  // Leafing/Embossing execute within Dye Cutting. Pasting is terminal → Dispatch → Billing.
+  out.push('dye_cutting', 'pasting')
   return out
 }
 

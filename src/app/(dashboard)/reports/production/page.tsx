@@ -8,10 +8,10 @@ export default function ReportsProductionPage() {
         Use Job Cards and Live Production for current production summaries.
       </p>
       <div className="flex gap-4 text-sm">
-        <Link href="/production/job-cards" className="text-blue-400 hover:underline">
+        <Link href="/production/job-cards" className="text-[var(--info)] hover:underline">
           Open Job Cards →
         </Link>
-        <Link href="/production/stages" className="text-blue-400 hover:underline">
+        <Link href="/production/stages" className="text-[var(--info)] hover:underline">
           Open Live Production →
         </Link>
       </div>

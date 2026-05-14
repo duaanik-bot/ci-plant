@@ -60,7 +60,7 @@ export default function DyeMasterPage() {
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Dye Master</h2>
-        <Link href="/masters/dyes/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
+        <Link href="/masters/dyes/new" className="rounded-ds-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
           Add dye
         </Link>
       </div>
@@ -71,7 +71,7 @@ export default function DyeMasterPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by dye no, type, size…"
-          className="min-h-[40px] min-w-[80px] flex-1 rounded-lg border border-border bg-card px-3 py-1.5 text-card-foreground"
+          className="min-h-[40px] min-w-[80px] flex-1 rounded-ds-md border border-border bg-card px-3 py-1.5 text-card-foreground"
         />
       </div>
 
@@ -100,7 +100,7 @@ export default function DyeMasterPage() {
                 <td className={enterpriseTdMonoClass}>{(d?.impressionCount ?? 0).toLocaleString()}</td>
                 <td className={enterpriseTdMutedClass}>{d?.conditionRating ?? 'Good'}</td>
                 <td className={enterpriseTdClass}>
-                  <Link href={`/masters/dyes/${d?.id ?? ''}`} className="text-blue-600 hover:underline dark:text-blue-400">
+                  <Link href={`/masters/dyes/${d?.id ?? ''}`} className="text-[var(--info)] hover:underline dark:text-[var(--info)]">
                     Edit
                   </Link>
                 </td>

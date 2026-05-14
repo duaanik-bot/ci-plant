@@ -413,11 +413,11 @@ export default function StoresIssuePage() {
   }
 
   const remainingColor = (remaining: number, approved: number) => {
-    if (remaining <= 0) return 'text-red-400 bg-red-900/30'
+    if (remaining <= 0) return 'text-[var(--error)] bg-[var(--error-bg)]'
     const pct = (remaining / approved) * 100
-    if (pct < 5) return 'text-red-400'
+    if (pct < 5) return 'text-[var(--error)]'
     if (pct < 20) return 'text-ds-warning'
-    return 'text-green-400'
+    return 'text-[var(--success)]'
   }
 
   const showFifoDrawer =
@@ -438,11 +438,11 @@ export default function StoresIssuePage() {
             onClick={() => setFifoDrawerDismissed(true)}
           />
           <aside
-            className="fixed top-0 right-0 z-[70] h-full w-full max-w-md border-l border-red-600 bg-[#0a0a0a] shadow-2xl flex flex-col p-4 overflow-y-auto"
+            className="fixed top-0 right-0 z-[70] h-full w-full max-w-md border-l border-[var(--error)] bg-[#0a0a0a] shadow-2xl flex flex-col p-4 overflow-y-auto"
             aria-labelledby="fifo-violation-title"
           >
             <div className="flex items-start justify-between gap-2 mb-3">
-              <h2 id="fifo-violation-title" className="text-lg font-bold text-red-400">
+              <h2 id="fifo-violation-title" className="text-lg font-bold text-[var(--error)]">
                 FIFO violation
               </h2>
               <button
@@ -462,7 +462,7 @@ export default function StoresIssuePage() {
               {fifoJobCardCheck.olderBatches.map((b) => (
                 <li
                   key={b.id}
-                  className="rounded-lg border border-ds-line/50 bg-background/40 px-3 py-2 font-mono text-xs text-ds-ink"
+                  className="rounded-ds-md border border-ds-line/50 bg-background/40 px-3 py-2 font-mono text-xs text-ds-ink"
                 >
                   <span className="text-ds-warning">Lot {b.lotNumber ?? '—'}</span>
                   <span className="block text-ds-ink-muted">
@@ -480,7 +480,7 @@ export default function StoresIssuePage() {
               onChange={(e) => setFifoSkipReason(e.target.value)}
               placeholder='e.g. "Older stock inaccessible in rack A3"'
               rows={4}
-              className="w-full rounded-lg border border-ds-line/60 bg-card px-3 py-2 font-mono text-sm text-foreground placeholder:text-ds-ink-faint"
+              className="w-full rounded-ds-md border border-ds-line/60 bg-card px-3 py-2 font-mono text-sm text-foreground placeholder:text-ds-ink-faint"
             />
             <p className="mt-2 text-xs text-ds-ink-faint">
               {fifoSkipReason.trim().length < 8
@@ -495,7 +495,7 @@ export default function StoresIssuePage() {
         <button
           type="button"
           onClick={() => setFifoDrawerDismissed(false)}
-          className="fixed bottom-4 right-4 z-50 rounded-full border border-red-600 bg-red-950 px-4 py-2 text-sm font-medium text-red-200 shadow-lg animate-pulse"
+          className="fixed bottom-4 right-4 z-50 rounded-full border border-[var(--error)] bg-[var(--error-bg)] px-4 py-2 text-sm font-medium text-[var(--error)] shadow-lg animate-pulse"
         >
           FIFO violation — open panel
         </button>
@@ -503,12 +503,12 @@ export default function StoresIssuePage() {
 
       {/* Hard stop overlay — full red */}
       {hardStop && !excessForm && (
-        <div className="fixed inset-0 z-50 bg-red-900/95 flex flex-col items-center justify-center p-6 text-center">
+        <div className="fixed inset-0 z-50 bg-[var(--error-bg)] flex flex-col items-center justify-center p-6 text-center">
           <p className="text-2xl font-bold mb-2">⛔ HARD STOP</p>
           <p className="text-lg mb-2">All approved sheets issued</p>
-          <p className="text-sm text-red-200 mb-1">Job: {hardStop.jobNumber}</p>
-          <p className="text-sm text-red-200 mb-1">Material: {hardStop.materialCode}</p>
-          <p className="text-sm text-red-200 mb-4">Approved: {hardStop.approvedQty} · Issued: {hardStop.totalIssued}</p>
+          <p className="text-sm text-[var(--error)] mb-1">Job: {hardStop.jobNumber}</p>
+          <p className="text-sm text-[var(--error)] mb-1">Material: {hardStop.materialCode}</p>
+          <p className="text-sm text-[var(--error)] mb-4">Approved: {hardStop.approvedQty} · Issued: {hardStop.totalIssued}</p>
           <button
             type="button"
             onClick={() => setExcessForm({
@@ -517,7 +517,7 @@ export default function StoresIssuePage() {
               reasonDetail: '',
               additionalQty: '',
             })}
-            className="mt-4 px-6 py-3 rounded-lg bg-orange-600 hover:bg-orange-500 text-foreground font-medium"
+            className="mt-4 px-6 py-3 rounded-ds-md bg-orange-600 hover:bg-orange-500 text-foreground font-medium"
           >
             Request Excess Sheets
           </button>
@@ -534,7 +534,7 @@ export default function StoresIssuePage() {
               <select
                 value={excessForm.reasonCode}
                 onChange={(e) => setExcessForm((f) => f ? { ...f, reasonCode: e.target.value } : null)}
-                className="w-full px-3 py-2 rounded-lg bg-card border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-card border border-ds-line/60 text-foreground"
               >
                 <option value="">— Select —</option>
                 {REASON_CODES.map((r) => (
@@ -548,7 +548,7 @@ export default function StoresIssuePage() {
                 <textarea
                   value={excessForm.reasonDetail}
                   onChange={(e) => setExcessForm((f) => f ? { ...f, reasonDetail: e.target.value } : null)}
-                  className="w-full px-3 py-2 rounded-lg bg-card border border-ds-line/60 text-foreground"
+                  className="w-full px-3 py-2 rounded-ds-md bg-card border border-ds-line/60 text-foreground"
                   rows={3}
                 />
               </div>
@@ -558,14 +558,14 @@ export default function StoresIssuePage() {
                 type="button"
                 onClick={handleExcessSubmit}
                 disabled={excessSubmitting || !excessForm.reasonCode}
-                className="flex-1 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium"
+                className="flex-1 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium"
               >
                 {excessSubmitting ? 'Sending…' : 'Submit'}
               </button>
               <button
                 type="button"
                 onClick={() => { setExcessForm(null); setHardStop(null) }}
-                className="px-4 py-2 rounded-lg bg-muted text-foreground text-sm"
+                className="px-4 py-2 rounded-ds-md bg-muted text-foreground text-sm"
               >
                 Cancel
               </button>
@@ -582,14 +582,14 @@ export default function StoresIssuePage() {
 
       {!jobContext ? (
         <div className="space-y-4">
-          <div id="qr-reader" className="rounded-lg overflow-hidden bg-card hidden" />
+          <div id="qr-reader" className="rounded-ds-md overflow-hidden bg-card hidden" />
           {scanning && <p className="text-ds-ink-muted text-sm">Scan job QR code</p>}
           {!scanning && (
             <>
               <button
                 type="button"
                 onClick={startScanner}
-                className="w-full py-3 px-4 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground font-medium"
+                className="w-full py-3 px-4 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground font-medium"
               >
                 Scan job QR code
               </button>
@@ -617,12 +617,12 @@ export default function StoresIssuePage() {
                     value={manualJobId}
                     onChange={(e) => setManualJobId(e.target.value)}
                     placeholder="e.g. CI-JOB-2025-0001 or JC# 12345"
-                    className="w-full px-3 py-2 rounded-lg bg-card border border-ds-line/60 text-foreground"
+                    className="w-full px-3 py-2 rounded-ds-md bg-card border border-ds-line/60 text-foreground"
                   />
                   <button
                     type="button"
                     onClick={() => manualJobId.trim() && fetchJobContext(manualJobId.trim())}
-                    className="mt-2 w-full py-2 rounded-lg bg-muted hover:bg-muted/80 text-foreground text-sm"
+                    className="mt-2 w-full py-2 rounded-ds-md bg-muted hover:bg-muted/80 text-foreground text-sm"
                   >
                     Load job / job card
                   </button>
@@ -638,7 +638,7 @@ export default function StoresIssuePage() {
         </div>
       ) : (
         <>
-          <div className="bg-ds-elevated rounded-lg p-4 mb-4">
+          <div className="bg-ds-elevated rounded-ds-md p-4 mb-4">
             <p className="font-semibold text-ds-warning">{jobContext.jobNumber}</p>
             <p>{jobContext.productName}</p>
             <p className="text-ds-ink-muted text-sm">{jobContext.customerName}</p>
@@ -659,10 +659,10 @@ export default function StoresIssuePage() {
               return (
                 <div
                   key={line.id}
-                  className={`rounded-lg border p-4 ${isLocked ? 'border-red-700 bg-red-900/20' : 'border-ds-line/60 bg-ds-elevated/50'}`}
+                  className={`rounded-ds-md border p-4 ${isLocked ? 'border-[var(--error)] bg-[var(--error-bg)]' : 'border-ds-line/60 bg-ds-elevated/50'}`}
                 >
                   {isLocked && (
-                    <div className="mb-2 py-1.5 px-2 rounded bg-red-900/50 text-red-200 text-sm font-medium">
+                    <div className="mb-2 py-1.5 px-2 rounded bg-[var(--error-bg)] text-[var(--error)] text-sm font-medium">
                       LOCKED — 0 remaining
                     </div>
                   )}
@@ -671,11 +671,11 @@ export default function StoresIssuePage() {
                   <div className="grid grid-cols-3 gap-2 my-2 text-sm">
                     <div className="text-center">
                       <p className="text-ds-ink-muted">Approved</p>
-                      <p className="text-green-400 font-semibold text-lg">{line.qtyApproved.toLocaleString()} {line.unit}</p>
+                      <p className="text-[var(--success)] font-semibold text-lg">{line.qtyApproved.toLocaleString()} {line.unit}</p>
                     </div>
                     <div className="text-center">
                       <p className="text-ds-ink-muted">Issued so far</p>
-                      <p className="text-blue-400 font-semibold">{line.qtyAlreadyIssued.toLocaleString()}</p>
+                      <p className="text-[var(--info)] font-semibold">{line.qtyAlreadyIssued.toLocaleString()}</p>
                     </div>
                     <div className="text-center">
                       <p className="text-ds-ink-muted">Remaining</p>
@@ -717,13 +717,13 @@ export default function StoresIssuePage() {
                         parseInt(issueQty[line.id], 10) > remaining ||
                         fifoBlocked
                       }
-                      className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium"
+                      className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium"
                     >
                       Issue
                     </button>
                   </div>
                   {isJobCardLine && fifoJobCardCheck?.violation && (
-                    <p className="mt-2 text-xs text-red-300">
+                    <p className="mt-2 text-xs text-[var(--error)]">
                       FIFO: use the side panel to enter a skip reason before issuing this lot.
                     </p>
                   )}

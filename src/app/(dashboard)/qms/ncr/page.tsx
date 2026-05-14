@@ -64,11 +64,11 @@ export default function NcrListPage() {
   const statusBadge = (s: string) => {
     const cls =
       s === 'closed'
-        ? 'bg-green-900/40 text-green-300 border-green-600'
+        ? 'bg-[var(--success-bg)] text-[var(--success)] border-[var(--success)]'
         : s === 'overdue'
-        ? 'bg-red-900/40 text-red-300 border-red-600'
+        ? 'bg-[var(--error-bg)] text-[var(--error)] border-[var(--error)]'
         : s === 'in_progress'
-        ? 'bg-blue-900/40 text-blue-300 border-blue-600'
+        ? 'bg-[var(--info-bg)] text-[var(--info)] border-[var(--info)]'
         : 'bg-ds-warning/12 text-ds-warning border-ds-warning'
     return (
       <span className={`px-2 py-0.5 rounded text-xs border ${cls}`}>{s}</span>
@@ -78,7 +78,7 @@ export default function NcrListPage() {
   const severityBadge = (s: string) => {
     const cls =
       s === 'critical'
-        ? 'text-red-400'
+        ? 'text-[var(--error)]'
         : s === 'major'
         ? 'text-ds-warning'
         : 'text-ds-ink-muted'
@@ -124,14 +124,14 @@ export default function NcrListPage() {
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+          className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
         >
           {showForm ? 'Cancel' : 'Raise NCR'}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="rounded-xl bg-ds-card border border-ds-line/50 p-4 space-y-3">
+        <form onSubmit={handleCreate} className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">Raise NCR</h2>
           <div className="grid md:grid-cols-2 gap-3 text-sm">
             <div>
@@ -139,7 +139,7 @@ export default function NcrListPage() {
               <select
                 value={form.jobId}
                 onChange={(e) => setForm((f) => ({ ...f, jobId: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               >
                 <option value="">Select job…</option>
                 {jobs.map((j) => (
@@ -154,7 +154,7 @@ export default function NcrListPage() {
               <select
                 value={form.trigger}
                 onChange={(e) => setForm((f) => ({ ...f, trigger: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               >
                 {TRIGGERS.map((t) => (
                   <option key={t} value={t}>
@@ -168,7 +168,7 @@ export default function NcrListPage() {
               <select
                 value={form.severity}
                 onChange={(e) => setForm((f) => ({ ...f, severity: e.target.value as any }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               >
                 <option value="critical">Critical</option>
                 <option value="major">Major</option>
@@ -182,7 +182,7 @@ export default function NcrListPage() {
                 min={0}
                 value={form.quantityAffected}
                 onChange={(e) => setForm((f) => ({ ...f, quantityAffected: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               />
             </div>
             <div className="md:col-span-2">
@@ -191,14 +191,14 @@ export default function NcrListPage() {
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                 rows={2}
-                className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
               />
             </div>
           </div>
           <button
             type="submit"
             disabled={saving}
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {saving ? 'Saving…' : 'Create NCR'}
           </button>
@@ -231,7 +231,7 @@ export default function NcrListPage() {
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-ds-line/50">
+      <div className="overflow-x-auto rounded-ds-md border border-ds-line/50">
         <table className="w-full text-sm text-left">
           <thead className="bg-ds-elevated text-ds-ink-muted">
             <tr>

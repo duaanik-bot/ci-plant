@@ -154,7 +154,7 @@ export default function DispatchTrackingPage() {
             )
             downloadText(`dispatch-tracking-${new Date().toISOString().slice(0, 10)}.csv`, csv)
           }}
-          className="px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/50 hover:border-ds-warning/60 text-sm"
+          className="px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/50 hover:border-ds-warning/60 text-sm"
         >
           Export CSV
         </button>
@@ -191,7 +191,7 @@ export default function DispatchTrackingPage() {
       ) : (
         <div className="space-y-3">
           {filtered.map((r) => (
-            <div key={r.id} className="rounded-xl border border-ds-line/50 bg-ds-card p-4">
+            <div key={r.id} className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                   <p className="text-sm font-semibold text-ds-ink">
@@ -207,17 +207,17 @@ export default function DispatchTrackingPage() {
               </div>
 
               <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                <div className="rounded-lg border border-ds-line/50 bg-ds-elevated/40 p-2">
+                <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/40 p-2">
                   <p className="text-ds-ink-muted">● Dispatched</p>
                   <p className="text-ds-ink mt-0.5">
                     {r.dispatchedAt ? new Date(r.dispatchedAt).toLocaleString() : '—'}
                   </p>
                 </div>
-                <div className="rounded-lg border border-ds-line/50 bg-ds-elevated/40 p-2">
+                <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/40 p-2">
                   <p className="text-ds-ink-muted">● In Transit</p>
                   <p className="text-ds-ink mt-0.5">{r.status === 'dispatched' ? 'Active' : '—'}</p>
                 </div>
-                <div className="rounded-lg border border-ds-line/50 bg-ds-elevated/40 p-2">
+                <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/40 p-2">
                   <p className="text-ds-ink-muted">● Delivered / POD</p>
                   <p className="text-ds-ink mt-0.5">
                     {r.podReceivedAt ? new Date(r.podReceivedAt).toLocaleString() : '—'}
@@ -229,7 +229,7 @@ export default function DispatchTrackingPage() {
                 <button
                   disabled={r.status === 'pod_received'}
                   onClick={() => openPod(r)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium border ${
+                  className={`px-3 py-2 rounded-ds-md text-sm font-medium border ${
                     r.status === 'pod_received'
                       ? 'bg-ds-elevated text-ds-ink-faint border-ds-line/50 cursor-not-allowed'
                       : 'bg-ds-warning hover:bg-ds-warning text-primary-foreground border-ds-warning/40'
@@ -254,7 +254,7 @@ export default function DispatchTrackingPage() {
             aria-label="Close"
             type="button"
           />
-          <div className="relative w-full max-w-xl rounded-xl border border-ds-line/50 bg-ds-card p-4">
+          <div className="relative w-full max-w-xl rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Confirm POD</h2>
@@ -313,7 +313,7 @@ export default function DispatchTrackingPage() {
               <button
                 type="button"
                 onClick={submitPod}
-                className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+                className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
               >
                 Confirm POD
               </button>

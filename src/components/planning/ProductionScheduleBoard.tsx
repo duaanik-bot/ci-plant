@@ -175,7 +175,7 @@ function SortableJobCard({
       style={style}
       className={`rounded border px-1.5 py-1 text-left ${
         gapAlert
-          ? 'border-rose-500 shadow-[0_0_0_1px_rgba(244,63,94,0.5)] bg-rose-950/20'
+          ? 'border-[var(--error)] shadow-[0_0_0_1px_rgba(244,63,94,0.5)] bg-[var(--error-bg)]/20'
           : pri
             ? 'border-ds-warning bg-ds-warning/8 shadow-[0_0_18px_rgba(245,158,11,0.35)]'
             : 'border-ds-line/60 bg-ds-card/95'
@@ -196,7 +196,7 @@ function SortableJobCard({
         ) : null}
       </div>
       {line.jobCard ? (
-        <div className={`text-xs text-sky-400/90 ${mono}`}>JC #{line.jobCard.jobCardNumber}</div>
+        <div className={`text-xs text-[var(--info)]/90 ${mono}`}>JC #{line.jobCard.jobCardNumber}</div>
       ) : null}
       <p className="text-xs text-ds-ink-muted truncate leading-tight mt-0.5" title={line.cartonName}>
         {line.cartonName}
@@ -207,7 +207,7 @@ function SortableJobCard({
         {segments.map((seg) => {
           const bg =
             seg.status === 'done'
-              ? 'bg-emerald-500'
+              ? 'bg-[var(--success-bg)]'
               : seg.status === 'active'
                 ? 'bg-ds-warning/50 animate-pulse'
                 : 'bg-ds-line/30'
@@ -225,7 +225,7 @@ function SortableJobCard({
             e.stopPropagation()
             onHandshake()
           }}
-          className="text-xs text-sky-400/90 hover:text-sky-300"
+          className="text-xs text-[var(--info)]/90 hover:text-[var(--info)]"
         >
           Handshake
         </button>
@@ -235,7 +235,7 @@ function SortableJobCard({
             e.stopPropagation()
             onRecall()
           }}
-          className="text-xs text-rose-400/90 hover:text-rose-300"
+          className="text-xs text-[var(--error)]/90 hover:text-[var(--error)]"
         >
           Recall
         </button>

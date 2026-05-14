@@ -98,7 +98,7 @@ export default function EditUserPage() {
   }
 
   if (loading) return <div className="text-ds-ink-muted">Loading…</div>
-  if (!user) return <div className="text-red-400">User not found</div>
+  if (!user) return <div className="text-[var(--error)]">User not found</div>
 
   return (
     <div className="max-w-lg">
@@ -110,7 +110,7 @@ export default function EditUserPage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -121,18 +121,18 @@ export default function EditUserPage() {
             onChange={(e) => setPin(e.target.value)}
             maxLength={6}
             placeholder="••••••"
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              fieldErrors.pin ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              fieldErrors.pin ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           />
-          {fieldErrors.pin && <p className="mt-1 text-sm text-red-400">{fieldErrors.pin}</p>}
+          {fieldErrors.pin && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.pin}</p>}
         </div>
         <div>
           <label className="block text-sm text-ds-ink-muted mb-1">Role *</label>
           <select
             value={roleId}
             onChange={(e) => setRoleId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           >
             {roles.map((r) => (
               <option key={r.id} value={r.id}>{r.roleName}</option>
@@ -160,7 +160,7 @@ export default function EditUserPage() {
           <input
             value={whatsappNumber}
             onChange={(e) => setWhatsappNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -177,11 +177,11 @@ export default function EditUserPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
+            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/users" className="px-4 py-2 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground">
+          <Link href="/masters/users" className="px-4 py-2 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-foreground">
             Cancel
           </Link>
         </div>

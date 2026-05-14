@@ -29,15 +29,15 @@ function FiveStrip({ segments }: { segments: ReadinessFiveSegment[] }) {
         const grey = s.state === 'neutral'
         const blocked = s.state === 'blocked'
         const stateClass = green
-          ? 'border-emerald-500/70 bg-emerald-500/20 text-emerald-300'
+          ? 'border-[var(--success)]/70 bg-[var(--success-bg)]/20 text-[var(--success)]'
           : grey
             ? 'border-ds-line/60 bg-ds-elevated text-ds-ink-muted'
-            : 'border-rose-500/70 bg-rose-500/20 text-rose-300'
+            : 'border-[var(--error)]/70 bg-[var(--error-bg)]/20 text-[var(--error)]'
         return (
           <span
             key={s.key}
             title={s.title}
-            className={`inline-flex h-6 min-w-[32px] items-center justify-center rounded-md border text-xs font-bold leading-none font-designing-queue ${stateClass}`}
+            className={`inline-flex h-6 min-w-[32px] items-center justify-center rounded-ds-sm border text-xs font-bold leading-none font-designing-queue ${stateClass}`}
           >
             {s.abbr}
           </span>
@@ -303,7 +303,7 @@ export function PlanningReadinessDrawer({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
-          <div className="rounded-lg border border-ds-line/40 bg-ds-card/60 p-3">
+          <div className="rounded-ds-md border border-ds-line/40 bg-ds-card/60 p-3">
             <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>I. Product DNA</p>
             <div className="mt-2 space-y-1 text-sm text-ds-ink">
               <p className="truncate">
@@ -375,7 +375,7 @@ export function PlanningReadinessDrawer({
 
           <div>
             <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>Material Efficiency</p>
-            <div className="mt-2 flex flex-col gap-3 rounded-lg border border-ds-line/40 bg-ds-card/60 px-3 py-3">
+            <div className="mt-2 flex flex-col gap-3 rounded-ds-md border border-ds-line/40 bg-ds-card/60 px-3 py-3">
               {util && util.yieldPct > 0 ? (
                 <div className="flex flex-col items-center">
                   <SemiGaugeUtilization pct={util.yieldPct} />
@@ -407,7 +407,7 @@ export function PlanningReadinessDrawer({
             </div>
           </div>
 
-          <div className="rounded-lg border border-ds-line/40 bg-ds-card/60 p-3">
+          <div className="rounded-ds-md border border-ds-line/40 bg-ds-card/60 p-3">
             <p className={`mb-2 text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>
               II. Efficiency Gauges
             </p>

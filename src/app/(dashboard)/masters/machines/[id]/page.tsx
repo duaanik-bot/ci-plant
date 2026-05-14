@@ -104,7 +104,7 @@ export default function EditMachinePage() {
   }
 
   if (loading) return <div className="text-ds-ink-muted">Loading…</div>
-  if (!machine) return <div className="text-red-400">Machine not found</div>
+  if (!machine) return <div className="text-[var(--error)]">Machine not found</div>
 
   return (
     <div className="max-w-lg">
@@ -113,7 +113,7 @@ export default function EditMachinePage() {
         <button
           type="button"
           onClick={logMaintenance}
-          className="px-3 py-1.5 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground text-sm"
+          className="px-3 py-1.5 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-foreground text-sm"
         >
           Log maintenance
         </button>
@@ -124,7 +124,7 @@ export default function EditMachinePage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -132,7 +132,7 @@ export default function EditMachinePage() {
           <input
             value={make}
             onChange={(e) => setMake(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -140,7 +140,7 @@ export default function EditMachinePage() {
           <input
             value={specification}
             onChange={(e) => setSpecification(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div>
@@ -150,11 +150,11 @@ export default function EditMachinePage() {
             min={1}
             value={capacityPerShift}
             onChange={(e) => setCapacityPerShift(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              fieldErrors.capacityPerShift ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              fieldErrors.capacityPerShift ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           />
-          {fieldErrors.capacityPerShift && <p className="mt-1 text-sm text-red-400">{fieldErrors.capacityPerShift}</p>}
+          {fieldErrors.capacityPerShift && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.capacityPerShift}</p>}
         </div>
         <div>
           <label className="block text-sm text-ds-ink-muted mb-1">Standard waste %</label>
@@ -164,18 +164,18 @@ export default function EditMachinePage() {
             step="0.1"
             value={stdWastePct}
             onChange={(e) => setStdWastePct(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg bg-ds-elevated border text-foreground ${
-              fieldErrors.stdWastePct ? 'border-red-500' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
+              fieldErrors.stdWastePct ? 'border-[var(--error)]' : 'border-ds-line/60'
             }`}
           />
-          {fieldErrors.stdWastePct && <p className="mt-1 text-sm text-red-400">{fieldErrors.stdWastePct}</p>}
+          {fieldErrors.stdWastePct && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.stdWastePct}</p>}
         </div>
         <div>
           <label className="block text-sm text-ds-ink-muted mb-1">Status</label>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           >
             <option value="active">Active</option>
             <option value="under_maintenance">Under maintenance</option>
@@ -189,7 +189,7 @@ export default function EditMachinePage() {
               type="date"
               value={lastPmDate}
               onChange={(e) => setLastPmDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
           <div>
@@ -198,7 +198,7 @@ export default function EditMachinePage() {
               type="date"
               value={nextPmDue}
               onChange={(e) => setNextPmDue(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
             />
           </div>
         </div>
@@ -208,18 +208,18 @@ export default function EditMachinePage() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={3}
-            className="w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
           />
         </div>
         <div className="flex gap-2">
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-lg bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
+            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>
-          <Link href="/masters/machines" className="px-4 py-2 rounded-lg bg-ds-elevated hover:bg-ds-line/30 text-foreground">
+          <Link href="/masters/machines" className="px-4 py-2 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-foreground">
             Cancel
           </Link>
         </div>

@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       const label = this.props.moduleName ?? 'This section'
       return (
         <div
-          className="rounded-lg border border-neutral-200 bg-card p-6 text-center shadow-sm dark:border-ds-line/40 dark:bg-ds-card"
+          className="rounded-ds-md border border-neutral-200 bg-card p-6 text-center shadow-sm dark:border-ds-line/40 dark:bg-ds-card"
           role="alert"
         >
           <p className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Widget failed to load</p>
@@ -49,7 +49,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           ) : null}
           <button
             type="button"
-            className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-blue-700"
+            className="mt-4 rounded-ds-sm bg-[var(--info-bg)] px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-[var(--info-bg)]"
             onClick={() => this.setState({ hasError: false, error: null })}
           >
             Try again

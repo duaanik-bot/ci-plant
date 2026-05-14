@@ -62,7 +62,7 @@ export default function EmbossBlockDetailPage() {
       </div>
 
       {tab === 'overview' && (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm">
           <div className="grid md:grid-cols-4 gap-2">
             <Info k="Type" v={block.blockType} /><Info k="Material" v={block.blockMaterial} />
             <Info k="Size" v={`${block.blockSizeL ?? '-'} × ${block.blockSizeW ?? '-'}`} />
@@ -78,7 +78,7 @@ export default function EmbossBlockDetailPage() {
           </div>
           <div>
             <p className="text-ds-ink-muted mb-1">Impression Meter</p>
-            <div className="h-3 rounded bg-ds-elevated overflow-hidden"><div className={`${lifePct > 85 ? 'bg-red-500' : lifePct > 70 ? 'bg-ds-warning' : 'bg-green-500'} h-full`} style={{ width: `${lifePct}%` }} /></div>
+            <div className="h-3 rounded bg-ds-elevated overflow-hidden"><div className={`${lifePct > 85 ? 'bg-[var(--error-bg)]' : lifePct > 70 ? 'bg-ds-warning' : 'bg-[var(--success-bg)]'} h-full`} style={{ width: `${lifePct}%` }} /></div>
             <p className="text-xs text-ds-ink-muted mt-1">
               {block.impressionCount.toLocaleString()} / {block.maxImpressions.toLocaleString()} · Polish cycles {block.polishCount}/{block.maxPolishCount}
             </p>
@@ -89,7 +89,7 @@ export default function EmbossBlockDetailPage() {
       {tab === 'issue' && <IssueReturn block={block} />}
 
       {tab === 'vendor' && (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
           <table className="w-full text-xs">
             <thead className="text-ds-ink-muted"><tr><th className="text-left">Order</th><th className="text-left">Type</th><th className="text-left">Vendor</th><th className="text-left">Status</th></tr></thead>
             <tbody>{block.vendorOrders.map((o) => <tr key={o.id} className="border-t border-ds-line/40"><td className="py-1">{o.orderCode}</td><td>{o.orderType}</td><td>{o.vendorName}</td><td>{o.status}</td></tr>)}</tbody>
@@ -98,13 +98,13 @@ export default function EmbossBlockDetailPage() {
       )}
 
       {tab === 'history' && (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
           {block.issueRecords.map((r) => <div key={r.id} className="border border-ds-line/40 rounded p-2">Issued to {r.issuedTo} · {new Date(r.issuedAt).toLocaleString('en-IN')} · {r.status}</div>)}
         </div>
       )}
 
       {tab === 'audit' && (
-        <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2 text-xs">
+        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-xs">
           {block.auditLog.map((a) => <div key={a.id} className="grid grid-cols-3 border-b border-ds-line/40 pb-1"><span>{new Date(a.performedAt).toLocaleString('en-IN')}</span><span>{a.action}</span><span>{a.performedBy}</span></div>)}
         </div>
       )}
@@ -155,7 +155,7 @@ function IssueReturn({ block }: { block: BlockDetail }) {
   }
 
   return block.status === 'issued' ? (
-    <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
+    <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
       <p className="text-ds-ink-muted">Currently issued. Return required.</p>
       <input value={impressionsThisRun} onChange={(e) => setImpressionsThisRun(e.target.value)} placeholder="Impressions this run" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
       <select value={returnCondition} onChange={(e) => setReturnCondition(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full">
@@ -169,7 +169,7 @@ function IssueReturn({ block }: { block: BlockDetail }) {
       <button onClick={ret} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Confirm Return</button>
     </div>
   ) : (
-    <div className="rounded-xl border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
+    <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
       <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
       <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
       <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />

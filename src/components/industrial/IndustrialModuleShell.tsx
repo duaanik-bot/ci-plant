@@ -24,7 +24,7 @@ export function IndustrialModuleShell({
   className?: string
 }) {
   return (
-    <div className={`min-h-screen bg-background text-ds-ink ${className}`}>
+    <div className={`text-ds-ink ${className}`}>
       <div className="mx-auto w-full max-w-none space-y-3 px-2 py-3 pb-24 sm:px-3 md:px-4">
         <header className="flex items-start justify-between gap-3">
           <div className="space-y-1">

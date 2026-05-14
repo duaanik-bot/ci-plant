@@ -31,9 +31,9 @@ type Plate = {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  in_use: 'bg-blue-900/50 text-blue-200 border-blue-600',
-  stored: 'bg-green-900/50 text-green-200 border-green-600',
-  destroyed: 'bg-red-900/50 text-red-200 border-red-600',
+  in_use: 'bg-[var(--info-bg)] text-[var(--info)] border-[var(--info)]',
+  stored: 'bg-[var(--success-bg)] text-[var(--success)] border-[var(--success)]',
+  destroyed: 'bg-[var(--error-bg)] text-[var(--error)] border-[var(--error)]',
   missing: 'bg-ds-warning/12 text-ds-warning border-ds-warning',
 }
 
@@ -237,7 +237,7 @@ export default function PlateStoreDetailPage() {
       </div>
 
       {tab === 'overview' && (
-        <div className="rounded-xl bg-ds-card border border-ds-line/50 p-4 space-y-3 text-sm">
+        <div className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 space-y-3 text-sm">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div><span className="text-ds-ink-faint">Artwork</span> {plate.artworkCode ?? '—'}</div>
             <div><span className="text-ds-ink-faint">Version</span> {plate.artworkVersion ?? '—'}</div>
@@ -272,7 +272,7 @@ export default function PlateStoreDetailPage() {
       )}
 
       {tab === 'issue' && (
-        <div className="rounded-xl bg-ds-card border border-ds-line/50 p-4 grid md:grid-cols-2 gap-4">
+        <div className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 grid md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-ds-ink">Issue Form</h2>
             <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm" />
@@ -315,14 +315,14 @@ export default function PlateStoreDetailPage() {
                 <option value="">Destroyed by</option>
                 {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
               </select>
-              <button onClick={handleDestroyColour} disabled={saving} className="px-3 py-1.5 rounded border border-red-600 text-red-300 text-xs">{saving ? 'Saving…' : 'Destroy Colour'}</button>
+              <button onClick={handleDestroyColour} disabled={saving} className="px-3 py-1.5 rounded border border-[var(--error)] text-[var(--error)] text-xs">{saving ? 'Saving…' : 'Destroy Colour'}</button>
             </div>
           </div>
         </div>
       )}
 
       {tab === 'history' && (
-        <div className="rounded-xl bg-ds-card border border-ds-line/50 p-4 space-y-2">
+        <div className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 space-y-2">
           {(plate.issueRecords || []).map((h) => (
             <div key={h.id} className="rounded border border-ds-line/50 bg-ds-elevated/50 p-2 text-sm">
               <p className="text-ds-ink">{new Date(h.issuedAt).toLocaleString('en-IN')} · {h.status}</p>
@@ -334,7 +334,7 @@ export default function PlateStoreDetailPage() {
       )}
 
       {tab === 'audit' && (
-        <div className="rounded-xl bg-ds-card border border-ds-line/50 p-4">
+        <div className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4">
           <div className="grid grid-cols-4 gap-2 text-xs text-ds-ink-muted border-b border-ds-line/50 pb-2 mb-2">
             <span>Timestamp</span><span>Action</span><span>By</span><span>Details</span>
           </div>

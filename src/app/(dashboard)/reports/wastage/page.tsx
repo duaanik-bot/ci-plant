@@ -7,7 +7,7 @@ export default function ReportsWastagePage() {
       <p className="text-sm text-ds-ink-muted">
         Wastage analytics are available on the main dashboard charts currently.
       </p>
-      <Link href="/orders/purchase-orders" className="text-blue-400 hover:underline text-sm">
+      <Link href="/orders/purchase-orders" className="text-[var(--info)] hover:underline text-sm">
         Open Customer POs →
       </Link>
     </section>

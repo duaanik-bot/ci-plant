@@ -49,7 +49,7 @@ export function GrnAllocationPrompt({ open, grnMovementId, materialCode, receive
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl rounded-xl border border-ds-line/60 bg-ds-card p-4">
+      <div className="w-full max-w-2xl rounded-ds-lg border border-ds-line/60 bg-ds-card p-4">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-semibold text-ds-ink">Allocate GRN to shortages</h3>

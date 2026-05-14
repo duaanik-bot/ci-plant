@@ -181,7 +181,7 @@ export function AwQueueCommandPanel({
       <div className="max-w-7xl mx-auto w-full space-y-2">
         <div
           className={clsx(
-            'flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between rounded-lg border px-2.5 py-2',
+            'flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between rounded-ds-md border px-2.5 py-2',
             closed ? 'border-ds-line/50 bg-ds-main/50 opacity-80' : 'border-ds-line/40 bg-background',
           )}
         >
@@ -200,7 +200,7 @@ export function AwQueueCommandPanel({
             <span
               className={clsx(
                 'rounded px-1.5 py-0.5 text-xs font-bold uppercase ring-1',
-                awPo === AW_PO_STATUS.OPEN && 'bg-emerald-950/40 text-emerald-300 ring-emerald-500/40',
+                awPo === AW_PO_STATUS.OPEN && 'bg-[var(--success-bg)]/40 text-[var(--success)] ring-[var(--success)]/40',
                 awPo === AW_PO_STATUS.CLOSED && 'bg-ds-elevated text-ds-ink-muted ring-ds-line/50',
                 awPo === AW_PO_STATUS.REOPENED && 'bg-orange-950/50 text-orange-200 ring-orange-500/50',
               )}
@@ -218,7 +218,7 @@ export function AwQueueCommandPanel({
               type="button"
               disabled={!!busy || closed}
               onClick={() => void postLifecycle('manual_close')}
-              className="rounded-md bg-ds-line/30 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-ds-line/40 disabled:opacity-40"
+              className="rounded-ds-sm bg-ds-line/30 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-ds-line/40 disabled:opacity-40"
             >
               {busy === 'manual_close' ? '…' : 'Manual close'}
             </button>
@@ -226,7 +226,7 @@ export function AwQueueCommandPanel({
               type="button"
               disabled={!!busy || jobType !== 'repeat' || awPo !== AW_PO_STATUS.CLOSED}
               onClick={() => void postLifecycle('force_reopen')}
-              className="rounded-md bg-orange-600 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-orange-500 disabled:opacity-40"
+              className="rounded-ds-sm bg-orange-600 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-orange-500 disabled:opacity-40"
             >
               {busy === 'force_reopen' ? '…' : 'Force reopen'}
             </button>
@@ -244,7 +244,7 @@ export function AwQueueCommandPanel({
           </div>
           <div className="flex h-2 w-full overflow-hidden rounded-full bg-ds-card ring-1 ring-ds-line/40">
             <div
-              className="h-full bg-emerald-600/90 transition-[width]"
+              className="h-full bg-[var(--success-bg)]/90 transition-[width]"
               style={{ width: `${Math.round(segs.shippedPct * 100)}%` }}
               title="Shipped"
             />
@@ -262,9 +262,9 @@ export function AwQueueCommandPanel({
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
-          <div className="rounded-lg border border-ds-line/40 bg-background p-2 space-y-2">
+          <div className="rounded-ds-md border border-ds-line/40 bg-background p-2 space-y-2">
             <p className="text-xs font-semibold uppercase text-ds-ink-faint">Push mode</p>
-            <div className="inline-flex rounded-lg border border-ds-line/50 overflow-hidden">
+            <div className="inline-flex rounded-ds-md border border-ds-line/50 overflow-hidden">
               <button
                 type="button"
                 disabled={!!busy || closed}
@@ -389,7 +389,7 @@ export function AwQueueCommandPanel({
             </SlideOverPanel>
           </div>
 
-          <div className="rounded-lg border border-ds-line/40 bg-background p-2 space-y-2">
+          <div className="rounded-ds-md border border-ds-line/40 bg-background p-2 space-y-2">
             <p className="text-xs font-semibold uppercase text-ds-ink-faint flex items-center gap-1">
               <Package className="h-3 w-3" aria-hidden />
               Material handshake

@@ -59,9 +59,9 @@ type Props = {
 
 function pipelineDot(phase: Row['readiness']['pipelinePhase']) {
   switch (phase) {
-    case 'finalized':      return 'bg-emerald-500'
-    case 'revision':       return 'bg-rose-500'
-    case 'awaiting_client': return 'bg-blue-500'
+    case 'finalized':      return 'bg-[var(--success-bg)]'
+    case 'revision':       return 'bg-[var(--error-bg)]'
+    case 'awaiting_client': return 'bg-[var(--info-bg)]'
     default:               return 'bg-ds-ink-faint/50'
   }
 }
@@ -560,7 +560,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
       widthClass="w-[min(100%,clamp(560px,55vw,860px))]"
       title={
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-xs font-bold text-sky-700 dark:text-sky-300">
+          <span className="inline-flex items-center gap-1 rounded border border-[var(--info)]/40 bg-[var(--info-bg)]/10 px-1.5 py-0.5 text-xs font-bold text-[var(--info)] dark:text-[var(--info)]">
             <Layers className="h-3 w-3 shrink-0" aria-hidden />
             GANG
           </span>
@@ -582,8 +582,8 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
     >
       <div className="flex flex-col gap-4">
         {/* Unified group body controls */}
-        <div className="rounded-ds-md border border-sky-500/35 bg-sky-500/8 p-3">
-          <p className="mb-2 text-xs font-bold uppercase tracking-widest text-sky-700 dark:text-sky-300">
+        <div className="rounded-ds-md border border-[var(--info)]/35 bg-[var(--info-bg)]/8 p-3">
+          <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[var(--info)] dark:text-[var(--info)]">
             Unified group body
           </p>
           <div className="mb-2 flex items-center justify-between rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1.5">
@@ -708,7 +708,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               type="button"
               disabled={savingGroup}
               onClick={() => void saveUnifiedGroup('push_plate')}
-              className="inline-flex items-center gap-1 rounded-ds-sm border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/18 disabled:opacity-40 dark:text-emerald-200"
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-[var(--success)]/40 bg-[var(--success-bg)]/10 px-2.5 py-1.5 text-xs font-semibold text-[var(--success)] transition hover:bg-[var(--success-bg)]/18 disabled:opacity-40 dark:text-[var(--success)]"
             >
               {savingGroup ? '…' : 'Push plates'}
             </button>
@@ -716,7 +716,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               type="button"
               disabled={savingGroup}
               onClick={() => void saveUnifiedGroup('push_die')}
-              className="inline-flex items-center gap-1 rounded-ds-sm border border-violet-500/35 bg-violet-500/10 px-2.5 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-500/18 disabled:opacity-40 dark:text-violet-300"
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-[var(--tooling,#7c3aed)]/35 bg-[var(--tooling-bg,rgba(124,58,237,0.12))]/10 px-2.5 py-1.5 text-xs font-semibold text-[var(--tooling,#7c3aed)] transition hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))]/18 disabled:opacity-40 dark:text-[var(--tooling,#7c3aed)]"
             >
               {savingGroup ? '…' : 'Push die'}
             </button>
@@ -732,7 +732,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               type="button"
               disabled={savingGroup}
               onClick={() => void saveUnifiedGroup('push_all')}
-              className="inline-flex items-center gap-1 rounded-ds-sm border border-emerald-500/45 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/25 disabled:opacity-40 dark:text-emerald-200"
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-[var(--success)]/45 bg-[var(--success-bg)]/15 px-3 py-1.5 text-xs font-semibold text-[var(--success)] transition hover:bg-[var(--success-bg)]/25 disabled:opacity-40 dark:text-[var(--success)]"
             >
               <Layers className="h-3 w-3" aria-hidden />
               {savingGroup ? 'Pushing unified body…' : 'Push unified body downstream'}
@@ -741,7 +741,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
               type="button"
               disabled={savingGroup}
               onClick={() => void saveUnifiedGroup('save')}
-              className="inline-flex items-center gap-1 rounded-ds-sm border border-sky-500/45 bg-sky-500/15 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-500/25 disabled:opacity-40 dark:text-sky-200"
+              className="inline-flex items-center gap-1 rounded-ds-sm border border-[var(--info)]/45 bg-[var(--info-bg)]/15 px-3 py-1.5 text-xs font-semibold text-[var(--info)] transition hover:bg-[var(--info-bg)]/25 disabled:opacity-40 dark:text-[var(--info)]"
             >
               <Pencil className="h-3 w-3" aria-hidden />
               {savingGroup ? 'Saving group…' : 'Save unified group'}
@@ -798,7 +798,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                   {r.quantity.toLocaleString('en-IN')}
                 </span>
                 <span className="text-xs text-ds-ink-faint">pcs</span>
-                <span className={`mt-1 text-xs font-semibold text-emerald-300 ${mono}`}>
+                <span className={`mt-1 text-xs font-semibold text-[var(--success)] ${mono}`}>
                   UPS ×{itemStates[r.id]?.ups?.trim() || '—'}
                 </span>
               </div>
@@ -822,7 +822,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
             </button>
           </div>
           {unifiedMode ? (
-            <p className="rounded border border-sky-500/30 bg-sky-500/8 px-2 py-1 text-xs text-sky-700 dark:text-sky-300">
+            <p className="rounded border border-[var(--info)]/30 bg-[var(--info-bg)]/8 px-2 py-1 text-xs text-[var(--info)] dark:text-[var(--info)]">
               Unified mode is on: Set # and Artwork code are managed from the top unified section.
             </p>
           ) : null}
@@ -862,7 +862,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                 {/* Item header */}
                 <div className="flex items-center justify-between gap-3 border-b border-ds-line/30 bg-ds-elevated/30 px-3 py-2">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-xs font-bold text-sky-700 dark:text-sky-300 ${mono}`}>
+                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--info-bg)]/20 text-xs font-bold text-[var(--info)] dark:text-[var(--info)] ${mono}`}>
                       {idx + 1}
                     </span>
                     <div className="min-w-0">
@@ -878,7 +878,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
                       <span className="text-xs text-ds-ink-faint">{pipelineLabel(phase)}</span>
                     </div>
                     {finalized && (
-                      <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                      <span className="rounded border border-[var(--success)]/30 bg-[var(--success-bg)]/10 px-1.5 py-0.5 text-xs font-semibold text-[var(--success)] dark:text-[var(--success)]">
                         Finalized
                       </span>
                     )}
