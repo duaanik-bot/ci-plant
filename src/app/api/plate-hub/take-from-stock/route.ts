@@ -339,7 +339,6 @@ export async function POST(req: NextRequest) {
             artworkCode: plate.artworkCode,
             artworkVersion: plate.artworkVersion,
             cartonId: plate.cartonId,
-            artworkId: plate.artworkId,
             customerId: plate.customerId,
             plateSize: plate.plateSize,
             numberOfColours: custodyMetrics.numberOfColours,

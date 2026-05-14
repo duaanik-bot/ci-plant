@@ -153,61 +153,6 @@ export async function triggerEmbossVendorOrder(params: {
   })
 }
 
-export async function onArtworkApprovedEmbossCheck(
-  jobCardId: string,
-  cartonId: string,
-  artworkCode: string,
-  embossingLeafing: string,
-  userId: string,
-): Promise<EmbossRequirement | null> {
-  if (!isEmbossingRequired(embossingLeafing)) return null
-
-  const carton = await db.carton.findUnique({ where: { id: cartonId } })
-  const availability = await checkEmbossBlockAvailability(
-    cartonId,
-    artworkCode,
-    carton?.embossingLeafing || 'Blind Emboss',
-  )
-
-  const requirement = await db.embossRequirement.create({
-    data: {
-      requirementCode: await generateEmbossRequirementCode(),
-      jobCardId,
-      cartonName: carton?.cartonName || '',
-      cartonId,
-      artworkCode,
-      blockType: carton?.embossingLeafing ?? null,
-      requirementType: availability.requiresNew
-        ? 'new_required'
-        : availability.status === 'needs_attention'
-          ? 'polishing_required'
-          : 'existing_available',
-      existingBlockId: availability.block?.id,
-      existingBlockCode: availability.block?.blockCode,
-      existingCondition: availability.block?.condition,
-      status: availability.status === 'available' ? 'block_available' : 'pending',
-      createdBy: userId,
-    },
-  })
-
-  if (availability.requiresNew) {
-    const order = await triggerEmbossVendorOrder({
-      jobCardId,
-      cartonId,
-      cartonName: carton?.cartonName,
-      blockType: carton?.embossingLeafing ?? undefined,
-      embossArea: carton?.specialInstructions ?? undefined,
-      requirementId: requirement.id,
-      userId,
-    })
-    await db.embossRequirement.update({
-      where: { id: requirement.id },
-      data: { vendorOrderId: order.id, status: 'vendor_notified' },
-    })
-  }
-  return requirement
-}
-
 export async function issueEmbossBlock(
   embossBlockId: string,
   jobCardId: string,

@@ -95,15 +95,10 @@ export async function GET(req: NextRequest) {
       colours = defaultColoursFromCount(nColours)
     }
 
-    const artwork = await db.artwork.findFirst({
-      where: {
-        filename: { equals: awCode, mode: 'insensitive' },
-        ...(customerId ? { job: { customerId } } : {}),
-      },
-      select: { id: true, versionNumber: true, jobId: true },
-    })
-
-    if (!line && !artwork) {
+    // The standalone Artwork table was retired with the 4-lock workflow. AW
+    // identity now lives on PoLineItem (artworkCode + spec). Fall back to the
+    // line's own artworkVersion when set.
+    if (!line) {
       return NextResponse.json(
         { found: false, error: 'AW Code not found in Master.' },
         { status: 404 },
@@ -115,26 +110,19 @@ export async function GET(req: NextRequest) {
         ? spec.actualSheetSize.trim()
         : null
     const setNumber = line?.setNumber?.trim() || null
-    const cartonName =
-      carton?.cartonName ||
-      line?.cartonName ||
-      (artwork
-        ? (
-            await db.job.findUnique({
-              where: { id: artwork.jobId },
-              select: { productName: true },
-            })
-          )?.productName
-        : null) ||
-      null
+    const cartonName = carton?.cartonName || line?.cartonName || null
+    const artworkVersionSpec =
+      typeof spec.artworkVersion === 'string' && spec.artworkVersion.trim()
+        ? spec.artworkVersion.trim()
+        : null
 
     return NextResponse.json({
       found: true,
       awCode,
       cartonName,
       cartonId: carton?.id ?? line?.cartonId ?? null,
-      artworkId: (spec.artworkId as string | undefined)?.trim() || artwork?.id || null,
-      artworkVersion: artwork ? String(artwork.versionNumber) : null,
+      artworkId: (spec.artworkId as string | undefined)?.trim() || null,
+      artworkVersion: artworkVersionSpec,
       setNumber,
       sheetSize,
       colours,

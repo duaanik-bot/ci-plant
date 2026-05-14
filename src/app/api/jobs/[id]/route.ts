@@ -31,7 +31,6 @@ export async function GET(
       customer: true,
       creator: { select: { name: true, email: true } },
       closer: { select: { name: true } },
-      artwork: { include: { approvals: true, uploader: { select: { name: true } } } },
       bomLines: {
         include: { material: true, machine: { select: { machineCode: true, name: true } } },
       },

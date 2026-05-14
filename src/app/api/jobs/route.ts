@@ -48,7 +48,6 @@ export async function GET(req: NextRequest) {
     },
     include: {
       customer: { select: { name: true } },
-      artwork: { select: { versionNumber: true, status: true, locksCompleted: true } },
     },
     orderBy: { dueDate: 'asc' },
   })

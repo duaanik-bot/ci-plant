@@ -60,8 +60,6 @@ model User {
   role                Role               @relation(fields: [roleId], references: [id])
   jobsCreated         Job[]              @relation("JobCreator")
   jobsClosed          Job[]              @relation("JobCloser")
-  artworksUploaded    Artwork[]
-  artworkApprovals    ArtworkApproval[]
   sheetIssuesApproved SheetIssue[]       @relation("SheetApprover")
   sheetIssuesIssued   SheetIssue[]       @relation("SheetIssuer")
   stagesStarted       JobStage[]         @relation("StageStarter")
@@ -300,10 +298,11 @@ model Job {
   qtyRejected        Int       @default(0) @map("qty_rejected")
   imposition         Int       // Cartons per printed sheet
   machineSequence    String[]  @map("machine_sequence") // Ordered array of machine IDs
-  artworkId          String?   @map("artwork_id")
   status             String    @default("pending_artwork") @map("status") @db.VarChar(30)
-  // Status enum: pending_artwork | artwork_approved | in_production | 
+  // Status enum: pending_artwork | artwork_approved | in_production |
   //              folding | final_qc | packing | dispatched | closed
+  // (pending_artwork/artwork_approved retained as job-lifecycle states even after
+  // the standalone artwork table was dropped — artwork-lock now lives on PoLineItem.)
   dueDate            DateTime  @map("due_date") @db.Date
   specialInstructions String?  @map("special_instructions")
   createdBy          String    @map("created_by")
@@ -316,10 +315,8 @@ model Job {
   dieMaster  Dye?      @relation("JobDieMaster", fields: [dieMasterId], references: [id])
   creator    User      @relation("JobCreator", fields: [createdBy], references: [id])
   closer     User?     @relation("JobCloser", fields: [closedBy], references: [id])
-  artwork    Artwork?  @relation(fields: [artworkId], references: [id])
 
   bomLines      BomLine[]
-  artworks      Artwork[]   @relation("JobArtworks")
   stages        JobStage[]
   workflowStages WorkflowStage[]
   qcRecords     QcRecord[]
@@ -392,60 +389,14 @@ model SheetIssue {
 }
 
 // ─────────────────────────────────────────
-// ARTWORKS — SOLVES PROBLEM 2
+// ARTWORK — deprecated 4-lock workflow removed.
+// Artwork approval now lives on PoLineItem.specOverrides:
+//   - customerApprovalPharma  : boolean (raw flag)
+//   - shadeCardQaTextApproval : boolean (raw flag)
+//   - artworkLocked           : boolean (canonical seal, server-derived)
+//   - artworkRejections[]     : append-only rejection log
+// Plate-side barcode lives on PlateRequirement.plateBarcode.
 // ─────────────────────────────────────────
-
-model Artwork {
-  id             String    @id @default(uuid())
-  jobId          String    @map("job_id")
-  versionNumber  Int       @map("version_number")
-  filename       String    @db.VarChar(255)
-  fileUrl        String    @map("file_url") // Cloudflare R2 signed URL path
-  status         String    @default("pending") @db.VarChar(30)
-  // Status: pending | partially_approved | approved | superseded
-  locksCompleted Int       @default(0) @map("locks_completed") // 0-4
-  ctpReleaseAt   DateTime? @map("ctp_release_at")
-  plateBarcode   String?   @map("plate_barcode") @db.VarChar(60)
-  uploadedBy     String    @map("uploaded_by")
-  supersededBy   String?   @map("superseded_by")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-
-  job      Job    @relation("JobArtworks", fields: [jobId], references: [id])
-  uploader User   @relation(fields: [uploadedBy], references: [id])
-  jobsMain Job[]  // Jobs where this is the current artwork
-
-  approvals ArtworkApproval[]
-
-  @@map("artworks")
-}
-
-// ─────────────────────────────────────────
-// ARTWORK APPROVALS — 4 LOCKS
-// ─────────────────────────────────────────
-
-model ArtworkApproval {
-  id               String    @id @default(uuid())
-  artworkId        String    @map("artwork_id")
-  lockNumber       Int       @map("lock_number") // 1 | 2 | 3 | 4
-  // Lock 1: Customer doc attached (Sales)
-  // Lock 2: QA Officer 12-point checklist
-  // Lock 3: QA Manager version sign-off
-  // Lock 4: System-generated CTP release
-  approvedBy       String    @map("approved_by")
-  approvedAt       DateTime  @map("approved_at")
-  checklistData    Json?     @map("checklist_data") // Lock 2 stores 12-point answers
-  comments         String?
-  rejected         Boolean   @default(false)
-  rejectionReason  String?   @map("rejection_reason")
-  createdAt        DateTime  @default(now()) @map("created_at")
-
-  artwork  Artwork @relation(fields: [artworkId], references: [id])
-  approver User    @relation(fields: [approvedBy], references: [id])
-
-  @@unique([artworkId, lockNumber])
-  @@map("artwork_approvals")
-}
 
 // ─────────────────────────────────────────
 // JOB STAGES
@@ -1396,7 +1347,6 @@ model PlateStore {
   /// DB column `current_job_card_id` (see initial migration); links plate set to production job card.
   jobCardId       String?   @map("current_job_card_id")
   cartonId        String?   @map("carton_id")
-  artworkId       String?   @map("artwork_id")
   artworkCode     String?   @map("artwork_code")
   artworkVersion  String?   @map("artwork_version")
   plateSize       PlateSize @default(SIZE_560_670) @map("plate_size")
@@ -1479,6 +1429,9 @@ model PlateRequirement {
   cartonName         String    @map("carton_name")
   artworkCode        String?   @map("artwork_code")
   artworkVersion     String?   @map("artwork_version")
+  /// Press-side barcode, generated at executePrePressFinalize. Validated by
+  /// the press-operator scan route. Unique when set.
+  plateBarcode       String?   @unique @map("plate_barcode") @db.VarChar(60)
   customerId         String?   @map("customer_id")
   numberOfColours    Int       @map("number_of_colours")
   coloursNeeded      Json      @map("colours_needed")

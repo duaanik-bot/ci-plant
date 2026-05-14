@@ -50,24 +50,12 @@ function rowToPayload(row: {
   }
 }
 
-async function resolveArtworkId(
-  explicit: string | null,
-  awCode: string | null,
-): Promise<string | null> {
-  if (explicit?.trim()) return explicit.trim()
-  const code = awCode?.trim()
-  if (!code) return null
-  const a = await db.artwork.findFirst({
-    where: { filename: { equals: code, mode: 'insensitive' } },
-    orderBy: { updatedAt: 'desc' },
-    select: { id: true },
-  })
-  return a?.id ?? null
-}
-
 /**
  * Pre-press history: latest plate store row for carton + artwork, then line spec from linked job card.
  * Falls back to another PO line on the same carton when no plate row exists.
+ *
+ * Note: the standalone Artwork table was dropped along with the 4-lock workflow,
+ * so the awCode/artworkId hints are now best-effort filters on PlateStore.artworkCode.
  */
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
@@ -75,7 +63,6 @@ export async function GET(req: NextRequest) {
 
   const cartonId = (req.nextUrl.searchParams.get('cartonId') || '').trim()
   const awCode = (req.nextUrl.searchParams.get('awCode') || '').trim()
-  const artworkIdParam = (req.nextUrl.searchParams.get('artworkId') || '').trim()
   const excludeLineId = (req.nextUrl.searchParams.get('excludeLineId') || '').trim()
 
   if (!cartonId) {
@@ -87,14 +74,10 @@ export async function GET(req: NextRequest) {
     ...(excludeLineId ? { id: { not: excludeLineId } } : {}),
   }
 
-  const artworkId = await resolveArtworkId(artworkIdParam || null, awCode || null)
-
   const plateWhere: Prisma.PlateStoreWhereInput = {
     cartonId,
     status: { in: ['ready', 'returned'] },
-  }
-  if (artworkId) {
-    plateWhere.artworkId = artworkId
+    ...(awCode ? { artworkCode: { equals: awCode, mode: 'insensitive' as const } } : {}),
   }
 
   let plate = await db.plateStore.findFirst({
@@ -103,7 +86,7 @@ export async function GET(req: NextRequest) {
     include: { createdForJobCard: true },
   })
 
-  if (!plate && artworkId) {
+  if (!plate && awCode) {
     plate = await db.plateStore.findFirst({
       where: {
         cartonId,

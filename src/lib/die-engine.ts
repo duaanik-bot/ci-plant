@@ -154,57 +154,6 @@ export async function triggerVendorOrder(params: {
   })
 }
 
-export async function onArtworkApprovedDieCheck(
-  jobCardId: string,
-  cartonId: string,
-  cartonSize: string,
-  dieType: string,
-  ups: number,
-  sheetSize: string,
-  userId: string,
-): Promise<DieRequirement> {
-  const availability = await checkDieAvailability(cartonId, cartonSize, dieType, ups, sheetSize)
-  const requirement = await db.dieRequirement.create({
-    data: {
-      requirementCode: await generateDieRequirementCode(),
-      jobCardId,
-      cartonName: cartonSize || 'Unknown',
-      cartonSize,
-      dieType,
-      ups,
-      sheetSize,
-      requirementType: availability.requiresNew
-        ? 'new_required'
-        : availability.status === 'needs_attention'
-          ? 'sharpening_required'
-          : 'existing_available',
-      existingDieId: availability.die?.id,
-      existingDieCode: availability.die?.dieCode,
-      existingCondition: availability.die?.condition,
-      priority: 'Normal',
-      status: availability.status === 'available' ? 'die_available' : 'pending',
-      createdBy: userId,
-    },
-  })
-
-  if (availability.requiresNew) {
-    const order = await triggerVendorOrder({
-      jobCardId,
-      cartonSize,
-      dieType,
-      ups,
-      sheetSize,
-      requirementId: requirement.id,
-      userId,
-    })
-    await db.dieRequirement.update({
-      where: { id: requirement.id },
-      data: { vendorOrderId: order.id, status: 'vendor_notified' },
-    })
-  }
-  return requirement
-}
-
 export async function issueDie(
   dieStoreId: string,
   jobCardId: string,

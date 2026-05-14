@@ -30,7 +30,14 @@ export async function GET() {
     db.jobStage.count({ where: { completedAt: null } }),
     Promise.all([
       db.sheetIssue.count({ where: { isExcess: true, approvedAt: null, rejectedAt: null } }),
-      db.artworkApproval.count({ where: { rejected: false } }),
+      // PO lines on open POs that are NOT yet artwork-locked. Replaces the
+      // legacy artwork_approvals count.
+      db.poLineItem.count({
+        where: {
+          po: { status: { notIn: ['closed', 'cancelled'] } },
+          NOT: { specOverrides: { path: ['artworkLocked'], equals: true } },
+        },
+      }),
       db.purchaseRequisition.count({ where: { status: 'pending' } }),
     ]),
     db.job.count({
@@ -48,10 +55,20 @@ export async function GET() {
         take: 5,
         include: { job: { select: { jobNumber: true } } },
       }),
-      db.artwork.findMany({
-        where: { status: { in: ['pending', 'partially_approved'] } },
+      // PO lines awaiting artwork-lock — replaces the legacy Artwork-table feed
+      // for "artwork lock pending" alerts on the dashboard.
+      db.poLineItem.findMany({
+        where: {
+          po: { status: { notIn: ['closed', 'cancelled'] } },
+          NOT: { specOverrides: { path: ['artworkLocked'], equals: true } },
+        },
         take: 5,
-        include: { job: { select: { jobNumber: true, productName: true } } },
+        select: {
+          id: true,
+          cartonName: true,
+          artworkCode: true,
+          po: { select: { poNumber: true, customer: { select: { name: true } } } },
+        },
       }),
     ]),
     db.job.findMany({
@@ -73,7 +90,6 @@ export async function GET() {
     db.job.findMany({
       include: {
         customer: { select: { name: true } },
-        artwork: { select: { versionNumber: true, status: true, locksCompleted: true } },
       },
       orderBy: { dueDate: 'asc' },
     }),
@@ -138,9 +154,8 @@ export async function GET() {
       type: 'artwork',
       severity: 'warning',
       title: 'Artwork lock pending',
-      description: `${item.job.jobNumber} - ${item.job.productName}`,
-      link: `/artwork/${item.jobId}`,
-      jobId: item.jobId,
+      description: `${item.po.poNumber} · ${item.po.customer.name} — ${item.cartonName}${item.artworkCode ? ` (${item.artworkCode})` : ''}`,
+      link: `/orders/designing/${item.id}`,
     })
   }
 

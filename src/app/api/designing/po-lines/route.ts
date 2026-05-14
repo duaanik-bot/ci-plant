@@ -97,26 +97,10 @@ export async function GET(req: NextRequest) {
         orch.planningFlowStatus === 'forwarded' ||
         orch.planningFlowStatus === 'in_progress'
 
-      const awCode = li.artworkCode?.trim()
-      let artworkPreviewUrl: string | null = null
-      let artworkStatus: string | null = null
-      if (awCode) {
-        const art = await db.artwork.findFirst({
-          where: {
-            filename: { equals: awCode, mode: 'insensitive' },
-            job: { customerId: li.po.customer.id },
-          },
-          orderBy: [{ versionNumber: 'desc' }, { createdAt: 'desc' }],
-          select: { fileUrl: true, status: true },
-        })
-        if (art?.fileUrl) {
-          artworkPreviewUrl = art.fileUrl
-          artworkStatus = art.status
-        }
-      }
-      if (!artworkPreviewUrl && jc?.fileUrl) {
-        artworkPreviewUrl = jc.fileUrl
-      }
+      // Artwork preview path retired with the standalone Artwork table —
+      // fall back to the job card's stored file URL if available.
+      let artworkPreviewUrl: string | null = jc?.fileUrl ?? null
+      const artworkStatus: string | null = null
 
       const jcStatus = (jc?.status ?? '').toLowerCase()
       const revisionRequired =

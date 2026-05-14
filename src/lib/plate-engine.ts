@@ -1,11 +1,19 @@
 import type { Prisma } from '@prisma/client'
 import { randomUUID } from 'crypto'
+import { nanoid } from 'nanoid'
 import { db } from '@/lib/db'
 import {
   createPlateHubEvent,
   HUB_ZONE,
   PLATE_HUB_ACTION,
 } from '@/lib/plate-hub-events'
+
+/** Press-side plate barcode: `PLT-<lineCode>-<8-char nanoid>`. Unique on
+ * PlateRequirement.plateBarcode. Used by /api/press/validate-plate. */
+export function generatePlateBarcode(seed: string): string {
+  const prefix = (seed || 'JOB').replace(/[^A-Za-z0-9]/g, '').slice(0, 12).toUpperCase() || 'JOB'
+  return `PLT-${prefix}-${nanoid(8).toUpperCase()}`
+}
 
 /** DB or interactive transaction client (same delegates for our usage). */
 export type DbOrTx = typeof db | Prisma.TransactionClient
@@ -147,86 +155,6 @@ export async function checkPlateAvailability(
   }
 }
 
-export async function onArtworkApproved(
-  artworkApprovalId: string,
-  jobCardId: string,
-  userId: string,
-): Promise<void> {
-  const approval = await db.artworkApproval.findUnique({
-    where: { id: artworkApprovalId },
-    include: { artwork: true },
-  })
-  if (!approval) return
-
-  const artwork = approval.artwork
-  const carton = await db.carton.findFirst({
-    where: {
-      OR: [
-        { artworkCode: artwork.filename },
-        { cartonName: { contains: artwork.jobId, mode: 'insensitive' } },
-      ],
-    },
-  })
-
-  const colourBreakdown = parseColours(carton?.colourBreakdown).map((c) => ({ name: c.name }))
-  const availability = await checkPlateAvailability(
-    carton?.id ?? '',
-    artwork.filename,
-    `R${artwork.versionNumber}`,
-    carton?.numberOfColours ?? 4,
-    colourBreakdown.length ? colourBreakdown : [{ name: 'C' }, { name: 'M' }, { name: 'Y' }, { name: 'K' }],
-  )
-
-  const createdReq = await db.$transaction(async (tx) => {
-    const requirementCode = await generateRequirementCode(tx)
-    const row = await tx.plateRequirement.create({
-      data: {
-        requirementCode,
-        jobCardId,
-        cartonName: carton?.cartonName ?? artwork.filename,
-        artworkCode: artwork.filename,
-        artworkVersion: `R${artwork.versionNumber}`,
-        customerId: carton?.customerId ?? null,
-        numberOfColours: carton?.numberOfColours ?? 4,
-        coloursNeeded: buildColoursNeeded(
-          colourBreakdown.length ? colourBreakdown : [{ name: 'C' }, { name: 'M' }, { name: 'Y' }, { name: 'K' }],
-          availability.availableColours ?? [],
-        ),
-        newPlatesNeeded: availability.newNeeded,
-        oldPlatesAvailable: availability.oldAvailable,
-        status: availability.newNeeded > 0 ? 'ctp_notified' : 'plates_ready',
-        createdBy: userId,
-        ctpTriggeredAt: availability.newNeeded > 0 ? new Date() : null,
-        plateSize: carton?.plateSize ?? null,
-      },
-    })
-    await createPlateHubEvent(tx, {
-      plateRequirementId: row.id,
-      actionType: PLATE_HUB_ACTION.PREPRESS_FINALIZE,
-      fromZone: HUB_ZONE.OTHER,
-      toZone: HUB_ZONE.INCOMING_TRIAGE,
-      details: {
-        source: 'artwork_approved',
-        requirementCode: row.requirementCode,
-        jobCardId,
-        message: availability.message,
-      },
-    })
-    return row
-  })
-
-  if (availability.newNeeded > 0) {
-    await createCtpNotification(createdReq.requirementCode, jobCardId, availability.message)
-  }
-
-  if (availability.plateSetCode) {
-    await db.plateStore.update({
-      where: { plateSetCode: availability.plateSetCode },
-      data: { artworkId: artwork.id },
-    })
-  }
-}
-
 /** Queue a plate check for a PO line from Pre-Press (no job card yet). */
 export async function createPlateRequirementFromPoLine(
   poLineId: string,
@@ -275,6 +203,7 @@ export async function createPlateRequirementFromPoLine(
 
   const requirementCode = await generateRequirementCode(client)
   const cartonLabel = `${line.cartonName} · ${line.po.poNumber} · PO line ${poLineId}`
+  const plateBarcode = generatePlateBarcode(line.po.poNumber || requirementCode)
 
   const created = await client.plateRequirement.create({
     data: {
@@ -285,6 +214,7 @@ export async function createPlateRequirementFromPoLine(
       cartonName: cartonLabel,
       artworkCode,
       artworkVersion: normaliseArtworkVersion(artworkVersionRaw),
+      plateBarcode,
       customerId: line.po.customerId,
       numberOfColours,
       coloursNeeded: buildColoursNeeded(

@@ -16,7 +16,14 @@ export async function GET() {
     db.jobStage.count({ where: { completedAt: null } }),
     Promise.all([
       db.sheetIssue.count({ where: { isExcess: true, approvedAt: null, rejectedAt: null } }),
-      db.artworkApproval.count({ where: { rejected: false } }),
+      // PO lines on open POs that are NOT yet artwork-locked. Substitute for the
+      // old artwork_approvals count after the 4-lock workflow was retired.
+      db.poLineItem.count({
+        where: {
+          po: { status: { notIn: ['closed', 'cancelled'] } },
+          NOT: { specOverrides: { path: ['artworkLocked'], equals: true } },
+        },
+      }),
       db.purchaseRequisition.count({ where: { status: 'pending' } }),
     ]).then(([excess, artwork, pr]) => excess + artwork + pr),
     db.job.count({

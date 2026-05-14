@@ -15,10 +15,19 @@ export async function GET() {
         take: 5,
         include: { job: { select: { jobNumber: true } } },
       }),
-      db.artwork.findMany({
-        where: { status: { in: ['pending', 'partially_approved'] } },
+      // PO lines awaiting artwork-lock — replaces the legacy Artwork-table feed.
+      db.poLineItem.findMany({
+        where: {
+          po: { status: { notIn: ['closed', 'cancelled'] } },
+          NOT: { specOverrides: { path: ['artworkLocked'], equals: true } },
+        },
         take: 5,
-        include: { job: { select: { jobNumber: true, productName: true } } },
+        select: {
+          id: true,
+          cartonName: true,
+          artworkCode: true,
+          po: { select: { poNumber: true, customer: { select: { name: true } } } },
+        },
       }),
       db.plateRequirement.findMany({
         where: { status: { in: ['pending', 'ctp_notified'] } },
@@ -95,9 +104,8 @@ export async function GET() {
       type: 'artwork',
       severity: 'warning',
       title: 'Artwork lock pending',
-      description: `${a.job.jobNumber} — ${a.job.productName}`,
-      link: `/artwork/${a.jobId}`,
-      jobId: a.jobId,
+      description: `${a.po.poNumber} · ${a.po.customer.name} — ${a.cartonName}${a.artworkCode ? ` (${a.artworkCode})` : ''}`,
+      link: `/orders/designing/${a.id}`,
     })
   }
 

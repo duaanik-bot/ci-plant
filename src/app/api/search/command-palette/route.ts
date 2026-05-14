@@ -95,15 +95,6 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const artworkOr: Prisma.ArtworkWhereInput[] = []
-  for (const t of tokens) {
-    artworkOr.push(
-      { filename: { contains: t, mode } },
-      { job: { productName: { contains: t, mode } } },
-      { job: { jobNumber: { contains: t, mode } } },
-    )
-  }
-
   const dyeNumToken = tokens.find((t) => /^\d{1,6}$/.test(t))
   const dyeNum = dyeNumToken != null ? parseInt(dyeNumToken, 10) : null
 
@@ -159,7 +150,7 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const [purchaseOrders, cartons, artworks, dyes, embossBlocks, shadeCards] = await Promise.all([
+  const [purchaseOrders, cartons, dyes, embossBlocks, shadeCards] = await Promise.all([
     db.purchaseOrder.findMany({
       where: { OR: poOr },
       take: TAKE_EACH,
@@ -179,14 +170,6 @@ export async function GET(req: NextRequest) {
         finishedWidth: true,
         finishedHeight: true,
         customer: { select: { name: true } },
-      },
-    }),
-    db.artwork.findMany({
-      where: { OR: artworkOr },
-      take: TAKE_EACH,
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        job: { select: { id: true, jobNumber: true, productName: true } },
       },
     }),
     db.dye.findMany({
@@ -254,27 +237,6 @@ export async function GET(req: NextRequest) {
         subtitleMono: Boolean(size),
         href: `/masters/cartons/${c.id}`,
         pastingStyle: mapPasting(c.pastingStyle),
-        showMasterIcon: true,
-      } satisfies CommandPaletteResult
-    }),
-    ...artworks.map((a) => {
-      const j = a.job
-      const subtitle = j
-        ? [j.productName, j.jobNumber !== a.filename ? `Job ${j.jobNumber}` : null, `AW ${a.filename}`]
-            .filter(Boolean)
-            .join(' · ')
-        : `AW ${a.filename}`
-      return {
-        id: `artwork-${a.id}`,
-        title: a.filename,
-        titleMono: true,
-        subtitle,
-        subtitleMono: true,
-        href: `/jobs/${j?.id ?? a.jobId}`,
-        statusBadge: {
-          text: 'Artwork',
-          className: 'bg-violet-700/60 text-violet-50 ring-1 ring-violet-400/25',
-        },
         showMasterIcon: true,
       } satisfies CommandPaletteResult
     }),
