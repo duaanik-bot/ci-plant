@@ -40,6 +40,14 @@ export type CreatePoInput = {
   isPriority?: boolean
   createdBy: string
   lineItems: CreatePoLineInput[]
+  /**
+   * When true, skip the in-transaction `syncMaterialRequirementsForPurchaseOrder`
+   * pass. Callers that pass true MUST run the sync themselves after the
+   * transaction commits — the function is idempotent recompute work, so moving
+   * it outside the transaction is safe and avoids the 5 s interactive-transaction
+   * timeout when many lines are involved.
+   */
+  skipMaterialSync?: boolean
 }
 
 /** Generate the next PO number in the `CI-PO-YYYY-NNNN` series. */
@@ -114,7 +122,9 @@ export async function createPurchaseOrderWithLines(
     ),
   )
 
-  await syncMaterialRequirementsForPurchaseOrder(po.id, tx)
+  if (!input.skipMaterialSync) {
+    await syncMaterialRequirementsForPurchaseOrder(po.id, tx)
+  }
 
   return po
 }

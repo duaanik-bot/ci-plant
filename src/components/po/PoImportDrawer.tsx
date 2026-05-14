@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { CheckCircle2, AlertTriangle, AlertCircle, Sparkles, Upload, FileText } from 'lucide-react'
+import { CheckCircle2, AlertTriangle, AlertCircle, Sparkles, Upload, FileText, Plus } from 'lucide-react'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
 import { cn } from '@/lib/cn'
+import { normalizeCartonSizeString } from '@/lib/carton-size'
 
 type CartonCatalogItem = {
   id: string
@@ -46,6 +47,22 @@ type ExtractedPo = {
   lineItems: ExtractedLineItem[]
 }
 
+type CustomerDetection = {
+  matchedCustomerId: string | null
+  matchedCustomerName: string | null
+  confidence: number
+  evidence: string | null
+  candidates: Array<{ id: string; name: string; reason: string }>
+  reason: string | null
+  newCustomerProposal: ProposedCustomer | null
+}
+
+type ProposedCustomer = {
+  name: string
+  gstNumber: string | null
+  address: string | null
+}
+
 type ExtractResponse = {
   ok: true
   customerId: string
@@ -53,7 +70,12 @@ type ExtractResponse = {
   source: { filename: string; pageCount: number }
   extracted: ExtractedPo
   catalog: CartonCatalogItem[]
+  customerDetection: CustomerDetection | null
+  proposedNewCustomer: ProposedCustomer | null
 }
+
+/** Matches the extract / commit route sentinel — must stay in sync. */
+const NEW_CUSTOMER_SENTINEL = '__new__'
 
 type CustomerOption = { id: string; name: string }
 
@@ -121,6 +143,15 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
   const [remarks, setRemarks] = useState('')
   const [lines, setLines] = useState<ReviewLine[]>([])
   const [committing, setCommitting] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmAck, setConfirmAck] = useState(false)
+  const [detection, setDetection] = useState<CustomerDetection | null>(null)
+  /** Force the customer picker on the upload screen (after detect failure or "Change"). */
+  const [showFallbackPicker, setShowFallbackPicker] = useState(false)
+  /** Editable buyer details Claude read from the PDF when no roster match. Null
+   *  means the operator either picked an existing customer or there was a hard
+   *  detection failure with no proposal to confirm. */
+  const [newCustomer, setNewCustomer] = useState<ProposedCustomer | null>(null)
 
   // Reset when drawer closes
   useEffect(() => {
@@ -134,6 +165,11 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
       setPoDate('')
       setDeliveryRequiredBy('')
       setRemarks('')
+      setConfirmOpen(false)
+      setConfirmAck(false)
+      setDetection(null)
+      setShowFallbackPicker(false)
+      setNewCustomer(null)
       if (!presetCustomer) setCustomer(null)
     }
   }, [isOpen, presetCustomer])
@@ -185,19 +221,40 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
   )
 
   const runExtract = useCallback(async () => {
-    if (!customer || !file) return
+    if (!file) return
+    // Customer is REQUIRED only when presetCustomer is locked; otherwise the
+    // server auto-detects it from the PDF header in the same call.
+    if (presetCustomer && !customer) return
     setExtracting(true)
     try {
       const form = new FormData()
-      form.append('customerId', customer.id)
+      if (customer) form.append('customerId', customer.id)
       form.append('file', file)
       const res = await fetch('/api/purchase-orders/import/extract', { method: 'POST', body: form })
       const data = await res.json()
       if (!res.ok) {
+        // Customer-detection failure — surface the picker so the operator can
+        // pick manually and retry without re-uploading. Covers both "no match"
+        // (422 with candidates) and "detect call threw" (502, no candidates).
+        if (data?.customerDetection) {
+          setDetection(data.customerDetection as CustomerDetection)
+        }
+        if (data?.needsCustomerSelection && !presetCustomer) {
+          setShowFallbackPicker(true)
+        }
         toast.error(data?.error ?? 'Extraction failed')
         return
       }
       const payload = data as ExtractResponse
+      setCustomer({ id: payload.customerId, name: payload.customerName })
+      setDetection(payload.customerDetection)
+      // When extract returns a NEW_CUSTOMER_SENTINEL id, the buyer details
+      // come back in proposedNewCustomer for the operator to confirm/edit.
+      setNewCustomer(
+        payload.customerId === NEW_CUSTOMER_SENTINEL && payload.proposedNewCustomer
+          ? payload.proposedNewCustomer
+          : null,
+      )
       setExtracted(payload.extracted)
       setCatalog(payload.catalog)
       setPoNumber(payload.extracted.poNumber ?? '')
@@ -246,7 +303,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
             cartonName: '',
             newCartonClientKey: `new-${newCartonCounter}`,
             newCartonName: li.newCartonProposal.cartonName,
-            newCartonSize: li.newCartonProposal.cartonSize,
+            newCartonSize: normalizeCartonSizeString(li.newCartonProposal.cartonSize),
             newCartonGsm: li.newCartonProposal.gsm,
             newCartonRate: li.newCartonProposal.rate,
             newCartonArtwork: li.newCartonProposal.artworkCode,
@@ -280,29 +337,59 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
     } finally {
       setExtracting(false)
     }
-  }, [customer, file])
+  }, [customer, file, presetCustomer])
 
   const updateLine = useCallback((key: string, patch: Partial<ReviewLine>) => {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)))
   }, [])
 
-  const commit = useCallback(async () => {
-    if (!customer) return
-    if (!poDate) {
-      toast.error('PO date is required')
-      return
-    }
-    const issues: string[] = []
-    lines.forEach((l, idx) => {
-      if (l.quantity <= 0) issues.push(`Line ${idx + 1}: quantity must be > 0`)
-      if (l.mode === 'existing' && !l.cartonId) issues.push(`Line ${idx + 1}: pick a Carton or switch to "new"`)
-      if (l.mode === 'new' && !l.newCartonName.trim()) issues.push(`Line ${idx + 1}: new Carton name required`)
-    })
-    if (issues.length) {
-      toast.error(issues[0])
-      return
-    }
+  const newMasterLines = useMemo(() => lines.filter((l) => l.mode === 'new'), [lines])
 
+  /** Per-line list of missing required fields on a new-master proposal. */
+  const newMasterIssues = useMemo(() => {
+    return newMasterLines.map((l) => {
+      const missing: string[] = []
+      if (!l.newCartonName.trim()) missing.push('name')
+      if (!normalizeCartonSizeString(l.newCartonSize)) missing.push('size')
+      if (l.newCartonRate == null) missing.push('rate')
+      return { line: l, missing }
+    })
+  }, [newMasterLines])
+
+  const hasBlockingNewMasterIssue = useMemo(
+    () => newMasterIssues.some((x) => x.missing.length > 0),
+    [newMasterIssues],
+  )
+
+  const scrollLineIntoView = useCallback((key: string) => {
+    requestAnimationFrame(() => {
+      const node = document.querySelector(`[data-line-key="${key}"]`) as HTMLElement | null
+      node?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const input = node?.querySelector('input') as HTMLInputElement | null
+      input?.focus()
+    })
+  }, [])
+
+  const validate = useCallback((): string | null => {
+    if (!poDate) return 'PO date is required'
+    if (
+      customer?.id === NEW_CUSTOMER_SENTINEL &&
+      !newCustomer?.name?.trim()
+    ) {
+      return 'Customer name is required for the new buyer being created.'
+    }
+    for (let idx = 0; idx < lines.length; idx++) {
+      const l = lines[idx]
+      if (l.quantity <= 0) return `Line ${idx + 1}: quantity must be > 0`
+      if (l.mode === 'existing' && !l.cartonId) {
+        return `Line ${idx + 1}: pick a Carton or switch to "new"`
+      }
+    }
+    return null
+  }, [poDate, lines, customer, newCustomer])
+
+  const doCommit = useCallback(async () => {
+    if (!customer) return
     setCommitting(true)
     try {
       const newCartons = lines
@@ -310,7 +397,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
         .map((l) => ({
           clientKey: l.newCartonClientKey!,
           cartonName: l.newCartonName.trim(),
-          cartonSize: l.newCartonSize || null,
+          cartonSize: normalizeCartonSizeString(l.newCartonSize),
           gsm: l.newCartonGsm,
           rate: l.newCartonRate,
           gstPct: l.gstPct,
@@ -319,6 +406,16 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
 
       const payload = {
         customerId: customer.id,
+        // Only forwarded when customerId is the new-customer sentinel; the
+        // server creates the Customer row in the same transaction.
+        newCustomer:
+          customer.id === NEW_CUSTOMER_SENTINEL && newCustomer?.name?.trim()
+            ? {
+                name: newCustomer.name.trim(),
+                gstNumber: newCustomer.gstNumber?.trim() || null,
+                address: newCustomer.address?.trim() || null,
+              }
+            : null,
         poNumber: poNumber.trim() || null,
         poDate,
         deliveryRequiredBy: deliveryRequiredBy || null,
@@ -328,7 +425,8 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
           cartonId: l.mode === 'existing' ? l.cartonId : null,
           newCartonClientKey: l.mode === 'new' ? l.newCartonClientKey : null,
           cartonName: l.mode === 'existing' ? l.cartonName : l.newCartonName.trim(),
-          cartonSize: l.mode === 'existing' ? null : l.newCartonSize,
+          cartonSize:
+            l.mode === 'existing' ? null : normalizeCartonSizeString(l.newCartonSize),
           quantity: l.quantity,
           artworkCode: l.artworkCode,
           rate: l.rate,
@@ -348,6 +446,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
         return
       }
       toast.success(`Draft PO created — ${data.poNumber}`)
+      setConfirmOpen(false)
       onClose()
       router.push(`/orders/purchase-orders/${data.id}`)
       router.refresh()
@@ -357,21 +456,38 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
     } finally {
       setCommitting(false)
     }
-  }, [customer, poNumber, poDate, deliveryRequiredBy, remarks, lines, onClose, router])
+  }, [customer, newCustomer, poNumber, poDate, deliveryRequiredBy, remarks, lines, onClose, router])
+
+  const prepareCommit = useCallback(() => {
+    if (!customer) return
+    const err = validate()
+    if (err) {
+      toast.error(err)
+      return
+    }
+    if (newMasterLines.length > 0) {
+      setConfirmAck(false)
+      setConfirmOpen(true)
+      return
+    }
+    void doCommit()
+  }, [customer, validate, newMasterLines.length, doCommit])
 
   const headerMeta = useMemo(() => {
     if (step !== 'review' || !extracted) return null
     const greens = lines.filter((l) => l.mode === 'existing' && l.cartonId && l.confidence >= CONFIDENCE_AUTO).length
     const news = lines.filter((l) => l.mode === 'new').length
     const ambiguous = lines.length - greens - news
+    const newCustomerBadge = customer?.id === NEW_CUSTOMER_SENTINEL
     return (
       <span className="text-xs text-[var(--text-muted)] flex items-center gap-2">
+        {newCustomerBadge && <Badge tone="neutral">new customer</Badge>}
         <Badge tone="success">{greens} matched</Badge>
         {ambiguous > 0 && <Badge tone="warning">{ambiguous} to confirm</Badge>}
         {news > 0 && <Badge tone="neutral">{news} new master</Badge>}
       </span>
     )
-  }, [step, extracted, lines])
+  }, [step, extracted, lines, customer])
 
   return (
     <SlideOverPanel
@@ -395,7 +511,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
               <Button variant="ghost" onClick={() => setStep('upload')} disabled={committing}>
                 Back
               </Button>
-              <Button onClick={commit} disabled={committing}>
+              <Button onClick={prepareCommit} disabled={committing}>
                 {committing ? 'Saving…' : 'Save as draft PO'}
               </Button>
             </div>
@@ -403,7 +519,10 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
         ) : (
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={runExtract} disabled={!customer || !file || extracting}>
+            <Button
+              onClick={runExtract}
+              disabled={!file || extracting || (!!presetCustomer && !customer)}
+            >
               {extracting ? 'Extracting…' : 'Extract with Claude'}
             </Button>
           </div>
@@ -412,53 +531,60 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
     >
       {step === 'upload' && (
         <div className="space-y-4">
-          {!presetCustomer && (
+          {presetCustomer && customer && (
             <div>
-              <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">
-                Customer <span className="text-red-500">*</span>
-              </label>
-              {customer ? (
-                <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2">
-                  <span className="text-sm">{customer.name}</span>
-                  <button
-                    type="button"
-                    className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                    onClick={() => setCustomer(null)}
-                  >
-                    Change
-                  </button>
+              <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">Customer</label>
+              <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2">
+                <span className="text-sm">{customer.name}</span>
+                <span className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Locked</span>
+              </div>
+            </div>
+          )}
+
+          {!presetCustomer && showFallbackPicker && (
+            <div
+              className={cn(
+                'rounded-md border p-3 space-y-2',
+                detection && !detection.matchedCustomerId
+                  ? 'border-amber-500/50 bg-amber-500/[0.06]'
+                  : 'border-[var(--border)] bg-[var(--bg-card)]',
+              )}
+            >
+              <div className="text-xs text-[var(--text-muted)]">
+                {detection && !detection.matchedCustomerId ? (
+                  <>
+                    <strong className="text-amber-700 dark:text-amber-300">
+                      Couldn&apos;t identify the customer from this PDF.
+                    </strong>
+                    {detection.reason ? ` ${detection.reason}` : ''} Pick the right customer to continue.
+                  </>
+                ) : (
+                  <>Pick the customer below, then click Extract again.</>
+                )}
+              </div>
+              <CustomerPicker
+                customer={customer}
+                onChange={setCustomer}
+                query={custQuery}
+                onQueryChange={setCustQuery}
+                options={custOptions}
+                loading={custLoading}
+              />
+              {detection && detection.candidates.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-1">
+                  <span className="text-[11px] text-[var(--text-muted)] self-center">Top guesses:</span>
+                  {detection.candidates.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setCustomer({ id: c.id, name: c.name })}
+                      className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] hover:bg-[var(--hover-row)]"
+                      title={c.reason}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                <>
-                  <input
-                    type="text"
-                    value={custQuery}
-                    onChange={(e) => setCustQuery(e.target.value)}
-                    placeholder="Start typing customer name…"
-                    className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm"
-                  />
-                  {(custLoading || custOptions.length > 0) && (
-                    <div className="mt-1 rounded-md border border-[var(--border)] bg-[var(--bg-card)] divide-y divide-[var(--border)] max-h-56 overflow-y-auto">
-                      {custLoading && (
-                        <div className="px-3 py-2 text-xs text-[var(--text-muted)]">Searching…</div>
-                      )}
-                      {custOptions.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            setCustomer(c)
-                            setCustQuery('')
-                            setCustOptions([])
-                          }}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--hover-row)]"
-                        >
-                          {c.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
               )}
             </div>
           )}
@@ -505,13 +631,142 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
           </div>
 
           <div className="rounded-md bg-[var(--hover-row)] px-3 py-2 text-xs text-[var(--text-muted)] leading-relaxed">
-            <strong className="text-[var(--text-primary)]">What happens next:</strong> Claude reads the PDF, matches each line to your existing Carton master, and proposes new master rows where there's no match. You'll review the result before saving as a draft PO.
+            <strong className="text-[var(--text-primary)]">What happens next:</strong> Claude reads the PDF,
+            {presetCustomer ? ' ' : ' identifies the customer, '}
+            matches each line to your existing Carton master, and proposes new master rows where there&apos;s no match. You&apos;ll review the result before saving as a draft PO.
           </div>
         </div>
       )}
 
       {step === 'review' && extracted && (
         <div className="space-y-4">
+          {/* Customer — read-only on review. Click "Change" to re-extract with a different one. */}
+          {customer && customer.id !== NEW_CUSTOMER_SENTINEL && (
+            <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <label className="text-xs font-medium text-[var(--text-muted)]">Customer</label>
+                <span className="truncate text-sm">{customer.name}</span>
+                {!presetCustomer && detection && detection.matchedCustomerId === customer.id && (
+                  <span
+                    title={
+                      detection.evidence
+                        ? `Detected from PDF: "${detection.evidence}"`
+                        : 'Detected by Claude from the PDF header'
+                    }
+                    className={cn(
+                      'rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
+                      detection.confidence >= 0.9
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                        : 'border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+                    )}
+                  >
+                    AI detected · {(detection.confidence * 100).toFixed(0)}%
+                  </span>
+                )}
+              </div>
+              {!presetCustomer && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Go back to upload so the user can pre-pick the right customer
+                    // and re-run extraction (which re-loads the catalog for them).
+                    setCustomer(null)
+                    setDetection(null)
+                    setExtracted(null)
+                    setLines([])
+                    setCatalog([])
+                    setNewCustomer(null)
+                    setShowFallbackPicker(true)
+                    setStep('upload')
+                  }}
+                  className="shrink-0 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                >
+                  Change
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* New-customer card — Claude read these from the PO header because no
+              roster row matched. Operator can edit before they're created on save. */}
+          {customer && customer.id === NEW_CUSTOMER_SENTINEL && newCustomer && (
+            <div className="rounded-md border border-violet-500/40 bg-violet-500/[0.06] p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="size-4 text-violet-500" />
+                  <span className="text-xs font-medium text-violet-700 dark:text-violet-300 uppercase tracking-wide">
+                    New customer · from PO header
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomer(null)
+                    setDetection(null)
+                    setExtracted(null)
+                    setLines([])
+                    setCatalog([])
+                    setNewCustomer(null)
+                    setShowFallbackPicker(true)
+                    setStep('upload')
+                  }}
+                  className="shrink-0 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                >
+                  Pick existing instead
+                </button>
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)]">
+                This customer isn&apos;t in your master yet. We&apos;ll create it when you save the draft PO. Please verify the fields.
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-[var(--text-muted)] mb-0.5">
+                    Customer name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    value={newCustomer.name}
+                    onChange={(e) => {
+                      const name = e.target.value
+                      setNewCustomer((c) => (c ? { ...c, name } : c))
+                      setCustomer((cur) =>
+                        cur ? { ...cur, name: name || cur.name } : cur,
+                      )
+                    }}
+                    className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wide text-[var(--text-muted)] mb-0.5">
+                      GST number
+                    </label>
+                    <input
+                      value={newCustomer.gstNumber ?? ''}
+                      onChange={(e) =>
+                        setNewCustomer((c) => (c ? { ...c, gstNumber: e.target.value || null } : c))
+                      }
+                      placeholder="15-char GSTIN"
+                      className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wide text-[var(--text-muted)] mb-0.5">
+                      Address
+                    </label>
+                    <input
+                      value={newCustomer.address ?? ''}
+                      onChange={(e) =>
+                        setNewCustomer((c) => (c ? { ...c, address: e.target.value || null } : c))
+                      }
+                      placeholder="Billing address"
+                      className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Header fields */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -570,6 +825,24 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
           </div>
         </div>
       )}
+
+      {confirmOpen && (
+        <NewMasterConfirmDialog
+          rows={newMasterIssues}
+          ack={confirmAck}
+          onAckChange={setConfirmAck}
+          blocked={hasBlockingNewMasterIssue}
+          submitting={committing}
+          onCancel={() => setConfirmOpen(false)}
+          onEdit={(key) => {
+            setConfirmOpen(false)
+            scrollLineIntoView(key)
+          }}
+          onConfirm={() => {
+            void doCommit()
+          }}
+        />
+      )}
     </SlideOverPanel>
   )
 }
@@ -611,7 +884,7 @@ function LineRow({
   const toneText = tone === 'green' ? 'text-emerald-600' : tone === 'yellow' ? 'text-amber-600' : 'text-rose-600'
 
   return (
-    <div className={cn('rounded-lg border p-3', toneClasses)}>
+    <div data-line-key={line.key} className={cn('rounded-lg border p-3', toneClasses)}>
       <div className="flex items-start gap-2 mb-2">
         <ToneIcon className={cn('size-4 mt-0.5', toneText)} />
         <div className="flex-1 min-w-0">
@@ -720,7 +993,10 @@ function LineRow({
           <input
             value={line.newCartonSize ?? ''}
             onChange={(e) => onChange({ newCartonSize: e.target.value || null })}
-            placeholder="Size"
+            onBlur={(e) =>
+              onChange({ newCartonSize: normalizeCartonSizeString(e.target.value) })
+            }
+            placeholder="Size (e.g. 120 x 210 mm)"
             className="rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
           />
           <input
@@ -776,6 +1052,66 @@ function LineRow({
   )
 }
 
+function CustomerPicker({
+  customer,
+  onChange,
+  query,
+  onQueryChange,
+  options,
+  loading,
+}: {
+  customer: CustomerOption | null
+  onChange: (c: CustomerOption | null) => void
+  query: string
+  onQueryChange: (q: string) => void
+  options: CustomerOption[]
+  loading: boolean
+}) {
+  if (customer) {
+    return (
+      <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2">
+        <span className="text-sm">{customer.name}</span>
+        <button
+          type="button"
+          className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          onClick={() => onChange(null)}
+        >
+          Change
+        </button>
+      </div>
+    )
+  }
+  return (
+    <>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => onQueryChange(e.target.value)}
+        placeholder="Start typing customer name…"
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm"
+      />
+      {(loading || options.length > 0) && (
+        <div className="mt-1 rounded-md border border-[var(--border)] bg-[var(--bg-card)] divide-y divide-[var(--border)] max-h-56 overflow-y-auto">
+          {loading && <div className="px-3 py-2 text-xs text-[var(--text-muted)]">Searching…</div>}
+          {options.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => {
+                onChange(c)
+                onQueryChange('')
+              }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--hover-row)]"
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 function NumberField({
   label,
   value,
@@ -797,6 +1133,169 @@ function NumberField({
         onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
         className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm tabular-nums"
       />
+    </div>
+  )
+}
+
+type ConfirmRow = { line: ReviewLine; missing: string[] }
+
+function NewMasterConfirmDialog({
+  rows,
+  ack,
+  onAckChange,
+  blocked,
+  submitting,
+  onCancel,
+  onEdit,
+  onConfirm,
+}: {
+  rows: ConfirmRow[]
+  ack: boolean
+  onAckChange: (v: boolean) => void
+  blocked: boolean
+  submitting: boolean
+  onCancel: () => void
+  onEdit: (lineKey: string) => void
+  onConfirm: () => void
+}) {
+  const count = rows.length
+  const canConfirm = !blocked && ack && !submitting
+
+  return (
+    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/55 p-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Plus className="size-4 text-violet-500" />
+            <h3 className="text-sm font-semibold">
+              Create {count} new Carton master{count === 1 ? '' : 's'}?
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="max-h-[70vh] space-y-3 overflow-y-auto px-4 py-3">
+          <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+            These items don&apos;t match anything in your catalog. Once saved, they&apos;ll appear in the
+            Carton master and be used for future matching — please double-check.
+          </p>
+
+          {rows.map(({ line, missing }) => {
+            const hasIssues = missing.length > 0
+            return (
+              <div
+                key={line.key}
+                className={cn(
+                  'rounded-md border p-3 text-xs',
+                  hasIssues
+                    ? 'border-rose-500/60 bg-rose-500/[0.06]'
+                    : 'border-[var(--border)] bg-[var(--bg-card)]',
+                )}
+              >
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {line.newCartonName.trim() || (
+                        <span className="text-rose-600">[name missing]</span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-[var(--text-muted)] truncate" title={line.rawText}>
+                      from PDF: {line.rawText}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onEdit(line.key)}
+                    disabled={submitting}
+                    className="shrink-0 rounded border border-[var(--border)] px-2 py-1 text-[11px] hover:bg-[var(--hover-row)]"
+                  >
+                    Edit fields
+                  </button>
+                </div>
+
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-4">
+                  <Field label="Size" value={line.newCartonSize} required missing={missing.includes('size')} />
+                  <Field label="GSM" value={line.newCartonGsm} />
+                  <Field
+                    label="Rate"
+                    value={line.newCartonRate == null ? null : `₹${line.newCartonRate}`}
+                    required
+                    missing={missing.includes('rate')}
+                  />
+                  <Field label="GST" value={`${line.gstPct}%`} />
+                  <Field label="Artwork" value={line.newCartonArtwork} />
+                  <Field label="Qty (this PO)" value={line.quantity} />
+                </dl>
+
+                {hasIssues && (
+                  <div className="mt-2 text-[11px] text-rose-600">
+                    Missing required: {missing.join(', ')}. Click &ldquo;Edit fields&rdquo; to fix.
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          <label className="mt-2 flex items-start gap-2 rounded-md bg-[var(--hover-row)] px-3 py-2 text-xs">
+            <input
+              type="checkbox"
+              checked={ack}
+              onChange={(e) => onAckChange(e.target.checked)}
+              disabled={blocked || submitting}
+              className="mt-0.5"
+            />
+            <span>
+              I&apos;ve verified the fields above are correct. New cartons will be created in the master and
+              used for future PO matching.
+            </span>
+          </label>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-3">
+          <Button variant="ghost" onClick={onCancel} disabled={submitting}>
+            Back to review
+          </Button>
+          <Button onClick={onConfirm} disabled={!canConfirm}>
+            {submitting ? 'Saving…' : 'Confirm & save'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Field({
+  label,
+  value,
+  required,
+  missing,
+}: {
+  label: string
+  value: string | number | null | undefined
+  required?: boolean
+  missing?: boolean
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+        {label}
+        {required && <span className="ml-0.5 text-rose-500">*</span>}
+      </dt>
+      <dd
+        className={cn(
+          'truncate text-xs',
+          missing ? 'text-rose-600' : value == null || value === '' ? 'text-[var(--text-muted)]' : '',
+        )}
+      >
+        {value == null || value === '' ? (missing ? 'missing' : '—') : String(value)}
+      </dd>
     </div>
   )
 }

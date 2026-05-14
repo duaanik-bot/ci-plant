@@ -213,6 +213,9 @@ model Customer {
   /// Customer logo URL for CRM / queue avatars (optional).
   logoUrl                 String?  @map("logo_url") @db.VarChar(500)
   active                  Boolean  @default(true)
+  /// Origin marker for audit. NULL = manual entry (legacy or operator-created).
+  /// 'po_import_ai' = auto-created from a PDF PO import; surface for review.
+  source                  String?  @map("source")
   createdAt               DateTime @default(now()) @map("created_at")
   updatedAt               DateTime @updatedAt @map("updated_at")
 
@@ -226,6 +229,7 @@ model Customer {
   plateStores       PlateStore[]
   shadeCards        ShadeCard[]
 
+  @@index([source], map: "customers_source_idx")
   @@map("customers")
 }
 
@@ -704,6 +708,9 @@ model Carton {
   postPressRouting Json?    @map("post_press_routing")
   embossBlockId    String?  @map("emboss_block_id")
   shadeCardId      String?  @map("shade_card_id")
+  /// Origin marker for audit. NULL = manual entry (legacy or operator-created).
+  /// 'po_import_ai' = auto-created from a PDF PO import; surface for review.
+  source           String?  @map("source")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 

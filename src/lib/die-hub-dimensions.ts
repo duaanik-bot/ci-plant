@@ -13,6 +13,8 @@ export function normalizeDieMake(v: string | null | undefined): 'local' | 'laser
   return s === 'laser' ? 'laser' : 'local'
 }
 
+export { normalizeCartonSizeString } from '@/lib/carton-size'
+
 export function parseCartonSizeToDims(input: string | null | undefined): ParsedCartonDims | null {
   if (!input?.trim()) return null
   const s = input.replace(/×/g, 'x').replace(/X/g, 'x')
@@ -33,6 +35,46 @@ export function parseCartonSizeToDims(input: string | null | undefined): ParsedC
     .map((p) => parseFloat(p.replace(/[^\d.-]/g, '')))
     .filter((n) => Number.isFinite(n))
   if (nums.length >= 3) return { l: nums[0], w: nums[1], h: nums[2] }
+  return null
+}
+
+/**
+ * Lenient parser for `Carton.finishedLength/Width/Height` storage:
+ * - "120 x 210 mm" (2D leaflet)   → { l: 120, w: 210, h: null }
+ * - "100 x 50 x 30 mm" (3D box)   → { l: 100, w: 50,  h: 30 }
+ * Returns null only when fewer than 2 numeric tokens are present.
+ *
+ * Use this instead of `parseCartonSizeToDims` when null height is acceptable
+ * (e.g. leaflets, sachet inserts). Tooling/die flows must keep using the
+ * strict 3D parser since dies require all three axes.
+ */
+export function parseFinishedDims(
+  input: string | null | undefined,
+): { l: number; w: number; h: number | null } | null {
+  if (!input?.trim()) return null
+  const s = input.replace(/×/g, 'x').replace(/X/g, 'x')
+  const m3 = s.match(
+    /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i,
+  )
+  if (m3) {
+    const l = parseFloat(m3[1])
+    const w = parseFloat(m3[2])
+    const h = parseFloat(m3[3])
+    if ([l, w, h].every((n) => Number.isFinite(n))) return { l, w, h }
+  }
+  const m2 = s.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i)
+  if (m2) {
+    const l = parseFloat(m2[1])
+    const w = parseFloat(m2[2])
+    if ([l, w].every((n) => Number.isFinite(n))) return { l, w, h: null }
+  }
+  // Last-ditch: split into tokens and grab the first two/three numbers.
+  const nums = s
+    .split(/[x,\s]+/i)
+    .map((p) => parseFloat(p.replace(/[^\d.-]/g, '')))
+    .filter((n) => Number.isFinite(n))
+  if (nums.length >= 3) return { l: nums[0], w: nums[1], h: nums[2] }
+  if (nums.length === 2) return { l: nums[0], w: nums[1], h: null }
   return null
 }
 

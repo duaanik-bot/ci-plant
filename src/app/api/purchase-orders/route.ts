@@ -245,47 +245,52 @@ export async function POST(req: NextRequest) {
 
   let created: Awaited<ReturnType<typeof db.purchaseOrder.create>>
   try {
-    created = await db.$transaction((tx) =>
-      createPurchaseOrderWithLines(tx, {
-        poNumber,
-        customerId: data.customerId,
-        poDate: new Date(data.poDate),
-        deliveryRequiredBy: data.deliveryRequiredBy?.trim()
-          ? new Date(data.deliveryRequiredBy.trim())
-          : null,
-        remarks: data.remarks || null,
-        status: data.status || 'draft',
-        isPriority: data.isPriority === true,
-        createdBy: user!.id,
-        lineItems: safeLineItems.map((li) => ({
-          cartonId: li.cartonId,
-          cartonName: li.cartonName,
-          cartonSize: li.cartonSize || null,
-          quantity: li.quantity,
-          artworkCode: li.artworkCode || null,
-          backPrint: li.backPrint || 'No',
-          rate: li.rate ?? null,
-          gsm: li.gsm ?? null,
-          gstPct: li.gstPct,
-          coatingType: li.coatingType || null,
-          otherCoating: li.otherCoating || null,
-          embossingLeafing: li.embossingLeafing || null,
-          paperType: li.paperType || null,
-          dyeId: li.dyeId || null,
-          remarks: li.remarks || null,
-          setNumber: li.setNumber || null,
-          dieMasterId: li.dieMasterId || null,
-          toolingLocked: li.toolingLocked ?? true,
-          lineDieType: li.lineDieType || null,
-          dimLengthMm: li.dimLengthMm ?? null,
-          dimWidthMm: li.dimWidthMm ?? null,
-          dimHeightMm: li.dimHeightMm ?? null,
-          specOverrides:
-            li.specOverrides && Object.keys(li.specOverrides).length > 0
-              ? (li.specOverrides as Record<string, unknown>)
-              : null,
-        })),
-      }),
+    created = await db.$transaction(
+      (tx) =>
+        createPurchaseOrderWithLines(tx, {
+          poNumber,
+          customerId: data.customerId,
+          poDate: new Date(data.poDate),
+          deliveryRequiredBy: data.deliveryRequiredBy?.trim()
+            ? new Date(data.deliveryRequiredBy.trim())
+            : null,
+          remarks: data.remarks || null,
+          status: data.status || 'draft',
+          isPriority: data.isPriority === true,
+          createdBy: user!.id,
+          lineItems: safeLineItems.map((li) => ({
+            cartonId: li.cartonId,
+            cartonName: li.cartonName,
+            cartonSize: li.cartonSize || null,
+            quantity: li.quantity,
+            artworkCode: li.artworkCode || null,
+            backPrint: li.backPrint || 'No',
+            rate: li.rate ?? null,
+            gsm: li.gsm ?? null,
+            gstPct: li.gstPct,
+            coatingType: li.coatingType || null,
+            otherCoating: li.otherCoating || null,
+            embossingLeafing: li.embossingLeafing || null,
+            paperType: li.paperType || null,
+            dyeId: li.dyeId || null,
+            remarks: li.remarks || null,
+            setNumber: li.setNumber || null,
+            dieMasterId: li.dieMasterId || null,
+            toolingLocked: li.toolingLocked ?? true,
+            lineDieType: li.lineDieType || null,
+            dimLengthMm: li.dimLengthMm ?? null,
+            dimWidthMm: li.dimWidthMm ?? null,
+            dimHeightMm: li.dimHeightMm ?? null,
+            specOverrides:
+              li.specOverrides && Object.keys(li.specOverrides).length > 0
+                ? (li.specOverrides as Record<string, unknown>)
+                : null,
+          })),
+        }),
+      // Neon round-trips + per-line material-MRP work occasionally pushed the
+      // 5 s default over the cliff. 30 s is comfortably above worst-case
+      // observed without masking a real regression.
+      { maxWait: 10_000, timeout: 30_000 },
     )
   } catch (err) {
     console.error('[POST /api/purchase-orders] DB error:', err)

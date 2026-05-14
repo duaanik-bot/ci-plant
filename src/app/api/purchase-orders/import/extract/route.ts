@@ -3,16 +3,25 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { extractPoPdfText } from '@/lib/po-pdf-extract'
 import {
+  detectCustomerWithClaude,
   extractPoWithClaude,
   type CartonCatalogItem,
+  type CustomerDetection,
+  type CustomerRosterItem,
   type ExtractedPo,
 } from '@/lib/po-claude-extract'
+import { cityFromAddress } from '@/lib/customer-address'
 
 export const dynamic = 'force-dynamic'
 // PDF extract + LLM call can run long; bump per Vercel Fluid defaults.
 export const maxDuration = 300
 
 const MAX_PDF_BYTES = 8 * 1024 * 1024 // 8 MB
+
+/** Sentinel id sent in place of a real Customer.id when the operator is
+ *  confirming-and-creating a new customer from the PDF. The commit route
+ *  matches the same literal — keep them in sync if you ever change it. */
+const NEW_CUSTOMER_SENTINEL = '__new__'
 
 type ExtractResponse = {
   ok: true
@@ -22,6 +31,21 @@ type ExtractResponse = {
   extracted: ExtractedPo
   /** Carton catalog the LLM used — UI uses this for the per-line dropdown. */
   catalog: CartonCatalogItem[]
+  /**
+   * Present when the customer was auto-detected from the PDF (no customerId was
+   * passed in). Lets the UI flag low-confidence matches for operator review.
+   */
+  customerDetection: CustomerDetection | null
+  /**
+   * Populated when no roster match was found but Claude read a buyer off the
+   * PO header. The drawer renders an editable "New customer" card and the
+   * commit payload includes `newCustomer` for in-transaction creation.
+   */
+  proposedNewCustomer: {
+    name: string
+    gstNumber: string | null
+    address: string | null
+  } | null
 }
 
 export async function POST(req: NextRequest) {
@@ -38,11 +62,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Expected multipart/form-data' }, { status: 400 })
   }
 
-  const customerId = (form.get('customerId') as string | null)?.trim() || ''
+  const customerIdInput = (form.get('customerId') as string | null)?.trim() || ''
   const file = form.get('file')
-  if (!customerId) {
-    return NextResponse.json({ error: 'customerId is required' }, { status: 400 })
-  }
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'A PDF file is required' }, { status: 400 })
   }
@@ -57,14 +78,6 @@ export async function POST(req: NextRequest) {
   }
   if (!file.type.includes('pdf') && !file.name.toLowerCase().endsWith('.pdf')) {
     return NextResponse.json({ error: 'File must be a PDF' }, { status: 400 })
-  }
-
-  const customer = await db.customer.findUnique({
-    where: { id: customerId },
-    select: { id: true, name: true },
-  })
-  if (!customer) {
-    return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
   }
 
   const buffer = new Uint8Array(await file.arrayBuffer())
@@ -93,8 +106,88 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const cartons = await db.carton.findMany({
-    where: { customerId, active: true },
+  // Resolve which customer this PO belongs to. Operator pre-selection wins;
+  // otherwise we run a cheap detection pass against the active customer roster.
+  let customer: { id: string; name: string } | null = null
+  let detection: CustomerDetection | null = null
+
+  if (customerIdInput) {
+    customer = await db.customer.findUnique({
+      where: { id: customerIdInput },
+      select: { id: true, name: true },
+    })
+    if (!customer) {
+      return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
+    }
+  } else {
+    const roster = await db.customer.findMany({
+      where: { active: true },
+      select: { id: true, name: true, gstNumber: true, address: true },
+      orderBy: { name: 'asc' },
+    })
+    const rosterSlim: CustomerRosterItem[] = roster.map((c) => ({
+      id: c.id,
+      name: c.name,
+      gstNumber: c.gstNumber,
+      city: cityFromAddress(c.address),
+    }))
+
+    try {
+      detection = await detectCustomerWithClaude({
+        pdfText: pdf.text,
+        customerRoster: rosterSlim,
+      })
+    } catch (err) {
+      console.error('[POST /api/purchase-orders/import/extract] Customer detect failed:', err)
+      return NextResponse.json(
+        {
+          error: 'Could not identify the customer from this PDF. Please pick the customer manually.',
+          needsCustomerSelection: true,
+        },
+        { status: 502 },
+      )
+    }
+
+    if (!detection.matchedCustomerId) {
+      // No roster match. If Claude proposed buyer details from the PDF, fall
+      // through with a sentinel customer + empty catalog — the operator will
+      // confirm-and-create the customer at commit time. If there's also no
+      // proposal, fall back to the manual picker.
+      if (!detection.newCustomerProposal) {
+        return NextResponse.json(
+          {
+            error:
+              detection.reason ||
+              'Could not identify the customer from this PDF. Please pick the customer manually.',
+            customerDetection: detection,
+            needsCustomerSelection: true,
+          },
+          { status: 422 },
+        )
+      }
+      customer = {
+        id: NEW_CUSTOMER_SENTINEL,
+        name: detection.newCustomerProposal.name,
+      }
+    } else {
+      customer = roster
+        .filter((c) => c.id === detection!.matchedCustomerId)
+        .map((c) => ({ id: c.id, name: c.name }))[0] ?? null
+      if (!customer) {
+        // Shouldn't happen — detection IDs are filtered against the roster.
+        return NextResponse.json({ error: 'Detected customer not found' }, { status: 500 })
+      }
+    }
+  }
+
+  // Cartons catalog: only fetch for a REAL customer. For new-customer flow
+  // the catalog is intentionally empty so every line becomes a new-carton
+  // proposal that gets created alongside the customer at commit.
+  const cartons =
+    customer.id === NEW_CUSTOMER_SENTINEL
+      ? []
+      : await db.carton.findMany({
+    where: { customerId: customer.id, active: true },
     select: {
       id: true,
       cartonName: true,
@@ -151,6 +244,11 @@ export async function POST(req: NextRequest) {
     source: { filename: file.name, pageCount: pdf.pageCount },
     extracted,
     catalog,
+    customerDetection: detection,
+    proposedNewCustomer:
+      customer.id === NEW_CUSTOMER_SENTINEL && detection?.newCustomerProposal
+        ? detection.newCustomerProposal
+        : null,
   }
 
   return NextResponse.json(payload)
