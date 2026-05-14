@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import {
   Briefcase,
   Factory,
@@ -11,19 +12,18 @@ import {
   CircleDot,
 } from 'lucide-react'
 import { WORKFLOW_STAGE_COUNT } from '@/lib/workflow'
-import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  ReferenceLine,
-  Cell,
-} from 'recharts'
+
+const ChartSkeleton = () => (
+  <div className="h-[220px] w-full animate-pulse rounded bg-ds-line/20" />
+)
+const ImpressionsTrendChart = dynamic(
+  () => import('./_components/DashboardCharts').then((m) => m.ImpressionsTrendChart),
+  { ssr: false, loading: ChartSkeleton },
+)
+const WastageBarChart = dynamic(
+  () => import('./_components/DashboardCharts').then((m) => m.WastageBarChart),
+  { ssr: false, loading: ChartSkeleton },
+)
 
 type Stats = {
   activeJobs: number
@@ -392,48 +392,11 @@ export default function DashboardClient() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
         <div className="lg:col-span-3 rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Impressions This Week</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={TREND_DATA}>
-              <XAxis dataKey="day" stroke="#94a3b8" fontSize={12} />
-              <YAxis stroke="#94a3b8" fontSize={12} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155' }}
-                labelStyle={{ color: '#e2e8f0' }}
-              />
-              <Legend />
-              <Line type="monotone" dataKey="ci01" name="CI-01" stroke="#3B82F6" strokeWidth={2} dot={{ fill: '#3B82F6' }} />
-              <Line type="monotone" dataKey="ci02" name="CI-02" stroke="#14B8A6" strokeWidth={2} dot={{ fill: '#14B8A6' }} />
-              <Line type="monotone" dataKey="ci03" name="CI-03" stroke="#F97316" strokeWidth={2} dot={{ fill: '#F97316' }} />
-            </LineChart>
-          </ResponsiveContainer>
+          <ImpressionsTrendChart data={TREND_DATA} />
         </div>
         <div className="lg:col-span-2 rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Wastage % This Month</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={WASTAGE_DATA} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
-              <XAxis dataKey="machine" stroke="#94a3b8" fontSize={12} />
-              <YAxis stroke="#94a3b8" fontSize={12} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155' }}
-                labelStyle={{ color: '#e2e8f0' }}
-              />
-              <ReferenceLine y={5} stroke="#EF4444" strokeDasharray="3 3" />
-              <Bar dataKey="pct" name="Wastage %" radius={[4, 4, 0, 0]}>
-                {WASTAGE_DATA.map((entry, index) => (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={
-                      entry.pct <= 3
-                        ? '#22C55E'
-                        : entry.pct <= 5
-                        ? '#F59E0B'
-                        : '#EF4444'
-                    }
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <WastageBarChart data={WASTAGE_DATA} />
         </div>
       </div>
 

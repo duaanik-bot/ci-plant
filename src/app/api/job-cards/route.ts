@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
+import { unstable_cache, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { computeJobYieldMetricsForCard } from '@/lib/production-yield'
@@ -13,6 +14,20 @@ import {
 import { computeFivePointReadiness, computeMaterialGate, isArtworkLocked } from '@/lib/planning-interlock'
 
 export const dynamic = 'force-dynamic'
+
+const JOB_CARDS_TAG = 'job-cards'
+
+type JobCardListFilters = {
+  status: string | null
+  customerId: string | null
+  jobCardNumber: string | null
+  yieldMetrics: boolean
+  segment: string
+  q: string
+  priorityOnly: boolean
+  machineId: string
+  operatorId: string
+}
 
 async function jobCardNumbersMatchingSearch(query: string): Promise<number[]> {
   const lines = await db.poLineItem.findMany({
@@ -60,21 +75,18 @@ const createSchema = z.object({
   toolingOverrideReason: z.string().max(240).optional(),
 })
 
-export async function GET(req: NextRequest) {
-  const { error } = await requireAuth()
-  if (error) return error
-
-  const { searchParams } = new URL(req.url)
-  const status = searchParams.get('status')
-  const customerId = searchParams.get('customerId')
-  const jobCardNumber = searchParams.get('jobCardNumber')
-  const yieldMetrics = searchParams.get('yieldMetrics') === '1' || searchParams.get('yieldMetrics') === 'true'
-  const segment = searchParams.get('segment')?.trim() ?? ''
-  const q = searchParams.get('q')?.trim() ?? ''
-  const priorityOnly =
-    searchParams.get('priorityOnly') === '1' || searchParams.get('priorityOnly') === 'true'
-  const machineIdParam = searchParams.get('machineId')?.trim() ?? ''
-  const operatorIdParam = searchParams.get('operatorId')?.trim() ?? ''
+async function fetchJobCardsList(filters: JobCardListFilters) {
+  const {
+    status,
+    customerId,
+    jobCardNumber,
+    yieldMetrics,
+    segment,
+    q,
+    priorityOnly,
+    machineId: machineIdParam,
+    operatorId: operatorIdParam,
+  } = filters
 
   const where: Prisma.ProductionJobCardWhereInput = {}
   if (customerId) where.customerId = customerId
@@ -90,7 +102,6 @@ export async function GET(req: NextRequest) {
   else if (segment === 'qa_hold') where.status = 'final_qc'
   else if (segment === 'completed') where.status = { in: ['closed', 'qa_released'] }
   else if (segment === 'print_planning') {
-    // Planning triage should only show cards after explicit push/release from Job Card.
     where.status = { in: ['qa_released', 'in_progress', 'final_qc'] }
   } else if (status) where.status = status
 
@@ -283,6 +294,37 @@ export async function GET(req: NextRequest) {
     }),
   )
 
+  return mapped
+}
+
+const fetchJobCardsListCached = unstable_cache(
+  fetchJobCardsList,
+  ['job-cards-list-v1'],
+  { revalidate: 10, tags: [JOB_CARDS_TAG] },
+)
+
+export async function GET(req: NextRequest) {
+  const { error } = await requireAuth()
+  if (error) return error
+
+  const { searchParams } = new URL(req.url)
+  const filters: JobCardListFilters = {
+    status: searchParams.get('status'),
+    customerId: searchParams.get('customerId'),
+    jobCardNumber: searchParams.get('jobCardNumber'),
+    yieldMetrics:
+      searchParams.get('yieldMetrics') === '1' ||
+      searchParams.get('yieldMetrics') === 'true',
+    segment: searchParams.get('segment')?.trim() ?? '',
+    q: searchParams.get('q')?.trim() ?? '',
+    priorityOnly:
+      searchParams.get('priorityOnly') === '1' ||
+      searchParams.get('priorityOnly') === 'true',
+    machineId: searchParams.get('machineId')?.trim() ?? '',
+    operatorId: searchParams.get('operatorId')?.trim() ?? '',
+  }
+
+  const mapped = await fetchJobCardsListCached(filters)
   return NextResponse.json(mapped)
 }
 
@@ -567,5 +609,6 @@ export async function POST(req: NextRequest) {
   }
 
   const refreshed = await db.productionJobCard.findUnique({ where: { id: created.id } })
+  revalidateTag(JOB_CARDS_TAG)
   return NextResponse.json(refreshed ?? created, { status: 201 })
 }

@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_cache, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
+
+const DISPATCH_TAG = 'dispatch-queue'
+const JOB_CARDS_TAG = 'job-cards'
 
 const createDispatchSchema = z.object({
   // Either jobCardId (production flow, new) or legacy jobId must be supplied.
@@ -24,10 +28,7 @@ function nextBillNumber(lastBill: { billNumber: string } | null): string {
   return `${prefix}${String(lastSeq + 1).padStart(4, '0')}`
 }
 
-export async function GET() {
-  const { error } = await requireAuth()
-  if (error) return error
-
+async function fetchDispatchQueue() {
   // Dispatch queue = ProductionJobCards whose terminal Pasting stage is completed.
   // Dispatched and POD-received rows stay in the list (sorted to the end on the client)
   // so they remain trackable; the row's existingDispatch.status drives the UI state.
@@ -84,6 +85,19 @@ export async function GET() {
     }
   })
 
+  return ready
+}
+
+const fetchDispatchQueueCached = unstable_cache(
+  fetchDispatchQueue,
+  ['dispatch-queue-v1'],
+  { revalidate: 10, tags: [DISPATCH_TAG] },
+)
+
+export async function GET() {
+  const { error } = await requireAuth()
+  if (error) return error
+  const ready = await fetchDispatchQueueCached()
   return NextResponse.json(ready)
 }
 
@@ -226,6 +240,8 @@ export async function POST(req: NextRequest) {
     newValue: { jobCardId: jobCardId ?? null, jobId: jobId ?? null, qtyDispatched, status: dispatch.status, draftBillId: draftBill?.id ?? null },
   })
 
+  revalidateTag(DISPATCH_TAG)
+  revalidateTag(JOB_CARDS_TAG)
   return NextResponse.json(
     {
       ...dispatch,

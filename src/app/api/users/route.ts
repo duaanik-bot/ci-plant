@@ -1,8 +1,20 @@
 import { NextResponse } from 'next/server'
+import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 
 export const dynamic = 'force-dynamic'
+
+const fetchActiveUsersCached = unstable_cache(
+  async () =>
+    db.user.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
+  ['users-active-list-v1'],
+  { revalidate: 300, tags: ['users'] },
+)
 
 /**
  * List users by id/name for assignee dropdowns (e.g. NCR assignee).
@@ -11,12 +23,6 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   const { error } = await requireAuth()
   if (error) return error
-
-  const list = await db.user.findMany({
-    where: { active: true },
-    orderBy: { name: 'asc' },
-    select: { id: true, name: true },
-  })
-
+  const list = await fetchActiveUsersCached()
   return NextResponse.json(list)
 }

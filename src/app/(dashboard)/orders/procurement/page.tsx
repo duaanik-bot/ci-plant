@@ -36,17 +36,19 @@ import {
   freightPctOfBasicRate,
   isHighLogisticsCostVsBasic,
 } from '@/lib/total-landed-cost'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import dynamic from 'next/dynamic'
+
+const ChartSkeleton = () => (
+  <div className="h-full w-full animate-pulse rounded bg-ds-line/20" />
+)
+const PriceTrendSparkline = dynamic(
+  () => import('./_components/ProcurementCharts').then((m) => m.PriceTrendSparkline),
+  { ssr: false, loading: () => <span className="text-xs text-neutral-600 tabular-nums">…</span> },
+)
+const DeliveryAccuracyChart = dynamic(
+  () => import('./_components/ProcurementCharts').then((m) => m.DeliveryAccuracyChart),
+  { ssr: false, loading: ChartSkeleton },
+)
 
 type MaterialVitals = {
   openMaterialSpendInr: number
@@ -305,56 +307,6 @@ function emptyPriceIntelBundle(): PriceIntelBundle {
 }
 
 const PRICE_BENCHMARK_WARN_THRESHOLD_PCT = 2.0
-
-function PriceTrendSparkline({
-  data,
-  tooltip,
-}: {
-  data: TrendMonthDto[]
-  tooltip: PriceIntelBundle['trendTooltip']
-}) {
-  if (!data.length) {
-    return <span className="text-xs text-neutral-600 tabular-nums">No 6m trend</span>
-  }
-  const chartData = data.map((d) => ({ ...d, shortMonth: d.monthKey.slice(5) }))
-  return (
-    <div className="w-[128px] h-10 shrink-0">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={chartData} margin={{ top: 2, right: 2, left: 0, bottom: 0 }}>
-          <Tooltip
-            cursor={{ stroke: '#f59e0b', strokeOpacity: 0.35 }}
-            content={() => (
-              <div className="rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink shadow-xl space-y-0.5">
-                <div className="font-mono tabular-nums">
-                  High:{' '}
-                  {tooltip.high != null ? `₹${tooltip.high.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
-                </div>
-                <div className="font-mono tabular-nums">
-                  Low:{' '}
-                  {tooltip.low != null ? `₹${tooltip.low.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
-                </div>
-                <div className="font-mono tabular-nums">
-                  Last paid:{' '}
-                  {tooltip.lastPaid != null
-                    ? `₹${tooltip.lastPaid.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : '—'}
-                </div>
-              </div>
-            )}
-          />
-          <Line
-            type="monotone"
-            dataKey="avgRate"
-            stroke="#f59e0b"
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
 
 function formatRupee(n: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -3295,47 +3247,7 @@ export default function ProcurementWorkbenchPage() {
                       {scorecardDetail.supplierName}
                     </p>
                     <div className="h-36 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={scorecardDetail.monthlyDeliveryAccuracy}
-                          margin={{ top: 4, right: 4, left: -18, bottom: 0 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                          <XAxis
-                            dataKey="label"
-                            tick={{ fill: '#a1a1aa', fontSize: 9 }}
-                            interval={0}
-                            angle={-12}
-                            textAnchor="end"
-                            height={36}
-                          />
-                          <YAxis
-                            domain={[0, 100]}
-                            tick={{ fill: '#a1a1aa', fontSize: 9 }}
-                            width={28}
-                            tickFormatter={(v) => `${v}%`}
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: '#09090b',
-                              border: `1px solid rgba(245, 158, 11, 0.35)`,
-                              borderRadius: 8,
-                              fontSize: 11,
-                            }}
-                            labelStyle={{ color: '#e4e4e7' }}
-                            formatter={(value: number, _n, item) => [
-                              `${value}% (${(item?.payload as { orders?: number })?.orders ?? 0} dispatches)`,
-                              'OTIF accuracy',
-                            ]}
-                          />
-                          <Bar
-                            dataKey="accuracyPct"
-                            name="Delivery accuracy"
-                            fill="#f59e0b"
-                            radius={[3, 3, 0, 0]}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
+                      <DeliveryAccuracyChart data={scorecardDetail.monthlyDeliveryAccuracy} />
                     </div>
                     <p className="text-xs text-neutral-500">
                       Monthly delivery accuracy (last 6 months) · dispatch vs required date

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_cache, revalidateTag } from 'next/cache'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
@@ -8,6 +9,8 @@ import { customerSchema } from '@/lib/validations'
 import { cityFromAddress } from '@/lib/customer-address'
 
 export const dynamic = 'force-dynamic'
+
+const CUSTOMERS_TAG = 'customers'
 
 const createSchema = customerSchema.extend({
   gstNumber: z.string().trim().max(32, 'GST number is too long').optional().or(z.literal('')),
@@ -19,14 +22,9 @@ const createSchema = customerSchema.extend({
   active: z.boolean().default(true),
 })
 
-export async function GET(req: NextRequest) {
-  const { error } = await requireRole('operations_head', 'md')
-  if (error) return error
-
-  const q = req.nextUrl.searchParams.get('q')?.trim() || ''
-  const limit = Math.min(Number(req.nextUrl.searchParams.get('limit') || 20), 50)
-
-  const list = await db.customer.findMany({
+async function fetchMastersCustomers(args: { q: string; limit: number }) {
+  const { q, limit } = args
+  return db.customer.findMany({
     where: q.length >= 2 ? {
       OR: [
         { name: { contains: q, mode: 'insensitive' } },
@@ -40,6 +38,22 @@ export async function GET(req: NextRequest) {
     orderBy: { name: 'asc' },
     take: limit,
   })
+}
+
+const fetchMastersCustomersCached = unstable_cache(
+  fetchMastersCustomers,
+  ['masters-customers-list-v1'],
+  { revalidate: 300, tags: [CUSTOMERS_TAG] },
+)
+
+export async function GET(req: NextRequest) {
+  const { error } = await requireRole('operations_head', 'md')
+  if (error) return error
+
+  const q = req.nextUrl.searchParams.get('q')?.trim() || ''
+  const limit = Math.min(Number(req.nextUrl.searchParams.get('limit') || 20), 50)
+
+  const list = await fetchMastersCustomersCached({ q, limit })
   return NextResponse.json(
     list.map((c) => ({
       id: c.id,
@@ -102,6 +116,7 @@ export async function POST(req: NextRequest) {
       newValue: { name: customer.name },
     })
 
+    revalidateTag(CUSTOMERS_TAG)
     return NextResponse.json(
       {
         id: customer.id,

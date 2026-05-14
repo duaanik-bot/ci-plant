@@ -165,6 +165,62 @@ export async function resolveActualIssuedKgForJob(
   return { kg: hasAny ? Math.round(sumKg * 1000) / 1000 : null, totalSheets }
 }
 
+/**
+ * Batched paper-issued resolver: returns Map<jobId, {kg, totalSheets}> for many jobs
+ * in just 2 queries total (paperIssueToFloor.findMany + materialQueue.findMany).
+ * Use this upstream of `computeJobYieldMetricsForCard` to avoid N+1.
+ */
+export async function resolveActualIssuedKgForJobs(
+  db: PrismaClient,
+  jobIds: string[],
+): Promise<Map<string, { kg: number | null; totalSheets: number }>> {
+  const out = new Map<string, { kg: number | null; totalSheets: number }>()
+  if (jobIds.length === 0) return out
+
+  const issues = await db.paperIssueToFloor.findMany({
+    where: { productionJobCardId: { in: jobIds } },
+    include: {
+      source: {
+        select: { id: true, gsm: true, boardGrade: true, paperType: true, rate: true },
+      },
+    },
+  })
+  if (issues.length === 0) {
+    for (const id of jobIds) out.set(id, { kg: null, totalSheets: 0 })
+    return out
+  }
+
+  // Resolve kg-per-sheet once per unique source, batching the materialQueue lookup.
+  const uniqueSources = new Map<string, typeof issues[number]['source']>()
+  for (const iss of issues) {
+    if (!uniqueSources.has(iss.sourcePaperWarehouseId)) {
+      uniqueSources.set(iss.sourcePaperWarehouseId, iss.source)
+    }
+  }
+  const kgBySource = new Map<string, number | null>()
+  for (const [sid, src] of uniqueSources) {
+    const resolved = await resolveKgPerSheetForPaper(db, src)
+    kgBySource.set(sid, resolved ?? fallbackKgPerSheetFromGsm(src.gsm))
+  }
+
+  for (const iss of issues) {
+    const prev = out.get(iss.productionJobCardId) ?? { kg: null, totalSheets: 0 }
+    const kps = kgBySource.get(iss.sourcePaperWarehouseId)
+    const kg = estimateKgForSheets(iss.qtySheets, kps ?? null)
+    const nextSheets = prev.totalSheets + iss.qtySheets
+    const nextKg = kg != null ? (prev.kg ?? 0) + kg : prev.kg
+    out.set(iss.productionJobCardId, {
+      kg: nextKg != null ? Math.round(nextKg * 1000) / 1000 : null,
+      totalSheets: nextSheets,
+    })
+  }
+  // Jobs with no issues at all: ensure they're in the map with empty values.
+  for (const id of jobIds) {
+    if (!out.has(id)) out.set(id, { kg: null, totalSheets: 0 })
+  }
+  return out
+}
+
 export async function computeJobYieldMetricsForCard(
   db: PrismaClient,
   job: {
@@ -185,11 +241,14 @@ export async function computeJobYieldMetricsForCard(
       gsm: number | null
     } | null
   } | null,
+  /** Optional precomputed paper-issued data (use batched resolver upstream to avoid N+1). */
+  precomputedIssued?: { kg: number | null; totalSheets: number },
 ): Promise<JobYieldMetrics> {
   const dims = poLine ? pickCartonMmAndGsm(poLine.carton, poLine) : null
   const theoreticalUnitKg = dims ? theoreticalCartonWeightKg(dims.L, dims.W, dims.gsm) : null
   const fg = finishedGoodsFromStages(job.stages)
-  const { kg: actualIssuedKg, totalSheets: totalSheetsIssuedFloor } = await resolveActualIssuedKgForJob(db, job.id)
+  const { kg: actualIssuedKg, totalSheets: totalSheetsIssuedFloor } =
+    precomputedIssued ?? (await resolveActualIssuedKgForJob(db, job.id))
   return buildJobYieldMetrics({
     finishedGoodsCount: fg,
     totalSheetsIssuedFloor,

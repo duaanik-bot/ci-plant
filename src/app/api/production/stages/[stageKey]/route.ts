@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { PRODUCTION_STAGES } from '@/lib/constants'
-import { computeJobYieldMetricsForCard } from '@/lib/production-yield'
-import { computeLiveOeeForJobCard } from '@/lib/production-oee'
+import { computeJobYieldMetricsForCard, resolveActualIssuedKgForJobs } from '@/lib/production-yield'
+import { computeLiveOeeForJobCard, sumDowntimeMinutesForJobs } from '@/lib/production-oee'
 import { loadMachinePmHealthMap } from '@/lib/machine-pm-health'
 
 export const dynamic = 'force-dynamic'
+
+const PRODUCTION_STAGES_TAG = 'production-stages'
 
 const stageLabelByKey: Record<string, string> = {}
 PRODUCTION_STAGES.forEach((s) => {
@@ -26,18 +29,103 @@ const postPressRoutingKeyByStageKey: Record<string, string> = {
   embossing: 'embossing',
 }
 
-export async function GET(
-  req: NextRequest,
-  context: { params: Promise<{ stageKey: string }> }
-) {
-  const { error } = await requireAuth()
-  if (error) return error
-
-  const { stageKey } = await context.params
-  const stageLabel = stageLabelByKey[stageKey]
-  if (!stageLabel) {
-    return NextResponse.json({ error: 'Invalid stage key' }, { status: 400 })
+function asRoutingFlags(postPressRouting: unknown) {
+  const o = (postPressRouting && typeof postPressRouting === 'object'
+    ? (postPressRouting as Record<string, unknown>)
+    : {}) as Record<string, unknown>
+  return {
+    chemicalCoating: o.chemicalCoating === true,
+    lamination: o.lamination === true,
+    spotUv: o.spotUv === true,
+    leafing: o.leafing === true,
+    embossing: o.embossing === true,
   }
+}
+
+function requiredStageKeysForJob(postPressRouting: unknown): string[] {
+  const r = asRoutingFlags(postPressRouting)
+  const out: string[] = ['cutting', 'printing']
+  // Spot UV is part of coating execution, not a separate station queue.
+  if (r.chemicalCoating || r.spotUv) out.push('chemical_coating')
+  if (r.lamination) out.push('lamination')
+  // Leafing/Embossing are executed within Dye Cutting. Pasting is terminal → Dispatch → Billing.
+  out.push('dye_cutting', 'pasting')
+  return out
+}
+
+function isQueuedForStage(postPressRouting: unknown, key: string): boolean {
+  const o = (postPressRouting && typeof postPressRouting === 'object'
+    ? (postPressRouting as Record<string, unknown>)
+    : {}) as Record<string, unknown>
+  const exec =
+    o.executionOrchestration && typeof o.executionOrchestration === 'object'
+      ? (o.executionOrchestration as Record<string, unknown>)
+      : null
+  if (!exec) return false
+  const token = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+  const field = `${token}QueuedAt`
+  return typeof exec[field] === 'string' && String(exec[field]).trim().length > 0
+}
+
+function stagePushedQty(postPressRouting: unknown, key: string): number {
+  const o = (postPressRouting && typeof postPressRouting === 'object'
+    ? (postPressRouting as Record<string, unknown>)
+    : {}) as Record<string, unknown>
+  const exec =
+    o.executionOrchestration && typeof o.executionOrchestration === 'object'
+      ? (o.executionOrchestration as Record<string, unknown>)
+      : null
+  if (!exec) return 0
+  const progress =
+    exec.stageProgress && typeof exec.stageProgress === 'object'
+      ? (exec.stageProgress as Record<string, unknown>)
+      : {}
+  const stage =
+    progress[key] && typeof progress[key] === 'object'
+      ? (progress[key] as Record<string, unknown>)
+      : {}
+  const pushed = Number(stage.pushedQty ?? 0)
+  return Number.isFinite(pushed) ? Math.max(0, pushed) : 0
+}
+
+function stageProgressStatus(postPressRouting: unknown, key: string): string {
+  const o = (postPressRouting && typeof postPressRouting === 'object'
+    ? (postPressRouting as Record<string, unknown>)
+    : {}) as Record<string, unknown>
+  const exec =
+    o.executionOrchestration && typeof o.executionOrchestration === 'object'
+      ? (o.executionOrchestration as Record<string, unknown>)
+      : null
+  if (!exec) return 'pending'
+  const progress =
+    exec.stageProgress && typeof exec.stageProgress === 'object'
+      ? (exec.stageProgress as Record<string, unknown>)
+      : {}
+  const stage =
+    progress[key] && typeof progress[key] === 'object'
+      ? (progress[key] as Record<string, unknown>)
+      : {}
+  const status = String(stage.status ?? '').trim().toLowerCase()
+  return status || 'pending'
+}
+
+function idleHoursForStage(
+  status: string,
+  stageCreatedAt: Date,
+  jobUpdatedAt: Date,
+): number | null {
+  if (status === 'completed') return null
+  if (status === 'pending') {
+    return (Date.now() - stageCreatedAt.getTime()) / 3_600_000
+  }
+  if (status === 'in_progress') {
+    return (Date.now() - jobUpdatedAt.getTime()) / 3_600_000
+  }
+  return (Date.now() - stageCreatedAt.getTime()) / 3_600_000
+}
+
+async function fetchStageData(stageKey: string) {
+  const stageLabel = stageLabelByKey[stageKey]
 
   const routingKey = postPressRoutingKeyByStageKey[stageKey]
   const where: {
@@ -102,86 +190,6 @@ export async function GET(
       },
     },
   })
-
-  function asRoutingFlags(postPressRouting: unknown) {
-    const o = (postPressRouting && typeof postPressRouting === 'object'
-      ? (postPressRouting as Record<string, unknown>)
-      : {}) as Record<string, unknown>
-    return {
-      chemicalCoating: o.chemicalCoating === true,
-      lamination: o.lamination === true,
-      spotUv: o.spotUv === true,
-      leafing: o.leafing === true,
-      embossing: o.embossing === true,
-    }
-  }
-
-function requiredStageKeysForJob(postPressRouting: unknown): string[] {
-  const r = asRoutingFlags(postPressRouting)
-  const out: string[] = ['cutting', 'printing']
-  // Spot UV is part of coating execution, not a separate station queue.
-  if (r.chemicalCoating || r.spotUv) out.push('chemical_coating')
-  if (r.lamination) out.push('lamination')
-  // Leafing/Embossing are executed within Dye Cutting. Pasting is terminal → Dispatch → Billing.
-  out.push('dye_cutting', 'pasting')
-  return out
-}
-
-  function isQueuedForStage(postPressRouting: unknown, key: string): boolean {
-    const o = (postPressRouting && typeof postPressRouting === 'object'
-      ? (postPressRouting as Record<string, unknown>)
-      : {}) as Record<string, unknown>
-    const exec =
-      o.executionOrchestration && typeof o.executionOrchestration === 'object'
-        ? (o.executionOrchestration as Record<string, unknown>)
-        : null
-    if (!exec) return false
-    const token = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
-    const field = `${token}QueuedAt`
-    return typeof exec[field] === 'string' && String(exec[field]).trim().length > 0
-  }
-
-  function stagePushedQty(postPressRouting: unknown, key: string): number {
-    const o = (postPressRouting && typeof postPressRouting === 'object'
-      ? (postPressRouting as Record<string, unknown>)
-      : {}) as Record<string, unknown>
-    const exec =
-      o.executionOrchestration && typeof o.executionOrchestration === 'object'
-        ? (o.executionOrchestration as Record<string, unknown>)
-        : null
-    if (!exec) return 0
-    const progress =
-      exec.stageProgress && typeof exec.stageProgress === 'object'
-        ? (exec.stageProgress as Record<string, unknown>)
-        : {}
-    const stage =
-      progress[key] && typeof progress[key] === 'object'
-        ? (progress[key] as Record<string, unknown>)
-        : {}
-    const pushed = Number(stage.pushedQty ?? 0)
-    return Number.isFinite(pushed) ? Math.max(0, pushed) : 0
-  }
-
-  function stageProgressStatus(postPressRouting: unknown, key: string): string {
-    const o = (postPressRouting && typeof postPressRouting === 'object'
-      ? (postPressRouting as Record<string, unknown>)
-      : {}) as Record<string, unknown>
-    const exec =
-      o.executionOrchestration && typeof o.executionOrchestration === 'object'
-        ? (o.executionOrchestration as Record<string, unknown>)
-        : null
-    if (!exec) return 'pending'
-    const progress =
-      exec.stageProgress && typeof exec.stageProgress === 'object'
-        ? (exec.stageProgress as Record<string, unknown>)
-        : {}
-    const stage =
-      progress[key] && typeof progress[key] === 'object'
-        ? (progress[key] as Record<string, unknown>)
-        : {}
-    const status = String(stage.status ?? '').trim().toLowerCase()
-    return status || 'pending'
-  }
 
   const gatedRecords = records.filter((rec) => {
     const jc = rec.jobCard
@@ -375,14 +383,25 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
         .filter((id): id is string => id != null && id.length > 0),
     ),
   )
-  const pmHealthByMachineId = await loadMachinePmHealthMap(db, machineIds)
-  const jobsForYield =
+
+  // Run independent fetches in parallel — was previously sequential.
+  const [pmHealthByMachineId, jobsForYield, ledgerRows, downtimeMinByJobId, issuedKgByJobId] = await Promise.all([
+    loadMachinePmHealthMap(db, machineIds),
     jcIds.length > 0
-      ? await db.productionJobCard.findMany({
+      ? db.productionJobCard.findMany({
           where: { id: { in: jcIds } },
           include: { stages: true },
         })
-      : []
+      : Promise.resolve([] as Awaited<ReturnType<typeof db.productionJobCard.findMany>>),
+    jcIds.length > 0
+      ? db.productionOeeLedger.findMany({
+          where: { productionJobCardId: { in: jcIds } },
+        })
+      : Promise.resolve([] as Awaited<ReturnType<typeof db.productionOeeLedger.findMany>>),
+    sumDowntimeMinutesForJobs(db, jcIds),
+    resolveActualIssuedKgForJobs(db, jcIds),
+  ])
+
   type PoLineYield = NonNullable<Parameters<typeof computeJobYieldMetricsForCard>[2]>
   const yieldLineByJcNum = new Map<number, PoLineYield>()
   const jcNumsForYield = jobsForYield.map((j) => j.jobCardNumber)
@@ -415,18 +434,19 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
       })
     }
   }
-  const yieldByJobId = new Map<string, Awaited<ReturnType<typeof computeJobYieldMetricsForCard>>>()
-  for (const j of jobsForYield) {
-    const line = yieldLineByJcNum.get(j.jobCardNumber) ?? null
-    yieldByJobId.set(j.id, await computeJobYieldMetricsForCard(db, j, line))
-  }
 
-  const ledgerRows =
-    jcIds.length > 0
-      ? await db.productionOeeLedger.findMany({
-          where: { productionJobCardId: { in: jcIds } },
-        })
-      : []
+  // Parallelize the per-job yield computation; pass precomputed issued data so each
+  // call does ZERO DB work (was 2 queries per card before batching).
+  const yieldByJobId = new Map<string, Awaited<ReturnType<typeof computeJobYieldMetricsForCard>>>()
+  const yieldEntries = await Promise.all(
+    jobsForYield.map(async (j) => {
+      const line = yieldLineByJcNum.get(j.jobCardNumber) ?? null
+      const issued = issuedKgByJobId.get(j.id) ?? { kg: null, totalSheets: 0 }
+      return [j.id, await computeJobYieldMetricsForCard(db, j, line, issued)] as const
+    }),
+  )
+  for (const [id, val] of yieldEntries) yieldByJobId.set(id, val)
+
   const ledgerByJcId = new Map(ledgerRows.map((l) => [l.productionJobCardId, l]))
 
   type OeePayload = {
@@ -441,25 +461,30 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
     source: 'live' | 'ledger'
   }
   const oeeByStageId = new Map<string, OeePayload>()
-  for (const r of gatedRecords) {
-    const jc = r.jobCard
-    if (!jc) continue
-    const led = ledgerByJcId.get(jc.id)
-    if (led) {
-      oeeByStageId.set(r.id, {
-        oee: Number(led.oeePct),
-        availability: Number(led.availabilityPct),
-        performance: Number(led.performancePct),
-        quality: Number(led.qualityPct),
-        currentSpeedPph: 0,
-        ratedSpeedPph: led.ratedSpeedPph != null ? Number(led.ratedSpeedPph) : 0,
-        secondsSinceLastTick: null,
-        downtimeLock: false,
-        source: 'ledger',
-      })
-      continue
-    }
-    if (r.status === 'in_progress') {
+
+  // Parallelize live OEE fetches (was sequential await in for-loop).
+  const liveOeeEntries = await Promise.all(
+    gatedRecords.map(async (r) => {
+      const jc = r.jobCard
+      if (!jc) return null
+      const led = ledgerByJcId.get(jc.id)
+      if (led) {
+        return [
+          r.id,
+          {
+            oee: Number(led.oeePct),
+            availability: Number(led.availabilityPct),
+            performance: Number(led.performancePct),
+            quality: Number(led.qualityPct),
+            currentSpeedPph: 0,
+            ratedSpeedPph: led.ratedSpeedPph != null ? Number(led.ratedSpeedPph) : 0,
+            secondsSinceLastTick: null,
+            downtimeLock: false,
+            source: 'ledger' as const,
+          },
+        ] as const
+      }
+      if (r.status !== 'in_progress') return null
       const live = await computeLiveOeeForJobCard(
         db,
         {
@@ -478,26 +503,14 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
           inProgressSince: r.inProgressSince,
           createdAt: r.createdAt,
         },
+        downtimeMinByJobId.get(jc.id) ?? 0,
       )
-      if (live) {
-        oeeByStageId.set(r.id, { ...live, source: 'live' })
-      }
-    }
-  }
-
-  function idleHoursForStage(
-    status: string,
-    stageCreatedAt: Date,
-    jobUpdatedAt: Date,
-  ): number | null {
-    if (status === 'completed') return null
-    if (status === 'pending') {
-      return (Date.now() - stageCreatedAt.getTime()) / 3_600_000
-    }
-    if (status === 'in_progress') {
-      return (Date.now() - jobUpdatedAt.getTime()) / 3_600_000
-    }
-    return (Date.now() - stageCreatedAt.getTime()) / 3_600_000
+      if (!live) return null
+      return [r.id, { ...live, source: 'live' as const }] as const
+    }),
+  )
+  for (const entry of liveOeeEntries) {
+    if (entry) oeeByStageId.set(entry[0], entry[1])
   }
 
   const jobCards = gatedRecords.map((r) => {
@@ -603,9 +616,34 @@ function requiredStageKeysForJob(postPressRouting: unknown): string[] {
     }
   })
 
-  return NextResponse.json({
+  return {
     stageKey,
     stageLabel,
     jobCards: jobCards.filter((x) => x.jobCard != null),
-  })
+  }
+}
+
+const fetchStageDataCached = unstable_cache(
+  fetchStageData,
+  ['production-stage-data-v2'],
+  { revalidate: 30, tags: [PRODUCTION_STAGES_TAG] },
+)
+
+export async function GET(
+  req: NextRequest,
+  context: { params: Promise<{ stageKey: string }> },
+) {
+  const { error } = await requireAuth()
+  if (error) return error
+
+  const { stageKey } = await context.params
+  if (!stageLabelByKey[stageKey]) {
+    return NextResponse.json({ error: 'Invalid stage key' }, { status: 400 })
+  }
+
+  const t0 = Date.now()
+  const data = await fetchStageDataCached(stageKey)
+  const elapsed = Date.now() - t0
+  console.log(`[stages/${stageKey}] ${elapsed}ms (${data.jobCards.length} cards)`)
+  return NextResponse.json(data)
 }

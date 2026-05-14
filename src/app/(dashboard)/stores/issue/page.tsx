@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Html5Qrcode } from 'html5-qrcode'
+import type { Html5Qrcode } from 'html5-qrcode'
 import { toast } from 'sonner'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
@@ -111,7 +111,7 @@ export default function StoresIssuePage() {
     fetchJobCardContext(item.id)
   }
 
-  const startScanner = useCallback(() => {
+  const startScanner = useCallback(async () => {
     setJobContext(null)
     setManualJobId('')
     setIssueQty({})
@@ -120,6 +120,7 @@ export default function StoresIssuePage() {
     setExcessForm(null)
     const el = document.getElementById('qr-reader')
     if (!el) return
+    const { Html5Qrcode } = await import('html5-qrcode')
     const html5Qr = new Html5Qrcode('qr-reader')
     html5Qr
       .start(

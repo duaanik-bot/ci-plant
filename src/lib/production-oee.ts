@@ -73,6 +73,27 @@ export async function sumDowntimeMinutesForJob(db: PrismaClient, productionJobCa
   return (agg._sum.durationSeconds ?? 0) / 60
 }
 
+/** Batched variant: returns Map<jobCardId, minutes> for many cards in a single query. */
+export async function sumDowntimeMinutesForJobs(
+  db: PrismaClient,
+  productionJobCardIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  if (productionJobCardIds.length === 0) return out
+  const rows = await db.productionDowntimeLog.groupBy({
+    by: ['productionJobCardId'],
+    where: {
+      productionJobCardId: { in: productionJobCardIds },
+      durationSeconds: { not: null },
+    },
+    _sum: { durationSeconds: true },
+  })
+  for (const r of rows) {
+    out.set(r.productionJobCardId, (r._sum.durationSeconds ?? 0) / 60)
+  }
+  return out
+}
+
 export type LiveOeeBundle = {
   oee: number
   availability: number
@@ -102,6 +123,8 @@ export async function computeLiveOeeForJobCard(
     inProgressSince: Date | null
     createdAt: Date
   },
+  /** Optional precomputed downtime minutes for this job — pass to avoid N+1 SUMs when batching. */
+  precomputedDowntimeMinutes?: number,
 ): Promise<LiveOeeBundle | null> {
   if (stage.status !== 'in_progress') return null
 
@@ -122,7 +145,8 @@ export async function computeLiveOeeForJobCard(
     ),
   )
 
-  const downtimeMin = await sumDowntimeMinutesForJob(db, job.id)
+  const downtimeMin =
+    precomputedDowntimeMinutes ?? (await sumDowntimeMinutesForJob(db, job.id))
   const runMinutes = Math.max(1, Math.round(shiftMinutes - downtimeMin))
   const availability = shiftMinutes > 0 ? clampPct((runMinutes / shiftMinutes) * 100) : 0
 

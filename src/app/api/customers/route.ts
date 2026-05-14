@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_cache, revalidateTag } from 'next/cache'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
@@ -8,6 +9,8 @@ import { z } from 'zod'
 import { customerSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
+
+const CUSTOMERS_TAG = 'customers'
 
 const createSchema = customerSchema.extend({
   gstNumber: z.string().trim().max(32, 'GST number is too long').optional().or(z.literal('')),
@@ -44,14 +47,8 @@ function mapCustomerRow(c: {
   }
 }
 
-export async function GET(req: NextRequest) {
-  const { error } = await requireAuth()
-  if (error) return error
-
-  const { searchParams } = new URL(req.url)
-  const q = searchParams.get('q')?.trim() ?? ''
-  const limit = Math.min(Number(searchParams.get('limit') || 20), 50)
-
+async function fetchCustomers(args: { q: string; limit: number }) {
+  const { q, limit } = args
   const where =
     q.length >= 2
       ? {
@@ -67,24 +64,41 @@ export async function GET(req: NextRequest) {
         }
       : { active: true }
 
+  const customers = await db.customer.findMany({
+    where,
+    select: {
+      id: true,
+      name: true,
+      gstNumber: true,
+      contactName: true,
+      contactPhone: true,
+      email: true,
+      address: true,
+      requiresArtworkApproval: true,
+      active: true,
+    },
+    orderBy: { name: 'asc' },
+    take: q.length >= 2 ? limit : 50,
+  })
+  return customers.map(mapCustomerRow)
+}
+
+const fetchCustomersCached = unstable_cache(fetchCustomers, ['customers-list-v1'], {
+  revalidate: 300,
+  tags: [CUSTOMERS_TAG],
+})
+
+export async function GET(req: NextRequest) {
+  const { error } = await requireAuth()
+  if (error) return error
+
+  const { searchParams } = new URL(req.url)
+  const q = searchParams.get('q')?.trim() ?? ''
+  const limit = Math.min(Number(searchParams.get('limit') || 20), 50)
+
   try {
-    const customers = await db.customer.findMany({
-      where,
-      select: {
-        id: true,
-        name: true,
-        gstNumber: true,
-        contactName: true,
-        contactPhone: true,
-        email: true,
-        address: true,
-        requiresArtworkApproval: true,
-        active: true,
-      },
-      orderBy: { name: 'asc' },
-      take: q.length >= 2 ? limit : 50,
-    })
-    return NextResponse.json(customers.map(mapCustomerRow))
+    const customers = await fetchCustomersCached({ q, limit })
+    return NextResponse.json(customers)
   } catch (err) {
     console.error('[GET /api/customers]', err)
     const message = err instanceof Error ? err.message : 'Failed to load customers'
@@ -141,6 +155,7 @@ export async function POST(req: NextRequest) {
       newValue: { name: customer.name },
     })
 
+    revalidateTag(CUSTOMERS_TAG)
     return NextResponse.json(
       {
         id: customer.id,

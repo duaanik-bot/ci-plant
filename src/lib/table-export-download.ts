@@ -1,7 +1,3 @@
-import * as XLSX from 'xlsx'
-import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable'
-
 export function sanitizeFileBase(name: string): string {
   const s = name
     .replace(/[^a-z0-9-_]+/gi, '_')
@@ -23,13 +19,14 @@ export function buildExportMatrix<T>(
   }
 }
 
-export function downloadLedgerXlsx(opts: {
+export async function downloadLedgerXlsx(opts: {
   fileBase: string
   sheetName: string
   title: string
   filterSummary?: string[]
   matrix: ExportMatrix
-}): void {
+}): Promise<void> {
+  const XLSX = await import('xlsx')
   const generated = new Date().toLocaleString()
   const meta: string[][] = [
     [opts.title],
@@ -46,12 +43,16 @@ export function downloadLedgerXlsx(opts: {
   XLSX.writeFile(wb, `${sanitizeFileBase(opts.fileBase)}.xlsx`)
 }
 
-export function downloadLedgerPdf(opts: {
+export async function downloadLedgerPdf(opts: {
   fileBase: string
   title: string
   filterSummary?: string[]
   matrix: ExportMatrix
-}): void {
+}): Promise<void> {
+  const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ])
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   let y = 14
   doc.setFontSize(14)

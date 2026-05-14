@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { Html5Qrcode } from 'html5-qrcode'
+import type { Html5Qrcode } from 'html5-qrcode'
 import { toast } from 'sonner'
 
 type ValidateResult = {
@@ -38,10 +38,11 @@ export default function PressValidatePage() {
       })
   }, [])
 
-  const startScanner = useCallback(() => {
+  const startScanner = useCallback(async () => {
     setResult(null)
     const el = document.getElementById('press-qr-reader')
     if (!el) return
+    const { Html5Qrcode } = await import('html5-qrcode')
     const html5Qr = new Html5Qrcode('press-qr-reader')
     html5Qr
       .start(

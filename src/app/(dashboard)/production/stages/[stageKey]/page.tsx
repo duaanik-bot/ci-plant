@@ -228,10 +228,15 @@ export default function ProductionStagePage() {
 
   const stageMeta = PRODUCTION_STAGES.find((s) => s.key === stageKey)
 
+  // Tracks whether the first load has landed — used to choose between full
+  // loading gate and background refresh without putting `data` in `load`'s deps
+  // (which would create an infinite fetch loop).
+  const hasLoadedRef = useRef(false)
+
   const load = useCallback(async () => {
     if (!stageKey) return
     // First load: full loading gate. Subsequent reloads: background refresh only.
-    if (data === null) {
+    if (!hasLoadedRef.current) {
       setLoading(true)
     } else {
       setRefreshing(true)
@@ -241,14 +246,14 @@ export default function ProductionStagePage() {
       const json = (await r.json()) as Payload & { error?: string }
       if ((json as { error?: string }).error) throw new Error((json as { error: string }).error)
       setData(json)
+      hasLoadedRef.current = true
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load')
-      if (data === null) setData(null)
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [stageKey, data])
+  }, [stageKey])
 
   useEffect(() => {
     void load()

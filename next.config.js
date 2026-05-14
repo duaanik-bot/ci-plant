@@ -10,6 +10,14 @@ const nextConfig = {
   experimental: {
     viewTransition: true,
     serverComponentsExternalPackages: ['@prisma/client', 'bcryptjs'],
+    optimizePackageImports: [
+      'lucide-react',
+      'date-fns',
+      'recharts',
+      'framer-motion',
+      '@radix-ui/react-dialog',
+      'sonner',
+    ],
   },
 }
 

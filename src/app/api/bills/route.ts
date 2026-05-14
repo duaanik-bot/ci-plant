@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { unstable_cache, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
+
+const BILLS_TAG = 'bills'
+
+type BillsFilters = { customerId: string | null; status: string | null }
 
 const lineItemSchema = z.object({
   jobCardId: z.string().uuid().optional().nullable(),
@@ -35,14 +40,8 @@ function nextBillNumber(): Promise<string> {
     })
 }
 
-export async function GET(req: NextRequest) {
-  const { error } = await requireAuth()
-  if (error) return error
-
-  const { searchParams } = new URL(req.url)
-  const customerId = searchParams.get('customerId')
-  const status = searchParams.get('status')
-
+async function fetchBills(filters: BillsFilters) {
+  const { customerId, status } = filters
   const list = await db.bill.findMany({
     where: {
       ...(customerId ? { customerId } : {}),
@@ -55,19 +54,35 @@ export async function GET(req: NextRequest) {
     },
   })
 
-  return NextResponse.json(
-    list.map((b) => ({
-      ...b,
-      subtotal: Number(b.subtotal),
-      gstAmount: Number(b.gstAmount),
-      totalAmount: Number(b.totalAmount),
-      lineItems: b.lineItems.map((li) => ({
-        ...li,
-        rate: Number(li.rate),
-        amount: Number(li.amount),
-      })),
-    }))
-  )
+  return list.map((b) => ({
+    ...b,
+    subtotal: Number(b.subtotal),
+    gstAmount: Number(b.gstAmount),
+    totalAmount: Number(b.totalAmount),
+    lineItems: b.lineItems.map((li) => ({
+      ...li,
+      rate: Number(li.rate),
+      amount: Number(li.amount),
+    })),
+  }))
+}
+
+const fetchBillsCached = unstable_cache(fetchBills, ['bills-list-v1'], {
+  revalidate: 15,
+  tags: [BILLS_TAG],
+})
+
+export async function GET(req: NextRequest) {
+  const { error } = await requireAuth()
+  if (error) return error
+
+  const { searchParams } = new URL(req.url)
+  const filters: BillsFilters = {
+    customerId: searchParams.get('customerId'),
+    status: searchParams.get('status'),
+  }
+  const bills = await fetchBillsCached(filters)
+  return NextResponse.json(bills)
 }
 
 export async function POST(req: NextRequest) {
@@ -154,5 +169,6 @@ export async function POST(req: NextRequest) {
     newValue: { billNumber, customerId: bill.customerId },
   })
 
+  revalidateTag(BILLS_TAG)
   return NextResponse.json(bill, { status: 201 })
 }
