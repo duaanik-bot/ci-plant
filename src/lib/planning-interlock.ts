@@ -1,6 +1,43 @@
 import { addMonths, differenceInDays } from 'date-fns'
 import { isEmbossingRequired } from '@/lib/emboss-conditions'
 
+// ─────────────────────────────────────────
+// ARTWORK LOCK — canonical seal on PoLineItem.specOverrides
+// Writers: PATCH /api/planning/po-lines/[id] (auto-derives on every spec merge)
+// and executePrePressFinalize (belt-and-braces).
+// Readers must use isArtworkLocked, not the raw approval flags.
+// ─────────────────────────────────────────
+
+function approvalFlagTrue(value: unknown): boolean {
+  if (value === true) return true
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    return v === 'true' || v === '1' || v === 'yes'
+  }
+  if (typeof value === 'number') return value === 1
+  return false
+}
+
+/** True when both pharma + QA-text raw approval flags are present. Used by the
+ * PATCH route to recompute `artworkLocked` after merging spec overrides. */
+export function rawApprovalsBothTrue(
+  spec: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!spec || typeof spec !== 'object') return false
+  return (
+    approvalFlagTrue(spec.customerApprovalPharma) &&
+    approvalFlagTrue(spec.shadeCardQaTextApproval)
+  )
+}
+
+/** Canonical artwork-lock seal. The only signal readers (5-point gate, dashboards,
+ * director command-center) should consult. */
+export function isArtworkLocked(
+  spec: Record<string, unknown> | null | undefined,
+): boolean {
+  return !!spec && typeof spec === 'object' && spec.artworkLocked === true
+}
+
 export type InterlockKey = 'pl' | 'di' | 'eb' | 'sc'
 
 /** Planning queue 5-icon strip: AW · PA · DI · EB · SC */

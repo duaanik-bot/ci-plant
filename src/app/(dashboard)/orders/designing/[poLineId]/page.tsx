@@ -41,11 +41,23 @@ import { readOrchestration } from '@/lib/orchestration-spec'
 import { AW_PO_STATUS, readAwPoStatus } from '@/lib/aw-queue-spec'
 import { AwQueueCommandPanel } from '@/components/designing/AwQueueCommandPanel'
 
+type ArtworkRejection = {
+  at: string
+  by: string | null
+  reason: string
+  /** Artwork iteration that was rejected (1-based). Useful for audit. */
+  iteration: number
+}
+
 type SpecOverrides = {
   assignedDesignerId?: string
   artworkVersion?: string
   customerApprovalPharma?: boolean
   shadeCardQaTextApproval?: boolean
+  /** Canonical artwork-lock seal; auto-derived server-side from the two approval flags. */
+  artworkLocked?: boolean
+  /** Append-only rejection log. Iteration count = rejections.length + 1. */
+  artworkRejections?: ArtworkRejection[]
   numberOfColours?: number
   batchSpace?: string
   ups?: number
@@ -351,6 +363,9 @@ export default function DesigningDetailPage() {
   const [prePressRemarksInput, setPrePressRemarksInput] = useState('')
   const [customerApproval, setCustomerApproval] = useState(false)
   const [qaTextApproval, setQaTextApproval] = useState(false)
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejecting, setRejecting] = useState(false)
   /** Smart set #: idle | loading | matched (history returned a set #) | empty (no history) */
   const [setLookupState, setSetLookupState] = useState<'idle' | 'loading' | 'matched' | 'empty'>('idle')
   /** True only when history API returned 404 (no plate/line history for carton). */
@@ -492,6 +507,62 @@ export default function DesigningDetailPage() {
         toast.error(e instanceof Error ? e.message : 'Failed to save')
       } finally {
         setSavingSpecs(false)
+      }
+    },
+    [data, poLineId],
+  )
+
+  const persistReject = useCallback(
+    async (reason: string) => {
+      if (!data) return false
+      const trimmed = reason.trim()
+      if (!trimmed) {
+        toast.error('Rejection reason is required')
+        return false
+      }
+      setRejecting(true)
+      try {
+        const existing = (data.line.specOverrides || {}) as Record<string, unknown>
+        const prevRejections = Array.isArray(existing.artworkRejections)
+          ? (existing.artworkRejections as ArtworkRejection[])
+          : []
+        const iteration = prevRejections.length + 1
+        const newRejection: ArtworkRejection = {
+          at: new Date().toISOString(),
+          by: null,
+          reason: trimmed,
+          iteration,
+        }
+        const specOverrides = {
+          ...existing,
+          customerApprovalPharma: false,
+          shadeCardQaTextApproval: false,
+          artworkRejections: [...prevRejections, newRejection],
+        }
+        const res = await fetch(`/api/planning/po-lines/${poLineId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ specOverrides }),
+        })
+        const json = (await res.json()) as { error?: string }
+        if (!res.ok) throw new Error(json.error || 'Reject failed')
+        setCustomerApproval(false)
+        setQaTextApproval(false)
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                line: { ...prev.line, specOverrides: specOverrides as SpecOverrides },
+              }
+            : null,
+        )
+        toast.success(`Artwork rejected — iteration ${iteration} logged`)
+        return true
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Reject failed')
+        return false
+      } finally {
+        setRejecting(false)
       }
     },
     [data, poLineId],
@@ -1917,8 +1988,89 @@ export default function DesigningDetailPage() {
                   />
                   QA OK
                 </label>
+                <span className="hidden sm:block w-px h-5 bg-ds-line/30 shrink-0" aria-hidden />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRejectReason('')
+                    setRejectDialogOpen(true)
+                  }}
+                  disabled={savingSpecs || rejecting || specLocked || (!customerApproval && !qaTextApproval)}
+                  className="px-2 py-1 rounded border border-rose-500/60 bg-rose-500/10 text-rose-300 text-xs font-semibold hover:bg-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  title="Reject this artwork iteration"
+                >
+                  Reject
+                </button>
+                {(() => {
+                  const recs = (data?.line.specOverrides as { artworkRejections?: ArtworkRejection[] } | null)?.artworkRejections
+                  const iteration = (Array.isArray(recs) ? recs.length : 0) + 1
+                  if (iteration <= 1) return null
+                  return (
+                    <span
+                      className="px-1.5 py-0.5 rounded bg-ds-line/40 text-ds-ink-muted text-[10px] font-mono whitespace-nowrap"
+                      title={`Iteration ${iteration} — ${iteration - 1} previous rejection(s)`}
+                    >
+                      v{iteration}
+                    </span>
+                  )
+                })()}
               </div>
             </div>
+            <Dialog.Root open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+              <Dialog.Portal>
+                <Dialog.Overlay className="fixed inset-0 z-[90] bg-background/60 data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0" />
+                <Dialog.Content
+                  className={clsx(
+                    'fixed z-[91] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100vw-1rem,28rem)] rounded-ds-md border border-rose-500/40 bg-background p-5 shadow-2xl',
+                    'data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0 zoom-in-95 duration-150',
+                  )}
+                >
+                  <Dialog.Title className="text-sm font-semibold text-ds-ink">
+                    Reject artwork
+                  </Dialog.Title>
+                  <Dialog.Description className="mt-1 text-xs text-ds-ink-muted">
+                    Clears both approvals and bumps to the next iteration. The reason is
+                    appended to the rejection log on this PO line and cannot be undone.
+                  </Dialog.Description>
+                  <label className="mt-4 block text-xs font-medium text-ds-ink-muted">
+                    Reason
+                    <textarea
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      rows={4}
+                      autoFocus
+                      placeholder="Why is this artwork being rejected?"
+                      className="mt-1 w-full rounded-ds-sm border border-ds-line/50 bg-ds-main px-2 py-1.5 text-sm text-ds-ink outline-none focus:border-rose-500/60"
+                    />
+                  </label>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <Dialog.Close asChild>
+                      <button
+                        type="button"
+                        disabled={rejecting}
+                        className="rounded-ds-sm border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink-muted hover:bg-ds-card disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </Dialog.Close>
+                    <button
+                      type="button"
+                      disabled={rejecting || !rejectReason.trim()}
+                      onClick={async () => {
+                        const ok = await persistReject(rejectReason)
+                        if (ok) {
+                          setRejectDialogOpen(false)
+                          setRejectReason('')
+                        }
+                      }}
+                      className="rounded-ds-sm bg-rose-500 px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-rose-600 disabled:opacity-50"
+                    >
+                      {rejecting ? 'Rejecting…' : 'Reject artwork'}
+                    </button>
+                  </div>
+                </Dialog.Content>
+              </Dialog.Portal>
+            </Dialog.Root>
             <div className="flex flex-wrap gap-2 justify-end">
               <a
                 href={`/api/designing/po-lines/${poLineId}/job-spec-pdf`}

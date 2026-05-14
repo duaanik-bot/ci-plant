@@ -1,5 +1,6 @@
 import type { PoLineItem, ProductionJobCard, PurchaseOrder } from '@prisma/client'
 import { classifyPoToolingSignal, type DieStatusSnapshot } from '@/lib/po-tooling-signal'
+import { isArtworkLocked } from '@/lib/planning-interlock'
 
 export type DirectorStageKey = 'artwork' | 'tooling' | 'material' | 'production' | 'logistics' | 'complete'
 
@@ -54,10 +55,11 @@ export function computeToolingInput(li: PoLineItem) {
 /** Single-line tooling R/Y/G stack for life-bar. */
 export function artworksBarParts(li: PoLineItem, _jc: ProductionJobCard | null): BarPart[] {
   const spec = asSpec(li)
+  const locked = isArtworkLocked(spec)
   const prePress = Boolean(spec.prePressSentToPlateHubAt)
   const a = Boolean(spec.customerApprovalPharma)
   const b = Boolean(spec.shadeCardQaTextApproval)
-  if (prePress) return [{ n: 1, c: 'bg-emerald-500' }]
+  if (locked || prePress) return [{ n: 1, c: 'bg-emerald-500' }]
   if (a || b) return [{ n: 1, c: 'bg-sky-500' }]
   return [{ n: 1, c: 'bg-ds-line/30' }]
 }
@@ -112,7 +114,7 @@ export function deriveDirectorStageKey(
 
   const spec = asSpec(li)
   const prePress = Boolean(spec.prePressSentToPlateHubAt)
-  const approvals = Boolean(spec.customerApprovalPharma && spec.shadeCardQaTextApproval)
+  const approvals = isArtworkLocked(spec)
   if (!prePress || !approvals) return 'artwork'
 
   const t = classifyPoToolingSignal(computeToolingInput(li), dye ?? undefined)

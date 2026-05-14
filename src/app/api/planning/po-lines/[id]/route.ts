@@ -7,6 +7,7 @@ import {
   assertPlanningFactsUnchanged,
   userCanRevisePlanningDecision,
 } from '@/lib/planning-facts-lock'
+import { rawApprovalsBothTrue } from '@/lib/planning-interlock'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,6 +89,12 @@ export async function PATCH(
     data.specOverrides !== undefined
       ? { ...existingSpec, ...(data.specOverrides as Record<string, unknown>) }
       : existingSpec
+  // Canonical artwork-lock seal: always reflect the merged raw approval flags.
+  // Set true iff both pharma + QA-text approvals are true in the merged spec;
+  // otherwise force false (so toggling either flag off clears the lock).
+  if (data.specOverrides !== undefined) {
+    mergedSpec.artworkLocked = rawApprovalsBothTrue(mergedSpec)
+  }
   const mergedSetNumber =
     data.setNumber !== undefined ? data.setNumber : (existing.setNumber ?? null)
 

@@ -9,6 +9,7 @@ import {
   computeMaterialGate,
   estimateDurationHours,
   firstFivePointBlockerName,
+  isArtworkLocked,
 } from '@/lib/planning-interlock'
 import { applyAllocatedStockToJobCard, get_allocated_stock_dims } from '@/lib/allocated-stock-dims'
 import { reserveMaterial } from '@/lib/material-readiness-service'
@@ -81,23 +82,10 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     ? li.specOverrides
     : {}) as Record<string, unknown>
 
-  const asBool = (value: unknown): boolean => {
-    if (value === true) return true
-    if (typeof value === 'string') {
-      const v = value.trim().toLowerCase()
-      return v === 'true' || v === '1' || v === 'yes'
-    }
-    if (typeof value === 'number') return value === 1
-    return false
-  }
-
-  const specTwoApprovals = asBool(spec.customerApprovalPharma) && asBool(spec.shadeCardQaTextApproval)
-  const prePressFinalized = typeof spec.prePressSentToPlateHubAt === 'string' && spec.prePressSentToPlateHubAt.trim().length > 0
-  let artworkLocksCompleted = specTwoApprovals
-    ? 2
-    : Number(spec.artworkLocksCompleted ?? 0)
-  if (prePressFinalized && artworkLocksCompleted < 2) artworkLocksCompleted = 2
-  if (artworkLocksCompleted < 2) artworkLocksCompleted = 2
+  // Read the canonical artwork-lock seal. The PATCH route and
+  // executePrePressFinalize are the only writers. No floors — if the
+  // PO line is not artwork-locked, the 5-point gate must fail on AW.
+  const artworkLocksCompleted = isArtworkLocked(spec) ? 2 : 0
 
   const platesStatus = String(spec.platesStatus ?? 'new_required')
   const dieStatus = String(spec.dieStatus ?? (li.dyeId ? 'good' : 'not_available'))

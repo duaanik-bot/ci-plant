@@ -10,7 +10,7 @@ import {
   postPressRoutingFromPoLine,
   postPressRoutingSchema,
 } from '@/lib/job-card-routing-spec'
-import { computeFivePointReadiness, computeMaterialGate } from '@/lib/planning-interlock'
+import { computeFivePointReadiness, computeMaterialGate, isArtworkLocked } from '@/lib/planning-interlock'
 
 export const dynamic = 'force-dynamic'
 
@@ -386,8 +386,9 @@ export async function POST(req: NextRequest) {
   const spec = (li.specOverrides && typeof li.specOverrides === 'object'
     ? li.specOverrides
     : {}) as Record<string, unknown>
-  // AW approval is advisory in this flow; do not hard-block job card push.
-  const artworkLocksForReadiness = 2
+  // Reads the canonical artwork-lock seal. The aw_orchestration bypass below
+  // still skips the whole readiness gate; tightening that bypass is C-4 work.
+  const artworkLocksForReadiness = isArtworkLocked(spec) ? 2 : 0
 
   const invRows = await db.inventory.findMany({
     where: { active: true },

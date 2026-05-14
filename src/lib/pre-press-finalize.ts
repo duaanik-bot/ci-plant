@@ -102,6 +102,9 @@ export async function executePrePressFinalize(
       ...spec,
       customerApprovalPharma: customerApproval,
       shadeCardQaTextApproval: qaTextCheckApproval,
+      // Canonical artwork-lock seal. The PATCH route auto-derives this on every
+      // merge; this path is the audited finalize, so seal explicitly.
+      artworkLocked: customerApproval === true && qaTextCheckApproval === true,
       assignedDesignerId: assignedDesignerId || undefined,
       designerCommand,
     }

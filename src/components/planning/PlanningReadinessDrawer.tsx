@@ -4,6 +4,7 @@ import { Info, X } from 'lucide-react'
 import {
   computeFivePointReadiness,
   computeToolingInterlock,
+  isArtworkLocked,
   type MaterialGate,
   type MaterialGateStatus,
 } from '@/lib/planning-interlock'
@@ -210,7 +211,7 @@ export function PlanningReadinessDrawer({
 
   const spec = line.specOverrides || {}
   const pc = readPlanningCore(spec)
-  const artworkLocks = Number(spec.artworkLocksCompleted ?? line.readiness?.artworkLocksCompleted ?? 0)
+  const artworkLocks = isArtworkLocked(spec as Record<string, unknown>) ? 2 : 0
   const platesStatus = String(spec.platesStatus ?? line.readiness?.platesStatus ?? 'new_required')
   const dieStatus = String(spec.dieStatus ?? line.readiness?.dieStatus ?? 'not_available')
   const embossStatus = String(spec.embossStatus ?? 'vendor_ordered')

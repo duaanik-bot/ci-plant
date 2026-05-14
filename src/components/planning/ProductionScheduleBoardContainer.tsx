@@ -6,6 +6,7 @@ import { isEmbossingRequired } from '@/lib/emboss-conditions'
 import { type PlanningCore } from '@/lib/planning-decision-spec'
 import {
   computeFivePointReadiness,
+  isArtworkLocked,
   type ReadinessFiveSegment,
 } from '@/lib/planning-interlock'
 import { parseCellKey, type ScheduleHandshake } from '@/lib/production-schedule-spec'
@@ -161,7 +162,7 @@ function shadeCardForInterlock(r: Line): {
 
 function readinessFiveForLine(r: Line): { segments: ReadinessFiveSegment[]; allGreen: boolean } {
   const spec = r.specOverrides || {}
-  const artworkLocks = Number(spec.artworkLocksCompleted ?? r.readiness?.artworkLocksCompleted ?? 0)
+  const artworkLocks = isArtworkLocked(spec as Record<string, unknown>) ? 2 : 0
   const platesStatus = String(spec.platesStatus ?? r.readiness?.platesStatus ?? 'new_required')
   const dieStatus = String(spec.dieStatus ?? r.readiness?.dieStatus ?? (r.dyeId ? 'good' : 'not_available'))
   const embossStatus = String(spec.embossStatus ?? 'vendor_ordered')

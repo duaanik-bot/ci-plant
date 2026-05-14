@@ -6,6 +6,7 @@ import {
   computeMaterialGate,
   computeToolingInterlock,
   estimateDurationHours,
+  isArtworkLocked,
   suggestMachineId,
 } from '@/lib/planning-interlock'
 
@@ -150,18 +151,7 @@ export async function GET(req: NextRequest) {
         ? (li.specOverrides as Record<string, unknown>)
         : {}
 
-      const specTwoApprovals = !!(spec.customerApprovalPharma && spec.shadeCardQaTextApproval)
-      const artworkLocksCompleted = specTwoApprovals
-        ? 2
-        : Number(
-            spec.artworkLocksCompleted ??
-              (jc
-                ? (jc.artworkApproved ? 1 : 0) +
-                  (jc.finalQcPass ? 1 : 0) +
-                  (jc.qaReleased ? 1 : 0) +
-                  (jc.qaReleased ? 1 : 0)
-                : 0),
-          )
+      const artworkLocksCompleted = isArtworkLocked(spec) ? 2 : 0
       const platesStatus = String(spec.platesStatus ?? (jc?.plateSetId ? 'available' : 'new_required'))
       const dieStatus = String(spec.dieStatus ?? (li.dyeId ? 'good' : 'not_available'))
       const embossStatus = String(
