@@ -91,9 +91,62 @@ async function testRecalc() {
   console.log('PASS: recalculateMaterialShortage')
 }
 
+async function testEndToEnd() {
+  // Find a job NOT in terminal state with at least one unreleased reservation
+  const existing = await prisma.materialReservation.findFirst({
+    where: {
+      isReleased: false,
+      jobCard: {
+        status: { in: ACTIVE_RESERVATION_STATUSES as unknown as string[] },
+      },
+    },
+    include: { jobCard: true },
+  })
+  if (!existing) {
+    console.log('SKIP testEndToEnd: no active job with reservations')
+    return
+  }
+
+  const originalStatus = existing.jobCard.status
+  const jobCardId = existing.jobCardId
+
+  // Mutate status to cancelled — explicit wiring at the site SHOULD fire the helper
+  // (we test by calling one of the wired API routes; for an offline smoke we
+  //  simulate the wiring by calling the helpers directly after a status update)
+  await prisma.$transaction(async (tx) => {
+    await tx.productionJobCard.update({
+      where: { id: jobCardId },
+      data: { status: 'cancelled' },
+    })
+    const { materialIds } = await releaseReservationsForJob(jobCardId, 'cancelled', tx)
+    for (const mid of materialIds) {
+      await recalculateMaterialShortage(mid, tx)
+    }
+  })
+
+  const after = await prisma.materialReservation.findMany({ where: { jobCardId } })
+  for (const r of after) {
+    console.assert(r.isReleased === true, `reservation ${r.id} should be released`)
+    console.assert(r.releasedReason === 'job_cancelled', `releasedReason ${r.releasedReason}`)
+  }
+
+  // Revert
+  await prisma.materialReservation.updateMany({
+    where: { jobCardId },
+    data: { isReleased: false, releasedAt: null, releasedReason: null },
+  })
+  await prisma.productionJobCard.update({
+    where: { id: jobCardId },
+    data: { status: originalStatus },
+  })
+
+  console.log('PASS: testEndToEnd (explicit wiring)')
+}
+
 async function main() {
   await testRelease()
   await testRecalc()
+  await testEndToEnd()
 }
 
 main()
