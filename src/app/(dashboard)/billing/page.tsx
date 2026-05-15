@@ -2,11 +2,12 @@
 
 import { useMemo, useState, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   Search, X, FileText, IndianRupee, CheckCircle2, Clock,
-  Send, BadgeCheck, ExternalLink, Receipt,
+  Send, BadgeCheck, ExternalLink, Receipt, ChevronRight,
 } from 'lucide-react'
 import { IndustrialModuleShell, industrialTableClassName } from '@/components/industrial/IndustrialModuleShell'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
@@ -17,6 +18,7 @@ import {
   KpiTile,
   StatusBadge,
 } from '@/components/design-system'
+import { fmtINR } from '@/lib/indian-gst'
 
 type LineItem = {
   id: string
@@ -32,12 +34,40 @@ type Bill = {
   id: string
   billNumber: string
   billDate: string
+  financialYear?: string | null
   customer: { id: string; name: string }
   subtotal: number
+  cgstAmount?: number
+  sgstAmount?: number
+  igstAmount?: number
   gstAmount: number
   totalAmount: number
+  taxSplit?: string
+  ewayApplicable?: boolean
   status: string
   lineItems: LineItem[]
+}
+
+type QueueLine = {
+  dispatchId: string
+  jobNumber: string
+  productName: string
+  poNumber: string | null
+  qtyDispatched: number
+  rate: number | null
+  gstPct: number | null
+  hsnCode: string | null
+  excessQty: number
+}
+
+type QueueGroup = {
+  customerId: string
+  customerName: string
+  customerStateCode: string | null
+  customerGstNumber: string | null
+  dispatches: QueueLine[]
+  totalQty: number
+  estimatedSubtotal: number
 }
 
 type Customer = { id: string; name: string }
@@ -58,15 +88,23 @@ function fmtAmount(n: number) {
 
 export default function BillingPage() {
   const qc = useQueryClient()
+  const router = useRouter()
   const [customerId, setCustomerId] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [localSearch, setLocalSearch] = useState('')
   const [drawerBill, setDrawerBill] = useState<Bill | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
+  const [generatingForCustomerId, setGeneratingForCustomerId] = useState<string | null>(null)
 
   const { data: customers = [] } = useQuery<Customer[]>({
     queryKey: ['billing-customers'],
     queryFn: () => fetch('/api/masters/customers').then((r) => r.json()).then((d) => Array.isArray(d) ? d : []),
+  })
+
+  const { data: queue = [], isFetching: queueFetching } = useQuery<QueueGroup[]>({
+    queryKey: ['billing-queue'],
+    queryFn: () => fetch('/api/billing/queue').then((r) => r.json()).then((d) => (Array.isArray(d) ? d : [])).catch(() => []),
+    refetchInterval: 30_000,
   })
 
   const { data: list = [], isLoading, isFetching, isError } = useQuery<Bill[]>({
@@ -78,6 +116,38 @@ export default function BillingPage() {
       return fetch(`/api/bills?${p}`).then((r) => r.json()).then((d) => Array.isArray(d) ? d : []).catch(() => { toast.error('Failed to load bills'); return [] })
     },
   })
+
+  async function generateForGroup(group: QueueGroup) {
+    if (group.dispatches.length === 0) return
+    setGeneratingForCustomerId(group.customerId)
+    try {
+      const res = await fetch('/api/billing/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dispatchIds: group.dispatches.map((d) => d.dispatchId) }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json?.error ?? 'Invoice generation failed')
+        return
+      }
+      toast.success(
+        `Invoice ${json.billNumber} · ${fmtINR(Number(json.totalAmount))}${json.ewayApplicable ? ' · E-way applicable' : ''}`,
+        {
+          action: {
+            label: 'Open invoice',
+            onClick: () => router.push(`/billing/${json.id}`),
+          },
+        },
+      )
+      await qc.invalidateQueries({ queryKey: ['billing-queue'] })
+      await qc.invalidateQueries({ queryKey: ['bills'] })
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setGeneratingForCustomerId(null)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = localSearch.trim().toLowerCase()
@@ -173,6 +243,70 @@ export default function BillingPage() {
           </Link>
         }
       >
+        {/* Pending Invoice Queue — dispatches flipped to sent_to_billing by Dispatch operators. */}
+        {queue.length > 0 && (
+          <div className="mb-4 space-y-2 rounded-ds-md border border-[var(--brand-primary)]/25 bg-[var(--brand-bg-soft)] p-3">
+            <div className="flex items-center justify-between px-1">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--brand-primary)]">
+                Pending Invoice Queue
+                {queueFetching && <span className="ml-2 text-ds-ink-faint">· refreshing…</span>}
+              </div>
+              <div className="text-[11px] text-ds-ink-muted">
+                {queue.length} customer{queue.length === 1 ? '' : 's'} ·{' '}
+                {queue.reduce((s, g) => s + g.dispatches.length, 0)} dispatches
+              </div>
+            </div>
+            <div className="space-y-2">
+              {queue.map((g) => (
+                <div
+                  key={g.customerId}
+                  className="flex items-center justify-between gap-3 rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-semibold text-ds-ink">{g.customerName}</span>
+                      {g.customerStateCode && (
+                        <span className="text-[10px] font-mono text-ds-ink-faint">
+                          ST {g.customerStateCode}
+                        </span>
+                      )}
+                      {g.customerGstNumber && (
+                        <span className="text-[10px] font-mono text-ds-ink-faint">
+                          {g.customerGstNumber}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] text-ds-ink-muted">
+                      {g.dispatches.length} dispatch{g.dispatches.length === 1 ? '' : 'es'} · Qty{' '}
+                      <span className="font-medium tabular-nums">{g.totalQty.toLocaleString('en-IN')}</span>
+                      {g.estimatedSubtotal > 0 && (
+                        <>
+                          {' · Est. subtotal '}
+                          <span className="font-medium tabular-nums">{fmtINR(g.estimatedSubtotal)}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    variant="primary"
+                    className="gap-1.5 px-3 py-1.5 text-xs"
+                    onClick={() => generateForGroup(g)}
+                    disabled={generatingForCustomerId === g.customerId}
+                  >
+                    {generatingForCustomerId === g.customerId ? (
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    ) : (
+                      <Receipt className="h-3.5 w-3.5" />
+                    )}
+                    Generate Invoice
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Search + Filters */}
         <div className="ds-toolbar">
           <div className="relative flex min-w-0 flex-1 items-center">
@@ -383,10 +517,29 @@ function BillDrawerBody({ bill }: { bill: Bill }) {
             <span className="text-ds-ink-muted">Taxable Amount</span>
             <span className="font-medium tabular-nums text-ds-ink">{fmtAmount(bill.subtotal)}</span>
           </div>
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-ds-ink-muted">GST</span>
-            <span className="font-medium tabular-nums text-ds-ink">{fmtAmount(bill.gstAmount)}</span>
-          </div>
+          {bill.taxSplit === 'intra' || (bill.cgstAmount ?? 0) > 0 || (bill.sgstAmount ?? 0) > 0 ? (
+            <>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-ds-ink-muted">CGST</span>
+                <span className="font-medium tabular-nums text-ds-ink">{fmtAmount(bill.cgstAmount ?? 0)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-ds-ink-muted">SGST</span>
+                <span className="font-medium tabular-nums text-ds-ink">{fmtAmount(bill.sgstAmount ?? 0)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-ds-ink-muted">IGST</span>
+              <span className="font-medium tabular-nums text-ds-ink">{fmtAmount(bill.igstAmount ?? 0)}</span>
+            </div>
+          )}
+          {(bill.cgstAmount ?? 0) === 0 && (bill.sgstAmount ?? 0) === 0 && (bill.igstAmount ?? 0) === 0 && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-ds-ink-muted">GST</span>
+              <span className="font-medium tabular-nums text-ds-ink">{fmtAmount(bill.gstAmount)}</span>
+            </div>
+          )}
           <div className="mt-1 flex items-center justify-between border-t border-[var(--border)] pt-2">
             <span className="flex items-center gap-1.5 text-sm font-semibold text-ds-ink">
               <Receipt className="h-3.5 w-3.5 text-[var(--brand-primary)]" />
@@ -394,6 +547,11 @@ function BillDrawerBody({ bill }: { bill: Bill }) {
             </span>
             <span className="text-base font-bold tabular-nums text-[var(--brand-primary)]">{fmtAmount(bill.totalAmount)}</span>
           </div>
+          {bill.ewayApplicable && (
+            <div className="mt-1 rounded-ds-sm border border-[var(--warning)]/40 bg-[var(--warning-bg)] px-2 py-1 text-[11px] text-[var(--warning)]">
+              E-way bill applicable (≥ ₹50,000 with transport mode set)
+            </div>
+          )}
         </div>
       </CardSection>
 

@@ -20,6 +20,13 @@ const createSchema = cartonSchema.extend({
   category: z.string().optional(),
   rate: z.number().min(0).optional(),
   gstPct: z.number().int().min(0).max(28).default(5),
+  /// HSN code (4–8 digits). Snapshotted onto PO line items at order entry.
+  hsnCode: z
+    .string()
+    .trim()
+    .regex(/^\d{4,8}$/, 'HSN must be 4–8 digits')
+    .optional()
+    .or(z.literal('')),
   active: z.boolean().default(true),
   remarks: z.string().optional(),
   cartonSize: z.string().optional(),
@@ -72,6 +79,7 @@ export async function GET() {
     finishedHeight: number | null
     rate: number | null
     active: boolean
+    source: string | null
   }>>(`
     select
       c.id,
@@ -86,7 +94,8 @@ export async function GET() {
       c.finished_width::float8 as "finishedWidth",
       c.finished_height::float8 as "finishedHeight",
       c.rate::float8 as rate,
-      c.active
+      c.active,
+      c.source
     from cartons c
     join customers cu on cu.id = c.customer_id
     order by c.carton_name asc
@@ -106,6 +115,7 @@ export async function GET() {
       finishedHeight: c.finishedHeight,
       rate: c.rate,
       active: c.active,
+      source: c.source,
     }))
   )
 }
@@ -155,6 +165,7 @@ export async function POST(req: NextRequest) {
       category: data.category || null,
       rate: data.rate ?? null,
       gstPct: data.gstPct,
+      hsnCode: data.hsnCode?.trim() ? data.hsnCode.trim() : null,
       active: data.active,
       boardGrade: data.boardGrade || null,
       gsm: data.gsm ?? null,

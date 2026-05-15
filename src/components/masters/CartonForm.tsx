@@ -71,6 +71,8 @@ export type CartonFormData = {
   artworkCode: string
   rate: string
   gstPct: string
+  /** HSN code (4–8 digits). Snapshotted onto PO line items at order entry. */
+  hsnCode: string
   finishedLength: string
   finishedWidth: string
   finishedHeight: string
@@ -104,6 +106,7 @@ const EMPTY: CartonFormData = {
   artworkCode: '',
   rate: '',
   gstPct: '5',
+  hsnCode: '',
   finishedLength: '',
   finishedWidth: '',
   finishedHeight: '',
@@ -411,6 +414,7 @@ export default function CartonForm({ mode, initialData }: Props) {
       artworkCode: toCaps(f.artworkCode.trim()) || undefined,
       rate: f.rate ? Number(f.rate) : undefined,
       gstPct: f.gstPct ? Number(f.gstPct) : 5,
+      hsnCode: f.hsnCode?.trim() ? f.hsnCode.trim() : undefined,
       finishedLength: f.finishedLength ? Number(f.finishedLength) : undefined,
       finishedWidth: f.finishedWidth ? Number(f.finishedWidth) : undefined,
       finishedHeight: f.finishedHeight ? Number(f.finishedHeight) : undefined,
@@ -605,7 +609,7 @@ export default function CartonForm({ mode, initialData }: Props) {
                   </div>
                 )}
               </div>
-              <div className='md:col-span-2 grid grid-cols-2 gap-3'>
+              <div className='md:col-span-2 grid grid-cols-3 gap-3'>
                 <div>
                   <label className='block text-ds-ink-muted mb-1'>Rate</label>
                   <input type='number' inputMode='decimal' onKeyDown={blockInvalidNumericKeys} className={cls} value={f.rate} onChange={(e) => patch('rate', e.target.value)} />
@@ -613,6 +617,16 @@ export default function CartonForm({ mode, initialData }: Props) {
                 <div>
                   <label className='block text-ds-ink-muted mb-1'>GST %</label>
                   <input type='number' inputMode='decimal' onKeyDown={blockInvalidNumericKeys} className={cls} value={f.gstPct} onChange={(e) => patch('gstPct', e.target.value)} />
+                </div>
+                <div>
+                  <label className='block text-ds-ink-muted mb-1'>HSN code</label>
+                  <input
+                    inputMode='numeric'
+                    placeholder='4–8 digits'
+                    className={`${cls} font-mono`}
+                    value={f.hsnCode}
+                    onChange={(e) => patch('hsnCode', e.target.value.replace(/\D/g, '').slice(0, 8))}
+                  />
                 </div>
               </div>
             </div>

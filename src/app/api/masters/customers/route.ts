@@ -20,6 +20,17 @@ const createSchema = customerSchema.extend({
   creditLimit: z.number().min(0).default(0),
   requiresArtworkApproval: z.boolean().default(true),
   active: z.boolean().default(true),
+}).extend({
+  // GST-invoicing extensions live on the base schema; restated here so partial()/extend chains stay consistent.
+  pan: z
+    .string()
+    .trim()
+    .regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/)
+    .optional()
+    .or(z.literal('')),
+  stateCode: z.string().trim().regex(/^\d{2}$/).optional().or(z.literal('')),
+  billingAddress: z.string().optional(),
+  shippingAddress: z.string().optional(),
 })
 
 async function fetchMastersCustomers(args: { q: string; limit: number }) {
@@ -61,6 +72,10 @@ export async function GET(req: NextRequest) {
       logoUrl: c.logoUrl,
       city: cityFromAddress(c.address),
       gstNumber: c.gstNumber,
+      pan: c.pan,
+      stateCode: c.stateCode,
+      billingAddress: c.billingAddress,
+      shippingAddress: c.shippingAddress,
       contactName: c.contactName,
       contactPhone: c.contactPhone,
       email: c.email,
@@ -98,6 +113,10 @@ export async function POST(req: NextRequest) {
         name: data.name,
         logoUrl: data.logoUrl?.trim() ? data.logoUrl.trim() : null,
         gstNumber: data.gstNumber?.trim() ? data.gstNumber.trim() : null,
+        pan: data.pan?.trim() ? data.pan.trim() : null,
+        stateCode: data.stateCode?.trim() ? data.stateCode.trim() : null,
+        billingAddress: data.billingAddress?.trim() ? data.billingAddress.trim() : null,
+        shippingAddress: data.shippingAddress?.trim() ? data.shippingAddress.trim() : null,
         contactName: data.contactName || null,
         contactPhone: data.contactPhone || null,
         email: data.email || null,
@@ -123,6 +142,10 @@ export async function POST(req: NextRequest) {
         name: customer.name,
         logoUrl: customer.logoUrl,
         gstNumber: customer.gstNumber,
+        pan: customer.pan,
+        stateCode: customer.stateCode,
+        billingAddress: customer.billingAddress,
+        shippingAddress: customer.shippingAddress,
         contactName: customer.contactName,
         contactPhone: customer.contactPhone,
         email: customer.email,

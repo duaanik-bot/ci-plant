@@ -30,6 +30,7 @@ const updateSchema = cartonSchema.partial().extend({
   category: z.string().optional(),
   rate: z.number().min(0).optional(),
   gstPct: z.number().int().min(0).max(28).optional(),
+  hsnCode: z.string().trim().regex(/^\d{4,8}$/).optional().nullable().or(z.literal('')),
   active: z.boolean().optional(),
   remarks: z.string().optional().nullable(),
   cartonSize: z.string().optional().nullable(),
@@ -119,6 +120,7 @@ export async function PUT(
   if (data.category !== undefined) update.category = toNullableText(data.category)
   if (data.rate !== undefined) update.rate = data.rate
   if (data.gstPct !== undefined) update.gstPct = data.gstPct
+  if (data.hsnCode !== undefined) update.hsnCode = toNullableText(data.hsnCode)
   if (data.active !== undefined) update.active = data.active
   if (data.remarks !== undefined) update.remarks = toNullableText(data.remarks)
   if (data.boardGrade !== undefined) update.boardGrade = toNullableText(data.boardGrade)

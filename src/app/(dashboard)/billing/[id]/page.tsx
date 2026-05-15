@@ -186,6 +186,9 @@ export default function BillDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href={`/billing/${bill.id}/print`} target="_blank">
+            <Button variant="secondary" className="gap-1.5">Print Tax Invoice</Button>
+          </Link>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}

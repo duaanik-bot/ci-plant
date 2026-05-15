@@ -57,11 +57,19 @@ async function fetchBills(filters: BillsFilters) {
   return list.map((b) => ({
     ...b,
     subtotal: Number(b.subtotal),
+    cgstAmount: Number(b.cgstAmount),
+    sgstAmount: Number(b.sgstAmount),
+    igstAmount: Number(b.igstAmount),
     gstAmount: Number(b.gstAmount),
     totalAmount: Number(b.totalAmount),
+    distanceKm: b.distanceKm != null ? Number(b.distanceKm) : null,
     lineItems: b.lineItems.map((li) => ({
       ...li,
       rate: Number(li.rate),
+      taxableAmount: Number(li.taxableAmount),
+      cgstAmount: Number(li.cgstAmount),
+      sgstAmount: Number(li.sgstAmount),
+      igstAmount: Number(li.igstAmount),
       amount: Number(li.amount),
     })),
   }))

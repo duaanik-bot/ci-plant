@@ -136,6 +136,22 @@ export const excessRequestSchema = z.object({
 export const customerSchema = z.object({
   name: requiredString('Company name'),
   gstNumber: gstValidator,
+  // 10-character PAN (5 letters + 4 digits + 1 letter). Optional but strict when present.
+  pan: z
+    .string()
+    .trim()
+    .regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, 'PAN must be 10 chars: AAAAA9999A')
+    .optional()
+    .or(z.literal('')),
+  // Indian state code: 2 digits (e.g. "27" = Maharashtra). Drives CGST/SGST vs IGST split.
+  stateCode: z
+    .string()
+    .trim()
+    .regex(/^\d{2}$/, 'State code must be 2 digits')
+    .optional()
+    .or(z.literal('')),
+  billingAddress: z.string().optional(),
+  shippingAddress: z.string().optional(),
   contactName: optionalString,
   contactPhone: phoneValidator,
   email: emailValidator,

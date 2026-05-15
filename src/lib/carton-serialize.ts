@@ -55,6 +55,7 @@ export function serializeCarton(row: CartonWithCustomerDye) {
     category: row.category,
     rate: dec(row.rate),
     gstPct: row.gstPct,
+    hsnCode: row.hsnCode ?? null,
     active: row.active,
     remarks: row.remarks ?? '',
     printingType: row.printingType ?? '',
@@ -114,5 +115,6 @@ export function serializeCarton(row: CartonWithCustomerDye) {
       row.shadeCardId && row.shadeCard
         ? { id: row.shadeCard.id, shadeCode: row.shadeCard.shadeCode }
         : null,
+    source: row.source,
   }
 }

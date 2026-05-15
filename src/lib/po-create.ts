@@ -14,6 +14,8 @@ export type CreatePoLineInput = {
   rate?: number | Prisma.Decimal | null
   gsm?: number | null
   gstPct: number
+  /// HSN snapshot — when omitted and `cartonId` is set, copied from Carton.hsnCode at write time.
+  hsnCode?: string | null
   coatingType?: string | null
   otherCoating?: string | null
   embossingLeafing?: string | null
@@ -85,9 +87,34 @@ export async function createPurchaseOrderWithLines(
     },
   })
 
+  // Snapshot Carton.hsnCode onto each PO line for lines that didn't pass an explicit
+  // hsnCode. Locks the HSN against the order's lifetime even if the Carton master
+  // is edited later. Batched in a single query for efficiency.
+  const cartonIdsNeedingHsn = Array.from(
+    new Set(
+      input.lineItems
+        .filter((li) => li.cartonId && (li.hsnCode == null || li.hsnCode === ''))
+        .map((li) => li.cartonId as string),
+    ),
+  )
+  const cartonHsnById = new Map<string, string | null>()
+  if (cartonIdsNeedingHsn.length > 0) {
+    const rows = await tx.carton.findMany({
+      where: { id: { in: cartonIdsNeedingHsn } },
+      select: { id: true, hsnCode: true },
+    })
+    for (const r of rows) cartonHsnById.set(r.id, r.hsnCode)
+  }
+
   await Promise.all(
-    input.lineItems.map((li) =>
-      tx.poLineItem.create({
+    input.lineItems.map((li) => {
+      const resolvedHsn =
+        li.hsnCode != null && li.hsnCode !== ''
+          ? li.hsnCode
+          : li.cartonId
+          ? cartonHsnById.get(li.cartonId) ?? null
+          : null
+      return tx.poLineItem.create({
         data: {
           poId: po.id,
           cartonId: li.cartonId,
@@ -99,6 +126,7 @@ export async function createPurchaseOrderWithLines(
           rate: li.rate ?? null,
           gsm: li.gsm ?? null,
           gstPct: li.gstPct,
+          hsnCode: resolvedHsn,
           coatingType: li.coatingType || null,
           otherCoating: li.otherCoating || null,
           embossingLeafing: li.embossingLeafing || null,
@@ -118,8 +146,8 @@ export async function createPurchaseOrderWithLines(
               : null,
           ) as object,
         },
-      }),
-    ),
+      })
+    }),
   )
 
   if (!input.skipMaterialSync) {

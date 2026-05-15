@@ -15,6 +15,10 @@ const updateSchema = customerSchema.partial().extend({
   creditLimit: z.number().min(0).optional(),
   requiresArtworkApproval: z.boolean().optional(),
   active: z.boolean().optional(),
+  pan: z.string().trim().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/).optional().or(z.literal('')),
+  stateCode: z.string().trim().regex(/^\d{2}$/).optional().or(z.literal('')),
+  billingAddress: z.string().optional(),
+  shippingAddress: z.string().optional(),
 })
 
 export async function PUT(
@@ -50,6 +54,10 @@ export async function PUT(
       ...(data.name != null && { name: data.name }),
       ...(data.logoUrl !== undefined && { logoUrl: data.logoUrl?.trim() ? data.logoUrl.trim() : null }),
       ...(data.gstNumber !== undefined && { gstNumber: data.gstNumber || null }),
+      ...(data.pan !== undefined && { pan: data.pan?.trim() ? data.pan.trim() : null }),
+      ...(data.stateCode !== undefined && { stateCode: data.stateCode?.trim() ? data.stateCode.trim() : null }),
+      ...(data.billingAddress !== undefined && { billingAddress: data.billingAddress?.trim() ? data.billingAddress.trim() : null }),
+      ...(data.shippingAddress !== undefined && { shippingAddress: data.shippingAddress?.trim() ? data.shippingAddress.trim() : null }),
       ...(data.contactName !== undefined && { contactName: data.contactName || null }),
       ...(data.contactPhone !== undefined && { contactPhone: data.contactPhone || null }),
       ...(data.email !== undefined && { email: data.email || null }),
@@ -74,6 +82,10 @@ export async function PUT(
     name: customer.name,
     logoUrl: customer.logoUrl,
     gstNumber: customer.gstNumber,
+    pan: customer.pan,
+    stateCode: customer.stateCode,
+    billingAddress: customer.billingAddress,
+    shippingAddress: customer.shippingAddress,
     contactName: customer.contactName,
     contactPhone: customer.contactPhone,
     email: customer.email,

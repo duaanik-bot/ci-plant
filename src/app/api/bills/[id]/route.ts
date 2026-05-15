@@ -31,8 +31,27 @@ export async function GET(
   const bill = await db.bill.findUnique({
     where: { id },
     include: {
-      customer: { select: { id: true, name: true } },
+      customer: true,
       lineItems: true,
+      dispatches: {
+        select: {
+          id: true,
+          qtyDispatched: true,
+          vehicleNumber: true,
+          transporterName: true,
+          transportMode: true,
+          distanceKm: true,
+          ewayBillNumber: true,
+          dispatchedAt: true,
+          poLineItem: {
+            select: {
+              cartonName: true,
+              hsnCode: true,
+              po: { select: { poNumber: true } },
+            },
+          },
+        },
+      },
     },
   })
   if (!bill) return NextResponse.json({ error: 'Bill not found' }, { status: 404 })
@@ -40,12 +59,25 @@ export async function GET(
   return NextResponse.json({
     ...bill,
     subtotal: Number(bill.subtotal),
+    cgstAmount: Number(bill.cgstAmount),
+    sgstAmount: Number(bill.sgstAmount),
+    igstAmount: Number(bill.igstAmount),
     gstAmount: Number(bill.gstAmount),
     totalAmount: Number(bill.totalAmount),
+    distanceKm: bill.distanceKm != null ? Number(bill.distanceKm) : null,
     lineItems: bill.lineItems.map((li) => ({
       ...li,
       rate: Number(li.rate),
+      taxableAmount: Number(li.taxableAmount),
+      cgstAmount: Number(li.cgstAmount),
+      sgstAmount: Number(li.sgstAmount),
+      igstAmount: Number(li.igstAmount),
       amount: Number(li.amount),
+    })),
+    dispatches: bill.dispatches.map((d) => ({
+      ...d,
+      distanceKm: d.distanceKm != null ? Number(d.distanceKm) : null,
+      dispatchedAt: d.dispatchedAt?.toISOString() ?? null,
     })),
   })
 }
