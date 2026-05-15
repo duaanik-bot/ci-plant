@@ -12,7 +12,7 @@
     @apply border-ds-brand/85 outline-none ring-2 ring-ds-brand/45;
   }
   .ds-input {
-    @apply w-full rounded-ds-sm border border-ds-line/60 bg-white px-3 py-2.5 text-[14px] text-ds-ink shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out placeholder:text-ds-ink-faint;
+    @apply w-full rounded-ds-sm border border-ds-line/60 bg-[var(--bg-card)] px-3 py-2.5 text-[14px] text-ds-ink shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out placeholder:text-ds-ink-faint;
   }
   /** Tabular numerals for amounts and counts (line totals use .ds-typo-total for green). */
   .ds-input-num {
@@ -22,7 +22,7 @@
     @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(249,115,22,0.2),0_4px_12px_rgba(15,23,42,0.08)];
   }
   .ds-toolbar {
-    @apply flex flex-wrap items-center gap-2 rounded-ds-md border border-ds-line/60 bg-white px-3 py-2 shadow-sm;
+    @apply flex flex-wrap items-center gap-2 rounded-ds-md border border-ds-line/60 bg-[var(--bg-card)] px-3 py-2 shadow-sm;
   }
   .ds-toolbar-search {
     @apply ds-input h-9 min-w-[260px] max-w-[460px] py-1.5;
@@ -295,15 +295,17 @@
 
 @layer components {
   .ci-hub-modal-panel {
-    @apply w-full max-w-md max-h-[90vh] overflow-y-auto space-y-2.5 rounded-ds-md border border-ds-line/50 bg-ds-card/95 p-3.5 shadow-2xl backdrop-blur-md;
+    @apply w-full max-w-md max-h-[90vh] overflow-y-auto space-y-2.5 rounded-ds-md border border-ds-line/50 bg-ds-card/95 p-3.5 shadow-ds-drawer backdrop-blur-md;
   }
   .ci-hub-modal-title {
     @apply -mt-0.5 border-b border-ds-line/50 pb-2 text-[11px] font-bold uppercase tracking-widest text-ds-ink;
   }
+  /** @deprecated Use <Button variant="primary"> from @/components/design-system/Button instead */
   .ci-btn-save-industrial {
     @apply rounded-ds-sm border border-ds-brand/30 bg-ds-brand px-3 py-2 text-sm font-semibold text-white shadow-sm transition duration-200 hover:border-ds-brand-hover hover:bg-ds-brand-hover disabled:opacity-50;
   }
+  /** @deprecated Use <Button variant="primary"> from @/components/design-system/Button instead */
   .ci-btn-procurement {
-    @apply rounded-ds-sm border border-ds-brand/25 bg-ds-brand px-3 py-2 text-sm font-semibold text-white shadow-md transition duration-200 hover:border-ds-brand/40 hover:bg-ds-brand-hover disabled:opacity-50;
+    @apply rounded-ds-sm border border-ds-brand/25 bg-ds-brand px-3 py-2 text-sm font-semibold text-white shadow-sm transition duration-200 hover:border-ds-brand/40 hover:bg-ds-brand-hover disabled:opacity-50;
   }
 }

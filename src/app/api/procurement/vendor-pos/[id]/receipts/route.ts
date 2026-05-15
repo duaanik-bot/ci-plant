@@ -156,7 +156,7 @@ export async function POST(
 
   const po = await db.vendorMaterialPurchaseOrder.findUnique({
     where: { id: vendorPoId },
-    select: { id: true, poNumber: true, status: true, isShortClosed: true },
+    select: { id: true, poNumber: true, status: true, isShortClosed: true, supplierId: true },
   })
   if (!po) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (po.isShortClosed || po.status === 'closed') {
@@ -177,6 +177,8 @@ export async function POST(
   const operatorName = (user!.name?.trim() || INDUSTRIAL_DEFAULT_OPERATOR).trim()
 
   const receipt = await db.$transaction(async (tx) => {
+    // Extended tx: receipt + aggregate sync + inventory quarantine fill +
+    // PaperWarehouse mint per matched line. Bump beyond Prisma's 5s default.
     const row = await tx.vendorMaterialReceipt.create({
       data: {
         vendorPoId,
@@ -189,8 +191,98 @@ export async function POST(
       },
     })
     await syncVendorPoReceiptAggregate(tx, vendorPoId)
+
+    const receiptKg = Number(row.receivedQty)
+    if (receiptKg > 0) {
+      const lines = await tx.vendorMaterialPurchaseOrderLine.findMany({
+        where: { vendorPoId },
+        select: {
+          boardGrade: true,
+          gsm: true,
+          totalWeightKg: true,
+          ratePerKg: true,
+          grainDirection: true,
+        },
+      })
+      const totalLineKg = lines.reduce((s, l) => s + Number(l.totalWeightKg), 0)
+
+      for (const line of lines) {
+        const share =
+          totalLineKg > 0
+            ? Number(line.totalWeightKg) / totalLineKg
+            : lines.length > 0
+              ? 1 / lines.length
+              : 0
+        const lineKg = Number((receiptKg * share).toFixed(3))
+        if (lineKg <= 0) continue
+
+        const invRow = await tx.inventory.findFirst({
+          where: { boardType: line.boardGrade, gsm: line.gsm },
+          select: {
+            id: true,
+            unit: true,
+            sheetLength: true,
+            sheetWidth: true,
+            gsm: true,
+            boardType: true,
+            boardClassification: true,
+            storageLocation: true,
+          },
+        })
+        if (!invRow) continue
+
+        let quarantineDelta = lineKg
+        if (invRow.unit === 'sheets' && invRow.sheetLength && invRow.sheetWidth && invRow.gsm) {
+          const sheetWeightG =
+            (Number(invRow.sheetLength) * Number(invRow.sheetWidth) * invRow.gsm) / 1_000_000
+          quarantineDelta = sheetWeightG > 0 ? Math.round((lineKg * 1000) / sheetWeightG) : 0
+        }
+        if (quarantineDelta <= 0) continue
+
+        await tx.inventory.update({
+          where: { id: invRow.id },
+          data: { qtyQuarantine: { increment: quarantineDelta } },
+        })
+        await tx.stockMovement.create({
+          data: {
+            materialId: invRow.id,
+            movementType: 'grn_quarantine',
+            qty: quarantineDelta,
+            refType: 'vendor_receipt',
+            refId: row.id,
+            userId: user!.id,
+          },
+        })
+
+        if (invRow.boardType && invRow.gsm) {
+          const sheetSizeLabel =
+            invRow.sheetLength != null && invRow.sheetWidth != null
+              ? `${Number(invRow.sheetLength)} × ${Number(invRow.sheetWidth)} mm`
+              : null
+          await tx.paperWarehouse.create({
+            data: {
+              vendorId: po.supplierId,
+              paperType: invRow.boardType,
+              boardGrade: invRow.boardClassification ?? null,
+              gsm: invRow.gsm,
+              qtySheets: quarantineDelta,
+              lotNumber: row.scaleSlipId,
+              rate: line.ratePerKg != null ? Number(line.ratePerKg) : null,
+              coaReference: row.id,
+              receiptDate: row.receiptDate,
+              location: invRow.storageLocation ?? null,
+              sheetSizeLabel,
+              grainDirection: line.grainDirection,
+              supplierGsm: line.gsm,
+              status: 'quarantine',
+            },
+          })
+        }
+      }
+    }
+
     return row
-  })
+  }, { maxWait: 5000, timeout: 15000 })
 
   const poAfter = await db.vendorMaterialPurchaseOrder.findUnique({
     where: { id: vendorPoId },

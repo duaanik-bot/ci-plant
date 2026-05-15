@@ -1,27 +1,28 @@
 /**
  * Shared enterprise data-grid tokens — use with {@link EnterpriseTableShell}.
- * Maps to the global `ds` palette; light theme uses neutral surfaces, dark uses premium tokens.
+ * Uses global DS CSS variables so light/dark/high-contrast themes all work
+ * without any dark: prefix overrides here.
  */
 
 /** Root `<table>` — full width, readable body size */
 export const enterpriseTableClass =
-  'w-full border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink'
+  'w-full border-collapse text-left text-sm text-[var(--text-primary)]'
 
 /** Table header row area */
 export const enterpriseTheadClass =
-  'border-b border-neutral-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-500 dark:border-ds-line/50 dark:bg-ds-elevated/80 dark:text-ds-ink-faint'
+  'border-b border-[var(--border)] bg-[var(--bg-elevated)] text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]'
 
 /** Table body — dividers + base row background */
 export const enterpriseTbodyClass =
-  'divide-y divide-neutral-200 bg-white dark:divide-ds-line/30 dark:bg-ds-main'
+  'divide-y divide-[var(--border)] bg-[var(--bg-card)]'
 
 /** Body row — hover scan line */
 export const enterpriseTrClass =
-  'transition-[background-color,box-shadow] duration-150 ease-out hover:bg-slate-50 dark:hover:bg-ds-elevated/30'
+  'transition-[background-color,box-shadow] duration-150 ease-out hover:bg-[var(--bg-elevated)]'
 
 /** Selected / active row — left brand rail (use on `<tr>`) */
 export const enterpriseTrSelectedClass =
-  'bg-orange-50/55 shadow-[inset_3px_0_0_0_#f97316] ring-1 ring-inset ring-orange-200/70 dark:bg-ds-elevated/35 dark:shadow-[inset_3px_0_0_0_#f97316] dark:ring-1 dark:ring-inset dark:ring-ds-brand/15'
+  'bg-[var(--brand-bg-soft)] shadow-[inset_3px_0_0_0_var(--brand-primary)] ring-1 ring-inset ring-[var(--brand-primary)]/20'
 
 /** Header cell */
 export const enterpriseThClass =
@@ -29,18 +30,18 @@ export const enterpriseThClass =
 
 /** Data cell padding + type — add ellipsis variant when needed */
 export const enterpriseTdBase =
-  'px-4 py-3 text-sm font-medium align-middle text-neutral-900 dark:text-ds-ink'
+  'px-4 py-3 text-sm font-medium align-middle text-[var(--text-primary)]'
 
 /** Standard data cell (single-line, clipped) */
 export const enterpriseTdClass = `${enterpriseTdBase} whitespace-nowrap overflow-hidden text-ellipsis`
 
-/** PO #, qty, dates, IDs — JetBrains Mono (root variable) */
-export const enterpriseTdMonoClass = `${enterpriseTdClass} font-designing-queue tabular-nums tracking-tight`
+/** PO #, qty, dates, IDs — monospace (JetBrains Mono loaded globally) */
+export const enterpriseTdMonoClass = `${enterpriseTdClass} font-[var(--font-mono-code,var(--font-sans))] tabular-nums tracking-tight`
 
 /** Secondary / muted cell */
 export const enterpriseTdMutedClass =
-  'px-4 py-3 text-sm text-neutral-500 dark:text-ds-ink-muted whitespace-nowrap overflow-hidden text-ellipsis'
+  'px-4 py-3 text-sm text-[var(--text-secondary)] whitespace-nowrap overflow-hidden text-ellipsis'
 
 /** Sub-label in table context */
 export const enterpriseTableSubLabelClass =
-  'text-xs uppercase tracking-wider text-neutral-500 dark:text-ds-ink-faint'
+  'text-xs uppercase tracking-wider text-[var(--text-secondary)]'

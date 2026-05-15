@@ -27,6 +27,7 @@ type CartonRow = {
   finishedHeight: number | null
   rate: number | null
   active: boolean
+  source: string | null
 }
 
 const cellWrap = `${enterpriseTdBase} whitespace-normal break-words`
@@ -110,6 +111,7 @@ export default function CartonMasterPage() {
           size,
           c.active ? 'active' : 'inactive',
           c.rate != null ? String(c.rate) : '',
+          c.source === 'po_import_ai' ? 'ai imported' : '',
         ]
           .join(' ')
           .toLowerCase()
@@ -213,7 +215,19 @@ export default function CartonMasterPage() {
                     }
                   />
                 </td>
-                <td className={`${cellWrap} font-designing-queue`}>{c?.cartonName ?? '—'}</td>
+                <td className={`${cellWrap} font-designing-queue`}>
+                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                    <span>{c?.cartonName ?? '—'}</span>
+                    {c?.source === 'po_import_ai' && (
+                      <span
+                        title="Auto-created from a PO PDF import — please verify before relying on for matching."
+                        className="rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300"
+                      >
+                        AI imported
+                      </span>
+                    )}
+                  </span>
+                </td>
                 <td className={cellWrap}>{c?.customer?.name ?? '—'}</td>
                 <td className={enterpriseTdMonoClass}>
                   {c?.finishedLength ?? '—'}×{c?.finishedWidth ?? '—'}×{c?.finishedHeight ?? '—'}

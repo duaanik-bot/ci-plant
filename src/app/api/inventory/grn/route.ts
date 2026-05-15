@@ -197,6 +197,35 @@ export async function POST(req: NextRequest) {
       },
     })
     grnMovementId = movement.id
+
+    if (isBoardType && inv.boardType && inv.gsm) {
+      const sheetSizeLabel =
+        inv.sheetLength != null && inv.sheetWidth != null
+          ? `${Number(inv.sheetLength)} × ${Number(inv.sheetWidth)} in`
+          : null
+      const batchRate =
+        pricePerKg != null && pricePerKg > 0
+          ? pricePerKg
+          : data.costPerUnit != null && data.costPerUnit > 0
+            ? data.costPerUnit
+            : null
+      await tx.paperWarehouse.create({
+        data: {
+          vendorId: inv.supplierId ?? null,
+          paperType: inv.boardType,
+          boardGrade: inv.boardClassification ?? null,
+          gsm: inv.gsm,
+          qtySheets: Math.max(0, Math.round(quarantineQty)),
+          lotNumber: lot,
+          rate: batchRate,
+          coaReference: data.poReference?.trim() || null,
+          location: inv.storageLocation ?? null,
+          sheetSizeLabel,
+          supplierGsm: inv.gsm,
+          status: 'quarantine',
+        },
+      })
+    }
   })
 
   await createAuditLog({

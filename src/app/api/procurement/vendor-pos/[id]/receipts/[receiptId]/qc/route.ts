@@ -204,7 +204,120 @@ export async function PATCH(
       },
     })
     await syncVendorPoReceiptAggregate(tx, vendorPoId)
-  })
+
+    const totalSplitKg = std + pen + rej
+    if (totalSplitKg > 0) {
+      const lines = await tx.vendorMaterialPurchaseOrderLine.findMany({
+        where: { vendorPoId },
+        select: { boardGrade: true, gsm: true, totalWeightKg: true },
+      })
+      const totalLineKg = lines.reduce((s, l) => s + Number(l.totalWeightKg), 0)
+
+      for (const line of lines) {
+        const share =
+          totalLineKg > 0
+            ? Number(line.totalWeightKg) / totalLineKg
+            : lines.length > 0
+              ? 1 / lines.length
+              : 0
+        const lineAcceptedKg = Number((usable * share).toFixed(3))
+        const lineRejectedKg = Number((rej * share).toFixed(3))
+
+        const invRow = await tx.inventory.findFirst({
+          where: { boardType: line.boardGrade, gsm: line.gsm },
+          select: {
+            id: true,
+            unit: true,
+            sheetLength: true,
+            sheetWidth: true,
+            gsm: true,
+          },
+        })
+        if (!invRow) continue
+
+        const toQty = (kg: number) => {
+          if (kg <= 0) return 0
+          if (invRow.unit === 'sheets' && invRow.sheetLength && invRow.sheetWidth && invRow.gsm) {
+            const sheetWeightG =
+              (Number(invRow.sheetLength) * Number(invRow.sheetWidth) * invRow.gsm) / 1_000_000
+            return sheetWeightG > 0 ? Math.round((kg * 1000) / sheetWeightG) : 0
+          }
+          return kg
+        }
+
+        const acceptedDelta = toQty(lineAcceptedKg)
+        if (acceptedDelta > 0) {
+          await tx.inventory.update({
+            where: { id: invRow.id },
+            data: {
+              qtyQuarantine: { decrement: acceptedDelta },
+              qtyAvailable: { increment: acceptedDelta },
+            },
+          })
+          await tx.stockMovement.create({
+            data: {
+              materialId: invRow.id,
+              movementType: 'qc_release',
+              qty: acceptedDelta,
+              refType: 'vendor_receipt',
+              refId: receiptId,
+              userId: user!.id,
+            },
+          })
+        }
+
+        const rejectedDelta = toQty(lineRejectedKg)
+        if (rejectedDelta > 0) {
+          await tx.inventory.update({
+            where: { id: invRow.id },
+            data: { qtyQuarantine: { decrement: rejectedDelta } },
+          })
+          await tx.stockMovement.create({
+            data: {
+              materialId: invRow.id,
+              movementType: 'grn_rejected',
+              qty: rejectedDelta,
+              refType: 'vendor_receipt',
+              refId: receiptId,
+              userId: user!.id,
+            },
+          })
+        }
+      }
+    }
+
+    const pwRows = await tx.paperWarehouse.findMany({
+      where: { coaReference: receiptId },
+      select: { id: true, qtySheets: true },
+    })
+    if (pwRows.length > 0) {
+      const measuredGsmInt = Math.round(qcDetails.actualGsm)
+      const qcResultStr =
+        verdict === 'FAILED'
+          ? 'rejected'
+          : verdict === 'PASSED_WITH_PENALTY'
+            ? 'passed_with_penalty'
+            : 'passed'
+
+      for (const pw of pwRows) {
+        const rejectedForPw =
+          totalSplitKg > 0 ? Math.round((rej / totalSplitKg) * pw.qtySheets) : 0
+        const remainingSheets = Math.max(0, pw.qtySheets - rejectedForPw)
+        const nextStatus = remainingSheets > 0 ? 'in_stock' : 'rejected'
+        await tx.paperWarehouse.update({
+          where: { id: pw.id },
+          data: {
+            qtySheets: remainingSheets,
+            status: nextStatus,
+            qcResult: qcResultStr,
+            qcInspectedBy: operatorName,
+            qcInspectedAt: now,
+            measuredGsm: measuredGsmInt,
+          },
+        })
+      }
+    }
+  }, { maxWait: 5000, timeout: 15000 })
 
   const poAfter = await db.vendorMaterialPurchaseOrder.findUnique({
     where: { id: vendorPoId },
