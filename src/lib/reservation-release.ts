@@ -49,5 +49,22 @@ export async function recalculateMaterialShortage(
   materialId: string,
   tx: ReleaseTxClient,
 ): Promise<{ shortage: number; prCreated: boolean }> {
-  throw new Error('not implemented')
+  const active = await tx.materialReservation.findMany({
+    where: {
+      materialId,
+      isReleased: false,
+      jobCard: {
+        status: { in: ACTIVE_RESERVATION_STATUSES as unknown as string[] },
+      },
+    },
+    select: { requiredSheets: true, reservedSheets: true },
+  })
+
+  const shortage = active.reduce(
+    (sum, r) => sum + Math.max(0, Number(r.requiredSheets) - Number(r.reservedSheets)),
+    0,
+  )
+
+  // Phase 5 wires auto-PR creation here. For now we return prCreated=false.
+  return { shortage, prCreated: false }
 }
