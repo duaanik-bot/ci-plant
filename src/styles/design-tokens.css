@@ -3,25 +3,26 @@
  * Tailwind `ds-*` colors use RGB triplets for alpha support.
  */
 :root {
-  --font-heading: 'Inter', system-ui, sans-serif;
-  --font-body: 'Inter', system-ui, sans-serif;
-  --font-label: 'Inter', system-ui, sans-serif;
-  --font-small: 'Inter', system-ui, sans-serif;
+  --font-heading: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-body: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-label: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-small: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
 
   /* —— Semantic (app-wide) —— */
-  --brand-primary: #f97316;
-  --brand-primary-hover: #ea580c;
-  --brand-bg-soft: rgba(249, 115, 22, 0.12);
-  --brand-bg-strong: rgba(249, 115, 22, 0.2);
+  --brand-primary: #f5820d;
+  --brand-primary-hover: #d9700b;
+  --brand-bg-soft: rgba(245, 130, 13, 0.12);
+  --brand-bg-strong: rgba(245, 130, 13, 0.2);
 
   --success: #22c55e;
   --success-bg: rgba(34, 197, 94, 0.12);
 
-  --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.12);
+  --warning: #eab308;
+  --warning-bg: rgba(234, 179, 8, 0.12);
 
-  --info: #0ea5e9;
-  --info-bg: rgba(14, 165, 233, 0.12);
+  --info: #3b82f6;
+  --info-bg: rgba(59, 130, 246, 0.12);
 
   --error: #ef4444;
   --error-bg: rgba(239, 68, 68, 0.12);
@@ -31,53 +32,53 @@
   --tooling: #7c3aed;
   --tooling-bg: rgba(124, 58, 237, 0.12);
 
-  --text-primary: #111827;
-  --text-secondary: #6b7280;
-  --text-muted: #9ca3af;
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
 
-  --bg-main: #f8fafc;
-  --bg-card: #ffffff;
-  --bg-muted: #f8fafc;
-  --bg-elevated: #f1f5f9;
+  --bg-main: #0f1117;
+  --bg-card: #181c27;
+  --bg-muted: #181c27;
+  --bg-elevated: #1f2433;
 
-  --border: #e5e7eb;
+  --border: rgba(255, 255, 255, 0.08);
 
   /* —— ds-* mirrors (Tailwind theme) —— */
   --ds-bg-main: var(--bg-main);
-  --ds-bg-main-rgb: 255 255 255;
+  --ds-bg-main-rgb: 15 17 23;
   --ds-bg-card: var(--bg-card);
-  --ds-bg-card-rgb: 255 255 255;
+  --ds-bg-card-rgb: 24 28 39;
   --ds-bg-elevated: var(--bg-elevated);
-  --ds-bg-elevated-rgb: 249 250 251;
+  --ds-bg-elevated-rgb: 31 36 51;
 
   --ds-border-subtle: var(--border);
-  --ds-border-subtle-rgb: 229 231 235;
-  --ds-border-strong: #d1d5db;
-  --ds-border-strong-rgb: 209 213 219;
+  --ds-border-subtle-rgb: 255 255 255;
+  --ds-border-strong: rgba(255, 255, 255, 0.16);
+  --ds-border-strong-rgb: 255 255 255;
 
   --ds-text-primary: var(--text-primary);
-  --ds-text-primary-rgb: 17 24 39;
+  --ds-text-primary-rgb: 229 231 235;
   --ds-text-secondary: var(--text-secondary);
-  --ds-text-secondary-rgb: 107 114 128;
+  --ds-text-secondary-rgb: 156 163 175;
   --ds-text-muted: var(--text-muted);
-  --ds-text-muted-rgb: 156 163 175;
+  --ds-text-muted-rgb: 107 114 128;
 
   --ds-kpi: var(--brand-primary);
-  --ds-kpi-rgb: 249 115 22;
+  --ds-kpi-rgb: 245 130 13;
 
   --ds-accent: var(--brand-primary);
-  --ds-accent-rgb: 249 115 22;
+  --ds-accent-rgb: 245 130 13;
   --ds-accent-hover: var(--brand-primary-hover);
-  --ds-accent-hover-rgb: 234 88 12;
+  --ds-accent-hover-rgb: 217 112 11;
 
   --ds-success: var(--success);
   --ds-success-rgb: 34 197 94;
   --ds-warning: var(--warning);
-  --ds-warning-rgb: 245 158 11;
+  --ds-warning-rgb: 234 179 8;
   --ds-error: var(--error);
   --ds-error-rgb: 239 68 68;
   --ds-info: var(--info);
-  --ds-info-rgb: 14 165 233;
+  --ds-info-rgb: 59 130 246;
   --ds-neutral: var(--neutral);
   --ds-neutral-rgb: 100 116 139;
   --ds-tooling: var(--tooling);
@@ -87,42 +88,43 @@
   --ds-radius-md: 10px;
   --ds-radius-lg: 12px;
 
-  --ds-shadow-elevated: 0 8px 28px rgba(15, 23, 42, 0.08);
+  --ds-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.35);
 
   --ds-gradient-app-top: none;
   --ds-gradient-drawer: none;
 }
 
 .dark {
-  --bg-main: #0a0f1c;
-  --bg-card: #111827;
-  --bg-muted: #1f2937;
-  --bg-elevated: #1f2937;
+  --bg-main: #0f1117;
+  --bg-card: #181c27;
+  --bg-muted: #181c27;
+  --bg-elevated: #1f2433;
 
   --text-primary: #e5e7eb;
   --text-secondary: #9ca3af;
-  --text-muted: #9ca3af;
+  --text-muted: #6b7280;
 
-  --border: #1f2937;
+  --border: rgba(255, 255, 255, 0.08);
 
-  --ds-bg-main-rgb: 10 15 28;
-  --ds-bg-card-rgb: 17 24 39;
-  --ds-bg-elevated-rgb: 31 41 55;
+  --ds-bg-main-rgb: 15 17 23;
+  --ds-bg-card-rgb: 24 28 39;
+  --ds-bg-elevated-rgb: 31 36 51;
 
-  --ds-border-subtle-rgb: 31 41 55;
-  --ds-border-strong-rgb: 55 65 81;
+  --ds-border-subtle-rgb: 255 255 255;
+  --ds-border-strong-rgb: 255 255 255;
 
   --ds-text-primary-rgb: 229 231 235;
   --ds-text-secondary-rgb: 156 163 175;
-  --ds-text-muted-rgb: 156 163 175;
+  --ds-text-muted-rgb: 107 114 128;
 
-  --ds-kpi-rgb: 249 115 22;
-  --ds-accent-rgb: 249 115 22;
-  --ds-accent-hover-rgb: 234 88 12;
+  --ds-kpi-rgb: 245 130 13;
+  --ds-accent-rgb: 245 130 13;
+  --ds-accent-hover-rgb: 217 112 11;
 
   --ds-success-rgb: 34 197 94;
-  --ds-warning-rgb: 245 158 11;
+  --ds-warning-rgb: 234 179 8;
   --ds-error-rgb: 239 68 68;
+  --ds-info-rgb: 59 130 246;
 
-  --ds-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.35);
+  --ds-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
