@@ -78,7 +78,7 @@ type GroupedCard = {
 }
 
 const STAGES: Array<{ key: Stage; label: string; accent: string }> = [
-  { key: 'draft', label: PR_STAGE_LABEL.draft, accent: 'border-orange-400/50' },
+  { key: 'draft', label: PR_STAGE_LABEL.draft, accent: 'border-[var(--brand-primary)]/50' },
   { key: 'approved', label: PR_STAGE_LABEL.approved, accent: 'border-[var(--info)]/50' },
   { key: 'ordered', label: PR_STAGE_LABEL.ordered, accent: 'border-[var(--info)]/50' },
   { key: 'received', label: PR_STAGE_LABEL.received, accent: 'border-[var(--success)]/50' },
