@@ -245,6 +245,7 @@ export function SidebarNav({
         { href: '/dispatch', label: 'Dispatch Planning', icon: Truck },
         { href: '/dispatch/tracking', label: 'Deliveries', icon: MapPin },
         { href: '/billing', label: 'Invoices', icon: Receipt },
+        { href: '/short-excess', label: 'Short & Excess', icon: AlertTriangle },
       ],
     },
     {

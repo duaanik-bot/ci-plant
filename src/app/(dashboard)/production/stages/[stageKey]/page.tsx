@@ -16,8 +16,11 @@ import {
   INDUSTRIAL_PRIORITY_STAR_ICON_CLASS,
 } from '@/lib/industrial-priority-ui'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
-import { StatusBadge } from '@/components/design-system'
+import { StatusBadge, Button as DsButton } from '@/components/design-system'
 import { ICON_BUTTON_BASE } from '@/components/design-system/tokens'
+import { PackingConfigEditor } from '@/components/industrial/PackingConfigEditor'
+import { normalizePackingConfig, packingTotal, type PackingConfig } from '@/lib/dispatch-packing'
+import { Package } from 'lucide-react'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const stageCellPad = 'px-1.5 py-1 align-middle'
@@ -225,6 +228,13 @@ export default function ProductionStagePage() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [showDowntime, setShowDowntime] = useState(false)
   const [showTimeline, setShowTimeline] = useState(false)
+  // Pasting completion captures a structured packing manifest (boxes × qty/box)
+  // before pushing to Dispatch. Drawer state lives here; null = closed.
+  const [pastingPackDraft, setPastingPackDraft] = useState<{
+    row: Payload['jobCards'][number]
+    packing: PackingConfig
+  } | null>(null)
+  const [pastingPackSaving, setPastingPackSaving] = useState(false)
 
   const stageMeta = PRODUCTION_STAGES.find((s) => s.key === stageKey)
 
@@ -925,7 +935,10 @@ export default function ProductionStagePage() {
     return pushToNext(row, Number(getRowCounter(row) || 0), true, skipReload)
   }
 
-  async function completePastingTerminal(row: Payload['jobCards'][number]) {
+  async function completePastingTerminal(
+    row: Payload['jobCards'][number],
+    packing?: PackingConfig,
+  ) {
     const counter = Number(getRowCounter(row) || 0)
     if (counter <= 0) {
       toast.error('Enter actual counter before completing pasting')
@@ -949,6 +962,9 @@ export default function ProductionStagePage() {
       ? (ex.stageProgress as Record<string, StageProgress>)
       : {}
     const nowIso = new Date().toISOString()
+    // Packing manifest captured before completion — drives the Dispatch row.
+    const packingRows = normalizePackingConfig(packing ?? [])
+    const totalPackedQty = packingRows.length ? packingTotal(packingRows) : null
     const updatedProgress = {
       ...stageProgress,
       [stageKey]: {
@@ -960,6 +976,9 @@ export default function ProductionStagePage() {
         status: 'completed',
         completedBy: getRowOperator(row).trim() || null,
         completedAt: nowIso,
+        ...(packingRows.length
+          ? { packingConfig: packingRows, totalPackedQty }
+          : {}),
       },
     }
     setSavingStageId(row.stageRecord.id)
@@ -2279,10 +2298,25 @@ export default function ProductionStagePage() {
                             (k) => checklistDrafts[row.stageRecord.id]?.[k] === true,
                           )
                         }
-                        onClick={() => void completeAndPushNext(row)}
+                        onClick={() => {
+                          if (stageKey === 'pasting') {
+                            // Pasting is terminal → open the packing manifest drawer so the
+                            // operator records boxes × qty/box before pushing to Dispatch.
+                            const existingProgress = getStageProgress(row) as StageProgress & {
+                              packingConfig?: unknown
+                            }
+                            const existing = normalizePackingConfig(existingProgress.packingConfig)
+                            setPastingPackDraft({
+                              row,
+                              packing: existing.length ? existing : [{ boxes: 0, qtyPerBox: 0 }],
+                            })
+                          } else {
+                            void completeAndPushNext(row)
+                          }
+                        }}
                         className="rounded-ds-sm bg-ds-warning px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
                       >
-                        Complete Push
+                        {stageKey === 'pasting' ? 'Complete & Pack →' : 'Complete Push'}
                       </button>
                       {pushedQty > 0 ? (
                         <button
@@ -2506,6 +2540,106 @@ export default function ProductionStagePage() {
       onClose={() => setPmMachineId(null)}
       onSignedOff={() => void load()}
     />
+    {/* Pasting → Dispatch packing manifest drawer */}
+    <SlideOverPanel
+      isOpen={!!pastingPackDraft}
+      onClose={() => (pastingPackSaving ? undefined : setPastingPackDraft(null))}
+      title={
+        pastingPackDraft
+          ? `Confirm Packing · JC-${pastingPackDraft.row.jobCard.jobCardNumber}`
+          : ''
+      }
+      headerMeta={
+        pastingPackDraft
+          ? `${pastingPackDraft.row.jobCard.customer?.name ?? '—'} · ${pastingPackDraft.row.jobCard.productName ?? pastingPackDraft.row.jobCard.setNumber ?? '—'}`
+          : undefined
+      }
+      footer={
+        pastingPackDraft ? (
+          <div className="flex items-center gap-2">
+            <DsButton
+              variant="primary"
+              className="flex-1 gap-2"
+              disabled={pastingPackSaving}
+              onClick={async () => {
+                if (!pastingPackDraft) return
+                setPastingPackSaving(true)
+                try {
+                  await completePastingTerminal(pastingPackDraft.row, pastingPackDraft.packing)
+                  setPastingPackDraft(null)
+                } finally {
+                  setPastingPackSaving(false)
+                }
+              }}
+            >
+              {pastingPackSaving ? (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Package className="h-4 w-4" />
+              )}
+              {pastingPackSaving ? 'Completing…' : 'Complete & Push to Dispatch'}
+            </DsButton>
+            <DsButton
+              variant="secondary"
+              disabled={pastingPackSaving}
+              onClick={() => setPastingPackDraft(null)}
+            >
+              Cancel
+            </DsButton>
+          </div>
+        ) : null
+      }
+    >
+      {pastingPackDraft && (
+        <div className="space-y-4">
+          <div className="space-y-3 rounded-ds-md border border-[var(--brand-primary)]/25 bg-[var(--brand-bg-soft)] px-4 py-3.5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--brand-primary)]">
+              Job Card Summary
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+              {(() => {
+                const r = pastingPackDraft.row
+                const counter = Number(getRowCounter(r) || 0)
+                const poMeta = r.jobCard.poMeta
+                const poQty = poMeta?.quantity ?? null
+                return (
+                  <>
+                    <div className="text-ds-ink-muted">PO Number</div>
+                    <div className="font-mono text-ds-ink">{poMeta?.poNumber ?? '—'}</div>
+                    <div className="text-ds-ink-muted">Customer PO Qty</div>
+                    <div className="tabular-nums text-ds-ink">
+                      {poQty != null ? poQty.toLocaleString('en-IN') : '—'}
+                    </div>
+                    <div className="text-ds-ink-muted">Pasting Counter</div>
+                    <div className="font-semibold tabular-nums text-ds-ink">
+                      {counter.toLocaleString('en-IN')}
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-muted">
+              Packing Manifest
+            </div>
+            <PackingConfigEditor
+              value={pastingPackDraft.packing}
+              onChange={(next) =>
+                setPastingPackDraft((prev) => (prev ? { ...prev, packing: next } : prev))
+              }
+              referenceQty={Number(getRowCounter(pastingPackDraft.row) || 0)}
+              referenceLabel="Pasting Counter"
+              disabled={pastingPackSaving}
+            />
+            <p className="px-1 text-[11px] leading-relaxed text-ds-ink-faint">
+              Capture how the finished cartons are packed. Multiple rows allowed (e.g. 4 boxes × 3000 + 2 boxes × 1000). This manifest flows into the Dispatch row and the customer’s delivery challan.
+            </p>
+          </div>
+        </div>
+      )}
+    </SlideOverPanel>
     </>
   )
 }

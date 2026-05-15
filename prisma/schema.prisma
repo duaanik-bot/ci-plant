@@ -31,13 +31,13 @@ enum PastingStyle {
 // ─────────────────────────────────────────
 
 model Role {
-  id                      String   @id @default(uuid())
-  roleName                String   @unique @map("role_name")
-  permissions             Json     // Module-level flags
-  wastageApproveLimitPct  Decimal  @default(0) @map("wastage_approve_limit_pct") @db.Decimal(5, 2)
-  canApproveArtwork       Boolean  @default(false) @map("can_approve_artwork")
-  canReleaseDispatch      Boolean  @default(false) @map("can_release_dispatch")
-  createdAt               DateTime @default(now()) @map("created_at")
+  id                     String   @id @default(uuid())
+  roleName               String   @unique @map("role_name")
+  permissions            Json // Module-level flags
+  wastageApproveLimitPct Decimal  @default(0) @map("wastage_approve_limit_pct") @db.Decimal(5, 2)
+  canApproveArtwork      Boolean  @default(false) @map("can_approve_artwork")
+  canReleaseDispatch     Boolean  @default(false) @map("can_release_dispatch")
+  createdAt              DateTime @default(now()) @map("created_at")
 
   users User[]
 
@@ -45,36 +45,36 @@ model Role {
 }
 
 model User {
-  id              String    @id @default(uuid())
-  name            String    @db.VarChar(120)
-  email           String    @unique @db.VarChar(200)
-  pinHash         String    @map("pin_hash")
-  roleId          String    @map("role_id")
-  machineAccess   String[]  @default([]) @map("machine_access") // Array of machine IDs
-  active          Boolean   @default(true)
-  whatsappNumber  String?   @map("whatsapp_number") @db.VarChar(20)
-  lastLoginAt     DateTime? @map("last_login_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id             String    @id @default(uuid())
+  name           String    @db.VarChar(120)
+  email          String    @unique @db.VarChar(200)
+  pinHash        String    @map("pin_hash")
+  roleId         String    @map("role_id")
+  machineAccess  String[]  @default([]) @map("machine_access") // Array of machine IDs
+  active         Boolean   @default(true)
+  whatsappNumber String?   @map("whatsapp_number") @db.VarChar(20)
+  lastLoginAt    DateTime? @map("last_login_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  role                Role               @relation(fields: [roleId], references: [id])
-  jobsCreated         Job[]              @relation("JobCreator")
-  jobsClosed          Job[]              @relation("JobCloser")
-  sheetIssuesApproved SheetIssue[]       @relation("SheetApprover")
-  sheetIssuesIssued   SheetIssue[]       @relation("SheetIssuer")
-  stagesStarted       JobStage[]         @relation("StageStarter")
-  stagesCompleted     JobStage[]         @relation("StageCompleter")
-  qcRecords           QcRecord[]
-  ncrsRaised          Ncr[]              @relation("NcrRaiser")
-  ncrsAssigned        Ncr[]              @relation("NcrAssignee")
-  ncrsClosed          Ncr[]              @relation("NcrCloser")
-  auditLogs           AuditLog[]
-  preventiveMaintenanceSignoffs PreventiveMaintenanceLog[]
-  wasteRecords        WasteRecord[]
-  rfqsCreated         Rfq[]              @relation("RfqCreator")
-  productionDowntimeLogs ProductionDowntimeLog[]
-  shiftOperatorProductionJobCards ProductionJobCard[] @relation("ShiftOperatorJobCard")
-  attributedProductionOeeLedgers ProductionOeeLedger[] @relation("LedgerAttributedOperator")
+  role                            Role                       @relation(fields: [roleId], references: [id])
+  jobsCreated                     Job[]                      @relation("JobCreator")
+  jobsClosed                      Job[]                      @relation("JobCloser")
+  sheetIssuesApproved             SheetIssue[]               @relation("SheetApprover")
+  sheetIssuesIssued               SheetIssue[]               @relation("SheetIssuer")
+  stagesStarted                   JobStage[]                 @relation("StageStarter")
+  stagesCompleted                 JobStage[]                 @relation("StageCompleter")
+  qcRecords                       QcRecord[]
+  ncrsRaised                      Ncr[]                      @relation("NcrRaiser")
+  ncrsAssigned                    Ncr[]                      @relation("NcrAssignee")
+  ncrsClosed                      Ncr[]                      @relation("NcrCloser")
+  auditLogs                       AuditLog[]
+  preventiveMaintenanceSignoffs   PreventiveMaintenanceLog[]
+  wasteRecords                    WasteRecord[]
+  rfqsCreated                     Rfq[]                      @relation("RfqCreator")
+  productionDowntimeLogs          ProductionDowntimeLog[]
+  shiftOperatorProductionJobCards ProductionJobCard[]        @relation("ShiftOperatorJobCard")
+  attributedProductionOeeLedgers  ProductionOeeLedger[]      @relation("LedgerAttributedOperator")
 
   @@map("users")
 }
@@ -84,48 +84,48 @@ model User {
 // ─────────────────────────────────────────
 
 model Machine {
-  id              String    @id @default(uuid())
-  machineCode     String    @unique @map("machine_code") @db.VarChar(10) // CI-01, CI-02...
-  name            String    @db.VarChar(120)
-  make            String?   @db.VarChar(80)
-  specification   String?   @db.VarChar(80)
-  capacityPerShift Int      @map("capacity_per_shift")
-  stdWastePct     Decimal   @map("std_waste_pct") @db.Decimal(5, 2)
-  status          String    @default("active") @db.VarChar(20) // active | under_maintenance | retired
-  lastPmDate      DateTime? @map("last_pm_date") @db.Date
-  nextPmDue       DateTime? @map("next_pm_due") @db.Date
+  id                      String    @id @default(uuid())
+  machineCode             String    @unique @map("machine_code") @db.VarChar(10) // CI-01, CI-02...
+  name                    String    @db.VarChar(120)
+  make                    String?   @db.VarChar(80)
+  specification           String?   @db.VarChar(80)
+  capacityPerShift        Int       @map("capacity_per_shift")
+  stdWastePct             Decimal   @map("std_waste_pct") @db.Decimal(5, 2)
+  status                  String    @default("active") @db.VarChar(20) // active | under_maintenance | retired
+  lastPmDate              DateTime? @map("last_pm_date") @db.Date
+  nextPmDue               DateTime? @map("next_pm_due") @db.Date
   /// Cumulative press run hours since last verified PM (reset on sign-off).
-  usageRunHoursSincePm     Decimal @default(0) @map("usage_run_hours_since_pm") @db.Decimal(14, 4)
+  usageRunHoursSincePm    Decimal   @default(0) @map("usage_run_hours_since_pm") @db.Decimal(14, 4)
   /// Cumulative impressions (ledger total pieces) since last verified PM.
-  usageImpressionsSincePm  BigInt  @default(0) @map("usage_impressions_since_pm")
-  notes           String?
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  usageImpressionsSincePm BigInt    @default(0) @map("usage_impressions_since_pm")
+  notes                   String?
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
 
-  bomLines      BomLine[]
-  jobStages     JobStage[]
-  wasteRecords  WasteRecord[]
+  bomLines               BomLine[]
+  jobStages              JobStage[]
+  wasteRecords           WasteRecord[]
   productionJobCards     ProductionJobCard[]
   productionDowntimeLogs ProductionDowntimeLog[]
   productionOeeLedgers   ProductionOeeLedger[]
   pmSchedule             MachinePmSchedule?
   pmLogs                 PreventiveMaintenanceLog[]
   pmPlannedSlots         PmPlannedDowntime[]
-  embossBlocksIssued     EmbossBlock[] @relation("EmbossBlockIssuedMachine")
+  embossBlocksIssued     EmbossBlock[]              @relation("EmbossBlockIssuedMachine")
 
   @@map("machines")
 }
 
 /// Per-machine PM interval configuration (hours OR impressions — health uses the worst axis).
 model MachinePmSchedule {
-  id                   String   @id @default(uuid())
-  machineId            String   @unique @map("machine_id")
-  intervalRunHours     Decimal  @map("interval_run_hours") @db.Decimal(12, 4)
-  intervalImpressions  BigInt   @map("interval_impressions")
-  taskChecklistJson    Json?    @map("task_checklist_json")
-  sparePartsPlaceholder String? @map("spare_parts_placeholder") @db.Text
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+  id                    String   @id @default(uuid())
+  machineId             String   @unique @map("machine_id")
+  intervalRunHours      Decimal  @map("interval_run_hours") @db.Decimal(12, 4)
+  intervalImpressions   BigInt   @map("interval_impressions")
+  taskChecklistJson     Json?    @map("task_checklist_json")
+  sparePartsPlaceholder String?  @map("spare_parts_placeholder") @db.Text
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
 
   machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
@@ -169,23 +169,23 @@ model PmPlannedDowntime {
 // ─────────────────────────────────────────
 
 model Supplier {
-  id            String   @id @default(uuid())
-  name          String   @db.VarChar(200)
-  gstNumber     String?  @map("gst_number") @db.VarChar(20)
-  contactName   String?  @map("contact_name") @db.VarChar(120)
-  contactPhone  String?  @map("contact_phone") @db.VarChar(20)
-  email         String?  @db.VarChar(200)
-  address       String?
-  materialTypes String[] @map("material_types") // board | ink | foil | consumables etc
+  id                    String   @id @default(uuid())
+  name                  String   @db.VarChar(200)
+  gstNumber             String?  @map("gst_number") @db.VarChar(20)
+  contactName           String?  @map("contact_name") @db.VarChar(120)
+  contactPhone          String?  @map("contact_phone") @db.VarChar(20)
+  email                 String?  @db.VarChar(200)
+  address               String?
+  materialTypes         String[] @map("material_types") // board | ink | foil | consumables etc
   /// Board grades this supplier is the default mill for (e.g. FBB, SBS) — procurement auto-map
   defaultForBoardGrades String[] @default([]) @map("default_for_board_grades")
-  leadTimeDays  Int      @default(7) @map("lead_time_days")
-  paymentTerms  String?  @map("payment_terms") @db.VarChar(60)
+  leadTimeDays          Int      @default(7) @map("lead_time_days")
+  paymentTerms          String?  @map("payment_terms") @db.VarChar(60)
   /// Calendar days from GRN receipt to due date (0 = advance; 30 = Net 30).
-  paymentTermsDays Int   @default(30) @map("payment_terms_days")
-  active        Boolean  @default(true)
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  paymentTermsDays      Int      @default(30) @map("payment_terms_days")
+  active                Boolean  @default(true)
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
 
   inventories       Inventory[]
   vendorMaterialPos VendorMaterialPurchaseOrder[]
@@ -202,10 +202,17 @@ model Customer {
   id                      String   @id @default(uuid())
   name                    String   @db.VarChar(200)
   gstNumber               String?  @map("gst_number") @db.VarChar(20)
+  /// Indian PAN (10 chars: AAAAA9999A). Optional but recommended for invoicing.
+  pan                     String?  @map("pan") @db.VarChar(10)
+  /// 2-digit Indian state code (e.g. "27" for Maharashtra). Drives CGST/SGST vs IGST.
+  stateCode               String?  @map("state_code") @db.VarChar(2)
   contactName             String?  @map("contact_name") @db.VarChar(120)
   contactPhone            String?  @map("contact_phone") @db.VarChar(20)
   email                   String?  @db.VarChar(200)
+  /// Legacy single address. Retained for back-compat; new flow prefers billing/shipping fields below.
   address                 String?
+  billingAddress          String?  @map("billing_address")
+  shippingAddress         String?  @map("shipping_address")
   creditLimit             Decimal  @default(0) @map("credit_limit") @db.Decimal(12, 2)
   requiresArtworkApproval Boolean  @default(true) @map("requires_artwork_approval")
   /// Customer logo URL for CRM / queue avatars (optional).
@@ -220,12 +227,12 @@ model Customer {
   jobs Job[]
   rfqs Rfq[]
 
-  cartons           Carton[]
-  purchaseOrders    PurchaseOrder[]
+  cartons            Carton[]
+  purchaseOrders     PurchaseOrder[]
   productionJobCards ProductionJobCard[]
-  bills             Bill[]
-  plateStores       PlateStore[]
-  shadeCards        ShadeCard[]
+  bills              Bill[]
+  plateStores        PlateStore[]
+  shadeCards         ShadeCard[]
 
   @@index([source], map: "customers_source_idx")
   @@map("customers")
@@ -236,40 +243,40 @@ model Customer {
 // ─────────────────────────────────────────
 
 model Inventory {
-  id              String   @id @default(uuid())
-  materialCode    String   @unique @map("material_code") @db.VarChar(30)
-  description     String
-  boardType       String?  @map("board_type") @db.VarChar(120)
-  boardClassification String? @map("board_classification") @db.VarChar(120)
-  sheetLength     Decimal? @map("sheet_length") @db.Decimal(12, 4)
-  sheetWidth      Decimal? @map("sheet_width") @db.Decimal(12, 4)
-  gsm             Int?
-  attributes      String?  @db.Text
-  unit            String   @db.VarChar(20) // sheets | kg | litres | metres | pieces
-  supplierId      String?  @map("supplier_id")
-  category        String   @default("A") @db.VarChar(1) // A | B | C
-  qtyQuarantine   Decimal  @default(0) @map("qty_quarantine") @db.Decimal(12, 3)
-  qtyAvailable    Decimal  @default(0) @map("qty_available") @db.Decimal(12, 3)
-  qtyReserved     Decimal  @default(0) @map("qty_reserved") @db.Decimal(12, 3)
-  qtyFg           Decimal  @default(0) @map("qty_fg") @db.Decimal(12, 3)
-  weightedAvgCost Decimal  @default(0) @map("weighted_avg_cost") @db.Decimal(12, 4)
-  reorderPoint    Decimal  @default(0) @map("reorder_point") @db.Decimal(12, 3)
-  safetyStock     Decimal  @default(0) @map("safety_stock") @db.Decimal(12, 3)
-  maxDailyUsage   Decimal  @default(0) @map("max_daily_usage") @db.Decimal(12, 3)
-  avgDailyUsage   Decimal  @default(0) @map("avg_daily_usage") @db.Decimal(12, 3)
-  hazmat          Boolean  @default(false)
-  maxStorageQty   Decimal? @map("max_storage_qty") @db.Decimal(12, 3)
-  impressionLife  Int?     @map("impression_life") // for plates
-  storageLocation String?  @map("storage_location") @db.VarChar(60)
-  leadTimeDays    Int      @default(7) @map("lead_time_days")
-  physicalStockSheets Decimal @default(0) @map("physical_stock_sheets") @db.Decimal(12, 3)
-  shortageSheets  Decimal  @default(0) @map("shortage_sheets") @db.Decimal(12, 3)
-  totalWeightKg   Decimal  @default(0) @map("total_weight_kg") @db.Decimal(16, 6)
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id                  String   @id @default(uuid())
+  materialCode        String   @unique @map("material_code") @db.VarChar(30)
+  description         String
+  boardType           String?  @map("board_type") @db.VarChar(120)
+  boardClassification String?  @map("board_classification") @db.VarChar(120)
+  sheetLength         Decimal? @map("sheet_length") @db.Decimal(12, 4)
+  sheetWidth          Decimal? @map("sheet_width") @db.Decimal(12, 4)
+  gsm                 Int?
+  attributes          String?  @db.Text
+  unit                String   @db.VarChar(20) // sheets | kg | litres | metres | pieces
+  supplierId          String?  @map("supplier_id")
+  category            String   @default("A") @db.VarChar(1) // A | B | C
+  qtyQuarantine       Decimal  @default(0) @map("qty_quarantine") @db.Decimal(12, 3)
+  qtyAvailable        Decimal  @default(0) @map("qty_available") @db.Decimal(12, 3)
+  qtyReserved         Decimal  @default(0) @map("qty_reserved") @db.Decimal(12, 3)
+  qtyFg               Decimal  @default(0) @map("qty_fg") @db.Decimal(12, 3)
+  weightedAvgCost     Decimal  @default(0) @map("weighted_avg_cost") @db.Decimal(12, 4)
+  reorderPoint        Decimal  @default(0) @map("reorder_point") @db.Decimal(12, 3)
+  safetyStock         Decimal  @default(0) @map("safety_stock") @db.Decimal(12, 3)
+  maxDailyUsage       Decimal  @default(0) @map("max_daily_usage") @db.Decimal(12, 3)
+  avgDailyUsage       Decimal  @default(0) @map("avg_daily_usage") @db.Decimal(12, 3)
+  hazmat              Boolean  @default(false)
+  maxStorageQty       Decimal? @map("max_storage_qty") @db.Decimal(12, 3)
+  impressionLife      Int?     @map("impression_life") // for plates
+  storageLocation     String?  @map("storage_location") @db.VarChar(60)
+  leadTimeDays        Int      @default(7) @map("lead_time_days")
+  physicalStockSheets Decimal  @default(0) @map("physical_stock_sheets") @db.Decimal(12, 3)
+  shortageSheets      Decimal  @default(0) @map("shortage_sheets") @db.Decimal(12, 3)
+  totalWeightKg       Decimal  @default(0) @map("total_weight_kg") @db.Decimal(16, 6)
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
-  supplier             Supplier?            @relation(fields: [supplierId], references: [id])
+  supplier             Supplier?             @relation(fields: [supplierId], references: [id])
   bomLines             BomLine[]
   sheetIssues          SheetIssue[]
   purchaseRequisitions PurchaseRequisition[]
@@ -278,8 +285,8 @@ model Inventory {
   stockMovements       StockMovement[]
   wasteRecords         WasteRecord[]
 
-  @@map("inventory")
   @@unique([boardType, sheetLength, sheetWidth, gsm], map: "inventory_board_size_gsm_unique")
+  @@map("inventory")
 }
 
 // ─────────────────────────────────────────
@@ -287,43 +294,43 @@ model Inventory {
 // ─────────────────────────────────────────
 
 model Job {
-  id                 String    @id @default(uuid())
-  jobNumber          String    @unique @map("job_number") @db.VarChar(30) // CI-JOB-YYYY-NNNN
-  customerId         String    @map("customer_id")
+  id                  String    @id @default(uuid())
+  jobNumber           String    @unique @map("job_number") @db.VarChar(30) // CI-JOB-YYYY-NNNN
+  customerId          String    @map("customer_id")
   /// Canonical die master for this job (from PO / product master).
-  dieMasterId        String?   @map("die_master_id")
-  productName        String    @map("product_name") @db.VarChar(200)
-  qtyOrdered         Int       @map("qty_ordered")
-  qtyProducedGood    Int       @default(0) @map("qty_produced_good")
-  qtyRejected        Int       @default(0) @map("qty_rejected")
-  imposition         Int       // Cartons per printed sheet
-  machineSequence    String[]  @map("machine_sequence") // Ordered array of machine IDs
-  status             String    @default("pending_artwork") @map("status") @db.VarChar(30)
+  dieMasterId         String?   @map("die_master_id")
+  productName         String    @map("product_name") @db.VarChar(200)
+  qtyOrdered          Int       @map("qty_ordered")
+  qtyProducedGood     Int       @default(0) @map("qty_produced_good")
+  qtyRejected         Int       @default(0) @map("qty_rejected")
+  imposition          Int // Cartons per printed sheet
+  machineSequence     String[]  @map("machine_sequence") // Ordered array of machine IDs
+  status              String    @default("pending_artwork") @map("status") @db.VarChar(30)
   // Status enum: pending_artwork | artwork_approved | in_production |
   //              folding | final_qc | packing | dispatched | closed
   // (pending_artwork/artwork_approved retained as job-lifecycle states even after
   // the standalone artwork table was dropped — artwork-lock now lives on PoLineItem.)
-  dueDate            DateTime  @map("due_date") @db.Date
-  specialInstructions String?  @map("special_instructions")
-  createdBy          String    @map("created_by")
-  closedBy           String?   @map("closed_by")
-  closedAt           DateTime? @map("closed_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  dueDate             DateTime  @map("due_date") @db.Date
+  specialInstructions String?   @map("special_instructions")
+  createdBy           String    @map("created_by")
+  closedBy            String?   @map("closed_by")
+  closedAt            DateTime? @map("closed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  customer   Customer  @relation(fields: [customerId], references: [id])
-  dieMaster  Dye?      @relation("JobDieMaster", fields: [dieMasterId], references: [id])
-  creator    User      @relation("JobCreator", fields: [createdBy], references: [id])
-  closer     User?     @relation("JobCloser", fields: [closedBy], references: [id])
+  customer  Customer @relation(fields: [customerId], references: [id])
+  dieMaster Dye?     @relation("JobDieMaster", fields: [dieMasterId], references: [id])
+  creator   User     @relation("JobCreator", fields: [createdBy], references: [id])
+  closer    User?    @relation("JobCloser", fields: [closedBy], references: [id])
 
-  bomLines      BomLine[]
-  stages        JobStage[]
+  bomLines       BomLine[]
+  stages         JobStage[]
   workflowStages WorkflowStage[]
-  qcRecords     QcRecord[]
-  ncrs          Ncr[]
-  dispatches    Dispatch[]
-  sheetIssues   SheetIssue[]
-  wasteRecords  WasteRecord[]
+  qcRecords      QcRecord[]
+  ncrs           Ncr[]
+  dispatches     Dispatch[]
+  sheetIssues    SheetIssue[]
+  wasteRecords   WasteRecord[]
 
   @@map("jobs")
 }
@@ -333,22 +340,22 @@ model Job {
 // ─────────────────────────────────────────
 
 model BomLine {
-  id            String   @id @default(uuid())
-  jobId         String   @map("job_id")
-  materialId    String   @map("material_id")
-  machineId     String?  @map("machine_id")
-  qtyApproved   Decimal  @map("qty_approved") @db.Decimal(12, 3)
-  qtyIssued     Decimal  @default(0) @map("qty_issued") @db.Decimal(12, 3)
-  qtyUsed       Decimal  @default(0) @map("qty_used") @db.Decimal(12, 3)
-  qtyWasteStd   Decimal  @map("qty_waste_std") @db.Decimal(12, 3)
-  netQty        Decimal  @map("net_qty") @db.Decimal(12, 3)
+  id          String   @id @default(uuid())
+  jobId       String   @map("job_id")
+  materialId  String   @map("material_id")
+  machineId   String?  @map("machine_id")
+  qtyApproved Decimal  @map("qty_approved") @db.Decimal(12, 3)
+  qtyIssued   Decimal  @default(0) @map("qty_issued") @db.Decimal(12, 3)
+  qtyUsed     Decimal  @default(0) @map("qty_used") @db.Decimal(12, 3)
+  qtyWasteStd Decimal  @map("qty_waste_std") @db.Decimal(12, 3)
+  netQty      Decimal  @map("net_qty") @db.Decimal(12, 3)
   // variance_pct is computed: (qtyUsed - netQty) / netQty * 100
-  lockedAt      DateTime @map("locked_at") // No changes after this
-  createdAt     DateTime @default(now()) @map("created_at")
+  lockedAt    DateTime @map("locked_at") // No changes after this
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  job         Job         @relation(fields: [jobId], references: [id])
-  material    Inventory   @relation(fields: [materialId], references: [id])
-  machine     Machine?    @relation(fields: [machineId], references: [id])
+  job         Job          @relation(fields: [jobId], references: [id])
+  material    Inventory    @relation(fields: [materialId], references: [id])
+  machine     Machine?     @relation(fields: [machineId], references: [id])
   sheetIssues SheetIssue[]
 
   @@map("bom_lines")
@@ -379,11 +386,11 @@ model SheetIssue {
   issuedAt        DateTime  @default(now()) @map("issued_at")
   lotNumber       String?   @map("lot_number") @db.VarChar(60)
 
-  job       Job        @relation(fields: [jobId], references: [id])
-  bomLine   BomLine    @relation(fields: [bomLineId], references: [id])
-  material  Inventory  @relation(fields: [materialId], references: [id])
-  approver  User?      @relation("SheetApprover", fields: [approvedBy], references: [id])
-  issuer    User       @relation("SheetIssuer", fields: [issuedBy], references: [id])
+  job      Job       @relation(fields: [jobId], references: [id])
+  bomLine  BomLine   @relation(fields: [bomLineId], references: [id])
+  material Inventory @relation(fields: [materialId], references: [id])
+  approver User?     @relation("SheetApprover", fields: [approvedBy], references: [id])
+  issuer   User      @relation("SheetIssuer", fields: [issuedBy], references: [id])
 
   @@map("sheet_issues")
 }
@@ -403,26 +410,26 @@ model SheetIssue {
 // ─────────────────────────────────────────
 
 model JobStage {
-  id           String    @id @default(uuid())
-  jobId        String    @map("job_id")
-  stageNumber  Int       @map("stage_number") // 1-11 matching workflow
-  machineId    String?   @map("machine_id")
-  startedBy    String    @map("started_by")
-  startedAt    DateTime  @map("started_at")
-  completedBy  String?   @map("completed_by")
-  completedAt  DateTime? @map("completed_at")
-  qtyIn        Int?      @map("qty_in")
-  qtyOut       Int?      @map("qty_out")
-  qtyWaste     Int       @default(0) @map("qty_waste")
-  notes        String?
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id          String    @id @default(uuid())
+  jobId       String    @map("job_id")
+  stageNumber Int       @map("stage_number") // 1-11 matching workflow
+  machineId   String?   @map("machine_id")
+  startedBy   String    @map("started_by")
+  startedAt   DateTime  @map("started_at")
+  completedBy String?   @map("completed_by")
+  completedAt DateTime? @map("completed_at")
+  qtyIn       Int?      @map("qty_in")
+  qtyOut      Int?      @map("qty_out")
+  qtyWaste    Int       @default(0) @map("qty_waste")
+  notes       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
 
   job       Job      @relation(fields: [jobId], references: [id])
   machine   Machine? @relation(fields: [machineId], references: [id])
   starter   User     @relation("StageStarter", fields: [startedBy], references: [id])
   completer User?    @relation("StageCompleter", fields: [completedBy], references: [id])
 
-  qcRecords   QcRecord[]
+  qcRecords    QcRecord[]
   wasteRecords WasteRecord[]
 
   @@map("job_stages")
@@ -433,20 +440,20 @@ model JobStage {
 // ─────────────────────────────────────────
 
 model QcRecord {
-  id              String   @id @default(uuid())
-  jobId           String   @map("job_id")
-  stageId         String?  @map("stage_id")
-  checkType       String   @map("check_type") @db.VarChar(60)
+  id             String   @id @default(uuid())
+  jobId          String   @map("job_id")
+  stageId        String?  @map("stage_id")
+  checkType      String   @map("check_type") @db.VarChar(60)
   // colour_delta_e | caliper | gsm | barcode_scan | gloss | burst_strength | crease | dimensional
-  instrumentName  String   @map("instrument_name") @db.VarChar(80)
-  measuredValue   String?  @map("measured_value") @db.VarChar(120)
-  specMin         String?  @map("spec_min") @db.VarChar(60)
-  specMax         String?  @map("spec_max") @db.VarChar(60)
-  result          String   @db.VarChar(10) // PASS | FAIL
-  checkedBy       String   @map("checked_by")
-  checkedAt       DateTime @default(now()) @map("checked_at")
-  isFirstArticle  Boolean  @default(false) @map("is_first_article")
-  notes           String?
+  instrumentName String   @map("instrument_name") @db.VarChar(80)
+  measuredValue  String?  @map("measured_value") @db.VarChar(120)
+  specMin        String?  @map("spec_min") @db.VarChar(60)
+  specMax        String?  @map("spec_max") @db.VarChar(60)
+  result         String   @db.VarChar(10) // PASS | FAIL
+  checkedBy      String   @map("checked_by")
+  checkedAt      DateTime @default(now()) @map("checked_at")
+  isFirstArticle Boolean  @default(false) @map("is_first_article")
+  notes          String?
 
   job     Job       @relation(fields: [jobId], references: [id])
   stage   JobStage? @relation(fields: [stageId], references: [id])
@@ -462,33 +469,33 @@ model QcRecord {
 // ─────────────────────────────────────────
 
 model Ncr {
-  id                String    @id @default(uuid())
-  jobId             String    @map("job_id")
-  qcRecordId        String?   @map("qc_record_id")
-  trigger           String    @db.VarChar(30)
+  id               String    @id @default(uuid())
+  jobId            String    @map("job_id")
+  qcRecordId       String?   @map("qc_record_id")
+  trigger          String    @db.VarChar(30)
   // qc_fail | excess_wastage | customer_complaint | old_stock
-  severity          String    @db.VarChar(20) // critical | major | minor
-  description       String
-  quantityAffected  Int?      @map("quantity_affected")
-  raisedBy          String    @map("raised_by")
-  raisedAt          DateTime  @default(now()) @map("raised_at")
-  rootCause         String?   @map("root_cause")
-  correctiveAction  String?   @map("corrective_action")
-  preventiveAction  String?   @map("preventive_action")
-  assignedTo        String?   @map("assigned_to")
-  dueDate           DateTime? @map("due_date") @db.Date // Default: raisedAt + 15 days
-  closedBy          String?   @map("closed_by")
-  closedAt          DateTime? @map("closed_at")
-  status            String    @default("open") @db.VarChar(20)
+  severity         String    @db.VarChar(20) // critical | major | minor
+  description      String
+  quantityAffected Int?      @map("quantity_affected")
+  raisedBy         String    @map("raised_by")
+  raisedAt         DateTime  @default(now()) @map("raised_at")
+  rootCause        String?   @map("root_cause")
+  correctiveAction String?   @map("corrective_action")
+  preventiveAction String?   @map("preventive_action")
+  assignedTo       String?   @map("assigned_to")
+  dueDate          DateTime? @map("due_date") @db.Date // Default: raisedAt + 15 days
+  closedBy         String?   @map("closed_by")
+  closedAt         DateTime? @map("closed_at")
+  status           String    @default("open") @db.VarChar(20)
   // open | in_progress | closed | overdue
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  job       Job       @relation(fields: [jobId], references: [id])
-  qcRecord  QcRecord? @relation(fields: [qcRecordId], references: [id])
-  raiser    User      @relation("NcrRaiser", fields: [raisedBy], references: [id])
-  assignee  User?     @relation("NcrAssignee", fields: [assignedTo], references: [id])
-  closer    User?     @relation("NcrCloser", fields: [closedBy], references: [id])
+  job      Job       @relation(fields: [jobId], references: [id])
+  qcRecord QcRecord? @relation(fields: [qcRecordId], references: [id])
+  raiser   User      @relation("NcrRaiser", fields: [raisedBy], references: [id])
+  assignee User?     @relation("NcrAssignee", fields: [assignedTo], references: [id])
+  closer   User?     @relation("NcrCloser", fields: [closedBy], references: [id])
 
   @@map("ncrs")
 }
@@ -498,30 +505,60 @@ model Ncr {
 // ─────────────────────────────────────────
 
 model Dispatch {
-  id                  String    @id @default(uuid())
+  id                   String    @id @default(uuid())
   // Legacy Job FK — kept nullable for back-compat. New dispatches originating from the
   // production-flow pasting completion populate `productionJobCardId` instead.
-  jobId               String?   @map("job_id")
-  productionJobCardId String?   @map("production_job_card_id")
-  qtyDispatched       Int       @map("qty_dispatched")
-  vehicleNumber       String?   @map("vehicle_number") @db.VarChar(30)
-  driverName          String?   @map("driver_name") @db.VarChar(80)
-  ewayBillNumber      String?   @map("eway_bill_number") @db.VarChar(30)
-  ewayBillExpiry      DateTime? @map("eway_bill_expiry") @db.Date
-  qaReleaseBy         String?   @map("qa_release_by")
-  qaReleaseAt         DateTime? @map("qa_release_at")
-  dispatchedAt        DateTime? @map("dispatched_at")
-  podReceivedAt       DateTime? @map("pod_received_at")
-  podUrl              String?   @map("pod_url") // Cloudflare R2 path
-  status              String    @default("pending_qa") @db.VarChar(20)
+  jobId                String?   @map("job_id")
+  productionJobCardId  String?   @map("production_job_card_id")
+  /// Customer PO line snapshot (qty + tolerance + rate context). NULL for legacy rows.
+  poLineItemId         String?   @map("po_line_item_id")
+  qtyDispatched        Int       @map("qty_dispatched")
+  /// PO qty snapshot at dispatch time (for variance & S&E maths).
+  poQtySnapshot        Int?      @map("po_qty_snapshot")
+  /// Tolerance % snapshot from PoLineItem at dispatch time.
+  tolerancePctSnapshot Decimal?  @map("tolerance_pct_snapshot") @db.Decimal(5, 2)
+  /// Max allowed dispatch qty = po_qty * (1 + tolerance/100). Computed at write time.
+  allowedQty           Int?      @map("allowed_qty")
+  /// Excess over allowed_qty (>= 0). Mirrored into ShortExcessRecord when > 0.
+  excessQty            Int       @default(0) @map("excess_qty")
+  /// Packing config — array of {boxes, qtyPerBox} captured at pasting completion.
+  packingConfig        Json?     @map("packing_config")
+  /// Sum of boxes * qtyPerBox across packingConfig rows. Usually == qty_dispatched.
+  totalPackedQty       Int?      @map("total_packed_qty")
+  vehicleNumber        String?   @map("vehicle_number") @db.VarChar(30)
+  driverName           String?   @map("driver_name") @db.VarChar(80)
+  /// Indian transport mode (Road | Air | Sea | Rail). Drives e-way applicability.
+  transportMode        String?   @map("transport_mode") @db.VarChar(8)
+  transporterName      String?   @map("transporter_name") @db.VarChar(120)
+  /// Distance to delivery (km) — required for e-way validity calc.
+  distanceKm           Decimal?  @map("distance_km") @db.Decimal(8, 2)
+  ewayBillNumber       String?   @map("eway_bill_number") @db.VarChar(30)
+  ewayBillExpiry       DateTime? @map("eway_bill_expiry") @db.Date
+  qaReleaseBy          String?   @map("qa_release_by")
+  qaReleaseAt          DateTime? @map("qa_release_at")
+  dispatchedAt         DateTime? @map("dispatched_at")
+  podReceivedAt        DateTime? @map("pod_received_at")
+  podUrl               String?   @map("pod_url") // Cloudflare R2 path
+  status               String    @default("pending_qa") @db.VarChar(20)
   // pending_qa | qa_released | dispatched | pod_received
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  /// Billing handshake: not_sent | sent_to_billing | billed | cancelled.
+  billingStatus        String    @default("not_sent") @map("billing_status") @db.VarChar(20)
+  /// Set once the dispatch is rolled into an invoice (Bill).
+  billId               String?   @map("bill_id")
+  /// ShortExcessRecord created when excessQty > 0.
+  shortExcessRecordId  String?   @map("short_excess_record_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  job     Job?               @relation(fields: [jobId], references: [id])
-  jobCard ProductionJobCard? @relation(fields: [productionJobCardId], references: [id], onDelete: SetNull)
+  job        Job?               @relation(fields: [jobId], references: [id])
+  jobCard    ProductionJobCard? @relation(fields: [productionJobCardId], references: [id], onDelete: SetNull)
+  poLineItem PoLineItem?        @relation(fields: [poLineItemId], references: [id], onDelete: SetNull)
+  bill       Bill?              @relation(fields: [billId], references: [id], onDelete: SetNull)
 
   @@index([productionJobCardId])
+  @@index([poLineItemId])
+  @@index([billingStatus])
+  @@index([billId])
   @@map("dispatches")
 }
 
@@ -532,17 +569,17 @@ model Dispatch {
 model QcInstrument {
   id                  String    @id @default(uuid())
   instrumentName      String    @unique @map("instrument_name") @db.VarChar(80)
-  specification       String?  @db.VarChar(120)
-  range               String?  @db.VarChar(60)
-  frequency           String?  @db.VarChar(60)
+  specification       String?   @db.VarChar(120)
+  range               String?   @db.VarChar(60)
+  frequency           String?   @db.VarChar(60)
   purpose             String?
   lastCalibration     DateTime? @map("last_calibration") @db.Date
   calibrationDue      DateTime? @map("calibration_due") @db.Date
-  calibrationFreqDays Int      @default(365) @map("calibration_freq_days")
-  certificateUrl      String?  @map("certificate_url")
-  active              Boolean  @default(true)
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  calibrationFreqDays Int       @default(365) @map("calibration_freq_days")
+  certificateUrl      String?   @map("certificate_url")
+  active              Boolean   @default(true)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   @@map("qc_instruments")
 }
@@ -552,16 +589,16 @@ model QcInstrument {
 // ─────────────────────────────────────────
 
 model AuditLog {
-  id         BigInt   @id @default(autoincrement())
-  userId     String?  @map("user_id")
-  action     String   @db.VarChar(30) // INSERT | UPDATE | DELETE | LOGIN | LOGOUT
-  tableName  String   @map("table_name") @db.VarChar(60)
-  recordId   String?  @map("record_id")
-  oldValue   Json?    @map("old_value")
-  newValue   Json?    @map("new_value")
-  ipAddress  String?  @map("ip_address") @db.VarChar(45)
-  userAgent  String?  @map("user_agent")
-  timestamp  DateTime @default(now())
+  id        BigInt   @id @default(autoincrement())
+  userId    String?  @map("user_id")
+  action    String   @db.VarChar(30) // INSERT | UPDATE | DELETE | LOGIN | LOGOUT
+  tableName String   @map("table_name") @db.VarChar(60)
+  recordId  String?  @map("record_id")
+  oldValue  Json?    @map("old_value")
+  newValue  Json?    @map("new_value")
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  userAgent String?  @map("user_agent")
+  timestamp DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id])
 
@@ -573,107 +610,109 @@ model AuditLog {
 // ─────────────────────────────────────────
 
 model Carton {
-  id               String   @id @default(uuid())
-  cartonName       String   @map("carton_name")
-  customerId       String   @map("customer_id")
-  productType      String?  @map("product_type")
-  category         String?
-  rate             Decimal? @db.Decimal(12, 4)
-  gstPct           Int      @default(12) @map("gst_pct")
-  active           Boolean  @default(true)
+  id                  String        @id @default(uuid())
+  cartonName          String        @map("carton_name")
+  customerId          String        @map("customer_id")
+  productType         String?       @map("product_type")
+  category            String?
+  rate                Decimal?      @db.Decimal(12, 4)
+  gstPct              Int           @default(12) @map("gst_pct")
+  /// HSN code for GST invoicing. 4–8 digits per Indian GST rules.
+  hsnCode             String?       @map("hsn_code") @db.VarChar(8)
+  active              Boolean       @default(true)
   // BOARD
-  boardGrade       String?  @map("board_grade")
-  gsm              Int?
-  caliperMicrons   Int?     @map("caliper_microns")
-  paperType        String?  @map("paper_type")
-  plyCount         Int?     @default(1) @map("ply_count")
-  burstStrengthMin Decimal? @map("burst_strength_min") @db.Decimal(6, 2)
-  whitenessMin     Int?     @map("whiteness_min")
-  moistureMaxPct   Decimal? @map("moisture_max_pct") @db.Decimal(4, 2)
+  boardGrade          String?       @map("board_grade")
+  gsm                 Int?
+  caliperMicrons      Int?          @map("caliper_microns")
+  paperType           String?       @map("paper_type")
+  plyCount            Int?          @default(1) @map("ply_count")
+  burstStrengthMin    Decimal?      @map("burst_strength_min") @db.Decimal(6, 2)
+  whitenessMin        Int?          @map("whiteness_min")
+  moistureMaxPct      Decimal?      @map("moisture_max_pct") @db.Decimal(4, 2)
   // DIMENSIONS
-  finishedLength   Decimal? @map("finished_length") @db.Decimal(8, 2)
-  finishedWidth    Decimal? @map("finished_width") @db.Decimal(8, 2)
-  finishedHeight   Decimal? @map("finished_height") @db.Decimal(8, 2)
-  blankLength      Decimal? @map("blank_length") @db.Decimal(8, 2)
-  blankWidth       Decimal? @map("blank_width") @db.Decimal(8, 2)
-  dimensionTol     Decimal? @default(0.5) @map("dimension_tol") @db.Decimal(4, 2)
-  hasWindow        Boolean  @default(false) @map("has_window")
-  windowLength     Decimal? @map("window_length") @db.Decimal(8, 2)
-  windowWidth      Decimal? @map("window_width") @db.Decimal(8, 2)
+  finishedLength      Decimal?      @map("finished_length") @db.Decimal(8, 2)
+  finishedWidth       Decimal?      @map("finished_width") @db.Decimal(8, 2)
+  finishedHeight      Decimal?      @map("finished_height") @db.Decimal(8, 2)
+  blankLength         Decimal?      @map("blank_length") @db.Decimal(8, 2)
+  blankWidth          Decimal?      @map("blank_width") @db.Decimal(8, 2)
+  dimensionTol        Decimal?      @default(0.5) @map("dimension_tol") @db.Decimal(4, 2)
+  hasWindow           Boolean       @default(false) @map("has_window")
+  windowLength        Decimal?      @map("window_length") @db.Decimal(8, 2)
+  windowWidth         Decimal?      @map("window_width") @db.Decimal(8, 2)
   // PHARMA SPACES
-  batchSpaceL      Decimal? @map("batch_space_l") @db.Decimal(6, 2)
-  batchSpaceW      Decimal? @map("batch_space_w") @db.Decimal(6, 2)
-  mrpSpaceL        Decimal? @map("mrp_space_l") @db.Decimal(6, 2)
-  mrpSpaceW        Decimal? @map("mrp_space_w") @db.Decimal(6, 2)
-  expirySpaceL     Decimal? @map("expiry_space_l") @db.Decimal(6, 2)
-  expirySpaceW     Decimal? @map("expiry_space_w") @db.Decimal(6, 2)
+  batchSpaceL         Decimal?      @map("batch_space_l") @db.Decimal(6, 2)
+  batchSpaceW         Decimal?      @map("batch_space_w") @db.Decimal(6, 2)
+  mrpSpaceL           Decimal?      @map("mrp_space_l") @db.Decimal(6, 2)
+  mrpSpaceW           Decimal?      @map("mrp_space_w") @db.Decimal(6, 2)
+  expirySpaceL        Decimal?      @map("expiry_space_l") @db.Decimal(6, 2)
+  expirySpaceW        Decimal?      @map("expiry_space_w") @db.Decimal(6, 2)
   // PRINT
-  numberOfColours  Int?     @map("number_of_colours")
-  colourBreakdown  Json?    @map("colour_breakdown")
-  backPrint        String   @default("No") @map("back_print")
-  screenRulingLpi  Int?     @default(175) @map("screen_ruling_lpi")
-  minFontSizePt    Decimal? @default(6.0) @map("min_font_size_pt") @db.Decimal(4, 2)
-  barcodeType      String?  @map("barcode_type")
-  barcodePosition  String?  @map("barcode_position")
-  artworkCode      String?  @map("artwork_code")
-  printingType     String?  @map("printing_type")
+  numberOfColours     Int?          @map("number_of_colours")
+  colourBreakdown     Json?         @map("colour_breakdown")
+  backPrint           String        @default("No") @map("back_print")
+  screenRulingLpi     Int?          @default(175) @map("screen_ruling_lpi")
+  minFontSizePt       Decimal?      @default(6.0) @map("min_font_size_pt") @db.Decimal(4, 2)
+  barcodeType         String?       @map("barcode_type")
+  barcodePosition     String?       @map("barcode_position")
+  artworkCode         String?       @map("artwork_code")
+  printingType        String?       @map("printing_type")
   /// Default plate sheet size for new plate requirements (optional).
-  plateSize        PlateSize? @map("plate_size")
+  plateSize           PlateSize?    @map("plate_size")
   // FINISHING
-  laminateType     String?  @map("laminate_type")
-  laminateMicrons  Int?     @map("laminate_microns")
-  coatingType      String?  @map("coating_type")
-  uvCoverageArea   String?  @map("uv_coverage_area")
-  foilType         String?  @map("foil_type")
-  foilWidth        Decimal? @map("foil_width") @db.Decimal(6, 2)
-  foilRegTol       Decimal? @default(0.1) @map("foil_reg_tol") @db.Decimal(4, 2)
-  embossingLeafing String?  @map("embossing_leafing")
-  embossDepth      Decimal? @map("emboss_depth") @db.Decimal(4, 2)
+  laminateType        String?       @map("laminate_type")
+  laminateMicrons     Int?          @map("laminate_microns")
+  coatingType         String?       @map("coating_type")
+  uvCoverageArea      String?       @map("uv_coverage_area")
+  foilType            String?       @map("foil_type")
+  foilWidth           Decimal?      @map("foil_width") @db.Decimal(6, 2)
+  foilRegTol          Decimal?      @default(0.1) @map("foil_reg_tol") @db.Decimal(4, 2)
+  embossingLeafing    String?       @map("embossing_leafing")
+  embossDepth         Decimal?      @map("emboss_depth") @db.Decimal(4, 2)
   // CUTTING
-  dyeId            String?  @map("dye_id")
+  dyeId               String?       @map("dye_id")
   /// Canonical Die Master (tooling type + dimensions source) for this product.
-  dieMasterId      String?  @map("die_master_id")
-  pastingStyle     PastingStyle? @map("pasting_style")
-  creaseDepthMm    Decimal? @map("crease_depth_mm") @db.Decimal(4, 2)
-  nickCount        Int?     @map("nick_count")
-  strippingType    String?  @default("Auto") @map("stripping_type")
+  dieMasterId         String?       @map("die_master_id")
+  pastingStyle        PastingStyle? @map("pasting_style")
+  creaseDepthMm       Decimal?      @map("crease_depth_mm") @db.Decimal(4, 2)
+  nickCount           Int?          @map("nick_count")
+  strippingType       String?       @default("Auto") @map("stripping_type")
   // PASTING
-  glueType         String?  @map("glue_type")
-  glueBondMinN     Decimal? @default(2.0) @map("glue_bond_min_n") @db.Decimal(6, 2)
-  overlapWidthMm   Decimal? @map("overlap_width_mm") @db.Decimal(6, 2)
+  glueType            String?       @map("glue_type")
+  glueBondMinN        Decimal?      @default(2.0) @map("glue_bond_min_n") @db.Decimal(6, 2)
+  overlapWidthMm      Decimal?      @map("overlap_width_mm") @db.Decimal(6, 2)
   // PHARMA COMPLIANCE
-  drugSchedule     String?  @map("drug_schedule")
-  regulatoryText   String?  @map("regulatory_text")
-  remarks          String?  @map("remarks")
-  specialInstructions String? @map("special_instructions")
-  iso9001Required  Boolean  @default(true)  @map("iso_9001_required")
-  whoGmpRequired   Boolean  @default(false) @map("who_gmp_required")
-  fssaiRequired    Boolean  @default(false) @map("fssai_required")
-  scheduleMRequired Boolean @default(true)  @map("schedule_m_required")
+  drugSchedule        String?       @map("drug_schedule")
+  regulatoryText      String?       @map("regulatory_text")
+  remarks             String?       @map("remarks")
+  specialInstructions String?       @map("special_instructions")
+  iso9001Required     Boolean       @default(true) @map("iso_9001_required")
+  whoGmpRequired      Boolean       @default(false) @map("who_gmp_required")
+  fssaiRequired       Boolean       @default(false) @map("fssai_required")
+  scheduleMRequired   Boolean       @default(true) @map("schedule_m_required")
   // QUALITY ACCEPTANCE
-  deltaEMax        Decimal? @default(3.0) @map("delta_e_max") @db.Decimal(4, 2)
-  glossUnitsMin    Int?     @map("gloss_units_min")
-  glossUnitsMax    Int?     @map("gloss_units_max")
-  registrationTol  Decimal? @default(0.1) @map("registration_tol") @db.Decimal(4, 2)
-  aqlLevel         String?  @default("1.0") @map("aql_level")
-  postPressRouting Json?    @map("post_press_routing")
-  embossBlockId    String?  @map("emboss_block_id")
-  shadeCardId      String?  @map("shade_card_id")
+  deltaEMax           Decimal?      @default(3.0) @map("delta_e_max") @db.Decimal(4, 2)
+  glossUnitsMin       Int?          @map("gloss_units_min")
+  glossUnitsMax       Int?          @map("gloss_units_max")
+  registrationTol     Decimal?      @default(0.1) @map("registration_tol") @db.Decimal(4, 2)
+  aqlLevel            String?       @default("1.0") @map("aql_level")
+  postPressRouting    Json?         @map("post_press_routing")
+  embossBlockId       String?       @map("emboss_block_id")
+  shadeCardId         String?       @map("shade_card_id")
   /// Origin marker for audit. NULL = manual entry (legacy or operator-created).
   /// 'po_import_ai' = auto-created from a PDF PO import; surface for review.
-  source           String?  @map("source")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  source              String?       @map("source")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
 
-  customer   Customer    @relation(fields: [customerId], references: [id])
-  dye        Dye?        @relation("CartonWorkDye", fields: [dyeId], references: [id])
-  dieMaster  Dye?        @relation("CartonDieMaster", fields: [dieMasterId], references: [id])
-  embossBlock EmbossBlock? @relation(fields: [embossBlockId], references: [id])
-  shadeCard  ShadeCard?   @relation(fields: [shadeCardId], references: [id], onDelete: SetNull)
+  customer                Customer     @relation(fields: [customerId], references: [id])
+  dye                     Dye?         @relation("CartonWorkDye", fields: [dyeId], references: [id])
+  dieMaster               Dye?         @relation("CartonDieMaster", fields: [dieMasterId], references: [id])
+  embossBlock             EmbossBlock? @relation(fields: [embossBlockId], references: [id])
+  shadeCard               ShadeCard?   @relation(fields: [shadeCardId], references: [id], onDelete: SetNull)
   /// Shade cards that reference this carton as linked Product Master (inventory).
-  shadeCardsProductMaster ShadeCard[] @relation("ShadeCardProductMaster")
-  plateStores PlateStore[]
-  poLineItems PoLineItem[]
+  shadeCardsProductMaster ShadeCard[]  @relation("ShadeCardProductMaster")
+  plateStores             PlateStore[]
+  poLineItems             PoLineItem[]
 
   @@index([shadeCardId])
   @@map("cartons")
@@ -684,81 +723,81 @@ model Carton {
 // ─────────────────────────────────────────
 
 model Dye {
-  id                  String    @id @default(uuid())
-  dyeNumber           Int       @unique @map("dye_number")
-  dyeType             String    @map("dye_type")
-  ups                 Int
-  sheetSize           String    @map("sheet_size")
-  cartonSize          String    @map("carton_size")
-  location            String?
-  impressionCount     Int       @default(0) @map("impression_count")
-  maxImpressions      Int       @default(500000) @map("max_impressions")
-  lastUsedDate        DateTime? @map("last_used_date") @db.Date
-  creaseDepthMm       Decimal?  @map("crease_depth_mm") @db.Decimal(4, 2)
-  creaseCount         Int?      @map("crease_count")
-  cutCount            Int?      @map("cut_count")
-  nicksPerCarton      Int?      @default(4) @map("nicks_per_carton")
-  dieMaterial         String?   @default("Steel Rule") @map("die_material")
-  lastInspectionDate  DateTime? @map("last_inspection_date") @db.Date
-  conditionRating     String?   @default("Good") @map("condition_rating")
-  active              Boolean   @default(true)
-  currentStock        Int       @default(1) @map("current_stock")
-  condition           String    @default("Good") @map("condition") @db.VarChar(40)
-  lastSharpenedDate   DateTime? @map("last_sharpened_date") @db.Date
-  sharpenCount        Int       @default(0) @map("sharpen_count")
-  maxSharpenCount     Int       @default(5) @map("max_sharpen_count")
-  lastInspectedBy     String?   @map("last_inspected_by")
-  scrapReason         String?   @map("scrap_reason")
-  scrappedBy         String?   @map("scrapped_by")
-  scrappedAt          DateTime? @map("scrapped_at")
-  custodyStatus       String    @default("in_stock") @map("custody_status") @db.VarChar(32)
+  id                        String        @id @default(uuid())
+  dyeNumber                 Int           @unique @map("dye_number")
+  dyeType                   String        @map("dye_type")
+  ups                       Int
+  sheetSize                 String        @map("sheet_size")
+  cartonSize                String        @map("carton_size")
+  location                  String?
+  impressionCount           Int           @default(0) @map("impression_count")
+  maxImpressions            Int           @default(500000) @map("max_impressions")
+  lastUsedDate              DateTime?     @map("last_used_date") @db.Date
+  creaseDepthMm             Decimal?      @map("crease_depth_mm") @db.Decimal(4, 2)
+  creaseCount               Int?          @map("crease_count")
+  cutCount                  Int?          @map("cut_count")
+  nicksPerCarton            Int?          @default(4) @map("nicks_per_carton")
+  dieMaterial               String?       @default("Steel Rule") @map("die_material")
+  lastInspectionDate        DateTime?     @map("last_inspection_date") @db.Date
+  conditionRating           String?       @default("Good") @map("condition_rating")
+  active                    Boolean       @default(true)
+  currentStock              Int           @default(1) @map("current_stock")
+  condition                 String        @default("Good") @map("condition") @db.VarChar(40)
+  lastSharpenedDate         DateTime?     @map("last_sharpened_date") @db.Date
+  sharpenCount              Int           @default(0) @map("sharpen_count")
+  maxSharpenCount           Int           @default(5) @map("max_sharpen_count")
+  lastInspectedBy           String?       @map("last_inspected_by")
+  scrapReason               String?       @map("scrap_reason")
+  scrappedBy                String?       @map("scrapped_by")
+  scrappedAt                DateTime?     @map("scrapped_at")
+  custodyStatus             String        @default("in_stock") @map("custody_status") @db.VarChar(32)
   /// Hub Kanban: reuse cycles when returning from custody staging to rack
-  reuseCount          Int       @default(0) @map("reuse_count")
+  reuseCount                Int           @default(0) @map("reuse_count")
   /// Undo mark-ready: previous custody_status before hub_custody_ready
-  hubPreviousCustody  String?   @map("hub_previous_custody") @db.VarChar(32)
-  issuedMachineId     String?   @map("issued_machine_id")
-  issuedOperator      String?   @map("issued_operator")
-  issuedAt            DateTime? @map("issued_at")
+  hubPreviousCustody        String?       @map("hub_previous_custody") @db.VarChar(32)
+  issuedMachineId           String?       @map("issued_machine_id")
+  issuedOperator            String?       @map("issued_operator")
+  issuedAt                  DateTime?     @map("issued_at")
   /// Parsed L×W×H (mm) for Die Hub matching & ledger; optional when only legacy `cartonSize` text exists.
-  dimLengthMm         Decimal?  @map("dim_length_mm") @db.Decimal(12, 4)
-  dimWidthMm          Decimal?  @map("dim_width_mm") @db.Decimal(12, 4)
-  dimHeightMm         Decimal?  @map("dim_height_mm") @db.Decimal(12, 4)
-  pastingStyle        PastingStyle? @map("pasting_style")
+  dimLengthMm               Decimal?      @map("dim_length_mm") @db.Decimal(12, 4)
+  dimWidthMm                Decimal?      @map("dim_width_mm") @db.Decimal(12, 4)
+  dimHeightMm               Decimal?      @map("dim_height_mm") @db.Decimal(12, 4)
+  pastingStyle              PastingStyle? @map("pasting_style")
   /// Hub make lane: local vs laser (table/board switcher).
-  dieMake             String    @default("local") @map("die_make") @db.VarChar(16)
+  dieMake                   String        @default("local") @map("die_make") @db.VarChar(16)
   /// First receipt into hub stock or custody from vendor (DOM).
-  dateOfManufacturing DateTime? @map("date_of_manufacturing")
+  dateOfManufacturing       DateTime?     @map("date_of_manufacturing")
   /// Die Hub custody staging: e.g. `rack` when pulled from live inventory (matches plate hub).
-  hubCustodySource    String?   @map("hub_custody_source") @db.VarChar(32)
+  hubCustodySource          String?       @map("hub_custody_source") @db.VarChar(32)
   /// Die Hub triage: non-null = on hold (yellow highlight in UI).
-  hubTriageHoldReason String?   @map("hub_triage_hold_reason") @db.VarChar(500)
+  hubTriageHoldReason       String?       @map("hub_triage_hold_reason") @db.VarChar(500)
   /// Last time Poor-condition maintenance was cleared in hub.
-  hubMaintenanceCompletedAt DateTime? @map("hub_maintenance_completed_at")
+  hubMaintenanceCompletedAt DateTime?     @map("hub_maintenance_completed_at")
   /// Die Hub only — e.g. POOR_CONDITION after a Poor return; not used by Plate/PO flows.
-  hubStatusFlag       String?   @map("hub_status_flag") @db.VarChar(32)
+  hubStatusFlag             String?       @map("hub_status_flag") @db.VarChar(32)
   /// Operator name from Operator Master when Poor was reported (hub-only alert).
-  hubPoorReportedBy   String?   @map("hub_poor_reported_by") @db.VarChar(120)
-  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
-  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
+  hubPoorReportedBy         String?       @map("hub_poor_reported_by") @db.VarChar(120)
+  hubSoftDeletedAt          DateTime?     @map("hub_soft_deleted_at")
+  hubSoftDeletedBy          String?       @map("hub_soft_deleted_by") @db.VarChar(120)
   /// Hub board sequence per column (only the active custody column is maintained).
-  hubOrderTriage      Int?      @map("hub_order_triage")
-  hubOrderPrep        Int?      @map("hub_order_prep")
-  hubOrderInventory   Int?      @map("hub_order_inventory")
-  hubOrderCustody     Int?      @map("hub_order_custody")
-  lastReorderedBy    String?   @map("last_reordered_by") @db.VarChar(120)
-  lastReorderedAt    DateTime? @map("last_reordered_at")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
+  hubOrderTriage            Int?          @map("hub_order_triage")
+  hubOrderPrep              Int?          @map("hub_order_prep")
+  hubOrderInventory         Int?          @map("hub_order_inventory")
+  hubOrderCustody           Int?          @map("hub_order_custody")
+  lastReorderedBy           String?       @map("last_reordered_by") @db.VarChar(120)
+  lastReorderedAt           DateTime?     @map("last_reordered_at")
+  createdAt                 DateTime      @default(now()) @map("created_at")
+  updatedAt                 DateTime      @default(now()) @updatedAt @map("updated_at")
 
-  cartonsWork             Carton[]          @relation("CartonWorkDye")
-  cartonsAsDieMaster      Carton[]          @relation("CartonDieMaster")
-  poLinesAsDieMaster      PoLineItem[]      @relation("PoLineDieMaster")
-  embossBlocksLinked      EmbossBlock[]     @relation("EmbossBlockLinkedDie")
-  jobsAsDieMaster         Job[]             @relation("JobDieMaster")
-  plateRequirementsMaster PlateRequirement[] @relation("PlateReqDieMaster")
-  usageLogs        DyeUsageLog[]
-  maintenanceLogs  DyeMaintenanceLog[]
-  hubEvents        DieHubEvent[]
+  cartonsWork             Carton[]            @relation("CartonWorkDye")
+  cartonsAsDieMaster      Carton[]            @relation("CartonDieMaster")
+  poLinesAsDieMaster      PoLineItem[]        @relation("PoLineDieMaster")
+  embossBlocksLinked      EmbossBlock[]       @relation("EmbossBlockLinkedDie")
+  jobsAsDieMaster         Job[]               @relation("JobDieMaster")
+  plateRequirementsMaster PlateRequirement[]  @relation("PlateReqDieMaster")
+  usageLogs               DyeUsageLog[]
+  maintenanceLogs         DyeMaintenanceLog[]
+  hubEvents               DieHubEvent[]
 
   @@map("dyes")
 }
@@ -776,27 +815,27 @@ model OperatorMaster {
 
 /// Append-only Die Hub audit trail (dual-written with hub state changes).
 model DieHubEvent {
-  id         String   @id @default(uuid())
-  dyeId      String   @map("dye_id")
-  actionType String   @map("action_type") @db.VarChar(64)
-  fromZone   String?  @map("from_zone") @db.VarChar(128)
-  toZone     String?  @map("to_zone") @db.VarChar(128)
-  details    Json?
-  operatorName String? @map("operator_name") @db.VarChar(120)
+  id                      String   @id @default(uuid())
+  dyeId                   String   @map("dye_id")
+  actionType              String   @map("action_type") @db.VarChar(64)
+  fromZone                String?  @map("from_zone") @db.VarChar(128)
+  toZone                  String?  @map("to_zone") @db.VarChar(128)
+  details                 Json?
+  operatorName            String?  @map("operator_name") @db.VarChar(120)
   /// Physical actor (Operator Master name) — canonical for timelines.
-  actorName       String?  @map("actor_name") @db.VarChar(120)
+  actorName               String?  @map("actor_name") @db.VarChar(120)
   /// ISSUE | RETURN | UNDO | ZONE_MOVE | CONDITION_CHANGE | SCRAP
-  auditActionType String?  @map("audit_action_type") @db.VarChar(32)
-  metadata        Json?
-  supersededByUndoEventId String?   @map("superseded_by_undo_event_id")
+  auditActionType         String?  @map("audit_action_type") @db.VarChar(32)
+  metadata                Json?
+  supersededByUndoEventId String?  @map("superseded_by_undo_event_id")
   /// Canonical action label for timelines (e.g. ISSUED_TO_MACHINE, RETURNED_TO_RACK).
-  hubAction        String?  @map("hub_action") @db.VarChar(64)
+  hubAction               String?  @map("hub_action") @db.VarChar(64)
   /// Good | Fair | Poor when applicable (returns); null otherwise.
-  eventCondition   String?  @map("event_condition") @db.VarChar(16)
-  createdAt  DateTime @default(now()) @map("created_at")
+  eventCondition          String?  @map("event_condition") @db.VarChar(16)
+  createdAt               DateTime @default(now()) @map("created_at")
 
-  dye Dye @relation(fields: [dyeId], references: [id], onDelete: Cascade)
-  supersedingUndo DieHubEvent?  @relation("DieHubEventUndoSupersede", fields: [supersededByUndoEventId], references: [id], onDelete: SetNull)
+  dye              Dye           @relation(fields: [dyeId], references: [id], onDelete: Cascade)
+  supersedingUndo  DieHubEvent?  @relation("DieHubEventUndoSupersede", fields: [supersededByUndoEventId], references: [id], onDelete: SetNull)
   supersededByThis DieHubEvent[] @relation("DieHubEventUndoSupersede")
 
   @@index([dyeId])
@@ -806,31 +845,31 @@ model DieHubEvent {
 }
 
 model DyeUsageLog {
-  id             String    @id @default(uuid())
-  dyeId          String    @map("dye_id")
-  jobCardId      String?   @map("job_card_id")
-  cartonName     String?   @map("carton_name")
-  impressions    Int       @default(0)
-  usedOn         DateTime  @default(now()) @map("used_on") @db.Date
-  operatorName   String?   @map("operator_name")
-  conditionAfter String?   @map("condition_after")
+  id             String   @id @default(uuid())
+  dyeId          String   @map("dye_id")
+  jobCardId      String?  @map("job_card_id")
+  cartonName     String?  @map("carton_name")
+  impressions    Int      @default(0)
+  usedOn         DateTime @default(now()) @map("used_on") @db.Date
+  operatorName   String?  @map("operator_name")
+  conditionAfter String?  @map("condition_after")
   notes          String?
-  dye            Dye       @relation(fields: [dyeId], references: [id])
+  dye            Dye      @relation(fields: [dyeId], references: [id])
 
   @@map("dye_usage_log")
 }
 
 model DyeMaintenanceLog {
-  id               String    @id @default(uuid())
-  dyeId            String    @map("dye_id")
-  actionType       String    @map("action_type")
-  performedBy      String    @map("performed_by")
-  performedAt      DateTime  @default(now()) @map("performed_at")
-  conditionBefore  String?   @map("condition_before")
-  conditionAfter   String?   @map("condition_after")
-  notes            String?
-  cost             Decimal?  @db.Decimal(10, 2)
-  dye              Dye       @relation(fields: [dyeId], references: [id])
+  id              String   @id @default(uuid())
+  dyeId           String   @map("dye_id")
+  actionType      String   @map("action_type")
+  performedBy     String   @map("performed_by")
+  performedAt     DateTime @default(now()) @map("performed_at")
+  conditionBefore String?  @map("condition_before")
+  conditionAfter  String?  @map("condition_after")
+  notes           String?
+  cost            Decimal? @db.Decimal(10, 2)
+  dye             Dye      @relation(fields: [dyeId], references: [id])
 
   @@map("dye_maintenance_log")
 }
@@ -854,45 +893,47 @@ model PurchaseOrder {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  customer             Customer               @relation(fields: [customerId], references: [id])
-  lineItems       PoLineItem[]
-  materialQueues  MaterialQueue[]
+  customer       Customer        @relation(fields: [customerId], references: [id])
+  lineItems      PoLineItem[]
+  materialQueues MaterialQueue[]
 
   @@map("purchase_orders")
 }
 
 model PoLineItem {
-  id               String        @id @default(uuid())
-  poId             String        @map("po_id")
-  cartonId         String?       @map("carton_id")
-  cartonName       String        @map("carton_name")
-  cartonSize       String?       @map("carton_size")
-  quantity         Int
-  artworkCode      String?       @map("artwork_code")
-  backPrint        String        @default("No") @map("back_print")
-  rate             Decimal?      @db.Decimal(12, 4)
-  gsm              Int?
-  gstPct           Int           @default(12) @map("gst_pct")
-  coatingType      String?       @map("coating_type")
-  otherCoating     String?       @map("other_coating")
-  embossingLeafing String?       @map("embossing_leafing")
-  paperType        String?       @map("paper_type")
-  dyeId            String?       @map("dye_id")
+  id                            String    @id @default(uuid())
+  poId                          String    @map("po_id")
+  cartonId                      String?   @map("carton_id")
+  cartonName                    String    @map("carton_name")
+  cartonSize                    String?   @map("carton_size")
+  quantity                      Int
+  artworkCode                   String?   @map("artwork_code")
+  backPrint                     String    @default("No") @map("back_print")
+  rate                          Decimal?  @db.Decimal(12, 4)
+  gsm                           Int?
+  gstPct                        Int       @default(12) @map("gst_pct")
+  /// HSN code snapshot at PO entry (copied from Carton.hsnCode; locked for the order's lifetime).
+  hsnCode                       String?   @map("hsn_code") @db.VarChar(8)
+  coatingType                   String?   @map("coating_type")
+  otherCoating                  String?   @map("other_coating")
+  embossingLeafing              String?   @map("embossing_leafing")
+  paperType                     String?   @map("paper_type")
+  dyeId                         String?   @map("dye_id")
   /// Snapshot link to Die Master at PO entry (may match carton.dieMasterId).
-  dieMasterId      String?       @map("die_master_id")
-  toolingLocked    Boolean       @default(true) @map("tooling_locked")
-  lineDieType      String?       @map("line_die_type")
-  dimLengthMm      Decimal?      @map("dim_length_mm") @db.Decimal(12, 4)
-  dimWidthMm       Decimal?      @map("dim_width_mm") @db.Decimal(12, 4)
-  dimHeightMm      Decimal?      @map("dim_height_mm") @db.Decimal(12, 4)
-  remarks          String?
-  setNumber        String?       @map("set_number")
-  jobCardNumber    Int?          @map("job_card_number")
-  planningStatus   String        @default("pending") @map("planning_status")
+  dieMasterId                   String?   @map("die_master_id")
+  toolingLocked                 Boolean   @default(true) @map("tooling_locked")
+  lineDieType                   String?   @map("line_die_type")
+  dimLengthMm                   Decimal?  @map("dim_length_mm") @db.Decimal(12, 4)
+  dimWidthMm                    Decimal?  @map("dim_width_mm") @db.Decimal(12, 4)
+  dimHeightMm                   Decimal?  @map("dim_height_mm") @db.Decimal(12, 4)
+  remarks                       String?
+  setNumber                     String?   @map("set_number")
+  jobCardNumber                 Int?      @map("job_card_number")
+  planningStatus                String    @default("pending") @map("planning_status")
   /// not_calculated | pending | on_order | dispatched (legacy) | paper_ordered (legacy) | received
-  materialProcurementStatus String @default("not_calculated") @map("material_procurement_status") @db.VarChar(32)
-  specOverrides    Json?         @map("spec_overrides")
-  tolerancePct     Decimal       @default(2.0) @map("tolerance_pct") @db.Decimal(5,2)
+  materialProcurementStatus     String    @default("not_calculated") @map("material_procurement_status") @db.VarChar(32)
+  specOverrides                 Json?     @map("spec_overrides")
+  tolerancePct                  Decimal   @default(2.0) @map("tolerance_pct") @db.Decimal(5, 2)
   /// Director Command Center — floor broadcast & WIP clocks (synced across modules).
   directorPriority              Boolean   @default(false) @map("director_priority")
   directorHold                  Boolean   @default(false) @map("director_hold")
@@ -905,16 +946,17 @@ model PoLineItem {
   materialStageEnteredAt        DateTime? @map("material_stage_entered_at")
   productionStageEnteredAt      DateTime? @map("production_stage_entered_at")
   logisticsStageEnteredAt       DateTime? @map("logistics_stage_entered_at")
-  shadeCardId      String?       @map("shade_card_id")
-  createdAt        DateTime      @default(now()) @map("created_at")
+  shadeCardId                   String?   @map("shade_card_id")
+  createdAt                     DateTime  @default(now()) @map("created_at")
 
-  po                  PurchaseOrder        @relation(fields: [poId], references: [id])
-  carton              Carton?              @relation(fields: [cartonId], references: [id])
-  dieMaster           Dye?                 @relation("PoLineDieMaster", fields: [dieMasterId], references: [id])
-  shadeCard           ShadeCard?           @relation(fields: [shadeCardId], references: [id], onDelete: SetNull)
-  materialQueue MaterialQueue?
+  po                   PurchaseOrder                 @relation(fields: [poId], references: [id])
+  carton               Carton?                       @relation(fields: [cartonId], references: [id])
+  dieMaster            Dye?                          @relation("PoLineDieMaster", fields: [dieMasterId], references: [id])
+  shadeCard            ShadeCard?                    @relation(fields: [shadeCardId], references: [id], onDelete: SetNull)
+  materialQueue        MaterialQueue?
   weightReconciliation MaterialWeightReconciliation?
-  shortExcessRecords ShortExcessRecord[]
+  shortExcessRecords   ShortExcessRecord[]
+  dispatches           Dispatch[]
 
   @@index([shadeCardId])
   @@map("po_line_items")
@@ -931,7 +973,7 @@ model ShortExcessRecord {
   billId       String?   @map("bill_id")
   poQty        Int       @map("po_qty")
   actualQty    Int       @map("actual_qty")
-  tolerancePct Decimal   @default(2.0) @map("tolerance_pct") @db.Decimal(5,2)
+  tolerancePct Decimal   @default(2.0) @map("tolerance_pct") @db.Decimal(5, 2)
   varianceQty  Int       @map("variance_qty")
   /// open | closed | sent_to_planning | sent_to_fg
   status       String    @default("open")
@@ -1027,52 +1069,52 @@ model CommunicationLog {
 // ─────────────────────────────────────────
 
 model VendorMaterialPurchaseOrder {
-  id                   String    @id @default(uuid())
-  poNumber             String    @unique @map("po_number")
-  supplierId           String    @map("supplier_id")
-  status               String    @default("draft") @map("status") @db.VarChar(24)
-  orderDate            DateTime  @default(now()) @map("order_date") @db.Date
-  requiredDeliveryDate DateTime? @map("required_delivery_date") @db.Date
-  signatoryName        String    @default("Anik Dua") @map("signatory_name") @db.VarChar(120)
-  remarks              String?
-  dispatchedAt         DateTime? @map("dispatched_at")
-  dispatchActor        String?   @map("dispatch_actor") @db.VarChar(120)
+  id                       String    @id @default(uuid())
+  poNumber                 String    @unique @map("po_number")
+  supplierId               String    @map("supplier_id")
+  status                   String    @default("draft") @map("status") @db.VarChar(24)
+  orderDate                DateTime  @default(now()) @map("order_date") @db.Date
+  requiredDeliveryDate     DateTime? @map("required_delivery_date") @db.Date
+  signatoryName            String    @default("Anik Dua") @map("signatory_name") @db.VarChar(120)
+  remarks                  String?
+  dispatchedAt             DateTime? @map("dispatched_at")
+  dispatchActor            String?   @map("dispatch_actor") @db.VarChar(120)
   /// Mill → gate logistics (IST timestamps in DB as UTC instants)
-  transporterName      String?   @map("transporter_name") @db.VarChar(200)
-  lrNumber             String?   @map("lr_number") @db.VarChar(120)
-  vehicleNumber        String?   @map("vehicle_number") @db.VarChar(64)
-  estimatedArrivalAt   DateTime? @map("estimated_arrival_at")
+  transporterName          String?   @map("transporter_name") @db.VarChar(200)
+  lrNumber                 String?   @map("lr_number") @db.VarChar(120)
+  vehicleNumber            String?   @map("vehicle_number") @db.VarChar(64)
+  estimatedArrivalAt       DateTime? @map("estimated_arrival_at")
   /// mill_dispatched | in_transit | at_gate
-  logisticsStatus      String?   @map("logistics_status") @db.VarChar(32)
-  logisticsUpdatedAt   DateTime? @map("logistics_updated_at")
-  isShortClosed        Boolean   @default(false) @map("is_short_closed")
-  shortCloseReason     String?   @map("short_close_reason") @db.VarChar(120)
-  shortCloseRemarks    String?   @map("short_close_remarks") @db.Text
-  shortClosedAt        DateTime? @map("short_closed_at")
-  shortClosedByUserId  String?   @map("short_closed_by_user_id")
-  shortClosedByName    String?   @map("short_closed_by_name") @db.VarChar(120)
-  shortCloseCompletionPct Decimal? @map("short_close_completion_pct") @db.Decimal(6, 2)
+  logisticsStatus          String?   @map("logistics_status") @db.VarChar(32)
+  logisticsUpdatedAt       DateTime? @map("logistics_updated_at")
+  isShortClosed            Boolean   @default(false) @map("is_short_closed")
+  shortCloseReason         String?   @map("short_close_reason") @db.VarChar(120)
+  shortCloseRemarks        String?   @map("short_close_remarks") @db.Text
+  shortClosedAt            DateTime? @map("short_closed_at")
+  shortClosedByUserId      String?   @map("short_closed_by_user_id")
+  shortClosedByName        String?   @map("short_closed_by_name") @db.VarChar(120)
+  shortCloseCompletionPct  Decimal?  @map("short_close_completion_pct") @db.Decimal(6, 2)
   /// Cumulative kg from all GRN ledger rows (gate scale).
-  totalReceivedKg      Decimal   @default(0) @map("total_received_kg") @db.Decimal(16, 6)
+  totalReceivedKg          Decimal   @default(0) @map("total_received_kg") @db.Decimal(16, 6)
   /// QC-passed kg only — counts toward production / partial-full status & short-close %.
-  totalUsableReceivedKg Decimal  @default(0) @map("total_usable_received_kg") @db.Decimal(16, 6)
+  totalUsableReceivedKg    Decimal   @default(0) @map("total_usable_received_kg") @db.Decimal(16, 6)
   /// Sum of receipt-level accrued payable (standard + penalty adjusted rate) after QC.
-  accruedReceiptPayableInr Decimal @default(0) @map("accrued_receipt_payable_inr") @db.Decimal(16, 2)
+  accruedReceiptPayableInr Decimal   @default(0) @map("accrued_receipt_payable_inr") @db.Decimal(16, 2)
   /// Set after GRN rejection when user chooses replacement (e.g. Awaiting_Replacement).
-  procurementShortageFlag   String?   @map("procurement_shortage_flag") @db.VarChar(48)
+  procurementShortageFlag  String?   @map("procurement_shortage_flag") @db.VarChar(48)
   /// Committed replacement arrival — drives lead-buffer when flag is Awaiting_Replacement.
-  replacementEtaAt          DateTime? @map("replacement_eta_at")
+  replacementEtaAt         DateTime? @map("replacement_eta_at")
   /// Source PR if this PO was created via the convert-to-po flow.
-  purchaseRequisitionId String?  @map("purchase_requisition_id")
-  createdBy            String    @map("created_by")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @updatedAt @map("updated_at")
+  purchaseRequisitionId    String?   @map("purchase_requisition_id")
+  createdBy                String    @map("created_by")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
 
-  supplier Supplier                        @relation(fields: [supplierId], references: [id])
-  purchaseRequisition PurchaseRequisition? @relation(fields: [purchaseRequisitionId], references: [id], onDelete: SetNull)
-  lines    VendorMaterialPurchaseOrderLine[]
-  receipts VendorMaterialReceipt[]
-  qualityDebitNotes VendorQualityDebitNote[]
+  supplier            Supplier                          @relation(fields: [supplierId], references: [id])
+  purchaseRequisition PurchaseRequisition?              @relation(fields: [purchaseRequisitionId], references: [id], onDelete: SetNull)
+  lines               VendorMaterialPurchaseOrderLine[]
+  receipts            VendorMaterialReceipt[]
+  qualityDebitNotes   VendorQualityDebitNote[]
 
   @@index([purchaseRequisitionId])
   @@map("vendor_material_purchase_orders")
@@ -1080,24 +1122,24 @@ model VendorMaterialPurchaseOrder {
 
 /// Quality / GSM technical debit — queued for accounts (Saachi finalization).
 model VendorQualityDebitNote {
-  id                   String   @id @default(uuid())
-  receiptId            String   @unique @map("receipt_id")
-  vendorPoId           String   @map("vendor_po_id")
-  supplierId           String   @map("supplier_id")
-  orderedGsm           Decimal  @map("ordered_gsm") @db.Decimal(8, 2)
-  actualGsm            Decimal  @map("actual_gsm") @db.Decimal(8, 2)
-  technicalShortfallPct Decimal @map("technical_shortfall_pct") @db.Decimal(10, 4)
-  invoiceRatePerKg     Decimal  @map("invoice_rate_per_kg") @db.Decimal(14, 4)
-  receivedQtyKg        Decimal  @map("received_qty_kg") @db.Decimal(16, 6)
-  amountInr            Decimal  @map("amount_inr") @db.Decimal(16, 2)
-  status               String   @default("draft_pending_finance") @map("status") @db.VarChar(32)
-  formulaProof         String?  @map("formula_proof") @db.Text
-  authorizedByUserId   String?  @map("authorized_by_user_id")
-  createdAt            DateTime @default(now()) @map("created_at")
+  id                    String   @id @default(uuid())
+  receiptId             String   @unique @map("receipt_id")
+  vendorPoId            String   @map("vendor_po_id")
+  supplierId            String   @map("supplier_id")
+  orderedGsm            Decimal  @map("ordered_gsm") @db.Decimal(8, 2)
+  actualGsm             Decimal  @map("actual_gsm") @db.Decimal(8, 2)
+  technicalShortfallPct Decimal  @map("technical_shortfall_pct") @db.Decimal(10, 4)
+  invoiceRatePerKg      Decimal  @map("invoice_rate_per_kg") @db.Decimal(14, 4)
+  receivedQtyKg         Decimal  @map("received_qty_kg") @db.Decimal(16, 6)
+  amountInr             Decimal  @map("amount_inr") @db.Decimal(16, 2)
+  status                String   @default("draft_pending_finance") @map("status") @db.VarChar(32)
+  formulaProof          String?  @map("formula_proof") @db.Text
+  authorizedByUserId    String?  @map("authorized_by_user_id")
+  createdAt             DateTime @default(now()) @map("created_at")
 
-  receipt  VendorMaterialReceipt         @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  receipt  VendorMaterialReceipt       @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   vendorPo VendorMaterialPurchaseOrder @relation(fields: [vendorPoId], references: [id], onDelete: Cascade)
-  supplier Supplier                     @relation(fields: [supplierId], references: [id])
+  supplier Supplier                    @relation(fields: [supplierId], references: [id])
 
   @@index([vendorPoId])
   @@index([supplierId])
@@ -1106,61 +1148,61 @@ model VendorQualityDebitNote {
 
 /// Partial GRN ledger — multiple gate receipts per vendor material PO.
 model VendorMaterialReceipt {
-  id               String   @id @default(uuid())
-  vendorPoId       String   @map("vendor_po_id")
-  receiptDate      DateTime @map("receipt_date")
-  receivedQty      Decimal  @map("received_qty") @db.Decimal(16, 6)
-  vehicleNumber    String   @map("vehicle_number") @db.VarChar(64)
-  scaleSlipId      String   @map("scale_slip_id") @db.VarChar(120)
-  receivedByUserId String?  @map("received_by_user_id")
-  receivedByName   String   @default("Anik Dua") @map("received_by_name") @db.VarChar(120)
+  id                        String    @id @default(uuid())
+  vendorPoId                String    @map("vendor_po_id")
+  receiptDate               DateTime  @map("receipt_date")
+  receivedQty               Decimal   @map("received_qty") @db.Decimal(16, 6)
+  vehicleNumber             String    @map("vehicle_number") @db.VarChar(64)
+  scaleSlipId               String    @map("scale_slip_id") @db.VarChar(120)
+  receivedByUserId          String?   @map("received_by_user_id")
+  receivedByName            String    @default("Anik Dua") @map("received_by_name") @db.VarChar(120)
   /// Split QC (must sum to received_qty); null until new QC submitted.
-  qtyAcceptedStandard   Decimal?  @map("qty_accepted_standard") @db.Decimal(16, 6)
-  qtyAcceptedPenalty    Decimal?  @map("qty_accepted_penalty") @db.Decimal(16, 6)
-  qtyRejected           Decimal?  @map("qty_rejected") @db.Decimal(16, 6)
-  rejectionReason       String?   @map("rejection_reason") @db.VarChar(120)
-  rejectionRemarks      String?   @map("rejection_remarks") @db.Text
+  qtyAcceptedStandard       Decimal?  @map("qty_accepted_standard") @db.Decimal(16, 6)
+  qtyAcceptedPenalty        Decimal?  @map("qty_accepted_penalty") @db.Decimal(16, 6)
+  qtyRejected               Decimal?  @map("qty_rejected") @db.Decimal(16, 6)
+  rejectionReason           String?   @map("rejection_reason") @db.VarChar(120)
+  rejectionRemarks          String?   @map("rejection_remarks") @db.Text
   returnGatePassGeneratedAt DateTime? @map("return_gate_pass_generated_at")
   /// null = QC pending; legacy: PASSED | PASSED_WITH_PENALTY | FAILED; new splits: QC_SPLIT | FAILED
-  qcStatus                 String?   @map("qc_status") @db.VarChar(32)
-  qcActualGsm              Decimal?  @map("qc_actual_gsm") @db.Decimal(8, 2)
-  qcShadeMatch             Boolean?  @map("qc_shade_match")
-  qcSurfaceCleanliness     Boolean?  @map("qc_surface_cleanliness")
-  qcRemarks                String?   @map("qc_remarks") @db.Text
-  qcPerformedByUserId      String?   @map("qc_performed_by_user_id")
-  qcPerformedAt            DateTime? @map("qc_performed_at")
+  qcStatus                  String?   @map("qc_status") @db.VarChar(32)
+  qcActualGsm               Decimal?  @map("qc_actual_gsm") @db.Decimal(8, 2)
+  qcShadeMatch              Boolean?  @map("qc_shade_match")
+  qcSurfaceCleanliness      Boolean?  @map("qc_surface_cleanliness")
+  qcRemarks                 String?   @map("qc_remarks") @db.Text
+  qcPerformedByUserId       String?   @map("qc_performed_by_user_id")
+  qcPerformedAt             DateTime? @map("qc_performed_at")
   /// Debit note recommended amount — GSM shortfall on penalty tranche only (₹).
-  qcPenaltyRecommendedInr  Decimal?  @map("qc_penalty_recommended_inr") @db.Decimal(16, 2)
-  qcInvoiceRatePerKg       Decimal?  @map("qc_invoice_rate_per_kg") @db.Decimal(14, 4)
-  qcTechnicalShortfallPct  Decimal?  @map("qc_technical_shortfall_pct") @db.Decimal(10, 4)
+  qcPenaltyRecommendedInr   Decimal?  @map("qc_penalty_recommended_inr") @db.Decimal(16, 2)
+  qcInvoiceRatePerKg        Decimal?  @map("qc_invoice_rate_per_kg") @db.Decimal(14, 4)
+  qcTechnicalShortfallPct   Decimal?  @map("qc_technical_shortfall_pct") @db.Decimal(10, 4)
   /// Payable accrual for this line after QC: (std×rate)+(penalty×adjusted rate).
-  qcAccruedPayableInr      Decimal?  @map("qc_accrued_payable_inr") @db.Decimal(16, 2)
-  createdAt        DateTime @default(now()) @map("created_at")
+  qcAccruedPayableInr       Decimal?  @map("qc_accrued_payable_inr") @db.Decimal(16, 2)
+  createdAt                 DateTime  @default(now()) @map("created_at")
 
-  vendorPo           VendorMaterialPurchaseOrder @relation(fields: [vendorPoId], references: [id], onDelete: Cascade)
-  qualityDebitNote   VendorQualityDebitNote?
+  vendorPo         VendorMaterialPurchaseOrder @relation(fields: [vendorPoId], references: [id], onDelete: Cascade)
+  qualityDebitNote VendorQualityDebitNote?
 
   @@index([vendorPoId])
   @@map("vendor_material_receipts")
 }
 
 model VendorMaterialPurchaseOrderLine {
-  id              String  @id @default(uuid())
-  vendorPoId      String  @map("vendor_po_id")
-  boardGrade      String  @map("board_grade")
-  gsm             Int
-  grainDirection  String  @default("Long grain") @map("grain_direction") @db.VarChar(64)
-  totalSheets     Int     @map("total_sheets")
-  totalWeightKg   Decimal @map("total_weight_kg") @db.Decimal(16, 6)
-  ratePerKg       Decimal? @map("rate_per_kg") @db.Decimal(14, 4)
+  id                  String   @id @default(uuid())
+  vendorPoId          String   @map("vendor_po_id")
+  boardGrade          String   @map("board_grade")
+  gsm                 Int
+  grainDirection      String   @default("Long grain") @map("grain_direction") @db.VarChar(64)
+  totalSheets         Int      @map("total_sheets")
+  totalWeightKg       Decimal  @map("total_weight_kg") @db.Decimal(16, 6)
+  ratePerKg           Decimal? @map("rate_per_kg") @db.Decimal(14, 4)
   /// Total freight (₹) allocated to this line for landed cost.
-  freightTotalInr       Decimal @default(0) @map("freight_total_inr") @db.Decimal(16, 2)
-  unloadingChargesInr   Decimal @default(0) @map("unloading_charges_inr") @db.Decimal(16, 2)
-  insuranceMiscInr      Decimal @default(0) @map("insurance_misc_inr") @db.Decimal(16, 2)
+  freightTotalInr     Decimal  @default(0) @map("freight_total_inr") @db.Decimal(16, 2)
+  unloadingChargesInr Decimal  @default(0) @map("unloading_charges_inr") @db.Decimal(16, 2)
+  insuranceMiscInr    Decimal  @default(0) @map("insurance_misc_inr") @db.Decimal(16, 2)
   /// Cached: basic_rate + (freight+unloading+insurance)/total_weight_kg — for margin / production.
-  landedRatePerKg       Decimal? @map("landed_rate_per_kg") @db.Decimal(14, 4)
+  landedRatePerKg     Decimal? @map("landed_rate_per_kg") @db.Decimal(14, 4)
   /// UUIDs of customer PoLineItem rows covered by this vendor line
-  linkedPoLineIds Json    @map("linked_po_line_ids")
+  linkedPoLineIds     Json     @map("linked_po_line_ids")
 
   vendorPo VendorMaterialPurchaseOrder @relation(fields: [vendorPoId], references: [id], onDelete: Cascade)
 
@@ -1172,88 +1214,88 @@ model VendorMaterialPurchaseOrderLine {
 // ─────────────────────────────────────────
 
 model ProductionJobCard {
-  id                 String    @id @default(uuid())
-  jobCardNumber      Int       @unique @default(autoincrement()) @map("job_card_number")
-  setNumber          String?   @map("set_number")
-  customerId         String    @map("customer_id")
+  id                        String   @id @default(uuid())
+  jobCardNumber             Int      @unique @default(autoincrement()) @map("job_card_number")
+  setNumber                 String?  @map("set_number")
+  customerId                String   @map("customer_id")
   /// Default / primary press for OEE & speed (optional).
-  machineId          String?   @map("machine_id")
-  assignedOperator   String?   @map("assigned_operator")
-  requiredSheets     Int       @map("required_sheets")
-  wastageSheets      Int       @default(0) @map("wastage_sheets")
-  totalSheets        Int       @map("total_sheets")
-  sheetsIssued       Int       @default(0) @map("sheets_issued")
-  artworkApproved    Boolean   @default(false) @map("artwork_approved")
-  firstArticlePass   Boolean   @default(false) @map("first_article_pass")
-  finalQcPass        Boolean   @default(false) @map("final_qc_pass")
-  qaReleased         Boolean   @default(false) @map("qa_released")
-  coaGenerated       Boolean   @default(false) @map("coa_generated")
-  batchNumber        String?   @map("batch_number")
-  fileUrl            String?   @map("file_url")
-  status             String    @default("design_ready")
-  jobDate            DateTime  @default(now()) @map("job_date") @db.Date
-  postPressRouting   Json?     @map("post_press_routing")
-  plateSetId         String?   @map("plate_set_id")
-  newPlatesRequired  Int?      @map("new_plates_required")
-  oldPlatesUsed      Int?      @map("old_plates_used")
-  plateNotes         String?   @map("plate_notes")
-  embossBlockId      String?   @map("emboss_block_id")
+  machineId                 String?  @map("machine_id")
+  assignedOperator          String?  @map("assigned_operator")
+  requiredSheets            Int      @map("required_sheets")
+  wastageSheets             Int      @default(0) @map("wastage_sheets")
+  totalSheets               Int      @map("total_sheets")
+  sheetsIssued              Int      @default(0) @map("sheets_issued")
+  artworkApproved           Boolean  @default(false) @map("artwork_approved")
+  firstArticlePass          Boolean  @default(false) @map("first_article_pass")
+  finalQcPass               Boolean  @default(false) @map("final_qc_pass")
+  qaReleased                Boolean  @default(false) @map("qa_released")
+  coaGenerated              Boolean  @default(false) @map("coa_generated")
+  batchNumber               String?  @map("batch_number")
+  fileUrl                   String?  @map("file_url")
+  status                    String   @default("design_ready")
+  jobDate                   DateTime @default(now()) @map("job_date") @db.Date
+  postPressRouting          Json?    @map("post_press_routing")
+  plateSetId                String?  @map("plate_set_id")
+  newPlatesRequired         Int?     @map("new_plates_required")
+  oldPlatesUsed             Int?     @map("old_plates_used")
+  plateNotes                String?  @map("plate_notes")
+  embossBlockId             String?  @map("emboss_block_id")
   /// Shift-attributed operator (HR / incentive attribution).
-  shiftOperatorUserId String?   @map("shift_operator_user_id")
+  shiftOperatorUserId       String?  @map("shift_operator_user_id")
   /// FIFO-allocated main-warehouse batch at job creation (sheet dims + location).
-  allocatedPaperWarehouseId String? @map("allocated_paper_warehouse_id")
+  allocatedPaperWarehouseId String?  @map("allocated_paper_warehouse_id")
   /// Denormalized: e.g. "Issued Stock: 20×30 in. | Grain: Long"
-  issuedStockDisplay        String? @map("issued_stock_display") @db.VarChar(280)
+  issuedStockDisplay        String?  @map("issued_stock_display") @db.VarChar(280)
   /// Pick pointer: "Pick from: {bay} | Pallet: {id}"
-  inventoryLocationPointer  String? @map("inventory_location_pointer") @db.VarChar(280)
+  inventoryLocationPointer  String?  @map("inventory_location_pointer") @db.VarChar(280)
   /// unknown | ok | critical_mismatch | pre_trim_required (vs AW actualSheetSize)
-  grainFitStatus            String  @default("unknown") @map("grain_fit_status") @db.VarChar(32)
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  grainFitStatus            String   @default("unknown") @map("grain_fit_status") @db.VarChar(32)
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
 
-  customer    Customer               @relation(fields: [customerId], references: [id])
-  shiftOperator User?                @relation("ShiftOperatorJobCard", fields: [shiftOperatorUserId], references: [id], onDelete: SetNull)
-  machine     Machine?             @relation(fields: [machineId], references: [id], onDelete: SetNull)
-  allocatedPaperWarehouse PaperWarehouse? @relation("JobCardAllocatedPaper", fields: [allocatedPaperWarehouseId], references: [id], onDelete: SetNull)
-  plateSet    PlateStore?            @relation("PlateSetUsedBy", fields: [plateSetId], references: [id])
-  embossBlock EmbossBlock?           @relation(fields: [embossBlockId], references: [id])
-  stages      ProductionStageRecord[]
-  issues      SheetIssueRecord[]
-  paperFloorIssues PaperIssueToFloor[]
-  plateStoresCreatedForThis PlateStore[] @relation("PlateSetCreatedFor")
-  downtimeLogs ProductionDowntimeLog[]
-  oeeLedgerEntry ProductionOeeLedger?
-  shadeCardsIssued ShadeCard[] @relation("ShadeCardIssuedJobCard")
-  materialReservations MaterialReservation[]
-  materialShortages    MaterialShortage[]
-  dispatches           Dispatch[]
+  customer                  Customer                @relation(fields: [customerId], references: [id])
+  shiftOperator             User?                   @relation("ShiftOperatorJobCard", fields: [shiftOperatorUserId], references: [id], onDelete: SetNull)
+  machine                   Machine?                @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  allocatedPaperWarehouse   PaperWarehouse?         @relation("JobCardAllocatedPaper", fields: [allocatedPaperWarehouseId], references: [id], onDelete: SetNull)
+  plateSet                  PlateStore?             @relation("PlateSetUsedBy", fields: [plateSetId], references: [id])
+  embossBlock               EmbossBlock?            @relation(fields: [embossBlockId], references: [id])
+  stages                    ProductionStageRecord[]
+  issues                    SheetIssueRecord[]
+  paperFloorIssues          PaperIssueToFloor[]
+  plateStoresCreatedForThis PlateStore[]            @relation("PlateSetCreatedFor")
+  downtimeLogs              ProductionDowntimeLog[]
+  oeeLedgerEntry            ProductionOeeLedger?
+  shadeCardsIssued          ShadeCard[]             @relation("ShadeCardIssuedJobCard")
+  materialReservations      MaterialReservation[]
+  materialShortages         MaterialShortage[]
+  dispatches                Dispatch[]
 
   @@map("production_job_cards")
 }
 
 model ProductionStageRecord {
-  id             String    @id @default(uuid())
-  jobCardId      String    @map("job_card_id")
-  stageName      String    @map("stage_name")
-  operator       String?
-  setNumber      String?   @map("set_number")
-  paper          String?
-  requiredSheets Int?      @map("required_sheets")
-  paperDivide    Int?      @map("paper_divide")
-  sheetSize      String?   @map("sheet_size")
-  totalSheets    Int?      @map("total_sheets")
-  counter        Int?
-  fileUrl        String?   @map("file_url")
-  status         String    @default("pending")
-  completedAt    DateTime? @map("completed_at")
-  stageData      Json?     @map("stage_data")
+  id                   String    @id @default(uuid())
+  jobCardId            String    @map("job_card_id")
+  stageName            String    @map("stage_name")
+  operator             String?
+  setNumber            String?   @map("set_number")
+  paper                String?
+  requiredSheets       Int?      @map("required_sheets")
+  paperDivide          Int?      @map("paper_divide")
+  sheetSize            String?   @map("sheet_size")
+  totalSheets          Int?      @map("total_sheets")
+  counter              Int?
+  fileUrl              String?   @map("file_url")
+  status               String    @default("pending")
+  completedAt          DateTime? @map("completed_at")
+  stageData            Json?     @map("stage_data")
   /// Last time the operator logged production (counter / pulse).
   lastProductionTickAt DateTime? @map("last_production_tick_at")
   /// When this stage entered `in_progress` (for run-time & idle detection).
   inProgressSince      DateTime? @map("in_progress_since")
-  createdAt      DateTime  @default(now()) @map("created_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
 
-  jobCard ProductionJobCard @relation(fields: [jobCardId], references: [id])
+  jobCard      ProductionJobCard       @relation(fields: [jobCardId], references: [id])
   downtimeLogs ProductionDowntimeLog[]
 
   @@map("production_stage_records")
@@ -1286,52 +1328,52 @@ model ProductionDowntimeLog {
 
 /// Final OEE snapshot when a production job card is closed (production ledger).
 model ProductionOeeLedger {
-  id                  String    @id @default(uuid())
-  productionJobCardId String    @unique @map("production_job_card_id")
-  machineId           String?   @map("machine_id")
-  availabilityPct     Decimal   @map("availability_pct") @db.Decimal(6, 2)
-  performancePct      Decimal   @map("performance_pct") @db.Decimal(6, 2)
-  qualityPct          Decimal   @map("quality_pct") @db.Decimal(6, 2)
-  oeePct              Decimal   @map("oee_pct") @db.Decimal(6, 2)
-  shiftMinutes        Int       @map("shift_minutes")
-  runMinutes          Int       @map("run_minutes")
-  ratedSpeedPph       Decimal?  @map("rated_speed_pph") @db.Decimal(12, 4)
-  actualAvgSpeedPph   Decimal?  @map("actual_avg_speed_pph") @db.Decimal(12, 4)
-  goodPieces          Int       @map("good_pieces")
-  totalPieces         Int       @map("total_pieces")
+  id                       String    @id @default(uuid())
+  productionJobCardId      String    @unique @map("production_job_card_id")
+  machineId                String?   @map("machine_id")
+  availabilityPct          Decimal   @map("availability_pct") @db.Decimal(6, 2)
+  performancePct           Decimal   @map("performance_pct") @db.Decimal(6, 2)
+  qualityPct               Decimal   @map("quality_pct") @db.Decimal(6, 2)
+  oeePct                   Decimal   @map("oee_pct") @db.Decimal(6, 2)
+  shiftMinutes             Int       @map("shift_minutes")
+  runMinutes               Int       @map("run_minutes")
+  ratedSpeedPph            Decimal?  @map("rated_speed_pph") @db.Decimal(12, 4)
+  actualAvgSpeedPph        Decimal?  @map("actual_avg_speed_pph") @db.Decimal(12, 4)
+  goodPieces               Int       @map("good_pieces")
+  totalPieces              Int       @map("total_pieces")
   /// Yield % at close (theoretical vs issued); mirrors Yield Guardian.
-  yieldPercent        Decimal?  @map("yield_percent") @db.Decimal(6, 2)
+  yieldPercent             Decimal?  @map("yield_percent") @db.Decimal(6, 2)
   /// Starred job, yield above 96%, OEE above 85%.
-  incentiveEligible   Boolean   @default(false) @map("incentive_eligible")
-  incentiveVerifiedAt DateTime? @map("incentive_verified_at")
+  incentiveEligible        Boolean   @default(false) @map("incentive_eligible")
+  incentiveVerifiedAt      DateTime? @map("incentive_verified_at")
   /// Denormalized from job shift operator at ledger creation.
-  attributedOperatorUserId String? @map("attributed_operator_user_id")
-  computedAt          DateTime  @default(now()) @map("computed_at")
+  attributedOperatorUserId String?   @map("attributed_operator_user_id")
+  computedAt               DateTime  @default(now()) @map("computed_at")
 
-  jobCard ProductionJobCard @relation(fields: [productionJobCardId], references: [id], onDelete: Cascade)
-  machine Machine?          @relation(fields: [machineId], references: [id], onDelete: SetNull)
-  attributedOperator User?  @relation("LedgerAttributedOperator", fields: [attributedOperatorUserId], references: [id], onDelete: SetNull)
+  jobCard            ProductionJobCard @relation(fields: [productionJobCardId], references: [id], onDelete: Cascade)
+  machine            Machine?          @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  attributedOperator User?             @relation("LedgerAttributedOperator", fields: [attributedOperatorUserId], references: [id], onDelete: SetNull)
 
   @@map("production_oee_ledgers")
 }
 
 model SheetIssueRecord {
-  id              String    @id @default(uuid())
-  jobCardId       String    @map("job_card_id")
-  qtyRequested    Int       @map("qty_requested")
-  isExcess        Boolean   @default(false) @map("is_excess")
-  reasonCode      String?   @map("reason_code")
-  reasonDetail    String?   @map("reason_detail")
-  approvedBy      String?   @map("approved_by")
-  approvedAt      DateTime? @map("approved_at")
-  approvalTier    Int?      @map("approval_tier")
-  rejectedAt      DateTime? @map("rejected_at")
-  rejectionReason String?   @map("rejection_reason")
-  issuedBy        String    @map("issued_by")
-  issuedAt        DateTime  @default(now()) @map("issued_at")
-  lotNumber       String?   @map("lot_number")
+  id                 String    @id @default(uuid())
+  jobCardId          String    @map("job_card_id")
+  qtyRequested       Int       @map("qty_requested")
+  isExcess           Boolean   @default(false) @map("is_excess")
+  reasonCode         String?   @map("reason_code")
+  reasonDetail       String?   @map("reason_detail")
+  approvedBy         String?   @map("approved_by")
+  approvedAt         DateTime? @map("approved_at")
+  approvalTier       Int?      @map("approval_tier")
+  rejectedAt         DateTime? @map("rejected_at")
+  rejectionReason    String?   @map("rejection_reason")
+  issuedBy           String    @map("issued_by")
+  issuedAt           DateTime  @default(now()) @map("issued_at")
+  lotNumber          String?   @map("lot_number")
   /// Free-text when issuing a newer lot while older FIFO stock exists for the same spec.
-  fifoOverrideReason String? @map("fifo_override_reason") @db.Text
+  fifoOverrideReason String?   @map("fifo_override_reason") @db.Text
 
   jobCard ProductionJobCard @relation(fields: [jobCardId], references: [id])
 
@@ -1343,64 +1385,64 @@ model SheetIssueRecord {
 // ─────────────────────────────────────────
 
 model PlateStore {
-  id              String    @id @default(uuid())
+  id                  String    @id @default(uuid())
   /// DB column `current_job_card_id` (see initial migration); links plate set to production job card.
-  jobCardId       String?   @map("current_job_card_id")
-  cartonId        String?   @map("carton_id")
-  artworkCode     String?   @map("artwork_code")
-  artworkVersion  String?   @map("artwork_version")
-  plateSize       PlateSize @default(SIZE_560_670) @map("plate_size")
-  cartonName      String    @map("carton_name")
-  customerId      String?   @map("customer_id")
-  plateSetCode    String    @unique @map("plate_set_code")
-  serialNumber    String?   @map("serial_number")
-  outputNumber    String?   @map("output_number")
-  rackNumber      String?   @map("rack_number")
-  ups             Int?      @map("ups")
-  numberOfColours Int       @map("number_of_colours")
-  colours         Json
-  totalPlates     Int       @map("total_plates")
-  newPlates       Int       @default(0) @map("new_plates")
-  oldPlates       Int       @default(0) @map("old_plates")
-  rackLocation    String?   @map("rack_location")
-  slotNumber      String?   @map("slot_number")
-  storageLocation String?   @map("storage_location")
-  ctpOperator     String?   @map("ctp_operator")
-  ctpDate         DateTime? @map("ctp_date") @db.Date
-  status          String    @default("in_use") @map("status") @db.VarChar(24)
-  printedOn       DateTime? @map("printed_on") @db.Date
-  collectedBy     String?   @map("collected_by")
-  collectedAt     DateTime? @map("collected_at")
-  issuedTo        String?   @map("issued_to")
-  issuedAt        DateTime? @map("issued_at")
-  returnedBy      String?   @map("returned_by")
-  returnedAt      DateTime? @map("returned_at")
-  storageNotes    String?   @map("storage_notes")
-  destroyedReason String?   @map("destroyed_reason")
-  destroyedBy     String?   @map("destroyed_by")
-  destroyedAt     DateTime? @map("destroyed_at")
-  totalImpressions Int      @default(0) @map("total_impressions")
-  lastUsedDate    DateTime? @map("last_used_date") @db.Date
+  jobCardId           String?   @map("current_job_card_id")
+  cartonId            String?   @map("carton_id")
+  artworkCode         String?   @map("artwork_code")
+  artworkVersion      String?   @map("artwork_version")
+  plateSize           PlateSize @default(SIZE_560_670) @map("plate_size")
+  cartonName          String    @map("carton_name")
+  customerId          String?   @map("customer_id")
+  plateSetCode        String    @unique @map("plate_set_code")
+  serialNumber        String?   @map("serial_number")
+  outputNumber        String?   @map("output_number")
+  rackNumber          String?   @map("rack_number")
+  ups                 Int?      @map("ups")
+  numberOfColours     Int       @map("number_of_colours")
+  colours             Json
+  totalPlates         Int       @map("total_plates")
+  newPlates           Int       @default(0) @map("new_plates")
+  oldPlates           Int       @default(0) @map("old_plates")
+  rackLocation        String?   @map("rack_location")
+  slotNumber          String?   @map("slot_number")
+  storageLocation     String?   @map("storage_location")
+  ctpOperator         String?   @map("ctp_operator")
+  ctpDate             DateTime? @map("ctp_date") @db.Date
+  status              String    @default("in_use") @map("status") @db.VarChar(24)
+  printedOn           DateTime? @map("printed_on") @db.Date
+  collectedBy         String?   @map("collected_by")
+  collectedAt         DateTime? @map("collected_at")
+  issuedTo            String?   @map("issued_to")
+  issuedAt            DateTime? @map("issued_at")
+  returnedBy          String?   @map("returned_by")
+  returnedAt          DateTime? @map("returned_at")
+  storageNotes        String?   @map("storage_notes")
+  destroyedReason     String?   @map("destroyed_reason")
+  destroyedBy         String?   @map("destroyed_by")
+  destroyedAt         DateTime? @map("destroyed_at")
+  totalImpressions    Int       @default(0) @map("total_impressions")
+  lastUsedDate        DateTime? @map("last_used_date") @db.Date
   /// Plate Hub staging: ctp | vendor | rack — set when status is READY_ON_FLOOR
-  hubCustodySource   String?  @map("hub_custody_source") @db.VarChar(32)
+  hubCustodySource    String?   @map("hub_custody_source") @db.VarChar(32)
   /// Status before Mark Plate Ready (for reverse)
-  hubPreviousStatus  String?  @map("hub_previous_status") @db.VarChar(32)
+  hubPreviousStatus   String?   @map("hub_previous_status") @db.VarChar(32)
   /// Hub analytics: last time this row entered its current workflow column (queue / rack / custody).
-  lastStatusUpdatedAt DateTime @default(now()) @map("last_status_updated_at")
+  lastStatusUpdatedAt DateTime  @default(now()) @map("last_status_updated_at")
   /// Per-channel rack usage cycles for star ledger, e.g. `{ "C": 3, "M": 2, "P1": 1 }` (keys match hub shorts).
-  cycleData       Json      @default("{}") @map("cycle_data")
+  cycleData           Json      @default("{}") @map("cycle_data")
   /// Hub card soft-delete (audit — row retained; hidden from board).
-  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
-  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  hubSoftDeletedAt    DateTime? @map("hub_soft_deleted_at")
+  hubSoftDeletedBy    String?   @map("hub_soft_deleted_by") @db.VarChar(120)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  carton            Carton?           @relation(fields: [cartonId], references: [id])
-  createdForJobCard ProductionJobCard? @relation("PlateSetCreatedFor", fields: [jobCardId], references: [id])
-  customer          Customer?          @relation(fields: [customerId], references: [id])
-  jobCardsUsingThis ProductionJobCard[] @relation("PlateSetUsedBy")
-  scrapEvents     PlateStoreScrapEvent[]
-  hubEvents       PlateHubEvent[]
+  carton            Carton?                @relation(fields: [cartonId], references: [id])
+  createdForJobCard ProductionJobCard?     @relation("PlateSetCreatedFor", fields: [jobCardId], references: [id])
+  customer          Customer?              @relation(fields: [customerId], references: [id])
+  jobCardsUsingThis ProductionJobCard[]    @relation("PlateSetUsedBy")
+  scrapEvents       PlateStoreScrapEvent[]
+  hubEvents         PlateHubEvent[]
 
   @@map("plate_store")
 }
@@ -1422,49 +1464,49 @@ model PlateStoreScrapEvent {
 }
 
 model PlateRequirement {
-  id                 String    @id @default(uuid())
-  requirementCode    String    @unique @map("requirement_code")
-  jobCardId          String?   @map("job_card_id")
-  dieMasterId        String?   @map("die_master_id")
-  cartonName         String    @map("carton_name")
-  artworkCode        String?   @map("artwork_code")
-  artworkVersion     String?   @map("artwork_version")
+  id                  String     @id @default(uuid())
+  requirementCode     String     @unique @map("requirement_code")
+  jobCardId           String?    @map("job_card_id")
+  dieMasterId         String?    @map("die_master_id")
+  cartonName          String     @map("carton_name")
+  artworkCode         String?    @map("artwork_code")
+  artworkVersion      String?    @map("artwork_version")
   /// Press-side barcode, generated at executePrePressFinalize. Validated by
   /// the press-operator scan route. Unique when set.
-  plateBarcode       String?   @unique @map("plate_barcode") @db.VarChar(60)
-  customerId         String?   @map("customer_id")
-  numberOfColours    Int       @map("number_of_colours")
-  coloursNeeded      Json      @map("colours_needed")
-  newPlatesNeeded    Int       @map("new_plates_needed")
-  oldPlatesAvailable Int       @map("old_plates_available")
-  ctpTriggeredAt     DateTime? @map("ctp_triggered_at")
-  ctpOperator        String?   @map("ctp_operator")
-  ctpPriority        String    @default("Normal") @map("ctp_priority")
-  status             String    @default("pending")
-  triageChannel      String?   @map("triage_channel") @db.VarChar(40)
-  reservedRackSlot   String?   @map("reserved_rack_slot")
-  poLineId           String?   @map("po_line_id")
+  plateBarcode        String?    @unique @map("plate_barcode") @db.VarChar(60)
+  customerId          String?    @map("customer_id")
+  numberOfColours     Int        @map("number_of_colours")
+  coloursNeeded       Json       @map("colours_needed")
+  newPlatesNeeded     Int        @map("new_plates_needed")
+  oldPlatesAvailable  Int        @map("old_plates_available")
+  ctpTriggeredAt      DateTime?  @map("ctp_triggered_at")
+  ctpOperator         String?    @map("ctp_operator")
+  ctpPriority         String     @default("Normal") @map("ctp_priority")
+  status              String     @default("pending")
+  triageChannel       String?    @map("triage_channel") @db.VarChar(40)
+  reservedRackSlot    String?    @map("reserved_rack_slot")
+  poLineId            String?    @map("po_line_id")
   /// Ad-hoc / partial remake from hub — show (Remake) in UI
-  partialRemake      Boolean   @default(false) @map("partial_remake")
+  partialRemake       Boolean    @default(false) @map("partial_remake")
   /// Set from carton master, manual hub entry, or triage dispatch; null = must resolve before CTP/vendor lane.
-  plateSize          PlateSize? @map("plate_size")
-  createdBy          String    @map("created_by")
+  plateSize           PlateSize? @map("plate_size")
+  createdBy           String     @map("created_by")
   /// Hub analytics: last time this requirement entered its current column (triage / CTP / vendor / custody).
-  lastStatusUpdatedAt DateTime @default(now()) @map("last_status_updated_at")
-  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
-  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
+  lastStatusUpdatedAt DateTime   @default(now()) @map("last_status_updated_at")
+  hubSoftDeletedAt    DateTime?  @map("hub_soft_deleted_at")
+  hubSoftDeletedBy    String?    @map("hub_soft_deleted_by") @db.VarChar(120)
   /// Sequence within the CTP internal queue (0 = first).
-  hubOrderCtp         Int?      @map("hub_order_ctp")
+  hubOrderCtp         Int?       @map("hub_order_ctp")
   /// Sequence within the outside-vendor queue (0 = first).
-  hubOrderVendor      Int?      @map("hub_order_vendor")
+  hubOrderVendor      Int?       @map("hub_order_vendor")
   /// Hub priority drag: who last changed order in CTP or vendor queue.
-  lastReorderedBy    String?   @map("last_reordered_by") @db.VarChar(120)
-  lastReorderedAt    DateTime? @map("last_reordered_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  lastReorderedBy     String?    @map("last_reordered_by") @db.VarChar(120)
+  lastReorderedAt     DateTime?  @map("last_reordered_at")
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
 
-  hubEvents   PlateHubEvent[]
-  dieMaster   Dye?            @relation("PlateReqDieMaster", fields: [dieMasterId], references: [id])
+  hubEvents PlateHubEvent[]
+  dieMaster Dye?            @relation("PlateReqDieMaster", fields: [dieMasterId], references: [id])
 
   @@map("plate_requirements")
 }
@@ -1494,61 +1536,61 @@ model PlateHubEvent {
 // ─────────────────────────────────────────
 
 model EmbossBlock {
-  id               String    @id @default(uuid())
-  blockCode        String    @unique @map("block_code")
-  cartonId         String?   @map("carton_id")
-  cartonName       String?   @map("carton_name")
-  customerId       String?   @map("customer_id")
-  blockType        String    @map("block_type")
-  blockMaterial    String    @default("Magnesium") @map("block_material")
+  id                 String    @id @default(uuid())
+  blockCode          String    @unique @map("block_code")
+  cartonId           String?   @map("carton_id")
+  cartonName         String?   @map("carton_name")
+  customerId         String?   @map("customer_id")
+  blockType          String    @map("block_type")
+  blockMaterial      String    @default("Magnesium") @map("block_material")
   /// Hub: Brass | Magnesium | Copper (optional; falls back to blockMaterial).
-  materialType     String?   @map("material_type") @db.VarChar(32)
-  blockSize        String?   @map("block_size")
-  embossDepth      Decimal?  @map("emboss_depth") @db.Decimal(4, 2)
+  materialType       String?   @map("material_type") @db.VarChar(32)
+  blockSize          String?   @map("block_size")
+  embossDepth        Decimal?  @map("emboss_depth") @db.Decimal(4, 2)
   /// Relief depth (mm); optional duplicate of embossDepth for tooling spec clarity.
-  reliefDepthMm    Decimal?  @map("relief_depth_mm") @db.Decimal(4, 2)
-  storageLocation  String?   @map("storage_location")
+  reliefDepthMm      Decimal?  @map("relief_depth_mm") @db.Decimal(4, 2)
+  storageLocation    String?   @map("storage_location")
   /// Linked die master for production kit traceability.
-  linkedDieId      String?   @map("linked_die_id")
+  linkedDieId        String?   @map("linked_die_id")
   /// Approved artwork PDF URL.
-  artworkRefLink   String?   @map("artwork_ref_link") @db.VarChar(600)
+  artworkRefLink     String?   @map("artwork_ref_link") @db.VarChar(600)
   /// Optional revision label for hub identity (e.g. REV-A); falls back to short id in UI.
-  assetVersionId   String?   @map("asset_version_id") @db.VarChar(40)
-  impressionCount  Int       @default(0) @map("impression_count")
+  assetVersionId     String?   @map("asset_version_id") @db.VarChar(40)
+  impressionCount    Int       @default(0) @map("impression_count")
   /// Cumulative production strikes (job-close increments); kept aligned with usage for tooling life.
-  cumulativeStrikes Int      @default(0) @map("cumulative_strikes")
-  maxImpressions   Int       @default(100000) @map("max_impressions")
-  condition        String    @default("Good") @map("condition") @db.VarChar(40)
-  lastPolishedDate DateTime? @map("last_polished_date") @db.Date
-  polishCount      Int       @default(0) @map("polish_count")
-  scrapReason      String?   @map("scrap_reason")
-  scrappedBy       String?   @map("scrapped_by")
-  scrappedAt       DateTime? @map("scrapped_at")
-  active           Boolean   @default(true)
-  custodyStatus    String    @default("in_stock") @map("custody_status") @db.VarChar(32)
-  reuseCount       Int       @default(0) @map("reuse_count")
-  hubPreviousCustody String? @map("hub_previous_custody") @db.VarChar(32)
-  issuedMachineId  String?   @map("issued_machine_id")
-  issuedOperator   String?   @map("issued_operator")
-  issuedAt         DateTime? @map("issued_at")
-  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
-  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
-  hubOrderTriage      Int?      @map("hub_order_triage")
-  hubOrderPrep        Int?      @map("hub_order_prep")
-  hubOrderInventory   Int?      @map("hub_order_inventory")
-  hubOrderCustody     Int?      @map("hub_order_custody")
+  cumulativeStrikes  Int       @default(0) @map("cumulative_strikes")
+  maxImpressions     Int       @default(100000) @map("max_impressions")
+  condition          String    @default("Good") @map("condition") @db.VarChar(40)
+  lastPolishedDate   DateTime? @map("last_polished_date") @db.Date
+  polishCount        Int       @default(0) @map("polish_count")
+  scrapReason        String?   @map("scrap_reason")
+  scrappedBy         String?   @map("scrapped_by")
+  scrappedAt         DateTime? @map("scrapped_at")
+  active             Boolean   @default(true)
+  custodyStatus      String    @default("in_stock") @map("custody_status") @db.VarChar(32)
+  reuseCount         Int       @default(0) @map("reuse_count")
+  hubPreviousCustody String?   @map("hub_previous_custody") @db.VarChar(32)
+  issuedMachineId    String?   @map("issued_machine_id")
+  issuedOperator     String?   @map("issued_operator")
+  issuedAt           DateTime? @map("issued_at")
+  hubSoftDeletedAt   DateTime? @map("hub_soft_deleted_at")
+  hubSoftDeletedBy   String?   @map("hub_soft_deleted_by") @db.VarChar(120)
+  hubOrderTriage     Int?      @map("hub_order_triage")
+  hubOrderPrep       Int?      @map("hub_order_prep")
+  hubOrderInventory  Int?      @map("hub_order_inventory")
+  hubOrderCustody    Int?      @map("hub_order_custody")
   lastReorderedBy    String?   @map("last_reordered_by") @db.VarChar(120)
   lastReorderedAt    DateTime? @map("last_reordered_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  issuedMachine    Machine?  @relation("EmbossBlockIssuedMachine", fields: [issuedMachineId], references: [id], onDelete: SetNull)
-  linkedDie        Dye?      @relation("EmbossBlockLinkedDie", fields: [linkedDieId], references: [id], onDelete: SetNull)
-  cartons          Carton[]
-  usageLogs        EmbossBlockUsageLog[]
-  maintenanceLogs  EmbossBlockMaintenanceLog[]
-  jobCards         ProductionJobCard[]
-  hubEvents        EmbossHubEvent[]
+  issuedMachine   Machine?                    @relation("EmbossBlockIssuedMachine", fields: [issuedMachineId], references: [id], onDelete: SetNull)
+  linkedDie       Dye?                        @relation("EmbossBlockLinkedDie", fields: [linkedDieId], references: [id], onDelete: SetNull)
+  cartons         Carton[]
+  usageLogs       EmbossBlockUsageLog[]
+  maintenanceLogs EmbossBlockMaintenanceLog[]
+  jobCards        ProductionJobCard[]
+  hubEvents       EmbossHubEvent[]
 
   @@index([linkedDieId])
   @@map("emboss_blocks")
@@ -1576,74 +1618,74 @@ model EmbossHubEvent {
 // ─────────────────────────────────────────
 
 model ShadeCard {
-  id                String    @id @default(uuid())
-  shadeCode         String    @unique @map("shade_code")
-  productMaster     String?   @map("product_master")
-  masterArtworkRef  String?   @map("master_artwork_ref")
-  approvalDate      DateTime? @map("approval_date") @db.Date
+  id                    String    @id @default(uuid())
+  shadeCode             String    @unique @map("shade_code")
+  productMaster         String?   @map("product_master")
+  masterArtworkRef      String?   @map("master_artwork_ref")
+  approvalDate          DateTime? @map("approval_date") @db.Date
   /// Last lab verification vs master (fade alert if &gt; 180 days).
-  lastVerifiedAt    DateTime? @map("last_verified_at") @db.Date
+  lastVerifiedAt        DateTime? @map("last_verified_at") @db.Date
   /// Color variance ΔE (standard &lt; 2.0).
-  deltaEReading     Decimal?  @map("delta_e_reading") @db.Decimal(5, 2)
+  deltaEReading         Decimal?  @map("delta_e_reading") @db.Decimal(5, 2)
   /// Customer-signed approval PDF / image.
-  approvalAttachmentUrl String? @map("approval_attachment_url") @db.VarChar(600)
+  approvalAttachmentUrl String?   @map("approval_attachment_url") @db.VarChar(600)
   /// Ink Kitchen PMS / lab recipe link.
-  inkRecipeLink         String? @map("ink_recipe_link") @db.VarChar(600)
+  inkRecipeLink         String?   @map("ink_recipe_link") @db.VarChar(600)
   /// Signed physical scan (customer approval).
-  customerApprovalDoc   String? @map("customer_approval_doc") @db.VarChar(600)
+  customerApprovalDoc   String?   @map("customer_approval_doc") @db.VarChar(600)
   /// Precomputed: last verification + 180 days (fade / re-verify gate).
   validUntil            DateTime? @map("valid_until") @db.Date
   /// Short spectro summary for spotlight drawer.
-  spectroReportSummary  String? @map("spectro_report_summary") @db.Text
+  spectroReportSummary  String?   @map("spectro_report_summary") @db.Text
   /// Hex swatch for UI preview e.g. #C41E3A
-  colorSwatchHex    String?   @map("color_swatch_hex") @db.VarChar(7)
-  customerId        String?   @map("customer_id")
-  inkComponent      String?   @map("ink_component")
-  remarks           String?
+  colorSwatchHex        String?   @map("color_swatch_hex") @db.VarChar(7)
+  customerId            String?   @map("customer_id")
+  inkComponent          String?   @map("ink_component")
+  remarks               String?
   /// Last manual remark edit (for hub tooltips).
-  remarksEditedAt     DateTime? @map("remarks_edited_at")
-  remarksEditedByName String?   @map("remarks_edited_by_name") @db.VarChar(120)
-  currentHolder     String?   @map("current_holder")
-  impressionCount   Int       @default(0) @map("impression_count")
-  custodyStatus     String    @default("in_stock") @map("custody_status") @db.VarChar(32)
-  issuedMachineId   String?   @map("issued_machine_id")
-  issuedJobCardId   String?   @map("issued_job_card_id")
-  issuedOperator    String?   @map("issued_operator")
-  issuedAt          DateTime? @map("issued_at")
+  remarksEditedAt       DateTime? @map("remarks_edited_at")
+  remarksEditedByName   String?   @map("remarks_edited_by_name") @db.VarChar(120)
+  currentHolder         String?   @map("current_holder")
+  impressionCount       Int       @default(0) @map("impression_count")
+  custodyStatus         String    @default("in_stock") @map("custody_status") @db.VarChar(32)
+  issuedMachineId       String?   @map("issued_machine_id")
+  issuedJobCardId       String?   @map("issued_job_card_id")
+  issuedOperator        String?   @map("issued_operator")
+  issuedAt              DateTime? @map("issued_at")
   /// Physical card manufacture date — drives 9 / 12 month colour policy.
-  mfgDate           DateTime? @map("mfg_date") @db.Date
+  mfgDate               DateTime? @map("mfg_date") @db.Date
   /// Soft-hide retired cards without deleting ledger history.
-  isActive          Boolean   @default(true) @map("is_active")
+  isActive              Boolean   @default(true) @map("is_active")
   /// Linked Product Master (carton) for identity & deep links.
-  productId         String?   @map("product_id")
+  productId             String?   @map("product_id")
   /// Board substrate for color matching (FBB, SBS, GREY_BACK, KRAFT).
-  substrateType     String?   @map("substrate_type") @db.VarChar(32)
+  substrateType         String?   @map("substrate_type") @db.VarChar(32)
   /// CIE L*a*b* reference (Color DNA).
-  labL              Decimal?  @map("lab_l") @db.Decimal(10, 4)
-  labA              Decimal?  @map("lab_a") @db.Decimal(10, 4)
-  labB              Decimal?  @map("lab_b") @db.Decimal(10, 4)
+  labL                  Decimal?  @map("lab_l") @db.Decimal(10, 4)
+  labA                  Decimal?  @map("lab_a") @db.Decimal(10, 4)
+  labB                  Decimal?  @map("lab_b") @db.Decimal(10, 4)
   /// PMS / lab mix notes (spotlight + audit).
-  inkRecipeNotes    String?   @map("ink_recipe_notes") @db.Text
+  inkRecipeNotes        String?   @map("ink_recipe_notes") @db.Text
   /// Append-only spectro verification timestamps [{ scannedAt, deltaE?, note? }].
-  spectroScanLog    Json?     @map("spectro_scan_log")
-  hubSoftDeletedAt  DateTime? @map("hub_soft_deleted_at")
-  hubSoftDeletedBy  String?   @map("hub_soft_deleted_by") @db.VarChar(120)
+  spectroScanLog        Json?     @map("spectro_scan_log")
+  hubSoftDeletedAt      DateTime? @map("hub_soft_deleted_at")
+  hubSoftDeletedBy      String?   @map("hub_soft_deleted_by") @db.VarChar(120)
   /// Kanban column-specific sequence (0 = top within that lane).
-  hubOrderInStock     Int?      @map("hub_order_in_stock")
-  hubOrderOnFloor     Int?      @map("hub_order_on_floor")
-  hubOrderReverify    Int?      @map("hub_order_reverify")
-  hubOrderExpired     Int?      @map("hub_order_expired")
-  lastReorderedBy    String?   @map("last_reordered_by") @db.VarChar(120)
-  lastReorderedAt    DateTime? @map("last_reordered_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  hubOrderInStock       Int?      @map("hub_order_in_stock")
+  hubOrderOnFloor       Int?      @map("hub_order_on_floor")
+  hubOrderReverify      Int?      @map("hub_order_reverify")
+  hubOrderExpired       Int?      @map("hub_order_expired")
+  lastReorderedBy       String?   @map("last_reordered_by") @db.VarChar(120)
+  lastReorderedAt       DateTime? @map("last_reordered_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
-  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  product  Carton?   @relation("ShadeCardProductMaster", fields: [productId], references: [id], onDelete: SetNull)
+  customer      Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  product       Carton?            @relation("ShadeCardProductMaster", fields: [productId], references: [id], onDelete: SetNull)
   issuedJobCard ProductionJobCard? @relation("ShadeCardIssuedJobCard", fields: [issuedJobCardId], references: [id], onDelete: SetNull)
-  events   ShadeCardEvent[]
-  cartons  Carton[]
-  poLines  PoLineItem[]
+  events        ShadeCardEvent[]
+  cartons       Carton[]
+  poLines       PoLineItem[]
 
   @@index([customerId])
   @@index([productId])
@@ -1667,13 +1709,13 @@ model ShadeCardEvent {
 }
 
 model EmbossBlockUsageLog {
-  id             String    @id @default(uuid())
-  blockId        String    @map("block_id")
-  jobCardId      String?   @map("job_card_id")
-  impressions    Int       @default(0)
-  usedOn         DateTime  @default(now()) @map("used_on") @db.Date
-  operatorName   String?   @map("operator_name")
-  conditionAfter String?   @map("condition_after")
+  id             String      @id @default(uuid())
+  blockId        String      @map("block_id")
+  jobCardId      String?     @map("job_card_id")
+  impressions    Int         @default(0)
+  usedOn         DateTime    @default(now()) @map("used_on") @db.Date
+  operatorName   String?     @map("operator_name")
+  conditionAfter String?     @map("condition_after")
   notes          String?
   block          EmbossBlock @relation(fields: [blockId], references: [id])
 
@@ -1681,16 +1723,16 @@ model EmbossBlockUsageLog {
 }
 
 model EmbossBlockMaintenanceLog {
-  id               String    @id @default(uuid())
-  blockId          String    @map("block_id")
-  actionType       String    @map("action_type")
-  performedBy      String    @map("performed_by")
-  performedAt      DateTime  @default(now()) @map("performed_at")
-  conditionBefore  String?   @map("condition_before")
-  conditionAfter   String?   @map("condition_after")
-  notes            String?
-  cost             Decimal?  @db.Decimal(10, 2)
-  block            EmbossBlock @relation(fields: [blockId], references: [id])
+  id              String      @id @default(uuid())
+  blockId         String      @map("block_id")
+  actionType      String      @map("action_type")
+  performedBy     String      @map("performed_by")
+  performedAt     DateTime    @default(now()) @map("performed_at")
+  conditionBefore String?     @map("condition_before")
+  conditionAfter  String?     @map("condition_after")
+  notes           String?
+  cost            Decimal?    @db.Decimal(10, 2)
+  block           EmbossBlock @relation(fields: [blockId], references: [id])
 
   @@map("emboss_block_maintenance_log")
 }
@@ -1731,10 +1773,10 @@ model PaperWarehouse {
   palletId          String?   @map("pallet_id") @db.VarChar(64)
   createdAt         DateTime  @default(now()) @map("created_at")
 
-  originatedFrom PaperWarehouse?  @relation("PaperWhFloorSplit", fields: [originatedFromId], references: [id], onDelete: SetNull)
-  floorSplits    PaperWarehouse[]   @relation("PaperWhFloorSplit")
-  issuesSourced  PaperIssueToFloor[] @relation("PaperIssueSourceWh")
-  issuesAsDest   PaperIssueToFloor[] @relation("PaperIssueDestWh")
+  originatedFrom    PaperWarehouse?     @relation("PaperWhFloorSplit", fields: [originatedFromId], references: [id], onDelete: SetNull)
+  floorSplits       PaperWarehouse[]    @relation("PaperWhFloorSplit")
+  issuesSourced     PaperIssueToFloor[] @relation("PaperIssueSourceWh")
+  issuesAsDest      PaperIssueToFloor[] @relation("PaperIssueDestWh")
   jobCardsAllocated ProductionJobCard[] @relation("JobCardAllocatedPaper")
 
   @@map("paper_warehouse")
@@ -1742,16 +1784,16 @@ model PaperWarehouse {
 
 /// Digital requisition: move sheets from main warehouse to floor stock, optionally linked to a production job card.
 model PaperIssueToFloor {
-  id                       String    @id @default(uuid())
-  sourcePaperWarehouseId   String    @map("source_paper_warehouse_id")
-  destinationWarehouseId   String?   @map("destination_warehouse_id")
-  productionJobCardId      String?   @map("production_job_card_id")
-  qtySheets                Int       @map("qty_sheets")
-  operatorUserId           String    @map("operator_user_id")
-  operatorName             String    @map("operator_name")
+  id                     String   @id @default(uuid())
+  sourcePaperWarehouseId String   @map("source_paper_warehouse_id")
+  destinationWarehouseId String?  @map("destination_warehouse_id")
+  productionJobCardId    String?  @map("production_job_card_id")
+  qtySheets              Int      @map("qty_sheets")
+  operatorUserId         String   @map("operator_user_id")
+  operatorName           String   @map("operator_name")
   /// When true, audit trail uses the director high-priority issuance wording.
-  highPriorityAuthorized   Boolean   @default(false) @map("high_priority_authorized")
-  createdAt                DateTime  @default(now()) @map("created_at")
+  highPriorityAuthorized Boolean  @default(false) @map("high_priority_authorized")
+  createdAt              DateTime @default(now()) @map("created_at")
 
   source      PaperWarehouse     @relation("PaperIssueSourceWh", fields: [sourcePaperWarehouseId], references: [id], onDelete: Cascade)
   destination PaperWarehouse?    @relation("PaperIssueDestWh", fields: [destinationWarehouseId], references: [id], onDelete: SetNull)
@@ -1778,38 +1820,76 @@ model PaperSpecReorderPolicy {
 // ─────────────────────────────────────────
 
 model Bill {
-  id          String        @id @default(uuid())
-  billNumber  String        @unique @map("bill_number")
-  customerId  String        @map("customer_id")
-  billDate    DateTime      @default(now()) @map("bill_date") @db.Date
-  subtotal    Decimal       @db.Decimal(12, 2)
-  gstAmount   Decimal       @map("gst_amount") @db.Decimal(12, 2)
-  totalAmount Decimal       @map("total_amount") @db.Decimal(12, 2)
-  status      String        @default("draft")
-  createdBy   String        @map("created_by")
-  createdAt   DateTime      @default(now()) @map("created_at")
+  id                     String    @id @default(uuid())
+  /// FY-prefixed Tally-style number, e.g. "CI/26-27/0001". Unique across the system.
+  billNumber             String    @unique @map("bill_number")
+  /// Financial year string ("26-27" for Apr 2026 – Mar 2027). Drives numbering reset.
+  financialYear          String?   @map("financial_year") @db.VarChar(8)
+  customerId             String    @map("customer_id")
+  billDate               DateTime  @default(now()) @map("bill_date") @db.Date
+  /// 2-digit Indian state code snapshot for place-of-supply. Drives CGST/SGST vs IGST.
+  placeOfSupplyStateCode String?   @map("place_of_supply_state_code") @db.VarChar(2)
+  /// "intra" (CGST+SGST) | "inter" (IGST). Computed from buyer/seller state codes.
+  taxSplit               String    @default("intra") @map("tax_split") @db.VarChar(8)
+  subtotal               Decimal   @db.Decimal(12, 2)
+  /// Total of CGST across all line items.
+  cgstAmount             Decimal   @default(0) @map("cgst_amount") @db.Decimal(12, 2)
+  /// Total of SGST across all line items.
+  sgstAmount             Decimal   @default(0) @map("sgst_amount") @db.Decimal(12, 2)
+  /// Total of IGST across all line items.
+  igstAmount             Decimal   @default(0) @map("igst_amount") @db.Decimal(12, 2)
+  /// Aggregate GST (cgst+sgst+igst). Retained for back-compat with older rows.
+  gstAmount              Decimal   @map("gst_amount") @db.Decimal(12, 2)
+  totalAmount            Decimal   @map("total_amount") @db.Decimal(12, 2)
+  /// Aggregate HSN summary for invoice footer: [{hsn, taxableValue, cgst, sgst, igst, total}].
+  hsnSummary             Json?     @map("hsn_summary")
+  /// Transport mode at invoice time (mirrors Dispatch when single-dispatch invoice).
+  transportMode          String?   @map("transport_mode") @db.VarChar(8)
+  transporterName        String?   @map("transporter_name") @db.VarChar(120)
+  vehicleNumber          String?   @map("vehicle_number") @db.VarChar(30)
+  distanceKm             Decimal?  @map("distance_km") @db.Decimal(8, 2)
+  ewayBillNumber         String?   @map("eway_bill_number") @db.VarChar(30)
+  ewayBillExpiry         DateTime? @map("eway_bill_expiry") @db.Date
+  /// Computed: invoice value >= 50,000 INR and transport_mode is set.
+  ewayApplicable         Boolean   @default(false) @map("eway_applicable")
+  status                 String    @default("draft")
+  createdBy              String    @map("created_by")
+  createdAt              DateTime  @default(now()) @map("created_at")
 
-  customer  Customer     @relation(fields: [customerId], references: [id])
-  lineItems BillLineItem[]
+  customer   Customer       @relation(fields: [customerId], references: [id])
+  lineItems  BillLineItem[]
+  dispatches Dispatch[]
 
+  @@index([financialYear])
+  @@index([customerId])
   @@map("bills")
 }
 
 model BillLineItem {
-  id          String  @id @default(uuid())
-  billId      String  @map("bill_id")
-  jobCardId   String? @map("job_card_id")
-  description String
-  quantity    Int
-  rate        Decimal @db.Decimal(12, 4)
-  gstPct      Int     @default(12) @map("gst_pct")
-  amount      Decimal @db.Decimal(12, 2)
+  id            String  @id @default(uuid())
+  billId        String  @map("bill_id")
+  jobCardId     String? @map("job_card_id")
+  /// Dispatch this line was rolled up from (one bill row may aggregate multiple dispatch rows of the same SKU).
+  dispatchId    String? @map("dispatch_id")
+  description   String
+  /// HSN snapshot at invoice time.
+  hsnCode       String? @map("hsn_code") @db.VarChar(8)
+  quantity      Int
+  rate          Decimal @db.Decimal(12, 4)
+  gstPct        Int     @default(12) @map("gst_pct")
+  /// Pre-tax line amount (quantity * rate).
+  taxableAmount Decimal @default(0) @map("taxable_amount") @db.Decimal(12, 2)
+  cgstAmount    Decimal @default(0) @map("cgst_amount") @db.Decimal(12, 2)
+  sgstAmount    Decimal @default(0) @map("sgst_amount") @db.Decimal(12, 2)
+  igstAmount    Decimal @default(0) @map("igst_amount") @db.Decimal(12, 2)
+  /// Final inclusive amount (taxable + tax). Retained for back-compat.
+  amount        Decimal @db.Decimal(12, 2)
 
   bill Bill @relation(fields: [billId], references: [id])
 
+  @@index([dispatchId])
   @@map("bill_line_items")
 }
-
 
 // ─────────────────────────────────────────
 // WORKFLOW STAGES (22-stage pharma workflow)
@@ -1871,22 +1951,22 @@ model Rfq {
 // ─────────────────────────────────────────
 
 model WasteRecord {
-  id          String   @id @default(uuid())
-  jobId       String   @map("job_id")
-  stageId     String?  @map("stage_id")
-  wasteType   String   @map("waste_type") @db.VarChar(40) // makeready | run_waste | substrate_trim
-  qty         Decimal  @db.Decimal(12, 3)
-  unit        String   @db.VarChar(20)
-  materialId  String   @map("material_id")
-  machineId   String?  @map("machine_id")
-  recordedBy  String   @map("recorded_by")
-  recordedAt  DateTime @default(now()) @map("recorded_at")
+  id         String   @id @default(uuid())
+  jobId      String   @map("job_id")
+  stageId    String?  @map("stage_id")
+  wasteType  String   @map("waste_type") @db.VarChar(40) // makeready | run_waste | substrate_trim
+  qty        Decimal  @db.Decimal(12, 3)
+  unit       String   @db.VarChar(20)
+  materialId String   @map("material_id")
+  machineId  String?  @map("machine_id")
+  recordedBy String   @map("recorded_by")
+  recordedAt DateTime @default(now()) @map("recorded_at")
 
-  job      Job        @relation(fields: [jobId], references: [id])
-  stage    JobStage?  @relation(fields: [stageId], references: [id])
-  material Inventory  @relation(fields: [materialId], references: [id])
-  machine  Machine?   @relation(fields: [machineId], references: [id])
-  recorder User       @relation(fields: [recordedBy], references: [id])
+  job      Job       @relation(fields: [jobId], references: [id])
+  stage    JobStage? @relation(fields: [stageId], references: [id])
+  material Inventory @relation(fields: [materialId], references: [id])
+  machine  Machine?  @relation(fields: [machineId], references: [id])
+  recorder User      @relation(fields: [recordedBy], references: [id])
 
   @@map("waste_records")
 }
@@ -1917,7 +1997,7 @@ model PurchaseRequisition {
   sourcePlanningId String?   @map("source_planning_id")
   createdAt        DateTime  @default(now()) @map("created_at")
 
-  material Inventory @relation(fields: [materialId], references: [id])
+  material             Inventory                     @relation(fields: [materialId], references: [id])
   vendorPurchaseOrders VendorMaterialPurchaseOrder[]
 
   @@map("purchase_requisitions")
@@ -1944,22 +2024,22 @@ model MaterialReservation {
 }
 
 model MaterialShortage {
-  id              String   @id @default(uuid())
-  materialId      String   @map("material_id")
-  jobCardId       String?  @map("job_card_id")
-  planningId      String?  @map("planning_id")
-  sourcePoLineId  String?  @map("source_po_line_id")
-  triggerReason   String?  @map("trigger_reason") @db.VarChar(64)
-  shortageQty     Decimal  @map("shortage_qty") @db.Decimal(12, 3)
-  allocatedQty    Decimal  @default(0) @map("allocated_qty") @db.Decimal(12, 3)
-  remainingQty    Decimal  @map("remaining_qty") @db.Decimal(12, 3)
-  status          String   @default("open") @db.VarChar(24)
-  purchaseReqId   String?  @map("purchase_req_id")
-  requiredByDate  DateTime? @map("required_by_date") @db.Date
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id             String    @id @default(uuid())
+  materialId     String    @map("material_id")
+  jobCardId      String?   @map("job_card_id")
+  planningId     String?   @map("planning_id")
+  sourcePoLineId String?   @map("source_po_line_id")
+  triggerReason  String?   @map("trigger_reason") @db.VarChar(64)
+  shortageQty    Decimal   @map("shortage_qty") @db.Decimal(12, 3)
+  allocatedQty   Decimal   @default(0) @map("allocated_qty") @db.Decimal(12, 3)
+  remainingQty   Decimal   @map("remaining_qty") @db.Decimal(12, 3)
+  status         String    @default("open") @db.VarChar(24)
+  purchaseReqId  String?   @map("purchase_req_id")
+  requiredByDate DateTime? @map("required_by_date") @db.Date
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  material Inventory         @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  material Inventory          @relation(fields: [materialId], references: [id], onDelete: Cascade)
   jobCard  ProductionJobCard? @relation(fields: [jobCardId], references: [id], onDelete: SetNull)
 
   @@index([materialId, status])
@@ -1968,12 +2048,12 @@ model MaterialShortage {
 }
 
 model GrnShortageAllocation {
-  id          String   @id @default(uuid())
-  grnId       String   @map("grn_id")
-  shortageId  String   @map("shortage_id")
-  materialId  String   @map("material_id")
-  allocatedQty Decimal @map("allocated_qty") @db.Decimal(12, 3)
-  createdAt   DateTime @default(now()) @map("created_at")
+  id           String   @id @default(uuid())
+  grnId        String   @map("grn_id")
+  shortageId   String   @map("shortage_id")
+  materialId   String   @map("material_id")
+  allocatedQty Decimal  @map("allocated_qty") @db.Decimal(12, 3)
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@unique([grnId, shortageId])
   @@index([shortageId])
@@ -2017,16 +2097,16 @@ model EffectCategory {
 }
 
 model EffectValue {
-  id          String   @id @default(uuid())
-  categoryId  String   @map("category_id")
-  value       String   @db.VarChar(120)
-  abbreviation String? @db.VarChar(24)
-  impactOn    String?  @map("impact_on") @db.VarChar(80)
-  description String?
-  sortOrder   Int      @default(100) @map("sort_order")
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  categoryId   String   @map("category_id")
+  value        String   @db.VarChar(120)
+  abbreviation String?  @db.VarChar(24)
+  impactOn     String?  @map("impact_on") @db.VarChar(80)
+  description  String?
+  sortOrder    Int      @default(100) @map("sort_order")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   category EffectCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
