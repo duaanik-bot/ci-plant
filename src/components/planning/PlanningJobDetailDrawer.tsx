@@ -14,7 +14,7 @@ import { mergePlanningMetaUps, readPlanningMeta } from '@/lib/planning-decision-
 import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
-import { StandardDrawer } from '@/components/design-system/StandardDrawer'
+import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -1357,54 +1357,69 @@ export function PlanningJobDetailDrawer({
   const visibleSuggestionCount = strictSuggestionCount > 0 ? strictSuggestionCount : compatibleSuggestionCount
 
   return (
-    <StandardDrawer
+    <PlanningEngineModal
       isOpen={open}
       onClose={onClose}
-      title={<span className="truncate text-ds-ink" title={line.cartonName}>{line.cartonName}</span>}
+      zIndexClass="z-[70]"
+      widthClass="max-w-[900px]"
+      title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
-        <div className="space-y-2">
-          <p className="text-xs text-ds-ink-faint">
-            {line.po.poNumber} · {line.planningStatus} · {line.po.customer.name}
-          </p>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {line.po.isPriority ? (
-              <Badge
-                tone="warning"
-                className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
-              >
-                <Star className="h-3 w-3 fill-current" aria-hidden />
-                PO
-              </Badge>
-            ) : null}
-            {line.directorPriority ? (
-              <Badge tone="brand" className="text-xs">
-                Line priority
-              </Badge>
-            ) : null}
-            {line.directorHold ? (
-              <Badge tone="warning" className="text-xs">
-                On hold
-              </Badge>
-            ) : null}
-            {line.cartonId && onViewProductDetail ? (
-              <button
-                type="button"
-                onClick={onViewProductDetail}
-                className="text-xs font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
-              >
-                Product sheet
-              </button>
-            ) : null}
-          </div>
+        <div className="flex flex-wrap items-center gap-2 mt-0.5">
+          <span className="font-id-mono text-xs text-ds-warning">{line.po.poNumber}</span>
+          <span className="text-ds-line/60">·</span>
+          <span className="text-xs text-ds-ink-faint">{line.planningStatus}</span>
+          <span className="text-ds-line/60">·</span>
+          <span className="text-xs text-ds-ink-faint truncate max-w-[18rem]">{line.po.customer.name}</span>
+          {line.po.isPriority ? (
+            <Badge
+              tone="warning"
+              className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
+            >
+              <Star className="h-3 w-3 fill-current" aria-hidden />
+              PO Priority
+            </Badge>
+          ) : null}
+          {line.directorPriority ? <Badge tone="brand" className="text-xs">Line priority</Badge> : null}
+          {line.directorHold ? <Badge tone="warning" className="text-xs">On hold</Badge> : null}
+          {line.cartonId && onViewProductDetail ? (
+            <button
+              type="button"
+              onClick={onViewProductDetail}
+              className="text-xs font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
+            >
+              Product sheet
+            </button>
+          ) : null}
+        </div>
+      }
+      statusBar={
+        <div className="flex items-center gap-3 text-xs">
+          <span className={`inline-flex items-center gap-1.5 rounded-ds-sm border px-2.5 py-1 font-medium ${statusTone}`}>
+            {readinessLoading
+              ? 'Checking material…'
+              : readiness?.status === 'green'
+                ? '● Stock ready'
+                : readiness?.status === 'yellow'
+                  ? '◐ Partial — PR pending'
+                  : readiness?.status === 'red'
+                    ? '○ Shortage'
+                    : '— No material linked'}
+          </span>
+          {readiness && !readinessLoading ? (
+            <span className="text-ds-ink-faint truncate">{materialSummary}</span>
+          ) : null}
+          {visibleSuggestionCount > 0 && (
+            <span className="ml-auto shrink-0 rounded-ds-sm border border-ds-brand/40 bg-ds-brand/10 px-2 py-0.5 text-ds-brand font-medium">
+              {visibleSuggestionCount} board option{visibleSuggestionCount > 1 ? 's' : ''}
+            </span>
+          )}
         </div>
       }
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
       primaryAction={{
         label: 'Save',
         loadingLabel: 'Saving…',
-        onClick: () => {
-          void handleSave()
-        },
+        onClick: () => { void handleSave() },
         disabled: saving,
         loading: saving,
       }}
@@ -2264,12 +2279,14 @@ export function PlanningJobDetailDrawer({
           </Button>
         </div>
       </div>
-      <StandardDrawer
+      <PlanningEngineModal
         isOpen={suggestionsWorkspaceOpen}
         onClose={() => setSuggestionsWorkspaceOpen(false)}
+        zIndexClass="z-[80]"
+        widthClass="max-w-[1100px]"
         title="Suggestion Workspace"
-        metadata={<p className="text-xs text-ds-ink-faint">Extended view for material decision and safer mapping verification.</p>}
-        primaryAction={{
+        metadata={<p className="text-xs text-ds-ink-faint mt-0.5">Extended view for material decision and safer mapping verification.</p>}
+        secondaryAction={{
           label: 'Close',
           onClick: () => setSuggestionsWorkspaceOpen(false),
         }}
@@ -2449,7 +2466,7 @@ export function PlanningJobDetailDrawer({
             </table>
           </div>
         </div>
-      </StandardDrawer>
+      </PlanningEngineModal>
       {reserveConfirmOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
           <div className="w-full max-w-3xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
@@ -2982,6 +2999,6 @@ export function PlanningJobDetailDrawer({
           </div>
         </div>
       ) : null}
-    </StandardDrawer>
+    </PlanningEngineModal>
   )
 }

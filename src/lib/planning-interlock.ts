@@ -62,12 +62,16 @@ export type InterlockSegment = {
   hint?: string
 }
 
-export type MaterialGateStatus = 'unknown' | 'available' | 'ordered' | 'shortage'
+export type MaterialGateStatus = 'unknown' | 'available' | 'partially_available' | 'ordered' | 'shortage'
 
 export type MaterialGate = {
   status: MaterialGateStatus
   requiredSheets: number | null
   netAvailable: number | null
+  /** Net available after subtracting reservations held by other jobs/lines. Optional for backwards compat. */
+  netFreeSheets?: number | null
+  /** Sheets currently locked by other jobs that draw from the same material pool. Optional for backwards compat. */
+  reservedByOtherJobs?: number | null
   procurementStatus: string
 }
 
@@ -103,29 +107,88 @@ export function computeMaterialGate(args: {
   materialQueue: { totalSheets: number; boardType: string; gsm: number } | null
   materialProcurementStatus: string
   inventoryRows: InvRow[]
+  /**
+   * Sheets already reserved/committed by other planning lines that share the
+   * same material pool. When provided, the gate uses `net - reservedByOtherJobs`
+   * (netFreeSheets) as the true available quantity for this job.
+   * Defaults to 0 when not supplied (legacy behaviour).
+   */
+  reservedByOtherJobs?: number
 }): MaterialGate {
   const proc = (args.materialProcurementStatus ?? '').trim().toLowerCase()
+  const otherReserved = Math.max(0, args.reservedByOtherJobs ?? 0)
+
   if (!args.materialQueue) {
     return {
       status: 'unknown',
       requiredSheets: null,
       netAvailable: null,
+      netFreeSheets: null,
+      reservedByOtherJobs: otherReserved || null,
       procurementStatus: proc,
     }
   }
+
   const required = args.materialQueue.totalSheets
   const net = netBoardStockForQueue(
     args.inventoryRows,
     args.materialQueue.boardType,
     args.materialQueue.gsm,
   )
-  if (net >= required) {
-    return { status: 'available', requiredSheets: required, netAvailable: net, procurementStatus: proc }
+  const netFree = Math.max(0, net - otherReserved)
+
+  if (netFree >= required) {
+    return {
+      status: 'available',
+      requiredSheets: required,
+      netAvailable: net,
+      netFreeSheets: netFree,
+      reservedByOtherJobs: otherReserved || null,
+      procurementStatus: proc,
+    }
   }
+
+  // Partially available: some free stock exists but not enough
+  if (netFree > 0 && netFree < required) {
+    if (ORDERED_PROC_STATUSES.has(proc)) {
+      return {
+        status: 'ordered',
+        requiredSheets: required,
+        netAvailable: net,
+        netFreeSheets: netFree,
+        reservedByOtherJobs: otherReserved || null,
+        procurementStatus: proc,
+      }
+    }
+    return {
+      status: 'partially_available',
+      requiredSheets: required,
+      netAvailable: net,
+      netFreeSheets: netFree,
+      reservedByOtherJobs: otherReserved || null,
+      procurementStatus: proc,
+    }
+  }
+
+  // No free stock
   if (ORDERED_PROC_STATUSES.has(proc)) {
-    return { status: 'ordered', requiredSheets: required, netAvailable: net, procurementStatus: proc }
+    return {
+      status: 'ordered',
+      requiredSheets: required,
+      netAvailable: net,
+      netFreeSheets: netFree,
+      reservedByOtherJobs: otherReserved || null,
+      procurementStatus: proc,
+    }
   }
-  return { status: 'shortage', requiredSheets: required, netAvailable: net, procurementStatus: proc }
+  return {
+    status: 'shortage',
+    requiredSheets: required,
+    netAvailable: net,
+    netFreeSheets: netFree,
+    reservedByOtherJobs: otherReserved || null,
+    procurementStatus: proc,
+  }
 }
 
 export function computeToolingInterlock(args: {
@@ -257,18 +320,25 @@ export function computeFivePointReadiness(args: {
   const mg = args.materialGate
   let paState: ReadinessFiveState
   let paTitle: string
-  if (mg.requiredSheets == null || mg.netAvailable == null) {
+  const freeSheets = mg.netFreeSheets ?? mg.netAvailable
+  if (mg.requiredSheets == null || freeSheets == null) {
     paState = 'neutral'
     paTitle = 'Paper / board — MRP not linked'
-  } else if (mg.netAvailable >= mg.requiredSheets) {
+  } else if (mg.status === 'available') {
     paState = 'ready'
-    paTitle = `Stock available · Net ${mg.netAvailable} ≥ Req ${mg.requiredSheets}`
+    const reserved = mg.reservedByOtherJobs ?? 0
+    paTitle = reserved > 0
+      ? `Stock available · Free ${freeSheets} ≥ Req ${mg.requiredSheets} (${reserved} reserved by other jobs)`
+      : `Stock available · Net ${freeSheets} ≥ Req ${mg.requiredSheets}`
+  } else if (mg.status === 'partially_available') {
+    paState = 'blocked'
+    paTitle = `Partial stock · Free ${freeSheets} < Req ${mg.requiredSheets}${mg.reservedByOtherJobs ? ` · ${mg.reservedByOtherJobs} reserved by other jobs` : ''}`
   } else if (mg.status === 'ordered') {
     paState = 'blocked'
-    paTitle = `On order — Net ${mg.netAvailable} < Req ${mg.requiredSheets}`
+    paTitle = `On order — Free ${freeSheets} < Req ${mg.requiredSheets}`
   } else {
     paState = 'blocked'
-    paTitle = `Shortage — Net ${mg.netAvailable} < Req ${mg.requiredSheets}`
+    paTitle = `Shortage — Free ${freeSheets} < Req ${mg.requiredSheets}`
   }
 
   const diOk = args.dieStatus === 'good'

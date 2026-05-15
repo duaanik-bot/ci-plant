@@ -1,6 +1,7 @@
 'use client'
 
-import { Info, X } from 'lucide-react'
+import { Info } from 'lucide-react'
+import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
 import {
   computeFivePointReadiness,
   computeToolingInterlock,
@@ -132,11 +133,15 @@ function RingPct({
 function normalizeMaterialGate(raw: Partial<MaterialGate> | undefined): MaterialGate {
   const s = String(raw?.status ?? 'unknown')
   const status: MaterialGateStatus =
-    s === 'available' || s === 'ordered' || s === 'shortage' || s === 'unknown' ? s : 'unknown'
+    s === 'available' || s === 'partially_available' || s === 'ordered' || s === 'shortage' || s === 'unknown'
+      ? s
+      : 'unknown'
   return {
     status,
     requiredSheets: raw?.requiredSheets ?? null,
     netAvailable: raw?.netAvailable ?? null,
+    netFreeSheets: raw?.netFreeSheets ?? null,
+    reservedByOtherJobs: raw?.reservedByOtherJobs ?? null,
     procurementStatus: raw?.procurementStatus ?? '',
   }
 }
@@ -272,38 +277,37 @@ export function PlanningReadinessDrawer({
   const materialTone = materialUtilPct >= 85 ? 'emerald' : materialUtilPct >= 60 ? 'amber' : 'rose'
   const readinessTone = productionReadinessPct >= 85 ? 'emerald' : productionReadinessPct >= 60 ? 'amber' : 'rose'
 
-  return (
-    <div className="fixed inset-0 z-[90] flex justify-end">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/55 backdrop-blur-[1px]"
-        aria-label="Close"
-        onClick={onClose}
-      />
-      <aside
-        className="relative flex h-full w-full max-w-[450px] flex-col border-l border-ds-line/50 bg-ds-main shadow-[-10px_0_30px_rgba(0,0,0,0.35)]"
-      >
-        <div className="flex items-start justify-between gap-2 border-b border-ds-line/40 bg-black/40 px-4 py-3">
-          <div className="min-w-0">
-            <p className="font-id-mono text-xs text-ds-warning truncate">
-              PO {line.po?.poNumber ?? '—'}
-            </p>
-            <h2 className="text-sm font-semibold text-ds-ink truncate pr-2">{line.cartonName}</h2>
-            <p className="text-xs text-ds-ink-faint mt-0.5 truncate max-w-[18rem]">
-              {line.po?.customer?.name ?? '—'}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-ds-ink-muted hover:bg-ds-elevated hover:text-ds-ink"
-            aria-label="Close drawer"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+  const blockedCount = five.segments.filter((s) => s.state === 'blocked').length
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
+  return (
+    <PlanningEngineModal
+      isOpen={open}
+      onClose={onClose}
+      zIndexClass="z-[90]"
+      title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
+      metadata={
+        <div className="flex flex-wrap items-center gap-2 mt-0.5">
+          <span className="font-id-mono text-xs text-ds-warning">{line.po?.poNumber ?? '—'}</span>
+          <span className="text-ds-line/60">·</span>
+          <span className="text-xs text-ds-ink-faint truncate max-w-[20rem]">
+            {line.po?.customer?.name ?? '—'}
+          </span>
+        </div>
+      }
+      statusBar={
+        <div className="flex flex-wrap items-center gap-2">
+          <FiveStrip segments={five.segments} />
+          {blockedCount > 0 && (
+            <span className="ml-auto text-xs font-semibold text-[var(--error)] bg-[var(--error-bg)]/20 border border-[var(--error)]/40 rounded-ds-sm px-2 py-0.5">
+              {blockedCount} blocker{blockedCount > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+      }
+      secondaryAction={{ label: 'Close', onClick: onClose }}
+    >
+      {/* 2-column grid — uses the wider modal canvas */}
+      <div className="grid grid-cols-2 gap-4">
           <div className="rounded-ds-md border border-ds-line/40 bg-ds-card/60 p-3">
             <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>I. Product DNA</p>
             <div className="mt-2 space-y-1 text-sm text-ds-ink">
@@ -422,7 +426,6 @@ export function PlanningReadinessDrawer({
             </p>
           </div>
         </div>
-      </aside>
-    </div>
+    </PlanningEngineModal>
   )
 }

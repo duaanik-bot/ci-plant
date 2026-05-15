@@ -41,9 +41,11 @@ type InterlockSegment = {
 }
 
 type MaterialGate = {
-  status: 'unknown' | 'available' | 'ordered' | 'shortage'
+  status: 'unknown' | 'available' | 'partially_available' | 'ordered' | 'shortage'
   requiredSheets: number | null
   netAvailable: number | null
+  netFreeSheets?: number | null
+  reservedByOtherJobs?: number | null
   procurementStatus: string
 }
 

@@ -64,9 +64,68 @@ function norm(s: string | null | undefined): string {
     .toLowerCase()
 }
 
+// ── Board canonicalisation ─────────────────────────────────────────────────
+/**
+ * Alias map: each entry is [pattern, canonicalKey].
+ * Patterns are tested against the lower-cased, trimmed raw board string.
+ * Order matters — more specific patterns should appear first.
+ * Extend this table as new warehouse aliases emerge.
+ */
+const BOARD_CANONICAL_MAP: Array<[RegExp | string, string]> = [
+  // FBB — Folding Box Board (GC1/GC2 in Tappi)
+  [/\bfbb\b/, 'fbb'],
+  [/folding[\s\-]*box[\s\-]*board/, 'fbb'],
+  [/folding[\s\-]*box(?!board)/, 'fbb'],
+  [/\bgc2?\b/, 'fbb'],
+  // SBS — Solid Bleached Sulphate / Ivory
+  [/\bsbs\b/, 'sbs'],
+  [/solid[\s\-]*bleached/, 'sbs'],
+  [/ivory[\s\-]*board/, 'sbs'],
+  [/\bivory\b/, 'sbs'],
+  // GD / GC — Grey Back Duplex
+  [/\bgd2?\b/, 'gd'],
+  [/grey[\s\-]*back/, 'gd'],
+  [/duplex[\s\-]*board/, 'gd'],
+  [/\bduplex\b/, 'gd'],
+  [/grey[\s\-]*board/, 'gd'],
+  [/grey[\s\-]*chip/, 'gd'],
+  [/triplex/, 'gd'],
+  // Coated Duplex (white back)
+  [/coated[\s\-]*duplex/, 'coated_duplex'],
+  [/white[\s\-]*back[\s\-]*duplex/, 'coated_duplex'],
+  // Kraft
+  [/kraft[\s\-]*liner/, 'kraft'],
+  [/natural[\s\-]*kraft/, 'kraft'],
+  [/\bkraft\b/, 'kraft'],
+  // Corrugated
+  [/single[\s\-]*wall/, 'corrugated_sw'],
+  [/double[\s\-]*wall/, 'corrugated_dw'],
+  [/\bcorrugated\b/, 'corrugated'],
+  // Manila
+  [/manila[\s\-]*board/, 'manila'],
+  [/\bmanila\b/, 'manila'],
+]
+
+/**
+ * Maps raw board-type strings from warehouse / spec fields to a canonical
+ * board-family key. "FBB", "fbb", "Folding Box Board" all resolve to "fbb".
+ * Returns the normalised raw string as fallback so novel types still group correctly.
+ */
+export function canonicaliseBoardType(raw: string | null | undefined): string {
+  const n = norm(raw)
+  if (!n || n === '—') return '—'
+  for (const [pattern, canonical] of BOARD_CANONICAL_MAP) {
+    if (typeof pattern === 'string' ? n.includes(pattern) : pattern.test(n)) {
+      return canonical
+    }
+  }
+  return n // unknown types still group by their own normalised string
+}
+
 function boardKey(l: SuggestableLine): string {
   const mq = l.materialQueue
-  return norm(mq?.boardType) || norm(l.paperType) || norm(l.carton?.paperType) || '—'
+  const raw = norm(mq?.boardType) || norm(l.paperType) || norm(l.carton?.paperType) || ''
+  return canonicaliseBoardType(raw) || '—'
 }
 
 function gsmKey(l: SuggestableLine): string {
@@ -197,6 +256,16 @@ export type SuggestedBatch = {
   subscores: { sizeFit: number; waste: number; urgency: number; tooling: number }
   /** For UI */
   lineSummaries: { id: string; cartonLabel: string; poNumber: string; qty: number; yieldPct: number }[]
+  /**
+   * Board match confidence across lines in this batch.
+   * 'exact'  — all raw board strings were already identical before canonicalisation.
+   * 'alias'  — at least one raw string differed but canonicalised to the same family.
+   * 'mixed'  — shouldn't happen (different families can't be in the same group),
+   *            included defensively.
+   */
+  boardMatchConfidence: 'exact' | 'alias' | 'mixed'
+  /** The resolved canonical board family for this batch (e.g. 'fbb', 'sbs', 'gd') */
+  canonicalBoardType: string
 }
 
 function scoreBatch(
@@ -283,6 +352,19 @@ export function suggestBatches(
           qty: b.quantity,
           yieldPct: Math.round(10 * yieldPctForLine(b)) / 10,
         }))
+
+        // Board match confidence: did every line share the same raw string,
+        // or did we rely on alias canonicalisation to unify them?
+        const rawBoardStrings = new Set(
+          batch.map((b) => {
+            const mq = b.materialQueue
+            return norm(mq?.boardType) || norm(b.paperType) || norm(b.carton?.paperType) || ''
+          }),
+        )
+        const canonicalBoardType = boardKey(batch[0]!)
+        const boardMatchConfidence: SuggestedBatch['boardMatchConfidence'] =
+          rawBoardStrings.size === 1 ? 'exact' : 'alias'
+
         out.push({
           id,
           groupKey,
@@ -295,6 +377,8 @@ export function suggestBatches(
           label,
           subscores,
           lineSummaries,
+          boardMatchConfidence,
+          canonicalBoardType,
         })
         i = j
       } else {
