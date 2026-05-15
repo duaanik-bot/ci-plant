@@ -57,6 +57,7 @@ type PaperWarehouseRow = {
   ageing_risk: 'low' | 'medium' | 'high'
   open_pr_id?: string | null
   open_pr_status?: string | null
+  daysOfCover: number | null
 }
 
 type StockStateItem = {
@@ -1183,6 +1184,7 @@ function InventoryPageContent() {
                     <th className="px-3 py-2 text-right">Available</th>
                     <th className="px-3 py-2 text-right">Reserved</th>
                     <th className="px-3 py-2 text-right">Free stock</th>
+                    <th className="px-3 py-2 text-right">Days of Cover</th>
                     <th className="px-3 py-2 text-right">Incoming</th>
                     <th className="px-3 py-2 text-right">Shortage</th>
                     <th className="px-3 py-2 text-right">Reorder</th>
@@ -1274,6 +1276,23 @@ function InventoryPageContent() {
                             fmt(row.available_sheets - row.reserved_sheets)
                           )}
                         </button>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {row.daysOfCover === null ? (
+                          <span className="text-ds-ink-muted" title="No completed-job consumption in last 30 days">—</span>
+                        ) : (
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold tabular-nums ${
+                              row.daysOfCover < 7
+                                ? 'bg-ds-danger/15 text-ds-danger'
+                                : row.daysOfCover < 30
+                                ? 'bg-ds-warning/15 text-ds-warning'
+                                : 'bg-ds-success/15 text-ds-success'
+                            }`}
+                          >
+                            {row.daysOfCover}d
+                          </span>
+                        )}
                       </td>
                       <td className={`px-3 py-2 text-right font-semibold text-[var(--info)] ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
                       <td className="px-3 py-2 text-right font-semibold text-[var(--error)]">
@@ -1846,6 +1865,7 @@ function InventoryPageContent() {
                   <th className="px-3 py-2">Available</th>
                   <th className="px-3 py-2">Reserved</th>
                   <th className="px-3 py-2">Free stock</th>
+                  <th className="px-3 py-2">Days of Cover</th>
                   <th className="px-3 py-2">Incoming</th>
                   <th className="px-3 py-2">Shortage</th>
                   <th className="px-3 py-2">Reorder</th>
@@ -1903,6 +1923,23 @@ function InventoryPageContent() {
                       }`}
                     >
                       {fmt(row.available_sheets - row.reserved_sheets)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {row.daysOfCover === null ? (
+                        <span className="text-ds-ink-muted" title="No completed-job consumption in last 30 days">—</span>
+                      ) : (
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold tabular-nums ${
+                            row.daysOfCover < 7
+                              ? 'bg-ds-danger/15 text-ds-danger'
+                              : row.daysOfCover < 30
+                              ? 'bg-ds-warning/15 text-ds-warning'
+                              : 'bg-ds-success/15 text-ds-success'
+                          }`}
+                        >
+                          {row.daysOfCover}d
+                        </span>
+                      )}
                     </td>
                     <td className={`px-3 py-2 text-[var(--info)] font-semibold ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
                     <td className={`px-3 py-2 text-[var(--error)] font-semibold ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
