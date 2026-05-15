@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { CheckCircle2, AlertTriangle, AlertCircle, Sparkles, Upload, FileText, Plus } from 'lucide-react'
+import { CheckCircle2, AlertTriangle, AlertCircle, Sparkles, Upload, FileText, Plus, ServerCrash } from 'lucide-react'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -152,6 +153,10 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
    *  means the operator either picked an existing customer or there was a hard
    *  detection failure with no proposal to confirm. */
   const [newCustomer, setNewCustomer] = useState<ProposedCustomer | null>(null)
+  /** Sticky once set: the server told us AI is unavailable (missing/invalid
+   *  API key, auth error). We surface a persistent banner and a manual-entry
+   *  fallback link so production work never stops just because the key is off. */
+  const [aiUnavailable, setAiUnavailable] = useState(false)
 
   // Reset when drawer closes
   useEffect(() => {
@@ -170,6 +175,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
       setDetection(null)
       setShowFallbackPicker(false)
       setNewCustomer(null)
+      setAiUnavailable(false)
       if (!presetCustomer) setCustomer(null)
     }
   }, [isOpen, presetCustomer])
@@ -233,6 +239,16 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
       const res = await fetch('/api/purchase-orders/import/extract', { method: 'POST', body: form })
       const data = await res.json()
       if (!res.ok) {
+        // Server is missing the Anthropic key (or auth failed). Don't ask the
+        // operator to fix it by re-picking — the next call would fail the same
+        // way. Flip into "AI unavailable" mode: show the banner + a manual
+        // PO entry link so the team is never blocked.
+        if (data?.code === 'AI_UNAVAILABLE') {
+          setAiUnavailable(true)
+          setShowFallbackPicker(false)
+          toast.error('AI extraction is unavailable on this deployment.')
+          return
+        }
         // Customer-detection failure — surface the picker so the operator can
         // pick manually and retry without re-uploading. Covers both "no match"
         // (422 with candidates) and "detect call threw" (502, no candidates).
@@ -531,6 +547,38 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
     >
       {step === 'upload' && (
         <div className="space-y-4">
+          {aiUnavailable && (
+            <div className="rounded-md border border-rose-500/60 bg-rose-500/[0.08] p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <ServerCrash className="size-5 text-rose-600 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-rose-700 dark:text-rose-300">
+                    AI extraction is unavailable on this deployment.
+                  </div>
+                  <p className="mt-1 text-xs text-rose-700/90 dark:text-rose-300/90 leading-relaxed">
+                    The server is missing <code className="rounded bg-rose-500/10 px-1 py-0.5 font-mono text-[11px]">ANTHROPIC_API_KEY</code>. Your team should set it in Vercel (Production, Preview, and Development) and redeploy.
+                    Until then, create POs manually so production isn&apos;t blocked.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Link
+                      href="/orders/purchase-orders/new"
+                      onClick={onClose}
+                      className="inline-flex items-center gap-1 rounded-md border border-rose-500/60 bg-white/80 dark:bg-rose-950/30 px-2.5 py-1 text-xs font-medium text-rose-700 dark:text-rose-200 hover:bg-white"
+                    >
+                      <Plus className="size-3.5" /> Create PO manually
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setAiUnavailable(false)}
+                      className="rounded-md border border-rose-500/40 px-2.5 py-1 text-xs text-rose-700 dark:text-rose-200 hover:bg-rose-500/10"
+                    >
+                      Dismiss & retry
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {presetCustomer && customer && (
             <div>
               <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">Customer</label>

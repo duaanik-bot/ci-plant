@@ -23,6 +23,36 @@ const MAX_PDF_BYTES = 8 * 1024 * 1024 // 8 MB
  *  matches the same literal — keep them in sync if you ever change it. */
 const NEW_CUSTOMER_SENTINEL = '__new__'
 
+/** Distinct error code returned when the server is missing the Anthropic key.
+ *  The PO import drawer checks for this and shows a "AI unavailable" banner
+ *  with a manual-entry fallback instead of confusing the operator with a
+ *  PDF/customer-identification message. */
+const AI_UNAVAILABLE_CODE = 'AI_UNAVAILABLE'
+
+function aiUnavailableResponse() {
+  return NextResponse.json(
+    {
+      error:
+        'AI extraction is unavailable on this deployment — ANTHROPIC_API_KEY is not configured. Please contact your administrator or use manual PO entry.',
+      code: AI_UNAVAILABLE_CODE,
+    },
+    { status: 503 },
+  )
+}
+
+/** True when an error thrown by the Anthropic SDK or our wrappers means the
+ *  server is mis-configured (missing key, invalid key, auth error) — i.e. an
+ *  ops problem, not a PDF problem. Used so we surface a clear admin-facing
+ *  message instead of "Could not identify the customer". */
+function isAuthOrConfigError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const msg = err.message.toLowerCase()
+  if (msg.includes('anthropic_api_key')) return true
+  // Anthropic SDK errors carry a status property on the error class.
+  const status = (err as { status?: number }).status
+  return status === 401 || status === 403
+}
+
 type ExtractResponse = {
   ok: true
   customerId: string
@@ -53,6 +83,17 @@ export async function POST(req: NextRequest) {
   if (error) return error
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // Fail fast & loud when the server is missing the Anthropic key. Without
+  // this check, both detect AND extract calls would fail later with a
+  // misleading "Could not identify the customer" / "API key is missing" UI
+  // — operators kept blaming the PDF when it was really an env-config drift.
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error(
+      '[POST /api/purchase-orders/import/extract] ANTHROPIC_API_KEY is not configured on this deployment.',
+    )
+    return aiUnavailableResponse()
   }
 
   let form: FormData
@@ -139,6 +180,11 @@ export async function POST(req: NextRequest) {
       })
     } catch (err) {
       console.error('[POST /api/purchase-orders/import/extract] Customer detect failed:', err)
+      if (isAuthOrConfigError(err)) {
+        // Server-side config problem — don't ask the operator to "pick
+        // manually", they'd hit the same error on the extract call.
+        return aiUnavailableResponse()
+      }
       return NextResponse.json(
         {
           error: 'Could not identify the customer from this PDF. Please pick the customer manually.',
@@ -223,6 +269,9 @@ export async function POST(req: NextRequest) {
     })
   } catch (err) {
     console.error('[POST /api/purchase-orders/import/extract] Claude call failed:', err)
+    if (isAuthOrConfigError(err)) {
+      return aiUnavailableResponse()
+    }
     const message = err instanceof Error ? err.message : 'AI extraction failed'
     return NextResponse.json({ error: message }, { status: 502 })
   }
