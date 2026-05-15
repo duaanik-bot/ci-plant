@@ -1,26 +1,36 @@
 import type { PlanningGridLine, PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
 
 /**
+ * Subset of the material readiness payload (fetched by the drawer
+ * from /api/planning/po-lines/:id/reserve-material) that the engine
+ * sections need. Defined locally so sections don't depend on the
+ * drawer's internal type.
+ */
+export type PlanningEngineReadiness = {
+  materialId: string | null
+  materialCode: string | null
+  boardType: string | null
+  boardClassification: string | null
+  size: string | null
+  gsm: number | null
+  requiredSheets: number
+  availableSheets: number
+  reservedSheets: number
+  freeSheets?: number
+  incomingSheets: number
+  shortageSheets: number
+  prId?: string | null
+  prStatus: string
+  grnEta: string | null
+  status?: 'green' | 'yellow' | 'red' | null
+}
+
+/**
  * View model the four engine sections consume. The drawer is responsible
  * for adapting its raw line + readiness fetches into this shape so each
  * section stays small and testable.
  */
 export type PlanningEngineLine = PlanningGridLine & {
-  /** Board allocation extras — sourced from the readiness panel fetch. */
-  boardAllocation?: {
-    boardType: string | null
-    gsm: number | null
-    sheetSizeLabel: string | null
-    requiredSheets: number | null
-    netStockSheets: number
-    reservedSheets: number
-    shortageSheets: number
-    prId?: string | null
-    prNumber?: string | null
-    prQtySheets?: number | null
-    prEtaDate?: string | null
-    prStatus?: string | null
-  }
   /** UPS & sheet spec extras — derived from spec + material queue. */
   upsAndSpec?: {
     ups: number | null

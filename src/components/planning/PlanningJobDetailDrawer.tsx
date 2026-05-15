@@ -16,7 +16,7 @@ import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
 import { PlanningEngineBody } from '@/components/planning/engine/PlanningEngineBody'
-import type { PlanningEngineLine } from '@/components/planning/engine/types'
+import type { PlanningEngineLine, PlanningEngineReadiness } from '@/components/planning/engine/types'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -1431,6 +1431,8 @@ export function PlanningJobDetailDrawer({
           and will be deleted in Phase 1.7. */}
       <PlanningEngineBody
         line={line as unknown as PlanningEngineLine}
+        readiness={readiness as unknown as PlanningEngineReadiness | null}
+        readinessLoading={readinessLoading}
         onPatch={async (patch) => onSaveLine(line.id, patch)}
         onLock={async () => {
           // Phase 2.4 wires this to /api/planning/po-lines/:id/lock-decision.
