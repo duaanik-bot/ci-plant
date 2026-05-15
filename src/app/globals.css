@@ -66,6 +66,30 @@
 
 @layer base {
   :root {
+    /* LIGHT theme (default). Accent stays the same orange in both themes. */
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --primary: 26 92% 51%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 26 92% 51%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --input: 214 32% 91%;
+    --border: 214 32% 91%;
+    --ring: 26 92% 51%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
     --background: 224 19% 8%;
     --foreground: 220 13% 91%;
     --card: 222 19% 13%;
@@ -85,26 +109,6 @@
     --ring: 26 92% 51%;
     --popover: 222 19% 13%;
     --popover-foreground: 220 13% 91%;
-    --radius: 0.5rem;
-  }
-
-  .dark {
-    --background: 222 47% 8%;
-    --foreground: 210 20% 93%;
-    --card: 217 33% 17%;
-    --card-foreground: 210 20% 93%;
-    --primary: 199 89% 60%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 32% 14%;
-    --secondary-foreground: 210 20% 93%;
-    --muted: 220 25% 16%;
-    --muted-foreground: 215 16% 65%;
-    --accent: 220 32% 18%;
-    --accent-foreground: 210 20% 93%;
-    --destructive: 0 62% 45%;
-    --destructive-foreground: 210 40% 98%;
-    --input: 220 22% 16%;
-    --ring: 199 89% 60%;
   }
 
   .dark .ds-input:focus {

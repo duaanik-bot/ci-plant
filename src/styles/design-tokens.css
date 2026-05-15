@@ -1,6 +1,9 @@
 /**
  * COLOUR IMPRESSIONS — global UI tokens (single source of truth).
  * Tailwind `ds-*` colors use RGB triplets for alpha support.
+ *
+ * :root holds the LIGHT theme; .dark overrides for dark.
+ * Accent / semantic colors stay identical across both themes.
  */
 :root {
   --font-heading: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
@@ -9,7 +12,7 @@
   --font-small: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
 
-  /* —— Semantic (app-wide) —— */
+  /* —— Semantic (theme-invariant) —— */
   --brand-primary: #f5820d;
   --brand-primary-hover: #d9700b;
   --brand-bg-soft: rgba(245, 130, 13, 0.12);
@@ -32,36 +35,37 @@
   --tooling: #7c3aed;
   --tooling-bg: rgba(124, 58, 237, 0.12);
 
-  --text-primary: #e5e7eb;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
+  /* —— LIGHT theme surfaces & text —— */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
 
-  --bg-main: #0f1117;
-  --bg-card: #181c27;
-  --bg-muted: #181c27;
-  --bg-elevated: #1f2433;
+  --bg-main: #ffffff;
+  --bg-card: #ffffff;
+  --bg-muted: #f8fafc;
+  --bg-elevated: #f1f5f9;
 
-  --border: rgba(255, 255, 255, 0.08);
+  --border: rgba(15, 23, 42, 0.08);
 
-  /* —— ds-* mirrors (Tailwind theme) —— */
+  /* —— ds-* mirrors (Tailwind theme) —— LIGHT */
   --ds-bg-main: var(--bg-main);
-  --ds-bg-main-rgb: 15 17 23;
+  --ds-bg-main-rgb: 255 255 255;
   --ds-bg-card: var(--bg-card);
-  --ds-bg-card-rgb: 24 28 39;
+  --ds-bg-card-rgb: 255 255 255;
   --ds-bg-elevated: var(--bg-elevated);
-  --ds-bg-elevated-rgb: 31 36 51;
+  --ds-bg-elevated-rgb: 241 245 249;
 
   --ds-border-subtle: var(--border);
-  --ds-border-subtle-rgb: 255 255 255;
-  --ds-border-strong: rgba(255, 255, 255, 0.16);
-  --ds-border-strong-rgb: 255 255 255;
+  --ds-border-subtle-rgb: 15 23 42;
+  --ds-border-strong: rgba(15, 23, 42, 0.16);
+  --ds-border-strong-rgb: 15 23 42;
 
   --ds-text-primary: var(--text-primary);
-  --ds-text-primary-rgb: 229 231 235;
+  --ds-text-primary-rgb: 15 23 42;
   --ds-text-secondary: var(--text-secondary);
-  --ds-text-secondary-rgb: 156 163 175;
+  --ds-text-secondary-rgb: 71 85 105;
   --ds-text-muted: var(--text-muted);
-  --ds-text-muted-rgb: 107 114 128;
+  --ds-text-muted-rgb: 148 163 184;
 
   --ds-kpi: var(--brand-primary);
   --ds-kpi-rgb: 245 130 13;
@@ -88,21 +92,22 @@
   --ds-radius-md: 10px;
   --ds-radius-lg: 12px;
 
-  --ds-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.35);
+  --ds-shadow-elevated: 0 8px 28px rgba(15, 23, 42, 0.12);
 
   --ds-gradient-app-top: none;
   --ds-gradient-drawer: none;
 }
 
 .dark {
+  /* —— DARK theme overrides —— */
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+
   --bg-main: #0f1117;
   --bg-card: #181c27;
   --bg-muted: #181c27;
   --bg-elevated: #1f2433;
-
-  --text-primary: #e5e7eb;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
 
   --border: rgba(255, 255, 255, 0.08);
 
@@ -116,15 +121,6 @@
   --ds-text-primary-rgb: 229 231 235;
   --ds-text-secondary-rgb: 156 163 175;
   --ds-text-muted-rgb: 107 114 128;
-
-  --ds-kpi-rgb: 245 130 13;
-  --ds-accent-rgb: 245 130 13;
-  --ds-accent-hover-rgb: 217 112 11;
-
-  --ds-success-rgb: 34 197 94;
-  --ds-warning-rgb: 234 179 8;
-  --ds-error-rgb: 239 68 68;
-  --ds-info-rgb: 59 130 246;
 
   --ds-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
