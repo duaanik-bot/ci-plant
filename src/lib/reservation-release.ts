@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client'
+import { maybeCreateDraftPrForShortage } from './auto-pr-from-shortage'
 
 export const TERMINAL_RELEASING_STATUSES = ['cancelled', 'completed', 'on_hold'] as const
 export type TerminalReleasingStatus = (typeof TERMINAL_RELEASING_STATUSES)[number]
@@ -65,6 +66,15 @@ export async function recalculateMaterialShortage(
     0,
   )
 
-  // Phase 5 wires auto-PR creation here. For now we return prCreated=false.
-  return { shortage, prCreated: false }
+  let prCreated = false
+  if (shortage > 0) {
+    const created = await maybeCreateDraftPrForShortage(
+      materialId,
+      shortage,
+      tx as Prisma.TransactionClient,
+    )
+    prCreated = created !== null
+  }
+
+  return { shortage, prCreated }
 }
