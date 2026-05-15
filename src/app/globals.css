@@ -17,6 +17,7 @@
   /** Tabular numerals for amounts and counts (line totals use .ds-typo-total for green). */
   .ds-input-num {
     @apply tabular-nums tracking-tight text-ds-ink;
+    font-family: var(--font-mono);
   }
   .ds-input:focus {
     @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(249,115,22,0.2),0_4px_12px_rgba(15,23,42,0.08)];
@@ -47,9 +48,11 @@
   }
   .ds-typo-total {
     @apply text-[20px] font-bold leading-tight text-ds-success tabular-nums md:text-[22px];
+    font-family: var(--font-mono);
   }
   .ds-typo-kpi {
     @apply text-[20px] font-bold leading-tight text-ds-kpi tabular-nums md:text-[22px];
+    font-family: var(--font-mono);
   }
 }
 
@@ -63,22 +66,25 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --background: 224 19% 8%;
+    --foreground: 220 13% 91%;
+    --card: 222 19% 13%;
+    --card-foreground: 220 13% 91%;
+    --primary: 26 92% 51%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 218 15% 20%;
+    --secondary-foreground: 220 13% 91%;
+    --muted: 218 15% 20%;
+    --muted-foreground: 220 9% 65%;
+    --accent: 26 92% 51%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --input: 218 15% 20%;
+    --border: 218 15% 20%;
+    --ring: 26 92% 51%;
+    --popover: 222 19% 13%;
+    --popover-foreground: 220 13% 91%;
     --radius: 0.5rem;
   }
 
