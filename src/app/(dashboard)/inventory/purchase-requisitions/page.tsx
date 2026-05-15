@@ -10,6 +10,7 @@ type PR = {
   qtyRequired: number
   triggerReason: string
   status: string
+  raisedBy: string | null
   poReference: string | null
   expectedDelivery: string | null
   sourceJobCardId?: string | null
@@ -404,6 +405,14 @@ export default function PurchaseRequisitionsPage() {
                     >
                       {g.materialCode}
                     </button>
+                    {g.rows.some((r) => r.raisedBy === null) && (
+                      <span
+                        className="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-ds-warning/15 text-ds-warning font-semibold uppercase"
+                        title="Auto-created from material shortage"
+                      >
+                        ⚡ Auto
+                      </span>
+                    )}
                     <p className="text-xs text-ds-ink-faint line-clamp-2">{g.description}</p>
                     <p className="mt-1 text-xs text-ds-ink-muted">
                       Total: <span className="font-semibold text-ds-ink">{g.totalQty.toLocaleString('en-IN')} {g.unit}</span>
