@@ -4,10 +4,11 @@ import { Suspense, useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { Star } from 'lucide-react'
+import { Star, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
+import { ReservationsPanel } from './components/ReservationsPanel'
 
 const ledgerMono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -246,6 +247,7 @@ function InventoryPageContent() {
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<Set<string>>(new Set())
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
+  const [reservationsPanelMaterialId, setReservationsPanelMaterialId] = useState<string | null>(null)
   const [materialDrawerLoading, setMaterialDrawerLoading] = useState(false)
   const [materialDrawerData, setMaterialDrawerData] = useState<MaterialDetailPayload | null>(null)
   const [materialDrawerView, setMaterialDrawerView] = useState<'history' | 'reserved' | 'available' | 'shortage' | 'free'>('history')
@@ -1236,14 +1238,19 @@ function InventoryPageContent() {
                           {fmt(row.available_sheets)}
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-right font-semibold text-[var(--warning)]">
-                        <button
-                          type="button"
-                          onClick={() => void openMaterialDrawer(row, 'reserved')}
-                          className={`underline decoration-amber-500/80 underline-offset-2 hover:text-[var(--warning)] ${ledgerMono}`}
-                        >
-                          {fmt(row.reserved_sheets)}
-                        </button>
+                      <td className="px-3 py-2 text-right font-semibold text-[var(--warning)] tabular-nums">
+                        {row.reserved_sheets > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setReservationsPanelMaterialId(row.material_id)}
+                            className={`inline-flex items-center gap-1 underline-offset-2 hover:underline hover:text-ds-brand ${ledgerMono}`}
+                          >
+                            {fmt(row.reserved_sheets)}
+                            <ChevronRight size={12} />
+                          </button>
+                        ) : (
+                          <span className={`text-ds-ink-muted ${ledgerMono}`}>{fmt(row.reserved_sheets)}</span>
+                        )}
                       </td>
                       <td
                         className={`px-3 py-2 text-right ${ledgerMono} ${
@@ -1872,14 +1879,19 @@ function InventoryPageContent() {
                     </td>
                     <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
                     <td className={`px-3 py-2 text-[var(--success)] font-semibold ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
-                    <td className="px-3 py-2 text-[var(--warning)] font-semibold">
-                      <button
-                        type="button"
-                        onClick={() => void openMaterialDrawer(row, 'reserved')}
-                        className={`underline decoration-amber-500/80 underline-offset-2 hover:text-[var(--warning)] ${ledgerMono}`}
-                      >
-                        {fmt(row.reserved_sheets)}
-                      </button>
+                    <td className="px-3 py-2 text-[var(--warning)] font-semibold tabular-nums">
+                      {row.reserved_sheets > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setReservationsPanelMaterialId(row.material_id)}
+                          className={`inline-flex items-center gap-1 underline-offset-2 hover:underline hover:text-ds-brand ${ledgerMono}`}
+                        >
+                          {fmt(row.reserved_sheets)}
+                          <ChevronRight size={12} />
+                        </button>
+                      ) : (
+                        <span className={`text-ds-ink-muted ${ledgerMono}`}>{fmt(row.reserved_sheets)}</span>
+                      )}
                     </td>
                     <td
                       className={`px-3 py-2 ${ledgerMono} ${
@@ -2440,6 +2452,12 @@ function InventoryPageContent() {
           )}
         </div>
       </SlideOverPanel>
+      <ReservationsPanel
+        materialId={reservationsPanelMaterialId}
+        open={reservationsPanelMaterialId !== null}
+        onClose={() => setReservationsPanelMaterialId(null)}
+        onRefresh={() => loadPaperWarehouse('')}
+      />
     </div>
   )
 }
