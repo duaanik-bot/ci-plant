@@ -1,0 +1,7 @@
+.claude
+.git
+data
+docs/reset-import-log.json
+node_modules
+.next
+*.tsbuildinfo
