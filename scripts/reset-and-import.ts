@@ -23,6 +23,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as bcrypt from "bcryptjs";
+import { canonicalRoleSlug, USER_ROLE_OVERRIDES } from "./legacy-role-map";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -174,19 +175,34 @@ async function main() {
   // ── STEP 1: ROLES ─────────────────────────────────────────────────────────
   log("📋 Step 1/9 — roles → Role");
   let n = 0;
+  // Legacy role names map onto canonical RBAC slugs (see legacy-role-map.ts).
+  // Many legacy roles collapse to one canonical role, so cache by slug and
+  // reuse a single Role row. prisma/seed.ts (run after import) enriches these
+  // canonical roles with their real permission sets.
+  const slugRoleId = new Map<string, string>();
   for (const row of readCsv("roles")) {
-    const id = crypto.randomUUID();
-    maps.roles.set(row.id, id);
-    if (!DRY_RUN) {
-      await prisma.role.create({ data: {
-        id, roleName: str(row.name), permissions: {},
-        wastageApproveLimitPct: 0, canApproveArtwork: false, canReleaseDispatch: false,
-      }});
+    const slug = canonicalRoleSlug(str(row.name));
+    let roleId = slugRoleId.get(slug);
+    if (!roleId) {
+      roleId = crypto.randomUUID();
+      if (!DRY_RUN) {
+        const existing = await prisma.role.findUnique({ where: { roleName: slug } });
+        if (existing) {
+          roleId = existing.id;
+        } else {
+          await prisma.role.create({ data: {
+            id: roleId, roleName: slug, permissions: {},
+            wastageApproveLimitPct: 0, canApproveArtwork: false, canReleaseDispatch: false,
+          }});
+        }
+      }
+      slugRoleId.set(slug, roleId);
+      n++;
     }
-    n++;
+    maps.roles.set(row.id, roleId);
   }
   counts.roles = n;
-  log(`   ✅ ${n} roles`);
+  log(`   ✅ ${n} canonical roles (from ${readCsv("roles").length} legacy rows)`);
 
   // ── STEP 2: ADMINS → USER ─────────────────────────────────────────────────
   log("👤 Step 2/9 — admins → User");
@@ -195,8 +211,13 @@ async function main() {
     const id = crypto.randomUUID();
     maps.admins.set(row.id, id);
     if (n === 0) SYSTEM_USER_ID = id;
-    const roleId = maps.roles.get(str(row.role_id));
+    let roleId = maps.roles.get(str(row.role_id));
     if (!roleId) { warn(`Admin ${row.id} (${row.name}): unknown role_id ${row.role_id} — skipped`); continue; }
+    const overrideSlug = USER_ROLE_OVERRIDES[str(row.email)];
+    if (overrideSlug && !DRY_RUN) {
+      const ov = await prisma.role.findUnique({ where: { roleName: overrideSlug } });
+      if (ov) roleId = ov.id;
+    }
     if (!DRY_RUN) {
       await prisma.user.create({ data: {
         id, name: str(row.name), email: str(row.email),
