@@ -16,6 +16,7 @@ import { parseCartonSizeToDims } from '@/lib/die-hub-dimensions'
 import { PastingStyle } from '@prisma/client'
 import { PoNewLineItemDrawer } from '@/components/po/PoNewLineItemDrawer'
 import { PoQuickCreateCartonForm } from '@/components/po/PoQuickCreateCartonForm'
+import { CartonSizeVerifiedBadge } from '@/components/carton/CartonSizeVerifiedBadge'
 import { DeliveryDateInput } from '@/components/po/DeliveryDateInput'
 import { updateProductMasterStyle } from '@/lib/update-product-master-style'
 import { cn } from '@/lib/cn'
@@ -1548,6 +1549,7 @@ export default function NewPurchaseOrderPage() {
                             })
                           }}
                         />
+                        <CartonSizeVerifiedBadge cartonId={ln.cartonId} />
                         {stockInsightByIdx[idx]?.matches?.[0] ? (
                           <button
                             type="button"
