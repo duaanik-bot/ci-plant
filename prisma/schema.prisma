@@ -703,6 +703,18 @@ model Carton {
   /// Origin marker for audit. NULL = manual entry (legacy or operator-created).
   /// 'po_import_ai' = auto-created from a PDF PO import; surface for review.
   source              String?       @map("source")
+  // EXCEL IMPORT EXTRAS
+  sheetSizeL          Decimal?      @map("sheet_size_l") @db.Decimal(8, 2)
+  sheetSizeW          Decimal?      @map("sheet_size_w") @db.Decimal(8, 2)
+  ups                 Int?          @map("ups")
+  // WAREHOUSE PHYSICAL VERIFICATION
+  physicalL           Decimal?      @map("physical_l") @db.Decimal(8, 2)
+  physicalW           Decimal?      @map("physical_w") @db.Decimal(8, 2)
+  physicalH           Decimal?      @map("physical_h") @db.Decimal(8, 2)
+  sizeVerified        Boolean       @default(false) @map("size_verified")
+  sizeVerifiedAt      DateTime?     @map("size_verified_at")
+  sizeVerifiedBy      String?       @map("size_verified_by")
+  sizeVarianceNotes   String?       @map("size_variance_notes") @db.Text
   createdAt           DateTime      @default(now()) @map("created_at")
   updatedAt           DateTime      @updatedAt @map("updated_at")
 
@@ -717,6 +729,8 @@ model Carton {
   poLineItems             PoLineItem[]
 
   @@index([shadeCardId])
+  @@index([sizeVerified])
+  @@index([customerId, cartonName])
   @@map("cartons")
 }
 
