@@ -55,7 +55,27 @@ export type PlanningEngineReadiness = {
   prId?: string | null
   prStatus: string
   grnEta: string | null
-  status?: 'green' | 'yellow' | 'red' | null
+  status?: 'green' | 'yellow' | 'red' | 'grey' | null
+  gsmTolerance?: number
+  noMaterialsAtAll?: boolean
+  debugMessage?: string | null
+  materialMatchState?: 'matched' | 'multiple' | 'none' | 'unknown'
+  mappingSafety?: {
+    requestedBoardType: string | null
+    requestedBoardClassification: string | null
+    candidatePoolCount: number
+    strictPoolCount: number
+    strategyUsed: string
+  } | null
+  suggestionDebug?: {
+    requiredSize: string | null
+    requiredGsm: number | null
+    tolerance: number
+    materialsFetched: number
+    afterGsmFilter: number
+    afterSizeFit: number
+    finalSuggestions: number
+  } | null
   suggestedBoardOptions?: PlanningEngineBoardOption[]
   closestAvailableOptions?: PlanningEngineBoardOption[]
 }
