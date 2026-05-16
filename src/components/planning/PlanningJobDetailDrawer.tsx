@@ -15,6 +15,8 @@ import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
+import { PlanningEngineBody } from '@/components/planning/engine/PlanningEngineBody'
+import type { PlanningEngineLine, PlanningEngineReadiness } from '@/components/planning/engine/types'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -1424,6 +1426,20 @@ export function PlanningJobDetailDrawer({
         loading: saving,
       }}
     >
+      {/* NEW: centred Planning engine body — replaces the legacy drawer body below.
+          The legacy body remains gated by `{false &&}` while Phase 1 sections fill in,
+          and will be deleted in Phase 1.7. */}
+      <PlanningEngineBody
+        line={line as unknown as PlanningEngineLine}
+        readiness={readiness as unknown as PlanningEngineReadiness | null}
+        readinessLoading={readinessLoading}
+        onPatch={async (patch) => onSaveLine(line.id, patch)}
+        onLock={async () => {
+          // Phase 2.4 wires this to /api/planning/po-lines/:id/lock-decision.
+          await onSave(line.id)
+        }}
+      />
+      {false && (
       <div className="space-y-3 text-sm text-ds-ink" aria-label="Job detail">
         <CardSection title="Job Snapshot" id="plan-drawer-job-snapshot">
           <div className="grid grid-cols-2 gap-3 text-xs">
@@ -2279,6 +2295,7 @@ export function PlanningJobDetailDrawer({
           </Button>
         </div>
       </div>
+      )}
       <PlanningEngineModal
         isOpen={suggestionsWorkspaceOpen}
         onClose={() => setSuggestionsWorkspaceOpen(false)}

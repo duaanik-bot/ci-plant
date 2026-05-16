@@ -1,0 +1,54 @@
+import { render, screen } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { SectionSmartMatch } from './SectionSmartMatch'
+import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
+
+const readiness: PlanningEngineReadiness = {
+  materialId: 'm1', materialCode: 'ITC-FBB-100',
+  boardType: 'FBB', boardClassification: null, size: '720×1020', gsm: 100,
+  requiredSheets: 4800, availableSheets: 1240, reservedSheets: 3100,
+  incomingSheets: 0, shortageSheets: 3560, prStatus: 'not_created', grnEta: null,
+}
+
+const baseLine = {
+  id: 'L1', cartonId: null, cartonName: 'X', cartonSize: null, quantity: 18000,
+  artworkCode: null, coatingType: null, otherCoating: null, embossingLeafing: null,
+  paperType: null, gsm: null, remarks: null, planningStatus: 'planning', specOverrides: null,
+  po: { id: 'PO1', poNumber: 'PO1', poDate: '2026-05-10', customer: { id: 'C1', name: 'X' } },
+  smartMatch: {
+    boardMatchConfidence: 0.94,
+    materialCode: 'ITC-FBB-100',
+    matchedOn: 'FBB / 100g / 4C UV',
+    suggestions: [
+      { label: 'A', tier: 'High' as const, composite: 82.4, sizeScore: 81, wasteScore: 79, urgencyScore: 72, toolScore: 80,
+        poRefs: ['PO-2024-0829', 'PO-2024-0831'], linesIncluded: 3, totalPcs: 52000, avgYieldPct: 77.1, totalSheets: 340 },
+      { label: 'B', tier: 'Medium' as const, composite: 58.1, sizeScore: 60, wasteScore: 55, urgencyScore: 50, toolScore: 65,
+        poRefs: ['PO-2024-0801'], linesIncluded: 2, totalPcs: 31000, avgYieldPct: 64.8, totalSheets: 220 },
+    ],
+  },
+} as unknown as PlanningEngineLine
+
+describe('SectionSmartMatch', () => {
+  it('renders top suggestion with composite, tier and sub-score bars', () => {
+    render(<SectionSmartMatch line={baseLine} readiness={readiness} onPatch={async () => true} />)
+    expect(screen.getByText('Suggestion A')).toBeInTheDocument()
+    expect(screen.getByText('82.4')).toBeInTheDocument()
+    expect(screen.getByText(/High \·/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Size sub-score 81')).toBeInTheDocument()
+    expect(screen.getByLabelText('Waste sub-score 79')).toBeInTheDocument()
+    expect(screen.getByLabelText('Urgency sub-score 72')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tool sub-score 80')).toBeInTheDocument()
+  })
+
+  it('renders board-match confidence + material code', () => {
+    render(<SectionSmartMatch line={baseLine} readiness={readiness} onPatch={async () => true} />)
+    expect(screen.getByText('94%')).toBeInTheDocument()
+    expect(screen.getByText(/material code ITC-FBB-100/)).toBeInTheDocument()
+  })
+
+  it('renders empty state when no suggestions', () => {
+    const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={empty} readiness={readiness} onPatch={async () => true} />)
+    expect(screen.getByText(/No suggestions yet/i)).toBeInTheDocument()
+  })
+})
