@@ -4,10 +4,11 @@ import { Suspense, useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { Star } from 'lucide-react'
+import { Star, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
+import { ReservationsPanel } from './components/ReservationsPanel'
 
 const ledgerMono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -56,6 +57,7 @@ type PaperWarehouseRow = {
   ageing_risk: 'low' | 'medium' | 'high'
   open_pr_id?: string | null
   open_pr_status?: string | null
+  daysOfCover: number | null
 }
 
 type StockStateItem = {
@@ -246,6 +248,7 @@ function InventoryPageContent() {
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<Set<string>>(new Set())
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
+  const [reservationsPanelMaterialId, setReservationsPanelMaterialId] = useState<string | null>(null)
   const [materialDrawerLoading, setMaterialDrawerLoading] = useState(false)
   const [materialDrawerData, setMaterialDrawerData] = useState<MaterialDetailPayload | null>(null)
   const [materialDrawerView, setMaterialDrawerView] = useState<'history' | 'reserved' | 'available' | 'shortage' | 'free'>('history')
@@ -1181,6 +1184,7 @@ function InventoryPageContent() {
                     <th className="px-3 py-2 text-right">Available</th>
                     <th className="px-3 py-2 text-right">Reserved</th>
                     <th className="px-3 py-2 text-right">Free stock</th>
+                    <th className="px-3 py-2 text-right">Days of Cover</th>
                     <th className="px-3 py-2 text-right">Incoming</th>
                     <th className="px-3 py-2 text-right">Shortage</th>
                     <th className="px-3 py-2 text-right">Reorder</th>
@@ -1236,14 +1240,19 @@ function InventoryPageContent() {
                           {fmt(row.available_sheets)}
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-right font-semibold text-[var(--warning)]">
-                        <button
-                          type="button"
-                          onClick={() => void openMaterialDrawer(row, 'reserved')}
-                          className={`underline decoration-amber-500/80 underline-offset-2 hover:text-[var(--warning)] ${ledgerMono}`}
-                        >
-                          {fmt(row.reserved_sheets)}
-                        </button>
+                      <td className="px-3 py-2 text-right font-semibold text-[var(--warning)] tabular-nums">
+                        {row.reserved_sheets > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setReservationsPanelMaterialId(row.material_id)}
+                            className={`inline-flex items-center gap-1 underline-offset-2 hover:underline hover:text-ds-brand ${ledgerMono}`}
+                          >
+                            {fmt(row.reserved_sheets)}
+                            <ChevronRight size={12} />
+                          </button>
+                        ) : (
+                          <span className={`text-ds-ink-muted ${ledgerMono}`}>{fmt(row.reserved_sheets)}</span>
+                        )}
                       </td>
                       <td
                         className={`px-3 py-2 text-right ${ledgerMono} ${
@@ -1267,6 +1276,23 @@ function InventoryPageContent() {
                             fmt(row.available_sheets - row.reserved_sheets)
                           )}
                         </button>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {row.daysOfCover === null ? (
+                          <span className="text-ds-ink-muted" title="No completed-job consumption in last 30 days">—</span>
+                        ) : (
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold tabular-nums ${
+                              row.daysOfCover < 7
+                                ? 'bg-ds-danger/15 text-ds-danger'
+                                : row.daysOfCover < 30
+                                ? 'bg-ds-warning/15 text-ds-warning'
+                                : 'bg-ds-success/15 text-ds-success'
+                            }`}
+                          >
+                            {row.daysOfCover}d
+                          </span>
+                        )}
                       </td>
                       <td className={`px-3 py-2 text-right font-semibold text-[var(--info)] ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
                       <td className="px-3 py-2 text-right font-semibold text-[var(--error)]">
@@ -1839,6 +1865,7 @@ function InventoryPageContent() {
                   <th className="px-3 py-2">Available</th>
                   <th className="px-3 py-2">Reserved</th>
                   <th className="px-3 py-2">Free stock</th>
+                  <th className="px-3 py-2">Days of Cover</th>
                   <th className="px-3 py-2">Incoming</th>
                   <th className="px-3 py-2">Shortage</th>
                   <th className="px-3 py-2">Reorder</th>
@@ -1872,14 +1899,19 @@ function InventoryPageContent() {
                     </td>
                     <td className="px-3 py-2 text-ds-ink-muted">{row.board_type_id ?? '-'}</td>
                     <td className={`px-3 py-2 text-[var(--success)] font-semibold ${ledgerMono}`}>{fmt(row.available_sheets)}</td>
-                    <td className="px-3 py-2 text-[var(--warning)] font-semibold">
-                      <button
-                        type="button"
-                        onClick={() => void openMaterialDrawer(row, 'reserved')}
-                        className={`underline decoration-amber-500/80 underline-offset-2 hover:text-[var(--warning)] ${ledgerMono}`}
-                      >
-                        {fmt(row.reserved_sheets)}
-                      </button>
+                    <td className="px-3 py-2 text-[var(--warning)] font-semibold tabular-nums">
+                      {row.reserved_sheets > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setReservationsPanelMaterialId(row.material_id)}
+                          className={`inline-flex items-center gap-1 underline-offset-2 hover:underline hover:text-ds-brand ${ledgerMono}`}
+                        >
+                          {fmt(row.reserved_sheets)}
+                          <ChevronRight size={12} />
+                        </button>
+                      ) : (
+                        <span className={`text-ds-ink-muted ${ledgerMono}`}>{fmt(row.reserved_sheets)}</span>
+                      )}
                     </td>
                     <td
                       className={`px-3 py-2 ${ledgerMono} ${
@@ -1891,6 +1923,23 @@ function InventoryPageContent() {
                       }`}
                     >
                       {fmt(row.available_sheets - row.reserved_sheets)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {row.daysOfCover === null ? (
+                        <span className="text-ds-ink-muted" title="No completed-job consumption in last 30 days">—</span>
+                      ) : (
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold tabular-nums ${
+                            row.daysOfCover < 7
+                              ? 'bg-ds-danger/15 text-ds-danger'
+                              : row.daysOfCover < 30
+                              ? 'bg-ds-warning/15 text-ds-warning'
+                              : 'bg-ds-success/15 text-ds-success'
+                          }`}
+                        >
+                          {row.daysOfCover}d
+                        </span>
+                      )}
                     </td>
                     <td className={`px-3 py-2 text-[var(--info)] font-semibold ${ledgerMono}`}>{fmt(row.incoming_sheets)}</td>
                     <td className={`px-3 py-2 text-[var(--error)] font-semibold ${ledgerMono}`}>{fmt(row.shortage_sheets)}</td>
@@ -2440,6 +2489,12 @@ function InventoryPageContent() {
           )}
         </div>
       </SlideOverPanel>
+      <ReservationsPanel
+        materialId={reservationsPanelMaterialId}
+        open={reservationsPanelMaterialId !== null}
+        onClose={() => setReservationsPanelMaterialId(null)}
+        onRefresh={() => loadPaperWarehouse('')}
+      />
     </div>
   )
 }

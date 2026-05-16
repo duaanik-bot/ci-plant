@@ -10,6 +10,7 @@ type PR = {
   qtyRequired: number
   triggerReason: string
   status: string
+  raisedBy: string | null
   poReference: string | null
   expectedDelivery: string | null
   sourceJobCardId?: string | null
@@ -77,7 +78,7 @@ type GroupedCard = {
 }
 
 const STAGES: Array<{ key: Stage; label: string; accent: string }> = [
-  { key: 'draft', label: PR_STAGE_LABEL.draft, accent: 'border-orange-400/50' },
+  { key: 'draft', label: PR_STAGE_LABEL.draft, accent: 'border-[var(--brand-primary)]/50' },
   { key: 'approved', label: PR_STAGE_LABEL.approved, accent: 'border-[var(--info)]/50' },
   { key: 'ordered', label: PR_STAGE_LABEL.ordered, accent: 'border-[var(--info)]/50' },
   { key: 'received', label: PR_STAGE_LABEL.received, accent: 'border-[var(--success)]/50' },
@@ -404,6 +405,14 @@ export default function PurchaseRequisitionsPage() {
                     >
                       {g.materialCode}
                     </button>
+                    {g.rows.some((r) => r.raisedBy === null) && (
+                      <span
+                        className="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-ds-warning/15 text-ds-warning font-semibold uppercase"
+                        title="Auto-created from material shortage"
+                      >
+                        ⚡ Auto
+                      </span>
+                    )}
                     <p className="text-xs text-ds-ink-faint line-clamp-2">{g.description}</p>
                     <p className="mt-1 text-xs text-ds-ink-muted">
                       Total: <span className="font-semibold text-ds-ink">{g.totalQty.toLocaleString('en-IN')} {g.unit}</span>

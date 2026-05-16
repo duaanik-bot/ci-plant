@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import { subDays } from 'date-fns'
 import { db } from '@/lib/db'
 import { resolveRequirementFromLine } from '@/lib/production-os-resolvers'
 
@@ -1274,6 +1275,65 @@ export async function getMaterialReadiness(jobCardId: string, client: DbClient =
     materialCode: material?.materialCode ?? null,
     planningId: req.planningId,
   }
+}
+
+/**
+ * Average daily consumption per material over the last 30 days, computed
+ * from SheetIssueRecord rows on COMPLETED job cards, attributed to materials
+ * via MaterialReservation.
+ *
+ * Caveat: a job with reservations for multiple materials has its sheet
+ * issues attributed to EACH material. Overcounts when multi-material
+ * reservations exist; acceptable for v1 (follow-up: weighted attribution).
+ */
+export async function computeAvgDailyConsumption(
+  materialIds: string[],
+): Promise<Map<string, number>> {
+  if (materialIds.length === 0) return new Map()
+
+  const thirtyDaysAgo = subDays(new Date(), 30)
+
+  // Reservations that link our target materials to completed jobs with recent issues
+  const reservations = await db.materialReservation.findMany({
+    where: {
+      materialId: { in: materialIds },
+      jobCard: {
+        status: 'completed',
+        issues: { some: { issuedAt: { gte: thirtyDaysAgo } } },
+      },
+    },
+    select: {
+      materialId: true,
+      jobCard: {
+        select: {
+          id: true,
+          issues: {
+            where: { issuedAt: { gte: thirtyDaysAgo } },
+            select: { qtyRequested: true },
+          },
+        },
+      },
+    },
+  })
+
+  // Avoid double-counting the same job-card's issues if it has multiple
+  // reservations for the SAME material (e.g. partial reservations). Use
+  // (materialId, jobCardId) as the dedupe key.
+  const counted = new Set<string>()
+  const totals = new Map<string, number>()
+  for (const r of reservations) {
+    const key = `${r.materialId}|${r.jobCard.id}`
+    if (counted.has(key)) continue
+    counted.add(key)
+    const sum = r.jobCard.issues.reduce((s, i) => s + i.qtyRequested, 0)
+    totals.set(r.materialId, (totals.get(r.materialId) ?? 0) + sum)
+  }
+
+  const avgPerDay = new Map<string, number>()
+  totals.forEach((total, mid) => {
+    avgPerDay.set(mid, total / 30)
+  })
+  return avgPerDay
 }
 
 export async function findOpenShortagesForMaterial(materialId: string, client: DbClient = db) {

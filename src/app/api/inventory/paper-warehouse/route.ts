@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { computeAvgDailyConsumption } from '@/lib/material-readiness-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -152,5 +153,16 @@ export async function GET(req: NextRequest) {
   const freeStock = kpi.available - kpi.reserved
   const incomingRequiredMismatch = Math.max(0, kpi.shortage - kpi.incoming)
 
-  return NextResponse.json({ rows: mapped, kpi: { ...kpi, freeStock, incomingRequiredMismatch } })
+  const materialIds = mapped.map((r) => r.material_id).filter(Boolean) as string[]
+  const consumption = await computeAvgDailyConsumption(materialIds)
+  const rowsWithDoC = mapped.map((r) => {
+    const avg = consumption.get(r.material_id) ?? 0
+    const freeStockRow = Math.max(0, r.available_sheets - r.reserved_sheets)
+    return {
+      ...r,
+      daysOfCover: avg > 0 ? Math.floor(freeStockRow / avg) : null,
+    }
+  })
+
+  return NextResponse.json({ rows: rowsWithDoC, kpi: { ...kpi, freeStock, incomingRequiredMismatch } })
 }

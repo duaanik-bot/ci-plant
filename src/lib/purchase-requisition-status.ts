@@ -25,7 +25,7 @@ export function uiStageToDbStatus(stage: PrUiStage): PrDbStatus {
 export function mapFilterToDbStatuses(input: string | null | undefined): string[] | null {
   const val = (input || '').trim().toLowerCase()
   if (!val) return null
-  if (val === 'draft' || val === 'pending') return ['pending']
+  if (val === 'draft' || val === 'pending') return ['draft', 'pending']
   if (val === 'approved') return ['approved']
   if (val === 'ordered' || val === 'converted_to_po') return ['converted_to_po']
   if (val === 'received') return ['received']

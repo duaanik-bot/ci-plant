@@ -1,20 +1,21 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import { Plus_Jakarta_Sans, IBM_Plex_Mono } from 'next/font/google'
 import { Providers } from '@/components/providers'
 import { AppToaster } from '@/components/theme/AppToaster'
 import './globals.css'
 
-const inter = Inter({
+const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
-  variable: '--font-sans',
+  weight: ['400', '500', '600', '700', '800'],
   display: 'swap',
+  variable: '--font-jakarta',
 })
 
-const jetbrainsMono = JetBrains_Mono({
+const plexMono = IBM_Plex_Mono({
   subsets: ['latin'],
-  variable: '--font-mono-code',
-  weight: ['400', '600', '700'],
+  weight: ['400', '500', '600', '700'],
   display: 'swap',
+  variable: '--font-plex-mono',
 })
 
 export const metadata: Metadata = {
@@ -30,7 +31,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} bg-ds-main font-sans text-sm text-ds-ink antialiased`}
+        className={`${jakarta.variable} ${plexMono.variable} bg-ds-main font-sans text-sm text-ds-ink antialiased`}
       >
         <Providers>{children}</Providers>
         <AppToaster />

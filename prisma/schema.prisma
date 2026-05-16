@@ -1984,7 +1984,7 @@ model PurchaseRequisition {
   estimatedValue   Decimal   @default(0) @map("estimated_value") @db.Decimal(12, 2)
   triggerReason    String    @map("trigger_reason")
   status           String    @default("pending") @db.VarChar(30) // pending | approved | converted_to_po | rejected
-  raisedBy         String    @map("raised_by")
+  raisedBy         String?   @map("raised_by")
   raisedAt         DateTime  @default(now()) @map("raised_at")
   approvedBy       String?   @map("approved_by")
   approvedAt       DateTime? @map("approved_at")
@@ -2014,6 +2014,10 @@ model MaterialReservation {
   reservedSheets Decimal  @default(0) @map("reserved_sheets") @db.Decimal(12, 3)
   shortageSheets Decimal  @default(0) @map("shortage_sheets") @db.Decimal(12, 3)
   status         String   @default("draft") @db.VarChar(32)
+  isReleased     Boolean  @default(false) @map("is_released")
+  releasedAt     DateTime? @map("released_at")
+  releasedReason String?  @map("released_reason") @db.VarChar(120)
+  confirmedQty   Int?     @map("confirmed_qty")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -2022,6 +2026,7 @@ model MaterialReservation {
 
   @@unique([materialId, jobCardId])
   @@index([jobCardId])
+  @@index([materialId, isReleased])
   @@map("material_reservations")
 }
 

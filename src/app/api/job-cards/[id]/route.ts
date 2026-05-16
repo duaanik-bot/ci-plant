@@ -11,6 +11,11 @@ import { incrementEmbossStrikesOnJobClose } from '@/lib/production-emboss-strike
 import { z } from 'zod'
 import { computeBoardMaterialForJobCard } from '@/lib/job-card-board-material'
 import { postPressRoutingSchema } from '@/lib/job-card-routing-spec'
+import {
+  isTerminalReleasingStatus,
+  releaseReservationsForJob,
+  recalculateMaterialShortage,
+} from '@/lib/reservation-release'
 
 export const dynamic = 'force-dynamic'
 
@@ -482,6 +487,17 @@ export async function PUT(
         ...(mergedPostPress !== undefined ? { postPressRouting: mergedPostPress } : {}),
       },
     })
+
+    if (
+      data.status !== undefined &&
+      typeof data.status === 'string' &&
+      isTerminalReleasingStatus(data.status)
+    ) {
+      const { materialIds } = await releaseReservationsForJob(id, data.status, tx)
+      for (const mid of materialIds) {
+        await recalculateMaterialShortage(mid, tx)
+      }
+    }
 
     const stageOrder = [
       'Cutting',
