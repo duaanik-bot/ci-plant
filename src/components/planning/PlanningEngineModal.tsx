@@ -126,24 +126,25 @@ export function PlanningEngineModal({
         }
       `}</style>
 
-      {/* Scrim */}
+      {/* Scrim — sits below the modal panel */}
       <div
         className={cn(
-          'fixed inset-0 bg-black/70 backdrop-blur-sm',
+          'fixed inset-0 bg-black/55 backdrop-blur-sm',
           zIndexClass,
         )}
         aria-hidden="true"
         onClick={onClose}
       />
 
-      {/* Modal */}
+      {/* Modal wrapper — must stack ABOVE the scrim. The previous
+          `style={{ zIndex: 'inherit' }}` forced this to z-index:auto,
+          letting the scrim paint over the panel and wash it out. */}
       <div
         className={cn(
           'fixed inset-0 flex items-start justify-center overflow-y-auto py-6 px-4',
           zIndexClass,
           'pointer-events-none',
         )}
-        style={{ zIndex: 'inherit' }}
       >
         <div
           role="dialog"
