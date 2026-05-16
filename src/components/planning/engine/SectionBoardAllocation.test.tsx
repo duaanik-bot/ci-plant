@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
 import { SectionBoardAllocation } from './SectionBoardAllocation'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
 
@@ -32,12 +32,22 @@ const readinessWithShortage: PlanningEngineReadiness = {
 }
 
 describe('SectionBoardAllocation', () => {
-  it('renders board, GSM, sheet size and required sheets', () => {
+  it('renders editable board, GSM, sheet size and read-only required sheets', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
-    expect(screen.getByText('FBB')).toBeInTheDocument()
-    expect(screen.getByText('100 gsm')).toBeInTheDocument()
-    expect(screen.getByText('720×1020 mm')).toBeInTheDocument()
+    expect(screen.getByLabelText('Board type')).toHaveValue('FBB')
+    expect(screen.getByLabelText('GSM')).toHaveValue(100)
+    expect(screen.getByLabelText('Sheet size')).toHaveValue('720×1020 mm')
     expect(screen.getByText('4,800 sh')).toBeInTheDocument()
+  })
+
+  it('patches paperType when board type is edited and blurred', async () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={onPatch} />)
+    const input = screen.getByLabelText('Board type') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'SBS' } })
+    fireEvent.blur(input)
+    await Promise.resolve()
+    expect(onPatch).toHaveBeenCalledWith({ paperType: 'SBS' })
   })
 
   it('shows the shortage banner with net/reserved/shortfall when shortageSheets > 0', () => {

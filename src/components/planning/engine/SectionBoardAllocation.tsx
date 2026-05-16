@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Badge } from '@/components/design-system/Badge'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
@@ -31,35 +32,66 @@ function resolveBoardType(line: PlanningEngineLine, readiness: PlanningEngineRea
     line.materialQueue?.boardType ||
     line.paperType ||
     line.carton?.paperType ||
-    '—'
+    ''
   )
 }
 
-function resolveGsm(line: PlanningEngineLine, readiness: PlanningEngineReadiness | null): string {
-  const gsm = readiness?.gsm ?? line.gsm ?? line.carton?.gsm ?? null
-  return gsm ? `${gsm} gsm` : '—'
+function resolveGsm(line: PlanningEngineLine, readiness: PlanningEngineReadiness | null): number | null {
+  return readiness?.gsm ?? line.gsm ?? line.carton?.gsm ?? null
 }
 
 function resolveSheetSize(line: PlanningEngineLine, readiness: PlanningEngineReadiness | null): string {
   if (readiness?.size) return readiness.size
+  const meta = (line.specOverrides ?? {}) as Record<string, unknown>
+  if (typeof meta.sheetSize === 'string' && meta.sheetSize.trim()) return meta.sheetSize
   const l = Number(line.materialQueue?.sheetLengthMm)
   const w = Number(line.materialQueue?.sheetWidthMm)
   if (Number.isFinite(l) && Number.isFinite(w) && l > 0 && w > 0) {
     return `${Math.round(l)}×${Math.round(w)} mm`
   }
-  return '—'
+  return ''
 }
 
-function MetricTile({ label, value }: { label: string; value: string }) {
+/** Editable field tile — text/number input that patches on blur if changed. */
+function EditableTile({
+  label,
+  value,
+  type = 'text',
+  onCommit,
+}: {
+  label: string
+  value: string
+  type?: 'text' | 'number'
+  onCommit: (next: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => { setDraft(value) }, [value])
   return (
-    <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
-      <div className="text-base font-semibold text-ds-ink leading-tight mt-1">{value}</div>
+    <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3 focus-within:border-ds-brand/60 transition-colors">
+      <label className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</label>
+      <input
+        type={type}
+        value={draft}
+        aria-label={label}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { if (draft !== value) onCommit(draft) }}
+        className="w-full bg-transparent text-base font-semibold text-ds-ink leading-tight mt-1 outline-none tabular-nums"
+        placeholder="—"
+      />
     </div>
   )
 }
 
-export function SectionBoardAllocation({ line, readiness, readinessLoading, onPatch: _onPatch }: Props) {
+function ReadTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-ds-elevated/70 rounded-ds-md border border-ds-line/40 p-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
+      <div className="text-base font-semibold text-ds-ink leading-tight mt-1 tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+export function SectionBoardAllocation({ line, readiness, readinessLoading, onPatch }: Props) {
   const shortage = Math.max(0, Number(readiness?.shortageSheets ?? 0))
   const required = Number(readiness?.requiredSheets ?? line.planningLedger?.boardStockInsight?.requiredSheets ?? 0)
   const netStock = Number(
@@ -69,13 +101,37 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
     readiness?.reservedSheets ?? line.planningLedger?.boardStockInsight?.reservedSheets ?? 0,
   )
 
+  const boardType = resolveBoardType(line, readiness)
+  const gsm = resolveGsm(line, readiness)
+  const sheetSize = resolveSheetSize(line, readiness)
+
   return (
     <CardSection title="BOARD ALLOCATION">
       <div className="grid grid-cols-2 gap-3">
-        <MetricTile label="Board type" value={resolveBoardType(line, readiness)} />
-        <MetricTile label="GSM" value={resolveGsm(line, readiness)} />
-        <MetricTile label="Sheet size" value={resolveSheetSize(line, readiness)} />
-        <MetricTile label="Required" value={formatSheets(required)} />
+        <EditableTile
+          label="Board type"
+          value={boardType}
+          onCommit={(v) => { void onPatch({ paperType: v.trim() || null }) }}
+        />
+        <EditableTile
+          label="GSM"
+          type="number"
+          value={gsm != null ? String(gsm) : ''}
+          onCommit={(v) => {
+            const n = v.trim() === '' ? null : Math.max(1, Math.round(Number(v) || 0))
+            void onPatch({ gsm: n })
+          }}
+        />
+        <EditableTile
+          label="Sheet size"
+          value={sheetSize}
+          onCommit={(v) => {
+            void onPatch({
+              specOverrides: { ...(line.specOverrides ?? {}), sheetSize: v.trim() },
+            })
+          }}
+        />
+        <ReadTile label="Required" value={formatSheets(required)} />
       </div>
 
       {readinessLoading ? (

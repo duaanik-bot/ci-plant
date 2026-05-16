@@ -6,6 +6,39 @@ import type { PlanningGridLine, PlanningLineFieldPatch } from '@/components/plan
  * sections need. Defined locally so sections don't depend on the
  * drawer's internal type.
  */
+export type PlanningEngineBoardOption = {
+  materialId: string
+  materialCode: string
+  boardType: string | null
+  boardClassification: string | null
+  gsm: number | null
+  size: string
+  availableSheets: number
+  reservedSheets: number
+  freeSheets: number
+  cutsPerSheet: number
+  requiredParentSheets: number
+  shortageParentSheets: number
+  wastagePct: number
+  sizeDeviationPct?: number
+  fitScore?: number
+  yieldPct: number
+  orientation: 'LxW' | 'WxL'
+  matchType:
+    | 'Cut Fit'
+    | 'Direct Size'
+    | 'Special Cut'
+    | 'GSM Tolerance'
+    | 'Compatible Size'
+    | 'Fallback Option'
+  status: 'Ready' | 'Partial' | 'Shortage'
+  tags: string[]
+  gsmDelta: number | null
+  matchRank?: number
+  isLeftover?: boolean
+  boardMatchMode?: 'exact' | 'cross_field' | 'fallback'
+}
+
 export type PlanningEngineReadiness = {
   materialId: string | null
   materialCode: string | null
@@ -23,6 +56,8 @@ export type PlanningEngineReadiness = {
   prStatus: string
   grnEta: string | null
   status?: 'green' | 'yellow' | 'red' | null
+  suggestedBoardOptions?: PlanningEngineBoardOption[]
+  closestAvailableOptions?: PlanningEngineBoardOption[]
 }
 
 /**

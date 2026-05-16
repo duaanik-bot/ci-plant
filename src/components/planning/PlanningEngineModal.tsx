@@ -129,7 +129,7 @@ export function PlanningEngineModal({
       {/* Scrim */}
       <div
         className={cn(
-          'fixed inset-0 bg-black/52 backdrop-blur-[1px]',
+          'fixed inset-0 bg-black/70 backdrop-blur-sm',
           zIndexClass,
         )}
         aria-hidden="true"
@@ -150,10 +150,10 @@ export function PlanningEngineModal({
           aria-modal="true"
           className={cn(
             'pe-modal-enter pointer-events-auto',
-            'relative flex flex-col w-[60vw] min-w-[580px]',
+            'relative flex flex-col w-[65vw] min-w-[640px]',
             widthClass,
-            'rounded-ds-xl border border-ds-line/50',
-            'bg-ds-main shadow-[0_24px_60px_rgba(0,0,0,0.45)]',
+            'rounded-ds-xl border border-ds-line',
+            'bg-ds-main shadow-[0_32px_80px_rgba(0,0,0,0.6)]',
             'max-h-[calc(100vh-3rem)] my-auto',
           )}
           onClick={(e) => e.stopPropagation()}

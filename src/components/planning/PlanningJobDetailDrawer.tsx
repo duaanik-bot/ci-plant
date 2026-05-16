@@ -1363,7 +1363,7 @@ export function PlanningJobDetailDrawer({
       isOpen={open}
       onClose={onClose}
       zIndexClass="z-[70]"
-      widthClass="max-w-[900px]"
+      widthClass="max-w-[1180px]"
       title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
         <div className="flex flex-wrap items-center gap-2 mt-0.5">
