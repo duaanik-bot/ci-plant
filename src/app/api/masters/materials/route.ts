@@ -19,7 +19,21 @@ function makeShortAbbr(name: string): string {
   return cleaned.slice(0, 4) || 'BRD'
 }
 
-async function boardTypeAbbreviation(boardType: string): Promise<string> {
+// Cross-module dependency: material codes are generated from the "Board Type"
+// abbreviations configured in Mini Masters (db.effectValue under the
+// "Board Type" category). If that category has no active entries, material
+// code generation is undefined — callers must surface a clear error rather
+// than silently falling back to a derived abbreviation.
+async function boardTypeAbbreviation(boardType: string): Promise<string | null> {
+  const anyBoardType = await db.effectValue.findFirst({
+    where: {
+      active: true,
+      category: { name: { equals: 'Board Type', mode: 'insensitive' } },
+    },
+    select: { id: true },
+  })
+  if (!anyBoardType) return null
+
   const row = await db.effectValue.findFirst({
     where: {
       active: true,
@@ -31,8 +45,9 @@ async function boardTypeAbbreviation(boardType: string): Promise<string> {
   return makeShortAbbr(row?.abbreviation?.trim() || boardType)
 }
 
-async function generateMaterialCode(boardType: string, gsm?: number, sheetLength?: number, sheetWidth?: number): Promise<string> {
+async function generateMaterialCode(boardType: string, gsm?: number, sheetLength?: number, sheetWidth?: number): Promise<string | null> {
   const abbr = await boardTypeAbbreviation(boardType)
+  if (abbr === null) return null
   const len = sheetLength ? Math.round(sheetLength) : 0
   const wid = sheetWidth ? Math.round(sheetWidth) : 0
   const gsmPart = gsm ? String(Math.round(gsm)) : ''
@@ -118,8 +133,8 @@ export async function GET() {
       qtyReserved: Number(m.qtyReserved),
       qtyFg: Number(m.qtyFg),
       weightedAvgCost: Number(m.weightedAvgCost),
-      packetWeight: Number(m.maxDailyUsage),
-      sheetsPerPacket: m.maxStorageQty != null ? Number(m.maxStorageQty) : null,
+      packetWeight: Number(m.packetWeight),
+      sheetsPerPacket: m.sheetsPerPacket != null ? Number(m.sheetsPerPacket) : null,
       reorderPoint: Number(m.reorderPoint),
       safetyStock: Number(m.safetyStock),
       active: m.active,
@@ -132,8 +147,8 @@ export async function GET() {
       physicalStockSheets: Number(m.physicalStockSheets),
       shortageSheets: Number(m.shortageSheets),
       totalWeightKg: Number(m.totalWeightKg),
-      brightnessPct: null,
-      moisturePct: null,
+      brightnessPct: m.brightnessPct,
+      moisturePct: m.moisturePct,
       supplier: m.supplier ? { id: m.supplier.id, name: m.supplier.name } : null,
     })),
   )
@@ -194,6 +209,15 @@ export async function POST(req: NextRequest) {
       data.sheetLength ?? undefined,
       data.sheetWidth ?? undefined,
     )
+    if (base === null) {
+      return NextResponse.json(
+        {
+          error:
+            'Board Type values are not configured in Mini Masters. Please add Board Type entries before creating materials.',
+        },
+        { status: 400 },
+      )
+    }
     let code = base
     let suffix = 0
     while (await db.inventory.findUnique({ where: { materialCode: code } })) {
@@ -259,8 +283,10 @@ export async function POST(req: NextRequest) {
       leadTimeDays: data.leadTimeDays,
       supplierId: data.supplierId || null,
       weightedAvgCost: data.weightedAvgCost,
-      maxDailyUsage: resolvedPacketWeight,
-      maxStorageQty: resolvedSheetsPerPacket,
+      packetWeight: resolvedPacketWeight,
+      sheetsPerPacket: resolvedSheetsPerPacket,
+      brightnessPct: data.brightnessPct ?? null,
+      moisturePct: data.moisturePct ?? null,
       physicalStockSheets,
       shortageSheets,
       totalWeightKg,

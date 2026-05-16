@@ -145,6 +145,8 @@ export default function MastersInstrumentsPage() {
               </th>
               <th className={enterpriseThClass}>Name</th>
               <th className={enterpriseThClass}>Specification</th>
+              <th className={enterpriseThClass}>Range</th>
+              <th className={enterpriseThClass}>Status</th>
               <th className={enterpriseThClass}>Last calibration</th>
               <th className={enterpriseThClass}>Due date</th>
               <th className={enterpriseThClass}>Certificate</th>
@@ -170,6 +172,18 @@ export default function MastersInstrumentsPage() {
                 </td>
                 <td className={enterpriseTdClass}>{i?.instrumentName ?? '—'}</td>
                 <td className={enterpriseTdMutedClass}>{i?.specification ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{i?.range ?? '—'}</td>
+                <td className={enterpriseTdClass}>
+                  <span
+                    className={
+                      i?.active
+                        ? 'rounded bg-[var(--success-bg)] px-2 py-0.5 text-xs font-medium text-[var(--success)]'
+                        : 'rounded bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-700 dark:bg-ds-elevated dark:text-ds-ink-muted'
+                    }
+                  >
+                    {i?.active ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
                 <td className={enterpriseTdMonoClass}>{i?.lastCalibration ?? '—'}</td>
                 <td className={enterpriseTdMonoClass}>
                   <span

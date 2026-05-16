@@ -3,23 +3,31 @@ import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
-import { customerSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
-const updateSchema = customerSchema.partial().extend({
-  gstNumber: z.string().trim().max(32, 'GST number is too long').optional().or(z.literal('')),
-  contactPhone: z.string().trim().max(20, 'Phone number is too long').optional().or(z.literal('')),
-  email: z.string().email().optional().or(z.literal('')),
+const updateSchema = z.object({
+  name: z.string().min(1).optional(),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
   address: z.string().optional(),
-  creditLimit: z.number().min(0).optional(),
-  requiresArtworkApproval: z.boolean().optional(),
+  gstin: z.string().optional(),
   active: z.boolean().optional(),
-  pan: z.string().trim().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/).optional().or(z.literal('')),
-  stateCode: z.string().trim().regex(/^\d{2}$/).optional().or(z.literal('')),
-  billingAddress: z.string().optional(),
-  shippingAddress: z.string().optional(),
 })
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error } = await requireRole('operations_head', 'md')
+  if (error) return error
+
+  const { id } = await params
+  const customer = await db.customer.findUnique({ where: { id } })
+  if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
+
+  return NextResponse.json(customer)
+}
 
 export async function PUT(
   req: NextRequest,
@@ -30,11 +38,7 @@ export async function PUT(
 
   const { id } = await params
   const body = await req.json().catch(() => ({}))
-  const parsed = updateSchema.safeParse({
-    ...body,
-    email: body.email ?? '',
-    creditLimit: body.creditLimit != null ? Number(body.creditLimit) : undefined,
-  })
+  const parsed = updateSchema.safeParse(body)
   if (!parsed.success) {
     const fields: Record<string, string> = {}
     parsed.error.issues.forEach((i) => {
@@ -52,18 +56,10 @@ export async function PUT(
     where: { id },
     data: {
       ...(data.name != null && { name: data.name }),
-      ...(data.logoUrl !== undefined && { logoUrl: data.logoUrl?.trim() ? data.logoUrl.trim() : null }),
-      ...(data.gstNumber !== undefined && { gstNumber: data.gstNumber || null }),
-      ...(data.pan !== undefined && { pan: data.pan?.trim() ? data.pan.trim() : null }),
-      ...(data.stateCode !== undefined && { stateCode: data.stateCode?.trim() ? data.stateCode.trim() : null }),
-      ...(data.billingAddress !== undefined && { billingAddress: data.billingAddress?.trim() ? data.billingAddress.trim() : null }),
-      ...(data.shippingAddress !== undefined && { shippingAddress: data.shippingAddress?.trim() ? data.shippingAddress.trim() : null }),
-      ...(data.contactName !== undefined && { contactName: data.contactName || null }),
-      ...(data.contactPhone !== undefined && { contactPhone: data.contactPhone || null }),
-      ...(data.email !== undefined && { email: data.email || null }),
+      ...(data.email !== undefined && { email: data.email }),
+      ...(data.phone !== undefined && { contactPhone: data.phone || null }),
       ...(data.address !== undefined && { address: data.address || null }),
-      ...(data.creditLimit != null && { creditLimit: data.creditLimit }),
-      ...(data.requiresArtworkApproval !== undefined && { requiresArtworkApproval: data.requiresArtworkApproval }),
+      ...(data.gstin !== undefined && { gstNumber: data.gstin || null }),
       ...(data.active !== undefined && { active: data.active }),
     },
   })
@@ -77,23 +73,7 @@ export async function PUT(
     newValue: customer,
   })
 
-  return NextResponse.json({
-    id: customer.id,
-    name: customer.name,
-    logoUrl: customer.logoUrl,
-    gstNumber: customer.gstNumber,
-    pan: customer.pan,
-    stateCode: customer.stateCode,
-    billingAddress: customer.billingAddress,
-    shippingAddress: customer.shippingAddress,
-    contactName: customer.contactName,
-    contactPhone: customer.contactPhone,
-    email: customer.email,
-    address: customer.address,
-    creditLimit: Number(customer.creditLimit),
-    requiresArtworkApproval: customer.requiresArtworkApproval,
-    active: customer.active,
-  })
+  return NextResponse.json(customer)
 }
 
 export async function DELETE(
@@ -111,7 +91,7 @@ export async function DELETE(
     await db.customer.delete({ where: { id } })
   } catch {
     return NextResponse.json(
-      { error: 'Customer cannot be deleted because it is linked to active records. Deactivate instead.' },
+      { error: 'Customer cannot be deleted because it is linked to active records.' },
       { status: 409 },
     )
   }

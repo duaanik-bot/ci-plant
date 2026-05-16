@@ -84,8 +84,8 @@ export async function GET(
     qtyReserved: Number(m.qtyReserved),
     qtyFg: Number(m.qtyFg),
     weightedAvgCost: Number(m.weightedAvgCost),
-    packetWeight: Number(m.maxDailyUsage),
-    sheetsPerPacket: m.maxStorageQty != null ? Number(m.maxStorageQty) : null,
+    packetWeight: Number(m.packetWeight),
+    sheetsPerPacket: m.sheetsPerPacket != null ? Number(m.sheetsPerPacket) : null,
     reorderPoint: Number(m.reorderPoint),
     safetyStock: Number(m.safetyStock),
     active: m.active,
@@ -102,8 +102,8 @@ export async function GET(
     totalWeightKg: Number(m.totalWeightKg),
     grainDirection: null,
     caliperMicrons: null,
-    brightnessPct: null,
-    moisturePct: null,
+    brightnessPct: m.brightnessPct,
+    moisturePct: m.moisturePct,
     hsnCode: null,
     supplier: m.supplier ? { id: m.supplier.id, name: m.supplier.name } : null,
   })
@@ -154,9 +154,9 @@ export async function PUT(
   const nextSheetWidth = data.sheetWidth ?? (existing.sheetWidth != null ? Number(existing.sheetWidth) : null)
   const nextSheetsPerPacket =
     data.sheetsPerPacket ??
-    (existing.maxStorageQty != null ? Number(existing.maxStorageQty) : null) ??
+    (existing.sheetsPerPacket != null ? Number(existing.sheetsPerPacket) : null) ??
     defaultSheetsPerPacket(nextBoardType)
-  const existingPacketWeight = Number(existing.maxDailyUsage)
+  const existingPacketWeight = Number(existing.packetWeight)
   const nextPacketWeight =
     data.packetWeight ??
     (existingPacketWeight > 0
@@ -225,8 +225,10 @@ export async function PUT(
       ...(data.leadTimeDays != null && { leadTimeDays: data.leadTimeDays }),
       ...(data.supplierId !== undefined && { supplierId: data.supplierId }),
       ...(data.weightedAvgCost != null && { weightedAvgCost: data.weightedAvgCost }),
-      ...(data.packetWeight != null && { maxDailyUsage: data.packetWeight }),
-      ...(data.sheetsPerPacket != null && { maxStorageQty: data.sheetsPerPacket }),
+      ...(data.packetWeight != null && { packetWeight: data.packetWeight }),
+      ...(data.sheetsPerPacket != null && { sheetsPerPacket: data.sheetsPerPacket }),
+      ...(data.brightnessPct !== undefined && { brightnessPct: data.brightnessPct }),
+      ...(data.moisturePct !== undefined && { moisturePct: data.moisturePct }),
       ...(data.active !== undefined && { active: data.active }),
       ...(data.boardType !== undefined && { boardType: data.boardType || null }),
       ...(data.boardType !== undefined && { boardClassification: data.boardType || null }),

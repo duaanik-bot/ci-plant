@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 
 type Role = { id: string; roleName: string }
-type Machine = { id: string; machineCode: string }
+type Machine = { id: string; machineCode: string; name: string }
 type User = {
   id: string
   name: string
@@ -38,7 +38,7 @@ export default function EditUserPage() {
     Promise.all([
       fetch('/api/masters/users').then((r) => r.json()),
       fetch('/api/masters/roles').then((r) => r.json()),
-      fetch('/api/machines').then((r) => r.json()),
+      fetch('/api/masters/machines').then((r) => r.json()),
     ]).then(([users, roleData, machs]) => {
       const u = Array.isArray(users) ? users.find((x: User) => x.id === id) : null
       if (u) {
@@ -150,7 +150,7 @@ export default function EditUserPage() {
                   onChange={() => toggleMachine(m.id)}
                   className="rounded border-ds-line/60"
                 />
-                {m.machineCode}
+                {m.name} ({m.machineCode})
               </label>
             ))}
           </div>

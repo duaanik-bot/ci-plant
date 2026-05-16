@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 
 type Role = { id: string; roleName: string }
-type Machine = { id: string; machineCode: string }
+type Machine = { id: string; machineCode: string; name: string }
 
 export default function NewUserPage() {
   const router = useRouter()
@@ -25,7 +25,7 @@ export default function NewUserPage() {
   useEffect(() => {
     Promise.all([
       fetch('/api/masters/roles').then((r) => r.json()),
-      fetch('/api/machines').then((r) => r.json()),
+      fetch('/api/masters/machines').then((r) => r.json()),
     ]).then(([roleData, machs]) => {
       setRoles(Array.isArray(roleData) ? roleData : [])
       if (Array.isArray(roleData) && roleData[0]) setRoleId(roleData[0].id)
@@ -141,7 +141,7 @@ export default function NewUserPage() {
                   onChange={() => toggleMachine(m.id)}
                   className="rounded border-ds-line/60"
                 />
-                {m.machineCode}
+                {m.name} ({m.machineCode})
               </label>
             ))}
           </div>

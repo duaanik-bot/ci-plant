@@ -20,10 +20,10 @@ export default async function MastersLayout({
     <div className="mx-auto min-h-0 w-full max-w-none bg-neutral-50 p-4 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <Link
-          href="/orders/purchase-orders"
+          href="/masters"
           className="text-sm text-ds-ink-faint hover:text-neutral-900 dark:text-ds-ink-muted dark:hover:text-ds-ink"
         >
-          ← Customer POs
+          ← Masters
         </Link>
         <Link href="/masters" className="text-base font-semibold text-[var(--info)] hover:text-[var(--info)] dark:text-[var(--info)]">
           Masters

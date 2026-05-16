@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       reorderPoint: true,
       active: true,
       weightedAvgCost: true,
-      maxDailyUsage: true,
+      packetWeight: true,
       createdAt: true,
     },
   })
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
         incoming_sheets: incoming,
         shortage_sheets: shortage,
         reorder_level: reorder,
-        packet_weight: num(r.maxDailyUsage),
+        packet_weight: num(r.packetWeight),
         status,
         est_value_inr: estValue,
         age_days: ageDays,

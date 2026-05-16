@@ -22,6 +22,7 @@ type User = {
   role: { id: string; roleName: string }
   whatsappNumber: string | null
   lastLoginAt: string | null
+  machineAccess: string[]
   active: boolean
 }
 
@@ -147,6 +148,7 @@ export default function MastersUsersPage() {
               <th className={enterpriseThClass}>Email</th>
               <th className={enterpriseThClass}>Role</th>
               <th className={enterpriseThClass}>WhatsApp</th>
+              <th className={enterpriseThClass}>Machine access</th>
               <th className={enterpriseThClass}>Last login</th>
               <th className={enterpriseThClass}>Status</th>
               <th className={enterpriseThClass}>Actions</th>
@@ -173,6 +175,15 @@ export default function MastersUsersPage() {
                 <td className={enterpriseTdMutedClass}>{u?.email ?? '—'}</td>
                 <td className={enterpriseTdClass}>{u?.role?.roleName ?? '—'}</td>
                 <td className={enterpriseTdMutedClass}>{u?.whatsappNumber ?? '—'}</td>
+                <td className={enterpriseTdClass}>
+                  {Array.isArray(u?.machineAccess) && u.machineAccess.length > 0 ? (
+                    <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-800 dark:bg-ds-elevated dark:text-ds-ink">
+                      {u.machineAccess.length} machine{u.machineAccess.length === 1 ? '' : 's'}
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                </td>
                 <td className={enterpriseTdMonoClass}>
                   {u?.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}
                 </td>

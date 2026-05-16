@@ -25,6 +25,11 @@ const groupedCards = [
         description: 'Material codes, units, reorder point, supplier',
       },
       {
+        href: '/masters/cartons',
+        label: 'Cartons',
+        description: 'Manage carton specifications, dimensions, and board grades',
+      },
+      {
         href: '/masters/minimasters',
         label: 'MiniMasters',
         description: 'Dynamic dropdown values and logic triggers',

@@ -22,6 +22,8 @@ type Supplier = {
   contactPhone: string | null
   materialTypes: string[]
   leadTimeDays: number
+  paymentTerms: string | null
+  paymentTermsDays: number | null
   active: boolean
 }
 
@@ -148,6 +150,7 @@ export default function MastersSuppliersPage() {
               <th className={enterpriseThClass}>Contact</th>
               <th className={enterpriseThClass}>Material types</th>
               <th className={enterpriseThClass}>Lead time</th>
+              <th className={enterpriseThClass}>Payment terms</th>
               <th className={enterpriseThClass}>Status</th>
               <th className={enterpriseThClass}>Actions</th>
             </tr>
@@ -182,6 +185,11 @@ export default function MastersSuppliersPage() {
                     : '—'}
                 </td>
                 <td className={enterpriseTdClass}>{s?.leadTimeDays ?? '—'} days</td>
+                <td className={enterpriseTdMutedClass}>
+                  {s?.paymentTerms == null && s?.paymentTermsDays == null
+                    ? '—'
+                    : `${s?.paymentTerms ?? '—'}${s?.paymentTermsDays != null ? ` (${s.paymentTermsDays} days)` : ''}`}
+                </td>
                 <td className={enterpriseTdClass}>
                   <span className={s?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>
                     {s?.active ? 'Active' : 'Inactive'}

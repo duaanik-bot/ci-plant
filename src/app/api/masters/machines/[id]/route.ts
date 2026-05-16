@@ -24,6 +24,25 @@ const updateSchema = z.object({
   notes: z.string().optional().nullable(),
 })
 
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error } = await requireRole('operations_head', 'md')
+  if (error) return error
+
+  const { id } = await params
+  const machine = await db.machine.findUnique({ where: { id } })
+  if (!machine) return NextResponse.json({ error: 'Machine not found' }, { status: 404 })
+
+  return NextResponse.json({
+    ...machine,
+    stdWastePct: Number(machine.stdWastePct),
+    lastPmDate: machine.lastPmDate?.toISOString().slice(0, 10) ?? null,
+    nextPmDue: machine.nextPmDue?.toISOString().slice(0, 10) ?? null,
+  })
+}
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

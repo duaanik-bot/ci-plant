@@ -36,13 +36,13 @@ export default function EditMachinePage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [loggingMaintenance, setLoggingMaintenance] = useState(false)
 
   useEffect(() => {
-    fetch('/api/masters/machines')
+    fetch(`/api/masters/machines/${id}`)
       .then((r) => r.json())
-      .then((data: Machine[]) => {
-        const m = Array.isArray(data) ? data.find((x) => x.id === id) : null
-        if (m) {
+      .then((m: Machine | { error?: string }) => {
+        if (m && 'id' in m) {
           setMachine(m)
           setName(m.name)
           setMake(m.make ?? '')
@@ -94,13 +94,37 @@ export default function EditMachinePage() {
     }
   }
 
-  function logMaintenance() {
+  async function logMaintenance() {
     const today = new Date().toISOString().slice(0, 10)
-    setLastPmDate(today)
     const next = new Date()
     next.setMonth(next.getMonth() + 1)
-    setNextPmDue(next.toISOString().slice(0, 10))
-    setNotes((prev) => prev ? `${prev}\nMaintenance logged ${today}` : `Maintenance logged ${today}`)
+    const nextDue = next.toISOString().slice(0, 10)
+    const entry = `Maintenance logged ${today}`
+    setLoggingMaintenance(true)
+    try {
+      const res = await fetch(`/api/masters/machines/${id}/maintenance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lastPmDate: today, nextPmDue: nextDue, notes: entry }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error((data as { error?: string }).error || 'Failed to log maintenance')
+        return
+      }
+      setLastPmDate(today)
+      setNextPmDue(nextDue)
+      if (typeof (data as { notes?: string }).notes === 'string') {
+        setNotes((data as { notes: string }).notes)
+      } else {
+        setNotes((prev) => (prev ? `${prev}\n${entry}` : entry))
+      }
+      toast.success('Maintenance logged')
+    } catch {
+      toast.error('Failed to log maintenance')
+    } finally {
+      setLoggingMaintenance(false)
+    }
   }
 
   if (loading) return <div className="text-ds-ink-muted">Loading…</div>
@@ -112,10 +136,11 @@ export default function EditMachinePage() {
         <h2 className="text-lg font-semibold text-foreground">Edit {machine.machineCode}</h2>
         <button
           type="button"
-          onClick={logMaintenance}
-          className="px-3 py-1.5 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-foreground text-sm"
+          onClick={() => void logMaintenance()}
+          disabled={loggingMaintenance}
+          className="px-3 py-1.5 rounded-ds-md bg-ds-elevated hover:bg-ds-line/30 text-foreground text-sm disabled:opacity-50"
         >
-          Log maintenance
+          {loggingMaintenance ? 'Logging…' : 'Log maintenance'}
         </button>
       </div>
       <form onSubmit={handleSubmit} className="space-y-4">
