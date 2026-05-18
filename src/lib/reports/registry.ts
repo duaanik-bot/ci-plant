@@ -6,6 +6,7 @@ import * as yieldRpt from './modules/yield'
 import * as otif from './modules/otif'
 import * as shortExcess from './modules/short-excess'
 import * as downtimePareto from './modules/downtime-pareto'
+import * as vendorPpm from './modules/vendor-quality-ppm'
 
 // Report modules are registered here as they are implemented.
 export const REPORTS: Record<string, ReportModule<any>> = {
@@ -16,6 +17,7 @@ export const REPORTS: Record<string, ReportModule<any>> = {
   otif: { ...otif.meta, filterSchema: otif.filterSchema, query: otif.query },
   'short-excess': { ...shortExcess.meta, filterSchema: shortExcess.filterSchema, query: shortExcess.query },
   'downtime-pareto': { ...downtimePareto.meta, filterSchema: downtimePareto.filterSchema, query: downtimePareto.query },
+  'vendor-quality-ppm': { ...vendorPpm.meta, filterSchema: vendorPpm.filterSchema, query: vendorPpm.query },
 }
 
 export function getReport(id: string): ReportModule<any> | undefined {
