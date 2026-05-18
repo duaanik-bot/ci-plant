@@ -4,14 +4,9 @@ import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { EffectSelect } from '@/components/ui/EffectSelect'
+import { useUnitOptions } from '@/hooks/useUnitOptions'
 
-const UNIT_OPTIONS = [
-  { value: 'sheets', label: 'Sheets' },
-  { value: 'packets', label: 'Packets' },
-  { value: 'kg', label: 'KG' },
-  { value: 'grs', label: 'GRS' },
-  { value: 'tonnes', label: 'Tonnes' },
-]
+const UNIT_FALLBACK = ['sheets', 'packets', 'kg', 'grs', 'tonnes']
 const GRAIN_DIRECTIONS = ['Long Grain', 'Short Grain']
 
 type Supplier = { id: string; name: string }
@@ -105,6 +100,7 @@ type Props = {
 
 export default function MaterialForm({ mode, initialData }: Props) {
   const router = useRouter()
+  const { options: unitOptions } = useUnitOptions(UNIT_FALLBACK)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [autoCode, setAutoCode] = useState(mode === 'ADD')
   const [submitting, setSubmitting] = useState(false)
@@ -431,7 +427,9 @@ export default function MaterialForm({ mode, initialData }: Props) {
             <div>
               <label className="block text-ds-ink-muted mb-1">Unit of measure</label>
               <select value={f.unit} onChange={(e) => patch('unit', e.target.value)} className={cls}>
-                {UNIT_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                {(unitOptions.includes(f.unit) || !f.unit ? unitOptions : [f.unit, ...unitOptions]).map((u) => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
               </select>
             </div>
             <div>

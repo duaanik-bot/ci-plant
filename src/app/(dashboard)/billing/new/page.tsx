@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { Copy, Trash2 } from 'lucide-react'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
+import { useUnitOptions } from '@/hooks/useUnitOptions'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { mapApiRowToPoCarton, type PoCartonCatalogItem } from '@/lib/po-carton-autocomplete'
 import { amountInWords } from '@/lib/amount-in-words'
@@ -89,6 +90,7 @@ function fmtINR(n: number, opts?: { withSymbol?: boolean }) {
 
 export default function NewBillPage() {
   const router = useRouter()
+  const { options: uomOptions } = useUnitOptions(['Pcs', 'Box', 'Set', 'Sheets', 'Kg'])
   const searchParams = useSearchParams()
   const [jobCards, setJobCards] = useState<JobCard[]>([])
   const [customer, setCustomer] = useState<Customer | null>(null)
@@ -681,11 +683,9 @@ export default function NewBillPage() {
                           onChange={(e) => updateLine(idx, { uom: e.target.value })}
                           className="ds-input w-20 cursor-pointer text-xs"
                         >
-                          <option value="Pcs">Pcs</option>
-                          <option value="Box">Box</option>
-                          <option value="Set">Set</option>
-                          <option value="Sheets">Sheets</option>
-                          <option value="Kg">Kg</option>
+                          {(uomOptions.includes(l.uom) || !l.uom ? uomOptions : [l.uom, ...uomOptions]).map((u) => (
+                            <option key={u} value={u}>{u}</option>
+                          ))}
                         </select>
                       </td>
                       <td className="px-2 py-2 text-right">

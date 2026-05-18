@@ -4,7 +4,6 @@ import { SessionProvider } from 'next-auth/react'
 import { ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from 'next-themes'
-import { MastersProvider } from '@/components/masters/MastersProvider'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,9 +21,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <SessionProvider refetchOnWindowFocus={false} refetchWhenOffline={false}>
-        <QueryClientProvider client={queryClient}>
-          <MastersProvider>{children}</MastersProvider>
-        </QueryClientProvider>
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
       </SessionProvider>
     </ThemeProvider>
   )

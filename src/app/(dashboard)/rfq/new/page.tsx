@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
+import { useUnitOptions } from '@/hooks/useUnitOptions'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { DRUG_SCHEDULES, COATING_TYPES, LAMINATE_TYPES, FOIL_TYPES, EMBOSSING_TYPES, CARTON_CONSTRUCTIONS, BARCODE_TYPES } from '@/lib/constants'
@@ -117,6 +118,7 @@ type FieldErrors = Record<string, string>
 
 export default function NewRfqPage() {
   const router = useRouter()
+  const { options: volumeUnitOptions } = useUnitOptions(['cartons', 'labels'])
 
   const [core, setCore] = useState<RfqCoreForm>({
     customerId: '',
@@ -661,8 +663,12 @@ export default function NewRfqPage() {
                   }
                   className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
                 >
-                  <option value="cartons">Cartons</option>
-                  <option value="labels">Labels</option>
+                  {(volumeUnitOptions.includes(core.annualVolumeUnit) || !core.annualVolumeUnit
+                    ? volumeUnitOptions
+                    : [core.annualVolumeUnit, ...volumeUnitOptions]
+                  ).map((u) => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
                 </select>
               </div>
             </div>
