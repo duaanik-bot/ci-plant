@@ -1,11 +1,13 @@
 import type { ReportModule } from './types'
 import * as ppv from './modules/ppv'
 import * as wastage from './modules/wastage'
+import * as oee from './modules/oee'
 
 // Report modules are registered here as they are implemented.
 export const REPORTS: Record<string, ReportModule<any>> = {
   ppv: { ...ppv.meta, filterSchema: ppv.filterSchema, query: ppv.query },
   wastage: { ...wastage.meta, filterSchema: wastage.filterSchema, query: wastage.query },
+  oee: { ...oee.meta, filterSchema: oee.filterSchema, query: oee.query },
 }
 
 export function getReport(id: string): ReportModule<any> | undefined {
