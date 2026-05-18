@@ -8,7 +8,8 @@ import {
   FOIL_TYPES,
   PAPER_TYPES,
 } from '@/lib/constants'
-import { fetchMiniMasterOptions } from '@/lib/minimasters-options'
+import { useMaster } from '@/components/masters/MastersProvider'
+import { MASTER } from '@/lib/masters/registry'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { Button } from '@/components/design-system/Button'
 import { cn } from '@/lib/cn'
@@ -44,36 +45,30 @@ type Props = {
 }
 
 export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onSubmit }: Props) {
-  const [paperOptions, setPaperOptions] = useState<string[]>(PAPER_TYPES as unknown as string[])
-  const [coatingOptions, setCoatingOptions] = useState<string[]>(COATING_TYPES as unknown as string[])
-  const [embossOptions, setEmbossOptions] = useState<string[]>(EMBOSSING_TYPES as unknown as string[])
-  const [foilOptions, setFoilOptions] = useState<string[]>(FOIL_TYPES as unknown as string[])
-  const [pastingOptions, setPastingOptions] = useState<string[]>([])
-  const [boardGradeOptions, setBoardGradeOptions] = useState<string[]>(BOARD_GRADES as unknown as string[])
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const [boardType, boardClass, coating, emboss, foil, pasting] = await Promise.all([
-        fetchMiniMasterOptions('Board Type'),
-        fetchMiniMasterOptions('Board Classification'),
-        fetchMiniMasterOptions('Coating'),
-        fetchMiniMasterOptions('Embossing'),
-        fetchMiniMasterOptions('Foil'),
-        fetchMiniMasterOptions('Pasting'),
-      ])
-      if (cancelled) return
-      if (boardType.length > 0) setPaperOptions(boardType)
-      if (boardClass.length > 0) setBoardGradeOptions(boardClass)
-      if (coating.length > 0) setCoatingOptions(coating)
-      if (emboss.length > 0) setEmbossOptions(emboss)
-      if (foil.length > 0) setFoilOptions(foil)
-      if (pasting.length > 0) setPastingOptions(pasting)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // Sourced from the cached master registry; dropdowns store the human
+  // label (legacy carton/PO records store labels, not codes). Fall back to
+  // the static constants when a category has no values yet.
+  const boardTypeMaster = useMaster(MASTER.BOARD_TYPE)
+  const coatingMaster = useMaster(MASTER.COATING)
+  const embossMaster = useMaster(MASTER.EMBOSS)
+  const foilMaster = useMaster(MASTER.FOIL)
+  const pastingMaster = useMaster(MASTER.PASTING)
+  const paperOptions = boardTypeMaster.options.length
+    ? boardTypeMaster.options.map((o) => o.label)
+    : (PAPER_TYPES as unknown as string[])
+  const boardGradeOptions = boardTypeMaster.options.length
+    ? boardTypeMaster.options.map((o) => o.label)
+    : (BOARD_GRADES as unknown as string[])
+  const coatingOptions = coatingMaster.options.length
+    ? coatingMaster.options.map((o) => o.label)
+    : (COATING_TYPES as unknown as string[])
+  const embossOptions = embossMaster.options.length
+    ? embossMaster.options.map((o) => o.label)
+    : (EMBOSSING_TYPES as unknown as string[])
+  const foilOptions = foilMaster.options.length
+    ? foilMaster.options.map((o) => o.label)
+    : (FOIL_TYPES as unknown as string[])
+  const pastingOptions = pastingMaster.options.map((o) => o.label)
 
   const set = (patch: Partial<PoQuickCreateCartonValues>) =>
     setValues((prev) => ({ ...prev, ...patch }))
