@@ -179,10 +179,14 @@ async function main() {
         boardGrade: canonicalBoardGrade(
           paperId ? PAPER_TYPE[paperId] ?? null : null,
         ),
-        coatingType: canonicalCoating(
-          coatId ? COATING_TYPE[coatId] ?? null : null,
-        ),
-        embossingLeafing: (c[7] ?? '').trim() || null,
+        // blank/unknown legacy coating = uncoated → canonical 'None'
+        coatingType:
+          canonicalCoating(coatId ? COATING_TYPE[coatId] ?? null : null) ??
+          'None',
+        // legacy embossing_leafing is a raw numeric id with no lookup — skip
+        embossingLeafing: /^\s*\d*\s*$/.test(c[7] ?? '')
+          ? null
+          : (c[7] ?? '').trim() || null,
         artworkCode: (c[10] ?? '').trim() || null,
       },
     })
