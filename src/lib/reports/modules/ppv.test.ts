@@ -1,60 +1,36 @@
 import { describe, it, expect } from 'vitest'
-import { computePpv } from './ppv'
-import { fmtInr } from '../format'
+import { computePpv, type PpvInput } from './ppv'
 
-const base = {
-  vendor: 'Vendor A',
-  material: 'Duplex Board',
-  boardGrade: '300gsm',
-  qtyKg: 1000,
-  basicRate: 45,
-  standardRate: 40,
-  freightPerKg: 2,
-  unloadingPerKg: 0.5,
-  insurancePerKg: 0.5,
-}
+const input: PpvInput[] = [
+  { vendor: 'V1', boardGrade: 'SBS', gsm: 300, qtyKg: 1000,
+    basicRate: 55, landedRate: 60, freightPerKg: 3, unloadingPerKg: 1, insurancePerKg: 1,
+    stdRate: 50 },
+  { vendor: 'V2', boardGrade: 'FBB', gsm: 250, qtyKg: 500,
+    basicRate: 48, landedRate: 52, freightPerKg: 2, unloadingPerKg: 1, insurancePerKg: 1,
+    stdRate: null },
+]
 
 describe('computePpv', () => {
-  it('computes all variance components when baseline present', () => {
-    const { rows } = computePpv([base])
-    const r = rows[0]
-    expect(r.priceVar).toBe(5000)   // (45-40)*1000
-    expect(r.freightVar).toBe(2000) // 2*1000
-    expect(r.unloadingVar).toBe(500)
-    expect(r.insuranceVar).toBe(500)
-    expect(r.totalVar).toBe(8000)
-    expect(r.baseline).toBe('ok')
+  const r = computePpv(input)
+  it('computes basic and landed PPV per line', () => {
+    const row = r.rows.find((x) => x.vendor === 'V1')!
+    expect(row.basicPpv).toBe((55 - 50) * 1000)
+    expect(row.landedPpv).toBe((60 - 50) * 1000)
   })
-
-  it('no-baseline row: all variance components are 0, baseline=missing', () => {
-    const noBase = { ...base, standardRate: null }
-    const { rows } = computePpv([noBase])
-    const r = rows[0]
-    expect(r.priceVar).toBe(0)
-    expect(r.freightVar).toBe(0)
-    expect(r.unloadingVar).toBe(0)
-    expect(r.insuranceVar).toBe(0)
-    expect(r.totalVar).toBe(0)
-    expect(r.baseline).toBe('missing')
+  it('decomposes landed variance into components', () => {
+    const row = r.rows.find((x) => x.vendor === 'V1')!
+    expect(row.freightVar).toBe(3 * 1000)
+    expect(row.unloadingVar).toBe(1 * 1000)
+    expect(row.insuranceVar).toBe(1 * 1000)
+    expect(row.priceVar).toBe((55 - 50) * 1000)
   })
-
-  it('no-baseline rows excluded from counted and totals', () => {
-    const noBase = { ...base, standardRate: null }
-    const { rows, counted, totalLandedVar } = computePpv([base, noBase])
-    expect(rows).toHaveLength(2)
-    expect(counted).toHaveLength(1)
-    expect(totalLandedVar).toBe(8000)
-  })
-
-  it('summary Total Landed PPV value is exact when variance is 10,000', () => {
-    // zero landing costs so totalVar = priceVar alone = (50-40)*1000 = 10000
-    const simple = { ...base, basicRate: 50, standardRate: 40, qtyKg: 1000, freightPerKg: 0, unloadingPerKg: 0, insurancePerKg: 0 }
-    const { totalLandedVar } = computePpv([simple])
-    // Build a summary card the same way the query function does
-    const summary = [
-      { label: 'Total Landed PPV', value: fmtInr(totalLandedVar) },
-    ]
-    const total = summary.find((s) => s.label === 'Total Landed PPV')!
+  it('flags no-baseline rows and excludes them from totals', () => {
+    const v2 = r.rows.find((x) => x.vendor === 'V2')!
+    expect(v2.baseline).toBe('no baseline')
+    const total = r.summary.find((s) => s.label === 'Total Landed PPV')!
     expect(total.value).toBe('₹10,000')
+  })
+  it('marks adverse total tone bad', () => {
+    expect(r.summary.find((s) => s.label === 'Total Landed PPV')!.tone).toBe('bad')
   })
 })
