@@ -6,6 +6,7 @@ import { requireRole } from '@/lib/helpers'
 export const dynamic = 'force-dynamic'
 
 const updateSchema = z.object({
+  code: z.string().trim().min(1).max(48).regex(/^[A-Z0-9_]+$/).optional(),
   name: z.string().trim().min(1).max(80).optional(),
   sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
   active: z.boolean().optional(),
@@ -47,9 +48,33 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
   }
 
+  if (parsed.data.code && parsed.data.code !== existing.code) {
+    const valueCount = await db.effectValue.count({ where: { categoryId: id } })
+    if (valueCount > 0) {
+      return NextResponse.json(
+        {
+          error: 'Category code is locked: consumers reference it. Create a new category instead.',
+          fields: { code: 'Locked (has values)' },
+        },
+        { status: 409 },
+      )
+    }
+    const dupCode = await db.effectCategory.findFirst({
+      where: { id: { not: id }, code: parsed.data.code },
+      select: { id: true },
+    })
+    if (dupCode) {
+      return NextResponse.json(
+        { error: 'Category code already exists', fields: { code: 'Code already exists' } },
+        { status: 400 },
+      )
+    }
+  }
+
   const updated = await db.effectCategory.update({
     where: { id },
     data: {
+      ...(parsed.data.code !== undefined ? { code: parsed.data.code } : {}),
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.sortOrder !== undefined ? { sortOrder: parsed.data.sortOrder } : {}),
       ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),

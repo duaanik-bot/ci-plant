@@ -6,6 +6,12 @@ import { requireRole } from '@/lib/helpers'
 export const dynamic = 'force-dynamic'
 
 const createSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(1, 'Code is required')
+    .max(48)
+    .regex(/^[A-Z0-9_]+$/, 'Uppercase letters, digits, underscore only'),
   name: z.string().trim().min(1, 'Category name is required').max(80, 'Max 80 characters'),
   sortOrder: z.coerce.number().int().min(0).max(9999).default(100),
   status: z.union([z.boolean(), z.string()]).optional(),
@@ -81,8 +87,20 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const dupCode = await db.effectCategory.findFirst({
+      where: { code: parsed.data.code },
+      select: { id: true },
+    })
+    if (dupCode) {
+      return NextResponse.json(
+        { error: 'Category code already exists', fields: { code: 'Code already exists' } },
+        { status: 400 },
+      )
+    }
+
     const created = await db.effectCategory.create({
       data: {
+        code: parsed.data.code,
         name: parsed.data.name,
         sortOrder: parsed.data.sortOrder,
         active: resolveActiveFlag({ status: parsed.data.status, active: parsed.data.active }),
