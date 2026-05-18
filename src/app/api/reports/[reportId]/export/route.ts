@@ -30,7 +30,7 @@ export async function GET(
 
     if (format === 'pdf') {
       const buf = await reportToPdf(mod.title, result)
-      return new NextResponse(buf, {
+      return new NextResponse(buf as unknown as BodyInit, {
         headers: {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="${fname}"`,
@@ -38,7 +38,7 @@ export async function GET(
       })
     }
     const buf = reportToXlsx(mod.id, result)
-    return new NextResponse(buf, {
+    return new NextResponse(buf as unknown as BodyInit, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename="${fname}"`,
