@@ -91,7 +91,6 @@ function fmtINR(n: number, opts?: { withSymbol?: boolean }) {
 
 export default function NewBillPage() {
   const router = useRouter()
-  const { options: uomOptions } = useUnitOptions(['Pcs', 'Box', 'Set', 'Sheets', 'Kg'])
   const searchParams = useSearchParams()
   const [jobCards, setJobCards] = useState<JobCard[]>([])
   const [customer, setCustomer] = useState<Customer | null>(null)

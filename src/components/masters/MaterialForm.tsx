@@ -100,7 +100,6 @@ type Props = {
 
 export default function MaterialForm({ mode, initialData }: Props) {
   const router = useRouter()
-  const { options: unitOptions } = useUnitOptions(UNIT_FALLBACK)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [autoCode, setAutoCode] = useState(mode === 'ADD')
   const [submitting, setSubmitting] = useState(false)
