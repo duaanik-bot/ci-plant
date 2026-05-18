@@ -8,20 +8,30 @@
  * through.
  */
 
-const BOARD_GRADE_MAP: Record<string, string> = {
-  FBB: 'FBB (Folding Box Board)',
-  'FBB COATED': 'FBB (Folding Box Board)',
-  SAFFIRE: 'SBS (Solid Bleached Sulphate)',
-  DUPLEX: 'Duplex Board (Grey Back)',
-}
-
+/**
+ * Maps Bible board terms (Saffire/FBB/Duplex/FBB coated) AND legacy
+ * paper-type labels (SBS / GD2 Grey Back / Art Card / Kraft) onto the
+ * canonical MASTER_BOARD_GRADES. Substring/keyword based so variants like
+ * "DARBI ART CARD" or "COLOUR WHITE BACK" still resolve. Unknown values are
+ * preserved verbatim; null passes through.
+ */
 export function canonicalBoardGrade(
   raw: string | null | undefined,
 ): string | null {
   if (raw == null) return null
   const v = String(raw).trim()
   if (!v) return null
-  return BOARD_GRADE_MAP[v.toUpperCase()] ?? v
+  const u = v.toUpperCase().replace(/\s+/g, ' ')
+  if (u.includes('FBB')) return 'FBB (Folding Box Board)'
+  if (u.includes('SAFFIRE') || u.includes('SBS'))
+    return 'SBS (Solid Bleached Sulphate)'
+  if (u.includes('ART CARD')) return 'SBS (Solid Bleached Sulphate)'
+  if (u.includes('WHITE BACK') || u === 'WB') return 'White Back Board'
+  if (u.includes('GREY BACK') || u.includes('GD2') || u.includes('DUPLEX'))
+    return 'Duplex Board (Grey Back)'
+  if (u.includes('KRAFT')) return 'Kraft Board'
+  if (u.includes('METPET') || u.includes('MET PET')) return 'MetPET Board'
+  return v
 }
 
 const COATING_MAP: Record<string, string> = {

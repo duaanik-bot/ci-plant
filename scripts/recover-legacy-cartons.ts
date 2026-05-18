@@ -32,6 +32,7 @@ const prisma = new PrismaClient()
 const CONFIRM = process.argv.includes('--confirm')
 const CARTONS_CSV = 'data/legacy-csv/cartons.csv'
 const CLIENTS_CSV = 'data/legacy-csv/clients.csv'
+const PRICES_CSV = 'data/legacy-csv/carton_prices.csv'
 const TARGET_CLIENT_IDS = ['3', '4', '5', '6'] // Venus (7) deliberately excluded
 
 const PAPER_TYPE: Record<number, string> = {
@@ -72,11 +73,33 @@ function parseCsvLine(line: string): string[] {
 }
 
 async function main() {
-  for (const f of [CARTONS_CSV, CLIENTS_CSV]) {
+  for (const f of [CARTONS_CSV, CLIENTS_CSV, PRICES_CSV]) {
     if (!fs.existsSync(f)) {
       console.error('Missing', f)
       process.exit(1)
     }
+  }
+
+  // legacy carton_id -> latest price (most recent created_at, tiebreak row id)
+  const latestPrice = new Map<string, { price: number; created: string; rowId: number }>()
+  for (const ln of fs
+    .readFileSync(PRICES_CSV, 'utf8')
+    .split(/\r?\n/)
+    .slice(1)
+    .filter(Boolean)) {
+    const r = parseCsvLine(ln)
+    const cid = r[1]
+    const price = Number(r[3])
+    const created = r[4] ?? ''
+    const rowId = Number(r[0])
+    if (!cid || !Number.isFinite(price)) continue
+    const cur = latestPrice.get(cid)
+    if (
+      !cur ||
+      created > cur.created ||
+      (created === cur.created && rowId > cur.rowId)
+    )
+      latestPrice.set(cid, { price, created, rowId })
   }
 
   // legacy client_id -> company_name
@@ -151,7 +174,7 @@ async function main() {
         finishedLength: dims.l,
         finishedWidth: dims.w,
         finishedHeight: dims.h,
-        rate: parseRate(c[4]),
+        rate: latestPrice.get(c[0])?.price ?? parseRate(c[4]),
         gsm: parseGsm(c[9]),
         boardGrade: canonicalBoardGrade(
           paperId ? PAPER_TYPE[paperId] ?? null : null,

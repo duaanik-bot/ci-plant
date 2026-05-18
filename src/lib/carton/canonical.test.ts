@@ -20,6 +20,14 @@ describe('canonicalBoardGrade', () => {
   it('Duplex → Duplex Board (Grey Back)', () => {
     expect(canonicalBoardGrade('Duplex')).toBe('Duplex Board (Grey Back)')
   })
+  it('legacy paper-type labels map to canonical', () => {
+    expect(canonicalBoardGrade('SBS')).toBe('SBS (Solid Bleached Sulphate)')
+    expect(canonicalBoardGrade('GD2 Grey Back')).toBe('Duplex Board (Grey Back)')
+    expect(canonicalBoardGrade('Art Card')).toBe('SBS (Solid Bleached Sulphate)')
+    expect(canonicalBoardGrade('DARBI ART CARD')).toBe('SBS (Solid Bleached Sulphate)')
+    expect(canonicalBoardGrade('Kraft')).toBe('Kraft Board')
+    expect(canonicalBoardGrade('COLOUR WHITE BACK')).toBe('White Back Board')
+  })
   it('result is always a valid master grade or the preserved raw', () => {
     expect((MASTER_BOARD_GRADES as readonly string[]).includes(canonicalBoardGrade('FBB')!)).toBe(true)
   })
