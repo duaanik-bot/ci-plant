@@ -107,6 +107,7 @@ export type PlanningGridLine = {
     paperType?: string | null
     gsm?: number | null
     numberOfColours?: number | null
+    specialInstructions?: string | null
   } | null
   dieMaster?: { id: string; dyeNumber: number; ups: number; sheetSize: string } | null
 }

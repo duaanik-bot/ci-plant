@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { unstable_cache } from 'next/cache'
+import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { PRODUCTION_STAGES } from '@/lib/constants'
@@ -136,6 +137,7 @@ async function fetchStageData(stageKey: string) {
         | { path: string[]; equals: boolean }
         | { path: string[]; equals: string }
       AND?: { postPressRouting: { path: string[]; equals: string } }[]
+      OR?: { postPressRouting: { path: string[]; equals: boolean } }[]
     }
   } = {
     stageName: stageLabel,
@@ -392,7 +394,7 @@ async function fetchStageData(stageKey: string) {
           where: { id: { in: jcIds } },
           include: { stages: true },
         })
-      : Promise.resolve([] as Awaited<ReturnType<typeof db.productionJobCard.findMany>>),
+      : Promise.resolve([] as Prisma.ProductionJobCardGetPayload<{ include: { stages: true } }>[]),
     jcIds.length > 0
       ? db.productionOeeLedger.findMany({
           where: { productionJobCardId: { in: jcIds } },
