@@ -22,6 +22,7 @@ type CartonRow = {
   gsm: number | null
   boardGrade: string | null
   paperType: string | null
+  coatingType: string | null
   finishedLength: number | null
   finishedWidth: number | null
   finishedHeight: number | null
@@ -234,7 +235,7 @@ export default function CartonMasterPage() {
                 </td>
                 <td className={enterpriseTdMonoClass}>{c?.gsm ?? '—'}</td>
                 <td className={enterpriseTdMutedClass}>{c?.boardGrade ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{c?.paperType ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{c?.coatingType ?? '—'}</td>
                 <td className={enterpriseTdMonoClass}>{c?.rate != null ? `₹${c.rate.toFixed(2)}` : '—'}</td>
                 <td className={cellWrap}>
                   <span className={c?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>
