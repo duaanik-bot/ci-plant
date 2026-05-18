@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { Copy, Trash2 } from 'lucide-react'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
+import { MasterSelect } from '@/components/ui/MasterSelect'
+import { MASTER } from '@/lib/masters/registry'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { mapApiRowToPoCarton, type PoCartonCatalogItem } from '@/lib/po-carton-autocomplete'
 import { amountInWords } from '@/lib/amount-in-words'
@@ -50,7 +52,7 @@ type ReconRow = {
 }
 
 const DEFAULT_HSN = '48191010'
-const DEFAULT_UOM = 'Pcs'
+const DEFAULT_UOM = 'NOS'
 
 const defaultLine = (): Line => ({
   cartonId: '',
@@ -676,17 +678,13 @@ export default function NewBillPage() {
                         />
                       </td>
                       <td className="px-2 py-2">
-                        <select
+                        <MasterSelect
+                          masterKey={MASTER.UNIT}
                           value={l.uom}
-                          onChange={(e) => updateLine(idx, { uom: e.target.value })}
+                          onChange={(code) => updateLine(idx, { uom: code })}
+                          allowEmpty={false}
                           className="ds-input w-20 cursor-pointer text-xs"
-                        >
-                          <option value="Pcs">Pcs</option>
-                          <option value="Box">Box</option>
-                          <option value="Set">Set</option>
-                          <option value="Sheets">Sheets</option>
-                          <option value="Kg">Kg</option>
-                        </select>
+                        />
                       </td>
                       <td className="px-2 py-2 text-right">
                         <input
