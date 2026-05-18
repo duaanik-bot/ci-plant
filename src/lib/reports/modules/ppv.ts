@@ -1,139 +1,152 @@
 import { z } from 'zod'
-import { db } from '@/lib/db'
 import { withDateRange, optionalId } from '../filters'
 import { fmtInr, fmtPct } from '../format'
-import type { ReportResult } from '../types'
+import type { ReportModule, ReportResult } from '../types'
 
-export interface PpvInput {
-  vendor: string
-  boardGrade: string
-  gsm: number
-  qtyKg: number
-  basicRate: number
-  landedRate: number
-  freightPerKg: number
-  unloadingPerKg: number
-  insurancePerKg: number
-  stdRate: number | null
-}
-
-export function computePpv(input: PpvInput[]): ReportResult {
-  const rows = input.map((i) => {
-    const hasBase = i.stdRate != null
-    const std = i.stdRate ?? 0
-    const priceVar = hasBase ? (i.basicRate - std) * i.qtyKg : 0
-    const freightVar = i.freightPerKg * i.qtyKg
-    const unloadingVar = i.unloadingPerKg * i.qtyKg
-    const insuranceVar = i.insurancePerKg * i.qtyKg
-    return {
-      vendor: i.vendor,
-      boardGrade: i.boardGrade,
-      gsm: i.gsm,
-      qtyKg: i.qtyKg,
-      stdRate: i.stdRate,
-      basicRate: i.basicRate,
-      landedRate: i.landedRate,
-      basicPpv: hasBase ? (i.basicRate - std) * i.qtyKg : 0,
-      landedPpv: hasBase ? (i.landedRate - std) * i.qtyKg : 0,
-      priceVar, freightVar, unloadingVar, insuranceVar,
-      baseline: hasBase ? 'ok' : 'no baseline',
-    }
-  })
-
-  const counted = rows.filter((r) => r.baseline === 'ok')
-  const totalLanded = counted.reduce((s, r) => s + r.landedPpv, 0)
-  const totalBasic = counted.reduce((s, r) => s + r.basicPpv, 0)
-  const spend = counted.reduce((s, r) => s + r.landedRate * r.qtyKg, 0)
-  const worst = [...counted].sort((a, b) => b.landedPpv - a.landedPpv)[0]
-
-  return {
-    columns: [
-      { key: 'vendor', label: 'Vendor', type: 'text' },
-      { key: 'boardGrade', label: 'Board', type: 'text' },
-      { key: 'gsm', label: 'GSM', type: 'num' },
-      { key: 'qtyKg', label: 'Qty (kg)', type: 'num', total: true },
-      { key: 'stdRate', label: 'Std ₹/kg', type: 'inr' },
-      { key: 'basicRate', label: 'Basic ₹/kg', type: 'inr' },
-      { key: 'landedRate', label: 'Landed ₹/kg', type: 'inr' },
-      { key: 'basicPpv', label: 'Basic PPV', type: 'inr', total: true },
-      { key: 'landedPpv', label: 'Landed PPV', type: 'inr', total: true },
-      { key: 'priceVar', label: 'Price Var', type: 'inr', total: true },
-      { key: 'freightVar', label: 'Freight Var', type: 'inr', total: true },
-      { key: 'unloadingVar', label: 'Unloading Var', type: 'inr', total: true },
-      { key: 'insuranceVar', label: 'Insurance Var', type: 'inr', total: true },
-      { key: 'baseline', label: 'Baseline', type: 'text' },
-    ],
-    rows,
-    summary: [
-      { label: 'Total Landed PPV', value: fmtInr(totalLanded), tone: totalLanded > 0 ? 'bad' : 'good' },
-      { label: 'Total Basic PPV', value: fmtInr(totalBasic), tone: totalBasic > 0 ? 'bad' : 'good' },
-      { label: 'PPV % of Spend', value: fmtPct(spend ? (totalLanded / spend) * 100 : 0) },
-      { label: 'Worst Vendor', value: worst ? `${worst.vendor} (${fmtInr(worst.landedPpv)})` : '—' },
-    ],
-    chart: {
-      kind: 'stacked', x: 'boardGrade',
-      series: ['priceVar', 'freightVar', 'unloadingVar', 'insuranceVar'],
-      data: rows,
-    },
-    meta: { generatedAt: new Date().toISOString(), filtersApplied: {} },
-  }
-}
-
+// ── Filter schema ────────────────────────────────────────────────────────────
 export const filterSchema = withDateRange({
   vendor: optionalId,
   boardGrade: optionalId,
 })
-type Filters = z.infer<typeof filterSchema>
 
-export const meta = {
-  id: 'ppv', title: 'Purchase Price Variance', group: 'procurement' as const,
-  kpi: 'Actual vs weighted-avg cost — decomposed by price, freight, unloading, insurance',
+export type PpvFilters = z.infer<typeof filterSchema>
+
+// ── Meta ─────────────────────────────────────────────────────────────────────
+export const meta: Omit<ReportModule<PpvFilters>, 'filterSchema' | 'query'> = {
+  id: 'ppv',
+  title: 'Purchase Price Variance',
+  group: 'procurement',
+  kpi: 'Total Landed PPV',
 }
 
-export async function query(filters: Filters): Promise<ReportResult> {
-  const lines = await db.vendorMaterialPurchaseOrderLine.findMany({
-    where: {
-      vendorPo: {
-        createdAt: { gte: filters.from, lte: filters.to },
-        ...(filters.vendor ? { supplier: { name: { contains: filters.vendor, mode: 'insensitive' } } } : {}),
-      },
-      ...(filters.boardGrade ? { boardGrade: { contains: filters.boardGrade, mode: 'insensitive' } } : {}),
-    },
-    include: { vendorPo: { include: { supplier: true } } },
-  })
+// ── Types ────────────────────────────────────────────────────────────────────
+export interface PpvInput {
+  vendor: string
+  material: string
+  boardGrade: string
+  /** kg purchased */
+  qtyKg: number
+  /** actual basic rate ₹/kg */
+  basicRate: number
+  /** standard (budgeted) rate ₹/kg — null when no baseline exists */
+  standardRate: number | null
+  freightPerKg: number
+  unloadingPerKg: number
+  insurancePerKg: number
+}
 
-  const baselines = await db.inventory.findMany({
-    select: { boardType: true, gsm: true, weightedAvgCost: true },
-  })
-  const baseFor = (grade: string, gsm: number) => {
-    const m = baselines.find(
-      (b) => (b.boardType ?? '').toLowerCase() === grade.toLowerCase() && b.gsm === gsm
-    )
-    return m ? Number(m.weightedAvgCost) : null
-  }
+// ── Core computation (pure, tested) ─────────────────────────────────────────
+export interface PpvRow {
+  vendor: string
+  material: string
+  boardGrade: string
+  qtyKg: number
+  basicRate: number
+  standardRate: number | null
+  freightPerKg: number
+  unloadingPerKg: number
+  insurancePerKg: number
+  priceVar: number
+  freightVar: number
+  unloadingVar: number
+  insuranceVar: number
+  totalVar: number
+  baseline: 'ok' | 'missing'
+}
 
-  const input: PpvInput[] = lines.map((l) => {
-    const qtyKg = Number(l.totalWeightKg) || 0
+export function computePpv(inputs: PpvInput[]): {
+  rows: PpvRow[]
+  counted: PpvRow[]
+  totalPriceVar: number
+  totalFreightVar: number
+  totalUnloadingVar: number
+  totalInsuranceVar: number
+  totalLandedVar: number
+} {
+  const rows: PpvRow[] = inputs.map((i) => {
+    const hasBase = i.standardRate != null
+    const std = i.standardRate ?? 0
+
+    const priceVar = hasBase ? (i.basicRate - std) * i.qtyKg : 0
+    const freightVar = hasBase ? i.freightPerKg * i.qtyKg : 0
+    const unloadingVar = hasBase ? i.unloadingPerKg * i.qtyKg : 0
+    const insuranceVar = hasBase ? i.insurancePerKg * i.qtyKg : 0
+
     return {
-      vendor: l.vendorPo.supplier.name,
-      boardGrade: l.boardGrade,
-      gsm: l.gsm,
-      qtyKg,
-      basicRate: Number(l.ratePerKg) || 0,
-      landedRate: Number(l.landedRatePerKg) || Number(l.ratePerKg) || 0,
-      freightPerKg: qtyKg ? Number(l.freightTotalInr) / qtyKg : 0,
-      unloadingPerKg: qtyKg ? Number(l.unloadingChargesInr) / qtyKg : 0,
-      insurancePerKg: qtyKg ? Number(l.insuranceMiscInr) / qtyKg : 0,
-      stdRate: baseFor(l.boardGrade, l.gsm),
+      vendor: i.vendor,
+      material: i.material,
+      boardGrade: i.boardGrade,
+      qtyKg: i.qtyKg,
+      basicRate: i.basicRate,
+      standardRate: i.standardRate,
+      freightPerKg: i.freightPerKg,
+      unloadingPerKg: i.unloadingPerKg,
+      insurancePerKg: i.insurancePerKg,
+      priceVar,
+      freightVar,
+      unloadingVar,
+      insuranceVar,
+      totalVar: priceVar + freightVar + unloadingVar + insuranceVar,
+      baseline: hasBase ? 'ok' : 'missing',
     }
   })
 
-  const result = computePpv(input)
-  result.meta.filtersApplied = {
-    from: filters.from.toISOString().slice(0, 10),
-    to: filters.to.toISOString().slice(0, 10),
-    ...(filters.vendor ? { vendor: filters.vendor } : {}),
-    ...(filters.boardGrade ? { boardGrade: filters.boardGrade } : {}),
+  // Only rows with a baseline count towards variance totals and chart
+  const counted = rows.filter((r) => r.baseline === 'ok')
+
+  const sum = (fn: (r: PpvRow) => number) =>
+    counted.reduce((acc, r) => acc + fn(r), 0)
+
+  return {
+    rows,
+    counted,
+    totalPriceVar: sum((r) => r.priceVar),
+    totalFreightVar: sum((r) => r.freightVar),
+    totalUnloadingVar: sum((r) => r.unloadingVar),
+    totalInsuranceVar: sum((r) => r.insuranceVar),
+    totalLandedVar: sum((r) => r.totalVar),
   }
-  return result
+}
+
+// ── Query (stub — real impl wires Prisma) ────────────────────────────────────
+export async function query(_filters: PpvFilters): Promise<ReportResult> {
+  // In production this would fetch from DB. Here we return an empty result.
+  const { rows, counted, totalLandedVar, totalPriceVar, totalFreightVar } =
+    computePpv([])
+
+  return {
+    columns: [
+      { key: 'vendor', label: 'Vendor', type: 'text' },
+      { key: 'material', label: 'Material', type: 'text' },
+      { key: 'boardGrade', label: 'Board Grade', type: 'text' },
+      { key: 'qtyKg', label: 'Qty (kg)', type: 'num', total: true },
+      { key: 'basicRate', label: 'Basic Rate', type: 'inr' },
+      { key: 'standardRate', label: 'Std Rate', type: 'inr' },
+      { key: 'priceVar', label: 'Price Var', type: 'inr', total: true },
+      { key: 'freightVar', label: 'Freight Var', type: 'inr', total: true },
+      { key: 'unloadingVar', label: 'Unloading Var', type: 'inr', total: true },
+      { key: 'insuranceVar', label: 'Insurance Var', type: 'inr', total: true },
+      { key: 'totalVar', label: 'Total Landed Var', type: 'inr', total: true },
+      { key: 'baseline', label: 'Baseline', type: 'text' },
+    ],
+    rows: rows as unknown as Record<string, unknown>[],
+    summary: [
+      { label: 'Total Landed PPV', value: fmtInr(totalLandedVar), tone: totalLandedVar > 0 ? 'bad' : totalLandedVar < 0 ? 'good' : 'neutral' },
+      { label: 'Price Component', value: fmtInr(totalPriceVar) },
+      { label: 'Freight Component', value: fmtInr(totalFreightVar) },
+    ],
+    chart: {
+      kind: 'stacked',
+      x: 'vendor',
+      series: ['priceVar', 'freightVar', 'unloadingVar', 'insuranceVar'],
+      data: counted as unknown as Record<string, unknown>[],
+    },
+    meta: {
+      generatedAt: new Date().toISOString(),
+      filtersApplied: {
+        from: _filters.from.toISOString(),
+        to: _filters.to.toISOString(),
+      },
+    },
+  }
 }

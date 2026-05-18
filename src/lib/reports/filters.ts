@@ -33,4 +33,7 @@ export function withDateRange<T extends z.ZodRawShape>(shape: T) {
         ...rest,
       } as { from: Date; to: Date } & { [K in keyof T]: z.infer<T[K]> }
     })
+    .refine((v: { from: Date; to: Date }) => v.from.getTime() <= v.to.getTime(), {
+      message: 'from must be on or before to',
+    })
 }

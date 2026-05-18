@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dateRangeSchema, optionalId } from './filters'
+import { dateRangeSchema, optionalId, withDateRange } from './filters'
 
 describe('reports/filters', () => {
   it('parses from/to into Date and defaults to current month when absent', () => {
@@ -18,5 +18,9 @@ describe('reports/filters', () => {
     expect(optionalId.parse('')).toBeUndefined()
     expect(optionalId.parse('abc')).toBe('abc')
     expect(optionalId.parse(undefined)).toBeUndefined()
+  })
+  it('withDateRange rejects from after to', () => {
+    const schema = withDateRange({})
+    expect(() => schema.parse({ from: '2026-05-10', to: '2026-05-01' })).toThrow()
   })
 })
