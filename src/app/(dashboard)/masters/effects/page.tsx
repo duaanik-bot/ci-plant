@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
+import { useMastersRefresh } from '@/components/masters/MastersProvider'
+import { normalizeCode } from '@/lib/masters/code-map'
 
 type EffectCategory = {
   id: string
+  code: string
   name: string
   sortOrder: number
   active: boolean
@@ -17,6 +20,7 @@ type EffectCategory = {
 type EffectValue = {
   id: string
   categoryId: string
+  code: string
   value: string
   abbreviation: string | null
   impactOn: string | null
@@ -49,8 +53,9 @@ export default function EffectsMasterPage() {
 
   const [drawerMode, setDrawerMode] = useState<DrawerMode>(null)
   const [saving, setSaving] = useState(false)
-  const [categoryForm, setCategoryForm] = useState({ name: '', sortOrder: '100', active: true })
-  const [valueForm, setValueForm] = useState({ value: '', abbreviation: '', impactOn: '', description: '', sortOrder: '100', active: true })
+  const [categoryForm, setCategoryForm] = useState({ code: '', name: '', sortOrder: '100', active: true })
+  const [valueForm, setValueForm] = useState({ code: '', value: '', abbreviation: '', impactOn: '', description: '', sortOrder: '100', active: true })
+  const refreshMasters = useMastersRefresh()
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [editingValueId, setEditingValueId] = useState<string | null>(null)
   const [categoryErrors, setCategoryErrors] = useState<{ name?: string; submit?: string }>({})
@@ -121,14 +126,14 @@ export default function EffectsMasterPage() {
   function openCreateCategory() {
     setDrawerMode('create-category')
     setEditingCategoryId(null)
-    setCategoryForm({ name: '', sortOrder: '100', active: true })
+    setCategoryForm({ code: '', name: '', sortOrder: '100', active: true })
     setCategoryErrors({})
   }
 
   function openEditCategory(c: EffectCategory) {
     setDrawerMode('edit-category')
     setEditingCategoryId(c.id)
-    setCategoryForm({ name: c.name, sortOrder: String(c.sortOrder), active: c.active })
+    setCategoryForm({ code: c.code, name: c.name, sortOrder: String(c.sortOrder), active: c.active })
     setCategoryErrors({})
   }
 
@@ -136,13 +141,14 @@ export default function EffectsMasterPage() {
     if (!selectedCategoryId) return
     setDrawerMode('create-value')
     setEditingValueId(null)
-    setValueForm({ value: '', abbreviation: '', impactOn: '', description: '', sortOrder: '100', active: true })
+    setValueForm({ code: '', value: '', abbreviation: '', impactOn: '', description: '', sortOrder: '100', active: true })
   }
 
   function openEditValue(v: EffectValue) {
     setDrawerMode('edit-value')
     setEditingValueId(v.id)
     setValueForm({
+      code: v.code,
       value: v.value,
       abbreviation: v.abbreviation ?? '',
       impactOn: v.impactOn ?? '',
@@ -163,7 +169,9 @@ export default function EffectsMasterPage() {
     setSaving(true)
     setCategoryErrors({})
     try {
+      const code = (categoryForm.code.trim() || normalizeCode(name))
       const payload = {
+        code,
         name,
         sortOrder: Number(categoryForm.sortOrder || 100),
         status: categoryForm.active ? 'active' : 'inactive',
@@ -187,6 +195,7 @@ export default function EffectsMasterPage() {
       const created = json as Partial<EffectCategory> & { id: string; name: string; sortOrder: number; active: boolean }
       const nextCategory: EffectCategory = {
         id: created.id,
+        code: created.code ?? code,
         name: created.name,
         sortOrder: created.sortOrder ?? Number(categoryForm.sortOrder || 100),
         active: created.active ?? categoryForm.active,
@@ -199,8 +208,9 @@ export default function EffectsMasterPage() {
       )
       setSelectedCategoryId(nextCategory.id)
 
-      setCategoryForm({ name: '', sortOrder: '100', active: true })
+      setCategoryForm({ code: '', name: '', sortOrder: '100', active: true })
       setDrawerMode(null)
+      refreshMasters()
       toast.success('Category created')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Save failed'
@@ -224,6 +234,7 @@ export default function EffectsMasterPage() {
     setCategoryErrors({})
     try {
       const payload = {
+        ...(categoryForm.code.trim() ? { code: categoryForm.code.trim() } : {}),
         name,
         sortOrder: Number(categoryForm.sortOrder || 100),
         status: categoryForm.active,
@@ -238,8 +249,9 @@ export default function EffectsMasterPage() {
       if (!res.ok) throw new Error((json as ApiErrorPayload).error || 'Save failed')
 
       await refreshAll(selectedCategoryId)
-      setCategoryForm({ name: '', sortOrder: '100', active: true })
+      setCategoryForm({ code: '', name: '', sortOrder: '100', active: true })
       setDrawerMode(null)
+      refreshMasters()
       toast.success('Category updated')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Save failed'
@@ -261,8 +273,10 @@ export default function EffectsMasterPage() {
         toast.error('Value name is required')
         return
       }
+      const code = valueForm.code.trim() || normalizeCode(trimmedValue)
       const payload = {
         categoryId: selectedCategoryId,
+        code,
         value: trimmedValue,
         abbreviation: valueForm.abbreviation.trim() || null,
         impactOn: valueForm.impactOn.trim() || null,
@@ -285,6 +299,7 @@ export default function EffectsMasterPage() {
       toast.success(drawerMode === 'edit-value' ? 'Value updated' : 'Value created')
       setDrawerMode(null)
       await refreshAll(selectedCategoryId)
+      refreshMasters()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Save failed'
       setValueError(msg)
@@ -305,6 +320,7 @@ export default function EffectsMasterPage() {
       if (!res.ok) throw new Error((json as ApiErrorPayload).error || 'Update failed')
       toast.success(active ? 'Value reactivated' : 'Value inactivated')
       await loadValues(selectedCategoryId)
+      refreshMasters()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed')
     }
@@ -318,6 +334,7 @@ export default function EffectsMasterPage() {
       if (!res.ok) throw new Error(json.error || 'Delete failed')
       toast.success('Value deleted')
       await loadValues(selectedCategoryId)
+      refreshMasters()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Delete failed')
     }
@@ -332,6 +349,7 @@ export default function EffectsMasterPage() {
       if (!res.ok) throw new Error(json.error || 'Delete failed')
       toast.success('Category deleted')
       await refreshAll()
+      refreshMasters()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Delete failed')
     }
@@ -548,6 +566,23 @@ export default function EffectsMasterPage() {
               {categoryErrors.name ? <p className="mt-1 text-xs text-ds-error">{categoryErrors.name}</p> : null}
             </div>
             <div>
+              <label className="mb-1 block text-xs text-ds-ink-muted">Code</label>
+              <input
+                className="ds-input w-full font-mono"
+                value={categoryForm.code}
+                placeholder="e.g. COATING (auto from name if blank)"
+                onChange={(e) =>
+                  setCategoryForm((p) => ({ ...p, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_') }))
+                }
+                onBlur={() =>
+                  setCategoryForm((p) => ({ ...p, code: p.code.trim() || normalizeCode(p.name) }))
+                }
+              />
+              {drawerMode === 'edit-category' ? (
+                <p className="mt-1 text-xs text-ds-ink-muted">Code is locked once the category has values.</p>
+              ) : null}
+            </div>
+            <div>
               <label className="mb-1 block text-xs text-ds-ink-muted">Sort Order</label>
               <input
                 type="number"
@@ -597,6 +632,23 @@ export default function EffectsMasterPage() {
                   setValueError(null)
                 }}
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-ds-ink-muted">Code</label>
+              <input
+                className="ds-input w-full font-mono"
+                value={valueForm.code}
+                placeholder="e.g. NOS (auto from value if blank)"
+                onChange={(e) =>
+                  setValueForm((p) => ({ ...p, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_') }))
+                }
+                onBlur={() =>
+                  setValueForm((p) => ({ ...p, code: p.code.trim() || normalizeCode(p.value) }))
+                }
+              />
+              {drawerMode === 'edit-value' ? (
+                <p className="mt-1 text-xs text-ds-ink-muted">Code is locked once referenced by records.</p>
+              ) : null}
             </div>
             <div>
               <label className="mb-1 block text-xs text-ds-ink-muted">Description</label>

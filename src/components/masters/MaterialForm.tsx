@@ -4,9 +4,9 @@ import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { EffectSelect } from '@/components/ui/EffectSelect'
-import { useUnitOptions } from '@/hooks/useUnitOptions'
+import { MasterSelect } from '@/components/ui/MasterSelect'
+import { MASTER } from '@/lib/masters/registry'
 
-const UNIT_FALLBACK = ['sheets', 'packets', 'kg', 'grs', 'tonnes']
 const GRAIN_DIRECTIONS = ['Long Grain', 'Short Grain']
 
 type Supplier = { id: string; name: string }
@@ -71,7 +71,7 @@ export type MaterialFormData = {
 const EMPTY: MaterialFormData = {
   materialCode: '',
   description: '',
-  unit: 'sheets',
+  unit: 'SHT',
   boardType: '',
   attributes: '',
   gsm: '',
@@ -426,11 +426,13 @@ export default function MaterialForm({ mode, initialData }: Props) {
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="block text-ds-ink-muted mb-1">Unit of measure</label>
-              <select value={f.unit} onChange={(e) => patch('unit', e.target.value)} className={cls}>
-                {(unitOptions.includes(f.unit) || !f.unit ? unitOptions : [f.unit, ...unitOptions]).map((u) => (
-                  <option key={u} value={u}>{u}</option>
-                ))}
-              </select>
+              <MasterSelect
+                masterKey={MASTER.UNIT}
+                value={f.unit}
+                onChange={(code) => patch('unit', code)}
+                allowEmpty={false}
+                className={cls}
+              />
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Reorder point</label>
@@ -454,7 +456,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
             </div>
             <div />
           </div>
-          {f.unit === 'kg' && sheetWeight > 0 && (
+          {f.unit === 'KG' && sheetWeight > 0 && (
             <div className="mt-3 p-2 rounded bg-ds-elevated/60 text-xs text-ds-ink-muted">
               1 kg = ~{Math.round(1000 / sheetWeight)} sheets (at {sheetWeight}g/sheet)
             </div>

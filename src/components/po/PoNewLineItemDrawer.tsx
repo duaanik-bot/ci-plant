@@ -9,7 +9,8 @@ import { CardSection } from '@/components/design-system/CardSection'
 import { SummaryBlock } from '@/components/design-system/SummaryBlock'
 import { Drawer } from '@/components/design-system/Drawer'
 import { Button } from '@/components/design-system/Button'
-import { fetchMiniMasterOptions } from '@/lib/minimasters-options'
+import { useMaster } from '@/components/masters/MastersProvider'
+import { MASTER } from '@/lib/masters/registry'
 
 type Line = {
   cartonId: string
@@ -127,33 +128,30 @@ export function PoNewLineItemDrawer({
   onReserveFg,
   onUnreserveFg,
 }: PoNewLineItemDrawerProps) {
-  const [boardGradeOptions, setBoardGradeOptions] = useState<string[]>(BOARD_GRADES as unknown as string[])
-  const [paperOptions, setPaperOptions] = useState<string[]>(PAPER_TYPES as unknown as string[])
-  const [coatingOptions, setCoatingOptions] = useState<string[]>(COATING_TYPES as unknown as string[])
-  const [embossOptions, setEmbossOptions] = useState<string[]>(EMBOSSING_TYPES as unknown as string[])
-  const [foilOptions, setFoilOptions] = useState<string[]>(FOIL_TYPES as unknown as string[])
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const [boardType, boardClass, coating, emboss, foil] = await Promise.all([
-        fetchMiniMasterOptions('Board Type'),
-        fetchMiniMasterOptions('Board Classification'),
-        fetchMiniMasterOptions('Coating'),
-        fetchMiniMasterOptions('Embossing'),
-        fetchMiniMasterOptions('Foil'),
-      ])
-      if (cancelled) return
-      if (boardClass.length > 0) setBoardGradeOptions(boardClass)
-      if (boardType.length > 0) setPaperOptions(boardType)
-      if (coating.length > 0) setCoatingOptions(coating)
-      if (emboss.length > 0) setEmbossOptions(emboss)
-      if (foil.length > 0) setFoilOptions(foil)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // Sourced from the cached master registry. These dropdowns store the
+  // human label (legacy PO/carton records store labels, not codes), so we
+  // map registry options to labels and fall back to the static constants
+  // when a category has no values yet.
+  const boardTypeMaster = useMaster(MASTER.BOARD_TYPE)
+  const coatingMaster = useMaster(MASTER.COATING)
+  const embossMaster = useMaster(MASTER.EMBOSS)
+  const foilMaster = useMaster(MASTER.FOIL)
+  const paperOptions = boardTypeMaster.options.length
+    ? boardTypeMaster.options.map((o) => o.label)
+    : (PAPER_TYPES as unknown as string[])
+  // Board Classification is folded into Board Type (legacy behaviour).
+  const boardGradeOptions = boardTypeMaster.options.length
+    ? boardTypeMaster.options.map((o) => o.label)
+    : (BOARD_GRADES as unknown as string[])
+  const coatingOptions = coatingMaster.options.length
+    ? coatingMaster.options.map((o) => o.label)
+    : (COATING_TYPES as unknown as string[])
+  const embossOptions = embossMaster.options.length
+    ? embossMaster.options.map((o) => o.label)
+    : (EMBOSSING_TYPES as unknown as string[])
+  const foilOptions = foilMaster.options.length
+    ? foilMaster.options.map((o) => o.label)
+    : (FOIL_TYPES as unknown as string[])
 
   const panelRootRef = useRef<HTMLDivElement | null>(null)
   const reserveQtyRef = useRef<HTMLInputElement | null>(null)

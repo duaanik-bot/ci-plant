@@ -2113,6 +2113,7 @@ model StockMovement {
 
 model EffectCategory {
   id        String   @id @default(uuid())
+  code      String   @unique @db.VarChar(48)
   name      String   @unique @db.VarChar(80)
   sortOrder Int      @default(100) @map("sort_order")
   active    Boolean  @default(true)
@@ -2127,6 +2128,7 @@ model EffectCategory {
 model EffectValue {
   id           String   @id @default(uuid())
   categoryId   String   @map("category_id")
+  code         String   @db.VarChar(48)
   value        String   @db.VarChar(120)
   abbreviation String?  @db.VarChar(24)
   impactOn     String?  @map("impact_on") @db.VarChar(80)
@@ -2139,6 +2141,7 @@ model EffectValue {
   category EffectCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   @@unique([categoryId, value])
+  @@unique([categoryId, code])
   @@index([categoryId, active, sortOrder])
   @@map("effect_values")
 }
