@@ -41,6 +41,9 @@ const createSchema = cartonSchema.extend({
   finishedHeight: z.number().positive().optional(),
   blankLength: z.number().positive().optional(),
   blankWidth: z.number().positive().optional(),
+  sheetSizeL: z.number().positive().optional(),
+  sheetSizeW: z.number().positive().optional(),
+  ups: z.number().int().positive().optional(),
   printingType: z.string().optional(),
   numberOfColours: z.number().int().min(1).max(12).optional(),
   coatingType: z.string().optional(),
@@ -134,6 +137,9 @@ export async function POST(req: NextRequest) {
     finishedHeight: toOptionalNumber(body.finishedHeight),
     blankLength: toOptionalNumber(body.blankLength),
     blankWidth: toOptionalNumber(body.blankWidth),
+    sheetSizeL: toOptionalNumber(body.sheetSizeL),
+    sheetSizeW: toOptionalNumber(body.sheetSizeW),
+    ups: toOptionalNumber(body.ups),
   })
   if (!parsed.success) {
     const fields: Record<string, string> = {}
@@ -177,6 +183,9 @@ export async function POST(req: NextRequest) {
       finishedHeight: data.finishedHeight ?? null,
       blankLength: data.blankLength ?? null,
       blankWidth: data.blankWidth ?? null,
+      sheetSizeL: data.sheetSizeL ?? null,
+      sheetSizeW: data.sheetSizeW ?? null,
+      ups: data.ups ?? null,
       coatingType: data.coatingType || null,
       embossingLeafing: data.embossingLeafing || null,
       foilType: data.foilType || null,

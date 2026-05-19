@@ -6,6 +6,7 @@ import { requireRole } from '@/lib/helpers'
 export const dynamic = 'force-dynamic'
 
 const updateSchema = z.object({
+  code: z.string().trim().min(1).max(48).regex(/^[A-Z0-9_]+$/).optional(),
   value: z.string().trim().min(1).max(120).optional(),
   abbreviation: z.string().trim().max(24).nullable().optional(),
   impactOn: z.string().trim().max(80).nullable().optional(),
@@ -50,9 +51,34 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
   }
 
+  if (parsed.data.code && parsed.data.code !== existing.code) {
+    const refCount = await db.$queryRaw<{ c: number }[]>`
+      SELECT (
+        (SELECT count(*) FROM inventory     WHERE lower(coalesce(board_type,'')) = lower(${existing.value})) +
+        (SELECT count(*) FROM po_line_items WHERE lower(coalesce(paper_type,''))  = lower(${existing.value}))
+      )::int AS c`
+    if (Number(refCount[0]?.c || 0) > 0) {
+      return NextResponse.json(
+        { error: 'Code is locked: this value is already referenced by records.', fields: { code: 'Locked (referenced)' } },
+        { status: 409 },
+      )
+    }
+    const dupCode = await db.effectValue.findFirst({
+      where: { id: { not: id }, categoryId: existing.categoryId, code: parsed.data.code },
+      select: { id: true },
+    })
+    if (dupCode) {
+      return NextResponse.json(
+        { error: 'Code already exists in this category', fields: { code: 'Code already exists' } },
+        { status: 400 },
+      )
+    }
+  }
+
   const updated = await db.effectValue.update({
     where: { id },
     data: {
+      ...(parsed.data.code !== undefined ? { code: parsed.data.code } : {}),
       ...(parsed.data.value !== undefined ? { value: parsed.data.value } : {}),
       ...(parsed.data.abbreviation !== undefined ? { abbreviation: parsed.data.abbreviation || null } : {}),
       ...(parsed.data.impactOn !== undefined ? { impactOn: parsed.data.impactOn || null } : {}),
@@ -114,7 +140,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (hasLinks) {
     return NextResponse.json(
       { error: 'This value is used in active records. Please inactivate instead.' },
-      { status: 400 },
+      { status: 409 },
     )
   }
 

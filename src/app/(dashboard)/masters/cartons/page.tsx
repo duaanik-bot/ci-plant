@@ -22,6 +22,7 @@ type CartonRow = {
   gsm: number | null
   boardGrade: string | null
   paperType: string | null
+  coatingType: string | null
   finishedLength: number | null
   finishedWidth: number | null
   finishedHeight: number | null
@@ -173,7 +174,19 @@ export default function CartonMasterPage() {
       </div>
 
       <EnterpriseTableShell>
-        <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
+        <table className="w-full min-w-[1040px] table-fixed border-collapse text-left text-sm text-neutral-900 [&_td]:align-top [&_th]:align-bottom dark:text-ds-ink">
+          <colgroup>
+            <col className="w-[40px]" />
+            <col className="w-[20%]" />
+            <col className="w-[17%]" />
+            <col className="w-[11%]" />
+            <col className="w-[6%]" />
+            <col className="w-[13%]" />
+            <col className="w-[13%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[10%]" />
+          </colgroup>
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>
@@ -234,7 +247,7 @@ export default function CartonMasterPage() {
                 </td>
                 <td className={enterpriseTdMonoClass}>{c?.gsm ?? '—'}</td>
                 <td className={enterpriseTdMutedClass}>{c?.boardGrade ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{c?.paperType ?? '—'}</td>
+                <td className={enterpriseTdMutedClass}>{c?.coatingType ?? '—'}</td>
                 <td className={enterpriseTdMonoClass}>{c?.rate != null ? `₹${c.rate.toFixed(2)}` : '—'}</td>
                 <td className={cellWrap}>
                   <span className={c?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>

@@ -19,6 +19,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as bcrypt from "bcryptjs";
+import { canonicalRoleSlug, USER_ROLE_OVERRIDES } from "./legacy-role-map";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -173,27 +174,37 @@ async function main() {
   log("📋 Step 1: roles → Role...");
   const roles = readCsv("roles");
   let n = 0;
+  // Legacy role names map onto canonical RBAC slugs (see legacy-role-map.ts).
+  // prisma/seed.ts owns the real permission sets for these slugs, so only
+  // create a stub if the canonical role does not exist yet.
+  const slugRoleId = new Map<string, string>();
   for (const row of roles) {
-    const newId = crypto.randomUUID();
-    maps.roles.set(row.id, newId);
-    if (!DRY_RUN) {
-      await prisma.role.upsert({
-        where: { roleName: str(row.name) },
-        update: {},
-        create: {
-          id: newId,
-          roleName: str(row.name),
-          permissions: {},
-          wastageApproveLimitPct: 0,
-          canApproveArtwork: false,
-          canReleaseDispatch: false,
-        },
-      });
+    const slug = canonicalRoleSlug(str(row.name));
+    let roleId = slugRoleId.get(slug);
+    if (!roleId) {
+      roleId = crypto.randomUUID();
+      if (!DRY_RUN) {
+        const role = await prisma.role.upsert({
+          where: { roleName: slug },
+          update: {},
+          create: {
+            id: roleId,
+            roleName: slug,
+            permissions: {},
+            wastageApproveLimitPct: 0,
+            canApproveArtwork: false,
+            canReleaseDispatch: false,
+          },
+        });
+        roleId = role.id;
+      }
+      slugRoleId.set(slug, roleId);
+      n++;
     }
-    n++;
+    maps.roles.set(row.id, roleId);
   }
   counts.roles = n;
-  log(`   ✅ ${n} roles`);
+  log(`   ✅ ${n} canonical roles (from ${roles.length} legacy rows)`);
 
   // ══════════════════════════════════════════════════════
   // STEP 2: admins → User
@@ -206,8 +217,13 @@ async function main() {
     maps.admins.set(row.id, newId);
     if (n === 0) SYSTEM_USER_ID = newId;
 
-    const roleId = maps.roles.get(str(row.role_id));
+    let roleId = maps.roles.get(str(row.role_id));
     if (!roleId) { warn(`Admin ${row.id} (${row.name}) unknown role_id ${row.role_id} — skipping`); continue; }
+    const overrideSlug = USER_ROLE_OVERRIDES[str(row.email)];
+    if (overrideSlug && !DRY_RUN) {
+      const ov = await prisma.role.findUnique({ where: { roleName: overrideSlug } });
+      if (ov) roleId = ov.id;
+    }
 
     if (!DRY_RUN) {
       await prisma.user.upsert({

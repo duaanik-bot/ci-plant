@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic'
 
 const createSchema = z.object({
   categoryId: z.string().uuid('Category is required'),
+  code: z
+    .string()
+    .trim()
+    .min(1, 'Code is required')
+    .max(48)
+    .regex(/^[A-Z0-9_]+$/, 'Uppercase letters, digits, underscore only'),
   value: z.string().trim().min(1, 'Value is required').max(120, 'Max 120 characters'),
   abbreviation: z.string().trim().max(24, 'Max 24 characters').optional().nullable(),
   impactOn: z.string().trim().max(80, 'Max 80 characters').optional().nullable(),
@@ -72,9 +78,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const dupCode = await db.effectValue.findFirst({
+      where: { categoryId: parsed.data.categoryId, code: parsed.data.code },
+      select: { id: true },
+    })
+    if (dupCode) {
+      return NextResponse.json(
+        { error: 'Code already exists in this category', fields: { code: 'Code already exists' } },
+        { status: 400 },
+      )
+    }
+
     const created = await db.effectValue.create({
       data: {
         categoryId: parsed.data.categoryId,
+        code: parsed.data.code,
         value: parsed.data.value,
         abbreviation: parsed.data.abbreviation || null,
         impactOn: parsed.data.impactOn || null,

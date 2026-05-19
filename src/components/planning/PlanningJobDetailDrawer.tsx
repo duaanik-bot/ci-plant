@@ -9,7 +9,8 @@ import { INDUSTRIAL_PRIORITY_STAR_ICON_CLASS } from '@/lib/industrial-priority-u
 import {
   MASTER_EMBOSSING_AND_LEAFING,
 } from '@/lib/master-enums'
-import { fetchMiniMasterOptions } from '@/lib/minimasters-options'
+import { useMaster } from '@/components/masters/MastersProvider'
+import { MASTER } from '@/lib/masters/registry'
 import { mergePlanningMetaUps, readPlanningMeta } from '@/lib/planning-decision-spec'
 import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
@@ -349,7 +350,8 @@ export function PlanningJobDetailDrawer({
   const [sheetWidthMm, setSheetWidthMm] = useState('')
   const [wastageSheetsInput, setWastageSheetsInput] = useState('150')
   const [boardTypeOptions, setBoardTypeOptions] = useState<string[]>([])
-  const [coatingOptions, setCoatingOptions] = useState<string[]>([])
+  const coatingMaster = useMaster(MASTER.COATING)
+  const coatingOptions = coatingMaster.options.map((o) => o.label)
   const [readiness, setReadiness] = useState<MaterialReadinessPanelData | null>(null)
   const [readinessLoading, setReadinessLoading] = useState(false)
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>('')
@@ -413,12 +415,8 @@ export function PlanningJobDetailDrawer({
     let cancelled = false
     ;(async () => {
       try {
-        const [coating, materialsRes] = await Promise.all([
-          fetchMiniMasterOptions('Coating'),
-          fetch('/api/masters/materials', { cache: 'no-store' }),
-        ])
+        const materialsRes = await fetch('/api/masters/materials', { cache: 'no-store' })
         if (cancelled) return
-        if (coating.length > 0) setCoatingOptions(coating)
         if (materialsRes.ok) {
           const data = (await materialsRes.json()) as Array<{ boardType?: string | null }>
           const values = Array.from(

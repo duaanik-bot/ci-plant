@@ -65,4 +65,68 @@ describe('SectionBoardAllocation', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={null} readinessLoading={true} onPatch={async () => true} />)
     expect(screen.getByText(/Checking material…/)).toBeInTheDocument()
   })
+
+  it('renders spec-incomplete warning when specComplete is false', () => {
+    const lineWithIncomplete = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          specComplete: false,
+          specIncompleteReason: 'Missing UPS in spec pack',
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithIncomplete} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByText(/missing ups in spec pack/i)).toBeInTheDocument()
+  })
+
+  it('shows "reason unavailable" fallback when specComplete is false and specIncompleteReason is null', () => {
+    const lineNullReason = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          specComplete: false,
+          specIncompleteReason: null,
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineNullReason} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByText(/spec incomplete/i)).toBeInTheDocument()
+    expect(screen.getByText(/reason unavailable/i)).toBeInTheDocument()
+  })
+
+  it('does NOT render spec-incomplete warning for a legacy line without specComplete', () => {
+    const legacyLine = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          boardWanted: 'FBB',
+          gsmWanted: 100,
+          suggestedBoardOptions: [],
+          availableMainSheets: 5000,
+          availableLeftoverSheets: 0,
+          availableTotalSheets: 5000,
+          reservedSheets: 0,
+          requiredSheets: 4800,
+          stockSignal: 'green' as const,
+          // specComplete intentionally omitted — legacy shape
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={legacyLine} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.queryByText(/spec incomplete/i)).toBeNull()
+  })
+
+  it('renders procurement suggestion suggestedSheets when shortageSheets > 0 and procurementSuggestion present', () => {
+    const lineWithProcurement = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          procurementSuggestion: { boardGrade: 'SBS', gsm: 350, paperType: 'White', suggestedSheets: 1200 },
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithProcurement} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByText(/1,200/)).toBeInTheDocument()
+  })
 })

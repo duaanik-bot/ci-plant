@@ -9,6 +9,7 @@ import {
   isArtworkLocked,
   suggestMachineId,
 } from '@/lib/planning-interlock'
+import { readCartonSpecPack, computePackSheetMath } from '@/lib/carton-spec-pack'
 
 export const dynamic = 'force-dynamic'
 
@@ -151,6 +152,20 @@ export async function GET(req: NextRequest) {
         ? (li.specOverrides as Record<string, unknown>)
         : {}
 
+      // NOTE: `specPack` is a scalar on PoLineItem returned because this query
+      // uses Prisma `include` (which returns all root scalars). If a root-level
+      // `select` is ever added to the poLineItem query, `specPack: true` MUST be
+      // added there or every line silently degrades to legacy.
+      const resolved = readCartonSpecPack({
+        specPack: (li as { specPack?: unknown }).specPack ?? null,
+        specOverrides: li.specOverrides ?? null,
+      })
+      const packBoard = resolved.pack.board
+      const wastagePct = li.tolerancePct != null ? Number(li.tolerancePct.toString()) : 2
+      const packMath = computePackSheetMath(
+        resolved.pack.sheet, li.quantity, wastagePct,
+      )
+
       const artworkLocksCompleted = isArtworkLocked(spec) ? 2 : 0
       const platesStatus = String(spec.platesStatus ?? (jc?.plateSetId ? 'available' : 'new_required'))
       const dieStatus = String(spec.dieStatus ?? (li.dyeId ? 'good' : 'not_available'))
@@ -182,20 +197,21 @@ export async function GET(req: NextRequest) {
         inventoryRows: invRows,
       })
 
+      const boardFromPack = packBoard.boardGrade?.trim() || packBoard.paperType?.trim() || ''
       const boardFromPo = typeof li.paperType === 'string' && li.paperType.trim() ? li.paperType.trim() : ''
-      const boardFromCarton =
-        typeof li.carton?.paperType === 'string' && li.carton.paperType.trim() ? li.carton.paperType.trim() : ''
       const boardFromQueue =
         typeof li.materialQueue?.boardType === 'string' && li.materialQueue.boardType.trim()
           ? li.materialQueue.boardType.trim()
           : ''
-      const boardWanted = boardFromQueue || boardFromPo || boardFromCarton
+      const boardWanted = boardFromQueue || boardFromPack || boardFromPo
       const gsmWanted =
         typeof li.materialQueue?.gsm === 'number'
           ? li.materialQueue.gsm
-          : typeof li.gsm === 'number'
-            ? li.gsm
-            : li.carton?.gsm ?? null
+          : packBoard.gsm != null
+            ? packBoard.gsm
+            : typeof li.gsm === 'number'
+              ? li.gsm
+              : li.carton?.gsm ?? null
 
       const boardTokens = boardWanted
         .toLowerCase()
@@ -218,7 +234,8 @@ export async function GET(req: NextRequest) {
       const mainAvailableSheets = matchedPaperRows
         .filter((pw) => String(pw.location ?? '').trim().toUpperCase() !== 'FLOOR')
         .reduce((sum, pw) => sum + Math.max(0, Number(pw.qtySheets) || 0), 0)
-      const requiredSheets = li.materialQueue?.totalSheets ?? null
+      const requiredSheets =
+        packMath.sheetsRequired ?? li.materialQueue?.totalSheets ?? null
       const availableTotalSheets = mainAvailableSheets + leftoverSheets
       const shortageSheets = Math.max(0, Number(requiredSheets ?? 0) - availableTotalSheets)
       let stockSignal: 'green' | 'yellow' | 'red' = 'red'
@@ -277,6 +294,21 @@ export async function GET(req: NextRequest) {
             shortageSheets,
             requiredSheets,
             stockSignal,
+            specComplete: packMath.specComplete,
+            specIncompleteReason: packMath.reason,
+            recommendedBoardGrade: packBoard.boardGrade,
+            recommendedGsm: packBoard.gsm,
+            recommendedPaperType: packBoard.paperType,
+            packSheetsRequired: packMath.sheetsRequired,
+            procurementSuggestion:
+              shortageSheets > 0 && (packBoard.boardGrade || packBoard.paperType)
+                ? {
+                    boardGrade: packBoard.boardGrade,
+                    gsm: packBoard.gsm,
+                    paperType: packBoard.paperType,
+                    suggestedSheets: shortageSheets,
+                  }
+                : null,
           },
           suggestedMachineId,
           estimatedDurationHours,

@@ -169,7 +169,7 @@ export default function CartonForm({ mode, initialData }: Props) {
     leafingEnabled: initialData?.leafingEnabled ?? specials.leafingEnabled,
     embossingEnabled: initialData?.embossingEnabled ?? specials.embossingEnabled,
     spotUvEnabled: initialData?.spotUvEnabled ?? specials.spotUvEnabled,
-    specialInstructions: initialData?.specialInstructions ?? specials.notes,
+    specialInstructions: specials.notes,
     ups: initialData?.ups ?? specials.ups,
     sheetLengthMm: initialData?.sheetLengthMm ?? '',
     sheetWidthMm: initialData?.sheetWidthMm ?? '',
@@ -426,8 +426,9 @@ export default function CartonForm({ mode, initialData }: Props) {
       printingType: f.printingType || undefined,
       coatingType: f.coatingType || undefined,
       numberOfColours: toOptionalInt(f.numberOfColours),
-      blankLength: f.sheetLengthMm ? Number(f.sheetLengthMm) : undefined,
-      blankWidth: f.sheetWidthMm ? Number(f.sheetWidthMm) : undefined,
+      sheetSizeL: f.sheetLengthMm ? Number(f.sheetLengthMm) : undefined,
+      sheetSizeW: f.sheetWidthMm ? Number(f.sheetWidthMm) : undefined,
+      ups: toOptionalInt(f.ups),
       embossingLeafing: f.embossingEnabled && f.leafingEnabled
         ? 'Embossing + Leafing'
         : f.embossingEnabled
@@ -441,7 +442,6 @@ export default function CartonForm({ mode, initialData }: Props) {
         leafingEnabled: f.leafingEnabled,
         embossingEnabled: f.embossingEnabled,
         spotUvEnabled: f.spotUvEnabled,
-        ups: toOptionalInt(f.ups) ?? null,
       }),
       remarks: toCaps(f.remarks || '') || undefined,
       dieMasterId: f.dieMasterId.trim() || undefined,

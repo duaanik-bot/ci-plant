@@ -109,6 +109,7 @@ type Row = {
   }
   directorPriority?: boolean
   directorHold?: boolean
+  carton?: { gsm?: number | null } | null
   materialQueue?: {
     totalSheets: number
     boardType?: string | null

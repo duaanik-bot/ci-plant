@@ -105,6 +105,13 @@ type PlanningLedger = {
     reservedSheets: number
     requiredSheets: number | null
     stockSignal: 'green' | 'yellow' | 'red'
+    specComplete?: boolean
+    specIncompleteReason?: string | null
+    recommendedBoardGrade?: string | null
+    recommendedGsm?: number | null
+    recommendedPaperType?: string | null
+    packSheetsRequired?: number | null
+    procurementSuggestion?: { boardGrade: string | null; gsm: number | null; paperType: string | null; suggestedSheets: number } | null
   }
   suggestedMachineId: string | null
   estimatedDurationHours: number

@@ -1,14 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
 import { SelectDropdown } from '@/components/design-system/SelectDropdown'
-
-type EffectOption = {
-  id: string
-  value: string
-  description: string | null
-  sortOrder: number
-}
+import { useMaster } from '@/components/masters/MastersProvider'
+import { normalizeCode } from '@/lib/masters/code-map'
+import type { MasterKey } from '@/lib/masters/registry'
 
 type EffectSelectProps = {
   category: string
@@ -19,6 +14,19 @@ type EffectSelectProps = {
   className?: string
 }
 
+// Legacy callers pass a category *name* string (and historically stored the
+// human label, not a code). To stay a drop-in we keep the label contract:
+// option values and onChange remain labels. We only change the data source
+// to the cached registry — removing the ad-hoc fetch and the Duplex/SBS
+// filter hack. (Code-based storage applies to new MasterSelect wiring, not
+// these existing label-storing carton/PO consumers.)
+function resolveKey(category: string): MasterKey {
+  const c = category.trim().toLowerCase()
+  if (c === 'board classification') return normalizeCode('Board Type') as MasterKey
+  if (c === 'embossing') return normalizeCode('Emboss') as MasterKey
+  return normalizeCode(category) as MasterKey
+}
+
 export function EffectSelect({
   category,
   value,
@@ -27,50 +35,22 @@ export function EffectSelect({
   placeholder = 'Select...',
   className,
 }: EffectSelectProps) {
-  const [options, setOptions] = useState<EffectOption[]>([])
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    const name = category.trim()
-    if (!name) {
-      setOptions([])
-      return
-    }
-
-    let cancelled = false
-    setLoading(true)
-
-    void (async () => {
-      try {
-        const res = await fetch(`/api/minimasters/values?category=${encodeURIComponent(name)}`, { cache: 'no-store' })
-        const data = (await res.json().catch(() => [])) as EffectOption[]
-        if (!cancelled) setOptions(Array.isArray(data) ? data : [])
-      } catch {
-        if (!cancelled) setOptions([])
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [category])
-
-  const optionValues = useMemo(() => new Set(options.map((o) => o.value)), [options])
-  const effectiveValue = optionValues.has(value) ? value : ''
+  const { options, loading } = useMaster(resolveKey(category))
+  const labels = options.map((o) => o.label)
+  const known = labels.includes(value)
+  const merged = !value || known ? labels : [value, ...labels]
 
   return (
     <SelectDropdown
-      value={effectiveValue}
+      value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled || loading}
       className={className}
     >
       <option value="">{loading ? 'Loading…' : placeholder}</option>
-      {options.map((opt) => (
-        <option key={opt.id} value={opt.value}>
-          {opt.value}
+      {merged.map((label) => (
+        <option key={label} value={label}>
+          {label}
         </option>
       ))}
     </SelectDropdown>

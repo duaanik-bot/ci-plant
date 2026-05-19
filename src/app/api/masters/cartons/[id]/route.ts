@@ -58,6 +58,9 @@ const updateSchema = cartonSchema.partial().extend({
   finishedHeight: z.number().positive().optional().nullable(),
   blankLength: z.number().positive().optional().nullable(),
   blankWidth: z.number().positive().optional().nullable(),
+  sheetSizeL: z.number().positive().optional().nullable(),
+  sheetSizeW: z.number().positive().optional().nullable(),
+  ups: z.number().int().positive().optional().nullable(),
   drugSchedule: z.string().optional().nullable(),
   regulatoryText: z.string().optional().nullable(),
   specialInstructions: z.string().optional().nullable(),
@@ -98,6 +101,9 @@ export async function PUT(
     finishedHeight: toOptionalNumber(body.finishedHeight),
     blankLength: toOptionalNumber(body.blankLength),
     blankWidth: toOptionalNumber(body.blankWidth),
+    sheetSizeL: toOptionalNumber(body.sheetSizeL),
+    sheetSizeW: toOptionalNumber(body.sheetSizeW),
+    ups: toOptionalNumber(body.ups),
   })
   if (!parsed.success) {
     const fields: Record<string, string> = {}
@@ -166,6 +172,9 @@ export async function PUT(
   if (data.finishedHeight !== undefined) update.finishedHeight = data.finishedHeight
   if (data.blankLength !== undefined) update.blankLength = data.blankLength
   if (data.blankWidth !== undefined) update.blankWidth = data.blankWidth
+  if (data.sheetSizeL !== undefined) update.sheetSizeL = data.sheetSizeL
+  if (data.sheetSizeW !== undefined) update.sheetSizeW = data.sheetSizeW
+  if (data.ups !== undefined) update.ups = data.ups
   if (data.drugSchedule !== undefined) update.drugSchedule = toNullableText(data.drugSchedule)
   if (data.regulatoryText !== undefined) update.regulatoryText = toNullableText(data.regulatoryText)
   if (data.specialInstructions !== undefined) {

@@ -288,6 +288,7 @@ model Inventory {
   wasteRecords         WasteRecord[]
 
   @@unique([boardType, sheetLength, sheetWidth, gsm], map: "inventory_board_size_gsm_unique")
+  @@index([reorderPoint])
   @@map("inventory")
 }
 
@@ -334,6 +335,9 @@ model Job {
   sheetIssues    SheetIssue[]
   wasteRecords   WasteRecord[]
 
+  @@index([status])
+  @@index([dueDate])
+  @@index([status, dueDate])
   @@map("jobs")
 }
 
@@ -434,6 +438,9 @@ model JobStage {
   qcRecords    QcRecord[]
   wasteRecords WasteRecord[]
 
+  @@index([completedAt])
+  @@index([machineId, completedAt])
+  @@index([machineId, startedAt])
   @@map("job_stages")
 }
 
@@ -703,6 +710,18 @@ model Carton {
   /// Origin marker for audit. NULL = manual entry (legacy or operator-created).
   /// 'po_import_ai' = auto-created from a PDF PO import; surface for review.
   source              String?       @map("source")
+  // EXCEL IMPORT EXTRAS
+  sheetSizeL          Decimal?      @map("sheet_size_l") @db.Decimal(8, 2)
+  sheetSizeW          Decimal?      @map("sheet_size_w") @db.Decimal(8, 2)
+  ups                 Int?          @map("ups")
+  // WAREHOUSE PHYSICAL VERIFICATION
+  physicalL           Decimal?      @map("physical_l") @db.Decimal(8, 2)
+  physicalW           Decimal?      @map("physical_w") @db.Decimal(8, 2)
+  physicalH           Decimal?      @map("physical_h") @db.Decimal(8, 2)
+  sizeVerified        Boolean       @default(false) @map("size_verified")
+  sizeVerifiedAt      DateTime?     @map("size_verified_at")
+  sizeVerifiedBy      String?       @map("size_verified_by")
+  sizeVarianceNotes   String?       @map("size_variance_notes") @db.Text
   createdAt           DateTime      @default(now()) @map("created_at")
   updatedAt           DateTime      @updatedAt @map("updated_at")
 
@@ -717,6 +736,8 @@ model Carton {
   poLineItems             PoLineItem[]
 
   @@index([shadeCardId])
+  @@index([sizeVerified])
+  @@index([customerId, cartonName])
   @@map("cartons")
 }
 
@@ -935,6 +956,7 @@ model PoLineItem {
   /// not_calculated | pending | on_order | dispatched (legacy) | paper_ordered (legacy) | received
   materialProcurementStatus     String    @default("not_calculated") @map("material_procurement_status") @db.VarChar(32)
   specOverrides                 Json?     @map("spec_overrides")
+  specPack                      Json?     @map("spec_pack")
   tolerancePct                  Decimal   @default(2.0) @map("tolerance_pct") @db.Decimal(5, 2)
   /// Director Command Center — floor broadcast & WIP clocks (synced across modules).
   directorPriority              Boolean   @default(false) @map("director_priority")
@@ -2006,20 +2028,20 @@ model PurchaseRequisition {
 }
 
 model MaterialReservation {
-  id             String   @id @default(uuid())
-  materialId     String   @map("material_id")
-  jobCardId      String   @map("job_card_id")
-  planningId     String?  @map("planning_id")
-  requiredSheets Decimal  @map("required_sheets") @db.Decimal(12, 3)
-  reservedSheets Decimal  @default(0) @map("reserved_sheets") @db.Decimal(12, 3)
-  shortageSheets Decimal  @default(0) @map("shortage_sheets") @db.Decimal(12, 3)
-  status         String   @default("draft") @db.VarChar(32)
-  isReleased     Boolean  @default(false) @map("is_released")
+  id             String    @id @default(uuid())
+  materialId     String    @map("material_id")
+  jobCardId      String    @map("job_card_id")
+  planningId     String?   @map("planning_id")
+  requiredSheets Decimal   @map("required_sheets") @db.Decimal(12, 3)
+  reservedSheets Decimal   @default(0) @map("reserved_sheets") @db.Decimal(12, 3)
+  shortageSheets Decimal   @default(0) @map("shortage_sheets") @db.Decimal(12, 3)
+  status         String    @default("draft") @db.VarChar(32)
+  isReleased     Boolean   @default(false) @map("is_released")
   releasedAt     DateTime? @map("released_at")
-  releasedReason String?  @map("released_reason") @db.VarChar(120)
-  confirmedQty   Int?     @map("confirmed_qty")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  releasedReason String?   @map("released_reason") @db.VarChar(120)
+  confirmedQty   Int?      @map("confirmed_qty")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   material Inventory         @relation(fields: [materialId], references: [id], onDelete: Cascade)
   jobCard  ProductionJobCard @relation(fields: [jobCardId], references: [id], onDelete: Cascade)
@@ -2092,6 +2114,7 @@ model StockMovement {
 
 model EffectCategory {
   id        String   @id @default(uuid())
+  code      String   @unique @db.VarChar(48)
   name      String   @unique @db.VarChar(80)
   sortOrder Int      @default(100) @map("sort_order")
   active    Boolean  @default(true)
@@ -2106,6 +2129,7 @@ model EffectCategory {
 model EffectValue {
   id           String   @id @default(uuid())
   categoryId   String   @map("category_id")
+  code         String   @db.VarChar(48)
   value        String   @db.VarChar(120)
   abbreviation String?  @db.VarChar(24)
   impactOn     String?  @map("impact_on") @db.VarChar(80)
@@ -2118,6 +2142,7 @@ model EffectValue {
   category EffectCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   @@unique([categoryId, value])
+  @@unique([categoryId, code])
   @@index([categoryId, active, sortOrder])
   @@map("effect_values")
 }

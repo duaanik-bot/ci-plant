@@ -73,9 +73,15 @@ export async function GET() {
     ]),
     db.job.findMany({
       where: { status: { in: ['pending_artwork', 'artwork_approved', 'in_production', 'folding', 'final_qc', 'packing'] } },
-      include: {
+      select: {
+        id: true,
+        jobNumber: true,
+        productName: true,
+        dueDate: true,
         customer: { select: { name: true } },
-        workflowStages: true,
+        workflowStages: {
+          select: { status: true, stageNumber: true, stageName: true },
+        },
       },
       orderBy: { dueDate: 'asc' },
     }),
@@ -86,12 +92,32 @@ export async function GET() {
     db.inventory.findMany({
       where: { reorderPoint: { gt: 0 } },
       orderBy: { materialCode: 'asc' },
+      select: {
+        materialCode: true,
+        description: true,
+        qtyAvailable: true,
+        qtyQuarantine: true,
+        reorderPoint: true,
+      },
     }),
     db.job.findMany({
-      include: {
-        customer: { select: { name: true } },
+      where: {
+        status: { in: ['final_qc', 'packing'] },
+        dueDate: {
+          gte: new Date(new Date().setHours(0, 0, 0, 0)),
+          lte: new Date(new Date().setHours(0, 0, 0, 0) + 8 * 24 * 60 * 60 * 1000),
+        },
+      },
+      select: {
+        id: true,
+        jobNumber: true,
+        productName: true,
+        qtyOrdered: true,
+        dueDate: true,
+        status: true,
       },
       orderBy: { dueDate: 'asc' },
+      take: 10,
     }),
     db.ncr.findMany({
       where: { status: 'open' },
