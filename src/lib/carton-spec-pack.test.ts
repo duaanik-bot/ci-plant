@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildCartonSpecPack, type CartonForPack } from './carton-spec-pack'
+import { readCartonSpecPack, emptySpecPack } from './carton-spec-pack'
 
 const fullCarton: CartonForPack = {
   id: 'c1',
@@ -65,5 +66,34 @@ describe('buildCartonSpecPack', () => {
     expect(p.sheet).toEqual({ sheetSizeL: null, sheetSizeW: null, ups: null })
     expect(p.finishing.spotUv).toBe(false)
     expect(p.board.gsm).toBeNull()
+  })
+})
+
+describe('readCartonSpecPack', () => {
+  it('flags a legacy line (null specPack) and returns an all-null pack', () => {
+    const r = readCartonSpecPack({ specPack: null, specOverrides: null })
+    expect(r.legacy).toBe(true)
+    expect(r.pack.sheet.ups).toBeNull()
+    expect(r.pack.v).toBe(1)
+  })
+
+  it('returns the stored pack and is not legacy', () => {
+    const stored = emptySpecPack('c9', 'CARTON 9')
+    stored.sheet.ups = 8
+    const r = readCartonSpecPack({ specPack: stored, specOverrides: null })
+    expect(r.legacy).toBe(false)
+    expect(r.pack.sheet.ups).toBe(8)
+  })
+
+  it('deep-merges specOverrides.specPack over the stored pack', () => {
+    const stored = emptySpecPack('c9', 'CARTON 9')
+    stored.board.gsm = 300
+    stored.sheet.ups = 6
+    const r = readCartonSpecPack({
+      specPack: stored,
+      specOverrides: { specPack: { board: { gsm: 350 } } },
+    })
+    expect(r.pack.board.gsm).toBe(350) // override wins
+    expect(r.pack.sheet.ups).toBe(6)   // untouched
   })
 })

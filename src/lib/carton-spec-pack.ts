@@ -144,3 +144,52 @@ export function buildCartonSpecPack(c: CartonForPack): SpecPackV1 {
     },
   }
 }
+
+export interface ResolvedSpecPack { pack: SpecPackV1; legacy: boolean }
+
+export function emptySpecPack(
+  cartonId: string | null,
+  cartonName: string,
+): SpecPackV1 {
+  return buildCartonSpecPack({ id: cartonId, cartonName } as CartonForPack)
+}
+
+function isObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** Recursively overlay `patch` leaves onto `base` (non-mutating). */
+function deepMerge<T>(base: T, patch: unknown): T {
+  if (!isObj(patch)) return base
+  const out: Record<string, unknown> = { ...(base as Record<string, unknown>) }
+  for (const [k, pv] of Object.entries(patch)) {
+    const bv = out[k]
+    out[k] = isObj(bv) && isObj(pv) ? deepMerge(bv, pv) : pv
+  }
+  return out as T
+}
+
+/**
+ * Resolve the effective pack for a PO line.
+ * - `specPack` null/invalid -> legacy line, all-null pack.
+ * - `specOverrides.specPack` (Partial<SpecPackV1>) deep-merges over the pack
+ *   so a deliberate per-line override wins per field.
+ */
+export function readCartonSpecPack(line: {
+  specPack: unknown
+  specOverrides: unknown
+}): ResolvedSpecPack {
+  let base: SpecPackV1
+  let legacy: boolean
+  if (isObj(line.specPack) && (line.specPack as { v?: unknown }).v === 1) {
+    base = line.specPack as unknown as SpecPackV1
+    legacy = false
+  } else {
+    base = emptySpecPack(null, '')
+    legacy = true
+  }
+  const ov = isObj(line.specOverrides)
+    ? (line.specOverrides as Record<string, unknown>).specPack
+    : undefined
+  return { pack: deepMerge(base, ov), legacy }
+}
