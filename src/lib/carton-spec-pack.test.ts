@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCartonSpecPack, readCartonSpecPack, emptySpecPack, type CartonForPack } from './carton-spec-pack'
+import { buildCartonSpecPack, readCartonSpecPack, emptySpecPack, computePackSheetMath, type CartonForPack } from './carton-spec-pack'
 
 const fullCarton: CartonForPack = {
   id: 'c1',
@@ -119,5 +119,27 @@ describe('readCartonSpecPack', () => {
     const r = readCartonSpecPack({ specPack: stored, specOverrides: { specPack: { board: { gsm: 350 } } } })
     expect(r.pack.board.gsm).toBe(350)
     expect(stored.board.gsm).toBe(300) // original untouched
+  })
+})
+
+describe('computePackSheetMath', () => {
+  it('computes ceil(qty/ups) * (1 + wastage) ceiled', () => {
+    const r = computePackSheetMath({ ups: 6 }, 18000, 2)
+    // ceil(18000/6)=3000; *1.02=3060
+    expect(r.specComplete).toBe(true)
+    expect(r.sheetsRequired).toBe(3060)
+  })
+
+  it('flags incomplete when ups missing', () => {
+    const r = computePackSheetMath({ ups: null }, 18000, 2)
+    expect(r.specComplete).toBe(false)
+    expect(r.sheetsRequired).toBeNull()
+    expect(r.reason).toMatch(/ups/i)
+  })
+
+  it('flags incomplete on non-positive quantity', () => {
+    const r = computePackSheetMath({ ups: 6 }, 0, 2)
+    expect(r.specComplete).toBe(false)
+    expect(r.sheetsRequired).toBeNull()
   })
 })

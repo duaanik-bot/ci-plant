@@ -196,3 +196,27 @@ export function readCartonSpecPack(line: {
     : undefined
   return { pack: deepMerge({ ...base }, ov), legacy }
 }
+
+export interface PackSheetMath {
+  specComplete: boolean
+  sheetsRequired: number | null
+  reason: string | null
+}
+
+/** ceil(quantity / ups) inflated by wastagePct, then ceiled. */
+export function computePackSheetMath(
+  sheet: { ups: number | null },
+  quantity: number,
+  wastagePct: number,
+): PackSheetMath {
+  if (sheet.ups == null || !(sheet.ups > 0)) {
+    return { specComplete: false, sheetsRequired: null, reason: 'Missing UPS in spec pack' }
+  }
+  if (!(quantity > 0)) {
+    return { specComplete: false, sheetsRequired: null, reason: 'Order quantity not positive' }
+  }
+  const w = Number.isFinite(wastagePct) && wastagePct > 0 ? wastagePct : 0
+  const base = Math.ceil(quantity / sheet.ups)
+  const sheetsRequired = Math.ceil(base * (1 + w / 100))
+  return { specComplete: true, sheetsRequired, reason: null }
+}
