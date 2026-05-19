@@ -73,6 +73,10 @@ export function seedLineFromSpecPack(
     if (line.specProvenance[field] === 'user') continue
     const v = leaf(pack, field)
     if (v === null || v === undefined || v === '') {
+      // No spec value for this field. If the line already carries a non-empty
+      // value it came from a master record, so tag it 'master'. backPrint==='No'
+      // is excluded because 'No' is the empty/default sentinel for backPrint —
+      // a line showing 'No' has no real master value to attribute.
       const hadMaster = String(line[field] ?? '').trim() !== '' &&
         !(field === 'backPrint' && line.backPrint === 'No')
       if (hadMaster) provenance[field] = 'master'

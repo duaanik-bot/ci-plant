@@ -59,6 +59,14 @@ describe('seedLineFromSpecPack', () => {
     expect(provenance.foilType).toBe('master')
   })
 
+  it('gives no provenance for a blank field with no spec leaf and no master value', () => {
+    // foilType is null in the fixture pack and empty on baseLine — neither spec
+    // nor master, so there should be no provenance entry and no patch entry.
+    const { patch, provenance } = seedLineFromSpecPack(baseLine(), pack, null)
+    expect(provenance.foilType).toBeUndefined()
+    expect(patch.foilType).toBeUndefined()
+  })
+
   it('never overwrites a user-edited field', () => {
     const { patch } = seedLineFromSpecPack(
       baseLine({ boardGrade: 'FBB', specProvenance: { boardGrade: 'user' } }),
@@ -88,5 +96,6 @@ describe('applySpecOverrideEdit', () => {
     expect(r.specOverrides).toEqual({
       specPack: { board: { gsm: 300 }, finishing: { coatingType: 'Matt Lamination' } },
     })
+    expect(r.specProvenance.coatingType).toBe('user')
   })
 })
