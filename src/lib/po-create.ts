@@ -1,6 +1,7 @@
 import type { Prisma, PurchaseOrder } from '@prisma/client'
 import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
 import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
+import { buildCartonSpecPack } from '@/lib/carton-spec-pack'
 
 type Tx = Prisma.TransactionClient
 
@@ -87,33 +88,29 @@ export async function createPurchaseOrderWithLines(
     },
   })
 
-  // Snapshot Carton.hsnCode onto each PO line for lines that didn't pass an explicit
-  // hsnCode. Locks the HSN against the order's lifetime even if the Carton master
-  // is edited later. Batched in a single query for efficiency.
-  const cartonIdsNeedingHsn = Array.from(
+  // Fetch full carton rows for all lines that reference a carton. Used for both
+  // HSN backfill (locks the HSN against the order's lifetime even if the Carton
+  // master is edited later) and the spec-pack snapshot. Batched in a single query.
+  const lineCartonIds = Array.from(
     new Set(
       input.lineItems
-        .filter((li) => li.cartonId && (li.hsnCode == null || li.hsnCode === ''))
+        .filter((li) => li.cartonId)
         .map((li) => li.cartonId as string),
     ),
   )
-  const cartonHsnById = new Map<string, string | null>()
-  if (cartonIdsNeedingHsn.length > 0) {
-    const rows = await tx.carton.findMany({
-      where: { id: { in: cartonIdsNeedingHsn } },
-      select: { id: true, hsnCode: true },
-    })
-    for (const r of rows) cartonHsnById.set(r.id, r.hsnCode)
+  const cartonById = new Map<string, Awaited<ReturnType<typeof tx.carton.findMany>>[number]>()
+  if (lineCartonIds.length > 0) {
+    const rows = await tx.carton.findMany({ where: { id: { in: lineCartonIds } } })
+    for (const r of rows) cartonById.set(r.id, r)
   }
 
   await Promise.all(
     input.lineItems.map((li) => {
+      const cartonRow = li.cartonId ? cartonById.get(li.cartonId) ?? null : null
       const resolvedHsn =
         li.hsnCode != null && li.hsnCode !== ''
           ? li.hsnCode
-          : li.cartonId
-          ? cartonHsnById.get(li.cartonId) ?? null
-          : null
+          : cartonRow?.hsnCode ?? null
       return tx.poLineItem.create({
         data: {
           poId: po.id,
@@ -145,6 +142,7 @@ export async function createPurchaseOrderWithLines(
               ? li.specOverrides
               : null,
           ) as object,
+          specPack: cartonRow ? (buildCartonSpecPack(cartonRow) as object) : undefined,
         },
       })
     }),
