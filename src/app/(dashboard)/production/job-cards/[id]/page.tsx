@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { getPostPressRouting, isEmbossingRequired } from '@/lib/emboss-conditions'
 import { resolveRequirementFromLine, resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
+import { SpecPackPanel } from '@/components/spec-pack/SpecPackPanel'
 
 type Stage = {
   id: string
@@ -44,6 +45,7 @@ type PoLine = {
   gsm: number | null
   dyeId: string | null
   specOverrides?: Record<string, unknown> | null
+  specPack?: unknown
   po: { poNumber: string; poDate?: string | null }
   carton: CartonSpecs
   materialQueue?: {
@@ -1132,6 +1134,12 @@ export default function JobCardDetailPage() {
           <div className="xl:col-span-2 space-y-4">
             <div ref={(el) => { sectionRefs.current.spec = el }} className="rounded-ds-lg border border-ds-line/40 bg-card p-4 space-y-2.5">
               <h2 className="text-sm font-semibold text-ds-ink">Printing & Finishing</h2>
+              <div className="mb-4">
+                <SpecPackPanel
+                  specPack={jc?.poLine?.specPack ?? null}
+                  specOverrides={jc?.poLine?.specOverrides ?? null}
+                />
+              </div>
               <div className="grid md:grid-cols-5 gap-3 text-xs">
                 <div><p className="text-ds-ink-faint mb-1">Coating</p><p>{coatingDisplay}</p></div>
                 <div><p className="text-ds-ink-faint mb-1">Other Coating</p><p>{otherCoatingDisplay}</p></div>

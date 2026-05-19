@@ -40,6 +40,7 @@ import {
 import { readOrchestration } from '@/lib/orchestration-spec'
 import { AW_PO_STATUS, readAwPoStatus } from '@/lib/aw-queue-spec'
 import { AwQueueCommandPanel } from '@/components/designing/AwQueueCommandPanel'
+import { SpecPackPanel } from '@/components/spec-pack/SpecPackPanel'
 
 type ArtworkRejection = {
   at: string
@@ -141,6 +142,7 @@ type DesigningDetail = {
     planningStatus: string
     directorPriority?: boolean
     specOverrides: SpecOverrides
+    specPack?: unknown
     carton?: CartonMasterDims
     po: {
       poNumber: string
@@ -2168,6 +2170,12 @@ export default function DesigningDetailPage() {
       ) : null}
 
       <div className="flex-1 p-3 max-w-7xl mx-auto w-full space-y-1 pb-6 bg-background">
+          <div className="mb-4">
+            <SpecPackPanel
+              specPack={line?.specPack ?? null}
+              specOverrides={line?.specOverrides ?? null}
+            />
+          </div>
           <section
             className={clsx(
               'rounded-ds-lg bg-card border p-3 pb-2',
