@@ -47,6 +47,16 @@ describe('buildCartonSpecPack', () => {
     expect(p.finishing.spotUv).toBe(true)
     expect(p.finishing.braille).toBe(false)
     expect(p.pharma).toEqual({ drugSchedule: 'H', scheduleMRequired: true })
+    expect(p.dimensions).toEqual({
+      finishedL: 59, finishedW: 59, finishedH: 175,
+      blankL: 210, blankW: 297, dimensionTol: 0.5,
+    })
+    expect(p.print).toEqual({
+      printingType: 'Offset', numberOfColours: 4,
+      backPrint: 'No', artworkCode: 'AGSSLLCA001/01',
+    })
+    expect(p.tooling).toEqual({ dieMasterId: 'd1', pastingStyle: 'STRAIGHT_TUCK_END' })
+    expect(p.linkage).toEqual({ shadeCardId: 's1' })
     expect(typeof p.source.snapshotAt).toBe('string')
   })
 

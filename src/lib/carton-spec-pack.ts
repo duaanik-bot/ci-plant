@@ -1,7 +1,12 @@
 /** Versioned, locked product spec snapshot carried on a PO line. */
 export interface SpecPackV1 {
   v: 1
-  source: { cartonId: string | null; cartonName: string; snapshotAt: string }
+  source: {
+    cartonId: string | null
+    cartonName: string
+    /** ISO-8601 UTC */
+    snapshotAt: string
+  }
   board: {
     boardGrade: string | null; gsm: number | null; paperType: string | null
     caliperMicrons: number | null; plyCount: number | null
@@ -24,11 +29,11 @@ export interface SpecPackV1 {
   pharma: { drugSchedule: string | null; scheduleMRequired: boolean }
 }
 
-type Decimalish = { toString(): string }
+export type Decimalish = { toString(): string }
 
 /** Structural input — accepts a Prisma Carton row (Decimal columns included). */
 export interface CartonForPack {
-  id: string | null
+  id?: string | null
   cartonName: string
   boardGrade?: string | null
   gsm?: number | null
@@ -96,10 +101,10 @@ export function buildCartonSpecPack(c: CartonForPack): SpecPackV1 {
     },
     board: {
       boardGrade: str(c.boardGrade),
-      gsm: c.gsm ?? null,
+      gsm: num(c.gsm),
       paperType: str(c.paperType),
-      caliperMicrons: c.caliperMicrons ?? null,
-      plyCount: c.plyCount ?? null,
+      caliperMicrons: num(c.caliperMicrons),
+      plyCount: num(c.plyCount),
     },
     dimensions: {
       finishedL: num(c.finishedLength),
@@ -112,11 +117,11 @@ export function buildCartonSpecPack(c: CartonForPack): SpecPackV1 {
     sheet: {
       sheetSizeL: num(c.sheetSizeL),
       sheetSizeW: num(c.sheetSizeW),
-      ups: c.ups ?? null,
+      ups: num(c.ups),
     },
     print: {
       printingType: str(c.printingType),
-      numberOfColours: c.numberOfColours ?? null,
+      numberOfColours: num(c.numberOfColours),
       backPrint: str(c.backPrint),
       artworkCode: str(c.artworkCode),
     },
