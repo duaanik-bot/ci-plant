@@ -1,4 +1,4 @@
-import type { Prisma, PurchaseOrder } from '@prisma/client'
+import type { Prisma, PurchaseOrder, Carton } from '@prisma/client'
 import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
 import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
 import { buildCartonSpecPack } from '@/lib/carton-spec-pack'
@@ -98,7 +98,7 @@ export async function createPurchaseOrderWithLines(
         .map((li) => li.cartonId as string),
     ),
   )
-  const cartonById = new Map<string, Awaited<ReturnType<typeof tx.carton.findMany>>[number]>()
+  const cartonById = new Map<string, Carton>()
   if (lineCartonIds.length > 0) {
     const rows = await tx.carton.findMany({ where: { id: { in: lineCartonIds } } })
     for (const r of rows) cartonById.set(r.id, r)
