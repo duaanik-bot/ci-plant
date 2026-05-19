@@ -2170,18 +2170,18 @@ export default function DesigningDetailPage() {
       ) : null}
 
       <div className="flex-1 p-3 max-w-7xl mx-auto w-full space-y-1 pb-6 bg-background">
-          <div className="mb-4">
-            <SpecPackPanel
-              specPack={line?.specPack ?? null}
-              specOverrides={line?.specOverrides ?? null}
-            />
-          </div>
-          <section
-            className={clsx(
-              'rounded-ds-lg bg-card border p-3 pb-2',
-              plateHubSent ? 'border-[var(--success)]/80 ring-1 ring-[var(--success)]/25' : 'border-ds-line/40',
-            )}
-          >
+        <div className="mb-4">
+          <SpecPackPanel
+            specPack={line?.specPack ?? null}
+            specOverrides={line?.specOverrides ?? null}
+          />
+        </div>
+        <section
+          className={clsx(
+            'rounded-ds-lg bg-card border p-3 pb-2',
+            plateHubSent ? 'border-[var(--success)]/80 ring-1 ring-[var(--success)]/25' : 'border-ds-line/40',
+          )}
+        >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 items-start">
               <h2 className="text-sm font-semibold text-ds-ink">
                 Section 1 — Identification &amp; spec
