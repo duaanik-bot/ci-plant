@@ -956,6 +956,7 @@ model PoLineItem {
   /// not_calculated | pending | on_order | dispatched (legacy) | paper_ordered (legacy) | received
   materialProcurementStatus     String    @default("not_calculated") @map("material_procurement_status") @db.VarChar(32)
   specOverrides                 Json?     @map("spec_overrides")
+  specPack                      Json?     @map("spec_pack")
   tolerancePct                  Decimal   @default(2.0) @map("tolerance_pct") @db.Decimal(5, 2)
   /// Director Command Center — floor broadcast & WIP clocks (synced across modules).
   directorPriority              Boolean   @default(false) @map("director_priority")
