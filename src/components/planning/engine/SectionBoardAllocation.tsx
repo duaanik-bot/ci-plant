@@ -69,6 +69,17 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
     readiness?.reservedSheets ?? line.planningLedger?.boardStockInsight?.reservedSheets ?? 0,
   )
 
+  const bsi = line.planningLedger?.boardStockInsight
+  const specIncomplete = bsi?.specComplete === false
+  const procurementSuggestion = bsi?.procurementSuggestion ?? null
+
+  const recommendedBoardParts = [
+    bsi?.recommendedBoardGrade ?? null,
+    bsi?.recommendedGsm != null ? `${bsi.recommendedGsm} gsm` : null,
+    bsi?.recommendedPaperType ?? null,
+  ].filter(Boolean)
+  const recommendedBoardLabel = recommendedBoardParts.length > 0 ? recommendedBoardParts.join(' · ') : null
+
   return (
     <CardSection title="BOARD ALLOCATION">
       <div className="grid grid-cols-2 gap-3">
@@ -121,6 +132,35 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
             </span>
           </div>
           <Badge tone="warning" className="text-[10px] uppercase">{readiness.prStatus || 'On order'}</Badge>
+        </div>
+      ) : null}
+
+      {specIncomplete ? (
+        <div className="mt-2 rounded-ds-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-300 mb-1">Spec check</div>
+          <div className="text-ds-ink-faint">
+            Spec incomplete — cannot compute: {bsi?.specIncompleteReason}
+          </div>
+        </div>
+      ) : null}
+
+      {recommendedBoardLabel ? (
+        <div className="mt-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated px-3 py-2 text-xs">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">Recommended board</div>
+          <div className="text-ds-ink font-semibold">{recommendedBoardLabel}</div>
+        </div>
+      ) : null}
+
+      {procurementSuggestion ? (
+        <div className="mt-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated px-3 py-2 text-xs">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">Suggested procurement</div>
+          <div className="text-ds-ink font-semibold tabular-nums">
+            {procurementSuggestion.suggestedSheets.toLocaleString()} sheets
+            {[procurementSuggestion.boardGrade, procurementSuggestion.gsm != null ? `${procurementSuggestion.gsm} gsm` : null]
+              .filter(Boolean).length > 0
+              ? ` · ${[procurementSuggestion.boardGrade, procurementSuggestion.gsm != null ? `${procurementSuggestion.gsm} gsm` : null].filter(Boolean).join(' ')}`
+              : null}
+          </div>
         </div>
       ) : null}
     </CardSection>

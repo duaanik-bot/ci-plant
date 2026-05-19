@@ -65,4 +65,31 @@ describe('SectionBoardAllocation', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={null} readinessLoading={true} onPatch={async () => true} />)
     expect(screen.getByText(/Checking material…/)).toBeInTheDocument()
   })
+
+  it('renders spec-incomplete warning when specComplete is false', () => {
+    const lineWithIncomplete = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          specComplete: false,
+          specIncompleteReason: 'Missing UPS in spec pack',
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithIncomplete} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByText(/missing ups in spec pack/i)).toBeInTheDocument()
+  })
+
+  it('renders procurement suggestion suggestedSheets when shortageSheets > 0 and procurementSuggestion present', () => {
+    const lineWithProcurement = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          procurementSuggestion: { boardGrade: 'SBS', gsm: 350, paperType: 'White', suggestedSheets: 1200 },
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithProcurement} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByText(/1,200/)).toBeInTheDocument()
+  })
 })
