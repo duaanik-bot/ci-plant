@@ -209,7 +209,7 @@ export function computePackSheetMath(
   quantity: number,
   wastagePct: number,
 ): PackSheetMath {
-  if (sheet.ups == null || !(sheet.ups > 0)) {
+  if (sheet.ups == null || !Number.isInteger(sheet.ups) || !(sheet.ups > 0)) {
     return { specComplete: false, sheetsRequired: null, reason: 'Missing UPS in spec pack' }
   }
   if (!(quantity > 0)) {

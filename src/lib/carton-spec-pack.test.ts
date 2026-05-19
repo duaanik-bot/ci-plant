@@ -142,4 +142,15 @@ describe('computePackSheetMath', () => {
     expect(r.specComplete).toBe(false)
     expect(r.sheetsRequired).toBeNull()
   })
+
+  it('returns base sheets with zero wastage', () => {
+    const r = computePackSheetMath({ ups: 6 }, 18000, 0)
+    expect(r.specComplete).toBe(true)
+    expect(r.sheetsRequired).toBe(3000)
+  })
+
+  it('does not off-by-one on exact division with zero wastage', () => {
+    const r = computePackSheetMath({ ups: 6 }, 12000, 0)
+    expect(r.sheetsRequired).toBe(2000)
+  })
 })
