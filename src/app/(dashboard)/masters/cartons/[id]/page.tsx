@@ -9,8 +9,6 @@ import CartonForm, { type CartonFormData } from '@/components/masters/CartonForm
 type ApiCarton = CartonFormData & {
   id: string
   customer?: { id: string; name: string }
-  blankLength?: number | string | null
-  blankWidth?: number | string | null
   sheetSizeL?: number | string | null
   sheetSizeW?: number | string | null
   ups?: number | null
