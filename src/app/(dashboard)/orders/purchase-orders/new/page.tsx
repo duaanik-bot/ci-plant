@@ -23,6 +23,7 @@ import { cn } from '@/lib/cn'
 import { computeSuggestedDelivery } from '@/lib/po-delivery-schedule'
 import type { PoToolingSignal } from '@/lib/po-tooling-signal'
 import type { SpecOverrides, EditableSpecField, SpecProvenance } from '@/lib/po-line-specpack'
+import { seedLineFromSpecPack, applySpecOverrideEdit, type SpecSeedLine } from '@/lib/po-line-specpack'
 import type { SpecPackV1 } from '@/lib/carton-spec-pack'
 import { Copy, Star, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/design-system/PageHeader'
@@ -495,6 +496,7 @@ export default function NewPurchaseOrderPage() {
   const [masterPulseLine, setMasterPulseLine] = useState<number | null>(null)
 
   const [lineToolingByIdx, setLineToolingByIdx] = useState<Record<number, LineToolingRowMeta>>({})
+  const specPackCache = useRef<Map<string, { pack: SpecPackV1 | null }>>(new Map())
   const [stockInsightByIdx, setStockInsightByIdx] = useState<
     Record<number, { matches: StockInsightMatch[]; linkedHistory: { poNumber: string; quantity: number }[] }>
   >({})
@@ -609,6 +611,53 @@ export default function NewPurchaseOrderPage() {
       cancelled = true
     }
   }, [customerId])
+
+  useEffect(() => {
+    let cancelled = false
+    lines.forEach((ln, idx) => {
+      if (!ln.cartonId) return
+      if (ln.specPackBase !== undefined) return
+      const cartonId = ln.cartonId
+      const cached = specPackCache.current.get(cartonId)
+      const apply = (pack: SpecPackV1 | null) => {
+        if (cancelled) return
+        setLines((prev) =>
+          prev.map((cur, i) => {
+            if (i !== idx || cur.cartonId !== cartonId) return cur
+            if (pack == null) {
+              return { ...cur, specPackBase: null, specPackLegacy: true }
+            }
+            const { patch, provenance } = seedLineFromSpecPack(
+              cur as unknown as SpecSeedLine,
+              pack,
+              cur.specOverrides ?? null,
+            )
+            return {
+              ...cur,
+              ...patch,
+              specPackBase: pack,
+              specPackLegacy: false,
+              specProvenance: { ...cur.specProvenance, ...provenance },
+            }
+          }),
+        )
+      }
+      if (cached) { apply(cached.pack); return }
+      void (async () => {
+        try {
+          const res = await fetch(`/api/cartons/${encodeURIComponent(cartonId)}/spec-pack`)
+          if (!res.ok) { specPackCache.current.set(cartonId, { pack: null }); apply(null); return }
+          const data = (await res.json()) as { pack?: SpecPackV1 }
+          const pack = data.pack && (data.pack as { v?: number }).v === 1 ? data.pack : null
+          specPackCache.current.set(cartonId, { pack })
+          apply(pack)
+        } catch {
+          specPackCache.current.set(cartonId, { pack: null }); apply(null)
+        }
+      })()
+    })
+    return () => { cancelled = true }
+  }, [lines])
 
   useEffect(() => {
     if (!customerId) return
@@ -750,6 +799,10 @@ export default function NewPurchaseOrderPage() {
       toolingUnlinked: !!c.toolingUnlinked,
       pastingStyle: autoPaste,
       masterPastingStyleMissing: masterPasteMissing,
+      specPackBase: undefined,
+      specPackLegacy: false,
+      specOverrides: null,
+      specProvenance: {},
       ghostFromMaster: {
         size: true,
         gsm: true,
@@ -766,6 +819,24 @@ export default function NewPurchaseOrderPage() {
       delete next.lines
       return next
     })
+  }
+
+  const updateLineField = (idx: number, field: EditableSpecField, value: string) => {
+    setLines((prev) =>
+      prev.map((ln, i) => {
+        if (i !== idx) return ln
+        if (!ln.specPackBase) {
+          return { ...ln, [field]: value }
+        }
+        const ov = applySpecOverrideEdit(ln as unknown as SpecSeedLine, field, value)
+        return {
+          ...ln,
+          [field]: value,
+          specOverrides: ov.specOverrides,
+          specProvenance: ov.specProvenance,
+        }
+      }),
+    )
   }
 
   const updateLine = (idx: number, patch: Partial<Line>) => {
@@ -1135,6 +1206,7 @@ export default function NewPurchaseOrderPage() {
                   stockInsightByIdx[lines.findIndex((row) => row === l)]?.matches?.[0] ?? undefined,
                 fgReservation: l.fgReservation ?? undefined,
                 useReservedFirst: l.useReservedFirst !== false,
+                ...(l.specOverrides?.specPack ? { specPack: l.specOverrides.specPack } : {}),
               },
             }
           }),
@@ -1714,6 +1786,7 @@ export default function NewPurchaseOrderPage() {
         lineIndex={detailLineIdx ?? 0}
         line={detailLineIdx != null ? (lines[detailLineIdx] ?? null) : null}
         updateLine={updateLine}
+        updateLineField={updateLineField}
         fieldErrors={fieldErrors}
         inputCls={inputCls}
         inputClsGhost={inputClsGhost}
