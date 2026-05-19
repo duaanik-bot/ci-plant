@@ -169,7 +169,7 @@ export default function CartonForm({ mode, initialData }: Props) {
     leafingEnabled: initialData?.leafingEnabled ?? specials.leafingEnabled,
     embossingEnabled: initialData?.embossingEnabled ?? specials.embossingEnabled,
     spotUvEnabled: initialData?.spotUvEnabled ?? specials.spotUvEnabled,
-    specialInstructions: initialData?.specialInstructions ?? specials.notes,
+    specialInstructions: specials.notes,
     ups: initialData?.ups ?? specials.ups,
     sheetLengthMm: initialData?.sheetLengthMm ?? '',
     sheetWidthMm: initialData?.sheetWidthMm ?? '',
