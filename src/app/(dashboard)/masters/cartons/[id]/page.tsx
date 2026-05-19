@@ -11,6 +11,9 @@ type ApiCarton = CartonFormData & {
   customer?: { id: string; name: string }
   blankLength?: number | string | null
   blankWidth?: number | string | null
+  sheetSizeL?: number | string | null
+  sheetSizeW?: number | string | null
+  ups?: number | null
   source?: string | null
 }
 
@@ -84,8 +87,8 @@ export default function CartonEditPage() {
         printingType: data.printingType ?? '',
         coatingType: data.coatingType ?? '',
         numberOfColours: data.numberOfColours != null ? String(data.numberOfColours) : '',
-        sheetLengthMm: data.blankLength != null ? String(data.blankLength) : '',
-        sheetWidthMm: data.blankWidth != null ? String(data.blankWidth) : '',
+        sheetLengthMm: data.sheetSizeL != null ? String(data.sheetSizeL) : '',
+        sheetWidthMm: data.sheetSizeW != null ? String(data.sheetSizeW) : '',
         ups: data.ups != null ? String(data.ups) : '',
         pastingStyle: data.pastingStyle ?? '',
         finishedLength: data.finishedLength != null ? String(data.finishedLength) : '',
