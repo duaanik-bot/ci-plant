@@ -72,7 +72,7 @@ type PoNewLineItemDrawerProps = {
   lineIndex: number
   line: Line | null
   updateLine: (idx: number, patch: Partial<Line>) => void
-  updateLineField: (idx: number, field: EditableSpecField, value: string) => void
+  updateLineField?: (idx: number, field: EditableSpecField, value: string) => void
   fieldErrors: Record<string, string>
   inputCls: string
   inputClsGhost: string
@@ -179,6 +179,11 @@ export function PoNewLineItemDrawer({
   const foilOptions = foilMaster.options.length
     ? foilMaster.options.map((o) => o.label)
     : (FOIL_TYPES as unknown as string[])
+
+  const editField =
+    updateLineField ??
+    ((idx: number, field: EditableSpecField, value: string) =>
+      updateLine(idx, { [field]: value } as never))
 
   const panelRootRef = useRef<HTMLDivElement | null>(null)
   const reserveQtyRef = useRef<HTMLInputElement | null>(null)
@@ -376,7 +381,7 @@ export function PoNewLineItemDrawer({
                     aria-label="Board grade"
                     options={boardGradeOptions}
                     value={line.boardGrade || null}
-                    onChange={(v) => updateLineField(lineIndex, 'boardGrade', v ?? '')}
+                    onChange={(v) => editField(lineIndex, 'boardGrade', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     optionClassName={comboboxOptionReadable}
@@ -395,7 +400,7 @@ export function PoNewLineItemDrawer({
                         ghostFromMaster: { ...line.ghostFromMaster, gsm: false },
                       })
                     }
-                    updateLineField(lineIndex, 'gsm', e.target.value)
+                    editField(lineIndex, 'gsm', e.target.value)
                   }}
                   className={`w-full ${
                     line.ghostFromMaster.gsm ? inputClsGhost : inputCls
@@ -409,7 +414,7 @@ export function PoNewLineItemDrawer({
                     aria-label="Paper / board type"
                     options={paperOptions}
                     value={line.paperType || null}
-                    onChange={(v) => updateLineField(lineIndex, 'paperType', v ?? '')}
+                    onChange={(v) => editField(lineIndex, 'paperType', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     optionClassName={comboboxOptionReadable}
@@ -427,7 +432,7 @@ export function PoNewLineItemDrawer({
                     aria-label="Coating"
                     options={coatingOptions}
                     value={line.coatingType || null}
-                    onChange={(v) => updateLineField(lineIndex, 'coatingType', v ?? '')}
+                    onChange={(v) => editField(lineIndex, 'coatingType', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     optionClassName={comboboxOptionReadable}
@@ -442,7 +447,7 @@ export function PoNewLineItemDrawer({
                     aria-label="Embossing and leafing"
                     options={embossOptions}
                     value={line.embossingLeafing || null}
-                    onChange={(v) => updateLineField(lineIndex, 'embossingLeafing', v ?? '')}
+                    onChange={(v) => editField(lineIndex, 'embossingLeafing', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     optionClassName={comboboxOptionReadable}
@@ -457,7 +462,7 @@ export function PoNewLineItemDrawer({
                     aria-label="Foil"
                     options={foilOptions}
                     value={line.foilType || null}
-                    onChange={(v) => updateLineField(lineIndex, 'foilType', v ?? '')}
+                    onChange={(v) => editField(lineIndex, 'foilType', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     className="w-full"
@@ -484,7 +489,7 @@ export function PoNewLineItemDrawer({
                         ghostFromMaster: { ...line.ghostFromMaster, pasting: false },
                       })
                     }
-                    updateLineField(lineIndex, 'pastingStyle', value)
+                    editField(lineIndex, 'pastingStyle', value)
                   }}
                   onSaveToMaster={(style) => onSavePastingToMaster(lineIndex, line.cartonId, style)}
                 />
@@ -586,7 +591,7 @@ export function PoNewLineItemDrawer({
                   <label className={labelSec}>Back print<ProvBadge p={line.specProvenance?.backPrint} /></label>
                   <select
                     value={line.backPrint}
-                    onChange={(e) => updateLineField(lineIndex, 'backPrint', e.target.value)}
+                    onChange={(e) => editField(lineIndex, 'backPrint', e.target.value)}
                     className={`w-full text-sm text-ds-ink-muted ${inputCls} ${inputReadable}`}
                   >
                     <option value="No">No</option>
@@ -598,7 +603,7 @@ export function PoNewLineItemDrawer({
                   <input
                     type="text"
                     value={line.artworkCode}
-                    onChange={(e) => updateLineField(lineIndex, 'artworkCode', e.target.value)}
+                    onChange={(e) => editField(lineIndex, 'artworkCode', e.target.value)}
                     className={`w-full font-mono text-xs text-ds-ink-muted ${inputCls} ${inputReadable}`}
                   />
                 </div>

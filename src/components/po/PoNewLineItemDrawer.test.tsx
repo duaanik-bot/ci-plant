@@ -38,15 +38,15 @@ function renderDrawer(line: unknown) {
 describe('PoNewLineItemDrawer spec-pack UI', () => {
   it('renders provenance badges per field', () => {
     renderDrawer(baseLine)
-    expect(screen.getByText(/spec pack/i)).toBeInTheDocument()
-    expect(screen.getByText(/^master$/i)).toBeInTheDocument()
-    expect(screen.getByText(/overridden/i)).toBeInTheDocument()
+    expect(screen.getAllByText('Spec pack').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Master').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Overridden').length).toBeGreaterThanOrEqual(1)
   })
 
   it('renders the read-only spec block with non-editable groups', () => {
     renderDrawer(baseLine)
-    expect(screen.getByText(/caliper/i)).toBeInTheDocument()
-    expect(screen.getByText(/ups/i)).toBeInTheDocument()
+    expect(screen.getByText('Locked spec (read-only)')).toBeInTheDocument()
+    expect(screen.getByText('Caliper (µm)')).toBeInTheDocument()
   })
 
   it('shows the legacy notice when no pack', () => {
