@@ -11,6 +11,9 @@ import { Drawer } from '@/components/design-system/Drawer'
 import { Button } from '@/components/design-system/Button'
 import { useMaster } from '@/components/masters/MastersProvider'
 import { MASTER } from '@/lib/masters/registry'
+import { SpecPackPanel } from '@/components/spec-pack/SpecPackPanel'
+import type { SpecPackV1 } from '@/lib/carton-spec-pack'
+import type { EditableSpecField, SpecProvenance, SpecOverrides } from '@/lib/po-line-specpack'
 
 type Line = {
   cartonId: string
@@ -57,6 +60,10 @@ type Line = {
     reservedAt: string
   } | null
   useReservedFirst?: boolean
+  specPackBase?: SpecPackV1 | null
+  specPackLegacy?: boolean
+  specOverrides?: SpecOverrides
+  specProvenance?: Partial<Record<EditableSpecField, SpecProvenance>>
 }
 
 type PoNewLineItemDrawerProps = {
@@ -65,6 +72,7 @@ type PoNewLineItemDrawerProps = {
   lineIndex: number
   line: Line | null
   updateLine: (idx: number, patch: Partial<Line>) => void
+  updateLineField: (idx: number, field: EditableSpecField, value: string) => void
   fieldErrors: Record<string, string>
   inputCls: string
   inputClsGhost: string
@@ -110,12 +118,31 @@ const comboboxControl = 'border-ds-line/80 bg-ds-elevated/50'
 const comboboxInput = 'text-sm text-ds-ink'
 const comboboxOptionReadable = 'text-sm'
 
+function ProvBadge({ p }: { p?: SpecProvenance }) {
+  if (!p) return null
+  const label: Record<SpecProvenance, string> = {
+    spec: 'Spec pack', master: 'Master', override: 'Overridden', user: 'Overridden',
+  }
+  const tone =
+    p === 'spec'
+      ? 'border-ds-success/40 bg-ds-success/10 text-ds-success'
+      : p === 'master'
+        ? 'border-ds-line/50 bg-ds-elevated/40 text-ds-ink-faint'
+        : 'border-ds-warning/40 bg-ds-warning/10 text-ds-warning'
+  return (
+    <span className={`ml-2 rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}>
+      {label[p]}
+    </span>
+  )
+}
+
 export function PoNewLineItemDrawer({
   isOpen,
   onClose,
   lineIndex,
   line,
   updateLine,
+  updateLineField,
   fieldErrors,
   inputCls,
   inputClsGhost,
@@ -343,13 +370,13 @@ export function PoNewLineItemDrawer({
                 </div>
               ) : null}
               <div>
-                <label className={labelSec}>Board</label>
+                <label className={labelSec}>Board<ProvBadge p={line.specProvenance?.boardGrade} /></label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Board grade"
                     options={boardGradeOptions}
                     value={line.boardGrade || null}
-                    onChange={(v) => updateLine(lineIndex, { boardGrade: v ?? '' })}
+                    onChange={(v) => updateLineField(lineIndex, 'boardGrade', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     optionClassName={comboboxOptionReadable}
@@ -358,29 +385,31 @@ export function PoNewLineItemDrawer({
                 </div>
               </div>
               <div>
-                <label className={labelSec}>GSM</label>
+                <label className={labelSec}>GSM<ProvBadge p={line.specProvenance?.gsm} /></label>
                 <input
                   type="number"
                   value={line.gsm}
-                  onChange={(e) =>
-                    updateLine(lineIndex, {
-                      gsm: e.target.value,
-                      ghostFromMaster: { ...line.ghostFromMaster, gsm: false },
-                    })
-                  }
+                  onChange={(e) => {
+                    if (line.ghostFromMaster.gsm) {
+                      updateLine(lineIndex, {
+                        ghostFromMaster: { ...line.ghostFromMaster, gsm: false },
+                      })
+                    }
+                    updateLineField(lineIndex, 'gsm', e.target.value)
+                  }}
                   className={`w-full ${
                     line.ghostFromMaster.gsm ? inputClsGhost : inputCls
                   } ${poMono} ${inputReadable}`}
                 />
               </div>
               <div>
-                <label className={labelSec}>Paper</label>
+                <label className={labelSec}>Paper<ProvBadge p={line.specProvenance?.paperType} /></label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Paper / board type"
                     options={paperOptions}
                     value={line.paperType || null}
-                    onChange={(v) => updateLine(lineIndex, { paperType: v ?? '' })}
+                    onChange={(v) => updateLineField(lineIndex, 'paperType', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     optionClassName={comboboxOptionReadable}
@@ -392,13 +421,13 @@ export function PoNewLineItemDrawer({
 
             <CardSection id="po-sec-print" title="Printing">
               <div>
-                <label className={labelSec}>Coating</label>
+                <label className={labelSec}>Coating<ProvBadge p={line.specProvenance?.coatingType} /></label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Coating"
                     options={coatingOptions}
                     value={line.coatingType || null}
-                    onChange={(v) => updateLine(lineIndex, { coatingType: v ?? '' })}
+                    onChange={(v) => updateLineField(lineIndex, 'coatingType', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     optionClassName={comboboxOptionReadable}
@@ -407,13 +436,13 @@ export function PoNewLineItemDrawer({
                 </div>
               </div>
               <div>
-                <label className={labelSec}>Emboss / leafing</label>
+                <label className={labelSec}>Emboss / leafing<ProvBadge p={line.specProvenance?.embossingLeafing} /></label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Embossing and leafing"
                     options={embossOptions}
                     value={line.embossingLeafing || null}
-                    onChange={(v) => updateLine(lineIndex, { embossingLeafing: v ?? '' })}
+                    onChange={(v) => updateLineField(lineIndex, 'embossingLeafing', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     optionClassName={comboboxOptionReadable}
@@ -422,13 +451,13 @@ export function PoNewLineItemDrawer({
                 </div>
               </div>
               <div>
-                <label className={labelSec}>Foil</label>
+                <label className={labelSec}>Foil<ProvBadge p={line.specProvenance?.foilType} /></label>
                 <div data-skip-po-enter-chain>
                   <PackagingEnumCombobox
                     aria-label="Foil"
                     options={foilOptions}
                     value={line.foilType || null}
-                    onChange={(v) => updateLine(lineIndex, { foilType: v ?? '' })}
+                    onChange={(v) => updateLineField(lineIndex, 'foilType', v ?? '')}
                     controlClassName={comboboxControl}
                     inputClassName={comboboxInput}
                     className="w-full"
@@ -436,7 +465,7 @@ export function PoNewLineItemDrawer({
                 </div>
               </div>
               <div data-skip-po-enter-chain className="space-y-1.5">
-                <label className={labelSec}>Pasting</label>
+                <label className={labelSec}>Pasting<ProvBadge p={line.specProvenance?.pastingStyle} /></label>
                 <PoLinePastingStyleCell
                   lineIndex={lineIndex}
                   cartonId={line.cartonId}
@@ -449,12 +478,14 @@ export function PoNewLineItemDrawer({
                   savingToMaster={masterPasteSavingLine === lineIndex}
                   popoverOpenForLine={masterPastePopoverLine}
                   setPopoverOpenForLine={setMasterPastePopoverLine}
-                  onPastingSelectChange={(value) =>
-                    updateLine(lineIndex, {
-                      pastingStyle: value,
-                      ghostFromMaster: { ...line.ghostFromMaster, pasting: false },
-                    })
-                  }
+                  onPastingSelectChange={(value) => {
+                    if (line.ghostFromMaster.pasting) {
+                      updateLine(lineIndex, {
+                        ghostFromMaster: { ...line.ghostFromMaster, pasting: false },
+                      })
+                    }
+                    updateLineField(lineIndex, 'pastingStyle', value)
+                  }}
                   onSaveToMaster={(style) => onSavePastingToMaster(lineIndex, line.cartonId, style)}
                 />
               </div>
@@ -552,10 +583,10 @@ export function PoNewLineItemDrawer({
               <div className="space-y-3 border-t border-ds-line/50 pt-4">
                 <p className={labelSec}>Additional (optional)</p>
                 <div>
-                  <label className={labelSec}>Back print</label>
+                  <label className={labelSec}>Back print<ProvBadge p={line.specProvenance?.backPrint} /></label>
                   <select
                     value={line.backPrint}
-                    onChange={(e) => updateLine(lineIndex, { backPrint: e.target.value })}
+                    onChange={(e) => updateLineField(lineIndex, 'backPrint', e.target.value)}
                     className={`w-full text-sm text-ds-ink-muted ${inputCls} ${inputReadable}`}
                   >
                     <option value="No">No</option>
@@ -563,11 +594,11 @@ export function PoNewLineItemDrawer({
                   </select>
                 </div>
                 <div>
-                  <label className={labelSec}>Artwork code</label>
+                  <label className={labelSec}>Artwork code<ProvBadge p={line.specProvenance?.artworkCode} /></label>
                   <input
                     type="text"
                     value={line.artworkCode}
-                    onChange={(e) => updateLine(lineIndex, { artworkCode: e.target.value })}
+                    onChange={(e) => updateLineField(lineIndex, 'artworkCode', e.target.value)}
                     className={`w-full font-mono text-xs text-ds-ink-muted ${inputCls} ${inputReadable}`}
                   />
                 </div>
@@ -580,6 +611,17 @@ export function PoNewLineItemDrawer({
                     className={`w-full min-h-[5rem] resize-y text-sm text-ds-ink ${inputCls} ${inputReadable}`}
                   />
                 </div>
+              </div>
+
+              <div className="border-t border-ds-line/50 pt-4">
+                <p className={labelSec}>Locked spec (read-only)</p>
+                {line.specPackBase ? (
+                  <SpecPackPanel specPack={line.specPackBase} specOverrides={line.specOverrides ?? null} />
+                ) : line.specPackLegacy ? (
+                  <SpecPackPanel specPack={null} specOverrides={null} />
+                ) : (
+                  <p className="text-xs text-ds-ink-faint">Loading spec…</p>
+                )}
               </div>
             </CardSection>
           </>
