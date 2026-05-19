@@ -22,6 +22,8 @@ import { updateProductMasterStyle } from '@/lib/update-product-master-style'
 import { cn } from '@/lib/cn'
 import { computeSuggestedDelivery } from '@/lib/po-delivery-schedule'
 import type { PoToolingSignal } from '@/lib/po-tooling-signal'
+import type { SpecOverrides, EditableSpecField, SpecProvenance } from '@/lib/po-line-specpack'
+import type { SpecPackV1 } from '@/lib/carton-spec-pack'
 import { Copy, Star, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/design-system/PageHeader'
 import { Button } from '@/components/design-system/Button'
@@ -101,6 +103,14 @@ type Line = {
   stockCarryForward?: StockInsightMatch | null
   fgReservation?: FgReservation | null
   useReservedFirst?: boolean
+  /** Canonical spec pack fetched for cartonId (cached); null = legacy/none. */
+  specPackBase?: SpecPackV1 | null
+  /** True once a fetch resolved with no v1 pack (legacy carton). */
+  specPackLegacy?: boolean
+  /** Per-line deliberate overrides, persisted at submit. */
+  specOverrides?: SpecOverrides
+  /** Provenance per editable field for badge rendering. */
+  specProvenance?: Partial<Record<EditableSpecField, SpecProvenance>>
 }
 
 type CartonLookupFieldProps = {
@@ -143,6 +153,10 @@ const defaultLine = (): Line => ({
   stockCarryForward: null,
   fgReservation: null,
   useReservedFirst: true,
+  specPackBase: undefined,
+  specPackLegacy: false,
+  specOverrides: null,
+  specProvenance: {},
 })
 
 function hasLineInput(line: Line): boolean {
@@ -156,6 +170,10 @@ function hasLineInput(line: Line): boolean {
     if (key === 'materialProcurementStatus') return false
     if (key === 'stockCarryForward') return false
     if (key === 'fgReservation') return false
+    if (key === 'specPackBase') return false
+    if (key === 'specPackLegacy') return false
+    if (key === 'specOverrides') return false
+    if (key === 'specProvenance') return false
     return String(value).trim() !== ''
   })
 }
