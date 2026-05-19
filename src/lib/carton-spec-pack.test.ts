@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCartonSpecPack, type CartonForPack } from './carton-spec-pack'
-import { readCartonSpecPack, emptySpecPack } from './carton-spec-pack'
+import { buildCartonSpecPack, readCartonSpecPack, emptySpecPack, type CartonForPack } from './carton-spec-pack'
 
 const fullCarton: CartonForPack = {
   id: 'c1',
@@ -95,5 +94,30 @@ describe('readCartonSpecPack', () => {
     })
     expect(r.pack.board.gsm).toBe(350) // override wins
     expect(r.pack.sheet.ups).toBe(6)   // untouched
+  })
+
+  it('replaces (does not merge) array override values and ignores __proto__', () => {
+    const stored = emptySpecPack('c1', 'X')
+    const r = readCartonSpecPack({
+      specPack: stored,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      specOverrides: { specPack: { board: { gsm: 350 } }, ['__proto__' as any]: { polluted: true } },
+    })
+    expect(r.pack.board.gsm).toBe(350)
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('treats a non-v1 stored pack as legacy', () => {
+    const r = readCartonSpecPack({ specPack: { v: 2, board: {} }, specOverrides: null })
+    expect(r.legacy).toBe(true)
+    expect(r.pack.v).toBe(1)
+  })
+
+  it('does not mutate the input specPack when overrides applied', () => {
+    const stored = emptySpecPack('c1', 'X')
+    stored.board.gsm = 300
+    const r = readCartonSpecPack({ specPack: stored, specOverrides: { specPack: { board: { gsm: 350 } } } })
+    expect(r.pack.board.gsm).toBe(350)
+    expect(stored.board.gsm).toBe(300) // original untouched
   })
 })

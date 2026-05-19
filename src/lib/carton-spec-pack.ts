@@ -151,7 +151,9 @@ export function emptySpecPack(
   cartonId: string | null,
   cartonName: string,
 ): SpecPackV1 {
-  return buildCartonSpecPack({ id: cartonId, cartonName } as CartonForPack)
+  const p = buildCartonSpecPack({ id: cartonId, cartonName } as CartonForPack)
+  p.source.snapshotAt = '1970-01-01T00:00:00.000Z'
+  return p
 }
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -163,6 +165,7 @@ function deepMerge<T>(base: T, patch: unknown): T {
   if (!isObj(patch)) return base
   const out: Record<string, unknown> = { ...(base as Record<string, unknown>) }
   for (const [k, pv] of Object.entries(patch)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue
     const bv = out[k]
     out[k] = isObj(bv) && isObj(pv) ? deepMerge(bv, pv) : pv
   }
@@ -191,5 +194,5 @@ export function readCartonSpecPack(line: {
   const ov = isObj(line.specOverrides)
     ? (line.specOverrides as Record<string, unknown>).specPack
     : undefined
-  return { pack: deepMerge(base, ov), legacy }
+  return { pack: deepMerge({ ...base }, ov), legacy }
 }
