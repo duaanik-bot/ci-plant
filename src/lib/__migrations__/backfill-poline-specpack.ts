@@ -25,8 +25,12 @@ async function main() {
       cartonId: { not: null },
       po: {
         status: {
-          // TODO before running: verify these match the actual terminal PurchaseOrder.status values
-          notIn: ['dispatched', 'closed', 'cancelled'],
+          // Terminal PO statuses excluded from backfill (verified 2026-05-19): ['closed'].
+          // Full PO status vocabulary is draft -> confirmed -> sent_to_planning -> closed
+          // (default 'draft' per prisma/schema.prisma:912; no 'dispatched'/'cancelled' exist).
+          // 'closed' is the only terminal state — src/app/api/purchase-orders/[id]/route.ts:195
+          // permits only 'closed' as the forward move from sent_to_planning and nothing exits 'closed'.
+          notIn: ['closed'],
         },
       },
     },
