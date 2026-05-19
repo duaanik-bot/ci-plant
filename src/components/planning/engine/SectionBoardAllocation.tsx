@@ -139,7 +139,9 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
         <div className="mt-2 rounded-ds-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-300 mb-1">Spec check</div>
           <div className="text-ds-ink-faint">
-            Spec incomplete — cannot compute: {bsi?.specIncompleteReason}
+            {bsi?.specIncompleteReason
+              ? `Spec incomplete — cannot compute: ${bsi.specIncompleteReason}`
+              : 'Spec incomplete — reason unavailable'}
           </div>
         </div>
       ) : null}
@@ -155,11 +157,14 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
         <div className="mt-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated px-3 py-2 text-xs">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">Suggested procurement</div>
           <div className="text-ds-ink font-semibold tabular-nums">
-            {procurementSuggestion.suggestedSheets.toLocaleString()} sheets
-            {[procurementSuggestion.boardGrade, procurementSuggestion.gsm != null ? `${procurementSuggestion.gsm} gsm` : null]
-              .filter(Boolean).length > 0
-              ? ` · ${[procurementSuggestion.boardGrade, procurementSuggestion.gsm != null ? `${procurementSuggestion.gsm} gsm` : null].filter(Boolean).join(' ')}`
-              : null}
+            {(() => {
+              const procParts = [
+                procurementSuggestion.boardGrade,
+                procurementSuggestion.gsm != null ? `${procurementSuggestion.gsm} gsm` : null,
+              ].filter(Boolean)
+              const procSuffix = procParts.length > 0 ? ` · ${procParts.join(' · ')}` : ''
+              return `${procurementSuggestion.suggestedSheets.toLocaleString()} sheets${procSuffix}`
+            })()}
           </div>
         </div>
       ) : null}
