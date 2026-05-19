@@ -152,6 +152,10 @@ export async function GET(req: NextRequest) {
         ? (li.specOverrides as Record<string, unknown>)
         : {}
 
+      // NOTE: `specPack` is a scalar on PoLineItem returned because this query
+      // uses Prisma `include` (which returns all root scalars). If a root-level
+      // `select` is ever added to the poLineItem query, `specPack: true` MUST be
+      // added there or every line silently degrades to legacy.
       const resolved = readCartonSpecPack({
         specPack: (li as { specPack?: unknown }).specPack ?? null,
         specOverrides: li.specOverrides ?? null,
@@ -297,7 +301,7 @@ export async function GET(req: NextRequest) {
             recommendedPaperType: packBoard.paperType,
             packSheetsRequired: packMath.sheetsRequired,
             procurementSuggestion:
-              shortageSheets > 0
+              shortageSheets > 0 && (packBoard.boardGrade || packBoard.paperType)
                 ? {
                     boardGrade: packBoard.boardGrade,
                     gsm: packBoard.gsm,
