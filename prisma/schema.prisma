@@ -2164,3 +2164,58 @@ model EffectValue {
   @@index([categoryId, active, sortOrder])
   @@map("effect_values")
 }
+
+// ─────────────────────────────────────────
+// PO BULK IMPORT (operator inbox)
+// ─────────────────────────────────────────
+
+/// One bulk-upload batch from an operator. Holds N PoImportItems; the inbox
+/// UI polls a job by id to render per-file status.
+model PoImportJob {
+  id         String   @id @default(uuid())
+  createdBy  String   @map("created_by")
+  fileCount  Int      @map("file_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  items PoImportItem[]
+
+  @@index([createdBy, createdAt])
+  @@map("po_import_jobs")
+}
+
+/// One uploaded PDF inside a bulk job. PDF bytes are kept on the row so the
+/// operator can re-open the drawer / retry without re-uploading. Once a row
+/// is committed, `committedPoId` points at the resulting PurchaseOrder and
+/// the PDF bytes can be cleared by a maintenance job.
+///
+/// Status lifecycle:
+///   pending → extracting → (needs_review | ready | failed)
+///   needs_review/ready → committed
+model PoImportItem {
+  id              String   @id @default(uuid())
+  jobId           String   @map("job_id")
+  filename        String   @db.VarChar(255)
+  pdfBytes        Bytes?   @map("pdf_bytes")
+  status          String   @default("pending") @db.VarChar(24)
+  /// Detected/assigned customer (null until detect runs).
+  customerId      String?  @map("customer_id")
+  /// CustomerDetection JSON from po-claude-extract — kept so the drawer can
+  /// render the candidates + newCustomerProposal exactly as the single-file
+  /// import flow does.
+  detection       Json?
+  /// ExtractedPo JSON returned by Claude (or the template engine, later).
+  extracted       Json?
+  /// Pre-fetched Carton catalog snapshot the extractor used (for the drawer).
+  catalog         Json?
+  /// Human-readable error if status='failed'.
+  errorMessage    String?  @map("error_message")
+  committedPoId   String?  @map("committed_po_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  job PoImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, status])
+  @@map("po_import_items")
+}

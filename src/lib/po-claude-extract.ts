@@ -1,6 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk'
 
-const MODEL = 'claude-opus-4-7'
+// Extraction model: Haiku 4.5 is ~15x cheaper than Opus 4.7 ($1/$5 vs $15/$75
+// per M tokens) and tool-use structured extraction is well within its
+// capability — the matching rules in SYSTEM_PROMPT do the heavy lifting.
+// Override per-deploy with PO_EXTRACT_MODEL if a tougher model is needed.
+const MODEL = process.env.PO_EXTRACT_MODEL || 'claude-haiku-4-5-20251001'
 const TOOL_NAME = 'submit_extracted_po'
 const DETECT_MODEL = 'claude-haiku-4-5-20251001'
 const DETECT_TOOL_NAME = 'submit_customer_match'
@@ -135,8 +139,14 @@ export async function extractPoWithClaude(args: {
 
   const response = await client.messages.create({
     model: MODEL,
-    max_tokens: 8000,
-    system: SYSTEM_PROMPT,
+    max_tokens: 4000,
+    system: [
+      {
+        type: 'text',
+        text: SYSTEM_PROMPT,
+        cache_control: { type: 'ephemeral' },
+      },
+    ],
     tools: [
       {
         name: TOOL_NAME,
