@@ -89,7 +89,7 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
     <CardSection title="BATCH DECISION">
       <div className="space-y-3">
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Status</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Status</div>
           <SegmentedPill
             value={status === 'Locked' ? 'Released' : (status as Status)}
             options={STATUSES}
@@ -101,7 +101,7 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Layout type</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Layout type</div>
             <SegmentedPill
               value={layoutType}
               options={['Gang', 'Single'] as const}
@@ -110,7 +110,7 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
             />
           </div>
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Set number</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Set number</div>
             <div className="flex items-center gap-1.5">
               <input
                 type="text"
@@ -124,7 +124,7 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
         </div>
 
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Designer</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Designer</div>
           <SegmentedPill
             value={designerId ?? ''}
             options={designerOptions.map((d) => d.id) as readonly string[]}
@@ -135,7 +135,7 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
         </div>
 
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Press assignment</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Press assignment</div>
           {press ? (
             <div className="rounded-ds-md border border-ds-line/40 bg-ds-elevated p-3">
               <div className="flex items-center justify-between mb-1">
@@ -144,7 +144,7 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
                   <Badge tone="success" className="text-[9px]">Smart pick</Badge>
                 ) : null}
               </div>
-              <div className="grid grid-cols-3 gap-2 text-[11px] text-ds-ink-faint tabular-nums">
+              <div className="grid grid-cols-3 gap-2 text-xs text-ds-ink-faint tabular-nums">
                 <div>
                   <div className="text-ds-ink-faint">{press.deckLabel}</div>
                   <div className="text-ds-ink">~{press.runHours.toFixed(1)}h run</div>
@@ -167,7 +167,7 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
         </div>
 
         <div className="flex items-center justify-between gap-3 pt-1">
-          <div className="text-[11px] text-ds-ink-faint min-h-[16px]">
+          <div className="text-xs text-ds-ink-faint min-h-[16px]">
             {locked
               ? `Locked${bd?.lockedByName ? ` · ${bd.lockedByName}` : ''}${bd?.lockedAt ? ` · ${new Date(bd.lockedAt).toLocaleString('en-IN')}` : ''}`
               : blockers.length > 0

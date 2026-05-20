@@ -4,7 +4,7 @@
  * PlanningEngineModal — centred zoom-in overlay that replaces the right-rail
  * StandardDrawer / SlideOverPanel for all planning engine surfaces.
  *
- * Width: 60 vw, clamped min-w-[580px] max-w-[780px].
+ * Width: 84 vw, clamped min-w-[760px] max-w-[1080px] (override via widthClass).
  * Enter: scale(0.94) opacity-0 → scale(1) opacity-1 in 130 ms ease-out.
  * Scrim: 52 % black, click-to-close.
  */
@@ -60,7 +60,7 @@ export function PlanningEngineModal({
   footerMeta,
   bodyClassName,
   zIndexClass = 'z-[70]',
-  widthClass = 'max-w-[780px]',
+  widthClass = 'max-w-[1080px]',
 }: Props) {
   /* Close on Escape */
   useEffect(() => {
@@ -150,7 +150,7 @@ export function PlanningEngineModal({
           aria-modal="true"
           className={cn(
             'pe-modal-enter pointer-events-auto',
-            'relative flex flex-col w-[60vw] min-w-[580px]',
+            'relative flex flex-col w-[84vw] min-w-[760px]',
             widthClass,
             'rounded-ds-xl border border-ds-line/50',
             'bg-ds-main shadow-[0_24px_60px_rgba(0,0,0,0.45)]',

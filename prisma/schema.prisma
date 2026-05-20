@@ -9,8 +9,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 /// Standard litho plate sheet sizes (Plate Hub, press matching). Stored as enum literals only.
@@ -833,7 +834,24 @@ model OperatorMaster {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  stationAssignments OperatorStationAssignment[]
+
   @@map("operator_master")
+}
+
+/// Maps an operator to a production stage (PRODUCTION_STAGES key, e.g. "cutting",
+/// "printing"). Drives the per-station operator dropdowns.
+model OperatorStationAssignment {
+  id         String   @id @default(uuid())
+  operatorId String   @map("operator_id")
+  stageKey   String   @map("stage_key") @db.VarChar(40)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  operator OperatorMaster @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@unique([operatorId, stageKey])
+  @@index([stageKey])
+  @@map("operator_station_assignment")
 }
 
 /// Append-only Die Hub audit trail (dual-written with hub state changes).

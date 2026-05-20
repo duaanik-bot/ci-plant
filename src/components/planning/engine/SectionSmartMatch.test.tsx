@@ -46,9 +46,28 @@ describe('SectionSmartMatch', () => {
     expect(screen.getByText(/material code ITC-FBB-100/)).toBeInTheDocument()
   })
 
-  it('renders empty state when no suggestions', () => {
+  it('renders empty state when no suggestions and no board options', () => {
     const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
     render(<SectionSmartMatch line={empty} readiness={readiness} onPatch={async () => true} />)
-    expect(screen.getByText(/No suggestions yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/No matching board found in stock/i)).toBeInTheDocument()
+  })
+
+  it('falls back to readiness board options when no scored suggestions', () => {
+    const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
+    const withOptions: PlanningEngineReadiness = {
+      ...readiness,
+      suggestedBoardOptions: [
+        {
+          materialId: 'opt1', materialCode: 'ITC-FBB-100', boardType: 'FBB', gsm: 100,
+          size: '720×1020', freeSheets: 1240, availableSheets: 1240, requiredParentSheets: 4800,
+          shortageParentSheets: 3560, wastagePct: 12, yieldPct: 78, cutsPerSheet: 6,
+          matchType: 'Direct Size', status: 'Partial', tags: ['Best Yield'], gsmDelta: 0,
+        },
+      ],
+    }
+    render(<SectionSmartMatch line={empty} readiness={withOptions} onPatch={async () => true} />)
+    expect(screen.getByText(/#1 · FBB · 100 gsm/)).toBeInTheDocument()
+    expect(screen.getByText('Best Yield')).toBeInTheDocument()
+    expect(screen.getByLabelText('Yield sub-score 78')).toBeInTheDocument()
   })
 })

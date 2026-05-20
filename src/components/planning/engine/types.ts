@@ -23,6 +23,30 @@ export type PlanningEngineReadiness = {
   prStatus: string
   grnEta: string | null
   status?: 'green' | 'yellow' | 'red' | null
+  /** Ranked board matches the readiness API already computes (strict). */
+  suggestedBoardOptions?: PlanningEngineBoardOption[]
+  /** Looser fallback matches when no strict option exists. */
+  closestAvailableOptions?: PlanningEngineBoardOption[]
+}
+
+/** Subset of the readiness board-option shape the SMART MATCH card renders. */
+export type PlanningEngineBoardOption = {
+  materialId: string
+  materialCode: string
+  boardType: string | null
+  gsm: number | null
+  size: string
+  freeSheets: number
+  availableSheets: number
+  requiredParentSheets: number
+  shortageParentSheets: number
+  wastagePct: number
+  yieldPct: number
+  cutsPerSheet: number
+  matchType: string
+  status: 'Ready' | 'Partial' | 'Shortage'
+  tags: string[]
+  gsmDelta: number | null
 }
 
 /**

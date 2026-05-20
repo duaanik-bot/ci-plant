@@ -53,7 +53,7 @@ function resolveSheetSize(line: PlanningEngineLine, readiness: PlanningEngineRea
 function MetricTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
       <div className="text-base font-semibold text-ds-ink leading-tight mt-1">{value}</div>
     </div>
   )
@@ -99,7 +99,7 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
             <div className="text-xs font-semibold uppercase tracking-wider text-red-300">
               Paper warehouse — shortage
             </div>
-            <Badge tone="danger" className="text-[10px] uppercase">Shortfall</Badge>
+            <Badge tone="danger" className="text-[11px] uppercase">Shortfall</Badge>
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs">
             <div>
@@ -131,13 +131,13 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
               {readiness.grnEta ? `ETA ${formatEta(readiness.grnEta)}` : 'ETA pending'}
             </span>
           </div>
-          <Badge tone="warning" className="text-[10px] uppercase">{readiness.prStatus || 'On order'}</Badge>
+          <Badge tone="warning" className="text-[11px] uppercase">{readiness.prStatus || 'On order'}</Badge>
         </div>
       ) : null}
 
       {specIncomplete ? (
         <div className="mt-2 rounded-ds-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-300 mb-1">Spec check</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-300 mb-1">Spec check</div>
           <div className="text-ds-ink-faint">
             {bsi?.specIncompleteReason
               ? `Spec incomplete — cannot compute: ${bsi.specIncompleteReason}`
@@ -148,14 +148,14 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
 
       {recommendedBoardLabel ? (
         <div className="mt-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated px-3 py-2 text-xs">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">Recommended board</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">Recommended board</div>
           <div className="text-ds-ink font-semibold">{recommendedBoardLabel}</div>
         </div>
       ) : null}
 
       {procurementSuggestion ? (
         <div className="mt-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated px-3 py-2 text-xs">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">Suggested procurement</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">Suggested procurement</div>
           <div className="text-ds-ink font-semibold tabular-nums">
             {(() => {
               const procParts = [

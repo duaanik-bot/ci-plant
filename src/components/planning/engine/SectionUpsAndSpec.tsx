@@ -27,9 +27,9 @@ function MetricTile({
 }) {
   return (
     <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
       <div className={`text-base font-semibold leading-tight mt-1 ${emphasisClass ?? 'text-ds-ink'}`}>{value}</div>
-      {hint ? <div className="text-[11px] text-ds-ink-faint mt-1 leading-snug">{hint}</div> : null}
+      {hint ? <div className="text-xs text-ds-ink-faint mt-1 leading-snug">{hint}</div> : null}
     </div>
   )
 }
@@ -71,7 +71,7 @@ export function SectionUpsAndSpec({ line, onPatch }: Props) {
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
           <div className="flex items-center justify-between mb-1">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">Units per sheet</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">Units per sheet</div>
             {!upsSourceManual ? <Badge tone="success" className="text-[9px]">Auto</Badge> : null}
           </div>
           <input
