@@ -12,6 +12,7 @@ import {
   ClipboardCheck,
   Cpu,
   Droplets,
+  HardHat,
   Package,
   Truck,
   UserCog,
@@ -54,6 +55,7 @@ const GROUPS: MasterGroup[] = [
     label: 'Operations',
     items: [
       { label: 'Machines', href: '/masters/machines', icon: Cpu },
+      { label: 'Operators', href: '/masters/operators', icon: HardHat },
       { label: 'QC Instruments', href: '/masters/instruments', icon: ClipboardCheck },
     ],
   },
