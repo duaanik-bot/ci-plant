@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -23,6 +23,15 @@ import { parseDeliveryYmdFromRemarks } from '@/lib/po-delivery-parse'
 import { broadcastIndustrialPriorityChange } from '@/lib/industrial-priority-sync'
 import { ProductionReadinessBar } from '@/components/orders/ProductionReadinessBar'
 import type { ProductionKitForLine } from '@/lib/production-kit-status'
+import type { SpecPackV1 } from '@/lib/carton-spec-pack'
+import {
+  seedLineFromSpecPack,
+  applySpecOverrideEdit,
+  type EditableSpecField,
+  type SpecOverrides,
+  type SpecProvenance,
+  type SpecSeedLine,
+} from '@/lib/po-line-specpack'
 
 type Customer = {
   id: string
@@ -75,6 +84,10 @@ type Line = {
     reservedAt: string
   } | null
   useReservedFirst?: boolean
+  specPackBase?: SpecPackV1 | null
+  specPackLegacy?: boolean
+  specOverrides?: SpecOverrides
+  specProvenance?: Partial<Record<EditableSpecField, SpecProvenance>>
 }
 
 type CartonLookupFieldProps = {
@@ -114,6 +127,10 @@ const defaultLine = (): Line => ({
   toolingDieType: '',
   toolingDims: '',
   toolingUnlinked: false,
+  specPackBase: undefined,
+  specPackLegacy: false,
+  specOverrides: null,
+  specProvenance: {},
 })
 
 function resetAutofillFields(line: Line, cartonName: string): Line {
@@ -426,6 +443,12 @@ export default function EditPurchaseOrderPage() {
                 ? (specOverrides.fgReservation as Line['fgReservation'])
                 : null,
             useReservedFirst: specOverrides.useReservedFirst !== false,
+            specPackBase: undefined,
+            specPackLegacy: false,
+            specOverrides: (specOverrides && (specOverrides as Record<string, unknown>).specPack)
+              ? { specPack: (specOverrides as Record<string, unknown>).specPack as Record<string, Record<string, unknown>> }
+              : null,
+            specProvenance: {},
           }
         })
         setLines(mapped.length > 0 ? mapped : [defaultLine()])
@@ -521,6 +544,110 @@ export default function EditPurchaseOrderPage() {
   const updateLine = (idx: number, patch: Partial<Line>) => {
     setLines((prev) => prev.map((ln, i) => (i === idx ? { ...ln, ...patch } : ln)))
   }
+
+  const updateLineField = useCallback(
+    (idx: number, field: EditableSpecField, value: string) => {
+      setLines((prev) =>
+        prev.map((ln, i) => {
+          if (i !== idx) return ln
+          const seedLine: SpecSeedLine = {
+            boardGrade: ln.boardGrade,
+            gsm: ln.gsm,
+            paperType: ln.paperType,
+            coatingType: ln.coatingType,
+            embossingLeafing: ln.embossingLeafing,
+            foilType: ln.foilType,
+            pastingStyle: ln.pastingStyle,
+            backPrint: ln.backPrint,
+            artworkCode: ln.artworkCode,
+            specOverrides: ln.specOverrides ?? null,
+            specProvenance: ln.specProvenance ?? {},
+          }
+          const next: Line = { ...ln, [field]: value } as Line
+          if (ln.specPackBase) {
+            const { specOverrides, specProvenance } = applySpecOverrideEdit(seedLine, field, value)
+            next.specOverrides = specOverrides
+            next.specProvenance = specProvenance
+          }
+          return next
+        }),
+      )
+    },
+    [],
+  )
+
+  const specPackCache = useRef<Map<string, { pack: SpecPackV1 | null }>>(new Map())
+
+  useEffect(() => {
+    let cancelled = false
+    lines.forEach((ln, idx) => {
+      if (!ln.cartonId) return
+      if (ln.specPackBase !== undefined) return
+      const cartonId = ln.cartonId
+      const cached = specPackCache.current.get(cartonId)
+      const apply = (pack: SpecPackV1 | null) => {
+        if (cancelled) return
+        setLines((prev) =>
+          prev.map((cur, i) => {
+            if (i !== idx || cur.cartonId !== cartonId) return cur
+            if (pack == null) {
+              // No spec pack available — if the line itself has no pasting
+              // style stored, treat it as missing so the UI prompts the user
+              // instead of spinning on "Loading…".
+              const pastingMissing = !cur.pastingStyle?.trim()
+              return {
+                ...cur,
+                specPackBase: null,
+                specPackLegacy: true,
+                masterPastingStyleMissing: pastingMissing,
+              }
+            }
+            const seedLine: SpecSeedLine = {
+              boardGrade: cur.boardGrade,
+              gsm: cur.gsm,
+              paperType: cur.paperType,
+              coatingType: cur.coatingType,
+              embossingLeafing: cur.embossingLeafing,
+              foilType: cur.foilType,
+              pastingStyle: cur.pastingStyle,
+              backPrint: cur.backPrint,
+              artworkCode: cur.artworkCode,
+              specOverrides: cur.specOverrides ?? null,
+              specProvenance: cur.specProvenance ?? {},
+            }
+            const { patch, provenance } = seedLineFromSpecPack(seedLine, pack, cur.specOverrides ?? null)
+            const seededPaste = patch.pastingStyle ?? cur.pastingStyle
+            const packPaste = pack.tooling?.pastingStyle
+            const pastingMissing =
+              !seededPaste?.trim() && (packPaste == null || String(packPaste).trim() === '')
+            return {
+              ...cur,
+              ...patch,
+              specPackBase: pack,
+              specPackLegacy: false,
+              specProvenance: { ...(cur.specProvenance ?? {}), ...provenance },
+              masterPastingStyleMissing: pastingMissing,
+            }
+          }),
+        )
+      }
+      if (cached) { apply(cached.pack); return }
+      void (async () => {
+        try {
+          const res = await fetch(`/api/cartons/${encodeURIComponent(cartonId)}/spec-pack`)
+          if (!res.ok) { specPackCache.current.set(cartonId, { pack: null }); apply(null); return }
+          const data = (await res.json()) as { pack?: SpecPackV1 }
+          const pack = data.pack && (data.pack as { v?: number }).v === 1 ? data.pack : null
+          specPackCache.current.set(cartonId, { pack })
+          apply(pack)
+        } catch {
+          specPackCache.current.set(cartonId, { pack: null })
+          apply(null)
+        }
+      })()
+    })
+    return () => { cancelled = true }
+  }, [lines])
 
   const saveProductMasterPasting = async (
     lineIndex: number,
@@ -1410,6 +1537,7 @@ export default function EditPurchaseOrderPage() {
         lineIndex={detailLineIdx ?? 0}
         line={!poSentToPlanning && detailLineIdx != null ? (lines[detailLineIdx] ?? null) : null}
         updateLine={updateLine}
+        updateLineField={updateLineField}
         fieldErrors={fieldErrors}
         inputCls={inputCls}
         inputClsGhost={inputClsGhost}
