@@ -1360,7 +1360,7 @@ export function PlanningJobDetailDrawer({
     <PlanningEngineModal
       isOpen={open}
       onClose={onClose}
-      zIndexClass="z-[70]"
+      zIndexClass="z-[200]"
       widthClass="max-w-[1180px]"
       title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={

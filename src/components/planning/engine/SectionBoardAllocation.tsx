@@ -82,7 +82,7 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
 
   return (
     <CardSection title="BOARD ALLOCATION">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <MetricTile label="Board type" value={resolveBoardType(line, readiness)} />
         <MetricTile label="GSM" value={resolveGsm(line, readiness)} />
         <MetricTile label="Sheet size" value={resolveSheetSize(line, readiness)} />

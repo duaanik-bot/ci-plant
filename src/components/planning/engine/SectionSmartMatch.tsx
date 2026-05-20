@@ -66,6 +66,69 @@ function statusClass(status: PlanningEngineBoardOption['status']): { pill: strin
   }
 }
 
+type EmptyKind = 'spec-incomplete' | 'no-material' | 'no-stock' | 'unknown'
+
+function deriveEmptyState(
+  line: PlanningEngineLine,
+  readiness: PlanningEngineReadiness | null,
+): { kind: EmptyKind; title: string; detail: string; cta: string | null } {
+  const bsi = line.planningLedger?.boardStockInsight
+  if (bsi?.specComplete === false) {
+    return {
+      kind: 'spec-incomplete',
+      title: 'Spec incomplete — matches blocked',
+      detail:
+        bsi.specIncompleteReason ||
+        'Carton spec is missing required fields. Complete the spec pack to unlock board matches.',
+      cta: 'Fix in UPS & sheet spec ↓',
+    }
+  }
+  if (!readiness || (!readiness.materialId && !readiness.materialCode)) {
+    return {
+      kind: 'no-material',
+      title: 'No material linked',
+      detail: 'Link a board material in the status bar above to see ranked stock matches.',
+      cta: null,
+    }
+  }
+  return {
+    kind: 'no-stock',
+    title: 'No matching board in current stock',
+    detail:
+      'Warehouse has no sheets that fit this spec. See Suggested procurement in Board allocation for the recommended PR.',
+    cta: 'See Suggested procurement ↑',
+  }
+}
+
+function SmartMatchEmptyState({
+  line,
+  readiness,
+}: {
+  line: PlanningEngineLine
+  readiness: PlanningEngineReadiness | null
+}) {
+  const empty = deriveEmptyState(line, readiness)
+  const tone =
+    empty.kind === 'spec-incomplete'
+      ? 'border-amber-500/40 bg-amber-500/[0.06]'
+      : empty.kind === 'no-material'
+        ? 'border-ds-line bg-ds-elevated/60'
+        : 'border-ds-line bg-ds-elevated/60'
+  const titleTone =
+    empty.kind === 'spec-incomplete' ? 'text-amber-300' : 'text-ds-ink'
+  return (
+    <div className={`rounded-ds-md border ${tone} px-4 py-3.5`}>
+      <div className={`text-sm font-semibold ${titleTone}`}>{empty.title}</div>
+      <div className="mt-1 text-xs text-ds-ink-muted leading-relaxed">{empty.detail}</div>
+      {empty.cta ? (
+        <div className="mt-2 text-[11px] font-medium uppercase tracking-wider text-ds-ink-faint">
+          {empty.cta}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function BoardOptionCard({ opt, rank }: { opt: PlanningEngineBoardOption; rank: number }) {
   const t = statusClass(opt.status)
   const boardLabel = [opt.boardType, opt.gsm != null ? `${opt.gsm} gsm` : null]
@@ -197,15 +260,13 @@ export function SectionSmartMatch({ line, readiness, onPatch: _onPatch }: Props)
           })}
         </div>
       ) : boardOptions.length > 0 ? (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {boardOptions.slice(0, 4).map((opt, idx) => (
             <BoardOptionCard key={opt.materialId || `${opt.materialCode}-${idx}`} opt={opt} rank={idx + 1} />
           ))}
         </div>
       ) : (
-        <div className="rounded-ds-md border border-dashed border-ds-line/50 bg-ds-elevated/40 p-4 text-center text-sm text-ds-ink-faint">
-          No matching board found in stock yet.
-        </div>
+        <SmartMatchEmptyState line={line} readiness={readiness} />
       )}
 
       {confidence != null ? (

@@ -46,10 +46,27 @@ describe('SectionSmartMatch', () => {
     expect(screen.getByText(/material code ITC-FBB-100/)).toBeInTheDocument()
   })
 
-  it('renders empty state when no suggestions and no board options', () => {
+  it('renders no-stock empty state when material linked but no options', () => {
     const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
     render(<SectionSmartMatch line={empty} readiness={readiness} onPatch={async () => true} />)
-    expect(screen.getByText(/No matching board found in stock/i)).toBeInTheDocument()
+    expect(screen.getByText(/No matching board in current stock/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/Suggested procurement/i).length).toBeGreaterThan(0)
+  })
+
+  it('renders spec-incomplete empty state when spec pack is missing fields', () => {
+    const empty = {
+      ...baseLine,
+      smartMatch: undefined,
+      planningLedger: {
+        boardStockInsight: {
+          specComplete: false,
+          specIncompleteReason: 'Missing UPS in spec pack',
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={empty} readiness={readiness} onPatch={async () => true} />)
+    expect(screen.getByText(/Spec incomplete/i)).toBeInTheDocument()
+    expect(screen.getByText(/Missing UPS in spec pack/i)).toBeInTheDocument()
   })
 
   it('falls back to readiness board options when no scored suggestions', () => {
