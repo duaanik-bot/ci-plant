@@ -28,15 +28,21 @@ function baseLine(over: Partial<SpecSeedLine> = {}): SpecSeedLine {
     boardGrade: '', gsm: '', paperType: '', coatingType: '',
     embossingLeafing: '', foilType: '', pastingStyle: '',
     backPrint: 'No', artworkCode: '',
+    printingType: '', numberOfColours: '', sheetSizeL: '', sheetSizeW: '', ups: '',
+    spotUv: '', braille: '', embossing: '', leafing: '',
     specOverrides: null, specProvenance: {},
     ...over,
   }
 }
 
 describe('EDITABLE_SPEC_FIELDS', () => {
-  it('covers exactly the 9 editable fields', () => {
+  it('covers the editable spec fields including the carton-master Specifications set', () => {
     expect(Object.keys(EDITABLE_SPEC_FIELDS).sort()).toEqual(
-      ['artworkCode','backPrint','boardGrade','coatingType','embossingLeafing','foilType','gsm','pastingStyle','paperType'].sort(),
+      [
+        'artworkCode', 'backPrint', 'boardGrade', 'braille', 'coatingType', 'embossing',
+        'embossingLeafing', 'foilType', 'gsm', 'leafing', 'numberOfColours', 'pastingStyle',
+        'paperType', 'printingType', 'sheetSizeL', 'sheetSizeW', 'spotUv', 'ups',
+      ].sort(),
     )
   })
 })

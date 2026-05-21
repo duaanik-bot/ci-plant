@@ -6,6 +6,9 @@ export type EditableSpecField =
   | 'boardGrade' | 'gsm' | 'paperType'
   | 'coatingType' | 'embossingLeafing' | 'foilType'
   | 'pastingStyle' | 'backPrint' | 'artworkCode'
+  | 'printingType' | 'numberOfColours'
+  | 'sheetSizeL' | 'sheetSizeW' | 'ups'
+  | 'spotUv' | 'braille' | 'embossing' | 'leafing'
 
 /** Editable line field -> [spec-pack group, leaf key]. */
 export const EDITABLE_SPEC_FIELDS: Record<
@@ -21,6 +24,15 @@ export const EDITABLE_SPEC_FIELDS: Record<
   pastingStyle: ['tooling', 'pastingStyle'],
   backPrint: ['print', 'backPrint'],
   artworkCode: ['print', 'artworkCode'],
+  printingType: ['print', 'printingType'],
+  numberOfColours: ['print', 'numberOfColours'],
+  sheetSizeL: ['sheet', 'sheetSizeL'],
+  sheetSizeW: ['sheet', 'sheetSizeW'],
+  ups: ['sheet', 'ups'],
+  spotUv: ['finishing', 'spotUv'],
+  braille: ['finishing', 'braille'],
+  embossing: ['finishing', 'embossing'],
+  leafing: ['finishing', 'leafing'],
 }
 
 export type SpecOverrides = { specPack?: Record<string, Record<string, unknown>> } | null
@@ -35,6 +47,15 @@ export interface SpecSeedLine {
   pastingStyle: string
   backPrint: string
   artworkCode: string
+  printingType: string
+  numberOfColours: string
+  sheetSizeL: string
+  sheetSizeW: string
+  ups: string
+  spotUv: string
+  braille: string
+  embossing: string
+  leafing: string
   specOverrides: SpecOverrides
   specProvenance: Partial<Record<EditableSpecField, SpecProvenance>>
 }

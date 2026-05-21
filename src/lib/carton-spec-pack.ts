@@ -23,6 +23,7 @@ export interface SpecPackV1 {
   finishing: {
     coatingType: string | null; laminateType: string | null; foilType: string | null
     embossingLeafing: string | null; spotUv: boolean; braille: boolean
+    embossing: boolean; leafing: boolean
   }
   tooling: { dieMasterId: string | null; pastingStyle: string | null }
   linkage: { shadeCardId: string | null }
@@ -78,14 +79,19 @@ function str(v: string | null | undefined): string | null {
 }
 
 function parseFinishingFlags(raw: string | null | undefined): {
-  spotUv: boolean; braille: boolean
+  spotUv: boolean; braille: boolean; embossing: boolean; leafing: boolean
 } {
-  if (!raw) return { spotUv: false, braille: false }
+  if (!raw) return { spotUv: false, braille: false, embossing: false, leafing: false }
   try {
     const o = JSON.parse(raw) as Record<string, unknown>
-    return { spotUv: !!o.spotUvEnabled, braille: !!o.brailleEnabled }
+    return {
+      spotUv: !!o.spotUvEnabled,
+      braille: !!o.brailleEnabled,
+      embossing: !!o.embossingEnabled,
+      leafing: !!o.leafingEnabled,
+    }
   } catch {
-    return { spotUv: false, braille: false }
+    return { spotUv: false, braille: false, embossing: false, leafing: false }
   }
 }
 
@@ -132,6 +138,8 @@ export function buildCartonSpecPack(c: CartonForPack): SpecPackV1 {
       embossingLeafing: str(c.embossingLeafing),
       spotUv: flags.spotUv,
       braille: flags.braille,
+      embossing: flags.embossing,
+      leafing: flags.leafing,
     },
     tooling: {
       dieMasterId: c.dieMasterId ?? null,
