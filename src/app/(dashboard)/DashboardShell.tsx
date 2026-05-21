@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useSession } from 'next-auth/react'
+import { useSession, signOut } from 'next-auth/react'
 import type { LucideIcon } from 'lucide-react'
 import {
   Bell,
@@ -15,6 +15,7 @@ import {
   FileText,
   Layers,
   LayoutGrid,
+  LogOut,
   Menu,
   Printer,
   Scale,
@@ -470,6 +471,16 @@ export function DashboardShell({
                       {formatRoleLabel(userRole)}
                     </span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => void signOut({ callbackUrl: '/login' })}
+                    className="ml-1 inline-flex items-center gap-1.5 rounded-ds-sm border border-[var(--border)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]"
+                    aria-label="Sign out"
+                    title="Sign out"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span className="hidden lg:inline">Sign out</span>
+                  </button>
                 </div>
                 <button
                   type="button"
@@ -638,6 +649,23 @@ export function DashboardShell({
                   </div>
                 ),
               )}
+              <div className="mt-2 border-t border-[var(--border)] pt-2">
+                <div className="px-[10px] pb-1">
+                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">{userName ?? 'User'}</p>
+                  <p className="truncate text-xs text-[var(--text-secondary)]">{formatRoleLabel(userRole)}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileOpen(false)
+                    void signOut({ callbackUrl: '/login' })
+                  }}
+                  className="flex w-full items-center gap-2 rounded-ds-sm py-[6px] px-[10px] text-sm font-medium text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--bg-muted)]"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sign out
+                </button>
+              </div>
             </div>
           </div>
         ) : null}
