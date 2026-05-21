@@ -13,6 +13,8 @@ type Props = {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
   onPatch: SectionPatchFn
+  /** Link the line to a board material — flows board type/GSM/size up into Board allocation. */
+  onSelectBoard?: (materialId: string) => Promise<void>
 }
 
 const nf = new Intl.NumberFormat('en-IN')
@@ -129,14 +131,45 @@ function SmartMatchEmptyState({
   )
 }
 
-function BoardOptionCard({ opt, rank }: { opt: PlanningEngineBoardOption; rank: number }) {
+function BoardOptionCard({
+  opt,
+  rank,
+  selected,
+  onSelect,
+}: {
+  opt: PlanningEngineBoardOption
+  rank: number
+  selected: boolean
+  onSelect?: (materialId: string) => void
+}) {
   const t = statusClass(opt.status)
   const boardLabel = [opt.boardType, opt.gsm != null ? `${opt.gsm} gsm` : null]
     .filter(Boolean)
     .join(' · ') || opt.materialCode
 
+  const clickable = !!onSelect && !!opt.materialId
+
   return (
-    <div className={`rounded-ds-md border p-3.5 ${t.ring}`}>
+    <div
+      className={`rounded-ds-md border p-3.5 ${t.ring}${
+        clickable ? ' cursor-pointer hover:border-ds-brand/50 transition-colors' : ''
+      }${selected ? ' ring-2 ring-ds-brand/60' : ''}`}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-pressed={clickable ? selected : undefined}
+      aria-label={clickable ? `Select board ${boardLabel}` : undefined}
+      onClick={clickable ? () => onSelect?.(opt.materialId) : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onSelect?.(opt.materialId)
+              }
+            }
+          : undefined
+      }
+    >
       <div className="flex items-start justify-between gap-3 mb-1.5">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-ds-ink truncate">
@@ -197,7 +230,7 @@ function BoardOptionCard({ opt, rank }: { opt: PlanningEngineBoardOption; rank: 
   )
 }
 
-export function SectionSmartMatch({ line, readiness, onPatch: _onPatch }: Props) {
+export function SectionSmartMatch({ line, readiness, onPatch: _onPatch, onSelectBoard }: Props) {
   const scored = line.smartMatch?.suggestions ?? []
   const matchedOn = line.smartMatch?.matchedOn ?? null
   const materialCode = line.smartMatch?.materialCode ?? readiness?.materialCode ?? null
@@ -207,13 +240,17 @@ export function SectionSmartMatch({ line, readiness, onPatch: _onPatch }: Props)
   const fallbackOptions = readiness?.closestAvailableOptions ?? []
   const boardOptions = strictOptions.length > 0 ? strictOptions : fallbackOptions
   const usingFallback = strictOptions.length === 0 && fallbackOptions.length > 0
+  const selectedMaterialId = readiness?.materialId ?? null
+  const handleSelect = onSelectBoard ? (materialId: string) => { void onSelectBoard(materialId) } : undefined
 
   return (
     <CardSection title="SMART MATCH">
       <div className="flex items-center justify-between text-xs text-ds-ink-faint mb-2.5">
         <span>
           {boardOptions.length > 0
-            ? `${boardOptions.length} board ${boardOptions.length === 1 ? 'match' : 'matches'}${usingFallback ? ' · compatible' : ''}`
+            ? `${boardOptions.length} board ${boardOptions.length === 1 ? 'match' : 'matches'}${usingFallback ? ' · compatible' : ''}${
+                handleSelect && scored.length === 0 ? ' · tap to link' : ''
+              }`
             : ''}
         </span>
         <span>
@@ -262,7 +299,13 @@ export function SectionSmartMatch({ line, readiness, onPatch: _onPatch }: Props)
       ) : boardOptions.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {boardOptions.slice(0, 4).map((opt, idx) => (
-            <BoardOptionCard key={opt.materialId || `${opt.materialCode}-${idx}`} opt={opt} rank={idx + 1} />
+            <BoardOptionCard
+              key={opt.materialId || `${opt.materialCode}-${idx}`}
+              opt={opt}
+              rank={idx + 1}
+              selected={!!selectedMaterialId && opt.materialId === selectedMaterialId}
+              onSelect={handleSelect}
+            />
           ))}
         </div>
       ) : (

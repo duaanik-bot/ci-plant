@@ -1431,7 +1431,15 @@ export function PlanningJobDetailDrawer({
         line={line as unknown as PlanningEngineLine}
         readiness={readiness as unknown as PlanningEngineReadiness | null}
         readinessLoading={readinessLoading}
-        onPatch={async (patch) => onSaveLine(line.id, patch)}
+        onPatch={async (patch) => {
+          // Optimistically reflect the edit in the grid row so derived tiles
+          // (board type / GSM / sheet size / UPS) update immediately, then persist.
+          updateRow(line.id, patch as Partial<PlanningGridLine>)
+          return onSaveLine(line.id, patch)
+        }}
+        onSelectBoard={async (materialId) => {
+          await lockSelectionOnly(materialId)
+        }}
         onLock={async () => {
           // Phase 2.4 wires this to /api/planning/po-lines/:id/lock-decision.
           await onSave(line.id)

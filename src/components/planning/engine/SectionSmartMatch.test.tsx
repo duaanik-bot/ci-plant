@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
 import { SectionSmartMatch } from './SectionSmartMatch'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
 
@@ -86,5 +86,25 @@ describe('SectionSmartMatch', () => {
     expect(screen.getByText(/#1 · FBB · 100 gsm/)).toBeInTheDocument()
     expect(screen.getByText('Best Yield')).toBeInTheDocument()
     expect(screen.getByLabelText('Yield sub-score 78')).toBeInTheDocument()
+  })
+
+  it('calls onSelectBoard when a board option card is clicked', () => {
+    const onSelectBoard = vi.fn().mockResolvedValue(undefined)
+    const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
+    const withOptions: PlanningEngineReadiness = {
+      ...readiness,
+      materialId: null,
+      suggestedBoardOptions: [
+        {
+          materialId: 'opt1', materialCode: 'ITC-FBB-100', boardType: 'FBB', gsm: 100,
+          size: '720×1020', freeSheets: 1240, availableSheets: 1240, requiredParentSheets: 4800,
+          shortageParentSheets: 3560, wastagePct: 12, yieldPct: 78, cutsPerSheet: 6,
+          matchType: 'Direct Size', status: 'Partial', tags: ['Best Yield'], gsmDelta: 0,
+        },
+      ],
+    }
+    render(<SectionSmartMatch line={empty} readiness={withOptions} onPatch={async () => true} onSelectBoard={onSelectBoard} />)
+    fireEvent.click(screen.getByRole('button', { name: /Select board FBB/ }))
+    expect(onSelectBoard).toHaveBeenCalledWith('opt1')
   })
 })

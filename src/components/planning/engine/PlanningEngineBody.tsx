@@ -12,6 +12,8 @@ export type PlanningEngineBodyProps = {
   readinessLoading: boolean
   onPatch: SectionPatchFn
   onLock: () => Promise<void>
+  /** Link the line to a board material — drives Board allocation + Smart Match selection. */
+  onSelectBoard?: (materialId: string) => Promise<void>
 }
 
 /**
@@ -31,6 +33,7 @@ export function PlanningEngineBody({
   readinessLoading,
   onPatch,
   onLock,
+  onSelectBoard,
 }: PlanningEngineBodyProps) {
   return (
     <div className="space-y-4">
@@ -39,12 +42,13 @@ export function PlanningEngineBody({
         readiness={readiness}
         readinessLoading={readinessLoading}
         onPatch={onPatch}
+        onSelectBoard={onSelectBoard}
       />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SectionUpsAndSpec line={line} onPatch={onPatch} />
         <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
       </div>
-      <SectionSmartMatch line={line} readiness={readiness} onPatch={onPatch} />
+      <SectionSmartMatch line={line} readiness={readiness} onPatch={onPatch} onSelectBoard={onSelectBoard} />
     </div>
   )
 }

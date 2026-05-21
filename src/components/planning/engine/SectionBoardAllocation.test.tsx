@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
 import { SectionBoardAllocation } from './SectionBoardAllocation'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
 
@@ -32,11 +32,12 @@ const readinessWithShortage: PlanningEngineReadiness = {
 }
 
 describe('SectionBoardAllocation', () => {
-  it('renders board, GSM, sheet size and required sheets', () => {
+  it('renders board, GSM, sheet size and UPS as editable fields plus required sheets', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
-    expect(screen.getByText('FBB')).toBeInTheDocument()
-    expect(screen.getByText('100 gsm')).toBeInTheDocument()
-    expect(screen.getByText('720×1020 mm')).toBeInTheDocument()
+    expect(screen.getByLabelText('Board type')).toHaveValue('FBB')
+    expect(screen.getByLabelText('GSM')).toHaveValue(100)
+    expect(screen.getByLabelText('Sheet size')).toHaveValue('720×1020 mm')
+    expect(screen.getByLabelText('Units per sheet')).toHaveValue(4)
     expect(screen.getByText('4,800 sh')).toBeInTheDocument()
   })
 
@@ -115,6 +116,56 @@ describe('SectionBoardAllocation', () => {
     } as unknown as PlanningEngineLine
     render(<SectionBoardAllocation line={legacyLine} readiness={null} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.queryByText(/spec incomplete/i)).toBeNull()
+  })
+
+  it('commits an edited board type via onPatch on blur', () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={onPatch} />)
+    const input = screen.getByLabelText('Board type')
+    fireEvent.change(input, { target: { value: 'SBS' } })
+    fireEvent.blur(input)
+    expect(onPatch).toHaveBeenCalledWith(expect.objectContaining({ paperType: 'SBS' }))
+  })
+
+  it('links board type + GSM from the carton master', () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    const lineWithCarton = {
+      ...baseLine,
+      paperType: null,
+      gsm: null,
+      materialQueue: null,
+      carton: { paperType: 'SBS', gsm: 300 },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithCarton} readiness={null} readinessLoading={false} onPatch={onPatch} />)
+    fireEvent.click(screen.getByRole('button', { name: /Carton master/ }))
+    expect(onPatch).toHaveBeenCalledWith(expect.objectContaining({ paperType: 'SBS', gsm: 300 }))
+  })
+
+  it('offers board-master options that call onSelectBoard', () => {
+    const onSelectBoard = vi.fn().mockResolvedValue(undefined)
+    const readinessWithOptions: PlanningEngineReadiness = {
+      ...readinessWithShortage,
+      suggestedBoardOptions: [
+        {
+          materialId: 'opt1', materialCode: 'ITC-FBB-100', boardType: 'FBB', gsm: 100,
+          size: '720×1020', freeSheets: 1240, availableSheets: 1240, requiredParentSheets: 4800,
+          shortageParentSheets: 3560, wastagePct: 12, yieldPct: 78, cutsPerSheet: 6,
+          matchType: 'Direct Size', status: 'Partial', tags: [], gsmDelta: 0,
+        },
+      ],
+    }
+    render(
+      <SectionBoardAllocation
+        line={baseLine}
+        readiness={readinessWithOptions}
+        readinessLoading={false}
+        onPatch={async () => true}
+        onSelectBoard={onSelectBoard}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Board master/ }))
+    fireEvent.click(screen.getByText(/FBB · 100 gsm · 720×1020/))
+    expect(onSelectBoard).toHaveBeenCalledWith('opt1')
   })
 
   it('renders procurement suggestion suggestedSheets when shortageSheets > 0 and procurementSuggestion present', () => {

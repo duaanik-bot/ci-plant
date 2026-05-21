@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
+import { readPlanningCore } from '@/lib/planning-decision-spec'
 import type { PlanningEngineLine, SectionPatchFn } from './types'
 
 type Props = {
@@ -63,7 +64,13 @@ function SegmentedPill<T extends string>({
 export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
   const bd = line.batchDecision
   const status = (bd?.status ?? 'Draft') as Status | 'Locked'
-  const layoutType = bd?.layoutType ?? 'Gang'
+  // Layout defaults to Single; a line that belongs to a multi-line mix-set defaults to Gang.
+  // An explicit saved layout (view-model or planningCore) always wins.
+  const core = readPlanningCore(line.specOverrides ?? null)
+  const isMultiLineSet = !!core.masterSetId && (core.mixSetMemberIds?.length ?? 0) > 1
+  const savedLayout =
+    bd?.layoutType ?? (core.layoutType === 'gang' ? 'Gang' : core.layoutType === 'single' ? 'Single' : null)
+  const layoutType: 'Gang' | 'Single' = savedLayout ?? (isMultiLineSet ? 'Gang' : 'Single')
   const setNumber = bd?.setNumber ?? null
   const setAuto = !!bd?.setNumberAuto
   const designerOptions = bd?.designerOptions ?? []
@@ -82,8 +89,16 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
     try { await onLock() } finally { setLocking(false) }
   }
 
-  // Patch wiring stays a stub until the PATCH endpoint in Phase 2.3 accepts these fields.
-  void onPatch
+  const persistLayout = (next: 'Gang' | 'Single') => {
+    if (locked || next === layoutType) return
+    const spec = { ...((line.specOverrides ?? {}) as Record<string, unknown>) }
+    const pc = {
+      ...(typeof spec.planningCore === 'object' && spec.planningCore ? (spec.planningCore as Record<string, unknown>) : {}),
+    }
+    pc.layoutType = next === 'Gang' ? 'gang' : 'single'
+    spec.planningCore = pc
+    void onPatch({ specOverrides: spec })
+  }
 
   return (
     <CardSection title="BATCH DECISION">
@@ -104,9 +119,9 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
             <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Layout type</div>
             <SegmentedPill
               value={layoutType}
-              options={['Gang', 'Single'] as const}
+              options={['Single', 'Gang'] as const}
               ariaLabel="Layout type"
-              onChange={() => {/* Phase 2.3 */}}
+              onChange={persistLayout}
             />
           </div>
           <div>
