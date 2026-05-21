@@ -14,6 +14,17 @@ export type PlanningEngineBodyProps = {
   onLock: () => Promise<void>
   /** Link the line to a board material — drives Board allocation + Smart Match selection. */
   onSelectBoard?: (materialId: string) => Promise<void>
+  /**
+   * Reserve the matched material against this line's requirement.
+   * Wires to POST /api/planning/po-lines/:id/reserve-material with actionType='reserve'.
+   * When undefined the Reserve button is hidden.
+   */
+  onReserve?: () => Promise<void>
+  /**
+   * Raise a draft Purchase Request for the shortage on this line.
+   * When undefined the Raise PR button is hidden in the shortage banner.
+   */
+  onRaisePR?: () => Promise<void>
 }
 
 /**
@@ -21,11 +32,11 @@ export type PlanningEngineBodyProps = {
  * decision-critical block first, then spec, then commit.
  *
  *   ┌──────────────── Board allocation ────────────────┐  (full width)
- *   ├─── UPS & spec ───┬─── Batch decision ────────────┤  (2-col)
+ *   ├─── Sheet metrics ─┬─── Batch decision ───────────┤  (2-col)
  *   └──────────────── Smart match ─────────────────────┘  (full width)
  *
- * Smart match sits at the bottom because its content varies wildly —
- * empty (compact guidance) or 3–4 rich cards (deserves full width).
+ * All four sections are wrapped in React.memo internally — re-renders are
+ * isolated to the section whose props actually changed.
  */
 export function PlanningEngineBody({
   line,
@@ -34,6 +45,8 @@ export function PlanningEngineBody({
   onPatch,
   onLock,
   onSelectBoard,
+  onReserve,
+  onRaisePR,
 }: PlanningEngineBodyProps) {
   return (
     <div className="space-y-4">
@@ -43,12 +56,19 @@ export function PlanningEngineBody({
         readinessLoading={readinessLoading}
         onPatch={onPatch}
         onSelectBoard={onSelectBoard}
+        onReserve={onReserve}
+        onRaisePR={onRaisePR}
       />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SectionUpsAndSpec line={line} onPatch={onPatch} />
         <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
       </div>
-      <SectionSmartMatch line={line} readiness={readiness} onPatch={onPatch} onSelectBoard={onSelectBoard} />
+      <SectionSmartMatch
+        line={line}
+        readiness={readiness}
+        onPatch={onPatch}
+        onSelectBoard={onSelectBoard}
+      />
     </div>
   )
 }

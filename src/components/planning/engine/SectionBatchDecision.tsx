@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -30,12 +30,14 @@ function SegmentedPill<T extends string>({
   labels,
   onChange,
   ariaLabel,
+  disabled,
 }: {
   value: T
   options: readonly T[]
   labels?: Record<string, string>
   onChange: (v: T) => void
   ariaLabel: string
+  disabled?: boolean
 }) {
   return (
     <div role="group" aria-label={ariaLabel} className="inline-flex flex-wrap items-center gap-1">
@@ -46,11 +48,12 @@ function SegmentedPill<T extends string>({
             key={opt}
             type="button"
             aria-pressed={selected}
+            disabled={disabled}
             onClick={() => onChange(opt)}
             className={
               selected
-                ? 'rounded-full border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 px-3 py-1 text-xs font-semibold'
-                : 'rounded-full border border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink px-3 py-1 text-xs font-medium'
+                ? 'rounded-full border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 px-3 py-1 text-xs font-semibold disabled:opacity-60'
+                : 'rounded-full border border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink px-3 py-1 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed'
             }
           >
             {labels?.[opt] ?? opt}
@@ -61,11 +64,30 @@ function SegmentedPill<T extends string>({
   )
 }
 
-export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
+/** Persist a planningCore key into specOverrides. */
+function patchPlanningCore(
+  line: PlanningEngineLine,
+  key: string,
+  value: unknown,
+): Parameters<SectionPatchFn>[0] {
+  const spec = { ...((line.specOverrides ?? {}) as Record<string, unknown>) }
+  const pc = {
+    ...(typeof spec.planningCore === 'object' && spec.planningCore
+      ? (spec.planningCore as Record<string, unknown>)
+      : {}),
+  }
+  pc[key] = value
+  spec.planningCore = pc
+  return { specOverrides: spec }
+}
+
+export const SectionBatchDecision = memo(function SectionBatchDecision({
+  line,
+  onPatch,
+  onLock,
+}: Props) {
   const bd = line.batchDecision
   const status = (bd?.status ?? 'Draft') as Status | 'Locked'
-  // Layout defaults to Single; a line that belongs to a multi-line mix-set defaults to Gang.
-  // An explicit saved layout (view-model or planningCore) always wins.
   const core = readPlanningCore(line.specOverrides ?? null)
   const isMultiLineSet = !!core.masterSetId && (core.mixSetMemberIds?.length ?? 0) > 1
   const savedLayout =
@@ -83,80 +105,149 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
   const blockers = readinessFive?.blockers ?? []
   const canLock = readinessFive?.allReady === true && !locked
 
-  const handleLock = async () => {
+  // ── Controlled Set Number ─────────────────────────────────────────────────
+  const [setNumberDraft, setSetNumberDraft] = useState(setNumber ?? '')
+
+  // Sync when the line reloads
+  useEffect(() => {
+    setSetNumberDraft(setNumber ?? '')
+  }, [setNumber])
+
+  const commitSetNumber = useCallback(() => {
+    const v = setNumberDraft.trim() || null
+    if (v === setNumber) return
+    void onPatch(patchPlanningCore(line, 'setNumber', v))
+  }, [setNumberDraft, setNumber, line, onPatch])
+
+  // ── Status persist ────────────────────────────────────────────────────────
+  const persistStatus = useCallback(
+    (next: Status) => {
+      if (locked || next === (status as Status)) return
+      void onPatch(patchPlanningCore(line, 'status', next))
+    },
+    [locked, status, line, onPatch],
+  )
+
+  // ── Layout persist ────────────────────────────────────────────────────────
+  const persistLayout = useCallback(
+    (next: 'Gang' | 'Single') => {
+      if (locked || next === layoutType) return
+      void onPatch(patchPlanningCore(line, 'layoutType', next === 'Gang' ? 'gang' : 'single'))
+    },
+    [locked, layoutType, line, onPatch],
+  )
+
+  // ── Designer persist ──────────────────────────────────────────────────────
+  const persistDesigner = useCallback(
+    (next: string) => {
+      if (locked || next === designerId) return
+      void onPatch(patchPlanningCore(line, 'designerKey', next || null))
+    },
+    [locked, designerId, line, onPatch],
+  )
+
+  const handleLock = useCallback(async () => {
     if (!canLock || locking) return
     setLocking(true)
-    try { await onLock() } finally { setLocking(false) }
-  }
-
-  const persistLayout = (next: 'Gang' | 'Single') => {
-    if (locked || next === layoutType) return
-    const spec = { ...((line.specOverrides ?? {}) as Record<string, unknown>) }
-    const pc = {
-      ...(typeof spec.planningCore === 'object' && spec.planningCore ? (spec.planningCore as Record<string, unknown>) : {}),
+    try {
+      await onLock()
+    } finally {
+      setLocking(false)
     }
-    pc.layoutType = next === 'Gang' ? 'gang' : 'single'
-    spec.planningCore = pc
-    void onPatch({ specOverrides: spec })
-  }
+  }, [canLock, locking, onLock])
 
   return (
     <CardSection title="BATCH DECISION">
       <div className="space-y-3">
+        {/* Status */}
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Status</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">
+            Status
+          </div>
           <SegmentedPill
             value={status === 'Locked' ? 'Released' : (status as Status)}
             options={STATUSES}
             labels={STATUS_LABEL}
             ariaLabel="Decision status"
-            onChange={() => {/* Phase 2.3 */}}
+            disabled={locked}
+            onChange={persistStatus}
           />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
+          {/* Layout type */}
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Layout type</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">
+              Layout type
+            </div>
             <SegmentedPill
               value={layoutType}
               options={['Single', 'Gang'] as const}
               ariaLabel="Layout type"
+              disabled={locked}
               onChange={persistLayout}
             />
           </div>
+
+          {/* Set number — controlled input, commits on blur / Enter */}
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Set number</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">
+              Set number
+            </div>
             <div className="flex items-center gap-1.5">
               <input
                 type="text"
-                defaultValue={setNumber ?? ''}
+                value={setNumberDraft}
                 aria-label="Set number"
-                className="w-full bg-ds-elevated border border-ds-line/40 rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none tabular-nums"
+                disabled={locked}
+                onChange={(e) => setSetNumberDraft(e.target.value)}
+                onBlur={commitSetNumber}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                }}
+                className="w-full bg-ds-elevated border border-ds-line/40 rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none tabular-nums disabled:opacity-50"
               />
-              {setAuto ? <Badge tone="neutral" className="text-[9px]">auto</Badge> : null}
+              {setAuto ? (
+                <Badge tone="neutral" className="text-[9px]">
+                  auto
+                </Badge>
+              ) : null}
             </div>
           </div>
         </div>
 
+        {/* Designer */}
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Designer</div>
-          <SegmentedPill
-            value={designerId ?? ''}
-            options={designerOptions.map((d) => d.id) as readonly string[]}
-            labels={Object.fromEntries(designerOptions.map((d) => [d.id, d.name]))}
-            ariaLabel="Designer"
-            onChange={() => {/* Phase 2.3 */}}
-          />
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">
+            Designer
+          </div>
+          {designerOptions.length > 0 ? (
+            <SegmentedPill
+              value={designerId ?? ''}
+              options={designerOptions.map((d) => d.id) as readonly string[]}
+              labels={Object.fromEntries(designerOptions.map((d) => [d.id, d.name]))}
+              ariaLabel="Designer"
+              disabled={locked}
+              onChange={persistDesigner}
+            />
+          ) : (
+            <div className="text-xs text-ds-ink-faint italic">No designers configured</div>
+          )}
         </div>
 
+        {/* Press assignment */}
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">Press assignment</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">
+            Press assignment
+          </div>
           {press ? (
             <div className="rounded-ds-md border border-ds-line/40 bg-ds-elevated p-3">
               <div className="flex items-center justify-between mb-1">
                 <div className="text-sm font-semibold text-ds-ink">{press.code}</div>
                 {press.smartPicked ? (
-                  <Badge tone="success" className="text-[9px]">Smart pick</Badge>
+                  <Badge tone="success" className="text-[9px]">
+                    Smart pick
+                  </Badge>
                 ) : null}
               </div>
               <div className="grid grid-cols-3 gap-2 text-xs text-ds-ink-faint tabular-nums">
@@ -181,6 +272,7 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
           )}
         </div>
 
+        {/* Lock row */}
         <div className="flex items-center justify-between gap-3 pt-1">
           <div className="text-xs text-ds-ink-faint min-h-[16px]">
             {locked
@@ -193,7 +285,9 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
           </div>
           <Button
             type="button"
-            onClick={() => { void handleLock() }}
+            onClick={() => {
+              void handleLock()
+            }}
             disabled={!canLock || locking}
             aria-label="Save & lock"
           >
@@ -203,4 +297,4 @@ export function SectionBatchDecision({ line, onPatch, onLock }: Props) {
       </div>
     </CardSection>
   )
-}
+})

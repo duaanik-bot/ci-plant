@@ -1,20 +1,19 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { memo, useMemo } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
-import { Badge } from '@/components/design-system/Badge'
-import { readPlanningMeta, mergePlanningMetaUps } from '@/lib/planning-decision-spec'
 import { resolveUps } from '@/lib/production-os-resolvers'
 import type { PlanningEngineLine, SectionPatchFn } from './types'
 
 type Props = {
   line: PlanningEngineLine
+  // onPatch kept in props for future BPI / make-ready overrides; unused here.
   onPatch: SectionPatchFn
 }
 
 const nf = new Intl.NumberFormat('en-IN')
 
-function MetricTile({
+const MetricTile = memo(function MetricTile({
   label,
   value,
   hint,
@@ -27,64 +26,45 @@ function MetricTile({
 }) {
   return (
     <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
-      <div className={`text-base font-semibold leading-tight mt-1 ${emphasisClass ?? 'text-ds-ink'}`}>{value}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+        {label}
+      </div>
+      <div className={`text-base font-semibold leading-tight mt-1 ${emphasisClass ?? 'text-ds-ink'}`}>
+        {value}
+      </div>
       {hint ? <div className="text-xs text-ds-ink-faint mt-1 leading-snug">{hint}</div> : null}
     </div>
   )
-}
+})
 
-function computeSheetYield(line: PlanningEngineLine, ups: number | null): number | null {
-  const qty = Number(line.quantity ?? 0)
-  const required = Number(line.planningLedger?.boardStockInsight?.requiredSheets ?? 0)
-  if (!ups || !qty || !required) return null
-  const yieldPct = (qty / (ups * required)) * 100
-  if (!Number.isFinite(yieldPct)) return null
-  return Math.max(0, Math.min(100, yieldPct))
-}
+export const SectionUpsAndSpec = memo(function SectionUpsAndSpec({ line }: Props) {
+  const ups = useMemo(
+    () => (line.upsAndSpec?.ups ?? resolveUps(line) ?? null) as number | null,
+    [line],
+  )
 
-export function SectionUpsAndSpec({ line, onPatch }: Props) {
-  const meta = readPlanningMeta(line.specOverrides ?? null)
-  const upsSourceManual = meta?.upsSource === 'manual'
-  const initialUps = (line.upsAndSpec?.ups ?? resolveUps(line) ?? null) as number | null
+  // Sheet yield — use pre-computed view-model value; fall back to deriving it.
+  const sheetYield = useMemo(() => {
+    if (line.upsAndSpec?.sheetYieldPct != null) return line.upsAndSpec.sheetYieldPct
+    const qty = Number(line.quantity ?? 0)
+    const required = Number(line.planningLedger?.boardStockInsight?.requiredSheets ?? 0)
+    if (!ups || !qty || !required) return null
+    const pct = (qty / (ups * required)) * 100
+    return Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null
+  }, [line, ups])
 
-  const [upsDraft, setUpsDraft] = useState<string>(initialUps != null ? String(initialUps) : '')
-
-  useEffect(() => {
-    setUpsDraft(initialUps != null ? String(initialUps) : '')
-  }, [initialUps])
-
-  const persistUps = async () => {
-    const next = upsDraft.trim() === '' ? null : Math.max(1, Math.floor(Number(upsDraft) || 0))
-    if (next === initialUps) return
-    const nextSpec = mergePlanningMetaUps((line.specOverrides ?? {}) as Record<string, unknown>, next)
-    await onPatch({ specOverrides: nextSpec })
-  }
-
-  const ups = initialUps
-  const sheetYield = line.upsAndSpec?.sheetYieldPct ?? computeSheetYield(line, ups)
   const makeReady = line.upsAndSpec?.makeReady
   const bpi = line.upsAndSpec?.bpi
 
   return (
-    <CardSection title="UPS & SHEET SPEC">
+    <CardSection title="SHEET METRICS">
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">Units per sheet</div>
-            {!upsSourceManual ? <Badge tone="success" className="text-[9px]">Auto</Badge> : null}
-          </div>
-          <input
-            type="number"
-            min={1}
-            inputMode="numeric"
-            value={upsDraft}
-            onChange={(e) => setUpsDraft(e.target.value)}
-            onBlur={() => { void persistUps() }}
-            aria-label="Units per sheet"
-            className="w-full bg-transparent text-base font-semibold text-ds-ink outline-none tabular-nums"
-          />
-        </div>
+        {/* UPS — read-only here; editable in Board Allocation (adjacent to sheet size). */}
+        <MetricTile
+          label="Units per sheet"
+          value={ups != null ? ups : '—'}
+          hint="Edit in Board Allocation"
+        />
         <MetricTile
           label="Sheet yield"
           value={sheetYield != null ? `${sheetYield.toFixed(1)}%` : '—'}
@@ -95,7 +75,9 @@ export function SectionUpsAndSpec({ line, onPatch }: Props) {
           hint={
             makeReady
               ? `${makeReady.base} base${
-                  makeReady.colours ? ` + ${makeReady.colours.count}×${makeReady.colours.perColour}c` : ''
+                  makeReady.colours
+                    ? ` + ${makeReady.colours.count}×${makeReady.colours.perColour}c`
+                    : ''
                 }${makeReady.uv ? ` + ${makeReady.uv} UV` : ''}`
               : undefined
           }
@@ -119,4 +101,4 @@ export function SectionUpsAndSpec({ line, onPatch }: Props) {
       </div>
     </CardSection>
   )
-}
+})
