@@ -15,7 +15,8 @@ const createSchema = z.object({
   pin: z.string().min(1, 'PIN is required').pipe(pinSchema),
   roleId: z.string().uuid('Select a role'),
   machineAccess: z.array(z.string()).default([]),
-  whatsappNumber: z.string().optional(),
+  // Accept null (form clears the field) as well as string/undefined.
+  whatsappNumber: z.string().nullable().optional(),
   active: z.boolean().default(true),
 })
 
