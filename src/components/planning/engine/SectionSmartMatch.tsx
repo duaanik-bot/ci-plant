@@ -1,7 +1,7 @@
 'use client'
 
+import { memo, useCallback, useMemo } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
-import { Badge } from '@/components/design-system/Badge'
 import type {
   PlanningEngineBoardOption,
   PlanningEngineLine,
@@ -13,13 +13,15 @@ type Props = {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
   onPatch: SectionPatchFn
+  /** Link the line to a board material — flows board type/GSM/size up into Board allocation. */
+  onSelectBoard?: (materialId: string) => Promise<void>
 }
 
 const nf = new Intl.NumberFormat('en-IN')
 
 type SubScore = { label: string; value: number }
 
-function SubScoreBar({ label, value }: SubScore) {
+const SubScoreBar = memo(function SubScoreBar({ label, value }: SubScore) {
   const pct = Math.max(0, Math.min(100, value))
   const tone =
     pct >= 75 ? 'bg-emerald-400/80' : pct >= 55 ? 'bg-amber-400/80' : 'bg-red-400/80'
@@ -34,17 +36,19 @@ function SubScoreBar({ label, value }: SubScore) {
       </div>
     </div>
   )
-}
+})
 
 function tierClass(tier: 'High' | 'Medium' | 'Low'): { pill: string; ring: string } {
-  if (tier === 'High') return {
-    pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-    ring: 'border-emerald-500/30 bg-emerald-500/[0.04]',
-  }
-  if (tier === 'Medium') return {
-    pill: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-    ring: 'border-ds-line/40 bg-ds-elevated/40',
-  }
+  if (tier === 'High')
+    return {
+      pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+      ring: 'border-emerald-500/30 bg-emerald-500/[0.04]',
+    }
+  if (tier === 'Medium')
+    return {
+      pill: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+      ring: 'border-ds-line/40 bg-ds-elevated/40',
+    }
   return {
     pill: 'bg-red-500/15 text-red-300 border-red-500/30',
     ring: 'border-ds-line/40 bg-ds-elevated/40',
@@ -52,14 +56,16 @@ function tierClass(tier: 'High' | 'Medium' | 'Low'): { pill: string; ring: strin
 }
 
 function statusClass(status: PlanningEngineBoardOption['status']): { pill: string; ring: string } {
-  if (status === 'Ready') return {
-    pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-    ring: 'border-emerald-500/30 bg-emerald-500/[0.04]',
-  }
-  if (status === 'Partial') return {
-    pill: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-    ring: 'border-amber-500/40 bg-amber-500/[0.04]',
-  }
+  if (status === 'Ready')
+    return {
+      pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+      ring: 'border-emerald-500/30 bg-emerald-500/[0.04]',
+    }
+  if (status === 'Partial')
+    return {
+      pill: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+      ring: 'border-amber-500/40 bg-amber-500/[0.04]',
+    }
   return {
     pill: 'bg-red-500/15 text-red-300 border-red-500/30',
     ring: 'border-ds-line/40 bg-ds-elevated/40',
@@ -100,7 +106,7 @@ function deriveEmptyState(
   }
 }
 
-function SmartMatchEmptyState({
+const SmartMatchEmptyState = memo(function SmartMatchEmptyState({
   line,
   readiness,
 }: {
@@ -111,11 +117,8 @@ function SmartMatchEmptyState({
   const tone =
     empty.kind === 'spec-incomplete'
       ? 'border-amber-500/40 bg-amber-500/[0.06]'
-      : empty.kind === 'no-material'
-        ? 'border-ds-line bg-ds-elevated/60'
-        : 'border-ds-line bg-ds-elevated/60'
-  const titleTone =
-    empty.kind === 'spec-incomplete' ? 'text-amber-300' : 'text-ds-ink'
+      : 'border-ds-line bg-ds-elevated/60'
+  const titleTone = empty.kind === 'spec-incomplete' ? 'text-amber-300' : 'text-ds-ink'
   return (
     <div className={`rounded-ds-md border ${tone} px-4 py-3.5`}>
       <div className={`text-sm font-semibold ${titleTone}`}>{empty.title}</div>
@@ -127,16 +130,47 @@ function SmartMatchEmptyState({
       ) : null}
     </div>
   )
-}
+})
 
-function BoardOptionCard({ opt, rank }: { opt: PlanningEngineBoardOption; rank: number }) {
+const BoardOptionCard = memo(function BoardOptionCard({
+  opt,
+  rank,
+  selected,
+  onSelect,
+}: {
+  opt: PlanningEngineBoardOption
+  rank: number
+  selected: boolean
+  onSelect?: (materialId: string) => void
+}) {
   const t = statusClass(opt.status)
-  const boardLabel = [opt.boardType, opt.gsm != null ? `${opt.gsm} gsm` : null]
-    .filter(Boolean)
-    .join(' · ') || opt.materialCode
+  const boardLabel =
+    [opt.boardType, opt.gsm != null ? `${opt.gsm} gsm` : null].filter(Boolean).join(' · ') ||
+    opt.materialCode
+
+  const clickable = !!onSelect && !!opt.materialId
 
   return (
-    <div className={`rounded-ds-md border p-3.5 ${t.ring}`}>
+    <div
+      className={`rounded-ds-md border p-3.5 ${t.ring}${
+        clickable ? ' cursor-pointer hover:border-ds-brand/50 transition-colors' : ''
+      }${selected ? ' ring-2 ring-ds-brand/60' : ''}`}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-pressed={clickable ? selected : undefined}
+      aria-label={clickable ? `Select board ${boardLabel}` : undefined}
+      onClick={clickable ? () => onSelect?.(opt.materialId) : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onSelect?.(opt.materialId)
+              }
+            }
+          : undefined
+      }
+    >
       <div className="flex items-start justify-between gap-3 mb-1.5">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-ds-ink truncate">
@@ -195,25 +229,51 @@ function BoardOptionCard({ opt, rank }: { opt: PlanningEngineBoardOption; rank: 
       ) : null}
     </div>
   )
-}
+})
 
-export function SectionSmartMatch({ line, readiness, onPatch: _onPatch }: Props) {
+export const SectionSmartMatch = memo(function SectionSmartMatch({
+  line,
+  readiness,
+  onPatch: _onPatch,
+  onSelectBoard,
+}: Props) {
   const scored = line.smartMatch?.suggestions ?? []
   const matchedOn = line.smartMatch?.matchedOn ?? null
   const materialCode = line.smartMatch?.materialCode ?? readiness?.materialCode ?? null
   const confidence = line.smartMatch?.boardMatchConfidence ?? null
 
-  const strictOptions = readiness?.suggestedBoardOptions ?? []
-  const fallbackOptions = readiness?.closestAvailableOptions ?? []
-  const boardOptions = strictOptions.length > 0 ? strictOptions : fallbackOptions
-  const usingFallback = strictOptions.length === 0 && fallbackOptions.length > 0
+  // Memoised — avoid re-deriving on every parent render
+  const boardOptions = useMemo(() => {
+    const strict = readiness?.suggestedBoardOptions ?? []
+    const fallback = readiness?.closestAvailableOptions ?? []
+    return strict.length > 0 ? strict : fallback
+  }, [readiness])
+
+  const usingFallback = useMemo(
+    () =>
+      (readiness?.suggestedBoardOptions?.length ?? 0) === 0 &&
+      (readiness?.closestAvailableOptions?.length ?? 0) > 0,
+    [readiness],
+  )
+
+  const selectedMaterialId = readiness?.materialId ?? null
+
+  // Stable callback — won't cause BoardOptionCard to re-render on every parent render
+  const handleSelect = useCallback(
+    (materialId: string) => {
+      void onSelectBoard?.(materialId)
+    },
+    [onSelectBoard],
+  )
 
   return (
     <CardSection title="SMART MATCH">
       <div className="flex items-center justify-between text-xs text-ds-ink-faint mb-2.5">
         <span>
           {boardOptions.length > 0
-            ? `${boardOptions.length} board ${boardOptions.length === 1 ? 'match' : 'matches'}${usingFallback ? ' · compatible' : ''}`
+            ? `${boardOptions.length} board ${boardOptions.length === 1 ? 'match' : 'matches'}${usingFallback ? ' · compatible' : ''}${
+                onSelectBoard && scored.length === 0 ? ' · tap to link' : ''
+              }`
             : ''}
         </span>
         <span>
@@ -236,7 +296,9 @@ export function SectionSmartMatch({ line, readiness, onPatch: _onPatch }: Props)
                       {s.poRefs.join(' · ')} + this line
                     </div>
                   </div>
-                  <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${t.pill}`}>
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${t.pill}`}
+                  >
                     {s.tier} · <span className="tabular-nums">{s.composite.toFixed(1)}</span>
                   </span>
                 </div>
@@ -262,7 +324,13 @@ export function SectionSmartMatch({ line, readiness, onPatch: _onPatch }: Props)
       ) : boardOptions.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {boardOptions.slice(0, 4).map((opt, idx) => (
-            <BoardOptionCard key={opt.materialId || `${opt.materialCode}-${idx}`} opt={opt} rank={idx + 1} />
+            <BoardOptionCard
+              key={opt.materialId || `${opt.materialCode}-${idx}`}
+              opt={opt}
+              rank={idx + 1}
+              selected={!!selectedMaterialId && opt.materialId === selectedMaterialId}
+              onSelect={onSelectBoard ? handleSelect : undefined}
+            />
           ))}
         </div>
       ) : (
@@ -295,4 +363,4 @@ export function SectionSmartMatch({ line, readiness, onPatch: _onPatch }: Props)
       ) : null}
     </CardSection>
   )
-}
+})

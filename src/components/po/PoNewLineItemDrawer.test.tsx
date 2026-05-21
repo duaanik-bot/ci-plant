@@ -14,7 +14,7 @@ const baseLine = {
   foilType: '', remarks: '', dieMasterId: '', toolingDieType: '', toolingDims: '',
   toolingUnlinked: false, pastingStyle: 'BSO', masterPastingStyleMissing: false,
   ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
-  specProvenance: { boardGrade: 'spec', paperType: 'master', gsm: 'override' },
+  specProvenance: { boardGrade: 'spec', coatingType: 'master', gsm: 'override' },
   specPackBase: { v: 1, board: { caliperMicrons: 450, plyCount: 1 },
     dimensions: { finishedL: 59 }, sheet: { ups: 6 }, print: {}, finishing: {},
     tooling: {}, linkage: {}, pharma: {}, source: {} },

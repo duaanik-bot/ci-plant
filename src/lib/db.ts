@@ -1,6 +1,25 @@
 // src/lib/db.ts — Prisma client singleton
 import { PrismaClient } from '@prisma/client'
 
+// --- Global BigInt JSON serialization fix ---
+// Postgres BIGINT columns (e.g. Machine.usageImpressionsSincePm) come back from
+// Prisma as native BigInt, which JSON.stringify / NextResponse.json cannot
+// serialize ("TypeError: Do not know how to serialize a BigInt"). Teach BigInt
+// how to serialize: as a Number when within safe-integer range, otherwise as a
+// string to avoid silent precision loss. Installed here because db.ts is imported
+// by every route that returns database data.
+if (typeof (BigInt.prototype as unknown as { toJSON?: unknown }).toJSON !== 'function') {
+  Object.defineProperty(BigInt.prototype, 'toJSON', {
+    value: function (this: bigint) {
+      return this >= BigInt(Number.MIN_SAFE_INTEGER) && this <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number(this)
+        : this.toString()
+    },
+    writable: true,
+    configurable: true,
+  })
+}
+
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient }
 
 const prisma = globalForPrisma.prisma ?? new PrismaClient({

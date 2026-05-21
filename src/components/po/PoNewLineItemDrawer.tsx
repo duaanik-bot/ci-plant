@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PastingStyle } from '@prisma/client'
-import { COATING_TYPES, EMBOSSING_TYPES, FOIL_TYPES, PAPER_TYPES, BOARD_GRADES } from '@/lib/constants'
+import { COATING_TYPES, FOIL_TYPES, BOARD_GRADES, PRINTING_TYPES } from '@/lib/constants'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PoLinePastingStyleCell } from '@/components/po/PoLinePastingStyleCell'
 import { CardSection } from '@/components/design-system/CardSection'
@@ -31,6 +31,15 @@ type Line = {
   paperType: string
   boardGrade: string
   foilType: string
+  printingType: string
+  numberOfColours: string
+  sheetSizeL: string
+  sheetSizeW: string
+  ups: string
+  spotUv: string
+  braille: string
+  embossing: string
+  leafing: string
   remarks: string
   dieMasterId: string
   toolingDieType: string
@@ -161,11 +170,7 @@ export function PoNewLineItemDrawer({
   // when a category has no values yet.
   const boardTypeMaster = useMaster(MASTER.BOARD_TYPE)
   const coatingMaster = useMaster(MASTER.COATING)
-  const embossMaster = useMaster(MASTER.EMBOSS)
   const foilMaster = useMaster(MASTER.FOIL)
-  const paperOptions = boardTypeMaster.options.length
-    ? boardTypeMaster.options.map((o) => o.label)
-    : (PAPER_TYPES as unknown as string[])
   // Board Classification is folded into Board Type (legacy behaviour).
   const boardGradeOptions = boardTypeMaster.options.length
     ? boardTypeMaster.options.map((o) => o.label)
@@ -173,9 +178,6 @@ export function PoNewLineItemDrawer({
   const coatingOptions = coatingMaster.options.length
     ? coatingMaster.options.map((o) => o.label)
     : (COATING_TYPES as unknown as string[])
-  const embossOptions = embossMaster.options.length
-    ? embossMaster.options.map((o) => o.label)
-    : (EMBOSSING_TYPES as unknown as string[])
   const foilOptions = foilMaster.options.length
     ? foilMaster.options.map((o) => o.label)
     : (FOIL_TYPES as unknown as string[])
@@ -299,7 +301,7 @@ export function PoNewLineItemDrawer({
           <p className="text-sm text-ds-ink-faint">No line selected.</p>
         ) : (
           <>
-            <CardSection id="po-sec-material" title="Material">
+            <CardSection id="po-sec-material" title="Specifications">
               {line.stockCarryForward ? (
                 <div className="rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300 sm:col-span-3">
                   FG stock available: {line.stockCarryForward.qtyFg.toLocaleString('en-IN')} {line.stockCarryForward.unit}
@@ -374,103 +376,156 @@ export function PoNewLineItemDrawer({
                   </label>
                 </div>
               ) : null}
-              <div>
-                <label className={labelSec}>Board<ProvBadge p={line.specProvenance?.boardGrade} /></label>
-                <div data-skip-po-enter-chain>
-                  <PackagingEnumCombobox
-                    aria-label="Board grade"
-                    options={boardGradeOptions}
-                    value={line.boardGrade || null}
-                    onChange={(v) => editField(lineIndex, 'boardGrade', v ?? '')}
-                    controlClassName={comboboxControl}
-                    inputClassName={comboboxInput}
-                    optionClassName={comboboxOptionReadable}
-                    className="w-full"
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <label className={labelSec}>Board grade<ProvBadge p={line.specProvenance?.boardGrade} /></label>
+                  <div data-skip-po-enter-chain>
+                    <PackagingEnumCombobox
+                      aria-label="Board grade"
+                      options={boardGradeOptions}
+                      value={line.boardGrade || null}
+                      onChange={(v) => editField(lineIndex, 'boardGrade', v ?? '')}
+                      controlClassName={comboboxControl}
+                      inputClassName={comboboxInput}
+                      optionClassName={comboboxOptionReadable}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelSec}>GSM<ProvBadge p={line.specProvenance?.gsm} /></label>
+                  <input
+                    type="number"
+                    value={line.gsm}
+                    onChange={(e) => {
+                      if (line.ghostFromMaster.gsm) {
+                        updateLine(lineIndex, {
+                          ghostFromMaster: { ...line.ghostFromMaster, gsm: false },
+                        })
+                      }
+                      editField(lineIndex, 'gsm', e.target.value)
+                    }}
+                    className={`w-full ${
+                      line.ghostFromMaster.gsm ? inputClsGhost : inputCls
+                    } ${poMono} ${inputReadable}`}
                   />
                 </div>
-              </div>
-              <div>
-                <label className={labelSec}>GSM<ProvBadge p={line.specProvenance?.gsm} /></label>
-                <input
-                  type="number"
-                  value={line.gsm}
-                  onChange={(e) => {
-                    if (line.ghostFromMaster.gsm) {
-                      updateLine(lineIndex, {
-                        ghostFromMaster: { ...line.ghostFromMaster, gsm: false },
-                      })
-                    }
-                    editField(lineIndex, 'gsm', e.target.value)
-                  }}
-                  className={`w-full ${
-                    line.ghostFromMaster.gsm ? inputClsGhost : inputCls
-                  } ${poMono} ${inputReadable}`}
-                />
-              </div>
-              <div>
-                <label className={labelSec}>Paper<ProvBadge p={line.specProvenance?.paperType} /></label>
-                <div data-skip-po-enter-chain>
-                  <PackagingEnumCombobox
-                    aria-label="Paper / board type"
-                    options={paperOptions}
-                    value={line.paperType || null}
-                    onChange={(v) => editField(lineIndex, 'paperType', v ?? '')}
-                    controlClassName={comboboxControl}
-                    inputClassName={comboboxInput}
-                    optionClassName={comboboxOptionReadable}
-                    className="w-full"
+                <div>
+                  <label className={labelSec}>Printing type<ProvBadge p={line.specProvenance?.printingType} /></label>
+                  <div data-skip-po-enter-chain>
+                    <PackagingEnumCombobox
+                      aria-label="Printing type"
+                      options={PRINTING_TYPES as unknown as string[]}
+                      value={line.printingType || null}
+                      onChange={(v) => editField(lineIndex, 'printingType', v ?? '')}
+                      controlClassName={comboboxControl}
+                      inputClassName={comboboxInput}
+                      optionClassName={comboboxOptionReadable}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelSec}>Coating spec<ProvBadge p={line.specProvenance?.coatingType} /></label>
+                  <div data-skip-po-enter-chain>
+                    <PackagingEnumCombobox
+                      aria-label="Coating"
+                      options={coatingOptions}
+                      value={line.coatingType || null}
+                      onChange={(v) => editField(lineIndex, 'coatingType', v ?? '')}
+                      controlClassName={comboboxControl}
+                      inputClassName={comboboxInput}
+                      optionClassName={comboboxOptionReadable}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelSec}>Colours<ProvBadge p={line.specProvenance?.numberOfColours} /></label>
+                  <input
+                    type="number"
+                    min={1}
+                    inputMode="numeric"
+                    value={line.numberOfColours}
+                    placeholder="e.g. 4"
+                    onChange={(e) => editField(lineIndex, 'numberOfColours', e.target.value)}
+                    className={`w-full ${inputCls} ${poMono} ${inputReadable}`}
                   />
                 </div>
+                <div>
+                  <label className={labelSec}>UPS<ProvBadge p={line.specProvenance?.ups} /></label>
+                  <input
+                    type="number"
+                    min={1}
+                    inputMode="numeric"
+                    value={line.ups}
+                    placeholder="e.g. 6"
+                    onChange={(e) => editField(lineIndex, 'ups', e.target.value)}
+                    className={`w-full ${inputCls} ${poMono} ${inputReadable}`}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className={labelSec}>Sheet size (L × W mm)</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      value={line.sheetSizeL}
+                      placeholder="Length"
+                      onChange={(e) => editField(lineIndex, 'sheetSizeL', e.target.value)}
+                      className={`w-full ${inputCls} ${poMono} ${inputReadable}`}
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      value={line.sheetSizeW}
+                      placeholder="Width"
+                      onChange={(e) => editField(lineIndex, 'sheetSizeW', e.target.value)}
+                      className={`w-full ${inputCls} ${poMono} ${inputReadable}`}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelSec}>Foil<ProvBadge p={line.specProvenance?.foilType} /></label>
+                  <div data-skip-po-enter-chain>
+                    <PackagingEnumCombobox
+                      aria-label="Foil"
+                      options={foilOptions}
+                      value={line.foilType || null}
+                      onChange={(v) => editField(lineIndex, 'foilType', v ?? '')}
+                      controlClassName={comboboxControl}
+                      inputClassName={comboboxInput}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-ds-ink-muted">
+                {([
+                  ['embossing', 'Embossing'],
+                  ['leafing', 'Leafing'],
+                  ['spotUv', 'Spot UV'],
+                  ['braille', 'Braille'],
+                ] as const).map(([field, label]) => (
+                  <label key={field} className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={line[field] === 'Yes'}
+                      onChange={(e) => editField(lineIndex, field, e.target.checked ? 'Yes' : 'No')}
+                      className="rounded border-ds-line/60"
+                    />
+                    {label}
+                  </label>
+                ))}
               </div>
             </CardSection>
 
-            <CardSection id="po-sec-print" title="Printing">
-              <div>
-                <label className={labelSec}>Coating<ProvBadge p={line.specProvenance?.coatingType} /></label>
-                <div data-skip-po-enter-chain>
-                  <PackagingEnumCombobox
-                    aria-label="Coating"
-                    options={coatingOptions}
-                    value={line.coatingType || null}
-                    onChange={(v) => editField(lineIndex, 'coatingType', v ?? '')}
-                    controlClassName={comboboxControl}
-                    inputClassName={comboboxInput}
-                    optionClassName={comboboxOptionReadable}
-                    className="w-full"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelSec}>Emboss / leafing<ProvBadge p={line.specProvenance?.embossingLeafing} /></label>
-                <div data-skip-po-enter-chain>
-                  <PackagingEnumCombobox
-                    aria-label="Embossing and leafing"
-                    options={embossOptions}
-                    value={line.embossingLeafing || null}
-                    onChange={(v) => editField(lineIndex, 'embossingLeafing', v ?? '')}
-                    controlClassName={comboboxControl}
-                    inputClassName={comboboxInput}
-                    optionClassName={comboboxOptionReadable}
-                    className="w-full"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelSec}>Foil<ProvBadge p={line.specProvenance?.foilType} /></label>
-                <div data-skip-po-enter-chain>
-                  <PackagingEnumCombobox
-                    aria-label="Foil"
-                    options={foilOptions}
-                    value={line.foilType || null}
-                    onChange={(v) => editField(lineIndex, 'foilType', v ?? '')}
-                    controlClassName={comboboxControl}
-                    inputClassName={comboboxInput}
-                    className="w-full"
-                  />
-                </div>
-              </div>
+            <CardSection id="po-sec-print" title="Pasting">
               <div data-skip-po-enter-chain className="space-y-1.5">
-                <label className={labelSec}>Pasting<ProvBadge p={line.specProvenance?.pastingStyle} /></label>
+                <label className={labelSec}>Pasting style<ProvBadge p={line.specProvenance?.pastingStyle} /></label>
                 <PoLinePastingStyleCell
                   lineIndex={lineIndex}
                   cartonId={line.cartonId}

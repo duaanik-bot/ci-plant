@@ -62,4 +62,29 @@ describe('SectionBatchDecision', () => {
     render(<SectionBatchDecision line={line} onPatch={async () => true} onLock={async () => {}} />)
     expect(screen.getByText(/No press assigned yet/i)).toBeInTheDocument()
   })
+
+  it('defaults layout to Single for a standalone line', () => {
+    const line = { ...baseLine, batchDecision: undefined, specOverrides: null } as unknown as PlanningEngineLine
+    render(<SectionBatchDecision line={line} onPatch={async () => true} onLock={async () => {}} />)
+    expect(screen.getByRole('button', { name: 'Single' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Gang' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('defaults layout to Gang for a multi-line mix-set', () => {
+    const line = {
+      ...baseLine,
+      batchDecision: undefined,
+      specOverrides: { planningCore: { masterSetId: 'MIX-1', mixSetMemberIds: ['a', 'b'] } },
+    } as unknown as PlanningEngineLine
+    render(<SectionBatchDecision line={line} onPatch={async () => true} onLock={async () => {}} />)
+    expect(screen.getByRole('button', { name: 'Gang' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('persists layoutType to planningCore when toggled', () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    const line = { ...baseLine, batchDecision: undefined, specOverrides: null } as unknown as PlanningEngineLine
+    render(<SectionBatchDecision line={line} onPatch={onPatch} onLock={async () => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Gang' }))
+    expect(onPatch).toHaveBeenCalledWith({ specOverrides: { planningCore: { layoutType: 'gang' } } })
+  })
 })

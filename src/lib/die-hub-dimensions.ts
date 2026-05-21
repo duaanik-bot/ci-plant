@@ -106,6 +106,53 @@ export function formatDimsLwhFromParsed(p: ParsedCartonDims): string {
   return `${p.l}×${p.w}×${p.h}`
 }
 
+/** Carton finished-dimension size label: `L×W×H` (3D) or `L×W` (2D leaflet). */
+export function sizeFromFinishedDims(c: {
+  finishedLength: unknown
+  finishedWidth: unknown
+  finishedHeight: unknown
+}): string {
+  const l = c.finishedLength != null ? Number(c.finishedLength) : null
+  const w = c.finishedWidth != null ? Number(c.finishedWidth) : null
+  const h = c.finishedHeight != null ? Number(c.finishedHeight) : null
+  if (l != null && w != null && h != null) return `${l}×${w}×${h}`
+  if (l != null && w != null) return `${l}×${w}`
+  return ''
+}
+
+/** Die-master derived size label (DB dims preferred, else parsed cartonSize text). */
+export function dieMasterDimsLabel(
+  die:
+    | { dimLengthMm: unknown; dimWidthMm: unknown; dimHeightMm: unknown; cartonSize: string }
+    | null
+    | undefined,
+): string {
+  if (!die) return ''
+  const parsed = parseCartonSizeToDims(die.cartonSize)
+  const formatted =
+    formatDimsLwhFromDb({
+      dimLengthMm: die.dimLengthMm as { toString(): string } | null,
+      dimWidthMm: die.dimWidthMm as { toString(): string } | null,
+      dimHeightMm: die.dimHeightMm as { toString(): string } | null,
+    }) ?? (parsed ? formatDimsLwhFromParsed(parsed) : null)
+  return formatted?.trim() || ''
+}
+
+/**
+ * Canonical PO line size for a carton: die-master dimensions take precedence
+ * over the carton's own finished dimensions (mirrors the carton autocomplete
+ * and the PO line-item enrichment). Returns '' when neither source has dims.
+ */
+export function cartonMasterSizeLabel(
+  carton: { finishedLength: unknown; finishedWidth: unknown; finishedHeight: unknown },
+  die:
+    | { dimLengthMm: unknown; dimWidthMm: unknown; dimHeightMm: unknown; cartonSize: string }
+    | null
+    | undefined,
+): string {
+  return dieMasterDimsLabel(die) || sizeFromFinishedDims(carton)
+}
+
 export type DieSimilarIndexEntry = {
   id: string
   dyeNumber: number

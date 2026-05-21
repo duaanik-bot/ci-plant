@@ -14,7 +14,9 @@ const updateSchema = z.object({
   pin: pinSchema,
   roleId: z.string().uuid().optional(),
   machineAccess: z.array(z.string()).optional(),
-  whatsappNumber: z.string().optional(),
+  // Client sends null to clear the number, or a string to set it. Accept both
+  // (plus undefined when omitted) — z.string().optional() alone rejects null.
+  whatsappNumber: z.string().nullable().optional(),
   active: z.boolean().optional(),
 })
 

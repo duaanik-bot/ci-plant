@@ -88,6 +88,15 @@ type Line = {
   paperType: string
   boardGrade: string
   foilType: string
+  printingType: string
+  numberOfColours: string
+  sheetSizeL: string
+  sheetSizeW: string
+  ups: string
+  spotUv: string
+  braille: string
+  embossing: string
+  leafing: string
   remarks: string
   dieMasterId: string
   toolingDieType: string
@@ -142,6 +151,15 @@ const defaultLine = (): Line => ({
   paperType: '',
   boardGrade: '',
   foilType: '',
+  printingType: '',
+  numberOfColours: '',
+  sheetSizeL: '',
+  sheetSizeW: '',
+  ups: '',
+  spotUv: '',
+  braille: '',
+  embossing: '',
+  leafing: '',
   remarks: '',
   dieMasterId: '',
   toolingDieType: '',
@@ -197,6 +215,15 @@ function resetAutofillFields(line: Line, cartonName: string): Line {
     paperType: '',
     boardGrade: '',
     foilType: '',
+    printingType: '',
+    numberOfColours: '',
+    sheetSizeL: '',
+    sheetSizeW: '',
+    ups: '',
+    spotUv: '',
+    braille: '',
+    embossing: '',
+    leafing: '',
     dieMasterId: '',
     toolingDieType: '',
     toolingDims: '',
@@ -1199,6 +1226,15 @@ export default function NewPurchaseOrderPage() {
                 wastagePct: wastage,
                 boardGrade: l.boardGrade.trim() || undefined,
                 foilType: l.foilType.trim() || undefined,
+                printingType: l.printingType.trim() || undefined,
+                numberOfColours: l.numberOfColours.trim() ? Number(l.numberOfColours) : undefined,
+                sheetSizeL: l.sheetSizeL.trim() ? Number(l.sheetSizeL) : undefined,
+                sheetSizeW: l.sheetSizeW.trim() ? Number(l.sheetSizeW) : undefined,
+                ups: l.ups.trim() ? Number(l.ups) : undefined,
+                spotUv: l.spotUv === 'Yes' ? true : l.spotUv === 'No' ? false : undefined,
+                braille: l.braille === 'Yes' ? true : l.braille === 'No' ? false : undefined,
+                embossing: l.embossing === 'Yes' ? true : l.embossing === 'No' ? false : undefined,
+                leafing: l.leafing === 'Yes' ? true : l.leafing === 'No' ? false : undefined,
                 masterDieType: l.toolingDieType.trim() || undefined,
                 dieMasterId: l.dieMasterId.trim() || undefined,
                 pastingStyle: l.pastingStyle as PastingStyle,

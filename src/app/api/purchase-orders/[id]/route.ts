@@ -8,6 +8,7 @@ import { purchaseOrderSchema } from '@/lib/validations'
 import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
 import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
 import { isPlanningFactsLocked, mergeSpecRespectingPlanningLock } from '@/lib/planning-facts-lock'
+import { cartonMasterSizeLabel } from '@/lib/die-hub-dimensions'
 
 export const dynamic = 'force-dynamic'
 
@@ -107,6 +108,45 @@ export async function GET(
   })
 
   if (!po) return NextResponse.json({ error: 'PO not found' }, { status: 404 })
+
+  // Backfill empty size / artwork code from the linked carton master so
+  // downstream consumers (PDF, planning hand-off) see the same values the
+  // edit screen derives. Only fills blanks — stored snapshots always win.
+  const needsBackfill = po.lineItems.filter(
+    (li) => li.cartonId && (!li.cartonSize?.trim() || !li.artworkCode?.trim()),
+  )
+  if (needsBackfill.length > 0) {
+    const cartonIds = Array.from(
+      new Set(needsBackfill.map((li) => li.cartonId).filter((x): x is string => !!x)),
+    )
+    const cartons = await db.carton.findMany({
+      where: { id: { in: cartonIds } },
+      select: {
+        id: true,
+        artworkCode: true,
+        finishedLength: true,
+        finishedWidth: true,
+        finishedHeight: true,
+        dieMaster: {
+          select: { dimLengthMm: true, dimWidthMm: true, dimHeightMm: true, cartonSize: true },
+        },
+        dye: {
+          select: { dimLengthMm: true, dimWidthMm: true, dimHeightMm: true, cartonSize: true },
+        },
+      },
+    })
+    const byId = new Map(cartons.map((c) => [c.id, c]))
+    po.lineItems = po.lineItems.map((li) => {
+      if (!li.cartonId) return li
+      const master = byId.get(li.cartonId)
+      if (!master) return li
+      const masterSize = cartonMasterSizeLabel(master, master.dieMaster ?? master.dye)
+      const next = { ...li }
+      if (!li.cartonSize?.trim() && masterSize) next.cartonSize = masterSize
+      if (!li.artworkCode?.trim() && master.artworkCode) next.artworkCode = master.artworkCode
+      return next
+    })
+  }
 
   return NextResponse.json(po)
 }

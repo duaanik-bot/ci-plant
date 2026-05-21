@@ -67,6 +67,15 @@ type Line = {
   paperType: string
   boardGrade: string
   foilType: string
+  printingType: string
+  numberOfColours: string
+  sheetSizeL: string
+  sheetSizeW: string
+  ups: string
+  spotUv: string
+  braille: string
+  embossing: string
+  leafing: string
   remarks: string
   pastingStyle: string
   masterPastingStyleMissing: boolean
@@ -120,6 +129,15 @@ const defaultLine = (): Line => ({
   paperType: '',
   boardGrade: '',
   foilType: '',
+  printingType: '',
+  numberOfColours: '',
+  sheetSizeL: '',
+  sheetSizeW: '',
+  ups: '',
+  spotUv: '',
+  braille: '',
+  embossing: '',
+  leafing: '',
   remarks: '',
   pastingStyle: '',
   masterPastingStyleMissing: false,
@@ -153,6 +171,15 @@ function resetAutofillFields(line: Line, cartonName: string): Line {
     paperType: '',
     boardGrade: '',
     foilType: '',
+    printingType: '',
+    numberOfColours: '',
+    sheetSizeL: '',
+    sheetSizeW: '',
+    ups: '',
+    spotUv: '',
+    braille: '',
+    embossing: '',
+    leafing: '',
     pastingStyle: '',
     masterPastingStyleMissing: false,
     ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
@@ -372,6 +399,33 @@ export default function EditPurchaseOrderPage() {
     }
   }, [customerId])
 
+  // Backfill size and artwork code from the carton master for lines saved
+  // without a snapshot. Mirrors applyCartonToLine's master-derived values and
+  // only fills empty fields, so operator edits are never overwritten.
+  useEffect(() => {
+    if (customerCartonsLoading || customerCartons.length === 0) return
+    const byId = new Map(customerCartons.map((c) => [c.id, c]))
+    setLines((prev) => {
+      let changed = false
+      const next = prev.map((ln) => {
+        if (!ln.cartonId) return ln
+        const master = byId.get(ln.cartonId)
+        if (!master) return ln
+        const masterSize = (master.toolingDimsLabel || master.cartonSize || '')
+          .trim()
+          .replace(/x/gi, '×')
+        const patch: Partial<Line> = {}
+        if (!ln.cartonSize.trim() && masterSize) patch.cartonSize = masterSize
+        if (!ln.toolingDims.trim() && masterSize) patch.toolingDims = masterSize
+        if (!ln.artworkCode.trim() && master.artworkCode) patch.artworkCode = master.artworkCode
+        if (Object.keys(patch).length === 0) return ln
+        changed = true
+        return { ...ln, ...patch }
+      })
+      return changed ? next : prev
+    })
+  }, [customerCartons, customerCartonsLoading])
+
   const customerSearch = useAutoPopulate<Customer>({
     storageKey: 'po-customer',
     search: async (query: string) => {
@@ -431,6 +485,16 @@ export default function EditPurchaseOrderPage() {
             paperType: li.paperType || '',
             boardGrade: (specOverrides.boardGrade as string) || li.boardGrade || '',
             foilType: (specOverrides.foilType as string) || li.foilType || '',
+            printingType: (specOverrides.printingType as string) || li.printingType || '',
+            numberOfColours:
+              specOverrides.numberOfColours != null ? String(specOverrides.numberOfColours) : '',
+            sheetSizeL: specOverrides.sheetSizeL != null ? String(specOverrides.sheetSizeL) : '',
+            sheetSizeW: specOverrides.sheetSizeW != null ? String(specOverrides.sheetSizeW) : '',
+            ups: specOverrides.ups != null ? String(specOverrides.ups) : '',
+            spotUv: specOverrides.spotUv === true ? 'Yes' : specOverrides.spotUv === false ? 'No' : '',
+            braille: specOverrides.braille === true ? 'Yes' : specOverrides.braille === false ? 'No' : '',
+            embossing: specOverrides.embossing === true ? 'Yes' : specOverrides.embossing === false ? 'No' : '',
+            leafing: specOverrides.leafing === true ? 'Yes' : specOverrides.leafing === false ? 'No' : '',
             remarks: li.remarks || '',
             pastingStyle,
             masterPastingStyleMissing: false,
@@ -530,6 +594,10 @@ export default function EditPurchaseOrderPage() {
                 pasting: !masterPasteMissing,
                 rate: c.rate != null,
               },
+              // Re-fetch the carton's spec pack so Printing/Colours/Sheet/UPS/finishing
+              // flags populate from the current master on (re)link.
+              specPackBase: undefined,
+              specPackLegacy: false,
             }
           : ln
       )
@@ -560,6 +628,15 @@ export default function EditPurchaseOrderPage() {
             pastingStyle: ln.pastingStyle,
             backPrint: ln.backPrint,
             artworkCode: ln.artworkCode,
+            printingType: ln.printingType,
+            numberOfColours: ln.numberOfColours,
+            sheetSizeL: ln.sheetSizeL,
+            sheetSizeW: ln.sheetSizeW,
+            ups: ln.ups,
+            spotUv: ln.spotUv,
+            braille: ln.braille,
+            embossing: ln.embossing,
+            leafing: ln.leafing,
             specOverrides: ln.specOverrides ?? null,
             specProvenance: ln.specProvenance ?? {},
           }
@@ -612,6 +689,15 @@ export default function EditPurchaseOrderPage() {
               pastingStyle: cur.pastingStyle,
               backPrint: cur.backPrint,
               artworkCode: cur.artworkCode,
+              printingType: cur.printingType,
+              numberOfColours: cur.numberOfColours,
+              sheetSizeL: cur.sheetSizeL,
+              sheetSizeW: cur.sheetSizeW,
+              ups: cur.ups,
+              spotUv: cur.spotUv,
+              braille: cur.braille,
+              embossing: cur.embossing,
+              leafing: cur.leafing,
               specOverrides: cur.specOverrides ?? null,
               specProvenance: cur.specProvenance ?? {},
             }
@@ -847,6 +933,15 @@ export default function EditPurchaseOrderPage() {
               wastagePct: Number(l.wastagePct) || 10,
               boardGrade: l.boardGrade.trim() || undefined,
               foilType: l.foilType.trim() || undefined,
+              printingType: l.printingType.trim() || undefined,
+              numberOfColours: l.numberOfColours.trim() ? Number(l.numberOfColours) : undefined,
+              sheetSizeL: l.sheetSizeL.trim() ? Number(l.sheetSizeL) : undefined,
+              sheetSizeW: l.sheetSizeW.trim() ? Number(l.sheetSizeW) : undefined,
+              ups: l.ups.trim() ? Number(l.ups) : undefined,
+              spotUv: l.spotUv === 'Yes' ? true : l.spotUv === 'No' ? false : undefined,
+              braille: l.braille === 'Yes' ? true : l.braille === 'No' ? false : undefined,
+              embossing: l.embossing === 'Yes' ? true : l.embossing === 'No' ? false : undefined,
+              leafing: l.leafing === 'Yes' ? true : l.leafing === 'No' ? false : undefined,
               fgReservation: l.fgReservation ?? undefined,
               useReservedFirst: l.useReservedFirst !== false,
               ...(l.pastingStyle === 'BSO' || l.pastingStyle === 'LOCK_BOTTOM'

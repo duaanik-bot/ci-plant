@@ -37,3 +37,11 @@ Thumbs.db
 # Prisma
 prisma/migrations/**/migration_lock.toml
 .env*.local
+
+# Claude Code internal data (large; never commit)
+.claude/
+
+# Local data dumps / artifacts (not source)
+data/
+CI-Production-Audit.docx
+docs/reset-import-log.json

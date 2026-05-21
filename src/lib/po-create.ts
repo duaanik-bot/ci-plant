@@ -1,7 +1,8 @@
-import type { Prisma, PurchaseOrder, Carton } from '@prisma/client'
+import type { Prisma, PurchaseOrder } from '@prisma/client'
 import { syncMaterialRequirementsForPurchaseOrder } from '@/lib/material-requirement-sync'
 import { withDefaultPrePressAuditLead } from '@/lib/pre-press-defaults'
 import { buildCartonSpecPack } from '@/lib/carton-spec-pack'
+import { cartonMasterSizeLabel } from '@/lib/die-hub-dimensions'
 
 type Tx = Prisma.TransactionClient
 
@@ -98,11 +99,17 @@ export async function createPurchaseOrderWithLines(
         .map((li) => li.cartonId as string),
     ),
   )
-  const cartonById = new Map<string, Carton>()
-  if (lineCartonIds.length > 0) {
-    const rows = await tx.carton.findMany({ where: { id: { in: lineCartonIds } } })
-    for (const r of rows) cartonById.set(r.id, r)
-  }
+  const dieDimsSelect = {
+    select: { dimLengthMm: true, dimWidthMm: true, dimHeightMm: true, cartonSize: true },
+  } as const
+  const cartonRows =
+    lineCartonIds.length > 0
+      ? await tx.carton.findMany({
+          where: { id: { in: lineCartonIds } },
+          include: { dieMaster: dieDimsSelect, dye: dieDimsSelect },
+        })
+      : []
+  const cartonById = new Map(cartonRows.map((r) => [r.id, r]))
 
   await Promise.all(
     input.lineItems.map((li) => {
@@ -111,14 +118,24 @@ export async function createPurchaseOrderWithLines(
         li.hsnCode != null && li.hsnCode !== ''
           ? li.hsnCode
           : cartonRow?.hsnCode ?? null
+      // Snapshot size / artwork from the carton master when the line omits them,
+      // so the stored row is complete regardless of how it was entered (manual
+      // form, import). Line-provided values always win. Mirrors resolvedHsn.
+      const masterSize = cartonRow
+        ? cartonMasterSizeLabel(cartonRow, cartonRow.dieMaster ?? cartonRow.dye)
+        : ''
+      const resolvedSize = li.cartonSize?.trim() ? li.cartonSize : masterSize || null
+      const resolvedArtwork = li.artworkCode?.trim()
+        ? li.artworkCode
+        : cartonRow?.artworkCode ?? null
       return tx.poLineItem.create({
         data: {
           poId: po.id,
           cartonId: li.cartonId,
           cartonName: li.cartonName,
-          cartonSize: li.cartonSize || null,
+          cartonSize: resolvedSize,
           quantity: li.quantity,
-          artworkCode: li.artworkCode || null,
+          artworkCode: resolvedArtwork,
           backPrint: li.backPrint || 'No',
           rate: li.rate ?? null,
           gsm: li.gsm ?? null,
