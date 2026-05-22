@@ -93,13 +93,11 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    for (const g of groups) {
-      for (const m of g.members) {
-        await tx.vendorPoRequisitionLink.create({
-          data: { vendorPoId: po.id, purchaseRequisitionId: m.prId, allocatedQty: m.qty },
-        })
-      }
-    }
+    await tx.vendorPoRequisitionLink.createMany({
+      data: groups.flatMap((g) =>
+        g.members.map((m) => ({ vendorPoId: po.id, purchaseRequisitionId: m.prId, allocatedQty: m.qty })),
+      ),
+    })
 
     await tx.purchaseRequisition.updateMany({
       where: { id: { in: prIds } },
