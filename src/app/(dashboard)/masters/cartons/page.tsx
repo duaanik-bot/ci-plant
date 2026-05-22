@@ -1,19 +1,31 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
-import { toast } from 'sonner'
-import {
-  EnterpriseTableShell,
-  enterpriseTheadClass,
-  enterpriseTbodyClass,
-  enterpriseTrClass,
-  enterpriseThClass,
-  enterpriseTdBase,
-  enterpriseTdMonoClass,
-  enterpriseTdMutedClass,
-} from '@/components/ui/EnterpriseTableShell'
+/**
+ * Carton Master — rebuilt with ERP design system
+ * ─────────────────────────────────────────────────
+ * Before: raw fetch + useEffect, browser confirm(), EnterpriseTableShell
+ * After:  useQuery/useMutation, DataTable, PageHeader, KpiCard,
+ *         SearchInput, Pagination, ConfirmDialog, toast
+ *         AI-imported badge (source === 'po_import_ai') is preserved.
+ */
 
+import { useState }                           from 'react'
+import Link                                   from 'next/link'
+import { useRouter }                          from 'next/navigation'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Box, CheckCircle, XCircle, Pencil, Trash2, Sparkles } from 'lucide-react'
+
+import { PageHeader }    from '@/components/shared/PageHeader'
+import { DataTable }     from '@/components/shared/DataTable'
+import { StatusBadge }   from '@/components/shared/StatusBadge'
+import { KpiCard }       from '@/components/shared/KpiCard'
+import { Button }        from '@/components/ui/Button'
+import { SearchInput }   from '@/components/ui/SearchInput'
+import { Pagination }    from '@/components/ui/Pagination'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast }         from '@/store/toastStore'
+
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type CartonRow = {
   id: string
   cartonName: string
@@ -31,250 +43,246 @@ type CartonRow = {
   source: string | null
 }
 
-const cellWrap = `${enterpriseTdBase} whitespace-normal break-words`
+const PAGE_LIMIT = 20
 
+/* ── API helpers ─────────────────────────────────────────────────────────── */
+async function fetchCartons(): Promise<CartonRow[]> {
+  const res = await fetch('/api/masters/cartons')
+  if (!res.ok) throw new Error('Failed to load cartons')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+async function deleteCarton(id: string): Promise<void> {
+  const res = await fetch(`/api/masters/cartons/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error((j as { error?: string }).error ?? 'Failed to delete carton')
+  }
+}
+
+/* ── Page component ──────────────────────────────────────────────────────── */
 export default function CartonMasterPage() {
-  const [rows, setRows] = useState<CartonRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const router = useRouter()
+  const qc     = useQueryClient()
 
-  async function load() {
-    try {
-      const cartonsRes = await fetch('/api/masters/cartons')
-      const cartonsJson = await cartonsRes.json()
-      setRows(Array.isArray(cartonsJson) ? cartonsJson : [])
-    } catch {
-      toast.error('Failed to load cartons')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const [q,            setQ]            = useState('')
+  const [page,         setPage]         = useState(1)
+  const [deleteTarget, setDeleteTarget] = useState<CartonRow | null>(null)
 
-  useEffect(() => {
-    void load()
-  }, [])
+  /* ── Fetch ───────────────────────────────────────────────────────────── */
+  const { data: list = [], isLoading } = useQuery<CartonRow[]>({
+    queryKey: ['masters', 'cartons'],
+    queryFn:  fetchCartons,
+  })
 
-  async function handleDelete(c: CartonRow) {
-    if (!confirm(`Delete carton "${c.cartonName}"? This action cannot be undone.`)) return
-    setDeletingId(c.id)
-    try {
-      const res = await fetch(`/api/masters/cartons/${c.id}`, { method: 'DELETE' })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to delete carton')
+  /* ── Delete mutation ─────────────────────────────────────────────────── */
+  const deleteMut = useMutation({
+    mutationFn: deleteCarton,
+    onSuccess: () => {
       toast.success('Carton deleted')
-      await load()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete carton')
-    } finally {
-      setDeletingId(null)
-    }
-  }
+      void qc.invalidateQueries({ queryKey: ['masters', 'cartons'] })
+      setDeleteTarget(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
-  async function handleBulkDelete() {
-    const targets = filtered.filter((c) => selectedIds.has(c.id))
-    if (!targets.length) return
-    if (!confirm(`Delete ${targets.length} carton record(s)?`)) return
-    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
-    if (token !== 'DELETE') return
-    setBulkDeleting(true)
-    let ok = 0
-    let fail = 0
-    for (const c of targets) {
-      try {
-        const res = await fetch(`/api/masters/cartons/${c.id}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error('Failed')
-        ok += 1
-      } catch {
-        fail += 1
-      }
-    }
-    if (ok) toast.success(`Deleted ${ok} carton(s)`)
-    if (fail) toast.error(`Failed to delete ${fail} carton(s)`)
-    setBulkDeleting(false)
-    setSelectedIds(new Set())
-    await load()
-  }
+  /* ── Filter + paginate ───────────────────────────────────────────────── */
+  const ql = q.toLowerCase()
+  const filtered = list.filter(c => {
+    if (!ql) return true
+    const size = `${c.finishedLength ?? ''}x${c.finishedWidth ?? ''}x${c.finishedHeight ?? ''}`
+    return [
+      c.cartonName,
+      c.customer?.name ?? '',
+      c.boardGrade ?? '',
+      c.paperType ?? '',
+      String(c.gsm ?? ''),
+      size,
+      c.active ? 'active' : 'inactive',
+      c.rate != null ? String(c.rate) : '',
+      c.source === 'po_import_ai' ? 'ai imported' : '',
+    ].join(' ').toLowerCase().includes(ql)
+  })
+  const paginated = filtered.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT)
 
-  const filtered = useMemo(() => {
-    return rows.filter((c) => {
-      if (search) {
-        const q = search.toLowerCase()
-        const size = `${c.finishedLength ?? ''}x${c.finishedWidth ?? ''}x${c.finishedHeight ?? ''}`.toLowerCase()
-        const haystack = [
-          c.cartonName,
-          c.customer?.name || '',
-          c.boardGrade || '',
-          c.paperType || '',
-          String(c.gsm ?? ''),
-          size,
-          c.active ? 'active' : 'inactive',
-          c.rate != null ? String(c.rate) : '',
-          c.source === 'po_import_ai' ? 'ai imported' : '',
-        ]
-          .join(' ')
-          .toLowerCase()
-        if (!haystack.includes(q)) return false
-      }
-      return true
-    })
-  }, [rows, search])
+  const aiImportedCount = list.filter(c => c.source === 'po_import_ai').length
 
-  if (loading) {
-    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading cartons…</div>
-  }
-
-  return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Carton Master</h2>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              setSelectedIds((prev) =>
-                prev.size === filtered.length ? new Set() : new Set(filtered.map((c) => c.id)),
-              )
-            }
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+  /* ── Column definitions ──────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:    'cartonName',
+      label:  'Carton',
+      render: (row: CartonRow) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Link
+            href={`/masters/cartons/${row.id}`}
+            className="font-medium hover:text-ds-brand hover:underline"
           >
-            {selectedIds.size === filtered.length && filtered.length > 0 ? 'Unselect all' : 'Select all'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedIds(new Set())}
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            disabled={selectedIds.size === 0 || bulkDeleting}
-            onClick={() => void handleBulkDelete()}
-            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
-          >
-            {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
-          </button>
-          <Link href="/masters/cartons/new" className="rounded-ds-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
-            Add carton
+            {row.cartonName}
           </Link>
+          {row.source === 'po_import_ai' && (
+            <span
+              title="Auto-created from a PO PDF import — please verify before relying on for matching."
+              className="inline-flex items-center gap-0.5 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300"
+            >
+              <Sparkles size={9} />
+              AI
+            </span>
+          )}
         </div>
-      </div>
+      ),
+    },
+    {
+      key:       'customer',
+      label:     'Client',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: CartonRow) => row.customer?.name ?? '—',
+    },
+    {
+      key:       'dimensions',
+      label:     'L×W×H',
+      className: 'font-mono text-xs',
+      render:    (row: CartonRow) =>
+        `${row.finishedLength ?? '—'}×${row.finishedWidth ?? '—'}×${row.finishedHeight ?? '—'}`,
+    },
+    {
+      key:       'gsm',
+      label:     'GSM',
+      align:     'right' as const,
+      className: 'font-mono text-sm',
+      render:    (row: CartonRow) => row.gsm ?? '—',
+    },
+    {
+      key:       'boardGrade',
+      label:     'Board',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: CartonRow) => row.boardGrade ?? '—',
+    },
+    {
+      key:       'coatingType',
+      label:     'Coating',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: CartonRow) => row.coatingType ?? '—',
+    },
+    {
+      key:       'rate',
+      label:     'Rate',
+      align:     'right' as const,
+      className: 'font-mono text-sm',
+      render:    (row: CartonRow) =>
+        row.rate != null ? `₹${row.rate.toFixed(2)}` : '—',
+    },
+    {
+      key:    'active',
+      label:  'Status',
+      render: (row: CartonRow) => (
+        <StatusBadge status={row.active ? 'active' : 'inactive'} />
+      ),
+    },
+    {
+      key:    'actions',
+      label:  '',
+      render: (row: CartonRow) => (
+        <div className="flex items-center gap-1 justify-end">
+          <Link
+            href={`/masters/cartons/${row.id}`}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-brand hover:bg-ds-brand/8 transition-colors"
+            title="Edit"
+          >
+            <Pencil size={14} />
+          </Link>
+          <button
+            onClick={() => setDeleteTarget(row)}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-error hover:bg-ds-error/8 transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ),
+    },
+  ]
 
-      <div className="mb-3">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search clients, board grades, GSM, size, carton..."
-          className="min-h-[40px] w-full rounded-ds-md border border-border bg-card px-3 py-2 text-sm text-card-foreground"
+  /* ── Render ──────────────────────────────────────────────────────────── */
+  return (
+    <div className="p-6 space-y-6">
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <KpiCard
+          title="Total Cartons"
+          value={list.length}
+          icon={Box}
+          color="blue"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Active"
+          value={list.filter(c => c.active).length}
+          icon={CheckCircle}
+          color="green"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="AI Imported"
+          value={aiImportedCount}
+          icon={Sparkles}
+          color={aiImportedCount > 0 ? 'orange' : 'slate'}
+          loading={isLoading}
         />
       </div>
 
-      <EnterpriseTableShell>
-        <table className="w-full min-w-[1040px] table-fixed border-collapse text-left text-sm text-neutral-900 [&_td]:align-top [&_th]:align-bottom dark:text-ds-ink">
-          <colgroup>
-            <col className="w-[40px]" />
-            <col className="w-[20%]" />
-            <col className="w-[17%]" />
-            <col className="w-[11%]" />
-            <col className="w-[6%]" />
-            <col className="w-[13%]" />
-            <col className="w-[13%]" />
-            <col className="w-[7%]" />
-            <col className="w-[7%]" />
-            <col className="w-[10%]" />
-          </colgroup>
-          <thead className={enterpriseTheadClass}>
-            <tr>
-              <th className={enterpriseThClass}>
-                <input
-                  type="checkbox"
-                  checked={filtered.length > 0 && selectedIds.size === filtered.length}
-                  onChange={() =>
-                    setSelectedIds((prev) =>
-                      prev.size === filtered.length ? new Set() : new Set(filtered.map((c) => c.id)),
-                    )
-                  }
-                />
-              </th>
-              <th className={enterpriseThClass}>Carton</th>
-              <th className={enterpriseThClass}>Client</th>
-              <th className={enterpriseThClass}>L×W×H</th>
-              <th className={enterpriseThClass}>GSM</th>
-              <th className={enterpriseThClass}>Board</th>
-              <th className={enterpriseThClass}>Coating</th>
-              <th className={enterpriseThClass}>Rate</th>
-              <th className={enterpriseThClass}>Status</th>
-              <th className={enterpriseThClass}>Action</th>
-            </tr>
-          </thead>
-          <tbody className={enterpriseTbodyClass}>
-            {filtered.map((c) => (
-              <tr key={c.id} className={enterpriseTrClass}>
-                <td className={cellWrap}>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(c.id)}
-                    onChange={() =>
-                      setSelectedIds((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(c.id)) next.delete(c.id)
-                        else next.add(c.id)
-                        return next
-                      })
-                    }
-                  />
-                </td>
-                <td className={`${cellWrap} font-designing-queue`}>
-                  <span className="inline-flex flex-wrap items-center gap-1.5">
-                    <span>{c?.cartonName ?? '—'}</span>
-                    {c?.source === 'po_import_ai' && (
-                      <span
-                        title="Auto-created from a PO PDF import — please verify before relying on for matching."
-                        className="rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300"
-                      >
-                        AI imported
-                      </span>
-                    )}
-                  </span>
-                </td>
-                <td className={cellWrap}>{c?.customer?.name ?? '—'}</td>
-                <td className={enterpriseTdMonoClass}>
-                  {c?.finishedLength ?? '—'}×{c?.finishedWidth ?? '—'}×{c?.finishedHeight ?? '—'}
-                </td>
-                <td className={enterpriseTdMonoClass}>{c?.gsm ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{c?.boardGrade ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{c?.coatingType ?? '—'}</td>
-                <td className={enterpriseTdMonoClass}>{c?.rate != null ? `₹${c.rate.toFixed(2)}` : '—'}</td>
-                <td className={cellWrap}>
-                  <span className={c?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>
-                    {c?.active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td className={cellWrap}>
-                  <Link href={`/masters/cartons/${c?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
-                    Edit
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(c)}
-                    disabled={deletingId === c.id}
-                    className="text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
-                  >
-                    {deletingId === c.id ? 'Deleting…' : 'Delete'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </EnterpriseTableShell>
-      {filtered.length === 0 && (
-        <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No cartons match your search.</p>
-      )}
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Carton Master"
+        subtitle="Manage carton specifications, board grades and pricing"
+        action={
+          <Button icon={Plus} onClick={() => router.push('/masters/cartons/new')}>
+            Add Carton
+          </Button>
+        }
+      />
+
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <SearchInput
+          value={q}
+          onChange={v => { setQ(v); setPage(1) }}
+          placeholder="Search by name, client, board grade, GSM, size…"
+          className="w-96"
+        />
+      </div>
+
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={paginated}
+        loading={isLoading}
+        emptyMessage={
+          q ? 'No cartons match your search.' : 'No cartons yet. Add one to get started.'
+        }
+      />
+
+      {/* ── Pagination ────────────────────────────────────────────────── */}
+      <Pagination
+        page={page}
+        total={filtered.length}
+        limit={PAGE_LIMIT}
+        onChange={setPage}
+      />
+
+      {/* ── Delete confirmation ───────────────────────────────────────── */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+        title="Delete Carton"
+        message={`Are you sure you want to delete "${deleteTarget?.cartonName}"? This cannot be undone.`}
+        confirmLabel="Yes, Delete"
+        loading={deleteMut.isPending}
+      />
+
     </div>
   )
 }

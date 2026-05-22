@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { AlertTriangle, Check, Link as LinkedIcon, Search, Star } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
 import clsx from 'clsx'
@@ -998,7 +998,7 @@ export default function DesigningDetailPage() {
       const j = (await r.json()) as { setNumber?: string | null }
       if (cancelled || !j.setNumber?.trim()) return
       setSetNumberInput((prev) => (prev.trim() ? prev : j.setNumber!.trim()))
-      toast.message(
+      toast.info(
         `Set # from latest ${data.line.po.customer.name} + AW (${aw}): ${j.setNumber}`,
       )
     })()
@@ -1632,7 +1632,7 @@ export default function DesigningDetailPage() {
         setCustomerApproval(true)
         setQaTextApproval(true)
         await persistApprovals({ customer: true, qa: true })
-        toast.message('Repeat job: artwork code exists — approvals pre-filled')
+        toast.info('Repeat job: artwork code exists — approvals pre-filled')
       } else {
         setArtworkRepeatJob(false)
       }
@@ -1650,7 +1650,7 @@ export default function DesigningDetailPage() {
           const sn = j2.setNumber?.trim()
           if (sn) {
             setSetNumberInput(sn)
-            toast.message(`Set # ${sn} from ${data.line.po.customer.name} + AW history`)
+            toast.info(`Set # ${sn} from ${data.line.po.customer.name} + AW history`)
           }
         } catch {
           /* non-fatal */

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { Search, X, Truck, Package, CheckCircle2, Clock, ReceiptText, AlertTriangle } from 'lucide-react'
 import { IndustrialModuleShell, industrialTableClassName } from '@/components/industrial/IndustrialModuleShell'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
@@ -229,12 +229,6 @@ export default function DispatchPage() {
       if (!res.ok) { toast.error(json?.error ?? 'Send to billing failed'); return }
       toast.success(
         `${json.updated} dispatch${json.updated === 1 ? '' : 'es'} sent to billing${json.skipped ? ` · ${json.skipped} skipped` : ''}`,
-        {
-          action: {
-            label: 'Open billing',
-            onClick: () => window.open('/billing', '_self'),
-          },
-        },
       )
       setSelectedDispatchIds(new Set())
       await qc.invalidateQueries({ queryKey: ['dispatch-ready'] })
@@ -304,12 +298,6 @@ export default function DispatchPage() {
       if (json?.shortExcessRecordId) {
         toast.warning(
           `Dispatched with excess — ${row.customerName}. S&E record opened.`,
-          {
-            action: {
-              label: 'Open S&E',
-              onClick: () => window.open('/short-excess', '_self'),
-            },
-          },
         )
       } else {
         toast.success(`Dispatched ${qtyDispatched.toLocaleString('en-IN')} cartons — ${row.customerName}`)

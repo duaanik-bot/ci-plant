@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 type Instrument = {
   id: string

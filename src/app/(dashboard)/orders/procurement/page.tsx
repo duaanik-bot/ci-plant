@@ -9,7 +9,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { ClipboardList, IndianRupee, ListChecks, Star, Truck, X } from 'lucide-react'
 import { PROCUREMENT_DEFAULT_SIGNATORY } from '@/lib/procurement-mrp-service'
 import type { MaterialReadinessRollup } from '@/lib/procurement-mrp-service'
@@ -1320,11 +1320,11 @@ export default function ProcurementWorkbenchPage() {
 
   async function generateVendorPo() {
     if (selected.size === 0) {
-      toast.message('Select at least one requirement row')
+      toast.info('Select at least one requirement row')
       return
     }
     if (!supplierId) {
-      toast.message('Select a supplier')
+      toast.info('Select a supplier')
       return
     }
     setGenerating(true)
@@ -1459,11 +1459,11 @@ export default function ProcurementWorkbenchPage() {
     const scale = parseFloat(scaleInputs[poLineItemId] ?? '')
     const core = parseFloat(coreInputs[poLineItemId] ?? '')
     if (!Number.isFinite(scale) || scale <= 0) {
-      toast.message('Enter a valid scale weight (kg)')
+      toast.info('Enter a valid scale weight (kg)')
       return
     }
     if (!Number.isFinite(core) || core < 0) {
-      toast.message('Enter standard core weight (kg) — use 0 if none')
+      toast.info('Enter standard core weight (kg) — use 0 if none')
       return
     }
     setReceiptSavingId(poLineItemId)
@@ -1506,7 +1506,7 @@ export default function ProcurementWorkbenchPage() {
   async function saveLogisticsHud() {
     const id = spotlightRow?.procurementHud.primaryVendorPoId
     if (!id) {
-      toast.message('No dispatched vendor PO linked for logistics')
+      toast.info('No dispatched vendor PO linked for logistics')
       return
     }
     setLogisticsSaving(true)
@@ -1649,7 +1649,7 @@ export default function ProcurementWorkbenchPage() {
       if (json.criticalGsmVariance) {
         toast.warning(
           `Critical GSM variance — notify ${PROCUREMENT_LOGISTICS_AUDIT_ACTOR}: actual ${actual} vs ordered ${json.orderedGsm ?? '—'} (>5% deviation).`,
-          { duration: 12_000 },
+          12000,
         )
       }
       const doneId = receiptId

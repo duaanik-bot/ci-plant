@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
+import { PageHeader } from '@/components/shared/PageHeader'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { GrnAllocationPrompt } from '@/components/inventory/GrnAllocationPrompt'
@@ -207,8 +208,15 @@ export default function GrnPage() {
 
   return (
     <div className="p-4 max-w-2xl mx-auto">
-      <Link href="/inventory" className="text-ds-ink-muted hover:text-foreground text-sm mb-4 inline-block">&larr; Inventory</Link>
-      <h1 className="text-xl font-bold text-ds-warning mb-4">Goods Receipt (GRN)</h1>
+      <PageHeader
+        title="Goods Receipt (GRN)"
+        subtitle="Record incoming material deliveries and update inventory stock"
+        action={
+          <Link href="/inventory" className="text-ds-ink-muted hover:text-ds-ink text-sm">
+            ← Inventory
+          </Link>
+        }
+      />
 
       <form onSubmit={handleSubmit} className="space-y-5">
 

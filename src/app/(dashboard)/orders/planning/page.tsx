@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Download } from 'lucide-react'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { mergeOrchestrationIntoSpec, PLANNING_FLOW } from '@/lib/orchestration-spec'
@@ -1078,12 +1078,7 @@ export default function PlanningPage() {
         setHighlightedRowId(lineId)
         window.setTimeout(() => setHighlightedRowId(null), 3000)
         await fetchRows({ force: true })
-        toast.success('Returned to Planning', {
-          action: {
-            label: 'View Pending',
-            onClick: () => setLedgerView('pending'),
-          },
-        })
+        toast.success('Returned to Planning')
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Recall failed')
       }

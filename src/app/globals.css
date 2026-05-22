@@ -319,3 +319,26 @@
     @apply rounded-ds-sm border border-ds-brand/25 bg-ds-brand px-3 py-2 text-sm font-semibold text-white shadow-sm transition duration-200 hover:border-ds-brand/40 hover:bg-ds-brand-hover disabled:opacity-50;
   }
 }
+
+/* ── ERP design-system animation utilities (used by Modal + Toaster) ──── */
+@layer utilities {
+  .animate-in { animation-fill-mode: both; }
+
+  .slide-in-from-right-4 { animation-name: slide-in-right-4; }
+  @keyframes slide-in-right-4 {
+    from { transform: translateX(1rem); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+  }
+
+  .fade-in-0 { animation-name: fade-in-0; }
+  @keyframes fade-in-0 {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  .scale-in-95 { animation-name: scale-in-95; }
+  @keyframes scale-in-95 {
+    from { transform: scale(0.95); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 type ItemStatus = 'pending' | 'extracting' | 'ready' | 'needs_review' | 'failed' | 'committed'
 
@@ -191,7 +191,7 @@ export default function PoBulkImportPage() {
                         <button
                           type="button"
                           className="text-xs font-medium text-blue-600 hover:text-blue-700"
-                          onClick={() => toast('Drawer wiring lands in the next step')}
+                          onClick={() => toast.info('Drawer wiring lands in the next step')}
                         >
                           Open
                         </button>

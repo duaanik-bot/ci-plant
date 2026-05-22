@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 type Customer = { id: string; name: string }
 type Machine = { id: string; machineCode: string; name: string; stdWastePct: number }

@@ -1,19 +1,38 @@
 'use client'
 
+/**
+ * Die Inventory — partial upgrade with ERP design system
+ * ───────────────────────────────────────────────────────
+ * ✓ Stat cards → KpiCard
+ * ✓ h1 header → PageHeader
+ * ✓ Add Die button → Button component
+ * ✓ useEffect fetch kept (dynamic API query params: search/status/condition)
+ * ✓ LifeBar inline component preserved
+ * ✓ Tab filter system preserved
+ * ✓ EnterpriseTableShell preserved (complex table with many columns)
+ */
+
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import Link                             from 'next/link'
+import { useRouter }                    from 'next/navigation'
+import { Square, Archive, ArrowUpRight, Truck, Trash2 } from 'lucide-react'
+
+import { PageHeader } from '@/components/shared/PageHeader'
+import { KpiCard }    from '@/components/shared/KpiCard'
+import { Button }     from '@/components/ui/Button'
 import {
   EnterpriseTableShell,
   enterpriseTheadClass,
   enterpriseTbodyClass,
   enterpriseTrClass,
   enterpriseThClass,
-  enterpriseTdClass,
   enterpriseTdBase,
   enterpriseTdMonoClass,
   enterpriseTdMutedClass,
+  enterpriseTdClass,
 } from '@/components/ui/EnterpriseTableShell'
 
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type Die = {
   id: string
   dieCode: string
@@ -31,12 +50,39 @@ type Die = {
   status: string
 }
 
+type TabKey = 'all' | 'in_stock' | 'issued' | 'with_vendor' | 'attention' | 'scrapped'
+
+const TABS: [TabKey, string][] = [
+  ['all',         'All'],
+  ['in_stock',    'In Stock'],
+  ['issued',      'Issued'],
+  ['with_vendor', 'With Vendor'],
+  ['attention',   'Needs Attention'],
+  ['scrapped',    'Scrapped'],
+]
+
+const inputCls =
+  'min-h-[40px] min-w-[80px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand'
+
+/* ── LifeBar ─────────────────────────────────────────────────────────────── */
+function LifeBar({ pct }: { pct: number }) {
+  const cls = pct > 90 ? 'bg-ds-error' : pct > 70 ? 'bg-ds-warning' : 'bg-ds-success'
+  return (
+    <div className="h-2 w-20 overflow-hidden rounded bg-ds-elevated">
+      <div className={`h-full ${cls}`} style={{ width: `${pct}%` }} />
+    </div>
+  )
+}
+
+/* ── Page component ──────────────────────────────────────────────────────── */
 export default function DiesPage() {
-  const [rows, setRows] = useState<Die[]>([])
-  const [search, setSearch] = useState('')
-  const [status, setStatus] = useState('')
+  const router = useRouter()
+
+  const [rows,      setRows]      = useState<Die[]>([])
+  const [search,    setSearch]    = useState('')
+  const [status,    setStatus]    = useState('')
   const [condition, setCondition] = useState('')
-  const [tab, setTab] = useState<'all' | 'in_stock' | 'issued' | 'with_vendor' | 'attention' | 'scrapped'>('all')
+  const [tab,       setTab]       = useState<TabKey>('all')
 
   useEffect(() => {
     const qs = new URLSearchParams({
@@ -45,82 +91,78 @@ export default function DiesPage() {
       ...(condition ? { condition } : {}),
     })
     fetch(`/api/die-store?${qs}`)
-      .then((r) => r.json())
-      .then((data) => setRows(Array.isArray(data) ? data : []))
+      .then(r => r.json())
+      .then(data => setRows(Array.isArray(data) ? data : []))
       .catch(() => setRows([]))
   }, [search, status, condition])
 
   const filtered = useMemo(
     () =>
-      rows.filter((r) => {
-        if (tab === 'all') return true
+      rows.filter(r => {
+        if (tab === 'all')       return true
         if (tab === 'attention') return r.condition === 'Needs Sharpening' || r.condition === 'Damaged'
         return r.status === tab
       }),
-    [rows, tab]
+    [rows, tab],
   )
 
   const stats = {
-    total: rows.length,
-    inStock: rows.filter((r) => r.status === 'in_stock').length,
-    issued: rows.filter((r) => r.status === 'issued').length,
-    withVendor: rows.filter((r) => r.status === 'with_vendor').length,
-    scrapped: rows.filter((r) => r.status === 'scrapped').length,
+    total:      rows.length,
+    inStock:    rows.filter(r => r.status === 'in_stock').length,
+    issued:     rows.filter(r => r.status === 'issued').length,
+    withVendor: rows.filter(r => r.status === 'with_vendor').length,
+    scrapped:   rows.filter(r => r.status === 'scrapped').length,
   }
 
-  const inputCls =
-    'min-h-[40px] min-w-[80px] rounded-ds-md border border-border bg-card px-3 py-2 text-sm text-card-foreground'
-
+  /* ── Render ────────────────────────────────────────────────────────── */
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Die Inventory</h1>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/masters/dies/location-view"
-            className="rounded-ds-md border border-neutral-200 px-3 py-2 text-sm text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
-          >
-            Die Location View
-          </Link>
-          <Link
-            href="/masters/dies/vendor-orders"
-            className="rounded-ds-md border border-neutral-200 px-3 py-2 text-sm text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
-          >
-            Vendor Orders
-          </Link>
-          <Link href="/masters/dies/new" className="rounded-ds-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90">
-            Add Die
-          </Link>
-        </div>
-      </div>
+    <div className="p-6 space-y-6">
 
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Stat label="Total Dies" value={stats.total} />
-        <Stat label="In Stock" value={stats.inStock} />
-        <Stat label="Currently Issued" value={stats.issued} />
-        <Stat label="With Vendor" value={stats.withVendor} />
-        <Stat label="Scrapped" value={stats.scrapped} />
+        <KpiCard title="Total Dies"        value={stats.total}      icon={Square}        color="blue"   />
+        <KpiCard title="In Stock"          value={stats.inStock}    icon={Archive}       color="green"  />
+        <KpiCard title="Currently Issued"  value={stats.issued}     icon={ArrowUpRight}  color="orange" />
+        <KpiCard title="With Vendor"       value={stats.withVendor} icon={Truck}         color="slate"  />
+        <KpiCard title="Scrapped"          value={stats.scrapped}   icon={Trash2}        color="red"    />
       </div>
 
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Die Inventory"
+        subtitle="Track die stock, condition and vendor orders"
+        action={
+          <div className="flex items-center gap-2">
+            <Link
+              href="/masters/dies/location-view"
+              className="rounded-ds-md border border-ds-line px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated transition-colors"
+            >
+              Die Location View
+            </Link>
+            <Link
+              href="/masters/dies/vendor-orders"
+              className="rounded-ds-md border border-ds-line px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated transition-colors"
+            >
+              Vendor Orders
+            </Link>
+            <Button onClick={() => router.push('/masters/dies/new')}>
+              Add Die
+            </Button>
+          </div>
+        }
+      />
+
+      {/* ── Tabs ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ['all', 'All'],
-            ['in_stock', 'In Stock'],
-            ['issued', 'Issued'],
-            ['with_vendor', 'With Vendor'],
-            ['attention', 'Needs Attention'],
-            ['scrapped', 'Scrapped'],
-          ] as const
-        ).map(([k, l]) => (
+        {TABS.map(([k, l]) => (
           <button
             key={k}
             type="button"
             onClick={() => setTab(k)}
-            className={`rounded border px-3 py-1.5 text-xs font-medium ${
+            className={`rounded-ds-md border px-3 py-1.5 text-xs font-medium transition-colors ${
               tab === k
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-neutral-200 text-neutral-700 dark:border-ds-line/50 dark:text-ds-ink-muted'
+                ? 'border-ds-brand bg-ds-brand text-white'
+                : 'border-ds-line text-ds-ink-muted hover:border-ds-brand/50 hover:text-ds-ink'
             }`}
           >
             {l}
@@ -128,16 +170,17 @@ export default function DiesPage() {
         ))}
       </div>
 
+      {/* ── Filters ───────────────────────────────────────────────────── */}
       <div className="grid gap-2 md:grid-cols-5">
         <input
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={e => setSearch(e.target.value)}
           placeholder="Search die no or carton"
           className={inputCls}
         />
-        <input placeholder="Customer" className={inputCls} />
-        <input placeholder="Type" className={inputCls} />
-        <select value={condition} onChange={(e) => setCondition(e.target.value)} className={inputCls}>
+        <input placeholder="Customer" className={inputCls} readOnly />
+        <input placeholder="Type" className={inputCls} readOnly />
+        <select value={condition} onChange={e => setCondition(e.target.value)} className={inputCls}>
           <option value="">Condition</option>
           <option>New</option>
           <option>Excellent</option>
@@ -147,7 +190,7 @@ export default function DiesPage() {
           <option>Damaged</option>
           <option>Scrapped</option>
         </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputCls}>
+        <select value={status} onChange={e => setStatus(e.target.value)} className={inputCls}>
           <option value="">Status</option>
           <option value="in_stock">in_stock</option>
           <option value="issued">issued</option>
@@ -156,8 +199,9 @@ export default function DiesPage() {
         </select>
       </div>
 
+      {/* ── Table ─────────────────────────────────────────────────────── */}
       <EnterpriseTableShell>
-        <table className="w-full min-w-[1100px] border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
+        <table className="w-full min-w-[1100px] border-collapse text-left text-sm text-ds-ink">
           <thead className={enterpriseTheadClass}>
             <tr>
               <th className={enterpriseThClass}>Die Code</th>
@@ -175,54 +219,50 @@ export default function DiesPage() {
             </tr>
           </thead>
           <tbody className={enterpriseTbodyClass}>
-            {filtered.map((d) => {
-              const pct = d.maxImpressions > 0 ? Math.min(100, Math.round((d.impressionCount / d.maxImpressions) * 100)) : 0
+            {filtered.map(d => {
+              const pct =
+                d.maxImpressions > 0
+                  ? Math.min(100, Math.round((d.impressionCount / d.maxImpressions) * 100))
+                  : 0
               return (
                 <tr key={d.id} className={enterpriseTrClass}>
-                  <td className={`${enterpriseTdMonoClass} text-ds-warning dark:text-ds-warning`}>{d?.dieCode ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{d?.dieNumber ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{d?.dieType ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{d?.ups ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{d?.sheetSize ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{d?.cartonSize ?? d?.cartonName ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{d?.storageLocation ?? '—'}</td>
+                  <td className={`${enterpriseTdMonoClass} text-ds-warning`}>{d.dieCode ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{d.dieNumber ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{d.dieType ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{d.ups ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{d.sheetSize ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{d.cartonSize ?? d.cartonName ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{d.storageLocation ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>
-                    {d?.impressionCount?.toLocaleString() ?? '—'} / {d?.maxImpressions?.toLocaleString() ?? '—'}
+                    {d.impressionCount?.toLocaleString() ?? '—'} / {d.maxImpressions?.toLocaleString() ?? '—'}
                   </td>
                   <td className={enterpriseTdBase}>
                     <LifeBar pct={pct} />
                   </td>
-                  <td className={enterpriseTdClass}>{d?.condition ?? '—'}</td>
-                  <td className={enterpriseTdClass}>{d?.status ?? '—'}</td>
+                  <td className={enterpriseTdClass}>{d.condition ?? '—'}</td>
+                  <td className={enterpriseTdClass}>{d.status ?? '—'}</td>
                   <td className={enterpriseTdClass}>
-                    <Link href={`/masters/dies/${d?.id ?? ''}`} className="text-[var(--info)] hover:underline dark:text-[var(--info)]">
+                    <Link
+                      href={`/masters/dies/${d.id}`}
+                      className="text-ds-brand hover:underline text-xs"
+                    >
                       View Details
                     </Link>
                   </td>
                 </tr>
               )
             })}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={12} className="py-12 text-center text-sm text-ds-ink-muted">
+                  No dies match your filters.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </EnterpriseTableShell>
-    </div>
-  )
-}
 
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-ds-lg border border-border bg-card p-3">
-      <p className="text-xs uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">{label}</p>
-      <p className="text-lg font-semibold text-neutral-900 dark:text-ds-ink">{value}</p>
-    </div>
-  )
-}
-
-function LifeBar({ pct }: { pct: number }) {
-  const cls = pct > 90 ? 'bg-[var(--error-bg)]' : pct > 70 ? 'bg-ds-warning' : 'bg-[var(--success-bg)]'
-  return (
-    <div className="h-2 w-20 overflow-hidden rounded bg-neutral-200 dark:bg-ds-elevated">
-      <div className={`h-full ${cls}`} style={{ width: `${pct}%` }} />
     </div>
   )
 }

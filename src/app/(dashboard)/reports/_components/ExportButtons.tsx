@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 export function ExportButtons({ reportId, query }: { reportId: string; query: string }) {
   const [busy, setBusy] = useState<'xlsx' | 'pdf' | null>(null)

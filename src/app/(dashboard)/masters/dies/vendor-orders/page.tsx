@@ -1,17 +1,21 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import {
-  EnterpriseTableShell,
-  enterpriseTheadClass,
-  enterpriseTbodyClass,
-  enterpriseTrClass,
-  enterpriseThClass,
-  enterpriseTdClass,
-  enterpriseTdMonoClass,
-  enterpriseTdMutedClass,
-} from '@/components/ui/EnterpriseTableShell'
+/**
+ * Die Vendor Orders — rebuilt with ERP design system
+ * ─────────────────────────────────────────────────────
+ * ✓ useQuery (replaces useEffect + refresh counter)
+ * ✓ DataTable (replaces EnterpriseTableShell)
+ * ✓ PageHeader
+ */
 
+import { useMemo }                           from 'react'
+import { useQuery, useQueryClient }          from '@tanstack/react-query'
+import { format }                            from 'date-fns'
+
+import { PageHeader } from '@/components/shared/PageHeader'
+import { DataTable }  from '@/components/shared/DataTable'
+
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type Order = {
   id: string
   orderCode: string
@@ -29,18 +33,29 @@ type Order = {
   status: string
 }
 
-export default function DieVendorOrdersPage() {
-  const [rows, setRows] = useState<Order[]>([])
-  const [refresh, setRefresh] = useState(0)
+type OrderWithOverdue = Order & { overdueDays: number }
 
-  useEffect(() => {
-    fetch('/api/die-vendor-orders')
-      .then((r) => r.json())
-      .then((data) => setRows(Array.isArray(data) ? data : []))
-  }, [refresh])
+/* ── API ─────────────────────────────────────────────────────────────────── */
+async function fetchOrders(): Promise<Order[]> {
+  const res = await fetch('/api/die-vendor-orders')
+  if (!res.ok) throw new Error('Failed to load die vendor orders')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+/* ── Page ────────────────────────────────────────────────────────────────── */
+export default function DieVendorOrdersPage() {
+  const qc = useQueryClient()
+
+  const { data: rows = [], isLoading } = useQuery<Order[]>({
+    queryKey: ['die-vendor-orders'],
+    queryFn:  fetchOrders,
+  })
+
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['die-vendor-orders'] })
 
   const today = Date.now()
-  const withOverdue = useMemo(
+  const withOverdue = useMemo<OrderWithOverdue[]>(
     () =>
       rows.map((r) => {
         const overdueDays =
@@ -49,7 +64,7 @@ export default function DieVendorOrdersPage() {
             : 0
         return { ...r, overdueDays }
       }),
-    [rows, today]
+    [rows, today],
   )
 
   async function updateStatus(id: string, status: string) {
@@ -58,7 +73,7 @@ export default function DieVendorOrdersPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     })
-    setRefresh((x) => x + 1)
+    refresh()
   }
 
   async function markReceived(id: string) {
@@ -67,76 +82,122 @@ export default function DieVendorOrdersPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ condition: 'New', storageLocation: 'Die Rack A-1', compartment: 'Compartment 1' }),
     })
-    setRefresh((x) => x + 1)
+    refresh()
   }
 
   const selectCls =
-    'min-h-[32px] min-w-[80px] rounded border border-neutral-200 bg-card px-1 py-0.5 text-xs text-neutral-900 dark:border-ds-line/50 dark:bg-ds-card dark:text-ds-ink'
+    'min-h-[32px] min-w-[80px] rounded border border-ds-line bg-ds-card px-1 py-0.5 text-xs text-ds-ink'
+
+  /* ── Columns ────────────────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:    'orderCode',
+      label:  'Order',
+      render: (o: OrderWithOverdue) => (
+        <span className="font-mono text-sm text-ds-warning">{o.orderCode ?? '—'}</span>
+      ),
+    },
+    {
+      key:    'orderedAt',
+      label:  'Date',
+      render: (o: OrderWithOverdue) => (
+        <span className="font-mono text-xs text-ds-ink-muted">
+          {o.orderedAt ? format(new Date(o.orderedAt), 'dd MMM yyyy') : '—'}
+        </span>
+      ),
+    },
+    {
+      key:    'orderType',
+      label:  'Type',
+      render: (o: OrderWithOverdue) => <span className="text-ds-ink-muted text-sm">{o.orderType ?? '—'}</span>,
+    },
+    {
+      key:    'cartonName',
+      label:  'Carton',
+      render: (o: OrderWithOverdue) => <span className="text-ds-ink-muted text-sm">{o.cartonName ?? '—'}</span>,
+    },
+    {
+      key:    'dieSpec',
+      label:  'Die Spec',
+      render: (o: OrderWithOverdue) => (
+        <span className="text-ds-ink-muted text-sm">
+          {o.dieType ?? '—'} · {o.ups ?? '—'} up · {o.sheetSize ?? '—'}
+        </span>
+      ),
+    },
+    {
+      key:    'vendorName',
+      label:  'Vendor',
+      render: (o: OrderWithOverdue) => <span className="text-ds-ink text-sm">{o.vendorName ?? '—'}</span>,
+    },
+    {
+      key:    'expectedBy',
+      label:  'Expected',
+      render: (o: OrderWithOverdue) => (
+        <span className="font-mono text-xs text-ds-ink-muted">
+          {o.expectedBy ? format(new Date(o.expectedBy), 'dd MMM yyyy') : '—'}{' '}
+          {o.overdueDays > 0 && (
+            <span className="text-ds-error font-semibold">OVERDUE {o.overdueDays}d</span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key:    'priority',
+      label:  'Priority',
+      render: (o: OrderWithOverdue) => <span className="text-ds-ink text-sm">{o.priority ?? '—'}</span>,
+    },
+    {
+      key:    'status',
+      label:  'Status',
+      render: (o: OrderWithOverdue) => <span className="text-ds-ink text-sm">{o.status ?? '—'}</span>,
+    },
+    {
+      key:    'action',
+      label:  'Action',
+      render: (o: OrderWithOverdue) => (
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={o.status}
+            onChange={(e) => void updateStatus(o.id, e.target.value)}
+            className={selectCls}
+          >
+            <option>ordered</option>
+            <option>confirmed</option>
+            <option>in_manufacturing</option>
+            <option>dispatched</option>
+            <option>received</option>
+            <option>cancelled</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => void markReceived(o.id)}
+            className="text-sm text-ds-success hover:underline"
+          >
+            Receive
+          </button>
+        </div>
+      ),
+    },
+  ]
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
-      <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Vendor Orders</h1>
-      <EnterpriseTableShell>
-        <table className="w-full min-w-[960px] border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
-          <thead className={enterpriseTheadClass}>
-            <tr>
-              <th className={enterpriseThClass}>Order</th>
-              <th className={enterpriseThClass}>Date</th>
-              <th className={enterpriseThClass}>Type</th>
-              <th className={enterpriseThClass}>Carton</th>
-              <th className={enterpriseThClass}>Die Spec</th>
-              <th className={enterpriseThClass}>Vendor</th>
-              <th className={enterpriseThClass}>Expected</th>
-              <th className={enterpriseThClass}>Priority</th>
-              <th className={enterpriseThClass}>Status</th>
-              <th className={enterpriseThClass}>Action</th>
-            </tr>
-          </thead>
-          <tbody className={enterpriseTbodyClass}>
-            {withOverdue.map((o) => (
-              <tr key={o.id} className={enterpriseTrClass}>
-                <td className={`${enterpriseTdMonoClass} text-ds-warning dark:text-ds-warning`}>{o?.orderCode ?? '—'}</td>
-                <td className={enterpriseTdMonoClass}>
-                  {o?.orderedAt ? new Date(o.orderedAt).toLocaleDateString('en-IN') : '—'}
-                </td>
-                <td className={enterpriseTdMutedClass}>{o?.orderType ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{o?.cartonName ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>
-                  {o?.dieType ?? '—'} · {o?.ups ?? '—'} up · {o?.sheetSize ?? '—'}
-                </td>
-                <td className={enterpriseTdClass}>{o?.vendorName ?? '—'}</td>
-                <td className={enterpriseTdMonoClass}>
-                  {o?.expectedBy ? new Date(o.expectedBy).toLocaleDateString('en-IN') : '—'}{' '}
-                  {o.overdueDays > 0 ? (
-                    <span className="text-[var(--error)] dark:text-[var(--error)]">OVERDUE {o.overdueDays}d</span>
-                  ) : null}
-                </td>
-                <td className={enterpriseTdClass}>{o?.priority ?? '—'}</td>
-                <td className={enterpriseTdClass}>{o?.status ?? '—'}</td>
-                <td className={enterpriseTdClass}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select value={o.status} onChange={(e) => updateStatus(o.id, e.target.value)} className={selectCls}>
-                      <option>ordered</option>
-                      <option>confirmed</option>
-                      <option>in_manufacturing</option>
-                      <option>dispatched</option>
-                      <option>received</option>
-                      <option>cancelled</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => markReceived(o.id)}
-                      className="text-sm text-[var(--success)] hover:underline dark:text-[var(--success)]"
-                    >
-                      Receive
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </EnterpriseTableShell>
+    <div className="p-6 space-y-6">
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Die Vendor Orders"
+        subtitle="Track die manufacturing orders with vendors — status, expected delivery, and overdue tracking"
+      />
+
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={withOverdue}
+        loading={isLoading}
+        emptyMessage="No die vendor orders found."
+      />
+
     </div>
   )
 }

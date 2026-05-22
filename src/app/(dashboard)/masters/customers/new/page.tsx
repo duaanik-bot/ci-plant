@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 function toCaps(value: string) {
   return value.toUpperCase()

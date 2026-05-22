@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { IndustrialModuleShell } from '@/components/industrial/IndustrialModuleShell'
 import { PRODUCTION_STAGES } from '@/lib/constants'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'

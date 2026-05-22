@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
-import { toast } from 'sonner'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from '@/store/toastStore'
 import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -66,16 +68,20 @@ function statusTone(status: CuttingStatus): string {
   }
 }
 
+type CuttingData = {
+  rows: JobCardRow[]
+  users: Array<{ id: string; name: string }>
+  machines: Array<{ id: string; machineCode: string; name: string }>
+}
+
 export default function CuttingQueuePage() {
   const { data: session } = useSession()
-  const [rows, setRows] = useState<JobCardRow[]>([])
-  const [metaByJob, setMetaByJob] = useState<Record<string, LocalCuttingMeta>>({})
-  const [users, setUsers] = useState<Array<{ id: string; name: string }>>([])
-  const [machines, setMachines] = useState<Array<{ id: string; machineCode: string; name: string }>>([])
-  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const qc = useQueryClient()
+
+  const [metaByJob,    setMetaByJob]    = useState<Record<string, LocalCuttingMeta>>({})
+  const [activeJobId,  setActiveJobId]  = useState<string | null>(null)
   const [counterEdits, setCounterEdits] = useState<Record<string, string>>({})
-  const [savingRow, setSavingRow] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [savingRow,    setSavingRow]    = useState<string | null>(null)
 
   const deriveInitialStatus = useCallback((row: JobCardRow): CuttingStatus => {
     const cutting = (row.stages ?? []).find((s) => s.stageName === 'Cutting')
@@ -86,56 +92,59 @@ export default function CuttingQueuePage() {
     return 'pending'
   }, [])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
+  const { data: cuttingData, isLoading: loading } = useQuery<CuttingData>({
+    queryKey: ['cutting-queue'],
+    queryFn:  async () => {
       const [jcRes, uRes, mRes] = await Promise.all([
         fetch('/api/job-cards'),
         fetch('/api/users'),
         fetch('/api/machines'),
       ])
-      const jcData = await jcRes.json()
-      const userData = await uRes.json()
+      const jcData     = await jcRes.json()
+      const userData   = await uRes.json()
       const machineData = await mRes.json()
-
       if (!jcRes.ok) throw new Error(jcData?.error || 'Failed to load job cards')
-
       const allRows = (Array.isArray(jcData) ? jcData : []) as JobCardRow[]
       const cuttingRows = allRows.filter((j) => {
         const hasCutting = (j.stages ?? []).some((s) => s.stageName === 'Cutting')
         return hasCutting && j.poLine != null
       })
+      return {
+        rows:     cuttingRows,
+        users:    Array.isArray(userData)   ? userData   : [],
+        machines: Array.isArray(machineData) ? machineData : [],
+      }
+    },
+  })
 
-      setRows(cuttingRows)
-      setUsers(Array.isArray(userData) ? userData : [])
-      setMachines(Array.isArray(machineData) ? machineData : [])
-      setMetaByJob((prev) => {
-        const next = { ...prev }
-        for (const row of cuttingRows) {
-          if (next[row.id]) continue
-          const cutting = (row.stages ?? []).find((s) => s.stageName === 'Cutting')
-          next[row.id] = {
-            stage: 'cutting',
-            status: deriveInitialStatus(row),
-            operatorId: null,
-            operatorName: cutting?.operator ?? null,
-            machineId: null,
-            priority: 'normal',
-          }
-        }
-        return next
-      })
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Load failed')
-      setRows([])
-    } finally {
-      setLoading(false)
-    }
-  }, [deriveInitialStatus])
+  const rows     = cuttingData?.rows     ?? []
+  const users    = cuttingData?.users    ?? []
+  const machines = cuttingData?.machines ?? []
 
+  /* Initialise metaByJob whenever rows arrive from query */
   useEffect(() => {
-    void load()
-  }, [load])
+    if (!rows.length) return
+    setMetaByJob((prev) => {
+      const next = { ...prev }
+      for (const row of rows) {
+        if (next[row.id]) continue
+        const cutting = (row.stages ?? []).find((s) => s.stageName === 'Cutting')
+        next[row.id] = {
+          stage: 'cutting',
+          status: deriveInitialStatus(row),
+          operatorId: null,
+          operatorName: cutting?.operator ?? null,
+          machineId: null,
+          priority: 'normal',
+        }
+      }
+      return next
+    })
+  }, [rows, deriveInitialStatus])
+
+  const refresh = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ['cutting-queue'] })
+  }, [qc])
 
   const visibleRows = useMemo(() => {
     const role = String((session?.user as { role?: string } | undefined)?.role ?? '').toLowerCase()
@@ -266,7 +275,7 @@ export default function CuttingQueuePage() {
         delete next[row.id]
         return next
       })
-      await load()
+      refresh()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save counter')
     } finally {
@@ -339,7 +348,7 @@ export default function CuttingQueuePage() {
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to update status')
       updateMeta(row.id, { status, operatorName })
-      await load()
+      refresh()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update status')
     } finally {
@@ -358,16 +367,12 @@ export default function CuttingQueuePage() {
 
   return (
     <div className="min-h-screen bg-background text-ds-ink pb-10">
-      <div className="w-full px-3 py-3 md:px-4 space-y-3">
-        <div className="sticky top-0 z-20 border-b border-ds-line/30 bg-background/95 py-1.5 backdrop-blur">
-          <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>
-            Production execution · Cutting
-          </p>
-          <h1 className={`text-lg font-semibold text-ds-warning ${mono}`}>Cutting queue</h1>
-          <p className="text-xs text-ds-ink-muted mt-0.5">
-            Planning-style execution board. Table is the action surface; right drawer is decision + execution detail.
-          </p>
-        </div>
+      <div className="w-full px-4 py-4 md:px-6 space-y-3">
+        {/* ── Page header ─────────────────────────────────────────────── */}
+        <PageHeader
+          title="Cutting Queue"
+          subtitle="Production execution · Planning-style board. Table is the action surface; right drawer is decision + execution detail."
+        />
 
         <div className="flex flex-wrap gap-2">
           <span className={`rounded border border-ds-line/40 bg-ds-main/40 px-2 py-0.5 text-xs ${mono}`}>

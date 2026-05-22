@@ -1,8 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
+import { PageHeader } from '@/components/shared/PageHeader'
 import { Search, AlertTriangle, FileDown, Pencil, Sparkles, Star, Trash2, X } from 'lucide-react'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { PoImportDrawer } from '@/components/po/PoImportDrawer'
@@ -267,6 +269,7 @@ function PoDeepFilterBar({
 }
 
 export default function PurchaseOrdersPage() {
+  const qc = useQueryClient()
   const [listFilterQuery, setListFilterQuery] = useState('')
   const [poDensity] = useUiDensity()
   const [selectedPoId, setSelectedPoId] = useState<string | null>(null)
@@ -286,9 +289,15 @@ export default function PurchaseOrdersPage() {
   debouncedLiveRef.current = debouncedListFilter
 
   const [list, setList] = useState<PurchaseOrder[]>([])
-  const [metrics, setMetrics] = useState<ExecutiveMetrics | null>(null)
+  const { data: metrics = null, isLoading: metricsLoading } = useQuery<ExecutiveMetrics | null>({
+    queryKey: ['po-metrics'],
+    queryFn: async () => {
+      const res = await fetch('/api/purchase-orders/executive-metrics')
+      const json = (await res.json()) as ExecutiveMetrics
+      return res.ok ? json : null
+    },
+  })
   const [loading, setLoading] = useState(true)
-  const [metricsLoading, setMetricsLoading] = useState(true)
   const [status, setStatus] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
@@ -323,19 +332,7 @@ export default function PurchaseOrdersPage() {
     [status],
   )
 
-  async function loadMetrics() {
-    setMetricsLoading(true)
-    try {
-      const res = await fetch('/api/purchase-orders/executive-metrics')
-      const json = (await res.json()) as ExecutiveMetrics
-      if (res.ok) setMetrics(json)
-      else setMetrics(null)
-    } catch {
-      setMetrics(null)
-    } finally {
-      setMetricsLoading(false)
-    }
-  }
+  const refreshMetrics = () => void qc.invalidateQueries({ queryKey: ['po-metrics'] })
 
   useEffect(() => {
     let cancelled = false
@@ -388,10 +385,6 @@ export default function PurchaseOrdersPage() {
       }
     }
   }, [debouncedListFilter, loadPurchaseOrders])
-
-  useEffect(() => {
-    void loadMetrics()
-  }, [])
 
   useEffect(() => {
     const q = debouncedAuditFilter.trim()
@@ -644,7 +637,7 @@ export default function PurchaseOrdersPage() {
       toast.success(`${po.poNumber} deleted`)
       setList((prev) => prev.filter((p) => p.id !== po.id))
       if (drawerPoId === po.id) setDrawerPoId(null)
-      void loadMetrics()
+      refreshMetrics()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete')
     } finally {
@@ -667,7 +660,7 @@ export default function PurchaseOrdersPage() {
       toast.success(`${po.poNumber} confirmed — ${po.lineItems.length} item(s) pushed to Artwork queue`)
       setList((prev) => prev.map((p) => (p.id === po.id ? { ...p, status: 'confirmed' } : p)))
       if (drawerPo?.id === po.id) setDrawerPo((d) => (d ? { ...d, status: 'confirmed' } : d))
-      void loadMetrics()
+      refreshMetrics()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to confirm')
     } finally {
@@ -746,7 +739,7 @@ export default function PurchaseOrdersPage() {
         toast.success(`Status updated to ${newStatus}`)
         setList((prev) => prev.map((p) => (p.id === po.id ? { ...p, status: newStatus } : p)))
         if (drawerPo?.id === po.id) setDrawerPo((d) => (d ? { ...d, status: newStatus } : d))
-        void loadMetrics()
+        refreshMetrics()
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to update')
       } finally {
@@ -793,9 +786,9 @@ export default function PurchaseOrdersPage() {
         toast.error(`Failed for ${failed} PO${failed > 1 ? 's' : ''}`)
       }
       setBulkUpdatingStatus(null)
-      void loadMetrics()
+      refreshMetrics()
     },
-    [viewRows, selectedPoIds, drawerPo, loadMetrics],
+    [viewRows, selectedPoIds, drawerPo],
   )
 
   const bulkRevertSelectedToDraft = useCallback(async () => {
@@ -834,11 +827,11 @@ export default function PurchaseOrdersPage() {
       setList((prev) => prev.map((p) => (ids.has(p.id) ? { ...p, status: 'draft' } : p)))
       if (drawerPo && ids.has(drawerPo.id)) setDrawerPo((d) => (d ? { ...d, status: 'draft' } : d))
       toast.success(`Moved ${ok} PO${ok > 1 ? 's' : ''} to Draft`)
-      void loadMetrics()
+      refreshMetrics()
     }
     if (fail > 0) toast.error(`Could not revert ${fail} PO${fail > 1 ? 's' : ''}`)
     setBulkRevertingDraft(false)
-  }, [viewRows, selectedPoIds, drawerPo, loadMetrics])
+  }, [viewRows, selectedPoIds, drawerPo])
 
   if (loading && list.length === 0) {
     return <div className="p-4 text-ds-ink-muted text-sm">Loading purchase orders…</div>
@@ -846,6 +839,10 @@ export default function PurchaseOrdersPage() {
 
   return (
     <div className="w-full space-y-3 px-3 py-3 pb-24 md:px-4 md:py-4">
+      <PageHeader
+        title="Purchase Orders"
+        subtitle="Manage customer purchase orders — track status, readiness, and delivery pipeline"
+      />
       <div className="sticky top-0 z-40 rounded-ds-sm border border-ds-line/60 bg-ds-main/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
         <div className="flex flex-wrap items-center gap-2">
           <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">

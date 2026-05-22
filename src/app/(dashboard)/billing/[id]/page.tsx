@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { Badge, Button, CardSection, StatusBadge } from '@/components/design-system'
 
 type LineItem = {

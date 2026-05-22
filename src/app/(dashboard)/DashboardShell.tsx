@@ -39,6 +39,7 @@ import {
   getStoredHighContrast,
 } from '@/lib/accent-theme'
 import { useUiDensity } from '@/lib/ui-density'
+import { Toaster } from '@/components/ui/Toaster'
 
 type MegaNavItem = {
   label: string
@@ -672,6 +673,7 @@ export function DashboardShell({
         <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-ds-main pt-14 lg:pt-[104px]">
           <ErrorBoundary moduleName="Page">{children}</ErrorBoundary>
         </main>
+        <Toaster />
       </AppLayout>
     </CommandPaletteProvider>
     </ErrorBoundary>

@@ -1,25 +1,33 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { toast } from 'sonner'
+/**
+ * Machine Master — rebuilt with ERP design system
+ * ─────────────────────────────────────────────────
+ * Before: raw fetch + useEffect, browser confirm(), EnterpriseTableShell
+ * After:  useQuery/useMutation, DataTable, PageHeader, KpiCard,
+ *         SearchInput, Pagination, ConfirmDialog, toast
+ *         MachineHealthMeter + PmSpotlightDrawer are preserved.
+ */
+
+import { useState }                           from 'react'
+import Link                                   from 'next/link'
+import { useRouter }                          from 'next/navigation'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Cpu, Activity, AlertTriangle, Pencil, Trash2 } from 'lucide-react'
+
+import { PageHeader }    from '@/components/shared/PageHeader'
+import { DataTable }     from '@/components/shared/DataTable'
+import { StatusBadge }   from '@/components/shared/StatusBadge'
+import { KpiCard }       from '@/components/shared/KpiCard'
+import { Button }        from '@/components/ui/Button'
+import { SearchInput }   from '@/components/ui/SearchInput'
+import { Pagination }    from '@/components/ui/Pagination'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast }         from '@/store/toastStore'
 import { MachineHealthMeter } from '@/components/industrial/MachineHealthMeter'
-import { PmSpotlightDrawer } from '@/components/industrial/PmSpotlightDrawer'
-import {
-  EnterpriseTableShell,
-  enterpriseTableClass,
-  enterpriseTheadClass,
-  enterpriseTbodyClass,
-  enterpriseTrClass,
-  enterpriseThClass,
-  enterpriseTdClass,
-  enterpriseTdBase,
-  enterpriseTdMonoClass,
-  enterpriseTdMutedClass,
-} from '@/components/ui/EnterpriseTableShell'
+import { PmSpotlightDrawer }  from '@/components/industrial/PmSpotlightDrawer'
 
-const mono = 'font-designing-queue tabular-nums tracking-tight'
-
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type Machine = {
   id: string
   machineCode: string
@@ -42,230 +50,307 @@ type PmRow = {
   usageImpressions: string
 }
 
+type PmResponse = {
+  machines: PmRow[]
+}
+
+const PAGE_LIMIT = 20
+
+/* ── API helpers ─────────────────────────────────────────────────────────── */
+async function fetchMachines(): Promise<Machine[]> {
+  const res = await fetch('/api/masters/machines')
+  if (!res.ok) throw new Error('Failed to load machines')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+async function fetchMachineHealth(): Promise<Record<string, PmRow>> {
+  const res = await fetch('/api/production/machine-health')
+  if (!res.ok) return {}
+  const json = (await res.json()) as PmResponse
+  const map: Record<string, PmRow> = {}
+  if (json.machines && Array.isArray(json.machines)) {
+    for (const row of json.machines) {
+      map[row.machineId] = row
+    }
+  }
+  return map
+}
+
+async function deleteMachine(id: string): Promise<void> {
+  const res = await fetch(`/api/masters/machines/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error((j as { error?: string }).error ?? 'Failed to delete machine')
+  }
+}
+
+/* ── Page component ──────────────────────────────────────────────────────── */
 export default function MastersMachinesPage() {
-  const [list, setList] = useState<Machine[]>([])
-  const [loading, setLoading] = useState(true)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [bulkDeleting, setBulkDeleting] = useState(false)
-  const [pmById, setPmById] = useState<Record<string, PmRow>>({})
-  const [pmMachineId, setPmMachineId] = useState<string | null>(null)
+  const router = useRouter()
+  const qc     = useQueryClient()
 
-  function load() {
-    Promise.all([fetch('/api/masters/machines'), fetch('/api/production/machine-health')])
-      .then(async ([machRes, pmRes]) => {
-        const data = await machRes.json()
-        const pmJson = await pmRes.json()
-        setList(Array.isArray(data) ? data : [])
-        const map: Record<string, PmRow> = {}
-        if (pmJson.machines && Array.isArray(pmJson.machines)) {
-          for (const row of pmJson.machines as PmRow[]) {
-            map[row.machineId] = row
-          }
-        }
-        setPmById(map)
-      })
-      .catch(() => toast.error('Failed to load'))
-      .finally(() => setLoading(false))
-  }
+  const [q,            setQ]            = useState('')
+  const [page,         setPage]         = useState(1)
+  const [deleteTarget, setDeleteTarget] = useState<Machine | null>(null)
+  const [pmMachineId,  setPmMachineId]  = useState<string | null>(null)
 
-  useEffect(() => {
-    load()
-  }, [])
+  /* ── Fetch ───────────────────────────────────────────────────────────── */
+  const { data: list = [], isLoading: machinesLoading } = useQuery<Machine[]>({
+    queryKey: ['masters', 'machines'],
+    queryFn:  fetchMachines,
+  })
 
-  async function handleDelete(m: Machine) {
-    if (!confirm(`Delete machine "${m.machineCode}"? This action cannot be undone.`)) return
-    setDeletingId(m.id)
-    try {
-      const res = await fetch(`/api/masters/machines/${m.id}`, { method: 'DELETE' })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to delete machine')
+  const { data: pmById = {} } = useQuery<Record<string, PmRow>>({
+    queryKey: ['production', 'machine-health'],
+    queryFn:  fetchMachineHealth,
+  })
+
+  const isLoading = machinesLoading
+
+  /* ── Delete mutation ─────────────────────────────────────────────────── */
+  const deleteMut = useMutation({
+    mutationFn: deleteMachine,
+    onSuccess: () => {
       toast.success('Machine deleted')
-      load()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete machine')
-    } finally {
-      setDeletingId(null)
-    }
-  }
+      void qc.invalidateQueries({ queryKey: ['masters', 'machines'] })
+      void qc.invalidateQueries({ queryKey: ['production', 'machine-health'] })
+      setDeleteTarget(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
-  async function handleBulkDelete() {
-    const targets = list.filter((m) => selectedIds.has(m.id))
-    if (!targets.length) return
-    if (!confirm(`Delete ${targets.length} machine record(s)?`)) return
-    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
-    if (token !== 'DELETE') return
-    setBulkDeleting(true)
-    let ok = 0
-    let fail = 0
-    for (const m of targets) {
-      try {
-        const res = await fetch(`/api/masters/machines/${m.id}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error('Failed')
-        ok += 1
-      } catch {
-        fail += 1
-      }
-    }
-    if (ok) toast.success(`Deleted ${ok} machine(s)`)
-    if (fail) toast.error(`Failed to delete ${fail} machine(s)`)
-    setBulkDeleting(false)
-    setSelectedIds(new Set())
-    load()
-  }
+  /* ── Filter + paginate ───────────────────────────────────────────────── */
+  const ql = q.toLowerCase()
+  const filtered = list.filter(m =>
+    m.machineCode.toLowerCase().includes(ql) ||
+    m.name.toLowerCase().includes(ql) ||
+    (m.make ?? '').toLowerCase().includes(ql) ||
+    m.status.toLowerCase().includes(ql),
+  )
+  const paginated = filtered.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT)
 
-  if (loading) {
-    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
-  }
+  const overdueCount  = Object.values(pmById).filter(p => p.overdue).length
+  const activeCount   = list.filter(m => m.status === 'active').length
+  const maintCount    = list.filter(m => m.status === 'under_maintenance').length
 
-  return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Machine Master (CI-01 to CI-12)</h2>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              setSelectedIds((prev) =>
-                prev.size === list.length ? new Set() : new Set(list.map((m) => m.id)),
-              )
-            }
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            {selectedIds.size === list.length && list.length > 0 ? 'Unselect all' : 'Select all'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedIds(new Set())}
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            disabled={selectedIds.size === 0 || bulkDeleting}
-            onClick={() => void handleBulkDelete()}
-            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
-          >
-            {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
-          </button>
+  /* ── Column definitions ──────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:       'machineCode',
+      label:     'Code',
+      className: 'font-mono text-sm text-ds-warning font-semibold',
+      render:    (row: Machine) => (
+        <Link
+          href={`/masters/machines/${row.id}`}
+          className="hover:text-ds-brand hover:underline"
+        >
+          {row.machineCode}
+        </Link>
+      ),
+    },
+    {
+      key:       'name',
+      label:     'Name',
+      className: 'font-medium',
+      render:    (row: Machine) => row.name,
+    },
+    {
+      key:    'health',
+      label:  'Health',
+      render: (row: Machine) => {
+        const pm = pmById[row.id]
+        return pm?.hasSchedule ? (
+          <MachineHealthMeter
+            healthPct={pm.healthPct}
+            hasSchedule
+            onClick={() => setPmMachineId(row.id)}
+          />
+        ) : (
+          <MachineHealthMeter healthPct={0} hasSchedule={false} />
+        )
+      },
+    },
+    {
+      key:       'pmUsage',
+      label:     'PM Usage',
+      className: 'font-mono text-xs text-ds-ink-muted',
+      render:    (row: Machine) => {
+        const pm = pmById[row.id]
+        return pm?.hasSchedule ? `${pm.usageRunHours}h · ${pm.usageImpressions}` : '—'
+      },
+    },
+    {
+      key:       'make',
+      label:     'Make',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: Machine) => row.make ?? '—',
+    },
+    {
+      key:       'capacityPerShift',
+      label:     'Cap/Shift',
+      align:     'right' as const,
+      className: 'font-mono text-sm',
+      render:    (row: Machine) => (row.capacityPerShift ?? 0).toLocaleString('en-IN'),
+    },
+    {
+      key:       'stdWastePct',
+      label:     'Std Waste',
+      align:     'right' as const,
+      className: 'font-mono text-sm',
+      render:    (row: Machine) => `${row.stdWastePct ?? '—'}%`,
+    },
+    {
+      key:    'status',
+      label:  'Status',
+      render: (row: Machine) => (
+        <StatusBadge
+          status={
+            row.status === 'active'            ? 'active'
+            : row.status === 'under_maintenance' ? 'under_maintenance'
+            : 'inactive'
+          }
+        />
+      ),
+    },
+    {
+      key:       'lastPmDate',
+      label:     'Last PM',
+      className: 'font-mono text-xs text-ds-ink-muted',
+      render:    (row: Machine) => row.lastPmDate ?? '—',
+    },
+    {
+      key:    'nextPmDue',
+      label:  'Next PM Due',
+      render: (row: Machine) => {
+        const overdue = row.nextPmDue && new Date(row.nextPmDue) < new Date()
+        return row.nextPmDue ? (
+          <span className={`font-mono text-xs ${overdue ? 'font-semibold text-ds-error' : 'text-ds-ink-muted'}`}>
+            {row.nextPmDue}
+          </span>
+        ) : (
+          <span className="text-ds-ink-faint">—</span>
+        )
+      },
+    },
+    {
+      key:    'actions',
+      label:  '',
+      render: (row: Machine) => (
+        <div className="flex items-center gap-1 justify-end">
           <Link
-            href="/masters/machines/new"
-            className="rounded-ds-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+            href={`/masters/machines/${row.id}`}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-brand hover:bg-ds-brand/8 transition-colors"
+            title="Edit"
           >
-            Add machine
+            <Pencil size={14} />
           </Link>
+          <button
+            onClick={() => setDeleteTarget(row)}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-error hover:bg-ds-error/8 transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={14} />
+          </button>
         </div>
+      ),
+    },
+  ]
+
+  /* ── Row class — highlight overdue PM rows ───────────────────────────── */
+  function getRowClassName(row: Machine): string {
+    const pm = pmById[row.id]
+    return pm?.overdue ? 'bg-rose-50 dark:bg-[var(--error-bg)]/30' : ''
+  }
+
+  /* ── Render ──────────────────────────────────────────────────────────── */
+  return (
+    <div className="p-6 space-y-6">
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <KpiCard
+          title="Total Machines"
+          value={list.length}
+          icon={Cpu}
+          color="blue"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Active"
+          value={activeCount}
+          icon={Activity}
+          color="green"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="PM Overdue"
+          value={overdueCount}
+          icon={AlertTriangle}
+          color={overdueCount > 0 ? 'red' : 'slate'}
+          loading={isLoading}
+        />
       </div>
-      <EnterpriseTableShell>
-        <table className={`w-full min-w-[900px] border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink ${mono}`}>
-          <thead className={enterpriseTheadClass}>
-            <tr>
-              <th className={enterpriseThClass}>
-                <input
-                  type="checkbox"
-                  checked={list.length > 0 && selectedIds.size === list.length}
-                  onChange={() =>
-                    setSelectedIds((prev) =>
-                      prev.size === list.length ? new Set() : new Set(list.map((m) => m.id)),
-                    )
-                  }
-                />
-              </th>
-              <th className={enterpriseThClass}>Code</th>
-              <th className={enterpriseThClass}>Name</th>
-              <th className={enterpriseThClass}>Health</th>
-              <th className={enterpriseThClass}>PM usage</th>
-              <th className={enterpriseThClass}>Make</th>
-              <th className={enterpriseThClass}>Capacity/Shift</th>
-              <th className={enterpriseThClass}>Std Waste %</th>
-              <th className={enterpriseThClass}>Status</th>
-              <th className={enterpriseThClass}>Last PM</th>
-              <th className={enterpriseThClass}>Next PM Due</th>
-              <th className={enterpriseThClass}>Actions</th>
-            </tr>
-          </thead>
-          <tbody className={enterpriseTbodyClass}>
-            {list.map((m) => {
-              const pm = pmById[m.id]
-              return (
-                <tr
-                  key={m.id}
-                  className={`${enterpriseTrClass} ${pm?.overdue ? 'bg-rose-50 dark:bg-[var(--error-bg)]' : ''}`}
-                >
-                  <td className={enterpriseTdClass}>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(m.id)}
-                      onChange={() =>
-                        setSelectedIds((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(m.id)) next.delete(m.id)
-                          else next.add(m.id)
-                          return next
-                        })
-                      }
-                    />
-                  </td>
-                  <td className={`${enterpriseTdClass} text-ds-warning dark:text-ds-warning`}>{m?.machineCode ?? '—'}</td>
-                  <td className={enterpriseTdClass}>{m?.name ?? '—'}</td>
-                  <td className={enterpriseTdBase}>
-                    {pm?.hasSchedule ? (
-                      <MachineHealthMeter
-                        healthPct={pm.healthPct}
-                        hasSchedule
-                        onClick={() => setPmMachineId(m.id)}
-                      />
-                    ) : (
-                      <MachineHealthMeter healthPct={0} hasSchedule={false} />
-                    )}
-                  </td>
-                  <td className={enterpriseTdMutedClass}>
-                    {pm?.hasSchedule ? `${pm.usageRunHours}h · ${pm.usageImpressions}` : '—'}
-                  </td>
-                  <td className={enterpriseTdMutedClass}>{m?.make ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{(m?.capacityPerShift ?? 0).toLocaleString()}</td>
-                  <td className={enterpriseTdMonoClass}>{m?.stdWastePct ?? '—'}%</td>
-                  <td className={enterpriseTdClass}>
-                    <span
-                      className={
-                        m?.status === 'active'
-                          ? 'text-[var(--success)] dark:text-[var(--success)]'
-                          : m?.status === 'under_maintenance'
-                            ? 'text-ds-warning dark:text-ds-warning'
-                            : 'text-[var(--error)] dark:text-[var(--error)]'
-                      }
-                    >
-                      {(m?.status ?? '—').replace('_', ' ')}
-                    </span>
-                  </td>
-                  <td className={enterpriseTdMonoClass}>{m?.lastPmDate ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>
-                    <span className={m?.nextPmDue && new Date(m.nextPmDue) < new Date() ? 'text-[var(--error)] dark:text-[var(--error)]' : ''}>
-                      {m?.nextPmDue ?? '—'}
-                    </span>
-                  </td>
-                  <td className={enterpriseTdClass}>
-                    <Link href={`/masters/machines/${m?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
-                      Edit
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => void handleDelete(m)}
-                      disabled={deletingId === m.id}
-                      className="text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
-                    >
-                      {deletingId === m.id ? 'Deleting…' : 'Delete'}
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </EnterpriseTableShell>
-      {list.length === 0 && <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No machines. Run seed.</p>}
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Machine Master"
+        subtitle="Manage machine specifications, PM schedules and health status"
+        action={
+          <Button icon={Plus} onClick={() => router.push('/masters/machines/new')}>
+            Add Machine
+          </Button>
+        }
+      />
+
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <SearchInput
+          value={q}
+          onChange={v => { setQ(v); setPage(1) }}
+          placeholder="Search by code, name, make or status…"
+          className="w-80"
+        />
+        {maintCount > 0 && (
+          <span className="rounded-ds-md bg-ds-warning/10 px-3 py-1.5 text-xs font-medium text-ds-warning">
+            {maintCount} under maintenance
+          </span>
+        )}
+      </div>
+
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={paginated}
+        loading={isLoading}
+        rowClassName={getRowClassName}
+        emptyMessage={
+          q ? 'No machines match your search.' : 'No machines yet. Add one to get started.'
+        }
+      />
+
+      {/* ── Pagination ────────────────────────────────────────────────── */}
+      <Pagination
+        page={page}
+        total={filtered.length}
+        limit={PAGE_LIMIT}
+        onChange={setPage}
+      />
+
+      {/* ── Delete confirmation ───────────────────────────────────────── */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+        title="Delete Machine"
+        message={`Are you sure you want to delete "${deleteTarget?.machineCode}"? This cannot be undone.`}
+        confirmLabel="Yes, Delete"
+        loading={deleteMut.isPending}
+      />
+
+      {/* ── PM Spotlight drawer ───────────────────────────────────────── */}
       <PmSpotlightDrawer machineId={pmMachineId} onClose={() => setPmMachineId(null)} />
+
     </div>
   )
 }

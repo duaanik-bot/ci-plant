@@ -30,6 +30,10 @@ const config: Config = {
         'ds-drawer': '0 8px 32px rgba(15,23,42,0.12)',
         'ds-drawer-foot': '0 -4px 20px rgba(15,23,42,0.08)',
         'ds-focus': '0 0 0 3px rgba(249, 115, 22, 0.2)',
+        // ── ERP design-system component shadows ────────────────────────
+        card:  '0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.07)',
+        modal: '0 20px 60px -12px rgb(0 0 0 / 0.25), 0 8px 24px -4px rgb(0 0 0 / 0.1)',
+        toast: '0 8px 30px -4px rgb(0 0 0 / 0.12)',
       },
       keyframes: {
         'po-age-alert': {
@@ -49,12 +53,29 @@ const config: Config = {
           from: { transform: 'translateX(100%)' },
           to: { transform: 'translateX(0)' },
         },
+        // ── ERP design-system modal / toast animations ──────────────────
+        'slide-in-right': {
+          from: { transform: 'translateX(100%)', opacity: '0' },
+          to:   { transform: 'translateX(0)',    opacity: '1' },
+        },
+        'scale-in': {
+          from: { transform: 'scale(0.95)', opacity: '0' },
+          to:   { transform: 'scale(1)',    opacity: '1' },
+        },
+        'fade-in': {
+          from: { opacity: '0' },
+          to:   { opacity: '1' },
+        },
       },
       animation: {
         'po-age-alert': 'po-age-alert 2.2s ease-in-out infinite',
         'industrial-age-pulse': 'industrial-age-pulse 2.2s ease-in-out infinite',
         'slide-over-enter': 'slide-over-enter 200ms ease-in-out both',
         'ds-drawer-slide': 'ds-drawer-slide 200ms ease-out both',
+        // ── ERP design-system ──────────────────────────────────────────
+        'slide-in-right': 'slide-in-right 0.2s ease-out',
+        'scale-in':       'scale-in 0.18s ease-out',
+        'fade-in':        'fade-in 0.15s ease-out',
       },
       colors: {
         border: 'var(--border)',

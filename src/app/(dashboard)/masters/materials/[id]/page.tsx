@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import MaterialForm from '@/components/masters/MaterialForm'
 
 type ApiMaterial = {

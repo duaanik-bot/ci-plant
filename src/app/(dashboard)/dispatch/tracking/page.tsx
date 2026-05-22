@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 type TrackingRow = {
   id: string
@@ -113,12 +113,7 @@ export default function DispatchTrackingPage() {
         return
       }
       if (data.draftBillId) {
-        toast.success(`POD received. Draft bill ${data.draftBillNumber} created.`, {
-          action: {
-            label: 'View bill',
-            onClick: () => window.open(`/billing/${data.draftBillId}`, '_blank'),
-          },
-        })
+        toast.success(`POD received. Draft bill ${data.draftBillNumber} created.`)
       } else {
         toast.success('Marked delivered (POD received)')
       }

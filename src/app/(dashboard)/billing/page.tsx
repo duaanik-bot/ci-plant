@@ -4,7 +4,7 @@ import { useMemo, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import {
   Search, X, FileText, IndianRupee, CheckCircle2, Clock,
   Send, BadgeCheck, ExternalLink, Receipt, ChevronRight,
@@ -133,12 +133,6 @@ export default function BillingPage() {
       }
       toast.success(
         `Invoice ${json.billNumber} · ${fmtINR(Number(json.totalAmount))}${json.ewayApplicable ? ' · E-way applicable' : ''}`,
-        {
-          action: {
-            label: 'Open invoice',
-            onClick: () => router.push(`/billing/${json.id}`),
-          },
-        },
       )
       await qc.invalidateQueries({ queryKey: ['billing-queue'] })
       await qc.invalidateQueries({ queryKey: ['bills'] })

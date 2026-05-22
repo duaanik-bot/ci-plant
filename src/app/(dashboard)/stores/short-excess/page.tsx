@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { Search, X, AlertTriangle, TrendingUp, CheckCircle2 } from 'lucide-react'
 import {
   IndustrialModuleShell,

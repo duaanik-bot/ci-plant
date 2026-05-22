@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { Star, PauseCircle, PlayCircle } from 'lucide-react'
 import type { BarPart, DirectorLifeBars } from '@/lib/director-command-center-lifecycle'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'

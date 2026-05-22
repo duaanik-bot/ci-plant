@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { PRODUCTION_STAGES } from '@/lib/constants'
 import { ChevronDown, ChevronUp, CircleDollarSign, FileText, PanelRightOpen, RotateCcw, Star, Trash2 } from 'lucide-react'
 import { OperatorProfileDrawer } from '@/components/industrial/OperatorProfileDrawer'

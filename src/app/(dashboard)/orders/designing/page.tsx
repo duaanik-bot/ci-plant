@@ -4,7 +4,7 @@ import { Fragment, type MouseEvent, useCallback, useEffect, useMemo, useRef, use
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import {
   ChevronDown,
   ChevronUp,
@@ -1464,12 +1464,7 @@ export default function DesigningQueuePage() {
       if (!res.ok) throw new Error(json.error || 'Recall failed')
       setRows((prev) => prev.filter((row) => row.id !== r.id))
       window.dispatchEvent(new CustomEvent('planning:refresh'))
-      toast.success('Returned to Planning', {
-        action: {
-          label: 'View Planning',
-          onClick: () => router.push('/orders/planning?view=pending'),
-        },
-      })
+      toast.success('Returned to Planning')
       void load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Recall failed')
@@ -1505,12 +1500,7 @@ export default function DesigningQueuePage() {
       }
       window.dispatchEvent(new CustomEvent('planning:refresh'))
       if (success > 0) {
-        toast.success(`Returned to Planning • ${success} item${success > 1 ? 's' : ''}`, {
-          action: {
-            label: 'View Planning',
-            onClick: () => router.push('/orders/planning?view=pending'),
-          },
-        })
+        toast.success(`Returned to Planning • ${success} item${success > 1 ? 's' : ''}`)
       }
       if (failed > 0) toast.error(`Recall failed for ${failed} item${failed > 1 ? 's' : ''}`)
       void load()
@@ -1570,13 +1560,9 @@ export default function DesigningQueuePage() {
             : 'Plate Hub + job card: routed to CTP triage and production',
         )
       } else if (plateOk && !jcOk) {
-        toast.error(jobCardError || 'Job card step failed', {
-          description: 'Plate Hub / CTP side completed or was already sent — fix job card issue and retry',
-        })
+        toast.error(`${jobCardError || 'Job card step failed'} — Plate Hub / CTP side completed or was already sent — fix job card issue and retry`)
       } else if (!plateOk && jcOk) {
-        toast.warning(plateError || 'Plate Hub step failed', {
-          description: 'Job card was created — review Plate Hub push and retry if needed',
-        })
+        toast.warning(`${plateError || 'Plate Hub step failed'} — Job card was created — review Plate Hub push and retry if needed`)
       } else {
         toast.error(plateError || jobCardError || 'Plate Hub and job card both failed')
       }

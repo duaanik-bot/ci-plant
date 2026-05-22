@@ -4,9 +4,10 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { Html5Qrcode } from 'html5-qrcode'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 type IssueContextOption = { id: string; label: string }
 
@@ -428,7 +429,10 @@ export default function StoresIssuePage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 max-w-2xl mx-auto">
-      <h1 className="text-xl font-bold mb-4">Stores — Sheet Issue</h1>
+      <PageHeader
+        title="Stores — Sheet Issue"
+        subtitle="Scan a job card QR code or search to issue sheets from stores"
+      />
 
       {showFifoDrawer && (
         <>

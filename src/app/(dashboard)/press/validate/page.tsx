@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import type { Html5Qrcode } from 'html5-qrcode'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 type ValidateResult = {
   valid: boolean

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { safeJsonParse, safeJsonStringify } from '@/lib/safe-json'
 import { isHubStaffAdmin } from '@/lib/hub-admin-gate'

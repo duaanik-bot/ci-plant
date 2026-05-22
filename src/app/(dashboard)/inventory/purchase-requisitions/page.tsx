@@ -1,8 +1,10 @@
 'use client'
 
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PR_STAGE_LABEL, dbStatusToUiStage, type PrUiStage } from '@/lib/purchase-requisition-status'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
+import { PageHeader }     from '@/components/shared/PageHeader'
 
 type PR = {
   id: string
@@ -85,26 +87,26 @@ const STAGES: Array<{ key: Stage; label: string; accent: string }> = [
 ]
 
 export default function PurchaseRequisitionsPage() {
-  const [list, setList] = useState<PR[]>([])
-  const [loading, setLoading] = useState(true)
-  const [movingId, setMovingId] = useState<string | null>(null)
-  const [bulkBusy, setBulkBusy] = useState(false)
-  const [search, setSearch] = useState('')
+  const qc = useQueryClient()
+
+  const [movingId,        setMovingId]        = useState<string | null>(null)
+  const [bulkBusy,        setBulkBusy]        = useState(false)
+  const [search,          setSearch]          = useState('')
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set())
-  const [traceOpen, setTraceOpen] = useState(false)
-  const [traceLoading, setTraceLoading] = useState(false)
-  const [traceData, setTraceData] = useState<TraceabilityPayload | null>(null)
+  const [traceOpen,       setTraceOpen]       = useState(false)
+  const [traceLoading,    setTraceLoading]    = useState(false)
+  const [traceData,       setTraceData]       = useState<TraceabilityPayload | null>(null)
 
-  const fetchList = () => {
-    fetch('/api/purchase-requisitions')
-      .then((r) => r.json())
-      .then((data) => setList(Array.isArray(data) ? data : []))
-      .finally(() => setLoading(false))
-  }
+  const { data: list = [], isLoading } = useQuery<PR[]>({
+    queryKey: ['purchase-requisitions'],
+    queryFn:  async () => {
+      const res = await fetch('/api/purchase-requisitions')
+      const data = await res.json()
+      return Array.isArray(data) ? data : []
+    },
+  })
 
-  useEffect(() => {
-    fetchList()
-  }, [])
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['purchase-requisitions'] })
 
   const grouped = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -195,7 +197,7 @@ export default function PurchaseRequisitionsPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to move stage')
-      fetchList()
+      refresh()
       window.dispatchEvent(new Event('inventory:refresh'))
       window.dispatchEvent(new Event('planning:refresh'))
     } catch (e) {
@@ -212,7 +214,7 @@ export default function PurchaseRequisitionsPage() {
       const res = await fetch(`/api/purchase-requisitions/${prId}`, { method: 'DELETE' })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to delete card')
-      fetchList()
+      refresh()
       setSelectedCardIds((prev) => {
         const next = new Set(prev)
         next.delete(prId)
@@ -247,7 +249,7 @@ export default function PurchaseRequisitionsPage() {
           throw new Error((data as { error?: string }).error || `Failed moving ${pr.material.materialCode}`)
         }
       }
-      fetchList()
+      refresh()
       setSelectedCardIds(new Set())
       window.dispatchEvent(new Event('inventory:refresh'))
       window.dispatchEvent(new Event('planning:refresh'))
@@ -271,7 +273,7 @@ export default function PurchaseRequisitionsPage() {
           throw new Error((data as { error?: string }).error || `Failed deleting ${pr.material.materialCode}`)
         }
       }
-      fetchList()
+      refresh()
       setSelectedCardIds(new Set())
       window.dispatchEvent(new Event('inventory:refresh'))
       window.dispatchEvent(new Event('planning:refresh'))
@@ -298,12 +300,16 @@ export default function PurchaseRequisitionsPage() {
     }
   }
 
-  if (loading) return <div className="p-4 text-ds-ink-muted">Loading…</div>
-
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-6 space-y-4">
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Purchase Request Kanban"
+        subtitle="Material requisitions by stage: Draft → Approved → Ordered → Received"
+      />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold text-ds-warning">Purchase Request Kanban</h1>
         <div className="flex w-full flex-wrap items-center justify-end gap-2">
           <input
             value={search}
