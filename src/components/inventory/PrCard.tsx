@@ -75,8 +75,8 @@ export function PrCompactCard({
         <button type="button" onClick={onOpen} className="flex-1 text-left">
           <span className="font-semibold text-ds-ink">{pr.material.materialCode}</span>
           {pr.boardType ? <span className="text-ds-ink-muted"> · {pr.boardType}</span> : null}
-          {pr.raisedBy === null ? <span className="ml-1 text-[10px] text-ds-warning">⚡</span> : null}
-          <span className={`ml-1 inline-block h-1.5 w-1.5 rounded-full ${urgent ? 'bg-[var(--error)]' : 'bg-[var(--warning)]'}`} />
+          {pr.raisedBy === null ? <span className="ml-1 text-[10px] text-ds-warning" title="Auto-raised from shortage" aria-label="Auto-raised from shortage">⚡</span> : null}
+          <span role="img" title={urgent ? 'Urgent' : 'Normal priority'} aria-label={urgent ? 'Urgent' : 'Normal priority'} className={`ml-1 inline-block h-1.5 w-1.5 rounded-full ${urgent ? 'bg-ds-error' : 'bg-ds-warning'}`} />
         </button>
       </div>
       <button type="button" onClick={onOpen} className="mt-1 block w-full text-left text-[11px] text-ds-ink-faint">
