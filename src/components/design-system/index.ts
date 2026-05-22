@@ -4,8 +4,8 @@
  *   Buttons        → <Button variant="primary|secondary|ghost|danger|success|warning|info|icon|utility" />
  *   Text input     → <InputField label hint error /> or className="ds-input"
  *   Select         → <SelectDropdown label /> or <select className="ds-input">
- *   Right-rail     → <StandardDrawer primaryAction secondaryAction /> (no fixed inset-0 modals)
- *   Right-rail+    → <Drawer> / SlideOverPanel for custom footers
+ *   Modals         → <GlobalPopoutModal size="sm|md|lg|xl|fullscreen" /> (centered — all shared drawers delegate here)
+ *   Legacy adapters → <StandardDrawer /> <Drawer /> <SlideOverPanel /> all render as centered modals now
  *   Status pill    → <StatusBadge status="…" /> or <Badge tone="success|warning|danger|info|neutral|tooling|brand" />
  *   Section card   → <CardSection title="…"> {children} </CardSection>
  *   Section label  → <SectionLabel accent? />
@@ -46,3 +46,17 @@ export { Drawer } from './Drawer'
 export { StandardDrawer } from './StandardDrawer'
 export type { StandardDrawerAction } from './StandardDrawer'
 export type { StandardSlideOverOptions } from '@/components/ui/SlideOverPanel'
+export { GlobalPopoutModal } from './GlobalPopoutModal'
+export type { GlobalPopoutModalProps, GlobalPopoutModalSize } from './GlobalPopoutModal'
+export { Tabs } from './Tabs'
+export type { TabItem } from './Tabs'
+
+/* —— Program vocabulary aliases (App*) — thin re-exports, no duplicate implementations —— */
+export { Button as AppButton } from './Button'
+export { CardSection as AppCard } from './CardSection'
+export { DataTableFrame as AppTable } from './DataTable'
+export { InputField as AppInput } from './InputField'
+export { InputField as AppSearch } from './InputField'
+export { Badge as AppBadge } from './Badge'
+export { ActionBar as AppToolbar } from './ActionBar'
+export { Tabs as AppTabs } from './Tabs'
