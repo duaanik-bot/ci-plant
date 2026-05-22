@@ -22,6 +22,8 @@ const config: Config = {
         'ds-sm': '6px',
         'ds-md': '10px',
         'ds-lg': '12px',
+        'ds-card': '16px',
+        'ds-modal': '18px',
       },
       boxShadow: {
         /** Unified depth — neutral only */
@@ -29,7 +31,7 @@ const config: Config = {
         'ds-depth-sm': '0 1px 3px rgba(15,23,42,0.06)',
         'ds-drawer': '0 8px 32px rgba(15,23,42,0.12)',
         'ds-drawer-foot': '0 -4px 20px rgba(15,23,42,0.08)',
-        'ds-focus': '0 0 0 3px rgba(249, 115, 22, 0.2)',
+        'ds-focus': '0 0 0 3px rgba(37, 99, 235, 0.2)',
       },
       keyframes: {
         'po-age-alert': {
@@ -49,12 +51,26 @@ const config: Config = {
           from: { transform: 'translateX(100%)' },
           to: { transform: 'translateX(0)' },
         },
+        'modal-in': {
+          from: { opacity: '0', transform: 'scale(0.98)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
+        'modal-out': {
+          from: { opacity: '1', transform: 'scale(1)' },
+          to: { opacity: '0', transform: 'scale(0.98)' },
+        },
+        'overlay-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'overlay-out': { from: { opacity: '1' }, to: { opacity: '0' } },
       },
       animation: {
         'po-age-alert': 'po-age-alert 2.2s ease-in-out infinite',
         'industrial-age-pulse': 'industrial-age-pulse 2.2s ease-in-out infinite',
         'slide-over-enter': 'slide-over-enter 200ms ease-in-out both',
         'ds-drawer-slide': 'ds-drawer-slide 200ms ease-out both',
+        'modal-in': 'modal-in 180ms ease-out both',
+        'modal-out': 'modal-out 180ms ease-out both',
+        'overlay-in': 'overlay-in 180ms ease-out both',
+        'overlay-out': 'overlay-out 180ms ease-out both',
       },
       colors: {
         border: 'var(--border)',
