@@ -135,6 +135,7 @@
     color: var(--text-primary);
     background-color: var(--bg-main);
     background-image: none;
+    transition: background-color 200ms ease, color 200ms ease;
   }
 
   h1 {
