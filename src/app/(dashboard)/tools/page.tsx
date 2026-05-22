@@ -81,7 +81,7 @@ export default function ToolsHubPage() {
           <div className="h-2 rounded bg-ds-elevated overflow-hidden">
             <div className="h-full bg-[var(--success-bg)]" style={{ width: `${Math.min(100, plateStats.inRack * 10)}%` }} />
           </div>
-          <Link href="/pre-press/plate-store" className="text-sm text-ds-warning hover:underline">
+          <Link href="/hub/plates" className="text-sm text-ds-warning hover:underline">
             Open Plate Hub →
           </Link>
         </section>
@@ -92,8 +92,8 @@ export default function ToolsHubPage() {
           <p className="text-sm text-ds-ink">
             {dieStats.inStock} in stock | {dieStats.issued} issued | {dieStats.withVendor} with vendor
           </p>
-          <Link href="/masters/dies" className="text-sm text-ds-warning hover:underline">
-            Open Die Inventory →
+          <Link href="/hub/dies" className="text-sm text-ds-warning hover:underline">
+            Open Die Hub →
           </Link>
         </section>
 
@@ -104,8 +104,8 @@ export default function ToolsHubPage() {
             {embossStats.inStock} in stock | {embossStats.issued} issued | {embossStats.withVendor} with vendor
           </p>
           <p className="text-xs text-ds-ink-faint">Conditional - activates based on Product Master</p>
-          <Link href="/masters/emboss-blocks" className="text-sm text-ds-warning hover:underline">
-            Open Emboss Inventory →
+          <Link href="/hub/blocks" className="text-sm text-ds-warning hover:underline">
+            Open Emboss Hub →
           </Link>
         </section>
       </div>
