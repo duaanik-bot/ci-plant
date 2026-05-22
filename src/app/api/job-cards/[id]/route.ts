@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
+import { PRODUCTION_STAGES_TAG } from '@/lib/constants'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import {
   computeJobYieldMetricsForCard,
@@ -639,6 +641,11 @@ export async function PUT(
 
     return header
   })
+
+  // The Live Production stage views are served from a tagged unstable_cache.
+  // Bust it so print-planning machine moves (and any other job-card edit)
+  // surface immediately instead of waiting for the time-based revalidation.
+  revalidateTag(PRODUCTION_STAGES_TAG)
 
   let yieldAudit: Record<string, unknown> = {}
   if (isClosing) {
