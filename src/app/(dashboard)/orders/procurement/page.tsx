@@ -316,7 +316,7 @@ function formatRupee(n: number): string {
   }).format(n)
 }
 
-const industrialMono = 'font-[family-name:var(--font-designing-queue),ui-monospace]'
+const industrialMono = 'font-designing-queue'
 /** JetBrains Mono (dashboard variable) — GRN ledger qty / balance. */
 const ledgerMono = 'font-designing-queue tabular-nums tracking-tight'
 

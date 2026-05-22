@@ -16,7 +16,7 @@ function useMinuteTick(): number {
 
 /**
  * Compact metadata line: hub priority reorder audit (hidden when never reordered).
- * JetBrains via `font-designing-queue`; muted slate, top border.
+ * Geist Mono via `font-designing-queue`; muted slate, top border.
  */
 export function HubPriorityReorderAuditFooter({
   lastReorderedBy,
