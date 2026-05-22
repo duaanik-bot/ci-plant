@@ -1599,7 +1599,7 @@ export default function EditPurchaseOrderPage() {
               <span className="flex items-baseline gap-1.5 text-ds-ink-muted">
                 <span className="text-xs font-medium uppercase tracking-wide">Grand total</span>
                 <span
-                  className={`${poMono} text-[1.2rem] font-bold leading-none text-[#f97316] sm:text-[1.35rem]`}
+                  className={`${poMono} text-[1.2rem] font-bold leading-none text-[#2563eb] sm:text-[1.35rem]`}
                 >
                   ₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </span>

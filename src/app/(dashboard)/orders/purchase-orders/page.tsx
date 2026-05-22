@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { toast } from '@/store/toastStore'
 import { PageHeader } from '@/components/shared/PageHeader'
-import { Search, AlertTriangle, FileDown, Pencil, Sparkles, Star, Trash2, X } from 'lucide-react'
+import { Search, AlertTriangle, FileDown, Pencil, Sparkles, Star, Trash2, X, ShoppingCart, ListChecks, Package, IndianRupee, Gauge } from 'lucide-react'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { PoImportDrawer } from '@/components/po/PoImportDrawer'
 import { CommandPaletteTriggerIcon } from '@/components/command-palette/CommandPalette'
@@ -1000,61 +1000,86 @@ export default function PurchaseOrdersPage() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 md:gap-3">
-        <div className="rounded-ds-sm border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
-            Total active POs
+        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+          <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
+            <ShoppingCart className="h-5 w-5 text-ds-brand" aria-hidden />
           </div>
-          <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
-            {kpiLoading ? '—' : (kpi?.totalActivePosCount ?? 0).toLocaleString('en-IN')}
-          </div>
-          <div className="text-xs text-ds-ink-faint mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
-          </div>
-        </div>
-        <div className="rounded-ds-sm border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
-            Pending line count
-          </div>
-          <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
-            {kpiLoading ? '—' : pendingLineItemCount.toLocaleString('en-IN')}
-          </div>
-          <div className="text-xs text-ds-ink-faint mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? 'Lines · matching POs' : 'Lines · confirmed POs'}
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              Total active POs
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-ink ${poMono}`}>
+              {kpiLoading ? '—' : (kpi?.totalActivePosCount ?? 0).toLocaleString('en-IN')}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
+            </div>
           </div>
         </div>
-        <div className="rounded-ds-sm border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
-            Pending line items
+        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+          <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
+            <ListChecks className="h-5 w-5 text-ds-brand" aria-hidden />
           </div>
-          <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
-            {kpiLoading ? '—' : (kpi?.pendingItemsSum ?? 0).toLocaleString('en-IN')}
-          </div>
-          <div className="text-xs text-ds-ink-faint mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? 'Σ qty · matching POs' : 'Σ qty · confirmed POs'}
-          </div>
-        </div>
-        <div className="rounded-ds-sm border border-[var(--success)]/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--success)]/90">
-            Live order book
-          </div>
-          <div className={`mt-0.5 ds-typo-kpi text-[var(--success)] dark:text-[var(--success)] ${poMono}`}>
-            {kpiLoading ? '—' : formatRupee(kpi?.liveOrderValue ?? 0)}
-          </div>
-          <div className="text-xs text-[var(--success)]/80 mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? '₹ filtered order book' : '₹ total · confirmed'}
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              Pending line count
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-ink ${poMono}`}>
+              {kpiLoading ? '—' : pendingLineItemCount.toLocaleString('en-IN')}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? 'Lines · matching POs' : 'Lines · confirmed POs'}
+            </div>
           </div>
         </div>
-        <div className="rounded-ds-sm border border-ds-warning/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-ds-warning/90">
-            System velocity
+        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+          <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
+            <Package className="h-5 w-5 text-ds-brand" aria-hidden />
           </div>
-          <div className={`mt-0.5 ds-typo-kpi text-ds-warning ${poMono}`}>
-            {kpiLoading
-              ? '—'
-              : `${(kpi?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              Pending line items
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-ink ${poMono}`}>
+              {kpiLoading ? '—' : (kpi?.pendingItemsSum ?? 0).toLocaleString('en-IN')}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? 'Σ qty · matching POs' : 'Σ qty · confirmed POs'}
+            </div>
           </div>
-          <div className="text-xs text-ds-warning mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? 'Avg. age · matching POs' : 'Avg. age · confirmed'}
+        </div>
+        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+          <div className="shrink-0 rounded-ds-md bg-ds-success/10 p-2.5">
+            <IndianRupee className="h-5 w-5 text-ds-success" aria-hidden />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              Live order book
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-success ${poMono}`}>
+              {kpiLoading ? '—' : formatRupee(kpi?.liveOrderValue ?? 0)}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? '₹ filtered order book' : '₹ total · confirmed'}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+          <div className="shrink-0 rounded-ds-md bg-ds-warning/10 p-2.5">
+            <Gauge className="h-5 w-5 text-ds-warning" aria-hidden />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              System velocity
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-warning ${poMono}`}>
+              {kpiLoading
+                ? '—'
+                : `${(kpi?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? 'Avg. age · matching POs' : 'Avg. age · confirmed'}
+            </div>
           </div>
         </div>
       </div>

@@ -587,7 +587,7 @@ export default function DirectorCommandCenterPage() {
                     r.directorHold ? 'opacity-45' : ''
                   } ${
                     focusedLineId === r.id
-                      ? 'bg-[#f97316]/[0.06] shadow-[inset_3px_0_0_0_#f97316]'
+                      ? 'bg-[#2563eb]/[0.06] shadow-[inset_3px_0_0_0_#2563eb]'
                       : ''
                   }`}
                 >

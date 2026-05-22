@@ -130,7 +130,7 @@ type DrawerPushState = 'idle' | 'ok' | 'failed' | 'skipped'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const PREPRESS_AUDIT_LEAD = DEFAULT_PREPRESS_AUDIT_LEAD
-const BRAND_ORANGE = '#f97316'
+const BRAND_ORANGE = '#2563eb'
 
 function daysInQueue(createdAtIso: string): number {
   const d = new Date(createdAtIso)

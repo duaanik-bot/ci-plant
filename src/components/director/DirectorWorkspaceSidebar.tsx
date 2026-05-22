@@ -181,7 +181,7 @@ export function DirectorWorkspaceSidebar({
       >
         <div
           className={`flex items-center gap-1 rounded-ds-sm border-l-2 pl-1.5 ${
-            pinnedAccent ? 'border-[#f97316]' : 'border-transparent'
+            pinnedAccent ? 'border-[#2563eb]' : 'border-transparent'
           }`}
         >
           {!collapsed ? (
@@ -194,11 +194,11 @@ export function DirectorWorkspaceSidebar({
                 refresh()
               }}
               className={`shrink-0 rounded p-1 transition-opacity hover:bg-ds-elevated/80 ${
-                isPinned(entry) ? 'text-[#f97316]' : 'text-ds-ink-faint opacity-60 hover:opacity-100'
+                isPinned(entry) ? 'text-[#2563eb]' : 'text-ds-ink-faint opacity-60 hover:opacity-100'
               }`}
               aria-label={isPinned(entry) ? 'Unpin' : 'Pin'}
             >
-              <Pin className={`h-3.5 w-3.5 ${isPinned(entry) ? 'fill-[#f97316]' : ''}`} />
+              <Pin className={`h-3.5 w-3.5 ${isPinned(entry) ? 'fill-[#2563eb]' : ''}`} />
             </button>
           ) : null}
           <button
@@ -206,7 +206,7 @@ export function DirectorWorkspaceSidebar({
             title={collapsed ? tip : undefined}
             onClick={() => onItemActivate(entry)}
             className={`flex min-w-0 flex-1 items-center gap-2 rounded-ds-sm px-1.5 py-1.5 text-left transition-colors duration-200 ease-in-out hover:bg-ds-elevated/60 ${
-              active ? 'bg-[#f97316]/10 ring-1 ring-[#f97316]/40' : ''
+              active ? 'bg-[#2563eb]/10 ring-1 ring-[#2563eb]/40' : ''
             }`}
           >
             <KindIcon kind={kind} />
@@ -263,7 +263,7 @@ export function DirectorWorkspaceSidebar({
         <button
           type="button"
           onClick={toggleCollapsed}
-          className="rounded-ds-sm p-1.5 text-ds-ink-faint transition-colors hover:bg-ds-elevated/80 hover:text-[#f97316]"
+          className="rounded-ds-sm p-1.5 text-ds-ink-faint transition-colors hover:bg-ds-elevated/80 hover:text-[#2563eb]"
           title={collapsed ? 'Expand workspace' : 'Collapse workspace'}
           aria-expanded={!collapsed}
         >
@@ -279,7 +279,7 @@ export function DirectorWorkspaceSidebar({
         {pins.length > 0 ? (
           <div className="mb-3">
             {!collapsed ? (
-              <div className="mb-1.5 px-1 text-xs font-bold uppercase tracking-wider text-[#f97316]/90">
+              <div className="mb-1.5 px-1 text-xs font-bold uppercase tracking-wider text-[#2563eb]/90">
                 Favorites
               </div>
             ) : null}
@@ -309,7 +309,7 @@ export function DirectorWorkspaceSidebar({
 
       <div className="border-t border-ds-line/50 px-2 py-1.5">
         <p className={`text-xs text-ds-ink-faint ${monoClass}`}>
-          <span className="text-[#f97316]/90">Anik Dua</span>
+          <span className="text-[#2563eb]/90">Anik Dua</span>
           {!collapsed ? <span> · quick access</span> : null}
         </p>
       </div>
