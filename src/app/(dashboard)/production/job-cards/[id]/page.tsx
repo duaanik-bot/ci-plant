@@ -885,6 +885,15 @@ export default function JobCardDetailPage() {
   const grainDisplay = bible?.grainDirection ?? jc.poLine?.materialQueue?.grainDirection ?? '—'
   const poDateDisplay = formatDateDisplay(jc.poLine?.po?.poDate)
   const lineSpec = (jc.poLine?.specOverrides || {}) as Record<string, unknown>
+  const orderQty = Number(jc.poLine?.quantity || 0)
+  const fgUseEnabled = lineSpec.fgUseEnabled === true
+  const fgUsed = (() => {
+    if (!fgUseEnabled) return 0
+    const raw = Number(lineSpec.fgUseQty)
+    const want = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
+    return Math.max(0, Math.min(want, Math.max(0, orderQty)))
+  })()
+  const fgNetToProduce = Math.max(0, orderQty - fgUsed)
   const asSpecText = (...vals: unknown[]) => {
     for (const v of vals) {
       if (typeof v === 'string' && v.trim()) return v.trim()
@@ -1128,6 +1137,16 @@ export default function JobCardDetailPage() {
               </div>
             ))}
           </div>
+          {fgUseEnabled && fgUsed > 0 ? (
+            <div className="rounded-ds-md border border-[var(--success)]/40 bg-[var(--success-bg)]/20 px-3 py-2.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--success)]">Existing FG stock used</p>
+              <p className="mt-1 text-sm text-ds-ink">
+                Fulfilling <span className="font-semibold tabular-nums">{fgUsed.toLocaleString('en-IN')}</span> pcs from finished-goods stock —
+                {' '}produce <span className="font-semibold tabular-nums">{fgNetToProduce.toLocaleString('en-IN')}</span> of{' '}
+                <span className="tabular-nums">{orderQty.toLocaleString('en-IN')}</span> ordered.
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
