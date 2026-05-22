@@ -1,14 +1,14 @@
 import type { Metadata } from 'next'
-import { Plus_Jakarta_Sans, IBM_Plex_Mono } from 'next/font/google'
+import { Inter, IBM_Plex_Mono } from 'next/font/google'
 import { Providers } from '@/components/providers'
 import { AppToaster } from '@/components/theme/AppToaster'
 import './globals.css'
 
-const jakarta = Plus_Jakarta_Sans({
+const inter = Inter({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700', '800'],
   display: 'swap',
-  variable: '--font-jakarta',
+  variable: '--font-inter',
 })
 
 const plexMono = IBM_Plex_Mono({
@@ -29,9 +29,9 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${plexMono.variable}`}>
       <body
-        className={`${jakarta.variable} ${plexMono.variable} bg-ds-main font-sans text-sm text-ds-ink antialiased`}
+        className="bg-ds-main font-sans text-sm text-ds-ink antialiased"
       >
         <Providers>{children}</Providers>
         <AppToaster />
