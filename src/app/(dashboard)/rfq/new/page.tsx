@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
+import { PageHeader } from '@/components/shared/PageHeader'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { DRUG_SCHEDULES, COATING_TYPES, LAMINATE_TYPES, FOIL_TYPES, EMBOSSING_TYPES, CARTON_CONSTRUCTIONS, BARCODE_TYPES } from '@/lib/constants'
@@ -449,10 +450,10 @@ export default function NewRfqPage() {
 
   return (
     <div className="p-4 max-w-5xl mx-auto">
-      <h1 className="text-xl font-bold text-ds-warning mb-2">New RFQ</h1>
-      <p className="text-xs text-ds-ink-faint mb-4">
-        Capture client requirements with full pharma-compliant carton specifications.
-      </p>
+      <PageHeader
+        title="New RFQ"
+        subtitle="Capture client requirements with full pharma-compliant carton specifications."
+      />
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* SECTION 1 — CLIENT DETAILS */}

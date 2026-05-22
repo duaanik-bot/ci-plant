@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 type PlateRow = { status: string }
 type DieRow = { status: string }
@@ -65,12 +66,10 @@ export default function ToolsHubPage() {
 
   return (
     <div className="p-4 max-w-6xl mx-auto space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold text-ds-warning">Tools Hub - Pre-Press Inventory</h1>
-        <p className="text-sm text-ds-ink-muted">
-          Central control for Plates, Dies, and Embossing Blocks
-        </p>
-      </div>
+      <PageHeader
+        title="Tools Hub — Pre-Press Inventory"
+        subtitle="Central control for Plates, Dies, and Embossing Blocks"
+      />
 
       <div className="grid md:grid-cols-3 gap-4">
         <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2">

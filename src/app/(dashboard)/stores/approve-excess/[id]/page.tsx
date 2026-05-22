@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 type Issue = {
   id: string
@@ -92,7 +93,7 @@ export default function ApproveExcessPage() {
 
   return (
     <div className="min-h-screen bg-ds-card text-foreground p-4 max-w-lg mx-auto">
-      <h1 className="text-xl font-bold text-ds-warning mb-4">Approve Excess Sheets</h1>
+      <PageHeader title="Approve Excess Sheets" subtitle="Review and approve or reject the excess sheet request" />
 
       <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-4 space-y-3 mb-6">
         <p><span className="text-ds-ink-muted">Job:</span> {issue.jobNumber} — {issue.productName}</p>

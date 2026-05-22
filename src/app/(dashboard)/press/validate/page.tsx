@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import type { Html5Qrcode } from 'html5-qrcode'
 import { toast } from '@/store/toastStore'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 type ValidateResult = {
   valid: boolean
@@ -72,7 +73,7 @@ export default function PressValidatePage() {
 
   return (
     <div className="min-h-screen bg-ds-card text-foreground p-4 max-w-2xl mx-auto flex flex-col">
-      <h1 className="text-xl font-bold mb-4">Press — Validate plate</h1>
+      <PageHeader title="Press — Validate Plate" subtitle="Scan a plate barcode to verify artwork approval before running" />
 
       {!result ? (
         <>

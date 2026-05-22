@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from '@/store/toastStore'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 type TrackingRow = {
   id: string
@@ -127,13 +128,11 @@ export default function DispatchTrackingPage() {
 
   return (
     <div className="p-4 max-w-6xl mx-auto space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl font-bold text-ds-warning">Delivery Tracking</h1>
-          <p className="text-xs text-ds-ink-faint mt-0.5">
-            Dispatch timeline (auto-refresh 30s){isFetching ? ' • refreshing…' : ''}
-          </p>
-        </div>
+      <PageHeader
+        title="Delivery Tracking"
+        subtitle={`Dispatch timeline (auto-refresh 30s)${isFetching ? ' • refreshing…' : ''}`}
+      />
+      <div className="flex items-center justify-end gap-3 flex-wrap">
         <button
           onClick={() => {
             const csv = toCsv(

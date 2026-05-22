@@ -2,6 +2,7 @@
 
 import { useTheme } from 'next-themes'
 import { useEffect, useState } from 'react'
+import { PageHeader } from '@/components/shared/PageHeader'
 import {
   ACCENT_STORAGE_KEY,
   CONTRAST_STORAGE_KEY,
@@ -28,10 +29,10 @@ export default function SettingsPage() {
 
   return (
     <section className="p-6 space-y-4 max-w-2xl">
-      <h1 className="text-2xl font-semibold">Settings</h1>
-      <p className="text-sm text-ds-ink-muted">
-        Global preferences for appearance and workspace behavior.
-      </p>
+      <PageHeader
+        title="Settings"
+        subtitle="Global preferences for appearance and workspace behavior."
+      />
 
       <div className="rounded-ds-md border border-ds-line/40 bg-ds-main/40 p-4 space-y-3">
         <div>
