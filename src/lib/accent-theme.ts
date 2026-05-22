@@ -1,14 +1,14 @@
 export type AccentPreset = 'cyan' | 'emerald' | 'amber'
 
-/** All presets map to the same brand orange — accent switcher is retained without fragmenting the palette. */
+/** All presets map to the same brand blue — accent switcher is retained without fragmenting the palette. */
 const BRAND = {
-  accent: '#F97316',
-  accentHover: '#EA580C',
-  accentRgb: '249 115 22',
-  accentHoverRgb: '234 88 12',
+  accent: '#2563EB',
+  accentHover: '#1D4ED8',
+  accentRgb: '37 99 235',
+  accentHoverRgb: '29 78 216',
   /** HSL for shadcn `primary` / `ring` */
-  primaryHsl: '24 95% 53%',
-  ringHsl: '24 95% 53%',
+  primaryHsl: '217 91% 60%',
+  ringHsl: '217 91% 60%',
 } as const
 
 export const ACCENT_STORAGE_KEY = 'ci-accent-preset'
