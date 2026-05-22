@@ -6,7 +6,9 @@ import type { PlanningEngineLine } from './types'
 const baseLine = {
   id: 'L1', cartonId: null, cartonName: 'X', cartonSize: null, quantity: 1,
   artworkCode: null, coatingType: null, otherCoating: null, embossingLeafing: null,
-  paperType: null, gsm: null, remarks: null, planningStatus: 'planning', specOverrides: null,
+  // Mandatory engine inputs present so the lock tests isolate the readinessFive gate.
+  paperType: 'FBB', gsm: 300, remarks: null, planningStatus: 'planning',
+  specOverrides: { meta: { ups: 6, sheetLengthMm: 1016, sheetWidthMm: 711 } },
   po: { id: 'PO1', poNumber: 'PO1', poDate: '2026-05-10', customer: { id: 'C1', name: 'X' } },
   batchDecision: {
     status: 'Ready' as const,
