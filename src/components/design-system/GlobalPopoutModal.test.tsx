@@ -100,4 +100,49 @@ describe('GlobalPopoutModal', () => {
     setup()
     expect(document.body.style.overflow).toBe('hidden')
   })
+
+  it('restores body scroll when closed', () => {
+    const onClose = vi.fn()
+    const { rerender } = render(
+      <GlobalPopoutModal isOpen onClose={onClose} title="X">
+        <p>b</p>
+      </GlobalPopoutModal>,
+    )
+    expect(document.body.style.overflow).toBe('hidden')
+    rerender(
+      <GlobalPopoutModal isOpen={false} onClose={onClose} title="X">
+        <p>b</p>
+      </GlobalPopoutModal>,
+    )
+    expect(document.body.style.overflow).toBe('')
+  })
+
+  it('restores focus to the trigger element when closed', () => {
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+    expect(document.activeElement).toBe(trigger)
+    const onClose = vi.fn()
+    const { rerender } = render(
+      <GlobalPopoutModal isOpen onClose={onClose} title="X">
+        <p>b</p>
+      </GlobalPopoutModal>,
+    )
+    rerender(
+      <GlobalPopoutModal isOpen={false} onClose={onClose} title="X">
+        <p>b</p>
+      </GlobalPopoutModal>,
+    )
+    expect(document.activeElement).toBe(trigger)
+    trigger.remove()
+  })
+
+  it('focus trap: Tab from the panel pulls focus to the first focusable', () => {
+    setup()
+    const dialog = screen.getByRole('dialog')
+    dialog.focus()
+    expect(document.activeElement).toBe(dialog)
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }))
+  })
 })

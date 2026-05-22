@@ -92,14 +92,15 @@ export function GlobalPopoutModal({
     }
   }, [isOpen])
 
-  // Focus management: remember trigger, focus the panel on open, restore on close.
+  // Focus management: remember trigger, focus the panel on open, restore on close/unmount.
   useEffect(() => {
-    if (isOpen) {
-      lastFocused.current = document.activeElement as HTMLElement | null
-      const raf = requestAnimationFrame(() => panelRef.current?.focus())
-      return () => cancelAnimationFrame(raf)
+    if (!isOpen) return
+    lastFocused.current = document.activeElement as HTMLElement | null
+    const raf = requestAnimationFrame(() => panelRef.current?.focus())
+    return () => {
+      cancelAnimationFrame(raf)
+      lastFocused.current?.focus?.()
     }
-    lastFocused.current?.focus?.()
   }, [isOpen])
 
   // Escape handling honoring mode + unsaved changes.
@@ -122,13 +123,23 @@ export function GlobalPopoutModal({
     const focusables = root.querySelectorAll<HTMLElement>(
       'a[href],button:not([disabled]),textarea,input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
     )
-    if (focusables.length === 0) return
+    if (focusables.length === 0) {
+      e.preventDefault()
+      return
+    }
     const first = focusables[0]
     const last = focusables[focusables.length - 1]
-    if (e.shiftKey && document.activeElement === first) {
+    const active = document.activeElement
+    // Focus sitting on the panel itself (or otherwise outside the list) — pull it back in.
+    if (active === root || !root.contains(active)) {
+      e.preventDefault()
+      ;(e.shiftKey ? last : first).focus()
+      return
+    }
+    if (e.shiftKey && active === first) {
       e.preventDefault()
       last.focus()
-    } else if (!e.shiftKey && document.activeElement === last) {
+    } else if (!e.shiftKey && active === last) {
       e.preventDefault()
       first.focus()
     }
