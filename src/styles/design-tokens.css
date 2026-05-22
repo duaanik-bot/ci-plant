@@ -12,11 +12,11 @@
   --font-small: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
 
-  /* —— Semantic (theme-invariant) —— */
-  --brand-primary: #f5820d;
-  --brand-primary-hover: #d9700b;
-  --brand-bg-soft: rgba(245, 130, 13, 0.12);
-  --brand-bg-strong: rgba(245, 130, 13, 0.2);
+  /* —— Semantic (theme-invariant) — Pureflix brand blue —— */
+  --brand-primary: #2563eb;
+  --brand-primary-hover: #1d4ed8;
+  --brand-bg-soft: rgba(37, 99, 235, 0.12);
+  --brand-bg-strong: rgba(37, 99, 235, 0.2);
 
   --success: #22c55e;
   --success-bg: rgba(34, 197, 94, 0.12);
@@ -68,12 +68,12 @@
   --ds-text-muted-rgb: 148 163 184;
 
   --ds-kpi: var(--brand-primary);
-  --ds-kpi-rgb: 245 130 13;
+  --ds-kpi-rgb: 37 99 235;
 
   --ds-accent: var(--brand-primary);
-  --ds-accent-rgb: 245 130 13;
+  --ds-accent-rgb: 37 99 235;
   --ds-accent-hover: var(--brand-primary-hover);
-  --ds-accent-hover-rgb: 217 112 11;
+  --ds-accent-hover-rgb: 29 78 216;
 
   --ds-success: var(--success);
   --ds-success-rgb: 34 197 94;

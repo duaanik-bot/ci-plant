@@ -29,7 +29,7 @@ const config: Config = {
         'ds-depth-sm': '0 1px 3px rgba(15,23,42,0.06)',
         'ds-drawer': '0 8px 32px rgba(15,23,42,0.12)',
         'ds-drawer-foot': '0 -4px 20px rgba(15,23,42,0.08)',
-        'ds-focus': '0 0 0 3px rgba(249, 115, 22, 0.2)',
+        'ds-focus': '0 0 0 3px rgba(37, 99, 235, 0.2)',
         // ── ERP design-system component shadows ────────────────────────
         card:  '0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.07)',
         modal: '0 20px 60px -12px rgb(0 0 0 / 0.25), 0 8px 24px -4px rgb(0 0 0 / 0.1)',
