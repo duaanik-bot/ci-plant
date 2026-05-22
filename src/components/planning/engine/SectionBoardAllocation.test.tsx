@@ -32,20 +32,25 @@ const readinessWithShortage: PlanningEngineReadiness = {
 }
 
 describe('SectionBoardAllocation', () => {
-  it('renders board, GSM, sheet size and UPS as editable fields plus required sheets', () => {
+  it('renders board, GSM, UPS and the structured sheet/cut fields plus required sheets', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByLabelText('Board type')).toHaveValue('FBB')
     expect(screen.getByLabelText('GSM')).toHaveValue(100)
-    expect(screen.getByLabelText('Sheet size')).toHaveValue('720×1020 mm')
     expect(screen.getByLabelText('Units per sheet')).toHaveValue(4)
-    expect(screen.getByText('4,800 sh')).toBeInTheDocument()
+    // Sheet size is now structured length/width inputs (inches by default).
+    expect(screen.getByLabelText('Sheet length (in)')).toBeInTheDocument()
+    expect(screen.getByLabelText('Sheet width (in)')).toBeInTheDocument()
+    expect(screen.getByLabelText('Cut type')).toBeInTheDocument()
+    expect(screen.getAllByText('4,800 sh').length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows the shortage banner with net/reserved/shortfall when shortageSheets > 0', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByText(/Paper warehouse — shortage/i)).toBeInTheDocument()
-    expect(screen.getByText('1,240 sh')).toBeInTheDocument()
-    expect(screen.getByText('3,100 sh')).toBeInTheDocument()
+    // Net stock + reserved also appear in the warehouse strip, so match ≥1.
+    expect(screen.getAllByText('1,240 sh').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('3,100 sh').length).toBeGreaterThanOrEqual(1)
+    // Shortfall only renders in the banner.
     expect(screen.getByText('3,560 sh')).toBeInTheDocument()
   })
 

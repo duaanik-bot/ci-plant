@@ -21,6 +21,11 @@ export type PlanningEngineBodyProps = {
    */
   onReserve?: () => Promise<void>
   /**
+   * Release the reservation held against this line (full unreserve).
+   * When undefined the Unreserve button is hidden.
+   */
+  onUnreserve?: () => Promise<void>
+  /**
    * Raise a draft Purchase Request for the shortage on this line.
    * When undefined the Raise PR button is hidden in the shortage banner.
    */
@@ -28,12 +33,12 @@ export type PlanningEngineBodyProps = {
 }
 
 /**
- * Layout — material flows top-to-bottom so the eye lands on the most
- * decision-critical block first, then spec, then commit.
+ * Layout — board discovery flows top-to-bottom (allocate, then the ranked
+ * smart-match suggestions that feed it), with spec + commit last.
  *
  *   ┌──────────────── Board allocation ────────────────┐  (full width)
- *   ├─── Sheet metrics ─┬─── Batch decision ───────────┤  (2-col)
- *   └──────────────── Smart match ─────────────────────┘  (full width)
+ *   ├──────────────── Smart match ─────────────────────┤  (full width)
+ *   └─── Sheet metrics ─┬─── Batch decision ───────────┘  (2-col)
  *
  * All four sections are wrapped in React.memo internally — re-renders are
  * isolated to the section whose props actually changed.
@@ -46,6 +51,7 @@ export function PlanningEngineBody({
   onLock,
   onSelectBoard,
   onReserve,
+  onUnreserve,
   onRaisePR,
 }: PlanningEngineBodyProps) {
   return (
@@ -57,18 +63,19 @@ export function PlanningEngineBody({
         onPatch={onPatch}
         onSelectBoard={onSelectBoard}
         onReserve={onReserve}
+        onUnreserve={onUnreserve}
         onRaisePR={onRaisePR}
       />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SectionUpsAndSpec line={line} onPatch={onPatch} />
-        <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
-      </div>
       <SectionSmartMatch
         line={line}
         readiness={readiness}
         onPatch={onPatch}
         onSelectBoard={onSelectBoard}
       />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SectionUpsAndSpec line={line} onPatch={onPatch} />
+        <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
+      </div>
     </div>
   )
 }

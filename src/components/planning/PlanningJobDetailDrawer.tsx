@@ -1319,6 +1319,42 @@ export function PlanningJobDetailDrawer({
   }, [openReserveConfirmation])
 
   /**
+   * Release the reservation held against this line (full unreserve).
+   * Wires to POST reservation-control with action='release'. Button shows
+   * only when reservedForLine > 0.
+   */
+  const handleEngineUnreserve = useCallback(async () => {
+    if (!line) return
+    const materialId = readiness?.materialId
+    const reserved = Math.max(0, Number(readiness?.reservedForLine || 0))
+    if (!materialId || reserved <= 0) {
+      toast.error('Nothing reserved for this line.')
+      return
+    }
+    try {
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'release',
+          materialId,
+          requiredSheets: Math.max(0, Number(readiness?.requiredSheets || 0)),
+          releaseQty: reserved,
+          prImpactAction: 'reduce',
+        }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; message?: string }
+      if (!res.ok || data.success === false) throw new Error(data.message || 'Unreserve failed')
+      toast.success('Reservation released.')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+      window.dispatchEvent(new Event('inventory:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to unreserve')
+    }
+  }, [line, readiness?.materialId, readiness?.reservedForLine, readiness?.requiredSheets, loadReadiness])
+
+  /**
    * Raise a Purchase Request for the open shortage on this line.
    * Uses the shortageId already stored in readiness (set by the API when
    * the reserve-material call finds insufficient stock).
@@ -1429,32 +1465,55 @@ export function PlanningJobDetailDrawer({
       widthClass="max-w-[1180px]"
       title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
-        <div className="flex flex-wrap items-center gap-2 mt-0.5">
-          <span className="font-id-mono text-xs text-ds-warning">{line.po.poNumber}</span>
-          <span className="text-ds-line/60">·</span>
-          <span className="text-xs text-ds-ink-faint">{line.planningStatus}</span>
-          <span className="text-ds-line/60">·</span>
-          <span className="text-xs text-ds-ink-faint truncate max-w-[18rem]">{line.po.customer.name}</span>
-          {line.po.isPriority ? (
-            <Badge
-              tone="warning"
-              className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
-            >
-              <Star className="h-3 w-3 fill-current" aria-hidden />
-              PO Priority
-            </Badge>
-          ) : null}
-          {line.directorPriority ? <Badge tone="brand" className="text-xs">Line priority</Badge> : null}
-          {line.directorHold ? <Badge tone="warning" className="text-xs">On hold</Badge> : null}
-          {line.cartonId && onViewProductDetail ? (
-            <button
-              type="button"
-              onClick={onViewProductDetail}
-              className="text-xs font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
-            >
-              Product sheet
-            </button>
-          ) : null}
+        <div className="space-y-1 mt-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-id-mono text-xs text-ds-warning">{line.po.poNumber}</span>
+            <span className="text-ds-line/60">·</span>
+            <span className="text-xs text-ds-ink-faint">{line.planningStatus}</span>
+            <span className="text-ds-line/60">·</span>
+            <span className="text-xs text-ds-ink-faint truncate max-w-[18rem]">{line.po.customer.name}</span>
+            {line.po.isPriority ? (
+              <Badge
+                tone="warning"
+                className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
+              >
+                <Star className="h-3 w-3 fill-current" aria-hidden />
+                PO Priority
+              </Badge>
+            ) : null}
+            {line.directorPriority ? <Badge tone="brand" className="text-xs">Line priority</Badge> : null}
+            {line.directorHold ? <Badge tone="warning" className="text-xs">On hold</Badge> : null}
+            {line.cartonId && onViewProductDetail ? (
+              <button
+                type="button"
+                onClick={onViewProductDetail}
+                className="text-xs font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
+              >
+                Product sheet
+              </button>
+            ) : null}
+          </div>
+          {/* Product identity strip — AW code, board, GSM, carton size, required qty */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+            {(
+              [
+                line.artworkCode ? { k: 'AW', v: line.artworkCode, mono: true } : null,
+                line.paperType ? { k: 'Board', v: line.paperType, mono: false } : null,
+                line.gsm != null ? { k: 'GSM', v: String(line.gsm), mono: false } : null,
+                line.cartonSize ? { k: 'Size', v: line.cartonSize, mono: false } : null,
+                line.quantity != null
+                  ? { k: 'Qty', v: Number(line.quantity).toLocaleString('en-IN'), mono: false }
+                  : null,
+              ] as Array<{ k: string; v: string; mono: boolean } | null>
+            )
+              .filter((x): x is { k: string; v: string; mono: boolean } => x != null)
+              .map((f) => (
+                <span key={f.k} className="inline-flex items-center gap-1">
+                  <span className="uppercase tracking-wider text-ds-ink-faint/70">{f.k}</span>
+                  <span className={`text-ds-ink-muted ${f.mono ? 'font-id-mono' : ''} tabular-nums`}>{f.v}</span>
+                </span>
+              ))}
+          </div>
         </div>
       }
       statusBar={
@@ -1500,6 +1559,7 @@ export function PlanningJobDetailDrawer({
         onSelectBoard={handleEngineSelectBoard}
         onLock={handleEngineLock}
         onReserve={handleEngineReserve}
+        onUnreserve={handleEngineUnreserve}
         onRaisePR={handleEngineRaisePR}
       />
       {false && (
