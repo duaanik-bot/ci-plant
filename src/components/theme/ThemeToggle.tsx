@@ -28,6 +28,7 @@ export function ThemeToggle() {
         type="button"
         className={`${btn} ${active === 'light' ? activeCls : ''}`}
         onClick={() => setTheme('light')}
+        aria-pressed={active === 'light'}
       >
         <Sun className="w-3.5 h-3.5" />
         Light
@@ -36,6 +37,7 @@ export function ThemeToggle() {
         type="button"
         className={`${btn} ${active === 'dark' ? activeCls : ''}`}
         onClick={() => setTheme('dark')}
+        aria-pressed={active === 'dark'}
       >
         <Moon className="w-3.5 h-3.5" />
         Dark

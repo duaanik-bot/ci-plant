@@ -20,7 +20,7 @@ const queryClient = new QueryClient({
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} themes={['light', 'dark']} disableTransitionOnChange>
       <SessionProvider refetchOnWindowFocus={false} refetchWhenOffline={false}>
         <QueryClientProvider client={queryClient}>
           <MastersProvider>{children}</MastersProvider>
