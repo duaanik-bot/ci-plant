@@ -200,7 +200,7 @@ export default function DashboardClient() {
   })()
 
   return (
-    <div className="min-h-screen bg-[#0F172A] text-foreground w-full p-4 md:p-6">
+    <div className="min-h-screen bg-ds-elevated text-ds-ink w-full p-4 md:p-6">
       {/* ROW 1 — STAT BAR */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         {STAT_CARDS.map((card) => {
@@ -216,13 +216,17 @@ export default function DashboardClient() {
             <Link
               key={card.key}
               href={card.href}
-              className="bg-ds-elevated rounded-ds-lg p-5 border border-ds-line/50 cursor-pointer hover:border-[var(--info-bg)] transition-colors flex flex-col relative"
+              className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card transition-colors hover:border-ds-brand/40"
             >
-              <div className="absolute top-4 right-4 text-ds-ink-faint">
-                <Icon className="h-6 w-6" />
+              <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
+                <Icon className="h-5 w-5 text-ds-brand" aria-hidden />
               </div>
-              <span className="text-3xl font-bold text-foreground mt-2">{display}</span>
-              <span className="text-sm text-ds-ink-muted mt-1">{card.label}</span>
+              <div className="min-w-0">
+                <div className="text-2xl font-bold leading-none text-ds-ink">{display}</div>
+                <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide leading-none text-ds-ink-faint">
+                  {card.label}
+                </div>
+              </div>
             </Link>
           )
         })}
@@ -231,7 +235,7 @@ export default function DashboardClient() {
       {/* ROW 2 — THREE COLUMNS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* LEFT — Press Status — Live */}
-        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="rounded-ds-lg bg-card border border-border shadow-card p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Press Status — Live</h2>
           {isLoading ? (
             <div className="space-y-2">
@@ -301,7 +305,7 @@ export default function DashboardClient() {
         </div>
 
         {/* MIDDLE — Active Jobs Pipeline */}
-        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4 flex flex-col">
+        <div className="rounded-ds-lg bg-card border border-border shadow-card p-4 flex flex-col">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Active Jobs Pipeline</h2>
           <div className="space-y-2 overflow-y-auto max-h-80">
             {(pipeline || []).length === 0 && (
@@ -349,7 +353,7 @@ export default function DashboardClient() {
         </div>
 
         {/* RIGHT — Action Required */}
-        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4 flex flex-col">
+        <div className="rounded-ds-lg bg-card border border-border shadow-card p-4 flex flex-col">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Action Required</h2>
           <div className="space-y-1 overflow-y-auto max-h-80">
             {(alerts || []).length === 0 && (
@@ -390,18 +394,18 @@ export default function DashboardClient() {
 
       {/* ROW 3 — Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
-        <div className="lg:col-span-3 rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="lg:col-span-3 rounded-ds-lg bg-card border border-border shadow-card p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Impressions This Week</h2>
           <ImpressionsTrendChart data={TREND_DATA} />
         </div>
-        <div className="lg:col-span-2 rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="lg:col-span-2 rounded-ds-lg bg-card border border-border shadow-card p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Wastage % This Month</h2>
           <WastageBarChart data={WASTAGE_DATA} />
         </div>
       </div>
 
       {/* ROW 4 — RFQ Pipeline */}
-      <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4 mb-6">
+      <div className="rounded-ds-lg bg-card border border-border shadow-card p-4 mb-6">
         <h2 className="text-sm font-semibold text-ds-ink mb-3">RFQ Pipeline</h2>
         <div className="flex flex-wrap items-center gap-2">
           {RFQ_PIPELINE_STAGES.map((stage, idx) => (
@@ -425,7 +429,7 @@ export default function DashboardClient() {
 
       {/* ROW 5 — Three columns */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="rounded-ds-lg bg-card border border-border shadow-card p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Stock Alerts</h2>
           <div className="space-y-2 overflow-y-auto max-h-48">
             {(stockAlerts || []).length === 0 ? (
@@ -457,7 +461,7 @@ export default function DashboardClient() {
             )}
           </div>
         </div>
-        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="rounded-ds-lg bg-card border border-border shadow-card p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Dispatch This Week</h2>
           <div className="space-y-2 overflow-y-auto max-h-48">
             {dispatchThisWeek.length === 0 ? (
@@ -490,7 +494,7 @@ export default function DashboardClient() {
             )}
           </div>
         </div>
-        <div className="rounded-ds-lg bg-ds-elevated border border-ds-line/50 p-4">
+        <div className="rounded-ds-lg bg-card border border-border shadow-card p-4">
           <h2 className="text-sm font-semibold text-ds-ink mb-3">Quality Overview</h2>
           <div className="space-y-2">
             {(openNcrs || []).length === 0 ? (
