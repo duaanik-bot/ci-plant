@@ -60,6 +60,21 @@ type PaperWarehouseRow = {
   daysOfCover: number | null
 }
 
+type WarehouseSortKey =
+  | 'size_display'
+  | 'board_classification_id'
+  | 'gsm'
+  | 'material_code'
+  | 'board_type_id'
+  | 'available_sheets'
+  | 'reserved_sheets'
+  | 'free'
+  | 'daysOfCover'
+  | 'incoming_sheets'
+  | 'shortage_sheets'
+  | 'reorder_level'
+  | 'status'
+
 type StockStateItem = {
   id: string
   materialCode: string
@@ -202,6 +217,7 @@ function InventoryPageContent() {
     staleCapitalInr: number
   } | null>(null)
   const [paperWarehouseRows, setPaperWarehouseRows] = useState<PaperWarehouseRow[]>([])
+  const [warehouseSort, setWarehouseSort] = useState<{ key: WarehouseSortKey; dir: 'asc' | 'desc' } | null>(null)
   const [paperWarehouseKpi, setPaperWarehouseKpi] = useState({
     totalPhysical: 0,
     available: 0,
@@ -454,7 +470,7 @@ function InventoryPageContent() {
       if (shortageOnly && Number(row.shortage_sheets || 0) <= 0) return false
       return true
     })
-    return rows.filter((row) => {
+    const kpiFiltered = rows.filter((row) => {
       const free = Number(row.available_sheets || 0) - Number(row.reserved_sheets || 0)
       if (warehouseKpiFilter === 'shortage') return Number(row.shortage_sheets || 0) > 0
       if (warehouseKpiFilter === 'available') return Number(row.available_sheets || 0) > 0
@@ -467,7 +483,71 @@ function InventoryPageContent() {
       if (warehouseKpiFilter === 'mismatch') return Number(row.shortage_sheets || 0) > Number(row.incoming_sheets || 0)
       return true
     })
-  }, [paperSearch, paperWarehouseRows, warehouseKpiFilter, boardTypeFilter, gsmFilter, statusFilter, shortageOnly])
+    if (!warehouseSort) return kpiFiltered
+    const { key, dir } = warehouseSort
+    const factor = dir === 'asc' ? 1 : -1
+    return [...kpiFiltered].sort((a, b) => {
+      const av = warehouseSortValue(a, key)
+      const bv = warehouseSortValue(b, key)
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * factor
+      return String(av).localeCompare(String(bv)) * factor
+    })
+  }, [paperSearch, paperWarehouseRows, warehouseKpiFilter, boardTypeFilter, gsmFilter, statusFilter, shortageOnly, warehouseSort])
+
+  function warehouseSortValue(row: PaperWarehouseRow, key: WarehouseSortKey): number | string {
+    switch (key) {
+      case 'free':
+        return Number(row.available_sheets || 0) - Number(row.reserved_sheets || 0)
+      case 'gsm':
+        return row.gsm ?? Number.NEGATIVE_INFINITY
+      case 'daysOfCover':
+        return row.daysOfCover ?? Number.NEGATIVE_INFINITY
+      case 'available_sheets':
+        return Number(row.available_sheets || 0)
+      case 'reserved_sheets':
+        return Number(row.reserved_sheets || 0)
+      case 'incoming_sheets':
+        return Number(row.incoming_sheets || 0)
+      case 'shortage_sheets':
+        return Number(row.shortage_sheets || 0)
+      case 'reorder_level':
+        return Number(row.reorder_level || 0)
+      case 'size_display':
+        return (row.size_display || '').toLowerCase()
+      case 'board_classification_id':
+        return (row.board_classification_id || '').toLowerCase()
+      case 'material_code':
+        return (row.material_code || '').toLowerCase()
+      case 'board_type_id':
+        return (row.board_type_id || '').toLowerCase()
+      case 'status':
+        return (row.status || '').toLowerCase()
+    }
+  }
+
+  function toggleWarehouseSort(key: WarehouseSortKey) {
+    setWarehouseSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: 'asc' }
+      if (prev.dir === 'asc') return { key, dir: 'desc' }
+      return null
+    })
+  }
+
+  const sortTh = (label: string, key: WarehouseSortKey, align: 'left' | 'right' = 'left') => {
+    const active = warehouseSort?.key === key
+    return (
+      <th className={`px-3 py-2 ${align === 'right' ? 'text-right' : ''}`}>
+        <button
+          type="button"
+          onClick={() => toggleWarehouseSort(key)}
+          className={`inline-flex items-center gap-1 uppercase tracking-wide hover:text-ds-ink ${active ? 'text-ds-ink font-semibold' : ''}`}
+        >
+          {label}
+          <span className="text-[10px] leading-none opacity-70">{active ? (warehouseSort?.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+        </button>
+      </th>
+    )
+  }
 
   const boardTypeFilterOptions = useMemo(
     () =>
@@ -1176,19 +1256,19 @@ function InventoryPageContent() {
                         className="h-4 w-4"
                       />
                     </th>
-                    <th className="px-3 py-2">Size</th>
-                    <th className="px-3 py-2">Board classification</th>
-                    <th className="px-3 py-2">GSM</th>
-                    <th className="px-3 py-2">Material code</th>
-                    <th className="px-3 py-2">Board type</th>
-                    <th className="px-3 py-2 text-right">Available</th>
-                    <th className="px-3 py-2 text-right">Reserved</th>
-                    <th className="px-3 py-2 text-right">Free stock</th>
-                    <th className="px-3 py-2 text-right">Days of Cover</th>
-                    <th className="px-3 py-2 text-right">Incoming</th>
-                    <th className="px-3 py-2 text-right">Shortage</th>
-                    <th className="px-3 py-2 text-right">Reorder</th>
-                    <th className="px-3 py-2">Status</th>
+                    {sortTh('Size', 'size_display')}
+                    {sortTh('Board classification', 'board_classification_id')}
+                    {sortTh('GSM', 'gsm')}
+                    {sortTh('Material code', 'material_code')}
+                    {sortTh('Board type', 'board_type_id')}
+                    {sortTh('Available', 'available_sheets', 'right')}
+                    {sortTh('Reserved', 'reserved_sheets', 'right')}
+                    {sortTh('Free stock', 'free', 'right')}
+                    {sortTh('Days of Cover', 'daysOfCover', 'right')}
+                    {sortTh('Incoming', 'incoming_sheets', 'right')}
+                    {sortTh('Shortage', 'shortage_sheets', 'right')}
+                    {sortTh('Reorder', 'reorder_level', 'right')}
+                    {sortTh('Status', 'status')}
                     <th className="px-3 py-2">Actions</th>
                   </tr>
                 </thead>
@@ -1857,19 +1937,19 @@ function InventoryPageContent() {
             <table className="w-full text-sm">
                 <thead className="bg-background text-left border-b border-ds-line/40">
                 <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
-                  <th className="px-3 py-2">Size</th>
-                  <th className="px-3 py-2">Board classification</th>
-                  <th className="px-3 py-2">GSM</th>
-                  <th className="px-3 py-2">Material code</th>
-                  <th className="px-3 py-2">Board type</th>
-                  <th className="px-3 py-2">Available</th>
-                  <th className="px-3 py-2">Reserved</th>
-                  <th className="px-3 py-2">Free stock</th>
-                  <th className="px-3 py-2">Days of Cover</th>
-                  <th className="px-3 py-2">Incoming</th>
-                  <th className="px-3 py-2">Shortage</th>
-                  <th className="px-3 py-2">Reorder</th>
-                  <th className="px-3 py-2">Status</th>
+                  {sortTh('Size', 'size_display')}
+                  {sortTh('Board classification', 'board_classification_id')}
+                  {sortTh('GSM', 'gsm')}
+                  {sortTh('Material code', 'material_code')}
+                  {sortTh('Board type', 'board_type_id')}
+                  {sortTh('Available', 'available_sheets')}
+                  {sortTh('Reserved', 'reserved_sheets')}
+                  {sortTh('Free stock', 'free')}
+                  {sortTh('Days of Cover', 'daysOfCover')}
+                  {sortTh('Incoming', 'incoming_sheets')}
+                  {sortTh('Shortage', 'shortage_sheets')}
+                  {sortTh('Reorder', 'reorder_level')}
+                  {sortTh('Status', 'status')}
                   <th className="px-3 py-2">Actions</th>
                 </tr>
               </thead>
