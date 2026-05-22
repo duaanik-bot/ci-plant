@@ -93,6 +93,15 @@ export async function PUT(
       },
     })
 
+    // Write join-table row so the monitoring view can find this PO via the link.
+    await tx.vendorPoRequisitionLink.create({
+      data: {
+        vendorPoId: newPo.id,
+        purchaseRequisitionId: pr.id,
+        allocatedQty: pr.qtyRequired,
+      },
+    })
+
     const updatedPr = await tx.purchaseRequisition.update({
       where: { id: pr.id },
       data: {
