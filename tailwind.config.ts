@@ -31,7 +31,7 @@ const config: Config = {
         'ds-depth-sm': '0 1px 3px rgba(15,23,42,0.06)',
         'ds-drawer': '0 8px 32px rgba(15,23,42,0.12)',
         'ds-drawer-foot': '0 -4px 20px rgba(15,23,42,0.08)',
-        'ds-focus': '0 0 0 3px rgba(37, 99, 235, 0.2)',
+        'ds-focus': '0 0 0 3px rgba(37,99,235,0.2)',
       },
       keyframes: {
         'po-age-alert': {
@@ -51,26 +51,26 @@ const config: Config = {
           from: { transform: 'translateX(100%)' },
           to: { transform: 'translateX(0)' },
         },
-        'modal-in': {
+        'ds-modal-in': {
           from: { opacity: '0', transform: 'scale(0.98)' },
           to: { opacity: '1', transform: 'scale(1)' },
         },
-        'modal-out': {
+        'ds-modal-out': {
           from: { opacity: '1', transform: 'scale(1)' },
           to: { opacity: '0', transform: 'scale(0.98)' },
         },
-        'overlay-in': { from: { opacity: '0' }, to: { opacity: '1' } },
-        'overlay-out': { from: { opacity: '1' }, to: { opacity: '0' } },
+        'ds-overlay-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'ds-overlay-out': { from: { opacity: '1' }, to: { opacity: '0' } },
       },
       animation: {
         'po-age-alert': 'po-age-alert 2.2s ease-in-out infinite',
         'industrial-age-pulse': 'industrial-age-pulse 2.2s ease-in-out infinite',
         'slide-over-enter': 'slide-over-enter 200ms ease-in-out both',
         'ds-drawer-slide': 'ds-drawer-slide 200ms ease-out both',
-        'modal-in': 'modal-in 180ms ease-out both',
-        'modal-out': 'modal-out 180ms ease-out both',
-        'overlay-in': 'overlay-in 180ms ease-out both',
-        'overlay-out': 'overlay-out 180ms ease-out both',
+        'ds-modal-in': 'ds-modal-in 180ms ease-out both',
+        'ds-modal-out': 'ds-modal-out 180ms ease-in both',
+        'ds-overlay-in': 'ds-overlay-in 180ms ease-out both',
+        'ds-overlay-out': 'ds-overlay-out 180ms ease-in both',
       },
       colors: {
         border: 'var(--border)',
