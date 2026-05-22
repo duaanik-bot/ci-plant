@@ -145,10 +145,10 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
   })
 
   const revisions = audits
+    .filter((a) => typeof ((a.newValue as Record<string, unknown> | null) || {}).field === 'string')
     .map((a, idx) => {
       const nv = (a.newValue as Record<string, unknown> | null) || {}
       const ov = (a.oldValue as Record<string, unknown> | null) || {}
-      if (typeof nv.field !== 'string') return null
       return {
         revision: idx + 1,
         at: a.timestamp.toISOString(),
@@ -158,7 +158,6 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
         newValue: nv.value ?? null,
       }
     })
-    .filter((r): r is NonNullable<typeof r> => r !== null)
 
   const shortages = await db.materialShortage.findMany({
     where: { purchaseReqId: id },
