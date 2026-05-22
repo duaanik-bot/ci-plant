@@ -201,11 +201,6 @@ export function DashboardShell({
     () =>
       [
         {
-          key: 'director',
-          label: 'Director Command Centre',
-          href: '/director/command-center',
-        },
-        {
           key: 'orders',
           label: 'Orders',
           items: [
