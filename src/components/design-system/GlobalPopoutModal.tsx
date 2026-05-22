@@ -1,7 +1,7 @@
 'use client'
 
 import { X } from 'lucide-react'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@/components/design-system/Button'
 import { cn } from '@/lib/cn'
 
@@ -64,6 +64,7 @@ export function GlobalPopoutModal({
   widthClass,
   zIndexClass = 'z-[1100]',
 }: GlobalPopoutModalProps) {
+  const titleId = useId()
   // mounted keeps the DOM alive after close so the 220ms exit animation can play.
   const [mounted, setMounted] = useState(isOpen)
   const [visible, setVisible] = useState(isOpen)
@@ -193,6 +194,7 @@ export function GlobalPopoutModal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={handleTrapKeyDown}
         className={cn(
@@ -209,7 +211,7 @@ export function GlobalPopoutModal({
       >
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-ds-line/25 bg-ds-elevated/60 px-4 py-3 md:px-6 md:pb-4 md:pt-5">
           <div className="min-w-0 flex-1">
-            <h2 className="ds-typo-heading min-w-0 pr-2">{title}</h2>
+            <h2 id={titleId} className="ds-typo-heading min-w-0 pr-2">{title}</h2>
             {metadata ? (
               <div className="mt-1.5 text-sm leading-snug text-ds-ink-muted">{metadata}</div>
             ) : null}

@@ -39,6 +39,14 @@ describe('GlobalPopoutModal', () => {
     expect(screen.getByText('Acme · ₹1,20,000')).toBeInTheDocument()
   })
 
+  it('labels the dialog with its title for assistive tech', () => {
+    setup()
+    const dialog = screen.getByRole('dialog')
+    const labelId = dialog.getAttribute('aria-labelledby')
+    expect(labelId).toBeTruthy()
+    expect(document.getElementById(labelId!)).toHaveTextContent('PO SGB/2627')
+  })
+
   it('close button (X) always closes', () => {
     const { onClose } = setup({ mode: 'form', hasUnsavedChanges: true })
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
