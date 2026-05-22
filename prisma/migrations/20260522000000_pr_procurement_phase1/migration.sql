@@ -17,7 +17,7 @@ CREATE TABLE "vendor_po_requisition_links" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "vendor_po_requisition_links_vendor_po_id_purchase_req_key" ON "vendor_po_requisition_links"("vendor_po_id", "purchase_requisition_id");
+CREATE UNIQUE INDEX "vendor_po_requisition_links_vendor_po_id_purchase_requisiti_key" ON "vendor_po_requisition_links"("vendor_po_id", "purchase_requisition_id");
 
 -- CreateIndex
 CREATE INDEX "vendor_po_requisition_links_purchase_requisition_id_idx" ON "vendor_po_requisition_links"("purchase_requisition_id");
