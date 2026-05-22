@@ -15,7 +15,7 @@ export function CardSection({ title, id, children, className, action }: CardSect
     <section
       id={id}
       className={cn(
-        'space-y-4 rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-4 md:p-5 shadow-ds-depth-sm transition-[border-color,box-shadow] duration-200 ease-out',
+        'space-y-4 rounded-ds-card border border-[var(--border)] bg-[var(--bg-card)] p-4 md:p-5 shadow-ds-depth-sm transition-[border-color,box-shadow] duration-200 ease-out',
         className,
       )}
     >
