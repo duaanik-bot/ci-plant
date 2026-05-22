@@ -10,10 +10,11 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        'po-dashboard': ['var(--font-po-predictive)', 'ui-monospace', 'monospace'],
-        'director-cc': ['var(--font-director-cc)', 'ui-monospace', 'monospace'],
-        'designing-queue': ['var(--font-designing-queue)', 'ui-monospace', 'monospace'],
+        sans: ['var(--font-geist-sans)', 'Inter', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
+        'po-dashboard': ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
+        'director-cc': ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
+        'designing-queue': ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
       },
       borderRadius: {
         lg: 'var(--radius)',

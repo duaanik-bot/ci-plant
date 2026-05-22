@@ -1,22 +1,9 @@
 import type { Metadata } from 'next'
-import { Plus_Jakarta_Sans, IBM_Plex_Mono } from 'next/font/google'
+import { GeistSans } from 'geist/font/sans'
+import { GeistMono } from 'geist/font/mono'
 import { Providers } from '@/components/providers'
 import { AppToaster } from '@/components/theme/AppToaster'
 import './globals.css'
-
-const jakarta = Plus_Jakarta_Sans({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
-  display: 'swap',
-  variable: '--font-jakarta',
-})
-
-const plexMono = IBM_Plex_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  display: 'swap',
-  variable: '--font-plex-mono',
-})
 
 export const metadata: Metadata = {
   title: process.env.NEXT_PUBLIC_APP_NAME ?? 'Colour Impressions — Plant Management',
@@ -31,7 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${jakarta.variable} ${plexMono.variable} bg-ds-main font-sans text-sm text-ds-ink antialiased`}
+        className={`${GeistSans.variable} ${GeistMono.variable} bg-ds-main font-sans text-sm text-ds-ink antialiased`}
       >
         <Providers>{children}</Providers>
         <AppToaster />

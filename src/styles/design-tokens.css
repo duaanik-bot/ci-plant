@@ -6,11 +6,11 @@
  * Accent / semantic colors stay identical across both themes.
  */
 :root {
-  --font-heading: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
-  --font-body: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
-  --font-label: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
-  --font-small: var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
-  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+  --font-heading: var(--font-geist-sans), 'Inter', system-ui, sans-serif;
+  --font-body: var(--font-geist-sans), 'Inter', system-ui, sans-serif;
+  --font-label: var(--font-geist-sans), 'Inter', system-ui, sans-serif;
+  --font-small: var(--font-geist-sans), 'Inter', system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, 'SF Mono', monospace;
 
   /* —— Semantic (theme-invariant) —— */
   --brand-primary: #2563EB;
