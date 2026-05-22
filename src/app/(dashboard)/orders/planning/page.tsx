@@ -139,6 +139,7 @@ type Line = {
   setNumber: string | null
   jobCardNumber: number | null
   planningStatus: string
+  fgStockQty?: number
   specOverrides: PlanningSpec | null
   po: {
     id: string

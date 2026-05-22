@@ -64,6 +64,9 @@ export type ProductionJobCardPdfModel = {
   materialPendingWatermark?: boolean
   boardMaterialFooter?: string | null
   inventoryHandshakeFooter?: string | null
+  orderQty?: number | null
+  fgStockUsed?: number | null
+  fgNetToProduce?: number | null
 }
 
 export function ProductionJobCardDocument({ model }: { model: ProductionJobCardPdfModel }) {
@@ -123,6 +126,24 @@ export function ProductionJobCardDocument({ model }: { model: ProductionJobCardP
             <Text style={styles.value}>{model.sheetsIssued}</Text>
           </View>
         </View>
+
+        {model.fgStockUsed != null && model.fgStockUsed > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>FG stock used</Text>
+            <View style={styles.row}>
+              <Text style={styles.label}>Ordered</Text>
+              <Text style={styles.value}>{model.orderQty ?? '—'}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.label}>From FG stock</Text>
+              <Text style={styles.value}>{model.fgStockUsed}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.label}>To produce</Text>
+              <Text style={styles.value}>{model.fgNetToProduce ?? '—'}</Text>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Compliance</Text>

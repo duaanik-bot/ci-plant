@@ -5,6 +5,8 @@ import clsx from 'clsx'
 import { AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { CardSection } from '@/components/design-system/CardSection'
+import { Button } from '@/components/design-system/Button'
+import { GlobalPopoutModal } from '@/components/design-system/GlobalPopoutModal'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
@@ -65,128 +67,6 @@ function readinessMeta(ok: boolean | null): { label: string; dot: string; hint: 
   if (ok === true) return { label: 'Ready', dot: 'bg-[var(--success-bg)]', hint: 'Board available' }
   if (ok === null) return { label: 'Waiting', dot: 'bg-[var(--warning-bg)]', hint: 'Board in procurement' }
   return { label: 'Not Ready', dot: 'bg-[var(--error-bg)]', hint: 'Board missing' }
-}
-
-export function JobCardDrawer({
-  data,
-  onClose,
-  onSave,
-  onRelease,
-}: {
-  data: {
-    product: string
-    customer: string
-    po: string
-    qty: number | string
-    size: string
-    ups: number | string
-    sheetSize: string
-    boardReady: boolean
-    boardWaiting: boolean
-    boardType: string
-    gsm: string
-    plate: boolean
-    die: boolean
-    embossRequired: boolean
-    emboss: boolean
-    toolingReady: boolean
-    machineId: string
-    machineOptions: MachineOpt[]
-    isReleased: boolean
-    setMachineId: (v: string) => void
-    setSheetSize: (v: string) => void
-    statusLabel: string
-  }
-  onClose: () => void
-  onSave: () => void
-  onRelease: () => void
-}) {
-  const isValid = !!data.sheetSize && data.boardReady && data.toolingReady
-  return (
-    <div className="fixed right-0 top-0 z-[60] flex h-full w-[min(100%,clamp(420px,38vw,640px))] flex-col border-l border-ds-line bg-ds-card shadow-xl transition-transform duration-150">
-      <div className="border-b border-ds-line px-4 py-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-ds-ink">{data.product}</h2>
-            <p className="truncate text-xs text-ds-ink-faint">{data.customer} · {data.po}</p>
-          </div>
-          <span className="rounded border border-ds-line/60 px-2 py-0.5 text-xs text-ds-ink-faint">{data.statusLabel}</span>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        <CardSection
-          title="Job Summary"
-        >
-          <p className="mb-2 text-xs text-ds-ink-faint">Read-only job details with editable sheet size if missing.</p>
-          <div className="grid grid-cols-2 gap-3 text-xs text-ds-ink">
-            <div><span className="text-ds-ink-faint">Qty</span><div className="mt-0.5">{data.qty}</div></div>
-            <div><span className="text-ds-ink-faint">Size</span><div className="mt-0.5">{data.size}</div></div>
-            <div><span className="text-ds-ink-faint">UPS</span><div className="mt-0.5">{data.ups}</div></div>
-            <div>
-              <label className="text-ds-ink-faint">Sheet size</label>
-              <input
-                value={data.sheetSize || ''}
-                onChange={(e) => data.setSheetSize(e.target.value)}
-                disabled={data.isReleased}
-                placeholder="L x W mm"
-                className="mt-0.5 w-full rounded border border-ds-line bg-ds-main px-2 py-1 text-xs text-ds-ink disabled:opacity-50"
-              />
-            </div>
-          </div>
-        </CardSection>
-
-        <CardSection title="Board Readiness">
-          <div className="mb-2 text-xs text-ds-ink-faint">{data.boardType} · {data.gsm}</div>
-          <span className={`rounded px-2 py-1 text-xs ${data.boardReady ? 'bg-[var(--success-bg)]/10 text-[var(--success)]' : data.boardWaiting ? 'bg-ds-warning/10 text-ds-warning' : 'bg-[var(--error-bg)]/10 text-[var(--error)]'}`}>
-            {data.boardReady ? 'Ready' : data.boardWaiting ? 'Waiting' : 'Not Ready'}
-          </span>
-        </CardSection>
-
-        <CardSection title="Tooling Status">
-          <div className="space-y-1.5 text-xs text-ds-ink">
-            <div>Plate: {data.plate ? 'Linked' : 'Missing'}</div>
-            <div>Die: {data.die ? 'Linked' : 'Missing'}</div>
-            {data.embossRequired ? <div>Emboss: {data.emboss ? 'Linked' : 'Missing'}</div> : null}
-          </div>
-        </CardSection>
-
-        <CardSection title="Execution Setup">
-          <select
-            value={data.machineId}
-            onChange={(e) => data.setMachineId(e.target.value)}
-            disabled={data.isReleased}
-            className="w-full rounded border border-ds-line bg-ds-main px-3 py-2 text-sm text-ds-ink disabled:opacity-50"
-          >
-            <option value="">Select Machine</option>
-            {data.machineOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.machineCode} · {m.name}
-              </option>
-            ))}
-          </select>
-        </CardSection>
-      </div>
-
-      <div className="flex items-center justify-between border-t border-ds-line px-4 py-3">
-        <button onClick={onClose} className="text-sm text-ds-ink-muted">
-          Close
-        </button>
-        <div className="flex gap-2">
-          <button onClick={onSave} disabled={data.isReleased} className="rounded border border-ds-line px-3 py-1.5 text-sm text-ds-ink disabled:opacity-40">
-            Save Draft
-          </button>
-          <button
-            onClick={onRelease}
-            disabled={!isValid || data.isReleased}
-            className="rounded bg-ds-brand px-4 py-1.5 text-sm text-white disabled:opacity-40"
-          >
-            Release to Production
-          </button>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 export function JobCardHubAuditDrawer({
@@ -336,49 +216,106 @@ export function JobCardHubAuditDrawer({
     }
   }
 
-  if (!open) return null
-
-  if (loading && !data) {
-    return (
-      <div className="fixed right-0 top-0 h-full w-[38%] min-w-[420px] max-w-[640px] bg-[var(--bg-card)] border-l border-[var(--border)] shadow-xl z-[60] p-4 text-sm text-ds-ink-faint">
-        Loading job card…
-      </div>
-    )
-  }
-
-  if (!data) return null
-
-  const chip = statusChip(data.status)
+  const chip = data ? statusChip(data.status) : { label: '—', cls: '' }
+  const isValid = !!effectiveSheet && !!boardOk && toolingProblems.length === 0
 
   return (
-    <JobCardDrawer
-      data={{
-        product: data.poLine?.cartonName ?? `Job Card ${jobCardNumber ?? '—'}`,
-        customer: data.customer?.name ?? '—',
-        po: `${data.poLine?.po?.poNumber ?? '—'} • ${data.poLine?.id ?? '—'}`,
-        qty: data.poLine?.quantity ?? '—',
-        size: data.poLine?.cartonSize ?? '—',
-        ups: data.productionBible?.ups ?? '—',
-        sheetSize: effectiveSheet ?? '',
-        boardReady: !!boardOk,
-        boardWaiting: !boardOk && !!boardWaiting,
-        boardType: data.boardMaterial?.ledgerLink?.board ?? '—',
-        gsm: data.boardMaterial?.ledgerLink?.gsm != null ? String(data.boardMaterial.ledgerLink.gsm) : '—',
-        plate: !!tooling?.plate,
-        die: !!tooling?.die,
-        embossRequired: embossApplicable,
-        emboss: !!tooling?.emboss,
-        toolingReady: toolingProblems.length === 0,
-        machineId,
-        machineOptions: machines,
-        isReleased,
-        setMachineId,
-        setSheetSize: setSheetSizeOverride,
-        statusLabel: chip.label,
-      }}
+    <GlobalPopoutModal
+      isOpen={open}
       onClose={onClose}
-      onSave={() => void save(false)}
-      onRelease={() => void save(true)}
-    />
+      title={data?.poLine?.cartonName ?? `Job Card ${jobCardNumber ?? '—'}`}
+      metadata={
+        data ? (
+          <span className="text-xs text-ds-ink-faint">
+            {data.customer?.name ?? '—'} · {data.poLine?.po?.poNumber ?? '—'}
+            <span className={clsx('ml-2 rounded border px-1.5 py-0.5 text-[10px]', chip.cls)}>
+              {chip.label}
+            </span>
+          </span>
+        ) : undefined
+      }
+      mode="form"
+      size="md"
+      zIndexClass="z-[60]"
+      footer={
+        data ? (
+          <div className="flex w-full items-center justify-end gap-2">
+            <Button variant="secondary" onClick={onClose}>Close</Button>
+            <Button
+              variant="secondary"
+              onClick={() => void save(false)}
+              disabled={isReleased || savingDraft}
+            >
+              {savingDraft ? 'Saving…' : 'Save Draft'}
+            </Button>
+            <Button
+              onClick={() => void save(true)}
+              disabled={!isValid || isReleased || releasing}
+            >
+              {releasing ? 'Releasing…' : 'Release to Production'}
+            </Button>
+          </div>
+        ) : undefined
+      }
+    >
+      {loading && !data ? (
+        <p className="text-sm text-ds-ink-faint">Loading job card…</p>
+      ) : data ? (
+        <div className="space-y-4">
+          <CardSection title="Job Summary">
+            <p className="mb-2 text-xs text-ds-ink-faint">Read-only job details with editable sheet size if missing.</p>
+            <div className="grid grid-cols-2 gap-3 text-xs text-ds-ink">
+              <div><span className="text-ds-ink-faint">Qty</span><div className="mt-0.5">{data.poLine?.quantity ?? '—'}</div></div>
+              <div><span className="text-ds-ink-faint">Size</span><div className="mt-0.5">{data.poLine?.cartonSize ?? '—'}</div></div>
+              <div><span className="text-ds-ink-faint">UPS</span><div className="mt-0.5">{data.productionBible?.ups ?? '—'}</div></div>
+              <div>
+                <label className="text-ds-ink-faint">Sheet size</label>
+                <input
+                  value={effectiveSheet ?? ''}
+                  onChange={(e) => setSheetSizeOverride(e.target.value)}
+                  disabled={isReleased || hasBaseSheet}
+                  placeholder="L x W mm"
+                  className="mt-0.5 w-full rounded border border-ds-line bg-ds-main px-2 py-1 text-xs text-ds-ink disabled:opacity-50"
+                />
+              </div>
+            </div>
+          </CardSection>
+
+          <CardSection title="Board Readiness">
+            <div className="mb-2 text-xs text-ds-ink-faint">
+              {data.boardMaterial?.ledgerLink?.board ?? '—'} · {data.boardMaterial?.ledgerLink?.gsm != null ? String(data.boardMaterial.ledgerLink.gsm) : '—'}
+            </div>
+            <span className={`rounded px-2 py-1 text-xs ${boardOk ? 'bg-[var(--success-bg)]/10 text-[var(--success)]' : boardWaiting ? 'bg-ds-warning/10 text-ds-warning' : 'bg-[var(--error-bg)]/10 text-[var(--error)]'}`}>
+              {boardOk ? 'Ready' : boardWaiting ? 'Waiting' : 'Not Ready'}
+            </span>
+          </CardSection>
+
+          <CardSection title="Tooling Status">
+            <div className="space-y-1.5 text-xs text-ds-ink">
+              <div>Plate: {tooling?.plate ? 'Linked' : 'Missing'}</div>
+              <div>Die: {tooling?.die ? 'Linked' : 'Missing'}</div>
+              {embossApplicable ? <div>Emboss: {tooling?.emboss ? 'Linked' : 'Missing'}</div> : null}
+              {shadeApplicable ? <div>Shade: {tooling?.shade ? 'Linked' : 'Missing'}</div> : null}
+            </div>
+          </CardSection>
+
+          <CardSection title="Execution Setup">
+            <select
+              value={machineId}
+              onChange={(e) => setMachineId(e.target.value)}
+              disabled={isReleased}
+              className="w-full rounded border border-ds-line bg-ds-main px-3 py-2 text-sm text-ds-ink disabled:opacity-50"
+            >
+              <option value="">Select Machine</option>
+              {machines.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.machineCode} · {m.name}
+                </option>
+              ))}
+            </select>
+          </CardSection>
+        </div>
+      ) : null}
+    </GlobalPopoutModal>
   )
 }

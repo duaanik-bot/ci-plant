@@ -1,9 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { GlobalPopoutModal } from '@/components/design-system/GlobalPopoutModal'
 
-const shell = 'border-l border-[#334155] bg-[#1E293B] shadow-[-10px_0_40px_rgba(0,0,0,0.25)]'
 const mono = 'font-designing-queue tabular-nums text-sm font-semibold'
 
 type Insight = {
@@ -53,133 +52,117 @@ export function PlanningProductDetailDrawer({
       .finally(() => setLoading(false))
   }, [open, cartonId])
 
-  if (!open || !cartonId) return null
-
   const m = data?.master ?? {}
   const name = String(m?.cartonName ?? '—')
 
   return (
-    <div className="fixed inset-0 z-[91] flex justify-end">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50"
-        aria-label="Close"
-        onClick={onClose}
-      />
-      <aside
-        className={`relative flex h-full w-full max-w-[480px] flex-col ${shell}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Product detail"
-      >
-        <div className="flex items-start justify-between gap-2 border-b border-[#334155] bg-[#0F172A] px-4 py-4">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-ds-ink-faint">Product master</p>
-            <h2 className="pr-2 text-sm font-semibold text-ds-ink">{name}</h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1.5 text-ds-ink-muted hover:bg-[#1E293B] hover:text-ds-ink"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+    <GlobalPopoutModal
+      isOpen={open && !!cartonId}
+      onClose={onClose}
+      title="Product master"
+      metadata={
+        data ? (
+          <span className="text-xs text-ds-ink-faint">{name}</span>
+        ) : loading ? (
+          <span className="text-xs text-ds-ink-faint">Loading…</span>
+        ) : null
+      }
+      mode="preview"
+      size="sm"
+      zIndexClass="z-[91]"
+    >
+      <div className="space-y-4 text-sm text-ds-ink">
+        {err ? <p className="text-sm text-[var(--error)]">{err}</p> : null}
+        {loading ? <p className="text-ds-ink-faint">Loading…</p> : null}
+        {!loading && data && (
+          <>
+            <div className="space-y-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 p-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-ds-ink-faint">Master specs</p>
+              <p>
+                <span className="text-ds-ink-faint">GSM:</span>{' '}
+                <span className={mono}>{m?.gsm != null ? String(m.gsm) : '—'}</span>
+              </p>
+              <p>
+                <span className="text-ds-ink-faint">Paper:</span> {String(m?.paperType ?? '—')}
+              </p>
+              <p>
+                <span className="text-ds-ink-faint">Coating:</span> {String(m?.coatingType ?? '—')}
+              </p>
+              <p>
+                <span className="text-ds-ink-faint">Laminate / secondary:</span> {String(m?.laminateType ?? '—')}
+              </p>
+              <p>
+                <span className="text-ds-ink-faint">AW code:</span>{' '}
+                <span className={`text-ds-warning ${mono}`}>{String(m?.artworkCode ?? '—')}</span>
+              </p>
+            </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-sm">
-          {err ? <p className="text-sm text-[var(--error)]">{err}</p> : null}
-          {loading ? <p className="text-ds-ink-faint">Loading…</p> : null}
-          {!loading && data && (
-            <>
-              <div className="space-y-2 rounded border border-[#334155] bg-[#0F172A]/50 p-4 text-ds-ink">
-                <p className="text-xs font-medium uppercase tracking-wider text-ds-ink-faint">Master specs</p>
-                <p>
-                  <span className="text-ds-ink-faint">GSM:</span>{' '}
-                  <span className={mono}>{m?.gsm != null ? String(m.gsm) : '—'}</span>
-                </p>
-                <p>
-                  <span className="text-ds-ink-faint">Paper:</span> {String(m?.paperType ?? '—')}
-                </p>
-                <p>
-                  <span className="text-ds-ink-faint">Coating:</span> {String(m?.coatingType ?? '—')}
-                </p>
-                <p>
-                  <span className="text-ds-ink-faint">Laminate / secondary:</span> {String(m?.laminateType ?? '—')}
-                </p>
-                <p>
-                  <span className="text-ds-ink-faint">AW code:</span>{' '}
-                  <span className={`text-ds-warning ${mono}`}>{String(m?.artworkCode ?? '—')}</span>
-                </p>
-              </div>
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
+                Grain direction
+              </p>
+              <p className="whitespace-pre-wrap text-ds-ink-muted">{String(data.grainDirectionNote ?? '—')}</p>
+            </div>
 
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
-                  Grain direction
-                </p>
-                <p className="whitespace-pre-wrap text-ds-ink-muted">{String(data.grainDirectionNote ?? '—')}</p>
-              </div>
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
+                Hub readiness (live)
+              </p>
+              <ul className="space-y-1">
+                <li>
+                  Plates / die:{' '}
+                  {data.hub?.die ? (
+                    <span className="text-[var(--success)]">
+                      Die {data.hub.die.dyeNumber}/{data.hub.die.ups} · {data.hub.die.sheetSize}
+                    </span>
+                  ) : (
+                    <span className="text-ds-warning">—</span>
+                  )}
+                </li>
+                <li>
+                  Shade:{' '}
+                  {data.hub?.shadeCard ? (
+                    <span>
+                      {data.hub.shadeCard.shadeCode} · {data.hub.shadeCard.custodyStatus}
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                </li>
+              </ul>
+            </div>
 
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
-                  Hub readiness (live)
-                </p>
-                <ul className="space-y-1 text-ds-ink">
-                  <li>
-                    Plates / die:{' '}
-                    {data.hub?.die ? (
-                      <span className="text-[var(--success)]">
-                        Die {data.hub.die.dyeNumber}/{data.hub.die.ups} · {data.hub.die.sheetSize}
-                      </span>
-                    ) : (
-                      <span className="text-ds-warning">—</span>
-                    )}
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
+                Last production runs
+              </p>
+              <ul className="space-y-2">
+                {(data.lastRuns ?? []).map((r) => (
+                  <li
+                    key={r?.jobCardNumber}
+                    className="rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 px-3 py-2 text-ds-ink-muted"
+                  >
+                    <p className={`${mono} text-ds-warning`}>JC #{r?.jobCardNumber ?? '—'}</p>
+                    <p className="text-xs text-ds-ink-faint">
+                      {r?.jobDate != null
+                        ? new Date(r.jobDate).toISOString().slice(0, 10)
+                        : '—'}{' '}
+                      · {r?.status ?? '—'}
+                    </p>
+                    <p className="text-xs">
+                      Grain: {r?.grainFitStatus ?? '—'}
+                      {r?.issuedStockDisplay ? ` · ${r.issuedStockDisplay}` : ''}
+                    </p>
                   </li>
-                  <li>
-                    Shade:{' '}
-                    {data.hub?.shadeCard ? (
-                      <span>
-                        {data.hub.shadeCard.shadeCode} · {data.hub.shadeCard.custodyStatus}
-                      </span>
-                    ) : (
-                      '—'
-                    )}
-                  </li>
-                </ul>
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
-                  Last production runs
-                </p>
-                <ul className="space-y-2">
-                  {(data.lastRuns ?? []).map((r) => (
-                    <li
-                      key={r?.jobCardNumber}
-                      className="rounded border border-[#334155] bg-[#0F172A]/50 px-3 py-2 text-ds-ink-muted"
-                    >
-                      <p className={`${mono} text-ds-warning`}>JC #{r?.jobCardNumber ?? '—'}</p>
-                      <p className="text-xs text-ds-ink-faint">
-                        {r?.jobDate != null
-                          ? new Date(r.jobDate).toISOString().slice(0, 10)
-                          : '—'}{' '}
-                        · {r?.status ?? '—'}
-                      </p>
-                      <p className="text-xs">
-                        Grain: {r?.grainFitStatus ?? '—'}
-                        {r?.issuedStockDisplay ? ` · ${r.issuedStockDisplay}` : ''}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-                {(data.lastRuns?.length ?? 0) === 0 ? (
-                  <p className="text-ds-ink-faint">No prior job cards linked to this product.</p>
-                ) : null}
-              </div>
-            </>
-          )}
-        </div>
-      </aside>
-    </div>
+                ))}
+              </ul>
+              {(data.lastRuns?.length ?? 0) === 0 ? (
+                <p className="text-ds-ink-faint">No prior job cards linked to this product.</p>
+              ) : null}
+            </div>
+          </>
+        )}
+      </div>
+    </GlobalPopoutModal>
   )
 }

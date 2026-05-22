@@ -1,13 +1,14 @@
 'use client'
 
-import { Modal } from './Modal'
+import { GlobalPopoutModal } from '@/components/design-system/GlobalPopoutModal'
 import { Button } from './Button'
 
 /**
  * ConfirmDialog
  * ──────────────
- * A small Modal pre-wired for destructive confirmation.
- * Always renders at size="sm" (max-w-md).
+ * A small modal pre-wired for destructive confirmation.
+ * Always renders at size="sm". Uses preview-mode dismissal (Escape + backdrop
+ * click both close), matching the lightweight confirm-prompt UX.
  *
  * Usage:
  *   <ConfirmDialog
@@ -42,7 +43,7 @@ export function ConfirmDialog({
   loading      = false,
 }: ConfirmDialogProps) {
   return (
-    <Modal open={open} onClose={onClose} title={title} size="sm">
+    <GlobalPopoutModal isOpen={open} onClose={onClose} title={title} size="sm" mode="preview">
       <p className="text-sm text-ds-ink-muted mb-6 leading-relaxed">{message}</p>
       <div className="flex gap-3 justify-end">
         <Button variant="secondary" onClick={onClose} disabled={loading}>
@@ -52,7 +53,7 @@ export function ConfirmDialog({
           {confirmLabel}
         </Button>
       </div>
-    </Modal>
+    </GlobalPopoutModal>
   )
 }
 

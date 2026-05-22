@@ -68,6 +68,8 @@ export type PlanningGridLine = {
   remarks: string | null
   planningStatus: string
   specOverrides: Record<string, unknown> | null
+  /** Finished-goods stock available for this product (inventory.qtyFg matched by product). */
+  fgStockQty?: number
   dimLengthMm?: unknown
   dimWidthMm?: unknown
   planningLedger?: {
@@ -246,9 +248,32 @@ function coatingLabel(r: PlanningGridLine): string {
   return '—'
 }
 
+/** Real finished-goods stock for this product (inventory.qtyFg, matched by product upstream). */
 function availableFgCount(r: PlanningGridLine): number {
-  const n = Number(r.planningLedger?.materialGate?.netAvailable ?? 0)
+  const n = Number(r.fgStockQty ?? 0)
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0
+}
+
+/** Planner decision to fulfil part of the order from finished-goods stock. */
+function readFgUse(spec: Record<string, unknown>): { enabled: boolean; qty: number } {
+  const enabled = spec.fgUseEnabled === true
+  const raw = Number(spec.fgUseQty)
+  const qty = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
+  return { enabled, qty }
+}
+
+/** Quantity actually consumed from FG: clamped to both available stock and the order qty. */
+function fgQtyUsed(r: PlanningGridLine): number {
+  const { enabled, qty } = readFgUse((r.specOverrides || {}) as Record<string, unknown>)
+  if (!enabled) return 0
+  const cap = Math.min(availableFgCount(r), Math.max(0, r.quantity))
+  const want = qty > 0 ? qty : cap
+  return Math.max(0, Math.min(want, cap))
+}
+
+/** Remaining quantity to produce after deducting FG stock used. */
+function netToProduce(r: PlanningGridLine): number {
+  return Math.max(0, r.quantity - fgQtyUsed(r))
 }
 
 function sheetSizeLabel(r: PlanningGridLine): string {
@@ -1533,6 +1558,10 @@ export function PlanningDecisionGrid({
                 : null
               const rowActionFeedback = actionFeedbackByLineId[r.id]
               const fgAvailable = availableFgCount(r)
+              const fgUse = readFgUse(spec)
+              const fgUsed = fgQtyUsed(r)
+              const fgNet = netToProduce(r)
+              const fgCap = Math.min(fgAvailable, Math.max(0, r.quantity))
               const sheetSize = sheetSizeLabel(r)
               const rowSignal = r.planningLedger?.boardStockInsight?.stockSignal ?? 'red'
               const rowHasMaterialHint = (() => {
@@ -1674,11 +1703,64 @@ export function PlanningDecisionGrid({
                         }}
                         aria-label="Quantity"
                       />
+                      {fgUse.enabled && fgUsed > 0 ? (
+                        <p className="mt-0.5 text-center text-[10px] leading-tight text-[var(--success)]" title="Produce after using FG stock">
+                          ↳ make {fgNet.toLocaleString('en-IN')}
+                        </p>
+                      ) : null}
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <p className="truncate text-xs font-semibold tabular-nums text-ds-ink-muted">
-                        {fgAvailable.toLocaleString('en-IN')}
-                      </p>
+                      {fgAvailable > 0 ? (
+                        <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+                          <span className="text-xs font-semibold tabular-nums text-ds-ink" title="Finished goods in FG warehouse">
+                            {fgAvailable.toLocaleString('en-IN')}
+                          </span>
+                          <label className="flex items-center gap-1 text-[10px] text-ds-ink-muted">
+                            <input
+                              type="checkbox"
+                              className="h-3 w-3 accent-[var(--brand-primary)]"
+                              disabled={processed}
+                              checked={fgUse.enabled}
+                              onChange={(e) => {
+                                const enabled = e.target.checked
+                                const nextSpec: Record<string, unknown> = {
+                                  ...spec,
+                                  fgUseEnabled: enabled,
+                                  fgUseQty: enabled ? (fgUse.qty > 0 ? Math.min(fgUse.qty, fgCap) : fgCap) : fgUse.qty,
+                                }
+                                updateRow(r.id, { specOverrides: nextSpec })
+                                void onSaveLine(r.id, { specOverrides: nextSpec })
+                              }}
+                            />
+                            Use stock
+                          </label>
+                          {fgUse.enabled ? (
+                            <input
+                              type="number"
+                              min={0}
+                              max={fgCap}
+                              className={inp + ' h-6 px-1 text-center text-xs'}
+                              disabled={processed}
+                              value={fgUsed}
+                              aria-label="Quantity to use from FG"
+                              onChange={(e) => {
+                                const raw = parseInt(e.target.value, 10)
+                                const n = Math.max(0, Math.min(Number.isFinite(raw) ? raw : 0, fgCap))
+                                updateRow(r.id, { specOverrides: { ...spec, fgUseEnabled: true, fgUseQty: n } })
+                              }}
+                              onBlur={(e) => {
+                                const raw = parseInt(e.target.value, 10)
+                                const n = Math.max(0, Math.min(Number.isFinite(raw) ? raw : 0, fgCap))
+                                const nextSpec: Record<string, unknown> = { ...spec, fgUseEnabled: true, fgUseQty: n }
+                                updateRow(r.id, { specOverrides: nextSpec })
+                                void onSaveLine(r.id, { specOverrides: nextSpec })
+                              }}
+                            />
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="truncate text-xs font-semibold tabular-nums text-ds-ink-faint">—</p>
+                      )}
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <div className="flex items-center gap-1.5">

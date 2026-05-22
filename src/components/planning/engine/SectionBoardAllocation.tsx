@@ -4,9 +4,11 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta, mergePlanningMetaUps } from '@/lib/planning-decision-spec'
+import { mergeSpecPackUps } from '@/lib/carton-spec-pack'
 import { resolveUps } from '@/lib/production-os-resolvers'
 import { resolveSheetSize as resolveSheetSizeFromLine } from '@/lib/planning-sheet-size'
 import type { PlanningEngineBoardOption, PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
+import { PlanningWarehouseModal } from '@/components/planning/PlanningWarehouseModal'
 
 type Props = {
   line: PlanningEngineLine
@@ -17,6 +19,8 @@ type Props = {
   onSelectBoard?: (materialId: string) => Promise<void>
   /** Called when planner clicks Reserve — parent wires to POST reserve-material. */
   onReserve?: () => Promise<void>
+  /** Called when planner clicks Unreserve — parent wires to reservation-control release. */
+  onUnreserve?: () => Promise<void>
   /** Called when planner clicks Raise PR — parent wires to PR creation. */
   onRaisePR?: () => Promise<void>
 }
@@ -217,6 +221,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   onPatch,
   onSelectBoard,
   onReserve,
+  onUnreserve,
   onRaisePR,
 }: Props) {
   const shortage = Math.max(0, Number(readiness?.shortageSheets ?? 0))
@@ -248,45 +253,24 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     [line.specOverrides],
   )
   const meta = useMemo(() => readPlanningMeta(spec), [spec])
-  const upsManual = meta?.upsSource === 'manual'
-
   const resolvedBoardType = useMemo(() => resolveBoardType(line, readiness), [line, readiness])
   const resolvedGsm = useMemo(() => resolveGsm(line, readiness), [line, readiness])
   const resolvedSheetSize = useMemo(() => resolveSheetSize(line, readiness), [line, readiness])
   const resolvedUps = useMemo(() => (resolveUps(line) ?? null) as number | null, [line])
 
-  const wastageFromSpec = useMemo(
-    () => (spec.wastageSheets != null ? Number(spec.wastageSheets) : WASTAGE_DEFAULT),
-    [spec],
-  )
-
-  // Base sheets — computed client-side for the display tile
-  const qty = Number(line.quantity ?? 0)
-  const baseSheets = useMemo(
-    () => (resolvedUps && qty ? Math.max(1, Math.ceil(qty / resolvedUps)) : null),
-    [resolvedUps, qty],
-  )
-  const totalRequired = required || (baseSheets != null ? baseSheets + wastageFromSpec : null)
-
   // ── SINGLE combined state — one setState = one re-render ──────────────────
   const [drafts, setDrafts] = useState({
     board: resolvedBoardType,
     gsm: resolvedGsm != null ? String(resolvedGsm) : '',
-    size: resolvedSheetSize,
-    ups: resolvedUps != null ? String(resolvedUps) : '',
-    wastage: String(wastageFromSpec),
   })
 
-  // ONE effect replaces the previous four — fires when any resolved value changes
+  // ONE effect replaces the previous — fires when any resolved value changes
   useEffect(() => {
     setDrafts({
       board: resolvedBoardType,
       gsm: resolvedGsm != null ? String(resolvedGsm) : '',
-      size: resolvedSheetSize,
-      ups: resolvedUps != null ? String(resolvedUps) : '',
-      wastage: String(wastageFromSpec),
     })
-  }, [resolvedBoardType, resolvedGsm, resolvedSheetSize, resolvedUps, wastageFromSpec])
+  }, [resolvedBoardType, resolvedGsm])
 
   // Backfill — commit auto-populated values onto the line once per line-id.
   // Fill-empty-only: never overwrites a value the planner already set.
@@ -309,6 +293,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     }
     if (m.ups == null && resolvedUps != null) {
       s = mergePlanningMetaUps(s, resolvedUps)
+      // Sync the spec-complete gate when auto-populating a resolvable UPS.
+      s = mergeSpecPackUps(s, resolvedUps)
       specChanged = true
     }
     if (specChanged) patch.specOverrides = s
@@ -339,28 +325,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     void onPatch({ gsm: v })
   }, [drafts.gsm, line.gsm, onPatch])
 
-  const commitSize = useCallback(() => {
-    const v = drafts.size.trim()
-    const current = (readPlanningMeta(spec).parentSize as string | undefined)?.trim() ?? ''
-    if (v === current) return
-    void onPatch({ specOverrides: metaParentSizeSet({ ...spec }, v || null) })
-  }, [drafts.size, spec, onPatch])
-
-  const commitUps = useCallback(() => {
-    const next = drafts.ups.trim() === '' ? null : Math.max(1, Math.floor(Number(drafts.ups) || 0))
-    if (next === resolvedUps) return
-    void onPatch({ specOverrides: mergePlanningMetaUps(spec, next) })
-  }, [drafts.ups, resolvedUps, spec, onPatch])
-
-  const commitWastage = useCallback(() => {
-    const next =
-      drafts.wastage.trim() === ''
-        ? WASTAGE_DEFAULT
-        : Math.max(0, Math.round(Number(drafts.wastage) || 0))
-    if (next === wastageFromSpec) return
-    void onPatch({ specOverrides: { ...spec, wastageSheets: next } })
-  }, [drafts.wastage, wastageFromSpec, spec, onPatch])
-
   // ── Board master options ──────────────────────────────────────────────────
   const boardOptions: PlanningEngineBoardOption[] = useMemo(
     () =>
@@ -375,6 +339,17 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const canLinkCarton = !!onPatch && (!!cartonBoardType || cartonGsm != null)
   const canLinkBoard = !!onSelectBoard && boardOptions.length > 0
   const [linkOpen, setLinkOpen] = useState<null | 'carton' | 'board'>(null)
+  const [warehouseOpen, setWarehouseOpen] = useState(false)
+  const suggestedMaterialIds = useMemo(
+    () =>
+      [
+        ...(readiness?.suggestedBoardOptions ?? []),
+        ...(readiness?.closestAvailableOptions ?? []),
+      ]
+        .map((o) => o.materialId)
+        .filter(Boolean),
+    [readiness],
+  )
 
   const linkFromCarton = useCallback(() => {
     const patch: Parameters<SectionPatchFn>[0] = {}
@@ -384,9 +359,11 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     setLinkOpen(null)
   }, [cartonBoardType, cartonGsm, onPatch])
 
-  // ── Reserve & Raise PR ────────────────────────────────────────────────────
+  // ── Reserve, Unreserve & Raise PR ─────────────────────────────────────────
   const [reserving, setReserving] = useState(false)
+  const [unreserving, setUnreserving] = useState(false)
   const [raisingPR, setRaisingPR] = useState(false)
+  const reservedForLine = Math.max(0, Number(readiness?.reservedForLine ?? 0))
 
   const handleReserve = useCallback(async () => {
     if (!onReserve || reserving) return
@@ -397,6 +374,16 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
       setReserving(false)
     }
   }, [onReserve, reserving])
+
+  const handleUnreserve = useCallback(async () => {
+    if (!onUnreserve || unreserving) return
+    setUnreserving(true)
+    try {
+      await onUnreserve()
+    } finally {
+      setUnreserving(false)
+    }
+  }, [onUnreserve, unreserving])
 
   const handleRaisePR = useCallback(async () => {
     if (!onRaisePR || raisingPR) return
@@ -413,8 +400,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
 
   return (
     <CardSection title="BOARD ALLOCATION">
-      {/* ── Row 1: Board type | GSM | Sheet size | UPS ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* ── Row 1: Board type | GSM ── */}
+      <div className="grid grid-cols-2 gap-3">
         <EditableTile
           label="Board type"
           ariaLabel="Board type"
@@ -432,57 +419,9 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
           onChange={(v) => setDrafts((d) => ({ ...d, gsm: v }))}
           onCommit={commitGsm}
         />
-        <EditableTile
-          label="Sheet size"
-          ariaLabel="Sheet size"
-          value={drafts.size}
-          placeholder="—"
-          onChange={(v) => setDrafts((d) => ({ ...d, size: v }))}
-          onCommit={commitSize}
-        />
-        <EditableTile
-          label="Units per sheet"
-          ariaLabel="Units per sheet"
-          type="number"
-          value={drafts.ups}
-          placeholder="—"
-          onChange={(v) => setDrafts((d) => ({ ...d, ups: v }))}
-          onCommit={commitUps}
-          badge={
-            !upsManual && drafts.ups ? (
-              <Badge tone="success" className="text-[9px]">
-                Auto
-              </Badge>
-            ) : undefined
-          }
-        />
       </div>
 
-      {/* ── Row 2: Base sheets (r/o) | Wastage sheets (editable) | Total required (r/o) ── */}
-      <div className="grid grid-cols-3 gap-3 mt-3">
-        <ReadOnlyTile
-          label="Base sheets"
-          value={baseSheets != null ? formatSheets(baseSheets) : '—'}
-        />
-        <EditableTile
-          label="Wastage sheets"
-          ariaLabel="Wastage sheets"
-          type="number"
-          value={drafts.wastage}
-          placeholder={String(WASTAGE_DEFAULT)}
-          onChange={(v) => setDrafts((d) => ({ ...d, wastage: v }))}
-          onCommit={commitWastage}
-          badge={
-            <Badge tone="neutral" className="text-[9px]">
-              editable
-            </Badge>
-          }
-        />
-        <ReadOnlyTile
-          label="Total required"
-          value={totalRequired ? formatSheets(totalRequired) : '—'}
-        />
-      </div>
+      {/* Sheet/cut spec and yield calculations moved to SectionCutPlanBalance */}
 
       {/* ── Link to master row ── */}
       {canLinkCarton || canLinkBoard ? (
@@ -512,8 +451,35 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
               Board master ▾
             </button>
           ) : null}
+          <button
+            type="button"
+            onClick={() => setWarehouseOpen(true)}
+            className="rounded-full border border-ds-line/50 bg-ds-elevated px-2.5 py-1 text-xs font-medium text-ds-ink-muted hover:text-ds-ink"
+          >
+            Paper warehouse ↗
+          </button>
         </div>
-      ) : null}
+      ) : (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setWarehouseOpen(true)}
+            className="rounded-full border border-ds-line/50 bg-ds-elevated px-2.5 py-1 text-xs font-medium text-ds-ink-muted hover:text-ds-ink"
+          >
+            Paper warehouse ↗
+          </button>
+        </div>
+      )}
+
+      <PlanningWarehouseModal
+        isOpen={warehouseOpen}
+        onClose={() => setWarehouseOpen(false)}
+        boardType={resolvedBoardType || null}
+        gsm={resolvedGsm}
+        suggestedMaterialIds={suggestedMaterialIds}
+        currentMaterialId={readiness?.materialId ?? null}
+        onSelectBoard={onSelectBoard}
+      />
 
       {linkOpen === 'board' && canLinkBoard ? (
         <div className="mt-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated p-2 space-y-1">
@@ -546,8 +512,30 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
           free={netStock}
           reserved={reserved}
           incoming={incoming}
-          required={totalRequired ?? 0}
+          required={required}
         />
+      ) : null}
+
+      {/* ── Reserved-for-this-line + Unreserve ── */}
+      {reservedForLine > 0 ? (
+        <div className="mt-2 flex items-center justify-between rounded-ds-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+          <span className="text-amber-200">
+            Reserved for this line:{' '}
+            <span className="font-semibold tabular-nums">{formatSheets(reservedForLine)}</span>
+          </span>
+          {onUnreserve ? (
+            <button
+              type="button"
+              onClick={() => {
+                void handleUnreserve()
+              }}
+              disabled={unreserving}
+              className="rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50 transition-colors"
+            >
+              {unreserving ? 'Releasing…' : '↩ Unreserve'}
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {/* ── Stock state banner ── */}

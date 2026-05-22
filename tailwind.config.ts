@@ -44,15 +44,6 @@ const config: Config = {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.55' },
         },
-        'slide-over-enter': {
-          from: { transform: 'translateX(100%)' },
-          to: { transform: 'translateX(0)' },
-        },
-        /** App-standard right rail (180–220ms, ease-out) */
-        'ds-drawer-slide': {
-          from: { transform: 'translateX(100%)' },
-          to: { transform: 'translateX(0)' },
-        },
         // ── ERP design-system modal / toast animations ──────────────────
         'slide-in-right': {
           from: { transform: 'translateX(100%)', opacity: '0' },
@@ -70,8 +61,6 @@ const config: Config = {
       animation: {
         'po-age-alert': 'po-age-alert 2.2s ease-in-out infinite',
         'industrial-age-pulse': 'industrial-age-pulse 2.2s ease-in-out infinite',
-        'slide-over-enter': 'slide-over-enter 200ms ease-in-out both',
-        'ds-drawer-slide': 'ds-drawer-slide 200ms ease-out both',
         // ── ERP design-system ──────────────────────────────────────────
         'slide-in-right': 'slide-in-right 0.2s ease-out',
         'scale-in':       'scale-in 0.18s ease-out',

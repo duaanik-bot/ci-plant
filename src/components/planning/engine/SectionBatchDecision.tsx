@@ -1,11 +1,24 @@
 'use client'
 
-import { memo, useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
-import { readPlanningCore } from '@/lib/planning-decision-spec'
+import { readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
+import { resolveUps } from '@/lib/production-os-resolvers'
+import { validatePlanningLine } from '@/lib/planning-validation'
 import type { PlanningEngineLine, SectionPatchFn } from './types'
+
+/** First two positive numbers in a size string (tolerates unit suffixes). */
+function parseSizePair(raw: unknown): { l: number; w: number } | null {
+  if (typeof raw !== 'string') return null
+  const nums = raw.match(/\d+(?:\.\d+)?/g)
+  if (!nums || nums.length < 2) return null
+  const l = Number(nums[0])
+  const w = Number(nums[1])
+  return l > 0 && w > 0 ? { l, w } : null
+}
 
 type Props = {
   line: PlanningEngineLine
@@ -103,7 +116,34 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
 
   const [locking, setLocking] = useState(false)
   const blockers = readinessFive?.blockers ?? []
-  const canLock = readinessFive?.allReady === true && !locked
+
+  // ── Client-side mandatory-field + release validation ──────────────────────
+  const validation = useMemo(() => {
+    const spec = (line.specOverrides ?? {}) as Record<string, unknown>
+    const meta = readPlanningMeta(spec)
+    const fromMeta = parseSizePair(meta.parentSize)
+    const sheetLengthMm =
+      Number(meta.sheetLengthMm) > 0 ? Number(meta.sheetLengthMm) : fromMeta?.l ?? null
+    const sheetWidthMm =
+      Number(meta.sheetWidthMm) > 0 ? Number(meta.sheetWidthMm) : fromMeta?.w ?? null
+    return validatePlanningLine({
+      boardType: line.paperType ?? null,
+      gsm: line.gsm ?? null,
+      ups: resolveUps(line) ?? null,
+      sheetLengthMm,
+      sheetWidthMm,
+      shortageSheets: Number(
+        (line.planningLedger?.boardStockInsight as { shortageSheets?: number } | undefined)
+          ?.shortageSheets ?? 0,
+      ),
+      hasPurchaseRequest: !!(
+        line.planningLedger?.boardStockInsight as { prId?: string | null } | undefined
+      )?.prId,
+      status: status === 'Locked' ? 'Released' : (status as string),
+    })
+  }, [line, status])
+
+  const canLock = readinessFive?.allReady === true && validation.canLock && !locked
 
   // ── Controlled Set Number ─────────────────────────────────────────────────
   const [setNumberDraft, setSetNumberDraft] = useState(setNumber ?? '')
@@ -123,9 +163,13 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   const persistStatus = useCallback(
     (next: Status) => {
       if (locked || next === (status as Status)) return
+      if (next === 'Released' && validation.releaseBlocked) {
+        toast.error(validation.releaseReason ?? 'Cannot release with an open shortage.')
+        return
+      }
       void onPatch(patchPlanningCore(line, 'status', next))
     },
-    [locked, status, line, onPatch],
+    [locked, status, line, onPatch, validation.releaseBlocked, validation.releaseReason],
   )
 
   // ── Layout persist ────────────────────────────────────────────────────────
@@ -272,16 +316,26 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
           )}
         </div>
 
+        {/* Mandatory-field validation hint */}
+        {!locked && validation.missingMandatory.length > 0 ? (
+          <div className="rounded-ds-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+            <span className="font-semibold text-amber-300">Required to lock: </span>
+            <span className="text-ds-ink-muted">{validation.missingMandatory.join(', ')}</span>
+          </div>
+        ) : null}
+
         {/* Lock row */}
         <div className="flex items-center justify-between gap-3 pt-1">
           <div className="text-xs text-ds-ink-faint min-h-[16px]">
             {locked
               ? `Locked${bd?.lockedByName ? ` · ${bd.lockedByName}` : ''}${bd?.lockedAt ? ` · ${new Date(bd.lockedAt).toLocaleString('en-IN')}` : ''}`
-              : blockers.length > 0
-                ? `Blockers: ${blockers.join(', ')}`
-                : canLock
-                  ? 'All readiness checks green'
-                  : 'Readiness check pending'}
+              : validation.missingMandatory.length > 0
+                ? `Missing: ${validation.missingMandatory.join(', ')}`
+                : blockers.length > 0
+                  ? `Blockers: ${blockers.join(', ')}`
+                  : canLock
+                    ? 'All readiness checks green'
+                    : 'Readiness check pending'}
           </div>
           <Button
             type="button"

@@ -2413,8 +2413,6 @@ export default function ProcurementWorkbenchPage() {
         isOpen={!!spotlightRow}
         onClose={() => setSpotlightRow(null)}
         widthClass="max-w-md"
-        backdropClassName="bg-background/55"
-        panelClassName="border-l border-ds-line/40 bg-background shadow-2xl"
       >
         {spotlightRow ? (
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-ds-ink-muted">

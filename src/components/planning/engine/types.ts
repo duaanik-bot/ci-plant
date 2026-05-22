@@ -17,6 +17,8 @@ export type PlanningEngineReadiness = {
   availableSheets: number
   reservedSheets: number
   freeSheets?: number
+  /** Sheets already reserved against THIS planning line (drives the Unreserve action). */
+  reservedForLine?: number
   incomingSheets: number
   shortageSheets: number
   prId?: string | null

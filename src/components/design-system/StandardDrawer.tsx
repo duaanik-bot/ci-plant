@@ -31,8 +31,9 @@ type StandardDrawerProps = StandardSlideOverOptions & {
 }
 
 /**
- * Application-standard right rail: 38% width, clamp(420px, 38vw, 640px), subtle 25% black overlay,
- * sticky header + scroll body + optional sticky footer. Uses design tokens only.
+ * Application-standard detail surface: a centered pop-out modal (via SlideOverPanel →
+ * GlobalPopoutModal) with a sticky header, scroll body, and optional sticky footer.
+ * Uses design tokens only.
  */
 export function StandardDrawer({
   isOpen,

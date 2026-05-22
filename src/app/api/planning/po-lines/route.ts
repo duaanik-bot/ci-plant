@@ -13,6 +13,33 @@ import { readCartonSpecPack, computePackSheetMath } from '@/lib/carton-spec-pack
 
 export const dynamic = 'force-dynamic'
 
+function normFg(v: string | null | undefined): string {
+  return (v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+/** Sum finished-goods stock (inventory.qtyFg) whose material matches this line's product. */
+function fgStockForLine(
+  line: { cartonName: string | null; artworkCode: string | null; carton?: { artworkCode?: string | null } | null },
+  fgRows: { materialCode: string; description: string; qtyFg: unknown }[],
+): number {
+  const cartonN = normFg(line.cartonName)
+  const awN = normFg(line.artworkCode ?? line.carton?.artworkCode ?? '')
+  if (!cartonN && !awN) return 0
+  let sum = 0
+  for (const inv of fgRows) {
+    const codeN = normFg(inv.materialCode)
+    const descN = normFg(inv.description)
+    const match =
+      (cartonN.length > 4 && (descN.includes(cartonN) || cartonN.includes(descN))) ||
+      (awN.length > 2 && (codeN.includes(awN) || descN.includes(awN)))
+    if (match) {
+      const q = Number((inv.qtyFg as { toString(): string })?.toString?.() ?? inv.qtyFg ?? 0)
+      if (Number.isFinite(q) && q > 0) sum += q
+    }
+  }
+  return Math.round(sum)
+}
+
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
   if (error) return error
@@ -25,7 +52,7 @@ export async function GET(req: NextRequest) {
   if (status) where.planningStatus = status
   if (customerId) where.po = { customerId }
 
-  const [list, machines, invRows, paperRows] = await Promise.all([
+  const [list, machines, invRows, paperRows, fgRows] = await Promise.all([
     db.poLineItem.findMany({
       where,
       orderBy: [
@@ -115,6 +142,10 @@ export async function GET(req: NextRequest) {
         qtySheets: true,
         location: true,
       },
+    }),
+    db.inventory.findMany({
+      where: { active: true, qtyFg: { gt: 0 } },
+      select: { materialCode: true, description: true, qtyFg: true },
     }),
   ])
 
@@ -271,9 +302,12 @@ export async function GET(req: NextRequest) {
         wastePct != null ? Number(wastePct) : null,
       )
 
+      const fgStockQty = fgStockForLine(li, fgRows)
+
       return {
         ...li,
         jobCard: jc,
+        fgStockQty,
         readiness: {
           artworkLocksCompleted,
           platesStatus,

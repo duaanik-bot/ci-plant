@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, it, expect, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
 import { SectionUpsAndSpec } from './SectionUpsAndSpec'
 import type { PlanningEngineLine } from './types'
 
@@ -24,10 +24,11 @@ const baseLine = {
 } as unknown as PlanningEngineLine
 
 describe('SectionUpsAndSpec', () => {
-  it('renders the UPS input with Auto chip and shows sheet yield', () => {
+  it('shows UPS read-only (edited in Board Allocation) and sheet yield', () => {
     render(<SectionUpsAndSpec line={baseLine} onPatch={async () => true} />)
-    expect(screen.getByLabelText('Units per sheet')).toHaveValue(4)
-    expect(screen.getByText('Auto')).toBeInTheDocument()
+    // UPS is now a read-only metric here — the editable input lives in Board Allocation.
+    expect(screen.getByText('Units per sheet')).toBeInTheDocument()
+    expect(screen.getByText('Edit in Board Allocation')).toBeInTheDocument()
     expect(screen.getByText('74.3%')).toBeInTheDocument()
   })
 
@@ -41,28 +42,5 @@ describe('SectionUpsAndSpec', () => {
     render(<SectionUpsAndSpec line={baseLine} onPatch={async () => true} />)
     expect(screen.getByText('Optimal')).toBeInTheDocument()
     expect(screen.getByText(/₹36,000 margin vs ₹25,800 setup/)).toBeInTheDocument()
-  })
-
-  it('patches specOverrides with the merged ups on blur', async () => {
-    const onPatch = vi.fn().mockResolvedValue(true)
-    render(<SectionUpsAndSpec line={baseLine} onPatch={onPatch} />)
-    const input = screen.getByLabelText('Units per sheet') as HTMLInputElement
-    fireEvent.change(input, { target: { value: '6' } })
-    fireEvent.blur(input)
-    await Promise.resolve()
-    expect(onPatch).toHaveBeenCalledTimes(1)
-    const arg = onPatch.mock.calls[0][0] as { specOverrides: Record<string, unknown> }
-    expect(arg.specOverrides).toBeDefined()
-    // ups is nested inside the meta merge — assert the patch carries a non-empty spec.
-    expect(Object.keys(arg.specOverrides).length).toBeGreaterThan(0)
-  })
-
-  it('does not call onPatch when blur happens without a change', async () => {
-    const onPatch = vi.fn().mockResolvedValue(true)
-    render(<SectionUpsAndSpec line={baseLine} onPatch={onPatch} />)
-    const input = screen.getByLabelText('Units per sheet') as HTMLInputElement
-    fireEvent.blur(input)
-    await Promise.resolve()
-    expect(onPatch).not.toHaveBeenCalled()
   })
 })

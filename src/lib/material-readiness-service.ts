@@ -500,6 +500,7 @@ export async function reserveMaterial(
   jobCardId: string,
   requiredSheets: number,
   planningId?: string,
+  actorUserId?: string | null,
   client: DbClient = db,
 ) {
   if (requiredSheets <= 0) throw new Error('Required sheets must be positive')
@@ -531,6 +532,7 @@ export async function reserveMaterial(
           qty: reserveQty,
           refType: 'job_card_reserve',
           refId: jobCardId,
+          userId: actorUserId ?? undefined,
         },
       })
     }
@@ -623,6 +625,7 @@ export async function reserveMaterialForPlanning(
   materialId: string,
   requiredSheets: number,
   planningId: string,
+  actorUserId?: string | null,
   client: DbClient = db,
 ) {
   if (requiredSheets <= 0) throw new Error('Required sheets must be positive')
@@ -665,6 +668,7 @@ export async function reserveMaterialForPlanning(
           qty: reserveQty,
           refType: 'planning_reserve',
           refId: planningId,
+          userId: actorUserId ?? undefined,
         },
       })
     }
