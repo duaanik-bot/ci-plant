@@ -40,14 +40,20 @@ export function PrEditDrawer({
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({ boardType: '', gsm: '', sizeLabel: '', qtyRequired: '', requiredByDate: '', remarks: '' })
+  const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
     if (!open || !prId) return
+    let ignore = false
     setLoading(true)
     setDetail(null)
     fetch(`/api/purchase-requisitions/${prId}`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d: Detail) => {
+      .then(async (r) => {
+        if (!r.ok) throw new Error('Failed to load PR')
+        return (await r.json()) as Detail
+      })
+      .then((d) => {
+        if (ignore) return
         setDetail(d)
         setForm({
           boardType: d.boardType ?? '',
@@ -57,10 +63,23 @@ export function PrEditDrawer({
           requiredByDate: d.requiredByDate ? d.requiredByDate.slice(0, 10) : '',
           remarks: d.remarks ?? '',
         })
+        setDirty(false)
       })
-      .catch(() => setDetail(null))
-      .finally(() => setLoading(false))
+      .catch(() => {
+        if (!ignore) setDetail(null)
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+    return () => {
+      ignore = true
+    }
   }, [open, prId])
+
+  const update = (patch: Partial<typeof form>) => {
+    setForm((f) => ({ ...f, ...patch }))
+    setDirty(true)
+  }
 
   const isDraft = detail?.status === 'pending'
 
@@ -82,6 +101,7 @@ export function PrEditDrawer({
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Save failed')
+      setDirty(false)
       onSaved()
       onClose()
     } catch (e) {
@@ -143,6 +163,7 @@ export function PrEditDrawer({
       title="Purchase Requisition"
       metadata={detail ? `${detail.material.materialCode} · ${detail.status}` : undefined}
       mode="form"
+      hasUnsavedChanges={dirty}
       size="md"
       footer={footer}
     >
@@ -155,31 +176,31 @@ export function PrEditDrawer({
           <section className="space-y-2">
             <div>
               <label className={label}>Board Type</label>
-              <input className={field} disabled={!isDraft} value={form.boardType} onChange={(e) => setForm({ ...form, boardType: e.target.value })} />
+              <input className={field} disabled={!isDraft} value={form.boardType} onChange={(e) => update({ boardType: e.target.value })} />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={label}>GSM</label>
-                <input type="number" className={field} disabled={!isDraft} value={form.gsm} onChange={(e) => setForm({ ...form, gsm: e.target.value })} />
+                <input type="number" className={field} disabled={!isDraft} value={form.gsm} onChange={(e) => update({ gsm: e.target.value })} />
               </div>
               <div>
                 <label className={label}>Sheet Size</label>
-                <input className={field} disabled={!isDraft} value={form.sizeLabel} onChange={(e) => setForm({ ...form, sizeLabel: e.target.value })} />
+                <input className={field} disabled={!isDraft} value={form.sizeLabel} onChange={(e) => update({ sizeLabel: e.target.value })} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={label}>Required Qty</label>
-                <input type="number" className={field} disabled={!isDraft} value={form.qtyRequired} onChange={(e) => setForm({ ...form, qtyRequired: e.target.value })} />
+                <input type="number" className={field} disabled={!isDraft} value={form.qtyRequired} onChange={(e) => update({ qtyRequired: e.target.value })} />
               </div>
               <div>
                 <label className={label}>Required Date</label>
-                <input type="date" className={field} disabled={!isDraft} value={form.requiredByDate} onChange={(e) => setForm({ ...form, requiredByDate: e.target.value })} />
+                <input type="date" className={field} disabled={!isDraft} value={form.requiredByDate} onChange={(e) => update({ requiredByDate: e.target.value })} />
               </div>
             </div>
             <div>
               <label className={label}>Procurement Remarks</label>
-              <textarea className={field} rows={2} disabled={!isDraft} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
+              <textarea className={field} rows={2} disabled={!isDraft} value={form.remarks} onChange={(e) => update({ remarks: e.target.value })} />
             </div>
           </section>
 
