@@ -2,10 +2,13 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/components/design-system/Badge'
-import { readPlanningMeta } from '@/lib/planning-decision-spec'
+import { readPlanningMeta, mergePlanningMetaUps } from '@/lib/planning-decision-spec'
+import { mergeSpecPackUps } from '@/lib/carton-spec-pack'
+import { resolveUps } from '@/lib/production-os-resolvers'
 import {
   type SheetUnit,
   deriveChildSizeMm,
+  deriveParentSizeMm,
   formatSizeDisplay,
   formatSizeMm,
   fromMm,
@@ -21,6 +24,7 @@ type Props = {
 }
 
 const CUT_PRESETS = [1, 2, 3, 4, 5, 6, 7, 8] as const
+const nf = new Intl.NumberFormat('en-IN')
 
 /** Extract the first two positive numbers from a size string, tolerating unit
  * suffixes and separators (e.g. "720×1020 mm", "720 x 1020"). */
@@ -35,61 +39,95 @@ function parseSizeNumbers(raw: unknown): { lengthMm: number; widthMm: number } |
 }
 
 // ─── Read current structured sheet/cut values from spec.meta ──────────────────
+// NOTE: In the new design lengthMm/widthMm represent the CHILD (cut) sheet size,
+// not the parent board sheet. The parent is always derived from child × cutType.
 type SheetCutState = { lengthMm: number; widthMm: number; unit: SheetUnit; cutType: number }
 
 function readSheetCut(spec: Record<string, unknown>): SheetCutState {
   const meta = readPlanningMeta(spec)
   const unit = isSheetUnit(meta.sheetUnit) ? meta.sheetUnit : 'in'
-  let lengthMm = Number(meta.sheetLengthMm)
-  let widthMm = Number(meta.sheetWidthMm)
-  // Legacy fallback — derive structured dims from the (mm) parentSize string.
-  if (!(lengthMm > 0) || !(widthMm > 0)) {
-    const pair = parseSizeNumbers(meta.parentSize)
-    if (pair) {
-      lengthMm = pair.lengthMm
-      widthMm = pair.widthMm
-    }
-  }
+
   const cutRaw = Number(meta.cutType ?? meta.cutsPerSheet ?? meta.selectedCutsPerSheet)
   const cutType = Number.isFinite(cutRaw) && cutRaw >= 1 ? Math.floor(cutRaw) : 1
+
+  // New storage: child input dims under childInputLengthMm / childInputWidthMm.
+  let childLengthMm = Number(meta.childInputLengthMm)
+  let childWidthMm = Number(meta.childInputWidthMm)
+
+  // Legacy fallback — if child input not stored, derive from old parent dims.
+  if (!(childLengthMm > 0) || !(childWidthMm > 0)) {
+    const parentL = Number(meta.sheetLengthMm)
+    const parentW = Number(meta.sheetWidthMm)
+    if (parentL > 0 && parentW > 0) {
+      const child = deriveChildSizeMm(parentL, parentW, cutType)
+      if (child) {
+        childLengthMm = child.lengthMm
+        childWidthMm = child.widthMm
+      }
+    }
+  }
+  // Legacy fallback — derive child from parentSize string.
+  if (!(childLengthMm > 0) || !(childWidthMm > 0)) {
+    const pair = parseSizeNumbers(meta.parentSize)
+    if (pair) {
+      const child = deriveChildSizeMm(pair.lengthMm, pair.widthMm, cutType)
+      if (child) {
+        childLengthMm = child.lengthMm
+        childWidthMm = child.widthMm
+      }
+    }
+  }
+
   return {
-    lengthMm: lengthMm > 0 ? lengthMm : 0,
-    widthMm: widthMm > 0 ? widthMm : 0,
+    lengthMm: childLengthMm > 0 ? childLengthMm : 0,
+    widthMm: childWidthMm > 0 ? childWidthMm : 0,
     unit,
     cutType,
   }
 }
 
 /**
- * Persist structured sheet/cut spec onto spec.meta. Keeps meta.parentSize (mm)
- * + cut counts in sync so the cut-fit backend and Reserve confirmation keep
- * working unchanged.
+ * Persist structured sheet/cut spec onto spec.meta.
+ *
+ * New design: lengthMm/widthMm are the CHILD (cut) sheet dims entered by the
+ * planner. The parent board sheet is derived as child.longer × cutType and
+ * stored as meta.parentSize / meta.sheetLengthMm / meta.sheetWidthMm so all
+ * downstream consumers (cut-fit, Reserve confirmation, smart match) continue
+ * to work unchanged.
  */
 function mergeSheetCutMeta(spec: Record<string, unknown>, next: SheetCutState): Record<string, unknown> {
   const meta = { ...readPlanningMeta(spec) }
-  const { lengthMm, widthMm, unit, cutType } = next
+  const { lengthMm: childL, widthMm: childW, unit, cutType } = next
   meta.sheetUnit = unit
-  if (lengthMm > 0 && widthMm > 0) {
-    // Store mm at 2-dp precision so an inch round-trip (28in → mm → 28in) is
-    // stable; the backend parentSize string still rounds to whole mm.
-    meta.sheetLengthMm = Math.round(lengthMm * 100) / 100
-    meta.sheetWidthMm = Math.round(widthMm * 100) / 100
-    meta.parentSize = formatSizeMm(lengthMm, widthMm)
-    const child = deriveChildSizeMm(lengthMm, widthMm, cutType)
-    if (child) {
-      meta.childSize = formatSizeMm(child.lengthMm, child.widthMm)
-      meta.cutSizeUsed = meta.childSize
+
+  if (childL > 0 && childW > 0) {
+    // Store child input dims (new keys so we can distinguish from old parent dims).
+    meta.childInputLengthMm = Math.round(childL * 100) / 100
+    meta.childInputWidthMm = Math.round(childW * 100) / 100
+    meta.childSize = formatSizeMm(childL, childW)
+    meta.cutSizeUsed = meta.childSize
+
+    // Derive parent board sheet and store for all downstream consumers.
+    const parent = deriveParentSizeMm(childL, childW, cutType)
+    if (parent) {
+      meta.sheetLengthMm = Math.round(parent.lengthMm * 100) / 100
+      meta.sheetWidthMm = Math.round(parent.widthMm * 100) / 100
+      meta.parentSize = formatSizeMm(parent.lengthMm, parent.widthMm)
     } else {
-      delete meta.childSize
-      delete meta.cutSizeUsed
+      delete meta.sheetLengthMm
+      delete meta.sheetWidthMm
+      delete meta.parentSize
     }
   } else {
+    delete meta.childInputLengthMm
+    delete meta.childInputWidthMm
+    delete meta.childSize
+    delete meta.cutSizeUsed
     delete meta.sheetLengthMm
     delete meta.sheetWidthMm
     delete meta.parentSize
-    delete meta.childSize
-    delete meta.cutSizeUsed
   }
+
   meta.cutType = cutType
   meta.cutsPerSheet = cutType
   meta.selectedCutsPerSheet = cutType
@@ -168,12 +206,16 @@ export const SheetCutSpec = memo(function SheetCutSpec({ line, onPatch }: Props)
   const spec = useMemo(() => (line.specOverrides ?? {}) as Record<string, unknown>, [line.specOverrides])
   const current = useMemo(() => readSheetCut(spec), [spec])
 
+  // UPS — resolved from spec/meta/carton, same logic as SectionBoardAllocation.
+  const resolvedUps = useMemo(() => (resolveUps(line) ?? null) as number | null, [line])
+
   // Drafts hold display-unit strings; canonical mm is recomputed on commit.
   const [unit, setUnit] = useState<SheetUnit>(current.unit)
   const [length, setLength] = useState('')
   const [width, setWidth] = useState('')
   const [cutType, setCutType] = useState<number>(current.cutType)
   const [customCut, setCustomCut] = useState(false)
+  const [upsDraft, setUpsDraft] = useState(resolvedUps != null ? String(resolvedUps) : '')
 
   // Resync drafts when the underlying line changes (line switch / external save).
   useEffect(() => {
@@ -184,13 +226,27 @@ export const SheetCutSpec = memo(function SheetCutSpec({ line, onPatch }: Props)
     setCustomCut(!CUT_PRESETS.includes(current.cutType as (typeof CUT_PRESETS)[number]))
   }, [current.lengthMm, current.widthMm, current.unit, current.cutType])
 
-  const draftLengthMm = toMm(Number(length) || 0, unit)
-  const draftWidthMm = toMm(Number(width) || 0, unit)
-  const child = deriveChildSizeMm(draftLengthMm, draftWidthMm, cutType)
+  useEffect(() => {
+    setUpsDraft(resolvedUps != null ? String(resolvedUps) : '')
+  }, [resolvedUps])
+
+  // Child dims are what the planner enters; parent is auto-derived.
+  const draftChildLengthMm = toMm(Number(length) || 0, unit)
+  const draftChildWidthMm = toMm(Number(width) || 0, unit)
+  const derivedParent = deriveParentSizeMm(draftChildLengthMm, draftChildWidthMm, cutType)
+
+  // Sheet yield calculations.
+  const qty = Number(line.quantity ?? 0)
+  const upsVal = Number(upsDraft) || null
+  const baseSheets = upsVal && upsVal > 0 && qty > 0 ? Math.ceil(qty / upsVal) : null
+  // Units yield = how many carton units can actually be produced from baseSheets × UPS
+  // (= first multiple of UPS that covers qty, i.e. the actual planned production batch)
+  const unitsYield = baseSheets != null && upsVal ? baseSheets * upsVal : null
 
   const commit = useCallback(
     (nextState: Partial<SheetCutState>) => {
       const merged: SheetCutState = {
+        // lengthMm / widthMm are child dims
         lengthMm: nextState.lengthMm ?? toMm(Number(length) || 0, unit),
         widthMm: nextState.widthMm ?? toMm(Number(width) || 0, unit),
         unit: nextState.unit ?? unit,
@@ -202,6 +258,18 @@ export const SheetCutSpec = memo(function SheetCutSpec({ line, onPatch }: Props)
   )
 
   const commitDims = useCallback(() => commit({}), [commit])
+
+  const commitUps = useCallback(() => {
+    const next = upsDraft.trim() === '' ? null : Math.max(1, Math.floor(Number(upsDraft) || 0))
+    // Resolve current spec-pack UPS to avoid redundant writes.
+    const sp = spec.specPack as Record<string, unknown> | undefined
+    const sheetPack = sp && typeof sp === 'object' ? (sp.sheet as Record<string, unknown> | undefined) : undefined
+    const specPackUps = sheetPack ? Number(sheetPack.ups) : Number.NaN
+    const currentSpecPackUps = Number.isFinite(specPackUps) ? Math.floor(specPackUps) : null
+    if (next === resolvedUps && next === currentSpecPackUps) return
+    const withMeta = mergePlanningMetaUps(spec, next)
+    void onPatch({ specOverrides: mergeSpecPackUps(withMeta, next) })
+  }, [upsDraft, resolvedUps, spec, onPatch])
 
   const switchUnit = useCallback(
     (nextUnit: SheetUnit) => {
@@ -225,6 +293,10 @@ export const SheetCutSpec = memo(function SheetCutSpec({ line, onPatch }: Props)
     },
     [commit],
   )
+
+  // Read meta.ups to decide whether to show the Auto badge.
+  const meta = useMemo(() => readPlanningMeta(spec), [spec])
+  const upsIsAuto = meta?.upsSource !== 'manual' && !!upsDraft
 
   return (
     <div className="mt-3 rounded-ds-md border border-ds-line/40 bg-ds-elevated/30 p-3">
@@ -250,17 +322,17 @@ export const SheetCutSpec = memo(function SheetCutSpec({ line, onPatch }: Props)
         </div>
       </div>
 
-      {/* Row: length | width | cut type */}
+      {/* Row 1: cut length | cut width | cut type */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         <DimInput
-          label="Sheet length"
+          label="Cut length"
           value={length}
           unit={unit}
           onChange={setLength}
           onCommit={commitDims}
         />
         <DimInput
-          label="Sheet width"
+          label="Cut width"
           value={width}
           unit={unit}
           onChange={setWidth}
@@ -320,18 +392,57 @@ export const SheetCutSpec = memo(function SheetCutSpec({ line, onPatch }: Props)
         </div>
       </div>
 
-      {/* Row: derived parent | derived child (locked) */}
+      {/* Row 2: board sheet (auto) | UPS (editable) */}
       <div className="grid grid-cols-2 gap-3 mt-3">
         <DerivedTile
-          label="Parent sheet"
-          value={draftLengthMm > 0 && draftWidthMm > 0 ? formatSizeDisplay(draftLengthMm, draftWidthMm, unit) : '—'}
-        />
-        <DerivedTile
-          label="Child sheet (after cut)"
+          label="Board sheet"
           locked
-          value={child ? formatSizeDisplay(child.lengthMm, child.widthMm, unit) : '—'}
+          value={derivedParent ? formatSizeDisplay(derivedParent.lengthMm, derivedParent.widthMm, unit) : '—'}
         />
+        {/* UPS — editable, writes to meta.ups + specPack.sheet.ups */}
+        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              Units per sheet
+            </div>
+            {upsIsAuto ? (
+              <Badge tone="success" className="text-[9px]">
+                Auto
+              </Badge>
+            ) : null}
+          </div>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            value={upsDraft}
+            placeholder="—"
+            onChange={(e) => setUpsDraft(e.target.value)}
+            onBlur={commitUps}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            }}
+            aria-label="Units per sheet"
+            className="w-full bg-transparent text-base font-semibold text-ds-ink outline-none leading-tight tabular-nums placeholder:text-ds-ink-faint/60"
+          />
+        </div>
       </div>
+
+      {/* Row 3: base sheets (auto) | units yield (auto) */}
+      {(baseSheets != null || unitsYield != null) ? (
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <DerivedTile
+            label="Base sheets"
+            locked
+            value={baseSheets != null ? `${nf.format(baseSheets)} sh` : '—'}
+          />
+          <DerivedTile
+            label="Units yield"
+            locked
+            value={unitsYield != null ? nf.format(unitsYield) : '—'}
+          />
+        </div>
+      ) : null}
     </div>
   )
 })

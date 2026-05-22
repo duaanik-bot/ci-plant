@@ -3,6 +3,7 @@ import { calculateCutsPerSheet } from '@/lib/material-cut-fit'
 import {
   IN_TO_MM,
   deriveChildSizeMm,
+  deriveParentSizeMm,
   formatSizeDisplay,
   formatSizeMm,
   fromMm,
@@ -63,6 +64,52 @@ describe('deriveChildSizeMm (locked strip cutting)', () => {
       parentWidth,
       reqLength: child.lengthMm,
       reqWidth: child.widthMm,
+    })
+    expect(cuts).toBe(cut)
+  })
+})
+
+describe('deriveParentSizeMm (inverse strip cutting)', () => {
+  it('1-cut returns the child unchanged (parent === child)', () => {
+    expect(deriveParentSizeMm(1000, 700, 1)).toEqual({ lengthMm: 1000, widthMm: 700 })
+  })
+  it('2-cut doubles the longer child edge', () => {
+    expect(deriveParentSizeMm(500, 700, 2)).toEqual({ lengthMm: 1400, widthMm: 500 })
+  })
+  it('treats width as the long edge when larger', () => {
+    // child 500×1000, 2-cut → parent 2000×500
+    expect(deriveParentSizeMm(500, 1000, 2)).toEqual({ lengthMm: 2000, widthMm: 500 })
+  })
+  it('rejects invalid inputs', () => {
+    expect(deriveParentSizeMm(0, 700, 2)).toBeNull()
+    expect(deriveParentSizeMm(500, 700, 0)).toBeNull()
+  })
+
+  // deriveParentSizeMm must be the inverse of deriveChildSizeMm:
+  // deriveChildSizeMm(derivedParent, cutType) === original child in normalized form
+  // (deriveChildSizeMm always returns {lengthMm: longer, widthMm: shorter}).
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])('round-trips with deriveChildSizeMm for %i-cut', (cut) => {
+    const childLength = 360
+    const childWidth = 700
+    const parent = deriveParentSizeMm(childLength, childWidth, cut)!
+    const childBack = deriveChildSizeMm(parent.lengthMm, parent.widthMm, cut)!
+    // deriveChildSizeMm normalises to {longer, shorter} regardless of input orientation.
+    const expectedLong = Math.max(childLength, childWidth)
+    const expectedShort = Math.min(childLength, childWidth)
+    expect(childBack.lengthMm).toBe(expectedLong)
+    expect(childBack.widthMm).toBe(expectedShort)
+  })
+
+  // Derived parent must yield the correct cut count via calculateCutsPerSheet.
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])('derived parent yields correct cutsPerSheet for %i-cut', (cut) => {
+    const childLength = 360
+    const childWidth = 700
+    const parent = deriveParentSizeMm(childLength, childWidth, cut)!
+    const cuts = calculateCutsPerSheet({
+      parentLength: parent.lengthMm,
+      parentWidth: parent.widthMm,
+      reqLength: childLength,
+      reqWidth: childWidth,
     })
     expect(cuts).toBe(cut)
   })

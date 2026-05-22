@@ -32,15 +32,11 @@ const readinessWithShortage: PlanningEngineReadiness = {
 }
 
 describe('SectionBoardAllocation', () => {
-  it('renders board, GSM, UPS and the structured sheet/cut fields plus required sheets', () => {
+  it('renders board type and GSM editable tiles plus warehouse stock strip with required sheets', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByLabelText('Board type')).toHaveValue('FBB')
     expect(screen.getByLabelText('GSM')).toHaveValue(100)
-    expect(screen.getByLabelText('Units per sheet')).toHaveValue(4)
-    // Sheet size is now structured length/width inputs (inches by default).
-    expect(screen.getByLabelText('Sheet length (in)')).toBeInTheDocument()
-    expect(screen.getByLabelText('Sheet width (in)')).toBeInTheDocument()
-    expect(screen.getByLabelText('Cut type')).toBeInTheDocument()
+    // Sheet/cut spec (UPS, sheet size, cut type) moved to SectionCutPlanBalance — not asserted here.
     expect(screen.getAllByText('4,800 sh').length).toBeGreaterThanOrEqual(1)
   })
 

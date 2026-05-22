@@ -8,7 +8,6 @@ import { mergeSpecPackUps } from '@/lib/carton-spec-pack'
 import { resolveUps } from '@/lib/production-os-resolvers'
 import { resolveSheetSize as resolveSheetSizeFromLine } from '@/lib/planning-sheet-size'
 import type { PlanningEngineBoardOption, PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
-import { SheetCutSpec } from './SheetCutSpec'
 import { PlanningWarehouseModal } from '@/components/planning/PlanningWarehouseModal'
 
 type Props = {
@@ -254,43 +253,24 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     [line.specOverrides],
   )
   const meta = useMemo(() => readPlanningMeta(spec), [spec])
-  const upsManual = meta?.upsSource === 'manual'
-
   const resolvedBoardType = useMemo(() => resolveBoardType(line, readiness), [line, readiness])
   const resolvedGsm = useMemo(() => resolveGsm(line, readiness), [line, readiness])
   const resolvedSheetSize = useMemo(() => resolveSheetSize(line, readiness), [line, readiness])
   const resolvedUps = useMemo(() => (resolveUps(line) ?? null) as number | null, [line])
 
-  const wastageFromSpec = useMemo(
-    () => (spec.wastageSheets != null ? Number(spec.wastageSheets) : WASTAGE_DEFAULT),
-    [spec],
-  )
-
-  // Base sheets — computed client-side for the display tile
-  const qty = Number(line.quantity ?? 0)
-  const baseSheets = useMemo(
-    () => (resolvedUps && qty ? Math.max(1, Math.ceil(qty / resolvedUps)) : null),
-    [resolvedUps, qty],
-  )
-  const totalRequired = required || (baseSheets != null ? baseSheets + wastageFromSpec : null)
-
   // ── SINGLE combined state — one setState = one re-render ──────────────────
   const [drafts, setDrafts] = useState({
     board: resolvedBoardType,
     gsm: resolvedGsm != null ? String(resolvedGsm) : '',
-    ups: resolvedUps != null ? String(resolvedUps) : '',
-    wastage: String(wastageFromSpec),
   })
 
-  // ONE effect replaces the previous four — fires when any resolved value changes
+  // ONE effect replaces the previous — fires when any resolved value changes
   useEffect(() => {
     setDrafts({
       board: resolvedBoardType,
       gsm: resolvedGsm != null ? String(resolvedGsm) : '',
-      ups: resolvedUps != null ? String(resolvedUps) : '',
-      wastage: String(wastageFromSpec),
     })
-  }, [resolvedBoardType, resolvedGsm, resolvedUps, wastageFromSpec])
+  }, [resolvedBoardType, resolvedGsm])
 
   // Backfill — commit auto-populated values onto the line once per line-id.
   // Fill-empty-only: never overwrites a value the planner already set.
@@ -344,31 +324,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     if (v === (line.gsm ?? null)) return
     void onPatch({ gsm: v })
   }, [drafts.gsm, line.gsm, onPatch])
-
-  const commitUps = useCallback(() => {
-    const next = drafts.ups.trim() === '' ? null : Math.max(1, Math.floor(Number(drafts.ups) || 0))
-    // Current per-line spec-pack UPS (drives the spec-complete gate).
-    const specPackUps = (() => {
-      const sp = spec.specPack as Record<string, unknown> | undefined
-      const sheet = sp && typeof sp === 'object' ? (sp.sheet as Record<string, unknown> | undefined) : undefined
-      const u = sheet ? Number(sheet.ups) : Number.NaN
-      return Number.isFinite(u) ? Math.floor(u) : null
-    })()
-    // Skip only when both the display UPS and the gate UPS already match.
-    if (next === resolvedUps && next === specPackUps) return
-    // Write both: meta.ups (engine display) + specPack.sheet.ups (clears the gate).
-    const withMeta = mergePlanningMetaUps(spec, next)
-    void onPatch({ specOverrides: mergeSpecPackUps(withMeta, next) })
-  }, [drafts.ups, resolvedUps, spec, onPatch])
-
-  const commitWastage = useCallback(() => {
-    const next =
-      drafts.wastage.trim() === ''
-        ? WASTAGE_DEFAULT
-        : Math.max(0, Math.round(Number(drafts.wastage) || 0))
-    if (next === wastageFromSpec) return
-    void onPatch({ specOverrides: { ...spec, wastageSheets: next } })
-  }, [drafts.wastage, wastageFromSpec, spec, onPatch])
 
   // ── Board master options ──────────────────────────────────────────────────
   const boardOptions: PlanningEngineBoardOption[] = useMemo(
@@ -445,8 +400,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
 
   return (
     <CardSection title="BOARD ALLOCATION">
-      {/* ── Row 1: Board type | GSM | UPS ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      {/* ── Row 1: Board type | GSM ── */}
+      <div className="grid grid-cols-2 gap-3">
         <EditableTile
           label="Board type"
           ariaLabel="Board type"
@@ -464,52 +419,9 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
           onChange={(v) => setDrafts((d) => ({ ...d, gsm: v }))}
           onCommit={commitGsm}
         />
-        <EditableTile
-          label="Units per sheet"
-          ariaLabel="Units per sheet"
-          type="number"
-          value={drafts.ups}
-          placeholder="—"
-          onChange={(v) => setDrafts((d) => ({ ...d, ups: v }))}
-          onCommit={commitUps}
-          badge={
-            !upsManual && drafts.ups ? (
-              <Badge tone="success" className="text-[9px]">
-                Auto
-              </Badge>
-            ) : undefined
-          }
-        />
       </div>
 
-      {/* ── Structured sheet & cut spec (parent L×W, unit, cut type → locked child) ── */}
-      <SheetCutSpec line={line} onPatch={onPatch} />
-
-      {/* ── Row 2: Base sheets (r/o) | Wastage sheets (editable) | Total required (r/o) ── */}
-      <div className="grid grid-cols-3 gap-3 mt-3">
-        <ReadOnlyTile
-          label="Base sheets"
-          value={baseSheets != null ? formatSheets(baseSheets) : '—'}
-        />
-        <EditableTile
-          label="Wastage sheets"
-          ariaLabel="Wastage sheets"
-          type="number"
-          value={drafts.wastage}
-          placeholder={String(WASTAGE_DEFAULT)}
-          onChange={(v) => setDrafts((d) => ({ ...d, wastage: v }))}
-          onCommit={commitWastage}
-          badge={
-            <Badge tone="neutral" className="text-[9px]">
-              editable
-            </Badge>
-          }
-        />
-        <ReadOnlyTile
-          label="Total required"
-          value={totalRequired ? formatSheets(totalRequired) : '—'}
-        />
-      </div>
+      {/* Sheet/cut spec and yield calculations moved to SectionCutPlanBalance */}
 
       {/* ── Link to master row ── */}
       {canLinkCarton || canLinkBoard ? (
@@ -600,7 +512,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
           free={netStock}
           reserved={reserved}
           incoming={incoming}
-          required={totalRequired ?? 0}
+          required={required}
         />
       ) : null}
 

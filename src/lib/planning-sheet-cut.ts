@@ -1,13 +1,17 @@
 /**
  * Planning Engine — structured sheet & cut math.
  *
- * The planner enters a parent sheet size + cut count; the child (final) sheet
- * size is auto-derived and locked. Canonical storage is always millimetres
+ * The planner enters a child (cut) sheet size + cut count; the parent board
+ * sheet size is auto-derived and locked. Canonical storage is always millimetres
  * (matching the inventory schema + cut-fit backend); inches is a display unit.
  *
- * Child derivation uses strip cutting: the longer parent edge is divided by the
- * cut count, the shorter edge is kept. This is self-consistent with the engine's
- * grid cut math — calculateCutsPerSheet(parent, derivedChild) === cutType.
+ * Parent derivation uses strip cutting (inverse):
+ *   parent.longer = child.longer × cutType
+ *   parent.shorter = child.shorter
+ *
+ * The child derivation (`deriveChildSizeMm`) is preserved for backward compat
+ * and for self-consistency checks: deriveChildSizeMm(derivedParent, cutType)
+ * must equal the entered child size.
  */
 
 export const IN_TO_MM = 25.4
@@ -70,4 +74,25 @@ export function formatSizeDisplay(lengthMm: number, widthMm: number, unit: Sheet
   const l = roundForUnit(fromMm(lengthMm, unit), unit)
   const w = roundForUnit(fromMm(widthMm, unit), unit)
   return `${l} × ${w} ${unit}`
+}
+
+/**
+ * Locked parent-size derivation (inverse of deriveChildSizeMm).
+ * Multiplies the longer child edge by the cut count to reconstruct the parent.
+ *   parent.longer = child.longer × cutType
+ *   parent.shorter = child.shorter
+ * Returns null when inputs are invalid (non-positive dims or cut < 1).
+ */
+export function deriveParentSizeMm(
+  childLengthMm: number,
+  childWidthMm: number,
+  cutType: number,
+): { lengthMm: number; widthMm: number } | null {
+  const cl = Number(childLengthMm)
+  const cw = Number(childWidthMm)
+  const n = Math.floor(Number(cutType))
+  if (!(cl > 0) || !(cw > 0) || !(n >= 1)) return null
+  const long = Math.max(cl, cw)
+  const short = Math.min(cl, cw)
+  return { lengthMm: long * n, widthMm: short }
 }
