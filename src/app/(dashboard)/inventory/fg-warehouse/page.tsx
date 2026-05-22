@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 type FgExcessRow = {
   id: string
@@ -41,10 +42,10 @@ export default function FgWarehousePage() {
   return (
     <div className="w-full px-4 py-3">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-ds-warning">FG Warehouse (Finished Goods)</h1>
-          <p className="mt-1 text-xs text-ds-ink-faint">Dedicated finished-goods stock module, separated from paper warehouse.</p>
-        </div>
+        <PageHeader
+          title="FG Warehouse (Finished Goods)"
+          subtitle="Dedicated finished-goods stock module, separated from paper warehouse."
+        />
         <Link href="/inventory" className="rounded border border-ds-line/50 px-3 py-2 text-xs text-ds-ink hover:bg-ds-main/50">
           Open Paper Warehouse
         </Link>

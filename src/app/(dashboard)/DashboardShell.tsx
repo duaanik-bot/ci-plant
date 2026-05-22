@@ -321,8 +321,8 @@ export function DashboardShell({
           key: 'reports',
           label: 'Reports',
           items: [
-            { label: 'MD Dashboard', href: '/reports/dashboard', description: 'Executive production view', Icon: LayoutGrid },
-            { label: 'Production Summary', href: '/reports/production', description: 'Output and run summary', Icon: FileText },
+            { label: 'MD Dashboard', href: '/reports/oee', description: 'OEE and executive production view', Icon: LayoutGrid },
+            { label: 'Production Summary', href: '/reports/yield', description: 'Output, yield and run summary', Icon: FileText },
             { label: 'Wastage Report', href: '/reports/wastage', description: 'Wastage trends and losses', Icon: Scale },
           ],
         },
