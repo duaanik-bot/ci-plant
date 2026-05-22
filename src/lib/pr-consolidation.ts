@@ -36,7 +36,7 @@ export function consolidationKey(pr: {
   gsm: number | null
   sizeLabel: string | null
 }): string {
-  return [pr.materialId, pr.boardType ?? '', pr.gsm ?? '', pr.sizeLabel ?? ''].join('|')
+  return JSON.stringify([pr.materialId, pr.boardType, pr.gsm, pr.sizeLabel])
 }
 
 function mostCommonSupplier(members: ConsolidatedGroupMember[]): string | null {

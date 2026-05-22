@@ -63,4 +63,28 @@ describe('consolidatePrs', () => {
   it('returns an empty array for empty input', () => {
     expect(consolidatePrs([])).toEqual([])
   })
+
+  it('does not collide when a field value contains the separator character', () => {
+    const groups = consolidatePrs([
+      { ...base, id: 'pr1', qty: 1, sizeLabel: '20|30', boardType: 'Duplex', gsm: 230 },
+      { ...base, id: 'pr2', qty: 1, sizeLabel: '20', boardType: '30|Duplex', gsm: 230 },
+    ])
+    expect(groups).toHaveLength(2)
+  })
+
+  it('treats null and empty-string board type as distinct groups', () => {
+    const groups = consolidatePrs([
+      { ...base, id: 'pr1', qty: 1, boardType: null },
+      { ...base, id: 'pr2', qty: 1, boardType: '' },
+    ])
+    expect(groups).toHaveLength(2)
+  })
+
+  it('keeps the first-seen supplier on a tie (deterministic by input order)', () => {
+    const groups = consolidatePrs([
+      { ...base, id: 'pr1', qty: 1, supplierId: 'sup-b' },
+      { ...base, id: 'pr2', qty: 1, supplierId: 'sup-a' },
+    ])
+    expect(groups[0]!.suggestedSupplierId).toBe('sup-b')
+  })
 })
