@@ -195,7 +195,7 @@ export function GlobalPopoutModal({
         aria-hidden="true"
         onClick={handleBackdropClick}
         className={cn(
-          'absolute inset-0 bg-ds-main/60 backdrop-blur-sm transition-opacity duration-200',
+          'absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity duration-200',
           visible ? 'opacity-100' : 'opacity-0',
         )}
       />
