@@ -1518,8 +1518,6 @@ function InventoryPageContent() {
             setMaterialDrawerData(null)
           }}
           widthClass="max-w-xl"
-          backdropClassName="bg-background/60"
-          panelClassName="border-l border-ds-line/40 bg-background shadow-2xl"
         >
           {materialDrawerRow ? (
             <div className={`flex h-full flex-col text-xs text-ds-ink-muted ${ledgerMono}`}>
@@ -2219,8 +2217,6 @@ function InventoryPageContent() {
         isOpen={!!drawerRow}
         onClose={() => setDrawerRow(null)}
         widthClass="max-w-md"
-        backdropClassName="bg-background/60"
-        panelClassName="border-l border-ds-line/40 bg-background shadow-2xl"
       >
         {drawerRow ? (
           <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs text-ds-ink-muted ${ledgerMono}`}>

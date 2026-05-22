@@ -56,8 +56,6 @@ export function AwQueueDirectorStrip({
                 isOpen={recallOpen}
                 onClose={() => setRecallOpen(false)}
                 zIndexClass="z-[100]"
-                backdropClassName="bg-ds-main/50 backdrop-blur-[1.5px]"
-                panelClassName="border-l border-ds-line/50 bg-ds-card text-ds-ink shadow-2xl"
                 footer={
                   <div className="flex w-full justify-end gap-2">
                     <button

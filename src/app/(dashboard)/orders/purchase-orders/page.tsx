@@ -1347,8 +1347,6 @@ export default function PurchaseOrdersPage() {
         title={drawerPo ? `PO ${drawerPo.poNumber}` : 'Purchase order'}
         isOpen={Boolean(drawerPoId)}
         onClose={() => setDrawerPoId(null)}
-        backdropClassName="bg-ds-main/50 backdrop-blur-[1.5px]"
-        panelClassName="border-l border-ds-line/80 bg-ds-card text-ds-ink shadow-2xl"
       >
         {drawerLoading || !drawerPo ? (
           <p className="text-ds-ink-faint text-sm">Loading…</p>

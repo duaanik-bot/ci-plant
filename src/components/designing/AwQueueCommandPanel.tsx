@@ -349,8 +349,6 @@ export function AwQueueCommandPanel({
               isOpen={ledgerOpen}
               onClose={() => setLedgerOpen(false)}
               zIndexClass="z-[95]"
-              backdropClassName="bg-ds-main/50 backdrop-blur-[1.5px]"
-              panelClassName="border-l border-ds-line/50 bg-ds-card text-ds-ink shadow-2xl"
               footer={
                 <button
                   type="button"
