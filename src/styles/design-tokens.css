@@ -13,10 +13,10 @@
   --font-mono: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
 
   /* —— Semantic (theme-invariant) —— */
-  --brand-primary: #f5820d;
-  --brand-primary-hover: #d9700b;
-  --brand-bg-soft: rgba(245, 130, 13, 0.12);
-  --brand-bg-strong: rgba(245, 130, 13, 0.2);
+  --brand-primary: #2563EB;
+  --brand-primary-hover: #1D4ED8;
+  --brand-bg-soft: rgba(37, 99, 235, 0.12);
+  --brand-bg-strong: rgba(37, 99, 235, 0.2);
 
   --success: #22c55e;
   --success-bg: rgba(34, 197, 94, 0.12);
@@ -68,12 +68,12 @@
   --ds-text-muted-rgb: 148 163 184;
 
   --ds-kpi: var(--brand-primary);
-  --ds-kpi-rgb: 245 130 13;
+  --ds-kpi-rgb: 37 99 235;
 
   --ds-accent: var(--brand-primary);
-  --ds-accent-rgb: 245 130 13;
+  --ds-accent-rgb: 37 99 235;
   --ds-accent-hover: var(--brand-primary-hover);
-  --ds-accent-hover-rgb: 217 112 11;
+  --ds-accent-hover-rgb: 29 78 216;
 
   --ds-success: var(--success);
   --ds-success-rgb: 34 197 94;
@@ -123,4 +123,10 @@
   --ds-text-muted-rgb: 107 114 128;
 
   --ds-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.45);
+
+  --brand-primary: #3B82F6;
+  --brand-primary-hover: #2563EB;
+  --ds-accent-rgb: 59 130 246;
+  --ds-accent-hover-rgb: 37 99 235;
+  --ds-kpi-rgb: 59 130 246;
 }
