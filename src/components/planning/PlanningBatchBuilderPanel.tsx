@@ -112,6 +112,41 @@ function gsmLine(r: PlanningGridLine): string {
   return String(g)
 }
 
+/** Press/machine assigned to the line (from specOverrides.machineId). */
+function machineAggregate(lines: PlanningGridLine[]): { match: boolean; detail: string } {
+  const ids = lines.map((r) => {
+    const spec = (r.specOverrides || {}) as Record<string, unknown>
+    const m = typeof spec.machineId === 'string' ? spec.machineId.trim() : ''
+    return m || '—'
+  })
+  const uniq = Array.from(new Set(ids))
+  const assigned = uniq.filter((x) => x !== '—')
+  if (assigned.length === 0) return { match: true, detail: 'Unassigned' }
+  const match = uniq.length === 1
+  return {
+    match,
+    detail: match ? 'Same press' : `Mixed (${assigned.length} presses)`,
+  }
+}
+
+/** ISO-week label for a date string; '—' when missing/invalid. */
+function isoWeek(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return '—'
+  const dt = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  const day = dt.getUTCDay() || 7
+  dt.setUTCDate(dt.getUTCDate() + 4 - day)
+  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1))
+  const week = Math.ceil(((dt.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
+/** Timeline compatibility — PO week as the available proxy for delivery window. */
+function timelineAggregate(lines: PlanningGridLine[]): { match: boolean; detail: string } {
+  return aggregateDisplay(lines.map((r) => isoWeek(r.po?.poDate)))
+}
+
 function buildCompatibilityRows(lines: PlanningGridLine[]): CompRow[] {
   if (lines.length < 2) return []
 
@@ -129,6 +164,8 @@ function buildCompatibilityRows(lines: PlanningGridLine[]): CompRow[] {
   const gsm = aggregateDisplay(gsmVals)
   const plate = plateAggregate(lines)
   const die = dieAggregate(lines)
+  const machine = machineAggregate(lines)
+  const timeline = timelineAggregate(lines)
 
   const row = (key: string, label: string, match: boolean, detail: string): CompRow => ({
     key,
@@ -145,6 +182,8 @@ function buildCompatibilityRows(lines: PlanningGridLine[]): CompRow[] {
     row('tool-plate', 'Plate (planning)', plate.match, plate.detail),
     row('tool-die', 'Die', die.match, die.detail),
     row('gsm', 'GSM', gsm.match, gsm.detail),
+    row('press', 'Machine / press', machine.match, machine.detail),
+    row('timeline', 'Timeline (PO week)', timeline.match, timeline.detail),
   ]
 }
 
