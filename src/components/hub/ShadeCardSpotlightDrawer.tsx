@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import * as Dialog from '@radix-ui/react-dialog'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { GlobalPopoutModal } from '@/components/design-system/GlobalPopoutModal'
 import { COLOR_VERIFICATION_AUDIT } from '@/lib/shade-card-hub-audit'
 import { shadeCardAgeTier } from '@/lib/shade-card-age'
 import { shadeCardPhysicalLabel } from '@/lib/shade-card-custody-condition'
@@ -327,44 +327,36 @@ export function ShadeCardSpotlightDrawer({
   const clientName = row?.product?.customer?.name?.trim() || row?.customer?.name?.trim() || '—'
 
   return (
-    <Dialog.Root
-      open={row != null}
-      onOpenChange={(open) => {
-        if (!open) onClose()
+    <GlobalPopoutModal
+      isOpen={row != null}
+      onClose={onClose}
+      title={
+        <span className="font-sans">
+          <span className="font-normal text-ds-ink-muted">Product DNA — </span>
+          {productTitle}
+        </span>
+      }
+      metadata={
+        row ? (
+          <span className={`text-xs text-ds-ink-faint ${mono}`}>
+            {clientName} · {row.shadeCode}
+          </span>
+        ) : undefined
+      }
+      mode="preview"
+      size="lg"
+      zIndexClass="z-[70]"
+      primaryAction={{
+        label: `Save & log — ${COLOR_VERIFICATION_AUDIT}`,
+        loadingLabel: '…',
+        onClick: () => void saveVerification(),
+        disabled: busy || !row,
+        loading: busy,
       }}
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[70] bg-background/60 backdrop-blur-[2px]" />
-        <Dialog.Content
-          className={`fixed z-[70] right-0 top-0 flex h-full w-full min-w-0 max-w-full flex-col border-l border-ds-line/40 bg-background shadow-2xl outline-none animate-slide-over-enter sm:max-w-[min(40vw,36rem)] sm:w-[40vw] ${mono}`}
-        >
-          <Dialog.Title className="sr-only">
-            {row ? `Product DNA — ${productTitle}` : 'Shade card'}
-          </Dialog.Title>
-          <Dialog.Description className="sr-only">
-            Color specification, digital proof, and custody usage for this shade card.
-          </Dialog.Description>
-
-          <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3 shrink-0">
-            <h2 className="min-w-0 text-sm font-semibold leading-tight text-ds-ink font-sans">
-              <span className="text-neutral-500 font-normal">Product DNA — </span>
-              <span className="text-foreground">{row ? productTitle : '—'}</span>
-            </h2>
-            <Dialog.Close asChild>
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-ds-card hover:text-foreground font-sans"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </Dialog.Close>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-4 py-3">
-            {row ? (
-              <div className="space-y-4 text-sm text-neutral-400">
-                <div className="rounded-xl border border-ds-line/40 bg-ds-main/70 px-3 py-3">
+      {row ? (
+        <div className={`space-y-4 text-sm text-ds-ink-muted ${mono}`}>
+          <div className="rounded-ds-md border border-ds-line/40 bg-ds-elevated/50 px-3 py-3">
                   <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     Total cumulative runs
                   </p>
@@ -660,24 +652,13 @@ export function ShadeCardSpotlightDrawer({
                       placeholder="#C41E3A"
                     />
                   </label>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void saveVerification()}
-                    className="w-full rounded-lg bg-[var(--success)] py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 font-sans"
-                  >
-                    {busy ? '…' : `Save & log — ${COLOR_VERIFICATION_AUDIT}`}
-                  </button>
                 </div>
 
-                <p className="pt-1 text-center text-xs text-neutral-600 font-sans">
+                <p className="pt-1 text-center text-xs text-ds-ink-faint font-sans">
                   Custody Handshake Verified - 100% Audit Traceability Active.
                 </p>
-              </div>
-            ) : null}
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </div>
+      ) : null}
+    </GlobalPopoutModal>
   )
 }
