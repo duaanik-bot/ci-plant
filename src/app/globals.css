@@ -66,12 +66,12 @@
 
 @layer base {
   :root {
-    /* LIGHT theme (default). Accent stays the same orange in both themes. */
+    /* LIGHT theme (default). Brand blue (#2563EB / blue-600). */
     --background: 0 0% 100%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
-    --primary: 26 92% 51%;
+    --primary: 217 91% 53%;
     --primary-foreground: 0 0% 100%;
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
@@ -83,7 +83,7 @@
     --destructive-foreground: 0 0% 100%;
     --input: 214 32% 91%;
     --border: 214 32% 91%;
-    --ring: 26 92% 51%;
+    --ring: 217 91% 53%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
     --radius: 0.5rem;
@@ -94,7 +94,7 @@
     --foreground: 220 13% 91%;
     --card: 222 19% 13%;
     --card-foreground: 220 13% 91%;
-    --primary: 26 92% 51%;
+    --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
     --secondary: 218 15% 20%;
     --secondary-foreground: 220 13% 91%;
@@ -106,7 +106,7 @@
     --destructive-foreground: 0 0% 100%;
     --input: 218 15% 20%;
     --border: 218 15% 20%;
-    --ring: 26 92% 51%;
+    --ring: 217 91% 60%;
     --popover: 222 19% 13%;
     --popover-foreground: 220 13% 91%;
   }
