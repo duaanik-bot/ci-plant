@@ -180,6 +180,7 @@ type MaterialDetailPayload = {
 }
 
 type ProcureModalState = {
+  mode: 'shortage' | 'manual'
   materialId: string
   materialCode: string
   boardType: string | null
@@ -984,6 +985,7 @@ function InventoryPageContent() {
       }
       const first = shortages[0]
       setProcureState({
+        mode: 'shortage',
         materialId: row.material_id,
         materialCode: row.material_code,
         boardType: row.board_type_id ?? null,
@@ -1000,8 +1002,38 @@ function InventoryPageContent() {
     }
   }
 
+  function openManualProcureModal(row: PaperWarehouseRow) {
+    setProcureError(null)
+    if (!row.material_id) {
+      toast.error('Material id missing')
+      return
+    }
+    if (row.open_pr_id) {
+      toast.info('PR already exists')
+      window.location.href = `/inventory/purchase-requisitions?prId=${encodeURIComponent(row.open_pr_id)}`
+      return
+    }
+    setProcureState({
+      mode: 'manual',
+      materialId: row.material_id,
+      materialCode: row.material_code,
+      boardType: row.board_type_id ?? null,
+      size: row.size_display,
+      gsm: row.gsm ?? null,
+      shortages: [],
+    })
+    setProcureShortageId('')
+    setProcurePrQty('')
+    setProcureBuffer(false)
+    setProcureOpen(true)
+  }
+
   async function submitProcure() {
-    if (!procureState || !procureShortageId) {
+    if (!procureState) {
+      setProcureError('Nothing to procure')
+      return
+    }
+    if (procureState.mode === 'shortage' && !procureShortageId) {
       setProcureError('Select shortage first')
       return
     }
@@ -1014,11 +1046,18 @@ function InventoryPageContent() {
     setProcureBusy(true)
     setProcureError(null)
     try {
-      const res = await fetch(`/api/material-shortages/${procureShortageId}/create-pr`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prQty: qty }),
-      })
+      const res =
+        procureState.mode === 'manual'
+          ? await fetch(`/api/inventory/paper-warehouse/${procureState.materialId}/create-pr`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ qty }),
+            })
+          : await fetch(`/api/material-shortages/${procureShortageId}/create-pr`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ prQty: qty }),
+            })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to generate PR')
       const payload = data as { purchaseRequestId?: string; reused?: boolean; message?: string }
@@ -1441,8 +1480,9 @@ function InventoryPageContent() {
                           ) : (
                             <button
                               type="button"
-                              disabled
-                              className="cursor-not-allowed rounded border border-ds-line/40 bg-ds-elevated/10 px-2 py-1 text-ds-ink-faint"
+                              onClick={() => openManualProcureModal(row)}
+                              title="Raise a manual reorder Purchase Requisition"
+                              className="rounded border border-ds-brand/45 bg-ds-brand/10 px-2 py-1 font-medium text-ds-brand hover:bg-ds-brand/20"
                             >
                               Procure
                             </button>
@@ -1729,6 +1769,94 @@ function InventoryPageContent() {
               </div>
             </div>
           ) : null}
+        </SlideOverPanel>
+
+        <SlideOverPanel
+          title="Generate Purchase Request"
+          isOpen={procureOpen}
+          onClose={() => setProcureOpen(false)}
+          widthClass="max-w-md"
+        >
+          <div className="space-y-3 px-1 text-xs text-ds-ink">
+            {!procureState ? (
+              <p className="text-ds-ink-faint">-</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2">
+                  <div><span className="text-ds-ink-muted">Material</span><p className={ledgerMono}>{procureState.materialCode}</p></div>
+                  <div><span className="text-ds-ink-muted">Board Type</span><p>{procureState.boardType || '-'}</p></div>
+                  <div><span className="text-ds-ink-muted">Size</span><p className={ledgerMono}>{procureState.size || '-'}</p></div>
+                  <div><span className="text-ds-ink-muted">GSM</span><p className={ledgerMono}>{procureState.gsm ?? '-'}</p></div>
+                </div>
+                {procureState.mode === 'manual' ? (
+                  <p className="rounded border border-ds-brand/30 bg-ds-brand/10 px-2 py-1.5 text-ds-brand">
+                    Manual reorder — raises a Purchase Requisition not tied to any job shortage.
+                  </p>
+                ) : (
+                  <label className="block text-xs text-ds-ink-faint">
+                    Shortage reference
+                    <select
+                      value={procureShortageId}
+                      onChange={(e) => {
+                        const id = e.target.value
+                        setProcureShortageId(id)
+                        const hit = procureState.shortages.find((s) => s.id === id)
+                        if (hit) setProcurePrQty(String(Math.max(0, hit.pendingShortage)))
+                      }}
+                      className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                    >
+                      {procureState.shortages.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.planningId ? `PL#${s.planningId.slice(0, 8)}` : `JC#${s.jobCardNumber ?? '-'}`} · shortage {fmt(s.pendingShortage)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="block text-xs text-ds-ink-faint">
+                  PR Qty
+                  <input
+                    type="number"
+                    min={0}
+                    step="1"
+                    value={procurePrQty}
+                    onChange={(e) => setProcurePrQty(e.target.value)}
+                    className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs text-ds-ink-muted">
+                  <input
+                    type="checkbox"
+                    checked={procureBuffer}
+                    onChange={(e) => setProcureBuffer(e.target.checked)}
+                    className="rounded border-ds-line/50"
+                  />
+                  Add 10% buffer
+                </label>
+                {procureError ? (
+                  <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-2 py-1 text-[var(--error)]">{procureError}</div>
+                ) : null}
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded border border-ds-line/50 px-3 py-1.5 text-xs"
+                    onClick={() => setProcureOpen(false)}
+                    disabled={procureBusy}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded bg-ds-warning px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                    onClick={() => void submitProcure()}
+                    disabled={procureBusy}
+                  >
+                    {procureBusy ? 'Generating…' : 'Generate PR'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </SlideOverPanel>
 
         <SlideOverPanel
@@ -2047,7 +2175,14 @@ function InventoryPageContent() {
                       })()}
                     </td>
                     <td className="px-3 py-2 text-xs">
-                      {row.shortage_sheets > 0 ? (
+                      {row.open_pr_id ? (
+                        <Link
+                          href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(row.open_pr_id)}`}
+                          className="rounded border border-ds-brand/45 bg-ds-brand/10 px-2 py-1 font-medium text-ds-brand hover:bg-ds-brand/20"
+                        >
+                          View PR
+                        </Link>
+                      ) : row.shortage_sheets > 0 ? (
                         <button
                           type="button"
                           onClick={() => void openProcureModal(row)}
@@ -2056,7 +2191,14 @@ function InventoryPageContent() {
                           Procure
                         </button>
                       ) : (
-                        <span className="text-ds-ink-faint">-</span>
+                        <button
+                          type="button"
+                          onClick={() => openManualProcureModal(row)}
+                          title="Raise a manual reorder Purchase Requisition"
+                          className="rounded border border-ds-brand/45 bg-ds-brand/10 px-2 py-1 font-medium text-ds-brand hover:bg-ds-brand/20"
+                        >
+                          Procure
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -2349,25 +2491,31 @@ function InventoryPageContent() {
                 <div><span className="text-ds-ink-muted">Size</span><p className={ledgerMono}>{procureState.size || '-'}</p></div>
                 <div><span className="text-ds-ink-muted">GSM</span><p className={ledgerMono}>{procureState.gsm ?? '-'}</p></div>
               </div>
-              <label className="block text-xs text-ds-ink-faint">
-                Shortage reference
-                <select
-                  value={procureShortageId}
-                  onChange={(e) => {
-                    const id = e.target.value
-                    setProcureShortageId(id)
-                    const hit = procureState.shortages.find((s) => s.id === id)
-                    if (hit) setProcurePrQty(String(Math.max(0, hit.pendingShortage)))
-                  }}
-                  className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
-                >
-                  {procureState.shortages.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.planningId ? `PL#${s.planningId.slice(0, 8)}` : `JC#${s.jobCardNumber ?? '-'}`} · shortage {fmt(s.pendingShortage)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {procureState.mode === 'manual' ? (
+                <p className="rounded border border-ds-brand/30 bg-ds-brand/10 px-2 py-1.5 text-ds-brand">
+                  Manual reorder — raises a Purchase Requisition not tied to any job shortage.
+                </p>
+              ) : (
+                <label className="block text-xs text-ds-ink-faint">
+                  Shortage reference
+                  <select
+                    value={procureShortageId}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      setProcureShortageId(id)
+                      const hit = procureState.shortages.find((s) => s.id === id)
+                      if (hit) setProcurePrQty(String(Math.max(0, hit.pendingShortage)))
+                    }}
+                    className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                  >
+                    {procureState.shortages.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.planningId ? `PL#${s.planningId.slice(0, 8)}` : `JC#${s.jobCardNumber ?? '-'}`} · shortage {fmt(s.pendingShortage)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="block text-xs text-ds-ink-faint">
                 PR Qty
                 <input

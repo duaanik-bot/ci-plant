@@ -35,7 +35,6 @@ type SummaryRow = {
   id: string
   planningStatus: string
   quantity: number
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   specOverrides: Record<string, any> | null
   directorPriority?: boolean
   directorHold?: boolean

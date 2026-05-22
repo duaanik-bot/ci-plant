@@ -87,6 +87,39 @@ describe('seedLineFromSpecPack', () => {
     expect(patch.boardGrade).toBe('FBB (Folding Box Board)')
     expect(provenance.boardGrade).toBe('override')
   })
+
+  it('backfills a blank field from the last-PO pack and tags "history"', () => {
+    const lastPo = buildCartonSpecPack({
+      ...carton,
+      printingType: 'Offset',
+      numberOfColours: 4,
+      ups: 6,
+    })
+    // printingType/numberOfColours/ups are absent from the primary `pack`
+    // fixture, so the only source is the last-PO snapshot.
+    const { patch, provenance } = seedLineFromSpecPack(baseLine(), pack, null, lastPo)
+    expect(patch.printingType).toBe('Offset')
+    expect(patch.numberOfColours).toBe('4')
+    expect(patch.ups).toBe('6')
+    expect(provenance.printingType).toBe('history')
+    expect(provenance.ups).toBe('history')
+  })
+
+  it('prefers the spec leaf over the last-PO backfill', () => {
+    const lastPo = buildCartonSpecPack({ ...carton, gsm: 999 })
+    const { patch, provenance } = seedLineFromSpecPack(baseLine(), pack, null, lastPo)
+    expect(patch.gsm).toBe('350')
+    expect(provenance.gsm).toBe('spec')
+  })
+
+  it('does not backfill a field already carrying a master value', () => {
+    const lastPo = buildCartonSpecPack({ ...carton, foilType: 'Silver Foil' })
+    const { patch, provenance } = seedLineFromSpecPack(
+      baseLine({ foilType: 'Gold Foil' }), pack, null, lastPo,
+    )
+    expect(patch.foilType).toBeUndefined()
+    expect(provenance.foilType).toBe('master')
+  })
 })
 
 describe('applySpecOverrideEdit', () => {

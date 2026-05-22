@@ -100,7 +100,6 @@ describe('readCartonSpecPack', () => {
     const stored = emptySpecPack('c1', 'X')
     const r = readCartonSpecPack({
       specPack: stored,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       specOverrides: { specPack: { board: { gsm: 350 } }, ['__proto__' as any]: { polluted: true } },
     })
     expect(r.pack.board.gsm).toBe(350)

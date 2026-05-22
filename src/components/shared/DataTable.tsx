@@ -32,7 +32,6 @@ import type { ReactNode } from 'react'
  *   <DataTable columns={cols} data={items} loading={isLoading} />
  */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface TableColumn<T = any> {
   key: string
   label: ReactNode | (() => ReactNode)
@@ -41,7 +40,6 @@ export interface TableColumn<T = any> {
   render?: (row: T) => ReactNode
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 interface DataTableProps<T = any> {
   columns: TableColumn<T>[]
   data: T[]
@@ -117,7 +115,6 @@ export function DataTable<T extends { id?: string | number }>({
                     >
                       {col.render
                         ? col.render(row)
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         : String((row as any)[col.key] ?? '—')
                       }
                     </td>

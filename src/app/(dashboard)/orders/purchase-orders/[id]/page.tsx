@@ -653,7 +653,7 @@ export default function EditPurchaseOrderPage() {
     [],
   )
 
-  const specPackCache = useRef<Map<string, { pack: SpecPackV1 | null }>>(new Map())
+  const specPackCache = useRef<Map<string, { pack: SpecPackV1 | null; lastPoPack: SpecPackV1 | null }>>(new Map())
 
   useEffect(() => {
     let cancelled = false
@@ -662,7 +662,7 @@ export default function EditPurchaseOrderPage() {
       if (ln.specPackBase !== undefined) return
       const cartonId = ln.cartonId
       const cached = specPackCache.current.get(cartonId)
-      const apply = (pack: SpecPackV1 | null) => {
+      const apply = (pack: SpecPackV1 | null, lastPoPack: SpecPackV1 | null) => {
         if (cancelled) return
         setLines((prev) =>
           prev.map((cur, i) => {
@@ -701,7 +701,7 @@ export default function EditPurchaseOrderPage() {
               specOverrides: cur.specOverrides ?? null,
               specProvenance: cur.specProvenance ?? {},
             }
-            const { patch, provenance } = seedLineFromSpecPack(seedLine, pack, cur.specOverrides ?? null)
+            const { patch, provenance } = seedLineFromSpecPack(seedLine, pack, cur.specOverrides ?? null, lastPoPack)
             const seededPaste = patch.pastingStyle ?? cur.pastingStyle
             const packPaste = pack.tooling?.pastingStyle
             const pastingMissing =
@@ -717,18 +717,22 @@ export default function EditPurchaseOrderPage() {
           }),
         )
       }
-      if (cached) { apply(cached.pack); return }
+      if (cached) { apply(cached.pack, cached.lastPoPack); return }
       void (async () => {
         try {
-          const res = await fetch(`/api/cartons/${encodeURIComponent(cartonId)}/spec-pack`)
-          if (!res.ok) { specPackCache.current.set(cartonId, { pack: null }); apply(null); return }
-          const data = (await res.json()) as { pack?: SpecPackV1 }
+          const url = `/api/cartons/${encodeURIComponent(cartonId)}/spec-pack?excludePoId=${encodeURIComponent(id)}${
+            customerId ? `&customerId=${encodeURIComponent(customerId)}` : ''
+          }`
+          const res = await fetch(url)
+          if (!res.ok) { specPackCache.current.set(cartonId, { pack: null, lastPoPack: null }); apply(null, null); return }
+          const data = (await res.json()) as { pack?: SpecPackV1; lastPoPack?: SpecPackV1 | null }
           const pack = data.pack && (data.pack as { v?: number }).v === 1 ? data.pack : null
-          specPackCache.current.set(cartonId, { pack })
-          apply(pack)
+          const lastPoPack = data.lastPoPack && (data.lastPoPack as { v?: number }).v === 1 ? data.lastPoPack : null
+          specPackCache.current.set(cartonId, { pack, lastPoPack })
+          apply(pack, lastPoPack)
         } catch {
-          specPackCache.current.set(cartonId, { pack: null })
-          apply(null)
+          specPackCache.current.set(cartonId, { pack: null, lastPoPack: null })
+          apply(null, null)
         }
       })()
     })

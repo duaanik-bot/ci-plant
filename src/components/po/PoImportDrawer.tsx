@@ -639,7 +639,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
 
           <div>
             <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">
-              Customer's PO (PDF)
+              Customer&apos;s PO (PDF)
             </label>
             <label
               onDragOver={(e) => e.preventDefault()}
@@ -671,7 +671,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                   <Upload className="size-7 text-[var(--text-muted)]" />
                   <div className="text-sm font-medium">Drop a PDF here, or click to browse</div>
                   <div className="text-xs text-[var(--text-muted)]">
-                    Text-based PDFs only — scans aren't supported yet.
+                    Text-based PDFs only — scans aren&apos;t supported yet.
                   </div>
                 </>
               )}

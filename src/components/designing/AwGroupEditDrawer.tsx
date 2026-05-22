@@ -811,7 +811,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
           <p className="text-xs font-bold uppercase tracking-widest text-ds-ink-faint">Individual job details</p>
           <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-ds-line/35 bg-ds-elevated/15 px-2 py-1.5">
             <p className="text-xs text-ds-ink-muted">
-              Batch tools: apply one item's UPS/colours/remarks to all.
+              Batch tools: apply one item&apos;s UPS/colours/remarks to all.
             </p>
             <button
               type="button"
@@ -1104,7 +1104,7 @@ export function AwGroupEditDrawer({ groupId, rows, users, isOpen, onClose, onRef
         {/* Footer note */}
         <div className="space-y-1">
           <p className="text-center text-xs text-ds-ink-faint">
-            All items above belong to the same gang print group. Use "Full edit" to access advanced options per item.
+            All items above belong to the same gang print group. Use &quot;Full edit&quot; to access advanced options per item.
           </p>
           <p className="text-center text-xs text-ds-ink-muted">
             {savingGroup || saving.size > 0
