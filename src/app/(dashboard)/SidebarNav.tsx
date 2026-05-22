@@ -162,8 +162,8 @@ export function SidebarNav({
   const sections: NavSection[] = [
     {
       key: 'dashboard',
-      title: '📊 DASHBOARD',
-      borderColor: 'border-l-blue-500',
+      title: 'DASHBOARD',
+      borderColor: 'border-l-ds-ink-faint/50',
       links: [
         { href: '/', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/director/command-center', label: 'Director Command Center', icon: Crosshair },
@@ -171,8 +171,8 @@ export function SidebarNav({
     },
     {
       key: 'orders',
-      title: '📋 ORDERS',
-      borderColor: 'border-l-blue-500',
+      title: 'ORDERS',
+      borderColor: 'border-l-ds-brand',
       links: [
         { href: '/rfq', label: 'RFQ Pipeline', icon: FileText },
         { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart },
@@ -183,9 +183,9 @@ export function SidebarNav({
     },
     {
       key: 'tools',
-      title: '🔧 TOOLING HUB',
+      title: 'TOOLING HUB',
       subtitle: 'Plates, dies, blocks, and shade cards',
-      borderColor: 'border-l-emerald-500',
+      borderColor: 'border-l-ds-brand',
       links: [
         { href: '/hub/plates', label: 'Plates', icon: Layers },
         { href: '/hub/dies', label: 'Dies', icon: Droplets },
@@ -195,16 +195,16 @@ export function SidebarNav({
     },
     {
       key: 'execution',
-      title: '🏭 PRODUCTION EXECUTION',
-      borderColor: 'border-l-orange-500',
+      title: 'PRODUCTION EXEC.',
+      borderColor: 'border-l-ds-brand',
       links: [
         { href: '/production/print-planning', label: 'Print Planning', icon: LayoutGrid },
       ],
     },
     {
       key: 'production',
-      title: '🏭 PRODUCTION',
-      borderColor: 'border-l-rose-500',
+      title: 'PRODUCTION FLOOR',
+      borderColor: 'border-l-ds-brand',
       links: [
         { href: '/production/stages', label: 'Live Production', icon: Factory },
         { href: '/production/cutting-queue', label: 'Cutting queue', icon: Scissors },
@@ -212,8 +212,8 @@ export function SidebarNav({
     },
     {
       key: 'inventory',
-      title: '📦 INVENTORY',
-      borderColor: 'border-l-teal-500',
+      title: 'INVENTORY',
+      borderColor: 'border-l-ds-lineStrong',
       links: [
         { href: '/inventory', label: 'Raw Materials', icon: Warehouse },
         { href: '/inventory/flow', label: 'Inventory Flow', icon: RefreshCw },
@@ -221,8 +221,8 @@ export function SidebarNav({
     },
     {
       key: 'stores',
-      title: '🏪 STORES',
-      borderColor: 'border-l-ds-warning/90',
+      title: 'STORES',
+      borderColor: 'border-l-ds-lineStrong',
       links: [
         { href: '/stores/issue', label: 'Issue Sheets', icon: PackageCheck },
         { href: '/stores/approve-excess', label: 'Approve Excess', icon: CheckSquare },
@@ -230,8 +230,8 @@ export function SidebarNav({
     },
     {
       key: 'quality',
-      title: '✅ QUALITY',
-      borderColor: 'border-l-lime-500',
+      title: 'QUALITY',
+      borderColor: 'border-l-ds-warning',
       links: [
         { href: '/qms/qc', label: 'QC Records', icon: ClipboardCheck },
         { href: '/qms/ncr', label: 'NCR / CAPA', icon: AlertTriangle },
@@ -239,8 +239,8 @@ export function SidebarNav({
     },
     {
       key: 'dispatch',
-      title: '🚚 DISPATCH',
-      borderColor: 'border-l-indigo-500',
+      title: 'DISPATCH',
+      borderColor: 'border-l-ds-warning',
       links: [
         { href: '/dispatch', label: 'Dispatch Planning', icon: Truck },
         { href: '/dispatch/tracking', label: 'Deliveries', icon: MapPin },
@@ -250,8 +250,8 @@ export function SidebarNav({
     },
     {
       key: 'reports',
-      title: '📈 REPORTS',
-      borderColor: 'border-l-purple-500',
+      title: 'REPORTS',
+      borderColor: 'border-l-ds-ink-faint/50',
       links: [
         { href: '/reports/dashboard', label: 'MD Dashboard', icon: BarChart3 },
         { href: '/reports/production', label: 'Production Summary', icon: BarChart3 },
@@ -261,8 +261,8 @@ export function SidebarNav({
     },
     {
       key: 'masters',
-      title: '⚙️ MASTERS',
-      borderColor: 'border-l-violet-500',
+      title: 'MASTERS',
+      borderColor: 'border-l-ds-lineStrong',
       links: [
         { href: '/masters/customers', label: 'Customers', icon: Users },
         { href: '/masters/suppliers', label: 'Suppliers', icon: Truck },
