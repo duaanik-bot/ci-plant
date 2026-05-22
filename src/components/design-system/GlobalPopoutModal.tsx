@@ -88,7 +88,7 @@ export function GlobalPopoutModal({
           </div>
 
           {footer ? (
-            <footer className="shrink-0 border-t border-ds-line/30 bg-ds-elevated/60 px-4 py-3 pt-4 shadow-ds-drawer-foot md:px-6">
+            <footer className="shrink-0 border-t border-ds-line/30 bg-ds-elevated/60 px-4 pt-4 pb-3 shadow-ds-drawer-foot md:px-6">
               {footer}
             </footer>
           ) : null}

@@ -43,4 +43,15 @@ describe('GlobalPopoutModal', () => {
     )
     expect(screen.getByRole('dialog').className).toContain('max-w-[420px]')
   })
+
+  it('calls onClose when close button is clicked', async () => {
+    const onClose = vi.fn()
+    render(
+      <GlobalPopoutModal isOpen onClose={onClose} title="Closable">
+        <p>x</p>
+      </GlobalPopoutModal>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 })
