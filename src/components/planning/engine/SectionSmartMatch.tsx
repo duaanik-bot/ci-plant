@@ -2,6 +2,13 @@
 
 import { memo, useCallback, useMemo } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
+import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
+import { deriveChildSizeMm, formatSizeMm } from '@/lib/planning-sheet-cut'
+import {
+  type RankedBoardMatch,
+  type SmartMatchInput,
+  rankBoardMatches,
+} from '@/lib/planning-smart-match'
 import type {
   PlanningEngineBoardOption,
   PlanningEngineLine,
@@ -132,23 +139,39 @@ const SmartMatchEmptyState = memo(function SmartMatchEmptyState({
   )
 })
 
+function scoreTone(score: number): string {
+  return score >= 75
+    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+    : score >= 55
+      ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+      : 'bg-red-500/15 text-red-300 border-red-500/30'
+}
+
 const BoardOptionCard = memo(function BoardOptionCard({
-  opt,
-  rank,
+  match,
   selected,
   onSelect,
 }: {
-  opt: PlanningEngineBoardOption
-  rank: number
+  match: RankedBoardMatch
   selected: boolean
   onSelect?: (materialId: string) => void
 }) {
-  const t = statusClass(opt.status)
+  const t = statusClass(match.status)
   const boardLabel =
-    [opt.boardType, opt.gsm != null ? `${opt.gsm} gsm` : null].filter(Boolean).join(' · ') ||
-    opt.materialCode
+    [match.boardType, match.gsm != null ? `${match.gsm} gsm` : null].filter(Boolean).join(' · ') ||
+    match.materialCode ||
+    'Board'
 
-  const clickable = !!onSelect && !!opt.materialId
+  const parentPair = match.size ? parseSheetSizeToPair(match.size) : null
+  const child =
+    parentPair && match.cutsPerSheet > 0
+      ? deriveChildSizeMm(parentPair.length, parentPair.width, match.cutsPerSheet)
+      : null
+  const parentLabel = parentPair ? formatSizeMm(parentPair.length, parentPair.width) : match.size ?? '—'
+  const childLabel = child ? formatSizeMm(child.lengthMm, child.widthMm) : '—'
+  const surplus = match.freeSheets - match.requiredParentSheets
+
+  const clickable = !!onSelect && !!match.materialId
 
   return (
     <div
@@ -159,65 +182,79 @@ const BoardOptionCard = memo(function BoardOptionCard({
       tabIndex={clickable ? 0 : undefined}
       aria-pressed={clickable ? selected : undefined}
       aria-label={clickable ? `Select board ${boardLabel}` : undefined}
-      onClick={clickable ? () => onSelect?.(opt.materialId) : undefined}
+      onClick={clickable ? () => onSelect?.(match.materialId) : undefined}
       onKeyDown={
         clickable
           ? (e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault()
-                onSelect?.(opt.materialId)
+                onSelect?.(match.materialId)
               }
             }
           : undefined
       }
     >
-      <div className="flex items-start justify-between gap-3 mb-1.5">
+      {/* Header: rank + bucket, match score, status */}
+      <div className="flex items-start justify-between gap-2 mb-1.5">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-ds-ink truncate">
-            #{rank} · {boardLabel}
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            #{match.rank} · {match.bucketLabel}
           </div>
-          <div className="text-xs text-ds-ink-faint truncate">
-            {opt.size} · {opt.matchType}
-            {opt.gsmDelta != null && opt.gsmDelta !== 0
-              ? ` · ${opt.gsmDelta > 0 ? '+' : ''}${opt.gsmDelta}g`
-              : ''}
-          </div>
+          <div className="text-sm font-semibold text-ds-ink truncate">{boardLabel}</div>
         </div>
-        <span
-          className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${t.pill}`}
-        >
-          {opt.status}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span
+            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums ${scoreTone(match.matchScore)}`}
+            aria-label={`Match score ${Math.round(match.matchScore)} percent`}
+          >
+            {Math.round(match.matchScore)}%
+          </span>
+          <span
+            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${t.pill}`}
+          >
+            {match.status}
+          </span>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ds-ink-faint mb-2 tabular-nums">
-        <span>{nf.format(Math.round(opt.freeSheets))} free sh</span>
-        <span>·</span>
-        <span>Need {nf.format(Math.round(opt.requiredParentSheets))} sh</span>
-        {opt.shortageParentSheets > 0 ? (
+      {/* Parent → child sizing */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ds-ink-faint mb-1.5 tabular-nums">
+        <span className="text-ds-ink-muted">{parentLabel}</span>
+        {match.cutsPerSheet > 0 ? (
           <>
-            <span>·</span>
-            <span className="text-red-300">
-              Short {nf.format(Math.round(opt.shortageParentSheets))} sh
+            <span className="rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-1.5 py-0.5 text-[10px]">
+              {match.cutsPerSheet}-cut
             </span>
+            <span aria-hidden>→</span>
+            <span className="text-ds-ink-muted">{childLabel}</span>
           </>
         ) : null}
-        {opt.cutsPerSheet > 0 ? (
-          <>
-            <span>·</span>
-            <span>{opt.cutsPerSheet}-up</span>
-          </>
-        ) : null}
+      </div>
+
+      {/* Stock vs requirement */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ds-ink-faint mb-2 tabular-nums">
+        <span>{nf.format(Math.round(match.freeSheets))} free</span>
+        <span>·</span>
+        <span>Need {nf.format(Math.round(match.requiredParentSheets))}</span>
+        <span>·</span>
+        {match.shortageParentSheets > 0 ? (
+          <span className="text-red-300">Short {nf.format(Math.round(match.shortageParentSheets))}</span>
+        ) : (
+          <span className="text-emerald-300">+{nf.format(Math.round(Math.max(0, surplus)))} surplus</span>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <SubScoreBar label="Yield" value={opt.yieldPct} />
-        <SubScoreBar label="No-waste" value={Math.max(0, 100 - opt.wastagePct)} />
+        <SubScoreBar label="Yield" value={match.yieldPct} />
+        <SubScoreBar label={`Waste ${Math.round(match.wastagePct)}%`} value={Math.max(0, 100 - match.wastagePct)} />
       </div>
 
-      {opt.tags.length > 0 ? (
+      {/* Reason */}
+      <div className="mt-2 text-[11px] text-ds-ink-muted leading-snug">{match.reason}</div>
+
+      {match.tags.length > 0 ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {opt.tags.slice(0, 4).map((tag) => (
+          {match.tags.slice(0, 5).map((tag) => (
             <span
               key={tag}
               className="rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-1.5 py-0.5 text-[11px] text-ds-ink-faint"
@@ -254,6 +291,37 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
       (readiness?.suggestedBoardOptions?.length ?? 0) === 0 &&
       (readiness?.closestAvailableOptions?.length ?? 0) > 0,
     [readiness],
+  )
+
+  // Rank the readiness board options into labelled buckets with match scores.
+  const rankedMatches = useMemo<RankedBoardMatch[]>(
+    () =>
+      rankBoardMatches(
+        boardOptions.map(
+          (o) =>
+            ({
+              materialId: o.materialId,
+              materialCode: o.materialCode,
+              boardType: o.boardType,
+              gsm: o.gsm,
+              size: o.size,
+              freeSheets: o.freeSheets,
+              requiredParentSheets: o.requiredParentSheets,
+              shortageParentSheets: o.shortageParentSheets,
+              wastagePct: o.wastagePct,
+              yieldPct: o.yieldPct,
+              cutsPerSheet: o.cutsPerSheet,
+              matchType: o.matchType,
+              status: o.status,
+              gsmDelta: o.gsmDelta,
+              tags: o.tags,
+              boardMatchMode:
+                (o as { boardMatchMode?: 'exact' | 'cross_field' | 'fallback' | null }).boardMatchMode ??
+                null,
+            }) satisfies SmartMatchInput,
+        ),
+      ),
+    [boardOptions],
   )
 
   const selectedMaterialId = readiness?.materialId ?? null
@@ -321,14 +389,13 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
             )
           })}
         </div>
-      ) : boardOptions.length > 0 ? (
+      ) : rankedMatches.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {boardOptions.slice(0, 4).map((opt, idx) => (
+          {rankedMatches.map((match) => (
             <BoardOptionCard
-              key={opt.materialId || `${opt.materialCode}-${idx}`}
-              opt={opt}
-              rank={idx + 1}
-              selected={!!selectedMaterialId && opt.materialId === selectedMaterialId}
+              key={match.materialId}
+              match={match}
+              selected={!!selectedMaterialId && match.materialId === selectedMaterialId}
               onSelect={onSelectBoard ? handleSelect : undefined}
             />
           ))}

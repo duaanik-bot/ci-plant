@@ -83,7 +83,9 @@ describe('SectionSmartMatch', () => {
       ],
     }
     render(<SectionSmartMatch line={empty} readiness={withOptions} onPatch={async () => true} />)
-    expect(screen.getByText(/#1 · FBB · 100 gsm/)).toBeInTheDocument()
+    // Ranked into a labelled bucket (#1 Best Match) with the board label below it.
+    expect(screen.getByText(/#1 · Best Match/)).toBeInTheDocument()
+    expect(screen.getByText('FBB · 100 gsm')).toBeInTheDocument()
     expect(screen.getByText('Best Yield')).toBeInTheDocument()
     expect(screen.getByLabelText('Yield sub-score 78')).toBeInTheDocument()
   })
