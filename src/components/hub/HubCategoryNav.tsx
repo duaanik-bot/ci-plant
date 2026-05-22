@@ -19,7 +19,7 @@ export function HubCategoryNav({ active }: { active: HubToolType }) {
           href={`/hub/${id}`}
           className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
             active === id
-              ? 'bg-ds-warning border-ds-warning text-primary-foreground'
+              ? 'bg-ds-brand border-ds-brand text-white'
               : 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted hover:bg-ds-elevated'
           }`}
         >
