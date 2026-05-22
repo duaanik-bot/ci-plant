@@ -112,14 +112,16 @@ export async function POST(req: NextRequest) {
     return po
   })
 
-  await createAuditLog({
-    userId: user!.id,
-    action: 'UPDATE',
-    tableName: 'purchase_requisitions',
-    recordId: prIds.join(','),
-    oldValue: { status: 'approved_or_ordered', prIds },
-    newValue: { status: 'converted_to_po', vendorPoId: result.id, poNumber: result.poNumber },
-  })
+  for (const prId of prIds) {
+    await createAuditLog({
+      userId: user!.id,
+      action: 'UPDATE',
+      tableName: 'purchase_requisitions',
+      recordId: prId,
+      oldValue: { status: 'approved_or_ordered' },
+      newValue: { status: 'converted_to_po', vendorPoId: result.id, poNumber: result.poNumber },
+    })
+  }
 
   return NextResponse.json({
     success: true,
