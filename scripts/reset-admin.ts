@@ -12,7 +12,7 @@ async function main() {
   const hash = await bcrypt.hash(pin, 12)
 
   // Look up the admin role record
-  const role = await prisma.role.findUniqueOrThrow({ where: { name: roleName } })
+  const role = await prisma.role.findUniqueOrThrow({ where: { roleName } })
 
   // Upsert the admin user, linking to the admin role and resetting PIN
   const user = await prisma.user.upsert({
