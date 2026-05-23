@@ -2,13 +2,21 @@
 
 import { Suspense, useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { Star, ChevronRight } from 'lucide-react'
 import { toast } from '@/store/toastStore'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
 import { ReservationsPanel } from './components/ReservationsPanel'
+import { cn } from '@/lib/cn'
+import { computeRag } from '@/lib/procurement-rag'
+import { WarehouseKpiStrip } from './components/WarehouseKpiStrip'
+import { StockTab } from './components/StockTab'
+import { OpenPosTab } from './components/OpenPosTab'
+import { IncomingTab } from './components/IncomingTab'
+import { ReportsTab } from './components/ReportsTab'
+import { MaterialDrawer } from './components/MaterialDrawer'
 
 const ledgerMono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -207,9 +215,17 @@ type ReleaseModalState = {
 
 function InventoryPageContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const ledgerGsm = searchParams.get('ledgerGsm')?.trim() ?? ''
   const ledgerBoard = searchParams.get('ledgerBoard')?.trim() ?? ''
   const deepLinkMaterialId = searchParams.get('materialId')?.trim() ?? ''
+  const warehouseTab = (searchParams.get('warehouseTab') ?? 'stock') as 'stock' | 'open-pos' | 'incoming' | 'reports'
+
+  function setWarehouseTab(tab: 'stock' | 'open-pos' | 'incoming' | 'reports') {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('warehouseTab', tab)
+    router.replace(`?${params.toString()}`, { scroll: false })
+  }
   const { data: session } = useSession()
   const [items, setItems] = useState<StockStateItem[]>([])
   const [alerts, setAlerts] = useState<StockStateItem[]>([])
@@ -495,6 +511,20 @@ function InventoryPageContent() {
       return String(av).localeCompare(String(bv)) * factor
     })
   }, [paperSearch, paperWarehouseRows, warehouseKpiFilter, boardTypeFilter, gsmFilter, statusFilter, shortageOnly, warehouseSort])
+
+  const ragCounts = useMemo(() => {
+    const counts = { green: 0, amber: 0, red: 0 }
+    for (const row of filteredPaperWarehouseRows) {
+      const rag = computeRag({
+        shortage_sheets: Number(row.shortage_sheets),
+        open_pr_id: row.open_pr_id ?? null,
+        open_pr_status: row.open_pr_status ?? null,
+        hasOpenPo: row.hasOpenPo ?? false,
+      })
+      counts[rag]++
+    }
+    return counts
+  }, [filteredPaperWarehouseRows])
 
   function warehouseSortValue(row: PaperWarehouseRow, key: WarehouseSortKey): number | string {
     switch (key) {
@@ -1181,107 +1211,53 @@ function InventoryPageContent() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6 mb-4">
-              {[
-                { key: 'shortage' as const, label: 'Shortage', value: fmt(paperWarehouseKpi.shortage), tone: 'border-[var(--error)]/45 bg-[var(--error-bg)] text-[var(--error)]' },
-                { key: 'available' as const, label: 'Available', value: fmt(paperWarehouseKpi.available), tone: 'border-[var(--success)]/45 bg-[var(--success-bg)] text-[var(--success)]' },
-                { key: 'reserved' as const, label: 'Reserved', value: fmt(paperWarehouseKpi.reserved), tone: 'border-[var(--warning)]/45 bg-[var(--warning-bg)] text-[var(--warning)]' },
-                { key: 'free' as const, label: 'Free Stock', value: fmt(paperWarehouseKpi.freeStock), tone: 'border-cyan-500/45 bg-cyan-500/8 text-cyan-600' },
-                { key: 'incoming' as const, label: 'Incoming', value: fmt(paperWarehouseKpi.incoming), tone: 'border-[var(--info)]/45 bg-[var(--info-bg)] text-[var(--info)]' },
-                { key: 'all' as const, label: 'Total Stock', value: fmt(paperWarehouseKpi.totalPhysical), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
-                { key: 'stale' as const, label: 'Stale', value: fmtVal(paperWarehouseKpi.staleStock), tone: 'border-[var(--error)]/45 bg-[var(--error-bg)] text-[var(--error)]' },
-                { key: 'fast' as const, label: 'Fast-moving', value: fmt(paperWarehouseKpi.fastMoving), tone: 'border-[var(--success)]/45 bg-[var(--success-bg)] text-[var(--success)]' },
-                { key: 'slow' as const, label: 'Slow-moving', value: fmt(paperWarehouseKpi.slowMoving), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
-                { key: 'mismatch' as const, label: 'Incoming Mismatch', value: fmt(paperWarehouseKpi.incomingRequiredMismatch), tone: 'border-ds-warning/35 bg-ds-warning/10 text-ds-warning' },
-                { key: 'all' as const, label: 'Inventory Value', value: fmtVal(paperWarehouseKpi.value), tone: 'border-ds-line/40 bg-ds-elevated/10 text-ds-ink' },
-                { key: 'all' as const, label: 'Ageing Risk', value: fmtVal(paperWarehouseKpi.ageingRisk), tone: 'border-[var(--error)]/45 bg-[var(--error-bg)] text-[var(--error)]' },
-              ].map((kpi, i) => (
+            <WarehouseKpiStrip
+              ragCounts={ragCounts}
+              incomingKgThisWeek={0}
+              openPoValueInr={0}
+              avgDaysOfCover={
+                filteredPaperWarehouseRows.filter((r) => r.daysOfCover != null).length > 0
+                  ? filteredPaperWarehouseRows.reduce((s, r) => s + (r.daysOfCover ?? 0), 0) /
+                    filteredPaperWarehouseRows.filter((r) => r.daysOfCover != null).length
+                  : null
+              }
+              onFilterRed={() => setWarehouseTab('stock')}
+              onFilterAmber={() => setWarehouseTab('stock')}
+              onSwitchToOpenPos={() => setWarehouseTab('open-pos')}
+              onSwitchToIncoming={() => setWarehouseTab('incoming')}
+            />
+
+            {/* Warehouse tab navigation */}
+            <div className="flex gap-0 border-b border-ds-line/25 mb-4">
+              {(['stock', 'open-pos', 'incoming', 'reports'] as const).map((tab) => (
                 <button
-                  key={`${kpi.label}-${i}`}
+                  key={tab}
                   type="button"
-                  onClick={() => setWarehouseKpiFilter((f) => (f === kpi.key ? 'all' : kpi.key))}
-                  className={`h-16 rounded-ds-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${kpi.tone} cursor-pointer`}
+                  onClick={() => setWarehouseTab(tab)}
+                  className={cn(
+                    'pb-2 pr-6 text-sm font-medium transition-colors',
+                    warehouseTab === tab
+                      ? 'border-b-2 border-ds-primary text-ds-ink'
+                      : 'text-ds-ink-muted hover:text-ds-ink',
+                  )}
                 >
-                  <p className="text-[11px] uppercase tracking-wide text-ds-ink-muted">{kpi.label}</p>
-                  <p className={`${ledgerMono} text-lg font-bold`}>{kpi.value}</p>
+                  {tab === 'stock' ? 'Stock' : tab === 'open-pos' ? 'Open POs' : tab === 'incoming' ? 'Incoming' : 'Reports'}
                 </button>
               ))}
             </div>
 
-            <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex w-full items-center gap-2 lg:max-w-3xl">
-                <input
-                  type="text"
-                  value={paperSearch}
-                  onChange={(e) => setPaperSearch(e.target.value)}
-                  placeholder="Search by material code, board type, classification, size, GSM..."
-                  className={`w-full rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint ${ledgerMono}`}
-                />
-                <select
-                  value={boardTypeFilter}
-                  onChange={(e) => setBoardTypeFilter(e.target.value)}
-                  className="w-36 rounded-ds-md border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
-                >
-                  <option value="all">Board Type</option>
-                  {boardTypeFilterOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-                <select
-                  value={gsmFilter}
-                  onChange={(e) => setGsmFilter(e.target.value)}
-                  className="w-24 rounded-ds-md border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
-                >
-                  <option value="all">GSM</option>
-                  {gsmFilterOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-28 rounded-ds-md border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink"
-                >
-                  <option value="all">Status</option>
-                  {statusFilterOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-                <label className="inline-flex items-center gap-1 rounded-ds-md border border-ds-line/50 bg-background px-2 py-2 text-xs text-ds-ink">
-                  <input
-                    type="checkbox"
-                    checked={shortageOnly}
-                    onChange={(e) => setShortageOnly(e.target.checked)}
-                    className="h-4 w-4"
-                  />
-                  Shortage only
-                </label>
-              </div>
+            {warehouseTab === 'stock' && (
+              <StockTab
+                rows={filteredPaperWarehouseRows}
+                onRowClick={(row) => setMaterialDrawerRow(row)}
+              />
+            )}
+            {warehouseTab === 'open-pos' && <OpenPosTab />}
+            {warehouseTab === 'incoming' && <IncomingTab />}
+            {warehouseTab === 'reports' && <ReportsTab />}
 
-              <button
-                type="button"
-                onClick={() => setPaperLedgerSort('oldest')}
-                className={`rounded-ds-md px-3 py-1.5 text-xs font-medium border ${
-                  paperLedgerSort === 'oldest'
-                    ? 'bg-ds-warning border-ds-warning text-primary-foreground'
-                    : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
-                }`}
-              >
-                Oldest first
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaperLedgerSort('newest')}
-                className={`rounded-ds-md px-3 py-1.5 text-xs font-medium border ${
-                  paperLedgerSort === 'newest'
-                    ? 'bg-ds-warning border-ds-warning text-primary-foreground'
-                    : 'bg-background border-ds-line/50 text-ds-ink-muted hover:border-ds-line/50'
-                }`}
-              >
-                Newest first
-              </button>
-            </div>
-            <div className="overflow-x-auto rounded-ds-md border border-ds-line/40 shadow-sm">
+            {/* Keep a hidden sentinel so the old overflow div is replaced properly */}
+            <div className="hidden overflow-x-auto rounded-ds-md border border-ds-line/40 shadow-sm">
               <table className="w-full table-auto text-sm">
                 <thead className="bg-background text-left border-b border-ds-line/40">
                   <tr className="text-ds-ink-muted text-[12px] uppercase tracking-wide">
@@ -1511,9 +1487,18 @@ function InventoryPageContent() {
           </div>
         </section>
 
-        <SlideOverPanel
-          title="Material details"
+        <MaterialDrawer
+          row={materialDrawerRow}
           isOpen={!!materialDrawerRow}
+          onClose={() => setMaterialDrawerRow(null)}
+          onPrCreated={() => { void reloadAll() }}
+          onPoCreated={() => { void reloadAll() }}
+        />
+
+        {/* Legacy material details panel — kept hidden for JSX balance; replaced by MaterialDrawer above */}
+        <SlideOverPanel
+          title="Material details (legacy)"
+          isOpen={false}
           onClose={() => {
             setMaterialDrawerRow(null)
             setMaterialDrawerData(null)
