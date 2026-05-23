@@ -1,9 +1,10 @@
 // prisma/seed.ts
 // Run with: npx prisma db seed
-// Seeds: 10 roles, 12 machines, 13 QC instruments, admin user
+// Seeds: 5 roles, 14 machines, 13 QC instruments, 7 login users, 14 operators
 
 import { Prisma, PrismaClient, PastingStyle } from '@prisma/client'
 import bcrypt from 'bcryptjs'
+import { MACHINES, LOGIN_USERS, OPERATORS, DEFAULT_USER_PIN } from '../src/lib/master-data'
 
 const prisma = new PrismaClient()
 
@@ -11,297 +12,47 @@ async function main() {
   console.log('🌱 Seeding Colour Impressions Plant System...')
 
   // ─────────────────────────────────────────
-  // ROLES
+  // ROLES — 5 canonical roles
   // ─────────────────────────────────────────
-  const roles = await Promise.all([
-    prisma.role.upsert({
-      where: { roleName: 'md' },
-      update: {},
-      create: {
-        roleName: 'md',
-        wastageApproveLimitPct: 999, // unlimited
-        canApproveArtwork: true,
-        canReleaseDispatch: true,
-        permissions: {
-          jobs: 'full', artwork: 'full', production: 'full',
-          inventory: 'full', qms: 'full', dispatch: 'full',
-          reports: 'full', admin: 'full',
+  const ROLE_SEED: { slug: string; permissions: Record<string, string>; full: boolean }[] = [
+    { slug: 'admin', full: true, permissions: { jobs: 'full', artwork: 'full', production: 'full', inventory: 'full', qms: 'full', dispatch: 'full', reports: 'full', admin: 'full' } },
+    { slug: 'plant_head', full: true, permissions: { jobs: 'full', artwork: 'full', production: 'full', inventory: 'full', qms: 'full', dispatch: 'full', reports: 'full', admin: 'full' } },
+    { slug: 'accounts', full: false, permissions: { jobs: 'view', artwork: 'none', production: 'none', inventory: 'view', qms: 'none', dispatch: 'view', reports: 'partial', admin: 'none' } },
+    { slug: 'design_planning', full: false, permissions: { jobs: 'full', artwork: 'approve', production: 'partial', inventory: 'view', qms: 'view', dispatch: 'view', reports: 'partial', admin: 'none' } },
+    { slug: 'production', full: false, permissions: { jobs: 'own', artwork: 'none', production: 'own', inventory: 'own', qms: 'none', dispatch: 'none', reports: 'none', admin: 'none' } },
+  ]
+  const roles = await Promise.all(
+    ROLE_SEED.map((r) =>
+      prisma.role.upsert({
+        where: { roleName: r.slug },
+        update: { permissions: r.permissions, canApproveArtwork: r.full || r.slug === 'design_planning', canReleaseDispatch: r.full, wastageApproveLimitPct: r.full ? 999 : 0 },
+        create: {
+          roleName: r.slug,
+          permissions: r.permissions,
+          canApproveArtwork: r.full || r.slug === 'design_planning',
+          canReleaseDispatch: r.full,
+          wastageApproveLimitPct: r.full ? 999 : 0,
         },
-      },
-    }),
-    prisma.role.upsert({
-      where: { roleName: 'operations_head' },
-      update: {},
-      create: {
-        roleName: 'operations_head',
-        wastageApproveLimitPct: 200,
-        canApproveArtwork: true,
-        canReleaseDispatch: true,
-        permissions: {
-          jobs: 'full', artwork: 'approve', production: 'full',
-          inventory: 'full', qms: 'full', dispatch: 'full',
-          reports: 'full', admin: 'view',
-        },
-      },
-    }),
-    prisma.role.upsert({
-      where: { roleName: 'production_manager' },
-      update: {},
-      create: {
-        roleName: 'production_manager',
-        wastageApproveLimitPct: 150,
-        canApproveArtwork: false,
-        canReleaseDispatch: false,
-        permissions: {
-          jobs: 'full', artwork: 'view', production: 'full',
-          inventory: 'full', qms: 'view', dispatch: 'view',
-          reports: 'partial', admin: 'none',
-        },
-      },
-    }),
-    prisma.role.upsert({
-      where: { roleName: 'shift_supervisor' },
-      update: {},
-      create: {
-        roleName: 'shift_supervisor',
-        wastageApproveLimitPct: 100,
-        canApproveArtwork: false,
-        canReleaseDispatch: false,
-        permissions: {
-          jobs: 'partial', artwork: 'none', production: 'full',
-          inventory: 'view', qms: 'view', dispatch: 'none',
-          reports: 'none', admin: 'none',
-        },
-      },
-    }),
-    prisma.role.upsert({
-      where: { roleName: 'press_operator' },
-      update: {},
-      create: {
-        roleName: 'press_operator',
-        wastageApproveLimitPct: 0,
-        canApproveArtwork: false,
-        canReleaseDispatch: false,
-        permissions: {
-          jobs: 'own', artwork: 'none', production: 'own',
-          inventory: 'own', qms: 'none', dispatch: 'none',
-          reports: 'none', admin: 'none',
-        },
-      },
-    }),
-    prisma.role.upsert({
-      where: { roleName: 'qa_officer' },
-      update: {},
-      create: {
-        roleName: 'qa_officer',
-        wastageApproveLimitPct: 0,
-        canApproveArtwork: true, // Lock 2 only
-        canReleaseDispatch: false,
-        permissions: {
-          jobs: 'view', artwork: 'approve', production: 'view',
-          inventory: 'quarantine', qms: 'full', dispatch: 'approve',
-          reports: 'qc', admin: 'none',
-        },
-      },
-    }),
-    prisma.role.upsert({
-      where: { roleName: 'qa_manager' },
-      update: {},
-      create: {
-        roleName: 'qa_manager',
-        wastageApproveLimitPct: 0,
-        canApproveArtwork: true, // Lock 3 — final
-        canReleaseDispatch: true,
-        permissions: {
-          jobs: 'view', artwork: 'final', production: 'view',
-          inventory: 'view', qms: 'full', dispatch: 'final',
-          reports: 'qc', admin: 'none',
-        },
-      },
-    }),
-    prisma.role.upsert({
-      where: { roleName: 'stores' },
-      update: {},
-      create: {
-        roleName: 'stores',
-        wastageApproveLimitPct: 0,
-        canApproveArtwork: false,
-        canReleaseDispatch: false,
-        permissions: {
-          jobs: 'none', artwork: 'none', production: 'none',
-          inventory: 'wms', qms: 'none', dispatch: 'pick',
-          reports: 'none', admin: 'none',
-        },
-      },
-    }),
-    prisma.role.upsert({
-      where: { roleName: 'procurement_manager' },
-      update: {},
-      create: {
-        roleName: 'procurement_manager',
-        wastageApproveLimitPct: 0,
-        canApproveArtwork: false,
-        canReleaseDispatch: false,
-        permissions: {
-          jobs: 'view', artwork: 'none', production: 'view',
-          inventory: 'view', qms: 'none', dispatch: 'view',
-          reports: 'partial', admin: 'none',
-        },
-      },
-    }),
-  ])
+      }),
+    ),
+  )
   console.log(`✅ ${roles.length} roles created`)
 
-  // ─────────────────────────────────────────
-  // MACHINES — CI-01 through CI-12
-  // ─────────────────────────────────────────
-  const machines = await Promise.all([
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-01' },
-      update: {},
-      create: {
-        machineCode: 'CI-01',
-        name: 'Offset Press 5 Colour + Coater',
-        make: 'Komori Lithron',
-        specification: '20"×28"',
-        capacityPerShift: 80000, // 10,000/hr × 8hr shift
-        stdWastePct: 3.0,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-02' },
-      update: {},
-      create: {
-        machineCode: 'CI-02',
-        name: 'Offset Press 5 Colour',
-        make: 'Komori Lithron',
-        specification: '20"×28"',
-        capacityPerShift: 64000,
-        stdWastePct: 3.5,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-03' },
-      update: {},
-      create: {
-        machineCode: 'CI-03',
-        name: 'Offset Press 5 Colour (Small Format)',
-        make: 'Komori Lithron',
-        specification: '19"×26"',
-        capacityPerShift: 60000,
-        stdWastePct: 4.0,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-04' },
-      update: {},
-      create: {
-        machineCode: 'CI-04',
-        name: 'UV / Varnish Machine',
-        make: 'Komori 2 Colour',
-        specification: '19"×26"',
-        capacityPerShift: 48000, // 6,000/hr × 8hr
-        stdWastePct: 2.0,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-05' },
-      update: {},
-      create: {
-        machineCode: 'CI-05',
-        name: 'Lamination Machine',
-        make: 'Royal Thermal',
-        specification: '24"',
-        capacityPerShift: 8000,
-        stdWastePct: 1.5,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-06' },
-      update: {},
-      create: {
-        machineCode: 'CI-06',
-        name: 'Die Punch Cutting Machine (Auto)',
-        make: 'Heidelberg Automatic',
-        specification: '28"×40"',
-        capacityPerShift: 12000,
-        stdWastePct: 2.0,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-07' },
-      update: {},
-      create: {
-        machineCode: 'CI-07',
-        name: 'Die Punch Cutting Machine (Manual)',
-        make: 'Indian/Manual',
-        specification: '20"×28"',
-        capacityPerShift: 12000,
-        stdWastePct: 2.5,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-08' },
-      update: {},
-      create: {
-        machineCode: 'CI-08',
-        name: 'Automatic Lock Bottom Pasting Machine',
-        make: 'Precision',
-        specification: '24"',
-        capacityPerShift: 300000,
-        stdWastePct: 1.0,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-09' },
-      update: {},
-      create: {
-        machineCode: 'CI-09',
-        name: 'Side Pasting Machine',
-        make: 'Cortonal',
-        specification: '24"',
-        capacityPerShift: 400000,
-        stdWastePct: 1.0,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-10' },
-      update: {},
-      create: {
-        machineCode: 'CI-10',
-        name: 'Board Cutting Machine',
-        make: 'ACE',
-        specification: '42"',
-        capacityPerShift: 12000,
-        stdWastePct: 0.5,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-11' },
-      update: {},
-      create: {
-        machineCode: 'CI-11',
-        name: 'Automatic Label Cutting Machine',
-        make: 'Jindal',
-        specification: 'Auto',
-        capacityPerShift: 20000,
-        stdWastePct: 1.0,
-      },
-    }),
-    prisma.machine.upsert({
-      where: { machineCode: 'CI-12' },
-      update: {},
-      create: {
-        machineCode: 'CI-12',
-        name: 'Platesetter (CTP Unit)',
-        make: 'Kodak Achieve',
-        specification: 'Thermal CTP',
-        capacityPerShift: 200,
-        stdWastePct: 0,
-      },
-    }),
-  ])
-  console.log(`✅ ${machines.length} machines seeded (CI-01 through CI-12)`)
+  const machines = await Promise.all(
+    MACHINES.map((m) =>
+      prisma.machine.upsert({
+        where: { machineCode: m.machineCode },
+        update: { name: m.name, capacityPerShift: m.capacityPerShift, stdWastePct: m.stdWastePct },
+        create: {
+          machineCode: m.machineCode,
+          name: m.name,
+          capacityPerShift: m.capacityPerShift,
+          stdWastePct: m.stdWastePct,
+        },
+      }),
+    ),
+  )
+  console.log(`✅ ${machines.length} machines seeded`)
 
   const OFFSET_PM_CHECKLIST = [
     'Lockout/tagout verified; energy isolation documented',
@@ -319,7 +70,7 @@ async function main() {
     'Trial run + sign-off before release to production',
   ]
   for (const m of machines) {
-    const isOffset = ['CI-01', 'CI-02', 'CI-03'].includes(m.machineCode)
+    const isOffset = m.machineCode.startsWith('PRN-')
     await prisma.machinePmSchedule.upsert({
       where: { machineId: m.id },
       update: {},
@@ -461,25 +212,37 @@ async function main() {
   console.log('✅ 13 QC instruments seeded')
 
   // ─────────────────────────────────────────
-  // ADMIN USER
+  // DEDICATED LOGIN USERS
   // ─────────────────────────────────────────
-  const mdRole = roles.find(r => r.roleName === 'md')!
-  const pinHash = await bcrypt.hash('123456', 12)
+  const pinHash = await bcrypt.hash(DEFAULT_USER_PIN, 12)
+  const roleBySlug = new Map(roles.map((r) => [r.roleName, r.id]))
+  for (const u of LOGIN_USERS) {
+    const roleId = roleBySlug.get(u.roleSlug)
+    if (!roleId) throw new Error(`Missing role ${u.roleSlug} for user ${u.name}`)
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: { name: u.name, roleId, active: true },
+      create: { name: u.name, email: u.email, pinHash, roleId, active: true },
+    })
+  }
+  console.log(`✅ ${LOGIN_USERS.length} login users seeded (default PIN ${DEFAULT_USER_PIN})`)
 
-  await prisma.user.upsert({
-    where: { email: 'dua.anik@gmail.com' },
-    update: {},
-    create: {
-      name: 'Anik Dua',
-      email: 'dua.anik@gmail.com',
-      pinHash,
-      roleId: mdRole.id,
-      whatsappNumber: '+919780020225',
-      active: true,
-    },
-  })
-  console.log('✅ Admin user created — email: dua.anik@gmail.com PIN: 123456')
-  console.log('⚠️  CHANGE THE PIN on first login!')
+  // ─────────────────────────────────────────
+  // OPERATORS + STATION ASSIGNMENTS
+  // ─────────────────────────────────────────
+  for (const op of OPERATORS) {
+    const row = await prisma.operatorMaster.upsert({
+      where: { name: op.name },
+      update: { isActive: true },
+      create: { name: op.name, isActive: true },
+    })
+    await prisma.operatorStationAssignment.upsert({
+      where: { operatorId_stageKey: { operatorId: row.id, stageKey: op.stageKey } },
+      update: {},
+      create: { operatorId: row.id, stageKey: op.stageKey },
+    })
+  }
+  console.log(`✅ ${OPERATORS.length} operators + station assignments seeded`)
 
   // ─────────────────────────────────────────
   // DYES (5 samples)
