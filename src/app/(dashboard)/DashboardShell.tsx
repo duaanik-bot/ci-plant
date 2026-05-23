@@ -478,7 +478,7 @@ export function DashboardShell({
                   <CommandPaletteTriggerIcon />
                 </div>
                 <ThemeToggle />
-                <div className="hidden rounded-ds-sm border border-white/15 bg-white/5 p-0.5 xl:inline-flex">
+                <div className="hidden rounded-ds-sm bg-white/10 p-0.5 xl:inline-flex">
                   <button
                     type="button"
                     onClick={() => setUiDensity('dense')}
@@ -523,7 +523,7 @@ export function DashboardShell({
                   <button
                     type="button"
                     onClick={() => void signOut({ callbackUrl: '/login' })}
-                    className="ml-1 inline-flex items-center gap-1.5 rounded-ds-sm border border-white/15 px-2.5 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                    className="ml-1 inline-flex items-center gap-1.5 rounded-ds-sm bg-white/5 px-2.5 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
                     aria-label="Sign out"
                     title="Sign out"
                   >

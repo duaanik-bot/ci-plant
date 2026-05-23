@@ -230,16 +230,17 @@ function PoDeepFilterBar({
   return (
     <div className="flex w-full items-stretch gap-2">
       <div
-        className={`group flex min-w-0 flex-1 items-center gap-2 rounded-ds-sm border bg-ds-card/50 px-3 py-1.5 text-sm backdrop-blur-md transition-all duration-300 ${
-          filterActive
-            ? 'border-[var(--success)]/45 shadow-[0_0_16px_rgba(16,185,129,0.12)] ring-2 ring-[var(--success)]/30 dark:shadow-[0_0_32px_rgba(52,211,153,0.22),0_0_56px_rgba(245,158,11,0.12)] dark:ring-[var(--success)]/35'
-            : 'border-ds-warning/45 shadow-[0_0_8px_rgba(245,158,11,0.10)] ring-1 ring-ds-warning/35 dark:shadow-[0_0_14px_rgba(245,158,11,0.12)] dark:ring-ds-warning/40'
+        className={`group flex min-w-0 flex-1 items-center gap-2 rounded-ds-sm bg-[var(--bg-elevated)] px-3 py-1.5 text-sm transition-shadow duration-150 focus-within:ring-2 focus-within:ring-[var(--brand-primary)]/30 ${
+          filterActive ? 'ring-1 ring-[var(--brand-primary)]/25' : ''
         }`}
       >
-        <Search className="h-4 w-4 text-ds-warning shrink-0" aria-hidden />
+        <Search
+          className={`h-4 w-4 shrink-0 ${filterActive ? 'text-[var(--brand-primary)]' : 'text-ds-ink-faint'}`}
+          aria-hidden
+        />
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {value.trim().length >= 2 ? (
-            <span className="shrink-0 text-[var(--success)]/90 text-xs sm:text-sm">Filtering:</span>
+            <span className="shrink-0 text-xs text-[var(--brand-primary)] sm:text-sm">Filtering:</span>
           ) : null}
           <input
             id="po-module-search"
@@ -257,7 +258,7 @@ function PoDeepFilterBar({
         <button
           type="button"
           onClick={() => onClear()}
-          className="shrink-0 self-center rounded-ds-sm border border-ds-line/50 bg-ds-card/60 px-2.5 py-2 text-ds-ink-faint backdrop-blur-md hover:border-ds-warning/40 hover:bg-ds-elevated/80 hover:text-ds-warning"
+          className="shrink-0 self-center rounded-ds-sm bg-[var(--bg-elevated)] px-2.5 py-2 text-ds-ink-faint transition-colors hover:bg-[var(--bg-muted)] hover:text-ds-ink"
           title="Clear list filter"
           aria-label="Clear list filter"
         >
