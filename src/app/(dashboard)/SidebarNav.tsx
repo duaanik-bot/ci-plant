@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
+import { hasModuleAccess, type ModuleKey } from '@/lib/rbac'
 import {
   LayoutDashboard,
   FileText,
@@ -79,7 +80,7 @@ function saveStored(state: Record<string, boolean>) {
   } catch {}
 }
 
-type NavLink = { href: string; label: string; icon: React.ComponentType<{ className?: string }>; external?: boolean }
+type NavLink = { href: string; label: string; icon: React.ComponentType<{ className?: string }>; external?: boolean; module?: ModuleKey }
 type NavSection = {
   key: string
   title: string
@@ -87,6 +88,7 @@ type NavSection = {
   borderColor: string
   links: NavLink[]
   show?: boolean
+  module?: ModuleKey
 }
 
 function NavItem({
@@ -134,11 +136,9 @@ function NavItem({
 }
 
 export function SidebarNav({
-  canSeeMasters,
   userName,
   userRole,
 }: {
-  canSeeMasters: boolean
   userName: string | null
   userRole: string | undefined
 }) {
@@ -159,6 +159,8 @@ export function SidebarNav({
     })
   }, [])
 
+  const linkVisible = (l: NavLink) => !l.module || hasModuleAccess(userRole, l.module)
+
   const sections: NavSection[] = [
     {
       key: 'dashboard',
@@ -174,11 +176,11 @@ export function SidebarNav({
       title: '📋 ORDERS',
       borderColor: 'border-l-blue-500',
       links: [
-        { href: '/rfq', label: 'RFQ Pipeline', icon: FileText },
-        { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart },
-        { href: '/orders/planning', label: 'Planning', icon: CalendarCheck },
-        { href: '/orders/designing', label: 'Artwork Queue', icon: Image },
-        { href: '/production/job-cards', label: 'Job Cards', icon: FileStack },
+        { href: '/rfq', label: 'RFQ Pipeline', icon: FileText, module: 'customer_po' },
+        { href: '/orders/purchase-orders', label: 'Customer POs', icon: ShoppingCart, module: 'customer_po' },
+        { href: '/orders/planning', label: 'Planning', icon: CalendarCheck, module: 'planning' },
+        { href: '/orders/designing', label: 'Artwork Queue', icon: Image, module: 'artwork_queue' },
+        { href: '/production/job-cards', label: 'Job Cards', icon: FileStack, module: 'job_cards' },
       ],
     },
     {
@@ -186,6 +188,7 @@ export function SidebarNav({
       title: '🔧 TOOLING HUB',
       subtitle: 'Plates, dies, blocks, and shade cards',
       borderColor: 'border-l-emerald-500',
+      module: 'tooling_hub',
       links: [
         { href: '/hub/plates', label: 'Plates', icon: Layers },
         { href: '/hub/dies', label: 'Dies', icon: Droplets },
@@ -197,6 +200,7 @@ export function SidebarNav({
       key: 'execution',
       title: '🏭 PRODUCTION EXECUTION',
       borderColor: 'border-l-orange-500',
+      module: 'planning',
       links: [
         { href: '/production/print-planning', label: 'Print Planning', icon: LayoutGrid },
       ],
@@ -206,8 +210,8 @@ export function SidebarNav({
       title: '🏭 PRODUCTION',
       borderColor: 'border-l-rose-500',
       links: [
-        { href: '/production/stages', label: 'Live Production', icon: Factory },
-        { href: '/production/cutting-queue', label: 'Cutting queue', icon: Scissors },
+        { href: '/production/stages', label: 'Live Production', icon: Factory, module: 'cutting' },
+        { href: '/production/cutting-queue', label: 'Cutting queue', icon: Scissors, module: 'cutting' },
       ],
     },
     {
@@ -215,14 +219,15 @@ export function SidebarNav({
       title: '📦 INVENTORY',
       borderColor: 'border-l-teal-500',
       links: [
-        { href: '/inventory', label: 'Raw Materials', icon: Warehouse },
-        { href: '/inventory/flow', label: 'Inventory Flow', icon: RefreshCw },
+        { href: '/inventory', label: 'Raw Materials', icon: Warehouse, module: 'paper_warehouse' },
+        { href: '/inventory/flow', label: 'Inventory Flow', icon: RefreshCw, module: 'inventory' },
       ],
     },
     {
       key: 'stores',
       title: '🏪 STORES',
       borderColor: 'border-l-ds-warning/90',
+      module: 'stores',
       links: [
         { href: '/stores/issue', label: 'Issue Sheets', icon: PackageCheck },
         { href: '/stores/approve-excess', label: 'Approve Excess', icon: CheckSquare },
@@ -232,6 +237,7 @@ export function SidebarNav({
       key: 'quality',
       title: '✅ QUALITY',
       borderColor: 'border-l-lime-500',
+      module: 'quality',
       links: [
         { href: '/qms/qc', label: 'QC Records', icon: ClipboardCheck },
         { href: '/qms/ncr', label: 'NCR / CAPA', icon: AlertTriangle },
@@ -241,6 +247,7 @@ export function SidebarNav({
       key: 'dispatch',
       title: '🚚 DISPATCH',
       borderColor: 'border-l-indigo-500',
+      module: 'dispatch',
       links: [
         { href: '/dispatch', label: 'Dispatch Planning', icon: Truck },
         { href: '/dispatch/tracking', label: 'Deliveries', icon: MapPin },
@@ -252,6 +259,7 @@ export function SidebarNav({
       key: 'reports',
       title: '📈 REPORTS',
       borderColor: 'border-l-purple-500',
+      module: 'reports',
       links: [
         { href: '/reports/dashboard', label: 'MD Dashboard', icon: BarChart3 },
         { href: '/reports/production', label: 'Production Summary', icon: BarChart3 },
@@ -263,6 +271,7 @@ export function SidebarNav({
       key: 'masters',
       title: '⚙️ MASTERS',
       borderColor: 'border-l-violet-500',
+      module: 'masters',
       links: [
         { href: '/masters/customers', label: 'Customers', icon: Users },
         { href: '/masters/suppliers', label: 'Suppliers', icon: Truck },
@@ -273,7 +282,6 @@ export function SidebarNav({
         { href: '/masters/instruments', label: 'QC Instruments', icon: FlaskConical },
         { href: '/masters/minimasters', label: 'MiniMasters', icon: Palette },
       ],
-      show: canSeeMasters,
     },
   ]
 
@@ -287,6 +295,9 @@ export function SidebarNav({
     <>
       {sections.map((section) => {
         if (section.show === false) return null
+        const links = section.links.filter(linkVisible)
+        if (links.length === 0) return null
+        if (section.module && !hasModuleAccess(userRole, section.module)) return null
         const isOpen = hydrated ? open[section.key] !== false : true
         return (
           <div
@@ -310,7 +321,7 @@ export function SidebarNav({
             )}
             {isOpen && (
               <div className="space-y-0.5">
-                {section.links.map((link) => (
+                {links.map((link) => (
                   <NavItem
                     key={link.href}
                     href={link.href}
