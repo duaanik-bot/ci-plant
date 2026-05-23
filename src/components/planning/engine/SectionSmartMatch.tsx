@@ -14,6 +14,7 @@ type Props = {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
   onPatch: SectionPatchFn
+  onSelectBoard?: (materialId: string) => Promise<void>
 }
 
 const nf = new Intl.NumberFormat('en-IN')

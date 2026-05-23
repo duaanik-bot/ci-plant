@@ -10,6 +10,10 @@ type Props = {
   readiness: PlanningEngineReadiness | null
   readinessLoading: boolean
   onPatch: SectionPatchFn
+  onSelectBoard?: (materialId: string) => Promise<void>
+  onReserve?: () => Promise<void>
+  onUnreserve?: () => Promise<void>
+  onRaisePR?: () => Promise<void>
 }
 
 const nf = new Intl.NumberFormat('en-IN')
