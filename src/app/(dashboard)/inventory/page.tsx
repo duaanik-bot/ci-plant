@@ -36,7 +36,7 @@ type PaperLedgerRow = {
   suggestBalanceWriteOff: boolean
 }
 
-type PaperWarehouseRow = {
+export type PaperWarehouseRow = {
   material_id: string
   material_code: string
   board_type_id: string | null
@@ -58,6 +58,7 @@ type PaperWarehouseRow = {
   open_pr_id?: string | null
   open_pr_status?: string | null
   daysOfCover: number | null
+  hasOpenPo?: boolean
 }
 
 type WarehouseSortKey =
