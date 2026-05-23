@@ -429,7 +429,7 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
 
       {/* ── Info note ── */}
       <p className="text-[11px] text-ds-ink-faint mb-3 leading-relaxed">
-        Balance sheets will be available after cutting is complete. Select how you'd like to handle this stock.
+        Balance sheets will be available after cutting is complete. Select how you&apos;d like to handle this stock.
       </p>
 
       {/* ── Horizontal action cards ── */}
