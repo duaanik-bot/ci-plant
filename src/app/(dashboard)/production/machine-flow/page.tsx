@@ -28,10 +28,10 @@ type MachineFlowItem = {
   }
 }
 
-const PREPRESS = ['Board Store', 'CI-10', 'CI-12', 'Plate QC & Store']
-const PRESS = ['CI-01', 'CI-02', 'CI-03']
-const POSTPRESS = ['CI-04', 'CI-05']
-const FINISHING = ['CI-06', 'CI-07', 'CI-08', 'CI-09']
+const PREPRESS: string[] = []
+const PRESS = ['PRN-01', 'PRN-02', 'PRN-03']
+const POSTPRESS = ['COT-01', 'COT-02']
+const FINISHING = ['DIE-A01', 'DIE-A02', 'DIE-A03', 'DIE-M01', 'DIE-M02', 'PST-01', 'PST-02', 'PST-03', 'CUT-01']
 const QC_DISPATCH = ['Final QC Bench', 'Auto Counter', 'Packing Line', 'FG Warehouse', 'Dispatch Bay']
 
 function MachineCard({
@@ -117,7 +117,7 @@ export default function MachineFlowPage() {
     return { label, items: items.length ? items : machines.filter((m) => codes.some((c) => m.machineCode === c || m.name.includes(c))) }
   }
 
-  const prepressItems = machines.filter((m) => m.machineCode === 'CI-10' || m.machineCode === 'CI-12')
+  const prepressItems: typeof machines = []
   const pressItems = machines.filter((m) => PRESS.includes(m.machineCode))
   const postpressItems = machines.filter((m) => POSTPRESS.includes(m.machineCode))
   const finishingItems = machines.filter((m) => FINISHING.includes(m.machineCode))

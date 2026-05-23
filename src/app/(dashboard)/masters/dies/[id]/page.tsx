@@ -116,7 +116,7 @@ function IssuePanel({ die }: { die: DieDetail }) {
   const [jobCardId, setJobCardId] = useState('')
   const [jobCardNumber, setJobCardNumber] = useState('')
   const [issuedTo, setIssuedTo] = useState('')
-  const [machineCode, setMachineCode] = useState('CI-06')
+  const [machineCode, setMachineCode] = useState('DIE-A01')
   const [impressionsThisRun, setImpressionsThisRun] = useState('')
   const [returnCondition, setReturnCondition] = useState('Good')
   const [actionTaken, setActionTaken] = useState('store')
@@ -169,7 +169,7 @@ function IssuePanel({ die }: { die: DieDetail }) {
       <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
       <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
       <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full"><option>CI-06</option><option>CI-07</option></select>
+      <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full"><option>DIE-A01</option><option>DIE-A02</option><option>DIE-A03</option><option>DIE-M01</option><option>DIE-M02</option></select>
       <button onClick={issue} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Issue Die</button>
     </div>
   )

@@ -28,9 +28,9 @@ export function ImpressionsTrendChart({ data }: { data: TrendRow[] }) {
           labelStyle={{ color: '#e2e8f0' }}
         />
         <Legend />
-        <Line type="monotone" dataKey="ci01" name="CI-01" stroke="#3B82F6" strokeWidth={2} dot={{ fill: '#3B82F6' }} />
-        <Line type="monotone" dataKey="ci02" name="CI-02" stroke="#14B8A6" strokeWidth={2} dot={{ fill: '#14B8A6' }} />
-        <Line type="monotone" dataKey="ci03" name="CI-03" stroke="#F97316" strokeWidth={2} dot={{ fill: '#F97316' }} />
+        <Line type="monotone" dataKey="ci01" name="PRN-01" stroke="#3B82F6" strokeWidth={2} dot={{ fill: '#3B82F6' }} />
+        <Line type="monotone" dataKey="ci02" name="PRN-02" stroke="#14B8A6" strokeWidth={2} dot={{ fill: '#14B8A6' }} />
+        <Line type="monotone" dataKey="ci03" name="PRN-03" stroke="#F97316" strokeWidth={2} dot={{ fill: '#F97316' }} />
       </LineChart>
     </ResponsiveContainer>
   )

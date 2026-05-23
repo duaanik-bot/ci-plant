@@ -121,7 +121,7 @@ export default function MastersMachinesPage() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Machine Master (CI-01 to CI-12)</h2>
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Machine Master</h2>
         <div className="flex items-center gap-2">
           <button
             type="button"

@@ -131,7 +131,7 @@ export default function NewUserPage() {
           </select>
         </div>
         <div>
-          <label className="block text-sm text-ds-ink-muted mb-1">Machine access (CI-01 to CI-12)</label>
+          <label className="block text-sm text-ds-ink-muted mb-1">Machine access</label>
           <div className="flex flex-wrap gap-2">
             {machines.map((m) => (
               <label key={m.id} className="flex items-center gap-1 text-sm">

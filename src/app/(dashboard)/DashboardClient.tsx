@@ -107,12 +107,12 @@ const TREND_DATA = [
 ]
 
 const WASTAGE_DATA = [
-  { machine: 'CI-01', pct: 3.2 },
-  { machine: 'CI-02', pct: 4.8 },
-  { machine: 'CI-03', pct: 2.1 },
-  { machine: 'CI-04', pct: 5.5 },
-  { machine: 'CI-05', pct: 1.8 },
-  { machine: 'CI-06', pct: 3.9 },
+  { machine: 'PRN-01', pct: 3.2 },
+  { machine: 'PRN-02', pct: 4.8 },
+  { machine: 'PRN-03', pct: 2.1 },
+  { machine: 'COT-01', pct: 5.5 },
+  { machine: 'DIE-A01', pct: 1.8 },
+  { machine: 'PST-01', pct: 3.9 },
 ]
 
 const RFQ_PIPELINE_STAGES = [

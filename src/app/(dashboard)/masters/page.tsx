@@ -42,7 +42,7 @@ const groupedCards = [
       {
         href: '/masters/machines',
         label: 'Machine',
-        description: 'CI-01 to CI-12, capacity, waste %, PM dates',
+        description: 'CUT/PRN/COT/DIE/PST machines, capacity, waste %, PM dates',
       },
       {
         href: '/masters/instruments',

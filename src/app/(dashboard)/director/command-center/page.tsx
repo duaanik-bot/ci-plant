@@ -457,7 +457,7 @@ export default function DirectorCommandCenterPage() {
                     ? '—'
                     : `${(vitals?.production.factoryOeePct ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })}%`}
                 </div>
-                <div className="text-xs text-ds-ink-faint">CI-01 · CI-02 · CI-03 average (today)</div>
+                <div className="text-xs text-ds-ink-faint">PRN-01 · PRN-02 · PRN-03 average (today)</div>
               </div>
               <div className="rounded-lg border border-emerald-500/25 bg-ds-main/80 px-3 py-2">
                 <div className="text-xs font-semibold uppercase text-emerald-400/90">
