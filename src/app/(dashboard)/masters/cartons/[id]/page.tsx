@@ -9,6 +9,8 @@ import CartonForm, { type CartonFormData } from '@/components/masters/CartonForm
 type ApiCarton = CartonFormData & {
   id: string
   customer?: { id: string; name: string }
+  blankLength?: number | string | null
+  blankWidth?: number | string | null
   sheetSizeL?: number | string | null
   sheetSizeW?: number | string | null
   ups?: number | null
@@ -85,8 +87,18 @@ export default function CartonEditPage() {
         printingType: data.printingType ?? '',
         coatingType: data.coatingType ?? '',
         numberOfColours: data.numberOfColours != null ? String(data.numberOfColours) : '',
-        sheetLengthMm: data.sheetSizeL != null ? String(data.sheetSizeL) : '',
-        sheetWidthMm: data.sheetSizeW != null ? String(data.sheetSizeW) : '',
+        sheetLengthMm:
+          data.sheetSizeL != null
+            ? String(data.sheetSizeL)
+            : data.blankLength != null
+              ? String(data.blankLength)
+              : '',
+        sheetWidthMm:
+          data.sheetSizeW != null
+            ? String(data.sheetSizeW)
+            : data.blankWidth != null
+              ? String(data.blankWidth)
+              : '',
         ups: data.ups != null ? String(data.ups) : '',
         pastingStyle: data.pastingStyle ?? '',
         finishedLength: data.finishedLength != null ? String(data.finishedLength) : '',

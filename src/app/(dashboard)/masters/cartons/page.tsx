@@ -282,7 +282,6 @@ export default function CartonMasterPage() {
         confirmLabel="Yes, Delete"
         loading={deleteMut.isPending}
       />
-
     </div>
   )
 }
