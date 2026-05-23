@@ -33,11 +33,11 @@ export function PlanningSmartMatch() {
 
   const best = matches[0]?.match_score ?? 0
   return (
-    <div className="rounded-lg border p-4 space-y-3">
+    <div className="rounded-lg bg-ds-card shadow-ds-depth-sm p-4 space-y-3">
       <h3 className="font-semibold text-sm">Planning Smart Match</h3>
       <div className="flex gap-2">
         <input
-          className="flex-1 border rounded px-2 py-1 text-sm"
+          className="flex-1 bg-ds-elevated rounded px-2 py-1 text-sm"
           placeholder="Type carton name / scan barcode"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -67,14 +67,14 @@ export function PlanningSmartMatch() {
             onClick={() =>
               router.push(`/orders/purchase-orders/new?cartonId=${m.id}`)
             }
-            className="text-xs px-2 py-1 rounded border"
+            className="text-xs px-2 py-1 rounded bg-ds-elevated"
           >
             Use this carton
           </button>
         </div>
       ))}
       {searched && best < 40 && (
-        <button className="text-xs px-3 py-1 rounded border border-yellow-500 text-yellow-700">
+        <button className="text-xs px-3 py-1 rounded bg-[var(--warning-bg)] text-yellow-700">
           No match — create new
         </button>
       )}

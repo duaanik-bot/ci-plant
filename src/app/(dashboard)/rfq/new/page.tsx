@@ -457,7 +457,7 @@ export default function NewRfqPage() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* SECTION 1 — CLIENT DETAILS */}
-        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md bg-ds-card/70 p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-ds-ink">SECTION 1 — CLIENT DETAILS</h2>
           </div>
@@ -516,7 +516,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, contactPerson: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
             <div>
@@ -529,7 +529,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, contactPhone: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
             <div>
@@ -540,14 +540,14 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, contactEmail: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
           </div>
         </section>
 
         {/* SECTION 2 — PRODUCT REQUIREMENT */}
-        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md bg-ds-card/70 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">
             SECTION 2 — PRODUCT REQUIREMENT
           </h2>
@@ -586,9 +586,9 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, productName: e.target.value }))
                 }
-                className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                  errors.productName ? 'border-[var(--error)]' : 'border-ds-line/60'
-                } text-foreground`}
+                className={`w-full px-3 py-2 rounded text-foreground ${
+                  errors.productName ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
+                }`}
               />
               {errors.productName && (
                 <p className="text-xs text-[var(--error)] mt-1">{errors.productName}</p>
@@ -603,9 +603,9 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, packType: e.target.value }))
                 }
-                className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                  errors.packType ? 'border-[var(--error)]' : 'border-ds-line/60'
-                } text-foreground`}
+                className={`w-full px-3 py-2 rounded text-foreground ${
+                  errors.packType ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
+                }`}
               >
                 <option value="">Select…</option>
                 <option value="Mono Carton">Mono Carton</option>
@@ -623,7 +623,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, drugSchedule: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 {DRUG_SCHEDULES.map((s) => (
@@ -645,9 +645,9 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCore((prev) => ({ ...prev, annualVolume: e.target.value }))
                   }
-                  className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                    errors.annualVolume ? 'border-[var(--error)]' : 'border-ds-line/60'
-                  } text-foreground`}
+                  className={`w-full px-3 py-2 rounded text-foreground ${
+                    errors.annualVolume ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
+                  }`}
                 />
                 {errors.annualVolume && (
                   <p className="text-xs text-[var(--error)] mt-1">{errors.annualVolume}</p>
@@ -660,7 +660,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCore((prev) => ({ ...prev, annualVolumeUnit: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
                 >
                   <option value="cartons">Cartons</option>
                   <option value="labels">Labels</option>
@@ -676,7 +676,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, sampleQty: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
             <div>
@@ -687,7 +687,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, deliveryTimeline: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
             <div>
@@ -702,7 +702,7 @@ export default function NewRfqPage() {
                     referenceSampleAvailable: e.target.value as 'yes' | 'no' | '',
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 <option value="yes">Yes</option>
@@ -717,14 +717,14 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCore((prev) => ({ ...prev, specialRequirements: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
           </div>
         </section>
 
         {/* SECTION 3 — PACKAGING SPECIFICATIONS */}
-        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md bg-ds-card/70 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">
             SECTION 3 — PACKAGING SPECIFICATIONS
           </h2>
@@ -736,7 +736,7 @@ export default function NewRfqPage() {
                 min={0}
                 value={spec.sizeL}
                 onChange={(e) => setSpec((prev) => ({ ...prev, sizeL: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
             <div>
@@ -746,7 +746,7 @@ export default function NewRfqPage() {
                 min={0}
                 value={spec.sizeW}
                 onChange={(e) => setSpec((prev) => ({ ...prev, sizeW: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
             <div>
@@ -756,7 +756,7 @@ export default function NewRfqPage() {
                 min={0}
                 value={spec.sizeH}
                 onChange={(e) => setSpec((prev) => ({ ...prev, sizeH: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
           </div>
@@ -768,7 +768,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, boardGrade: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 {['SBS', 'FBB', 'Duplex', 'Art Card', 'Kraft'].map((b) => (
@@ -787,9 +787,9 @@ export default function NewRfqPage() {
                 min={0}
                 value={spec.gsm}
                 onChange={(e) => setSpec((prev) => ({ ...prev, gsm: e.target.value }))}
-                className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                  errors.gsm ? 'border-[var(--error)]' : 'border-ds-line/60'
-                } text-foreground`}
+                className={`w-full px-3 py-2 rounded text-foreground ${
+                  errors.gsm ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
+                }`}
               />
               {errors.gsm && <p className="text-xs text-[var(--error)] mt-1">{errors.gsm}</p>}
             </div>
@@ -800,7 +800,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, colours: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 {['1C', '2C', '4C', '5C', '6C'].map((c) => (
@@ -818,7 +818,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, colourBreakdown: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
                 placeholder="e.g. CMYK + PANTONE 300C"
               />
             </div>
@@ -829,7 +829,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, coatingType: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 {COATING_TYPES.map((c) => (
@@ -846,7 +846,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, lamination: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 {LAMINATE_TYPES.map((l) => (
@@ -861,7 +861,7 @@ export default function NewRfqPage() {
               <select
                 value={spec.foil}
                 onChange={(e) => setSpec((prev) => ({ ...prev, foil: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 {FOIL_TYPES.map((f) => (
@@ -878,7 +878,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, embossing: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 {EMBOSSING_TYPES.map((x) => (
@@ -895,7 +895,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, construction: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 {CARTON_CONSTRUCTIONS.map((c) => (
@@ -912,7 +912,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setSpec((prev) => ({ ...prev, barcodeType: e.target.value }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 {BARCODE_TYPES.map((b) => (
@@ -926,7 +926,7 @@ export default function NewRfqPage() {
         </section>
 
         {/* SECTION 4 — PHARMA COMPLIANCE */}
-        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md bg-ds-card/70 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">
             SECTION 4 — PHARMA COMPLIANCE
           </h2>
@@ -943,7 +943,7 @@ export default function NewRfqPage() {
                     regulatoryText: e.target.value as 'yes' | 'no' | '',
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 <option value="yes">Yes</option>
@@ -960,7 +960,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCompliance((prev) => ({ ...prev, batchSpaceW: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
                 />
               </div>
               <div className="flex-1">
@@ -972,7 +972,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCompliance((prev) => ({ ...prev, batchSpaceH: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
                 />
               </div>
             </div>
@@ -986,7 +986,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCompliance((prev) => ({ ...prev, mrpSpaceW: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
                 />
               </div>
               <div className="flex-1">
@@ -998,7 +998,7 @@ export default function NewRfqPage() {
                   onChange={(e) =>
                     setCompliance((prev) => ({ ...prev, mrpSpaceH: e.target.value }))
                   }
-                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
                 />
               </div>
             </div>
@@ -1010,7 +1010,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCompliance((prev) => ({ ...prev, whoGmp: e.target.checked }))
                 }
-                className="h-4 w-4 rounded border-ds-line/50 bg-ds-elevated"
+                className="h-4 w-4 rounded bg-ds-elevated"
               />
               <label htmlFor="who-gmp" className="text-xs text-ds-ink-muted">
                 WHO-GMP Required
@@ -1024,7 +1024,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCompliance((prev) => ({ ...prev, scheduleM: e.target.checked }))
                 }
-                className="h-4 w-4 rounded border-ds-line/50 bg-ds-elevated"
+                className="h-4 w-4 rounded bg-ds-elevated"
               />
               <label htmlFor="schedule-m" className="text-xs text-ds-ink-muted">
                 Schedule M Required
@@ -1038,7 +1038,7 @@ export default function NewRfqPage() {
                 onChange={(e) =>
                   setCompliance((prev) => ({ ...prev, fssai: e.target.checked }))
                 }
-                className="h-4 w-4 rounded border-ds-line/50 bg-ds-elevated"
+                className="h-4 w-4 rounded bg-ds-elevated"
               />
               <label htmlFor="fssai" className="text-xs text-ds-ink-muted">
                 FSSAI Required
@@ -1048,7 +1048,7 @@ export default function NewRfqPage() {
         </section>
 
         {/* SECTION 5 — COMMERCIAL */}
-        <section className="rounded-ds-md border border-ds-line/50 bg-ds-card/70 p-4 space-y-3">
+        <section className="rounded-ds-md bg-ds-card/70 p-4 space-y-3">
           <h2 className="text-sm font-semibold text-ds-ink">SECTION 5 — COMMERCIAL</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div>
@@ -1065,7 +1065,7 @@ export default function NewRfqPage() {
                       e.target.value === 'yes' ? prev.existingSupplierName : '',
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="">Select…</option>
                 <option value="yes">Yes</option>
@@ -1113,7 +1113,7 @@ export default function NewRfqPage() {
                     targetPricePerThousand: e.target.value,
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
             <div>
@@ -1127,7 +1127,7 @@ export default function NewRfqPage() {
                     competitorRef: e.target.value,
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               />
             </div>
             <div>
@@ -1140,7 +1140,7 @@ export default function NewRfqPage() {
                     priority: e.target.value as 'Normal' | 'Urgent' | 'Critical',
                   }))
                 }
-                className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
               >
                 <option value="Normal">Normal</option>
                 <option value="Urgent">Urgent</option>
@@ -1177,9 +1177,9 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, name: e.target.value }))
               }
-              className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-                qcErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'
-              } text-foreground`}
+              className={`w-full px-3 py-2 rounded text-foreground ${
+                qcErrors.name ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
+              }`}
             />
             {qcErrors.name && (
               <p className="text-xs text-[var(--error)] mt-1">{qcErrors.name}</p>
@@ -1193,7 +1193,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, gstNumber: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -1204,7 +1204,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, contactName: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -1215,7 +1215,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, contactPhone: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -1226,7 +1226,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, email: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -1237,7 +1237,7 @@ export default function NewRfqPage() {
               onChange={(e) =>
                 setQcCustomer((prev) => ({ ...prev, address: e.target.value }))
               }
-              className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -1251,7 +1251,7 @@ export default function NewRfqPage() {
                   requiresArtworkApproval: e.target.checked,
                 }))
               }
-              className="h-4 w-4 rounded border-ds-line/50 bg-ds-elevated"
+              className="h-4 w-4 rounded bg-ds-elevated"
             />
             <label htmlFor="requires-artwork" className="text-xs text-ds-ink-muted">
               Requires Artwork Approval

@@ -25,11 +25,11 @@ export function ExportButtons({ reportId, query }: { reportId: string; query: st
   return (
     <div className="flex gap-2">
       <button onClick={() => go('xlsx')} disabled={busy !== null}
-              className="rounded-md border border-ds-border px-3 py-1.5 text-sm disabled:opacity-50">
+              className="rounded-md px-3 py-1.5 text-sm disabled:opacity-50">
         {busy === 'xlsx' ? 'Exporting…' : 'Excel'}
       </button>
       <button onClick={() => go('pdf')} disabled={busy !== null}
-              className="rounded-md border border-ds-border px-3 py-1.5 text-sm disabled:opacity-50">
+              className="rounded-md px-3 py-1.5 text-sm disabled:opacity-50">
         {busy === 'pdf' ? 'Exporting…' : 'PDF'}
       </button>
     </div>

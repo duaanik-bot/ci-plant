@@ -153,12 +153,12 @@ export function ToolingJobAuditModal({
       role="presentation"
     >
       <div
-        className="w-full max-w-lg max-h-[90vh] rounded-xl border border-ds-line/50 bg-ds-main shadow-2xl flex flex-col"
+        className="w-full max-w-lg max-h-[90vh] rounded-xl bg-ds-main shadow-2xl flex flex-col"
         role="dialog"
         aria-labelledby="tooling-audit-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-ds-line/40 shrink-0">
+        <div className="p-4 shrink-0">
           <div className="flex justify-between gap-2 items-start">
             <div className="min-w-0">
               <h2 id="tooling-audit-title" className="text-lg font-semibold text-foreground truncate">
@@ -172,13 +172,13 @@ export function ToolingJobAuditModal({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 px-2 py-1 rounded border border-ds-line/50 text-[var(--text-secondary)] text-xs hover:bg-ds-elevated"
+              className="shrink-0 px-2 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-ds-elevated"
             >
               Close
             </button>
           </div>
           <div
-            className="mt-3 flex rounded-lg border border-ds-line/50 overflow-hidden p-0.5 bg-background/50"
+            className="mt-3 flex rounded-lg overflow-hidden p-0.5 bg-background/50"
             role="tablist"
             aria-label="Audit sections"
           >
@@ -212,7 +212,7 @@ export function ToolingJobAuditModal({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">
               Current specs
             </h3>
-            <div className="rounded-lg border border-ds-line/40 bg-background/50 p-3 space-y-2">
+            <div className="rounded-lg bg-background/50 p-3 space-y-2">
               <p className="text-xs text-[var(--text-secondary)] uppercase">Units</p>
               <p className="text-sm text-ds-ink font-medium tabular-nums">{context.units}</p>
               <p className="text-xs text-[var(--text-secondary)] uppercase">Specification</p>
@@ -232,12 +232,12 @@ export function ToolingJobAuditModal({
               ) : entries.length === 0 ? (
                 <p className="text-sm text-[var(--text-secondary)]">No hub events recorded yet for this tool.</p>
               ) : (
-                <ul className="relative border-l border-ds-line/50 pl-4 space-y-4 ml-1.5">
+                <ul className="relative pl-4 space-y-4 ml-1.5">
                 {entries.map((e, i) => (
                   <li key={e.id ?? `${e.timeLabel}-${i}`} className="relative">
                     <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-[var(--brand-primary)] ring-4 ring-ds-main" />
                     {context.tool === 'die' ? (
-                      <div className="rounded-lg border border-ds-line/40 bg-background/40 p-2.5 space-y-1.5">
+                      <div className="rounded-lg bg-background/40 p-2.5 space-y-1.5">
                         <p className="text-xs text-[var(--text-secondary)] font-mono tabular-nums">{e.timeLabel}</p>
                         <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-1 text-xs">
                           <dt className="text-[var(--text-secondary)] font-semibold uppercase tracking-wide">Operator</dt>
@@ -256,7 +256,7 @@ export function ToolingJobAuditModal({
                           </dd>
                         </dl>
                         {e.summaryLine ? (
-                          <p className="text-xs text-[var(--text-secondary)] leading-snug pt-1 border-t border-ds-line/50">
+                          <p className="text-xs text-[var(--text-secondary)] leading-snug pt-1">
                             {e.summaryLine}
                           </p>
                         ) : null}
@@ -293,10 +293,10 @@ export function ToolingJobAuditModal({
               ) : usageRows.length === 0 ? (
                 <p className="text-sm text-[var(--text-secondary)]">No return cycles recorded yet.</p>
               ) : (
-                <div className="overflow-x-auto rounded-lg border border-ds-line/40">
+                <div className="overflow-x-auto rounded-lg">
                   <table className="w-full text-left text-xs border-collapse min-w-[420px]">
                     <thead>
-                      <tr className="border-b border-ds-line/40 text-xs uppercase tracking-wide text-[var(--text-secondary)]">
+                      <tr className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">
                         <th className="px-2 py-2 font-semibold whitespace-nowrap">Date</th>
                         <th className="px-2 py-2 font-semibold">Operator</th>
                         <th className="px-2 py-2 font-semibold">Machine</th>
@@ -305,7 +305,7 @@ export function ToolingJobAuditModal({
                     </thead>
                     <tbody>
                       {usageRows.map((row, i) => (
-                        <tr key={`${row.dateLabel}-${i}`} className="border-b border-ds-line/50">
+                        <tr key={`${row.dateLabel}-${i}`}>
                           <td className="px-2 py-2 text-[var(--text-secondary)] font-mono whitespace-nowrap">
                             {row.dateLabel}
                           </td>

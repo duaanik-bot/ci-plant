@@ -71,7 +71,7 @@ function EditableTile({
   const [draft, setDraft] = useState(value)
   useEffect(() => { setDraft(value) }, [value])
   return (
-    <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3 focus-within:border-ds-brand/60 transition-colors">
+    <div className="bg-ds-elevated rounded-ds-md p-3 focus-within:ring-1 focus-within:ring-ds-brand/40 transition-all">
       <label className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</label>
       <input
         type={type}
@@ -88,7 +88,7 @@ function EditableTile({
 
 function ReadTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-ds-elevated/70 rounded-ds-md border border-ds-line/40 p-3">
+    <div className="bg-ds-elevated/70 rounded-ds-md p-3">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
       <div className="text-base font-semibold text-ds-ink leading-tight mt-1 tabular-nums">{value}</div>
     </div>
@@ -139,11 +139,11 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
       </div>
 
       {readinessLoading ? (
-        <div className="mt-3 rounded-ds-md border border-ds-line/40 bg-ds-elevated p-3 text-xs text-ds-ink-faint">
+        <div className="mt-3 rounded-ds-md bg-ds-elevated p-3 text-xs text-ds-ink-faint">
           Checking material…
         </div>
       ) : shortage > 0 ? (
-        <div className="mt-3 rounded-ds-md border border-red-500/40 bg-red-500/10 p-3">
+        <div className="mt-3 rounded-ds-md bg-red-500/10 p-3">
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs font-semibold uppercase tracking-wider text-red-300">
               Paper warehouse — shortage
@@ -166,13 +166,13 @@ export function SectionBoardAllocation({ line, readiness, readinessLoading, onPa
           </div>
         </div>
       ) : (
-        <div className="mt-3 rounded-ds-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-200">
+        <div className="mt-3 rounded-ds-md bg-emerald-500/10 p-3 text-xs text-emerald-200">
           Paper warehouse — stock covers required sheets.
         </div>
       )}
 
       {readiness?.prId ? (
-        <div className="mt-2 flex items-center justify-between rounded-ds-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+        <div className="mt-2 flex items-center justify-between rounded-ds-md bg-amber-500/10 px-3 py-2 text-xs">
           <div className="flex items-center gap-2 min-w-0">
             <span className="font-id-mono text-amber-200 truncate">{readiness.prId}</span>
             <span className="text-ds-line/60">·</span>

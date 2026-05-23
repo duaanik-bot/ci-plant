@@ -1413,13 +1413,13 @@ export default function PurchaseOrdersPage() {
               ) : null}
             </div>
 
-            <div className="space-y-2 border-t border-ds-line/40 pt-3">
+            <div className="space-y-2 pt-3">
               <label className="block text-xs uppercase tracking-wider text-ds-ink-faint">PO status</label>
               <select
                 value={drawerPo.status}
                 disabled={updatingId === drawerPo.id}
                 onChange={(e) => handleStatusChange(drawerPo, e.target.value)}
-                className="w-full rounded-ds-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                className="w-full rounded-ds-md bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-foreground"
               >
                 <option value="draft">draft</option>
                 <option value="confirmed">confirmed</option>

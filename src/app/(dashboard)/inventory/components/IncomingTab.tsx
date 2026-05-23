@@ -79,8 +79,8 @@ export function IncomingTab() {
                   <div
                     key={r.id}
                     className={cn(
-                      'flex items-center justify-between rounded-ds-md border border-ds-line/25 px-3 py-2',
-                      isOverdue && 'border-ds-error/30 bg-ds-error/5',
+                      'flex items-center justify-between rounded-ds-md px-3 py-2',
+                      isOverdue && 'bg-ds-error/5',
                     )}
                   >
                     <div>

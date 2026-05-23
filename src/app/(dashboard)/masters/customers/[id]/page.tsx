@@ -121,8 +121,8 @@ export default function EditCustomerPage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground ${
+              fieldErrors.name ? 'bg-[var(--error-bg)]' : ''
             }`}
           />
           {fieldErrors.name && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.name}</p>}
@@ -134,8 +134,8 @@ export default function EditCustomerPage() {
               value={gstNumber}
               onChange={(e) => setGstNumber(e.target.value.toUpperCase())}
               placeholder="22AAAAA0000A1Z5"
-              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground font-mono text-sm ${
-                fieldErrors.gstNumber ? 'border-[var(--error)]' : 'border-ds-line/60'
+              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground font-mono text-sm ${
+                fieldErrors.gstNumber ? 'bg-[var(--error-bg)]' : ''
               }`}
             />
             {fieldErrors.gstNumber && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.gstNumber}</p>}
@@ -148,8 +148,8 @@ export default function EditCustomerPage() {
               value={stateCode}
               onChange={(e) => setStateCode(e.target.value.replace(/\D/g, '').slice(0, 2))}
               placeholder="27"
-              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground font-mono text-sm ${
-                fieldErrors.stateCode ? 'border-[var(--error)]' : 'border-ds-line/60'
+              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground font-mono text-sm ${
+                fieldErrors.stateCode ? 'bg-[var(--error-bg)]' : ''
               }`}
             />
             {fieldErrors.stateCode && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.stateCode}</p>}
@@ -161,8 +161,8 @@ export default function EditCustomerPage() {
             value={pan}
             onChange={(e) => setPan(e.target.value.toUpperCase().slice(0, 10))}
             placeholder="ABCDE1234F"
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground font-mono text-sm ${
-              fieldErrors.pan ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground font-mono text-sm ${
+              fieldErrors.pan ? 'bg-[var(--error-bg)]' : ''
             }`}
           />
           {fieldErrors.pan && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.pan}</p>}
@@ -173,7 +173,7 @@ export default function EditCustomerPage() {
             <input
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -181,8 +181,8 @@ export default function EditCustomerPage() {
             <input
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-                fieldErrors.contactPhone ? 'border-[var(--error)]' : 'border-ds-line/60'
+              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground ${
+                fieldErrors.contactPhone ? 'bg-[var(--error-bg)]' : ''
               }`}
             />
             {fieldErrors.contactPhone && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.contactPhone}</p>}
@@ -194,8 +194,8 @@ export default function EditCustomerPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.email ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground ${
+              fieldErrors.email ? 'bg-[var(--error-bg)]' : ''
             }`}
           />
           {fieldErrors.email && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.email}</p>}
@@ -208,7 +208,7 @@ export default function EditCustomerPage() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -219,7 +219,7 @@ export default function EditCustomerPage() {
               onChange={(e) => setBillingAddress(e.target.value)}
               rows={3}
               placeholder="Full address with city + pincode"
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -229,7 +229,7 @@ export default function EditCustomerPage() {
               onChange={(e) => setShippingAddress(e.target.value)}
               rows={3}
               placeholder="Leave blank if same as billing"
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
         </div>
@@ -240,7 +240,7 @@ export default function EditCustomerPage() {
             min={0}
             value={creditLimit}
             onChange={(e) => setCreditLimit(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -249,7 +249,7 @@ export default function EditCustomerPage() {
             id="artwork"
             checked={requiresArtworkApproval}
             onChange={(e) => setRequiresArtworkApproval(e.target.checked)}
-            className="rounded border-ds-line/60"
+            className="rounded"
           />
           <label htmlFor="artwork" className="text-sm text-ds-ink-muted">
             Requires artwork approval
@@ -261,7 +261,7 @@ export default function EditCustomerPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-ds-line/60"
+            className="rounded"
           />
           <label htmlFor="active" className="text-sm text-ds-ink-muted">
             Active

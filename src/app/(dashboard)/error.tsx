@@ -15,7 +15,7 @@ export default function DashboardError({
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <div className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-6">
+      <div className="rounded-ds-md bg-[var(--bg-card)] p-6 shadow-ds-depth-sm">
         <h1 className="text-base font-semibold text-[var(--text-primary)]">
           This page failed to load
         </h1>

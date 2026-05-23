@@ -86,7 +86,7 @@ export default function DieVendorOrdersPage() {
   }
 
   const selectCls =
-    'min-h-[32px] min-w-[80px] rounded border border-ds-line bg-ds-card px-1 py-0.5 text-xs text-ds-ink'
+    'min-h-[32px] min-w-[80px] rounded bg-ds-card px-1 py-0.5 text-xs text-ds-ink'
 
   /* ── Columns ────────────────────────────────────────────────────────── */
   const columns = [

@@ -122,14 +122,14 @@ export default function DyeForm({ mode, initialData }: Props) {
   }
 
   const inpCls = (errKey?: string) =>
-    `w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground text-sm ${errKey && fieldErrors[errKey] ? 'border-[var(--error)]' : 'border-ds-line/60'}`
+    `w-full px-3 py-2 rounded-ds-md text-foreground text-sm ${errKey && fieldErrors[errKey] ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'}`
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
       <h2 className="text-lg font-semibold text-foreground">{mode === 'ADD' ? 'Add Die' : 'Edit Die'}</h2>
 
       {/* Die Number + Auto Toggle */}
-      <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm space-y-3">
+      <div className="bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm space-y-3">
         <div className="flex items-center justify-between">
           <label className="text-ds-ink-muted font-medium">Die Number</label>
           {mode === 'ADD' && (
@@ -153,7 +153,7 @@ export default function DyeForm({ mode, initialData }: Props) {
       </div>
 
       {/* Type & UPS */}
-      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm">
+      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm">
         <div>
           <label className="block text-ds-ink-muted mb-1">Die type *</label>
           <select value={f.dyeType} onChange={(e) => patch('dyeType', e.target.value)} className={inpCls()}>
@@ -168,7 +168,7 @@ export default function DyeForm({ mode, initialData }: Props) {
       </div>
 
       {/* Sheet Size (L x W) */}
-      <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm space-y-2">
+      <div className="bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm space-y-2">
         <label className="block text-ds-ink-muted font-medium">Sheet Size (mm) *</label>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -184,7 +184,7 @@ export default function DyeForm({ mode, initialData }: Props) {
       </div>
 
       {/* Carton Size (L x W x H) */}
-      <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm space-y-2">
+      <div className="bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm space-y-2">
         <label className="block text-ds-ink-muted font-medium">Carton Size (mm) *</label>
         <div className="grid grid-cols-3 gap-3">
           <div>
@@ -204,7 +204,7 @@ export default function DyeForm({ mode, initialData }: Props) {
       </div>
 
       {/* Location & Condition & Max Impressions */}
-      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm">
+      <div className="grid grid-cols-2 gap-4 bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm">
         <div>
           <label className="block text-ds-ink-muted mb-1">Storage location</label>
           <input type="text" value={f.location} onChange={(e) => patch('location', e.target.value)} placeholder="e.g. Rack A-3" className={inpCls()} />
@@ -220,7 +220,7 @@ export default function DyeForm({ mode, initialData }: Props) {
       </div>
 
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={() => router.push('/masters/dyes')} className="px-3 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
+        <button type="button" onClick={() => router.push('/masters/dyes')} className="px-3 py-1.5 rounded-ds-md bg-ds-elevated text-ds-ink text-sm">Cancel</button>
         <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium">
           {saving ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
         </button>

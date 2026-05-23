@@ -57,13 +57,13 @@ export function DataTable<T extends { id?: string | number }>({
   rowClassName,
 }: DataTableProps<T>) {
   return (
-    <div className="bg-ds-card rounded-ds-md border border-ds-line overflow-hidden shadow-card">
+    <div className="bg-ds-card rounded-ds-md overflow-hidden shadow-card">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
 
           {/* ── Header ── */}
           <thead>
-            <tr className="border-b border-ds-line bg-ds-elevated">
+            <tr className="bg-ds-elevated">
               {columns.map(col => (
                 <th
                   key={col.key}
@@ -100,7 +100,7 @@ export function DataTable<T extends { id?: string | number }>({
                 <tr
                   key={(row as { id?: string | number }).id ?? i}
                   className={cn(
-                    'border-b border-ds-line/40 last:border-0 hover:bg-ds-elevated/50 transition-colors',
+                    'hover:bg-ds-elevated/50 transition-colors',
                     rowClassName?.(row),
                   )}
                 >

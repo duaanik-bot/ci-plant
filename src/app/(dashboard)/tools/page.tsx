@@ -72,7 +72,7 @@ export default function ToolsHubPage() {
       />
 
       <div className="grid md:grid-cols-3 gap-4">
-        <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2">
+        <section className="rounded-ds-lg bg-ds-card p-4 space-y-2">
           <p className="text-xs text-ds-ink-muted">PLATE HUB</p>
           <p className="text-2xl">🖨️</p>
           <p className="text-sm text-ds-ink">
@@ -86,7 +86,7 @@ export default function ToolsHubPage() {
           </Link>
         </section>
 
-        <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2">
+        <section className="rounded-ds-lg bg-ds-card p-4 space-y-2">
           <p className="text-xs text-ds-ink-muted">DIE INVENTORY</p>
           <p className="text-2xl">✂️</p>
           <p className="text-sm text-ds-ink">
@@ -97,7 +97,7 @@ export default function ToolsHubPage() {
           </Link>
         </section>
 
-        <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2">
+        <section className="rounded-ds-lg bg-ds-card p-4 space-y-2">
           <p className="text-xs text-ds-ink-muted">EMBOSS BLOCKS</p>
           <p className="text-2xl">🔲</p>
           <p className="text-sm text-ds-ink">
@@ -110,12 +110,12 @@ export default function ToolsHubPage() {
         </section>
       </div>
 
-      <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
+      <section className="rounded-ds-lg bg-ds-card p-4">
         <h2 className="text-sm font-semibold text-ds-ink mb-2">Alerts</h2>
         <div className="space-y-2 text-sm">
           {alerts.length === 0 ? <p className="text-ds-ink-faint">No tool-related alerts.</p> : null}
           {alerts.slice(0, 10).map((a, idx) => (
-            <div key={a.id ?? idx} className="rounded border border-ds-line/50 px-3 py-2 text-ds-ink-muted">
+            <div key={a.id ?? idx} className="rounded bg-ds-elevated px-3 py-2 text-ds-ink-muted">
               {a.title || a.message || 'Alert'}
             </div>
           ))}

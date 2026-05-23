@@ -163,13 +163,13 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground text-sm'
+  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground text-sm'
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
       {mode === 'ADD' && <h2 className="text-lg font-semibold text-foreground">Add Emboss Block</h2>}
 
-      <div className="grid md:grid-cols-2 gap-4 bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm">
+      <div className="grid md:grid-cols-2 gap-4 bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm">
         <div>
           <label className="block text-ds-ink-muted mb-1">Block code *</label>
           <input
@@ -278,7 +278,7 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
 
         {mode === 'EDIT' && (
           <div className="flex items-center gap-2">
-            <input type="checkbox" id="eb-active" checked={f.active} onChange={(e) => patch('active', e.target.checked)} className="rounded border-ds-line/60" />
+            <input type="checkbox" id="eb-active" checked={f.active} onChange={(e) => patch('active', e.target.checked)} className="rounded" />
             <label htmlFor="eb-active" className="text-ds-ink-muted">Active</label>
           </div>
         )}
@@ -289,7 +289,7 @@ export default function EmbossBlockForm({ mode, initialData }: Props) {
       )}
 
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={() => router.push('/masters/emboss-blocks')} className="px-3 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm">Cancel</button>
+        <button type="button" onClick={() => router.push('/masters/emboss-blocks')} className="px-3 py-1.5 rounded-ds-md bg-ds-elevated text-ds-ink text-sm">Cancel</button>
         <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium">
           {saving ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
         </button>

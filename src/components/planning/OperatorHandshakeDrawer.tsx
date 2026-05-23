@@ -92,7 +92,7 @@ export function OperatorHandshakeDrawer({
           <select
             value={operatorUserId}
             onChange={(e) => setOperatorUserId(e.target.value)}
-            className={`w-full h-9 rounded border border-ds-line/50 bg-ds-main px-2 text-xs text-ds-ink ${mono}`}
+            className={`w-full h-9 rounded bg-ds-main px-2 text-xs text-ds-ink ${mono}`}
           >
             <option value="">— Select —</option>
             {users.map((u) => (
@@ -114,7 +114,7 @@ export function OperatorHandshakeDrawer({
             step={0.5}
             value={targetOeePct}
             onChange={(e) => setTargetOeePct(Number(e.target.value))}
-            className={`w-full h-9 rounded border border-ds-line/50 bg-ds-main px-2 text-xs text-ds-ink ${mono}`}
+            className={`w-full h-9 rounded bg-ds-main px-2 text-xs text-ds-ink ${mono}`}
           />
           <p className="text-xs text-ds-ink-faint">
             Auto-filled from product / press baseline; adjust per run.
@@ -132,7 +132,7 @@ export function OperatorHandshakeDrawer({
                 type="datetime-local"
                 value={pmStart}
                 onChange={(e) => setPmStart(e.target.value)}
-                className={`w-full h-9 rounded border border-ds-line/50 bg-ds-main px-1 text-xs text-ds-ink ${mono}`}
+                className={`w-full h-9 rounded bg-ds-main px-1 text-xs text-ds-ink ${mono}`}
               />
             </label>
             <label className="space-y-0.5">
@@ -141,7 +141,7 @@ export function OperatorHandshakeDrawer({
                 type="datetime-local"
                 value={pmEnd}
                 onChange={(e) => setPmEnd(e.target.value)}
-                className={`w-full h-9 rounded border border-ds-line/50 bg-ds-main px-1 text-xs text-ds-ink ${mono}`}
+                className={`w-full h-9 rounded bg-ds-main px-1 text-xs text-ds-ink ${mono}`}
               />
             </label>
           </div>

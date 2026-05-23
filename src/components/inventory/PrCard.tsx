@@ -61,7 +61,7 @@ export function PrCompactCard({
   const t = reservationTotals(pr)
   const urgent = (pr.linkedShortages?.length ?? 0) > 0 && pr.status === 'pending'
   return (
-    <div className="rounded-ds-md border border-ds-line/40 bg-background px-2 py-1.5 text-xs">
+    <div className="rounded-ds-md bg-background px-2 py-1.5 text-xs">
       <div className="flex items-center gap-2">
         {selectable ? (
           <input
@@ -116,7 +116,7 @@ export function OrderedConsolidatedCard({
   onOpen: () => void
 }) {
   return (
-    <div className="rounded-ds-md border border-ds-line/40 bg-background px-2 py-1.5 text-xs">
+    <div className="rounded-ds-md bg-background px-2 py-1.5 text-xs">
       <div className="flex items-center gap-2">
         {monitoring ? null : (
           <input

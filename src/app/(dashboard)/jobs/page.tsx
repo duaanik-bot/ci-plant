@@ -170,7 +170,7 @@ export default function JobsPage() {
         <div className="flex items-center gap-1.5">
           <Link
             href={`/jobs/${row.id}`}
-            className="rounded border border-ds-line/70 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated transition-colors"
+            className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated/80 transition-colors"
           >
             View
           </Link>
@@ -178,7 +178,7 @@ export default function JobsPage() {
             href={`/api/jobs/${row.id}/card-pdf`}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded border border-ds-line/70 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated transition-colors"
+            className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated/80 transition-colors"
           >
             PDF
           </a>
@@ -229,7 +229,7 @@ export default function JobsPage() {
         <select
           value={statusFilter}
           onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
-          className="min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+          className="min-h-[40px] rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
         >
           {STATUS_OPTIONS.map(o => (
             <option key={o.value} value={o.value}>{o.label}</option>
@@ -240,7 +240,7 @@ export default function JobsPage() {
           placeholder="Customer ID…"
           value={customerFilter}
           onChange={e => { setCustomerFilter(e.target.value); setPage(1) }}
-          className="min-h-[40px] w-44 rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+          className="min-h-[40px] w-44 rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
         />
       </div>
 

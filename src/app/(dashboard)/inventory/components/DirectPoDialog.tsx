@@ -118,7 +118,7 @@ export function DirectPoDialog({
           <select
             value={supplierId}
             onChange={(e) => setSupplierId(e.target.value)}
-            className="w-full rounded-ds-md border border-ds-line/40 bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
+            className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
           >
             <option value="">Select vendor…</option>
             {vendors.map((v) => (
@@ -134,7 +134,7 @@ export function DirectPoDialog({
             step="any"
             value={qtyKg}
             onChange={(e) => setQtyKg(e.target.value)}
-            className="w-full rounded-ds-md border border-ds-line/40 bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
+            className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
             placeholder="e.g. 4200"
           />
         </div>
@@ -144,7 +144,7 @@ export function DirectPoDialog({
             type="date"
             value={deliveryDate}
             onChange={(e) => setDeliveryDate(e.target.value)}
-            className="w-full rounded-ds-md border border-ds-line/40 bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
+            className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
           />
         </div>
         <div>
@@ -153,7 +153,7 @@ export function DirectPoDialog({
             type="text"
             value={paymentTerms}
             onChange={(e) => setPaymentTerms(e.target.value)}
-            className="w-full rounded-ds-md border border-ds-line/40 bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
+            className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
             placeholder="e.g. Net 30"
           />
         </div>
@@ -163,7 +163,7 @@ export function DirectPoDialog({
             type="text"
             value={transportTerms}
             onChange={(e) => setTransportTerms(e.target.value)}
-            className="w-full rounded-ds-md border border-ds-line/40 bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
+            className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
             placeholder="e.g. FOB mill"
           />
         </div>
@@ -173,7 +173,7 @@ export function DirectPoDialog({
             value={remarks}
             onChange={(e) => setRemarks(e.target.value)}
             rows={2}
-            className="w-full rounded-ds-md border border-ds-line/40 bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
+            className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
           />
         </div>
       </div>

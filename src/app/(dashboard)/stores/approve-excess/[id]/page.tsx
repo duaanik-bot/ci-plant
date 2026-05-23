@@ -95,7 +95,7 @@ export default function ApproveExcessPage() {
     <div className="min-h-screen bg-ds-card text-foreground p-4 max-w-lg mx-auto">
       <PageHeader title="Approve Excess Sheets" subtitle="Review and approve or reject the excess sheet request" />
 
-      <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-4 space-y-3 mb-6">
+      <div className="rounded-ds-md bg-ds-elevated/50 p-4 space-y-3 mb-6">
         <p><span className="text-ds-ink-muted">Job:</span> {issue.jobNumber} — {issue.productName}</p>
         <p><span className="text-ds-ink-muted">Material:</span> {issue.materialCode} {issue.materialDescription}</p>
         <p><span className="text-ds-ink-muted">Approved qty:</span> {issue.qtyApproved.toLocaleString()} {issue.unit}</p>
@@ -120,7 +120,7 @@ export default function ApproveExcessPage() {
         </button>
         <button
           type="button"
-          className="w-full py-2 rounded-ds-md border border-ds-warning text-ds-warning text-sm"
+          className="w-full py-2 rounded-ds-md bg-[var(--warning-bg)] text-ds-warning text-sm"
         >
           Escalate to next level
         </button>
@@ -130,7 +130,7 @@ export default function ApproveExcessPage() {
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
             placeholder="Rejection reason"
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground mb-2"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground mb-2"
           />
           <button
             type="button"

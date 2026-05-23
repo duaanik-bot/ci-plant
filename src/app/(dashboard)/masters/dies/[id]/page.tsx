@@ -59,12 +59,12 @@ export default function DieDetailPage() {
       </div>
       <div className="flex gap-2">
         {(['overview', 'issue', 'vendor', 'history', 'audit'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded border text-xs ${tab === t ? 'bg-ds-warning border-ds-warning text-primary-foreground' : 'border-ds-line/50 text-ds-ink-muted'}`}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded text-xs ${tab === t ? 'bg-ds-warning text-primary-foreground' : 'bg-ds-elevated/60 text-ds-ink-muted'}`}>{t}</button>
         ))}
       </div>
 
       {tab === 'overview' && (
-        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm">
+        <div className="rounded-ds-lg bg-ds-card p-4 space-y-3 text-sm shadow-ds-depth-sm">
           <div className="grid md:grid-cols-4 gap-2">
             <Info k="Type" v={die.dieType} /><Info k="UPS" v={String(die.ups)} /><Info k="Sheet Size" v={die.sheetSize || '-'} /><Info k="Carton Size" v={die.cartonSize || '-'} />
             <Info k="Material" v={die.dieMaterial} /><Info k="Board Thickness" v={die.boardThickness || '-'} /><Info k="Rule Height" v={die.ruleHeight || '-'} /><Info k="Nicks" v={String(die.nickCount ?? '-')} />
@@ -79,29 +79,29 @@ export default function DieDetailPage() {
       )}
 
       {tab === 'issue' && (
-        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3">
+        <div className="rounded-ds-lg bg-ds-card p-4 space-y-3 shadow-ds-depth-sm">
           <IssuePanel die={die} />
         </div>
       )}
 
       {tab === 'vendor' && (
-        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
+        <div className="rounded-ds-lg bg-ds-card p-4 shadow-ds-depth-sm">
           <table className="w-full text-xs">
             <thead className="text-ds-ink-muted"><tr><th className="text-left">Order</th><th className="text-left">Type</th><th className="text-left">Vendor</th><th className="text-left">Status</th><th className="text-left">Expected</th></tr></thead>
-            <tbody>{die.vendorOrders.map((o) => <tr key={o.id} className="border-t border-ds-line/40"><td className="py-1">{o.orderCode}</td><td>{o.orderType}</td><td>{o.vendorName}</td><td>{o.status}</td><td>{o.expectedBy ? new Date(o.expectedBy).toLocaleDateString('en-IN') : '-'}</td></tr>)}</tbody>
+            <tbody>{die.vendorOrders.map((o) => <tr key={o.id}><td className="py-1">{o.orderCode}</td><td>{o.orderType}</td><td>{o.vendorName}</td><td>{o.status}</td><td>{o.expectedBy ? new Date(o.expectedBy).toLocaleDateString('en-IN') : '-'}</td></tr>)}</tbody>
           </table>
         </div>
       )}
 
       {tab === 'history' && (
-        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
-          {die.issueRecords.map((r) => <div key={r.id} className="border border-ds-line/40 rounded p-2">Issued to {r.issuedTo} · {new Date(r.issuedAt).toLocaleString('en-IN')} · {r.status}</div>)}
+        <div className="rounded-ds-lg bg-ds-card p-4 space-y-2 text-sm shadow-ds-depth-sm">
+          {die.issueRecords.map((r) => <div key={r.id} className="rounded bg-ds-elevated/50 p-2">Issued to {r.issuedTo} · {new Date(r.issuedAt).toLocaleString('en-IN')} · {r.status}</div>)}
         </div>
       )}
 
       {tab === 'audit' && (
-        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-xs">
-          {die.auditLog.map((a) => <div key={a.id} className="grid grid-cols-3 border-b border-ds-line/40 pb-1"><span>{new Date(a.performedAt).toLocaleString('en-IN')}</span><span>{a.action}</span><span>{a.performedBy}</span></div>)}
+        <div className="rounded-ds-lg bg-ds-card p-4 space-y-2 text-xs shadow-ds-depth-sm">
+          {die.auditLog.map((a) => <div key={a.id} className="grid grid-cols-3 pb-1"><span>{new Date(a.performedAt).toLocaleString('en-IN')}</span><span>{a.action}</span><span>{a.performedBy}</span></div>)}
         </div>
       )}
     </div>
@@ -153,23 +153,23 @@ function IssuePanel({ die }: { die: DieDetail }) {
   return die.status === 'issued' ? (
     <div className="space-y-2 text-sm">
       <p className="text-ds-ink-muted">Currently issued. Return required.</p>
-      <input value={impressionsThisRun} onChange={(e) => setImpressionsThisRun(e.target.value)} placeholder="Impressions this run" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <select value={returnCondition} onChange={(e) => setReturnCondition(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full">
+      <input value={impressionsThisRun} onChange={(e) => setImpressionsThisRun(e.target.value)} placeholder="Impressions this run" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <select value={returnCondition} onChange={(e) => setReturnCondition(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full">
         <option>Good</option><option>Fair</option><option>Needs Sharpening</option><option>Damaged</option>
       </select>
-      <select value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full">
+      <select value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full">
         <option value="store">store</option><option value="sent_for_sharpening">sent_for_sharpening</option><option value="scrapped">scrapped</option>
       </select>
-      <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Storage location" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
+      <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Storage location" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
       <button onClick={ret} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Confirm Return</button>
     </div>
   ) : (
     <div className="space-y-2 text-sm">
-      <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full"><option>DIE-A01</option><option>DIE-A02</option><option>DIE-A03</option><option>DIE-M01</option><option>DIE-M02</option></select>
+      <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full"><option>DIE-A01</option><option>DIE-A02</option><option>DIE-A03</option><option>DIE-M01</option><option>DIE-M02</option></select>
       <button onClick={issue} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Issue Die</button>
     </div>
   )

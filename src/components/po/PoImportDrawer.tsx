@@ -548,7 +548,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
       {step === 'upload' && (
         <div className="space-y-4">
           {aiUnavailable && (
-            <div className="rounded-md border border-rose-500/60 bg-rose-500/[0.08] p-3 space-y-2">
+            <div className="rounded-md bg-[var(--error-bg)] p-3 space-y-2">
               <div className="flex items-start gap-2">
                 <ServerCrash className="size-5 text-rose-600 mt-0.5" />
                 <div className="flex-1 min-w-0">
@@ -563,14 +563,14 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                     <Link
                       href="/orders/purchase-orders/new"
                       onClick={onClose}
-                      className="inline-flex items-center gap-1 rounded-md border border-rose-500/60 bg-white/80 dark:bg-rose-950/30 px-2.5 py-1 text-xs font-medium text-rose-700 dark:text-rose-200 hover:bg-white"
+                      className="inline-flex items-center gap-1 rounded-md bg-white/80 dark:bg-rose-950/30 px-2.5 py-1 text-xs font-medium text-rose-700 dark:text-rose-200 hover:bg-white"
                     >
                       <Plus className="size-3.5" /> Create PO manually
                     </Link>
                     <button
                       type="button"
                       onClick={() => setAiUnavailable(false)}
-                      className="rounded-md border border-rose-500/40 px-2.5 py-1 text-xs text-rose-700 dark:text-rose-200 hover:bg-rose-500/10"
+                      className="rounded-md px-2.5 py-1 text-xs text-rose-700 dark:text-rose-200 hover:bg-rose-500/10"
                     >
                       Dismiss & retry
                     </button>
@@ -582,7 +582,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
           {presetCustomer && customer && (
             <div>
               <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">Customer</label>
-              <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2">
+              <div className="flex items-center justify-between rounded-md bg-[var(--bg-card)] px-3 py-2">
                 <span className="text-sm">{customer.name}</span>
                 <span className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Locked</span>
               </div>
@@ -592,10 +592,10 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
           {!presetCustomer && showFallbackPicker && (
             <div
               className={cn(
-                'rounded-md border p-3 space-y-2',
+                'rounded-md p-3 space-y-2',
                 detection && !detection.matchedCustomerId
-                  ? 'border-amber-500/50 bg-amber-500/[0.06]'
-                  : 'border-[var(--border)] bg-[var(--bg-card)]',
+                  ? 'bg-[var(--warning-bg)]'
+                  : 'bg-[var(--bg-card)]',
               )}
             >
               <div className="text-xs text-[var(--text-muted)]">
@@ -626,7 +626,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                       key={c.id}
                       type="button"
                       onClick={() => setCustomer({ id: c.id, name: c.name })}
-                      className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] hover:bg-[var(--hover-row)]"
+                      className="rounded px-2 py-0.5 text-[11px] hover:bg-[var(--hover-row)]"
                       title={c.reason}
                     >
                       {c.name}
@@ -690,7 +690,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
         <div className="space-y-4">
           {/* Customer — read-only on review. Click "Change" to re-extract with a different one. */}
           {customer && customer.id !== NEW_CUSTOMER_SENTINEL && (
-            <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2">
+            <div className="flex items-center justify-between rounded-md bg-[var(--bg-card)] px-3 py-2">
               <div className="flex min-w-0 items-center gap-2">
                 <label className="text-xs font-medium text-[var(--text-muted)]">Customer</label>
                 <span className="truncate text-sm">{customer.name}</span>
@@ -702,10 +702,10 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                         : 'Detected by Claude from the PDF header'
                     }
                     className={cn(
-                      'rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
+                      'rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
                       detection.confidence >= 0.9
-                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                        : 'border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+                        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
                     )}
                   >
                     AI detected · {(detection.confidence * 100).toFixed(0)}%
@@ -738,7 +738,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
           {/* New-customer card — Claude read these from the PO header because no
               roster row matched. Operator can edit before they're created on save. */}
           {customer && customer.id === NEW_CUSTOMER_SENTINEL && newCustomer && (
-            <div className="rounded-md border border-violet-500/40 bg-violet-500/[0.06] p-3 space-y-2">
+            <div className="rounded-md bg-violet-500/[0.06] p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Sparkles className="size-4 text-violet-500" />
@@ -780,7 +780,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                         cur ? { ...cur, name: name || cur.name } : cur,
                       )
                     }}
-                    className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+                    className="w-full rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -794,7 +794,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                         setNewCustomer((c) => (c ? { ...c, gstNumber: e.target.value || null } : c))
                       }
                       placeholder="15-char GSTIN"
-                      className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+                      className="w-full rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm"
                     />
                   </div>
                   <div>
@@ -807,7 +807,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                         setNewCustomer((c) => (c ? { ...c, address: e.target.value || null } : c))
                       }
                       placeholder="Billing address"
-                      className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+                      className="w-full rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm"
                     />
                   </div>
                 </div>
@@ -823,7 +823,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                 value={poNumber}
                 onChange={(e) => setPoNumber(e.target.value)}
                 placeholder="Auto-generate"
-                className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm"
+                className="w-full rounded-md bg-[var(--bg-card)] px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -834,7 +834,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                 type="date"
                 value={poDate}
                 onChange={(e) => setPoDate(e.target.value)}
-                className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm"
+                className="w-full rounded-md bg-[var(--bg-card)] px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -843,7 +843,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
                 type="date"
                 value={deliveryRequiredBy}
                 onChange={(e) => setDeliveryRequiredBy(e.target.value)}
-                className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm"
+                className="w-full rounded-md bg-[var(--bg-card)] px-3 py-2 text-sm"
               />
             </div>
             <div>
@@ -851,7 +851,7 @@ export function PoImportDrawer({ isOpen, onClose, presetCustomer }: DrawerProps)
               <input
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
-                className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm"
+                className="w-full rounded-md bg-[var(--bg-card)] px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -923,16 +923,16 @@ function LineRow({
 
   const toneClasses =
     tone === 'green'
-      ? 'border-emerald-500/40 bg-emerald-500/[0.04]'
+      ? 'bg-emerald-500/[0.04]'
       : tone === 'yellow'
-        ? 'border-amber-500/50 bg-amber-500/[0.06]'
-        : 'border-rose-500/50 bg-rose-500/[0.05]'
+        ? 'bg-amber-500/[0.06]'
+        : 'bg-rose-500/[0.05]'
 
   const ToneIcon = tone === 'green' ? CheckCircle2 : tone === 'yellow' ? AlertTriangle : AlertCircle
   const toneText = tone === 'green' ? 'text-emerald-600' : tone === 'yellow' ? 'text-amber-600' : 'text-rose-600'
 
   return (
-    <div data-line-key={line.key} className={cn('rounded-lg border p-3', toneClasses)}>
+    <div data-line-key={line.key} className={cn('rounded-lg p-3', toneClasses)}>
       <div className="flex items-start gap-2 mb-2">
         <ToneIcon className={cn('size-4 mt-0.5', toneText)} />
         <div className="flex-1 min-w-0">
@@ -949,7 +949,7 @@ function LineRow({
           onClick={() => onChange({ mode: 'existing' })}
           className={cn(
             'text-xs px-2 py-1 rounded',
-            line.mode === 'existing' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-card)] border border-[var(--border)]',
+            line.mode === 'existing' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-card)]',
           )}
         >
           Link to existing Carton
@@ -969,7 +969,7 @@ function LineRow({
           }}
           className={cn(
             'text-xs px-2 py-1 rounded',
-            line.mode === 'new' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-card)] border border-[var(--border)]',
+            line.mode === 'new' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-card)]',
           )}
         >
           Create new Carton master
@@ -981,7 +981,7 @@ function LineRow({
           <button
             type="button"
             onClick={() => setSearchOpen((s) => !s)}
-            className="w-full text-left rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm flex items-center justify-between"
+            className="w-full text-left rounded-md bg-[var(--bg-card)] px-3 py-2 text-sm flex items-center justify-between"
           >
             <span className={line.cartonId ? '' : 'text-[var(--text-muted)]'}>
               {line.cartonName || 'Select a Carton…'}
@@ -989,13 +989,13 @@ function LineRow({
             <span className="text-xs text-[var(--text-muted)]">{searchOpen ? '▴' : '▾'}</span>
           </button>
           {searchOpen && (
-            <div className="absolute z-10 mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] shadow-lg">
+            <div className="absolute z-10 mt-1 w-full rounded-md bg-[var(--bg-card)] shadow-lg">
               <input
                 autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name or artwork code…"
-                className="w-full border-b border-[var(--border)] bg-transparent px-3 py-2 text-sm focus:outline-none"
+                className="w-full bg-transparent px-3 py-2 text-sm focus:outline-none"
               />
               <div className="max-h-56 overflow-y-auto">
                 {filtered.length === 0 ? (
@@ -1036,7 +1036,7 @@ function LineRow({
             value={line.newCartonName}
             onChange={(e) => onChange({ newCartonName: e.target.value })}
             placeholder="New Carton name"
-            className="col-span-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+            className="col-span-2 rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm"
           />
           <input
             value={line.newCartonSize ?? ''}
@@ -1045,27 +1045,27 @@ function LineRow({
               onChange({ newCartonSize: normalizeCartonSizeString(e.target.value) })
             }
             placeholder="Size (e.g. 120 x 210 mm)"
-            className="rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+            className="rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm"
           />
           <input
             type="number"
             value={line.newCartonGsm ?? ''}
             onChange={(e) => onChange({ newCartonGsm: e.target.value ? Number(e.target.value) : null })}
             placeholder="GSM"
-            className="rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+            className="rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm"
           />
           <input
             value={line.newCartonArtwork ?? ''}
             onChange={(e) => onChange({ newCartonArtwork: e.target.value || null })}
             placeholder="Artwork code"
-            className="col-span-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+            className="col-span-2 rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm"
           />
           <input
             type="number"
             value={line.newCartonRate ?? ''}
             onChange={(e) => onChange({ newCartonRate: e.target.value ? Number(e.target.value) : null })}
             placeholder="Rate"
-            className="rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+            className="rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm"
           />
         </div>
       )}
@@ -1092,7 +1092,7 @@ function LineRow({
           <input
             value={line.artworkCode ?? ''}
             onChange={(e) => onChange({ artworkCode: e.target.value || null })}
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm"
+            className="w-full rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm"
           />
         </div>
       </div>
@@ -1117,7 +1117,7 @@ function CustomerPicker({
 }) {
   if (customer) {
     return (
-      <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2">
+      <div className="flex items-center justify-between rounded-md bg-[var(--bg-card)] px-3 py-2">
         <span className="text-sm">{customer.name}</span>
         <button
           type="button"
@@ -1136,10 +1136,10 @@ function CustomerPicker({
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         placeholder="Start typing customer name…"
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm"
+        className="w-full rounded-md bg-[var(--bg-card)] px-3 py-2 text-sm"
       />
       {(loading || options.length > 0) && (
-        <div className="mt-1 rounded-md border border-[var(--border)] bg-[var(--bg-card)] divide-y divide-[var(--border)] max-h-56 overflow-y-auto">
+        <div className="mt-1 rounded-md bg-[var(--bg-card)] max-h-56 overflow-y-auto shadow-ds-depth-sm">
           {loading && <div className="px-3 py-2 text-xs text-[var(--text-muted)]">Searching…</div>}
           {options.map((c) => (
             <button
@@ -1179,7 +1179,7 @@ function NumberField({
         step={step}
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-sm tabular-nums"
+        className="w-full rounded-md bg-[var(--bg-card)] px-2 py-1 text-sm tabular-nums"
       />
     </div>
   )
@@ -1211,7 +1211,7 @@ function NewMasterConfirmDialog({
 
   return (
     <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/55 p-4">
-      <div className="w-full max-w-2xl overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)] shadow-2xl">
+      <div className="w-full max-w-2xl overflow-hidden rounded-lg bg-[var(--bg-card)] shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
           <div className="flex items-center gap-2">
             <Plus className="size-4 text-violet-500" />
@@ -1241,10 +1241,10 @@ function NewMasterConfirmDialog({
               <div
                 key={line.key}
                 className={cn(
-                  'rounded-md border p-3 text-xs',
+                  'rounded-md p-3 text-xs',
                   hasIssues
-                    ? 'border-rose-500/60 bg-rose-500/[0.06]'
-                    : 'border-[var(--border)] bg-[var(--bg-card)]',
+                    ? 'bg-[var(--error-bg)]'
+                    : 'bg-[var(--bg-card)]',
                 )}
               >
                 <div className="mb-2 flex items-start justify-between gap-2">
@@ -1262,7 +1262,7 @@ function NewMasterConfirmDialog({
                     type="button"
                     onClick={() => onEdit(line.key)}
                     disabled={submitting}
-                    className="shrink-0 rounded border border-[var(--border)] px-2 py-1 text-[11px] hover:bg-[var(--hover-row)]"
+                    className="shrink-0 rounded px-2 py-1 text-[11px] hover:bg-[var(--hover-row)]"
                   >
                     Edit fields
                   </button>

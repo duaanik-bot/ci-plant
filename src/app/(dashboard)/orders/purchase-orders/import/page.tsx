@@ -148,7 +148,7 @@ export default function PoBulkImportPage() {
             {!allDone && <Pill tone="blue">processing…</Pill>}
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-slate-200">
+          <div className="overflow-hidden rounded-lg shadow-ds-depth-sm">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                 <tr>

@@ -53,7 +53,7 @@ export default function CartonEditPage() {
   return (
     <>
       {data.source === 'po_import_ai' && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-ds-md border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-sm text-violet-900 dark:text-violet-200">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-ds-md bg-violet-500/10 px-3 py-2 text-sm text-violet-900 dark:text-violet-200">
           <div className="flex min-w-0 items-center gap-2">
             <Sparkles className="size-4 shrink-0" />
             <span className="min-w-0">
@@ -64,7 +64,7 @@ export default function CartonEditPage() {
             type="button"
             onClick={() => void handleMarkReviewed()}
             disabled={markingReviewed}
-            className="shrink-0 rounded-ds-md border border-violet-500/50 bg-violet-500/20 px-3 py-1 text-xs font-medium text-violet-900 hover:bg-violet-500/30 disabled:opacity-60 dark:text-violet-100"
+            className="shrink-0 rounded-ds-md bg-violet-500/20 px-3 py-1 text-xs font-medium text-violet-900 hover:bg-violet-500/30 disabled:opacity-60 dark:text-violet-100"
           >
             {markingReviewed ? 'Marking…' : 'Mark as reviewed'}
           </button>

@@ -32,9 +32,9 @@ export type PoQuickCreateCartonValues = {
 }
 
 const comboboxControl =
-  'border-ds-line/80 bg-ds-elevated/50 shadow-sm transition-[border-color,box-shadow] duration-150 hover:bg-ds-elevated/70 focus-within:ring-2 focus-within:ring-ds-brand/20'
+  'bg-ds-elevated/50 shadow-sm transition-[border-color,box-shadow] duration-150 hover:bg-ds-elevated/70 focus-within:ring-2 focus-within:ring-ds-brand/20'
 const comboboxInput = 'text-sm text-ds-ink placeholder:text-ds-ink-faint'
-const errRing = 'ring-1 ring-ds-error/40 !border-ds-error/60'
+const errRing = 'ring-1 ring-ds-error/40'
 
 type Props = {
   values: PoQuickCreateCartonValues
@@ -251,7 +251,7 @@ export function PoQuickCreateCartonForm({ values, setValues, errors, saving, onS
           />
         </div>
       </div>
-      <div className="flex justify-end border-t border-ds-line/40 pt-4">
+      <div className="flex justify-end pt-4">
         <Button type="submit" disabled={saving} variant="primary" className="min-w-[8rem]">
           {saving ? 'Saving…' : 'Save Carton'}
         </Button>

@@ -410,60 +410,60 @@ function coalesceGrnLedger(j: GrnLedger): GrnLedger {
 }
 
 function cashTermsBadgeClass(band: CashFlowTerms['termsBand']): string {
-  if (band === 'credit') return 'border-[var(--success)]/55 text-[var(--success)] bg-[var(--success-bg)]'
-  if (band === 'near_cash') return 'border-ds-warning/55 text-ds-ink bg-ds-warning/15'
-  return 'border-[var(--error)]/65 text-[var(--error)] bg-[var(--error-bg)] animate-pulse'
+  if (band === 'credit') return 'text-[var(--success)] bg-[var(--success-bg)]'
+  if (band === 'near_cash') return 'text-ds-ink bg-ds-warning/15'
+  return 'text-[var(--error)] bg-[var(--error-bg)] animate-pulse'
 }
 
 function procurementHudBadgeClass(variant: ProcurementHud['variant']): string {
   switch (variant) {
     case 'mill_dispatched':
-      return 'border-ds-line/50 text-ds-ink bg-neutral-400/15'
+      return 'text-ds-ink bg-neutral-400/15'
     case 'in_transit':
-      return 'border-[var(--info)]/50 text-[var(--info)] bg-[var(--info-bg)]'
+      return 'text-[var(--info)] bg-[var(--info-bg)]'
     case 'in_transit_stale':
-      return 'border-ds-warning/60 text-ds-ink bg-[var(--info-bg)] animate-pulse'
+      return 'text-ds-ink bg-[var(--info-bg)] animate-pulse'
     case 'at_gate':
-      return 'border-[var(--success)]/50 text-[var(--success)] bg-[var(--success-bg)]'
+      return 'text-[var(--success)] bg-[var(--success-bg)]'
     case 'short_closed':
-      return 'border-ds-line/60 bg-ds-elevated/50 text-ds-ink-muted'
+      return 'bg-ds-elevated/50 text-ds-ink-muted'
     case 'received':
-      return 'border-[var(--success)]/50 text-[var(--success)] bg-[var(--success-bg)]'
+      return 'text-[var(--success)] bg-[var(--success-bg)]'
     case 'planned':
-      return 'border-ds-line/50 text-ds-ink-muted bg-ds-main/60'
+      return 'text-ds-ink-muted bg-ds-main/60'
     case 'ordered':
-      return 'border-[var(--info)]/50 text-[var(--info)] bg-[var(--info-bg)]'
+      return 'text-[var(--info)] bg-[var(--info-bg)]'
     case 'mixed':
     default:
-      return 'border-ds-warning/50 text-ds-warning bg-ds-warning/10'
+      return 'text-ds-warning bg-ds-warning/10'
   }
 }
 
 function varianceBadgeClass(level: WeightVarianceAgg['level']): string {
-  if (level === 'slate') return 'border-ds-line/50 text-ds-ink-muted bg-ds-main/50'
-  if (level === 'amber') return 'border-ds-warning/60 text-ds-ink bg-ds-warning/10'
-  return 'border-[var(--error)]/65 text-[var(--error)] bg-[var(--error-bg)]'
+  if (level === 'slate') return 'text-ds-ink-muted bg-ds-main/50'
+  if (level === 'amber') return 'text-ds-ink bg-ds-warning/10'
+  return 'text-[var(--error)] bg-[var(--error-bg)]'
 }
 
 function ReliabilityBadge({ rel }: { rel: SupplierReliability | null }) {
   if (!rel) {
     return (
-      <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-ds-line/50 bg-ds-card px-1 text-xs font-black text-neutral-600">
+      <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded bg-ds-card px-1 text-xs font-black text-neutral-600">
         —
       </span>
     )
   }
   const cls =
     rel.grade === 'A'
-      ? 'border-[var(--success)]/70 bg-[var(--success-bg)] text-[var(--success)] shadow-[0_0_12px_rgba(16,185,129,0.25)]'
+      ? 'bg-[var(--success-bg)] text-[var(--success)] shadow-[0_0_12px_rgba(16,185,129,0.25)]'
       : rel.grade === 'B'
-        ? 'border-ds-warning/65 bg-ds-warning/10 text-ds-ink'
-        : 'border-[var(--error)]/70 bg-[var(--error-bg)] text-[var(--error)] animate-pulse'
+        ? 'bg-ds-warning/10 text-ds-ink'
+        : 'bg-[var(--error-bg)] text-[var(--error)] animate-pulse'
   const title = `Reliability ${rel.grade} · composite ${rel.compositeScore} (60% OTIF dispatch · 40% weight)`
   return (
     <span
       title={title}
-      className={`inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border px-1 text-xs font-black tabular-nums ${cls}`}
+      className={`inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded px-1 text-xs font-black tabular-nums ${cls}`}
     >
       {rel.grade}
     </span>
@@ -484,9 +484,9 @@ type SupplierScorecardDetail = {
 }
 
 function leadBufferBadgeClass(level: LeadBuffer['level']): string {
-  if (level === 'critical') return 'border-[var(--error)]/70 text-[var(--error)] bg-[var(--error-bg)] font-bold'
-  if (level === 'at_risk') return 'border-ds-warning/65 text-ds-ink bg-ds-warning/10 font-semibold'
-  return 'border-[var(--success)]/50 text-[var(--success)]/90 bg-[var(--success-bg)]'
+  if (level === 'critical') return 'text-[var(--error)] bg-[var(--error-bg)] font-bold'
+  if (level === 'at_risk') return 'text-ds-ink bg-ds-warning/10 font-semibold'
+  return 'text-[var(--success)]/90 bg-[var(--success-bg)]'
 }
 
 function leadBufferRowGlow(lb: LeadBuffer | null): string {
@@ -654,7 +654,7 @@ function ProcurementLandedCostPanel({
 
   if (!lineId || basic == null) {
     return (
-      <div className="rounded-ds-md border border-ds-line/40 bg-background px-3 py-2 text-xs text-neutral-500">
+      <div className="rounded-ds-md bg-background px-3 py-2 text-xs text-neutral-500">
         Landed cost needs a linked mill PO line with a basic ₹/kg rate.
       </div>
     )
@@ -664,7 +664,7 @@ function ProcurementLandedCostPanel({
 
   return (
     <div
-      className="rounded-ds-md border border-ds-line/40 bg-background p-3 space-y-2"
+      className="rounded-ds-md bg-background p-3 space-y-2 shadow-ds-depth-sm"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       role="presentation"
@@ -673,7 +673,7 @@ function ProcurementLandedCostPanel({
         Landed cost calculator
       </p>
       {highLogistics ? (
-        <div className="rounded-ds-sm border border-ds-warning/40 bg-ds-warning/8 px-2 py-1.5 text-xs text-ds-warning leading-snug">
+        <div className="rounded-ds-sm bg-ds-warning/8 px-2 py-1.5 text-xs text-ds-warning leading-snug">
           High logistics cost: total uplift vs basic rate exceeds 10%. Review freight, unloading, and
           insurance allocations.
         </div>
@@ -697,7 +697,7 @@ function ProcurementLandedCostPanel({
             step={0.01}
             value={freightStr}
             onChange={(e) => setFreightStr(e.target.value)}
-            className="mt-0.5 w-full rounded border border-ds-line/50 bg-ds-main px-2 py-1 text-ds-ink"
+            className="mt-0.5 w-full rounded bg-ds-main px-2 py-1 text-ds-ink"
           />
         </label>
         <label className="block text-ds-ink-faint">
@@ -708,7 +708,7 @@ function ProcurementLandedCostPanel({
             step={0.01}
             value={unloadStr}
             onChange={(e) => setUnloadStr(e.target.value)}
-            className="mt-0.5 w-full rounded border border-ds-line/50 bg-ds-main px-2 py-1 text-ds-ink"
+            className="mt-0.5 w-full rounded bg-ds-main px-2 py-1 text-ds-ink"
           />
         </label>
         <label className="block text-ds-ink-faint">
@@ -719,10 +719,10 @@ function ProcurementLandedCostPanel({
             step={0.01}
             value={insStr}
             onChange={(e) => setInsStr(e.target.value)}
-            className="mt-0.5 w-full rounded border border-ds-line/50 bg-ds-main px-2 py-1 text-ds-ink"
+            className="mt-0.5 w-full rounded bg-ds-main px-2 py-1 text-ds-ink"
           />
         </label>
-        <div className="border-t border-ds-line/40 pt-2 mt-1 space-y-1">
+        <div className="pt-2 mt-1 space-y-1">
           <div className="flex justify-between gap-2">
             <span className="text-ds-ink-faint">Landed rate</span>
             <span className={`font-semibold ${STRATEGIC_SOURCING_GOLD}`}>
@@ -1936,7 +1936,7 @@ export default function ProcurementWorkbenchPage() {
 
   const qTrim = debouncedQ.trim()
   const glassKpi =
-    'ring-1 ring-ring/30 shadow-ds-depth bg-[var(--bg-card)] border border-[var(--border)]'
+    'ring-1 ring-ring/30 shadow-ds-depth bg-[var(--bg-card)]'
 
   return (
     <IndustrialModuleShell
@@ -2071,7 +2071,7 @@ export default function ProcurementWorkbenchPage() {
         </>
       }
     >
-      <div className="flex flex-wrap items-end gap-3 rounded-ds-lg border border-border/40 bg-ds-main/40 px-3 py-3 backdrop-blur-xl ring-1 ring-ring/20">
+      <div className="flex flex-wrap items-end gap-3 rounded-ds-lg bg-ds-main/40 px-3 py-3 backdrop-blur-xl ring-1 ring-ring/20">
         <label className="block flex-1 min-w-[200px]">
           <span className="text-xs uppercase tracking-wide text-ds-ink-faint font-semibold">
             Deep relational search
@@ -2080,7 +2080,7 @@ export default function ProcurementWorkbenchPage() {
             value={searchQ}
             onChange={(e) => setSearchQ(e.target.value)}
             placeholder="Customer PO #, vendor name, product/carton, JC…"
-            className="mt-1 w-full rounded-ds-sm border border-ds-line/60 bg-card px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint"
+            className="mt-1 w-full rounded-ds-sm bg-card px-3 py-2 text-sm text-foreground placeholder:text-ds-ink-faint"
           />
         </label>
         <div>
@@ -2088,7 +2088,7 @@ export default function ProcurementWorkbenchPage() {
           <select
             value={supplierId}
             onChange={(e) => setSupplierId(e.target.value)}
-            className="min-w-[14rem] rounded-ds-sm border border-ds-line/60 bg-card px-2 py-1.5 text-xs text-foreground"
+            className="min-w-[14rem] rounded-ds-sm bg-card px-2 py-1.5 text-xs text-foreground"
           >
             <option value="">Select…</option>
             {suppliers.map((s) => (
@@ -2114,10 +2114,10 @@ export default function ProcurementWorkbenchPage() {
         <button
           type="button"
           onClick={() => setSortByPaymentDate((v) => !v)}
-          className={`rounded-ds-sm border px-3 py-1.5 text-xs ${
+          className={`rounded-ds-sm px-3 py-1.5 text-xs ${
             sortByPaymentDate
-              ? 'border-[var(--success)]/50 bg-[var(--success-bg)] text-[var(--success)]'
-              : 'border-ds-line/60 text-ds-ink-muted hover:bg-ds-card'
+              ? 'bg-[var(--success-bg)] text-[var(--success)]'
+              : 'text-ds-ink-muted hover:bg-ds-card'
           }`}
         >
           {sortByPaymentDate ? 'Sort: payment date ✓' : 'Sort: payment date'}
@@ -2125,7 +2125,7 @@ export default function ProcurementWorkbenchPage() {
         <button
           type="button"
           onClick={() => void loadRequirements(debouncedQ, riskFilterHigh, vendorRiskFilterHigh, stockOutRiskFilterHigh)}
-          className="rounded-ds-sm border border-ds-line/60 px-3 py-1.5 text-xs text-ds-ink-muted hover:bg-ds-card"
+          className="rounded-ds-sm px-3 py-1.5 text-xs text-ds-ink-muted hover:bg-ds-card"
         >
           Refresh
         </button>
@@ -2133,7 +2133,7 @@ export default function ProcurementWorkbenchPage() {
           <button
             type="button"
             onClick={() => setRiskFilterHigh(false)}
-            className="rounded-ds-sm border border-ds-warning/50 bg-ds-warning/10 px-3 py-1.5 text-xs text-ds-warning hover:bg-ds-warning/10"
+            className="rounded-ds-sm bg-ds-warning/10 px-3 py-1.5 text-xs text-ds-warning hover:bg-ds-warning/10"
           >
             Clear lead-time filter
           </button>
@@ -2142,7 +2142,7 @@ export default function ProcurementWorkbenchPage() {
           <button
             type="button"
             onClick={() => setVendorRiskFilterHigh(false)}
-            className={`rounded-ds-sm border px-3 py-1.5 text-xs hover:opacity-90 ${STRATEGIC_SOURCING_GOLD_BORDER} ${STRATEGIC_SOURCING_GOLD_SOFT} ${STRATEGIC_SOURCING_GOLD}`}
+            className={`rounded-ds-sm px-3 py-1.5 text-xs hover:opacity-90 ${STRATEGIC_SOURCING_GOLD_SOFT} ${STRATEGIC_SOURCING_GOLD}`}
           >
             Clear vendor risk filter
           </button>
@@ -2151,7 +2151,7 @@ export default function ProcurementWorkbenchPage() {
           <button
             type="button"
             onClick={() => setStockOutRiskFilterHigh(false)}
-            className="rounded-ds-sm border border-[var(--error)]/50 bg-[var(--error-bg)] px-3 py-1.5 text-xs text-[var(--error)] hover:bg-[var(--error-bg)]"
+            className="rounded-ds-sm bg-[var(--error-bg)] px-3 py-1.5 text-xs text-[var(--error)] hover:bg-[var(--error-bg)]"
           >
             Clear stock-out filter
           </button>
@@ -2175,7 +2175,7 @@ export default function ProcurementWorkbenchPage() {
       ) : (
         <div className={industrialTableClassName()}>
           <table className="w-full text-left text-xs leading-tight border-collapse">
-            <thead className="bg-ds-main/90 text-ds-ink-muted border-b border-ds-line/40">
+            <thead className="bg-ds-main/90 text-ds-ink-muted">
               <tr>
                 <th className="px-1.5 py-1.5 w-8">
                   <input
@@ -2231,7 +2231,7 @@ export default function ProcurementWorkbenchPage() {
                         setSpotlightRow(r)
                       }
                     }}
-                    className={`border-b border-ds-line/50 text-ds-ink cursor-pointer ${
+                    className={`text-ds-ink cursor-pointer ${
                       rowIdx % 2 === 0 ? 'bg-background/40' : 'bg-ds-main/30'
                     } ${pri} ${riskGlow}`}
                   >
@@ -2281,7 +2281,7 @@ export default function ProcurementWorkbenchPage() {
                       <div className="flex flex-col gap-1 items-start">
                         <span
                           title={shortClosedTitle}
-                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${procurementHudBadgeClass(r.procurementHud.variant)}`}
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${procurementHudBadgeClass(r.procurementHud.variant)}`}
                         >
                           {(r.procurementHud.variant === 'in_transit' ||
                             r.procurementHud.variant === 'in_transit_stale') && (
@@ -2290,7 +2290,7 @@ export default function ProcurementWorkbenchPage() {
                           {r.procurementHud.variant === 'short_closed' ? 'Short-Closed' : r.procurementHud.label}
                         </span>
                         {r.procurementHud.shortageAwaitingReplacement ? (
-                          <span className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-1.5 py-0.5 text-xs font-bold text-[var(--error)]">
+                          <span className="rounded bg-[var(--error-bg)] px-1.5 py-0.5 text-xs font-bold text-[var(--error)]">
                             Shortage: Awaiting
                           </span>
                         ) : null}
@@ -2305,7 +2305,7 @@ export default function ProcurementWorkbenchPage() {
                               ? 'No GRN receipt yet — terms from supplier profile / suggestion'
                               : undefined
                         }
-                        className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-bold font-mono tabular-nums whitespace-nowrap ${cashTermsBadgeClass(
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-bold font-mono tabular-nums whitespace-nowrap ${cashTermsBadgeClass(
                           r.cashFlowTerms.termsBand,
                         )}`}
                       >
@@ -2361,7 +2361,7 @@ export default function ProcurementWorkbenchPage() {
                     <td className="px-1.5 py-1 align-top">
                       {lb ? (
                         <span
-                          className={`inline-flex rounded-ds-sm border px-1.5 py-0.5 text-xs font-bold tabular-nums whitespace-nowrap ${leadBufferBadgeClass(lb.level)}`}
+                          className={`inline-flex rounded-ds-sm px-1.5 py-0.5 text-xs font-bold tabular-nums whitespace-nowrap ${leadBufferBadgeClass(lb.level)}`}
                           title={`Vendor ETA ${lb.vendorEtaYmd} · Need by ${lb.productionTargetYmd} · ${lb.vendorPoNumber}`}
                         >
                           {lb.badgeLabel}
@@ -2373,7 +2373,7 @@ export default function ProcurementWorkbenchPage() {
                     <td className="px-1.5 py-1 align-top">
                       {wv ? (
                         <span
-                          className={`inline-flex rounded-ds-sm border px-1.5 py-0.5 text-xs font-bold font-mono tabular-nums whitespace-nowrap ${varianceBadgeClass(wv.level)} ${
+                          className={`inline-flex rounded-ds-sm px-1.5 py-0.5 text-xs font-bold font-mono tabular-nums whitespace-nowrap ${varianceBadgeClass(wv.level)} ${
                             wv.level === 'red' ? 'animate-pulse' : ''
                           }`}
                           title={`Δkg ${wv.varianceKg.toFixed(3)} (invoice − net received)`}
@@ -2426,7 +2426,7 @@ export default function ProcurementWorkbenchPage() {
               </p>
             </div>
 
-            <div className="rounded-ds-md border border-ds-line/50 bg-background p-3 space-y-3 ring-1 ring-ring/5">
+            <div className="rounded-ds-md bg-background p-3 space-y-3 ring-1 ring-ring/5 shadow-ds-depth-sm">
               <p className="text-xs uppercase tracking-wide text-ds-warning/90 font-semibold">
                 Dynamic reorder radar
               </p>
@@ -2460,7 +2460,7 @@ export default function ProcurementWorkbenchPage() {
                       min={0}
                       value={policyMinInput}
                       onChange={(e) => setPolicyMinInput(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1 text-xs text-foreground ${ledgerMono}`}
+                      className={`mt-0.5 w-full rounded bg-background px-2 py-1 text-xs text-foreground ${ledgerMono}`}
                     />
                   </label>
                   <label className="block text-xs text-neutral-500">
@@ -2470,7 +2470,7 @@ export default function ProcurementWorkbenchPage() {
                       min={0}
                       value={policyMaxInput}
                       onChange={(e) => setPolicyMaxInput(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1 text-xs text-foreground ${ledgerMono}`}
+                      className={`mt-0.5 w-full rounded bg-background px-2 py-1 text-xs text-foreground ${ledgerMono}`}
                     />
                   </label>
                 </div>
@@ -2478,7 +2478,7 @@ export default function ProcurementWorkbenchPage() {
                   type="button"
                   disabled={policySaving}
                   onClick={() => void saveReorderPolicyFromSpotlight()}
-                  className="w-full rounded-ds-sm border border-ds-line/50 bg-ds-main py-1.5 text-xs font-medium text-ds-ink hover:bg-ds-card disabled:opacity-50"
+                  className="w-full rounded-ds-sm bg-ds-main py-1.5 text-xs font-medium text-ds-ink hover:bg-ds-card disabled:opacity-50"
                 >
                   {policySaving ? 'Saving…' : 'Save safety buffer'}
                 </button>
@@ -2489,7 +2489,7 @@ export default function ProcurementWorkbenchPage() {
                   type="button"
                   disabled={draftReorderSubmitting}
                   onClick={() => void draftReorderPoFromSpotlight()}
-                  className="w-full rounded-ds-sm border border-ds-warning/50 bg-ds-warning/10 py-2 text-xs font-semibold text-ds-warning hover:bg-ds-warning/10 disabled:opacity-50"
+                  className="w-full rounded-ds-sm bg-ds-warning/10 py-2 text-xs font-semibold text-ds-warning hover:bg-ds-warning/10 disabled:opacity-50"
                 >
                   {draftReorderSubmitting
                     ? 'Drafting…'
@@ -2500,22 +2500,22 @@ export default function ProcurementWorkbenchPage() {
 
             {spotlightRow.procurementHud.primaryVendorPoId ? (
               <>
-                <div className="rounded-ds-md border border-ds-line/50 bg-ds-main/55 p-3 space-y-2">
+                <div className="rounded-ds-md bg-ds-main/55 p-3 space-y-2 shadow-ds-depth-sm">
                   <p className="text-xs uppercase tracking-wide text-cyan-500/90 font-semibold">
                     Digital waybill
                   </p>
                   <div className="space-y-2 text-xs">
-                    <div className="flex justify-between gap-2 border-b border-ds-line/50 pb-2">
+                    <div className="flex justify-between gap-2 pb-2">
                       <span className="text-ds-ink-faint">Vendor (mill)</span>
                       <span className="text-ds-ink text-right font-medium">
                         {spotlightRow.procurementHud.primarySupplierName ?? '—'}
                       </span>
                     </div>
-                    <div className="flex justify-between gap-2 border-b border-ds-line/50 pb-2">
+                    <div className="flex justify-between gap-2 pb-2">
                       <span className="text-ds-ink-faint">Transporter</span>
                       <span className="text-ds-ink text-right">{logisticsTransporter.trim() || '—'}</span>
                     </div>
-                    <div className="flex justify-between gap-2 border-b border-ds-line/50 pb-2">
+                    <div className="flex justify-between gap-2 pb-2">
                       <span className="text-ds-ink-faint">LR / Docket</span>
                       <span
                         className={`text-ds-ink text-right tracking-tight ${industrialMono}`}
@@ -2523,7 +2523,7 @@ export default function ProcurementWorkbenchPage() {
                         {logisticsLr.trim() || '—'}
                       </span>
                     </div>
-                    <div className="flex justify-between gap-2 border-b border-ds-line/50 pb-2">
+                    <div className="flex justify-between gap-2 pb-2">
                       <span className="text-ds-ink-faint">Vehicle</span>
                       <span
                         className={`text-ds-ink text-right font-semibold tracking-wide ${industrialMono}`}
@@ -2547,7 +2547,7 @@ export default function ProcurementWorkbenchPage() {
                   </div>
                 </div>
 
-                <div className="rounded-ds-md border border-[var(--info)]/30 bg-[var(--info-bg)] p-3 space-y-3">
+                <div className="rounded-ds-md bg-[var(--info-bg)] p-3 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs uppercase tracking-wide text-[var(--info)]/90 font-semibold">
                       Logistics &amp; tracking
@@ -2573,7 +2573,7 @@ export default function ProcurementWorkbenchPage() {
                       list="ci-transporter-picks"
                       value={logisticsTransporter}
                       onChange={(e) => setLogisticsTransporter(e.target.value)}
-                      className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-ds-ink text-xs"
+                      className="mt-0.5 w-full rounded bg-background px-2 py-1.5 text-ds-ink text-xs"
                       placeholder="Carrier name"
                     />
                   </label>
@@ -2594,7 +2594,7 @@ export default function ProcurementWorkbenchPage() {
                     <input
                       value={logisticsLr}
                       onChange={(e) => setLogisticsLr(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-ds-main px-2 py-1.5 text-ds-ink text-xs ${industrialMono}`}
+                      className={`mt-0.5 w-full rounded bg-ds-main px-2 py-1.5 text-ds-ink text-xs ${industrialMono}`}
                     />
                   </label>
                   <label className="block text-xs text-ds-ink-faint">
@@ -2602,7 +2602,7 @@ export default function ProcurementWorkbenchPage() {
                     <input
                       value={logisticsVehicle}
                       onChange={(e) => setLogisticsVehicle(e.target.value.toUpperCase())}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-ds-main px-2 py-1.5 text-ds-ink text-xs font-semibold ${industrialMono}`}
+                      className={`mt-0.5 w-full rounded bg-ds-main px-2 py-1.5 text-ds-ink text-xs font-semibold ${industrialMono}`}
                     />
                   </label>
                   <label className="block text-xs text-ds-ink-faint">
@@ -2611,7 +2611,7 @@ export default function ProcurementWorkbenchPage() {
                       type="datetime-local"
                       value={logisticsEta}
                       onChange={(e) => setLogisticsEta(e.target.value)}
-                      className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-ds-ink text-xs"
+                      className="mt-0.5 w-full rounded bg-background px-2 py-1.5 text-ds-ink text-xs"
                     />
                   </label>
                   <label className="block text-xs text-ds-ink-faint">
@@ -2621,7 +2621,7 @@ export default function ProcurementWorkbenchPage() {
                       onChange={(e) =>
                         setLogisticsStatusPick(e.target.value as typeof logisticsStatusPick)
                       }
-                      className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-ds-ink text-xs"
+                      className="mt-0.5 w-full rounded bg-background px-2 py-1.5 text-ds-ink text-xs"
                     >
                       <option value="mill_dispatched">Mill dispatched</option>
                       <option value="in_transit">In-transit</option>
@@ -2636,7 +2636,7 @@ export default function ProcurementWorkbenchPage() {
                         e.stopPropagation()
                         void saveLogisticsHud()
                       }}
-                      className="w-full rounded-ds-md border border-[var(--info)]/50 bg-[var(--info-bg)] px-3 py-2 text-xs font-bold text-[var(--info)] hover:bg-[var(--info-bg)] disabled:opacity-50"
+                      className="w-full rounded-ds-md bg-[var(--info-bg)] px-3 py-2 text-xs font-bold text-[var(--info)] hover:bg-[var(--info-bg)] disabled:opacity-50"
                     >
                       {logisticsSaving ? 'Saving…' : 'Save logistics (timestamped)'}
                     </button>
@@ -2648,7 +2648,7 @@ export default function ProcurementWorkbenchPage() {
                           e.stopPropagation()
                           void sendLogisticsFollowUp()
                         }}
-                        className="w-full rounded-ds-md border border-ds-warning/55 bg-ds-warning/10 px-3 py-2 text-xs font-bold text-ds-ink hover:bg-ds-warning/10 disabled:opacity-50"
+                        className="w-full rounded-ds-md bg-ds-warning/10 px-3 py-2 text-xs font-bold text-ds-ink hover:bg-ds-warning/10 disabled:opacity-50"
                       >
                         {followUpSending ? 'Notifying…' : 'Follow-up — notify procurement managers'}
                       </button>
@@ -2669,7 +2669,7 @@ export default function ProcurementWorkbenchPage() {
                           if (!spotlightRow.procurementHud.shortClose?.authorityGateMet) return
                           setShortCloseModalOpen(true)
                         }}
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-ds-md border border-ds-warning/45 bg-ds-warning/10 px-3 py-2 text-xs font-semibold text-ds-ink hover:bg-ds-warning/10 disabled:cursor-not-allowed disabled:opacity-45"
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-ds-md bg-ds-warning/10 px-3 py-2 text-xs font-semibold text-ds-ink hover:bg-ds-warning/10 disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <ListChecks className="h-3.5 w-3.5 opacity-90" aria-hidden />
                         Short-Close PO
@@ -2678,7 +2678,7 @@ export default function ProcurementWorkbenchPage() {
                   </div>
                 </div>
 
-                <div className="rounded-ds-md border border-[var(--success)]/25 bg-background p-3 space-y-2">
+                <div className="rounded-ds-md bg-background p-3 space-y-2 shadow-ds-depth-sm">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs uppercase tracking-wide text-[var(--success)]/90 font-semibold flex items-center gap-1.5">
                       <ClipboardList className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
@@ -2693,7 +2693,7 @@ export default function ProcurementWorkbenchPage() {
                     ) : null}
                   </div>
                   {spotlightRow.procurementHud.shortageAwaitingReplacement ? (
-                    <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-2 py-1.5 text-xs font-bold text-[var(--error)]">
+                    <div className="rounded bg-[var(--error-bg)] px-2 py-1.5 text-xs font-bold text-[var(--error)]">
                       Shortage: Awaiting replacement — lead buffer uses committed replacement ETA (
                       <span className={ledgerMono}>vs production target</span>).
                     </div>
@@ -2708,10 +2708,10 @@ export default function ProcurementWorkbenchPage() {
                   </p>
                   {grnLedger ? (
                     <>
-                      <div className="overflow-x-auto rounded border border-ds-line/30 bg-background">
+                      <div className="overflow-x-auto rounded bg-background">
                         <table className="w-full text-left text-xs text-ds-ink-muted border-collapse">
                           <thead>
-                            <tr className="border-b border-ds-line/40 bg-background text-xs uppercase tracking-wide text-neutral-600">
+                            <tr className="bg-background text-xs uppercase tracking-wide text-neutral-600">
                               <th className="px-1.5 py-1 font-semibold">Date</th>
                               <th className="px-1.5 py-1 font-semibold text-right">Qty (kg)</th>
                               <th className="px-1.5 py-1 font-semibold">Vehicle</th>
@@ -2744,7 +2744,7 @@ export default function ProcurementWorkbenchPage() {
                                 return (
                                   <tr
                                     key={rec.id}
-                                    className={`border-b border-ds-line/30 ${failed ? 'bg-[var(--error-bg)]' : ''}`}
+                                    className={`${failed ? 'bg-[var(--error-bg)]' : ''}`}
                                   >
                                     <td className="px-1.5 py-1 whitespace-nowrap text-ds-ink-faint">
                                       {new Date(rec.receiptDate).toLocaleString('en-IN', {
@@ -2786,16 +2786,16 @@ export default function ProcurementWorkbenchPage() {
                                             setGrnQcRejectionReason(GRN_REJECTION_REASONS[0] ?? '')
                                             setGrnQcRejectionRemarks('')
                                           }}
-                                          className="rounded border border-ds-warning/30 bg-ds-warning/8 px-1.5 py-0.5 text-xs font-bold text-ds-ink hover:bg-ds-warning/30"
+                                          className="rounded bg-ds-warning/8 px-1.5 py-0.5 text-xs font-bold text-ds-ink hover:bg-ds-warning/30"
                                         >
                                           Perform QC
                                         </button>
                                       ) : rec.qcStatus === 'PASSED_WITH_PENALTY' ? (
                                         <span className="flex flex-col gap-0.5 items-start">
-                                          <span className="inline-flex rounded border border-[var(--success)]/55 bg-[var(--success-bg)] px-1.5 py-0.5 text-xs font-bold text-[var(--success)]">
+                                          <span className="inline-flex rounded bg-[var(--success-bg)] px-1.5 py-0.5 text-xs font-bold text-[var(--success)]">
                                             QC passed
                                           </span>
-                                          <span className="inline-flex items-center gap-0.5 rounded border border-ds-warning/50 bg-ds-warning/15 px-1.5 py-0.5 text-xs font-bold text-ds-warning">
+                                          <span className="inline-flex items-center gap-0.5 rounded bg-ds-warning/15 px-1.5 py-0.5 text-xs font-bold text-ds-warning">
                                             <IndianRupee className="h-2.5 w-2.5 shrink-0 opacity-90" aria-hidden />
                                             Quality-adjusted
                                           </span>
@@ -2811,7 +2811,7 @@ export default function ProcurementWorkbenchPage() {
                                         </span>
                                       ) : rec.qcStatus === 'PASSED' ? (
                                         <span className="flex flex-col gap-0.5 items-start">
-                                          <span className="inline-flex rounded border border-[var(--success)]/55 bg-[var(--success-bg)] px-1.5 py-0.5 text-xs font-bold text-[var(--success)]">
+                                          <span className="inline-flex rounded bg-[var(--success-bg)] px-1.5 py-0.5 text-xs font-bold text-[var(--success)]">
                                             QC passed
                                           </span>
                                           {hasSplit && (rec.qtyRejected ?? 0) > 0 ? (
@@ -2825,7 +2825,7 @@ export default function ProcurementWorkbenchPage() {
                                           ) : null}
                                         </span>
                                       ) : (
-                                        <span className="inline-flex rounded border border-[var(--error)]/55 bg-[var(--error-bg)] px-1.5 py-0.5 text-xs font-bold text-[var(--error)]">
+                                        <span className="inline-flex rounded bg-[var(--error-bg)] px-1.5 py-0.5 text-xs font-bold text-[var(--error)]">
                                           Rejected
                                         </span>
                                       )}
@@ -2837,7 +2837,7 @@ export default function ProcurementWorkbenchPage() {
                                             e.stopPropagation()
                                             void generateReturnGatePass(rec.id)
                                           }}
-                                          className="mt-1 w-full rounded border border-[var(--error)]/45 bg-[var(--error-bg)] px-1 py-0.5 text-xs font-bold text-[var(--error)] hover:bg-[var(--error-bg)] disabled:opacity-50"
+                                          className="mt-1 w-full rounded bg-[var(--error-bg)] px-1 py-0.5 text-xs font-bold text-[var(--error)] hover:bg-[var(--error-bg)] disabled:opacity-50"
                                         >
                                           {returnPassWorkingId === rec.id ? '…' : 'Return gate pass'}
                                         </button>
@@ -2855,7 +2855,7 @@ export default function ProcurementWorkbenchPage() {
                       </div>
                       {grnQcReceiptId ? (
                         <div
-                          className={`space-y-2 rounded-ds-md border ${STRATEGIC_SOURCING_GOLD_BORDER} bg-background p-2.5 ring-1 ring-ds-warning/35`}
+                          className={`space-y-2 rounded-ds-md bg-background p-2.5 ring-1 ring-ds-warning/35`}
                           onClick={(e) => e.stopPropagation()}
                         >
                           <p className={`text-xs font-bold ${STRATEGIC_SOURCING_GOLD}`}>QC gate — split tranches</p>
@@ -2873,7 +2873,7 @@ export default function ProcurementWorkbenchPage() {
                                 min={0}
                                 value={grnQcQtyStandard}
                                 onChange={(e) => setGrnQcQtyStandard(e.target.value)}
-                                className={`mt-0.5 w-full rounded border border-[var(--success)]/45 bg-background px-1.5 py-1 text-[var(--success)] text-xs ${ledgerMono}`}
+                                className={`mt-0.5 w-full rounded bg-background px-1.5 py-1 text-[var(--success)] text-xs ${ledgerMono}`}
                               />
                             </label>
                             <label className="block text-xs text-ds-warning font-bold">
@@ -2884,7 +2884,7 @@ export default function ProcurementWorkbenchPage() {
                                 min={0}
                                 value={grnQcQtyPenalty}
                                 onChange={(e) => setGrnQcQtyPenalty(e.target.value)}
-                                className={`mt-0.5 w-full rounded border border-ds-warning/45 bg-background px-1.5 py-1 text-ds-ink text-xs ${ledgerMono}`}
+                                className={`mt-0.5 w-full rounded bg-background px-1.5 py-1 text-ds-ink text-xs ${ledgerMono}`}
                               />
                             </label>
                             <label className="block text-xs text-[var(--error)]/90 font-bold">
@@ -2895,12 +2895,12 @@ export default function ProcurementWorkbenchPage() {
                                 min={0}
                                 value={grnQcQtyRejected}
                                 onChange={(e) => setGrnQcQtyRejected(e.target.value)}
-                                className={`mt-0.5 w-full rounded border border-[var(--error)]/45 bg-background px-1.5 py-1 text-[var(--error)] text-xs ${ledgerMono}`}
+                                className={`mt-0.5 w-full rounded bg-background px-1.5 py-1 text-[var(--error)] text-xs ${ledgerMono}`}
                               />
                             </label>
                           </div>
                           {Number(grnQcQtyRejected) > 0 ? (
-                            <div className="space-y-1.5 rounded border border-[var(--error)]/25 bg-background p-2">
+                            <div className="space-y-1.5 rounded bg-[var(--error-bg)] p-2">
                               <p className="text-xs font-bold text-[var(--error)]/95 uppercase tracking-wide">
                                 Rejection — Anik Dua signature lane
                               </p>
@@ -2909,7 +2909,7 @@ export default function ProcurementWorkbenchPage() {
                                 <select
                                   value={grnQcRejectionReason}
                                   onChange={(e) => setGrnQcRejectionReason(e.target.value)}
-                                  className="mt-0.5 w-full rounded border border-ds-line/40 bg-ds-main px-2 py-1 text-xs text-ds-ink"
+                                  className="mt-0.5 w-full rounded bg-ds-main px-2 py-1 text-xs text-ds-ink"
                                 >
                                   {GRN_REJECTION_REASONS.map((r) => (
                                     <option key={r} value={r}>
@@ -2924,7 +2924,7 @@ export default function ProcurementWorkbenchPage() {
                                   value={grnQcRejectionRemarks}
                                   onChange={(e) => setGrnQcRejectionRemarks(e.target.value)}
                                   rows={2}
-                                  className="mt-0.5 w-full rounded border border-ds-line/40 bg-background px-2 py-1 text-xs text-ds-ink"
+                                  className="mt-0.5 w-full rounded bg-background px-2 py-1 text-xs text-ds-ink"
                                   placeholder="Document rejection for audit…"
                                 />
                               </label>
@@ -2937,7 +2937,7 @@ export default function ProcurementWorkbenchPage() {
                               step="any"
                               value={grnQcActualGsm}
                               onChange={(e) => setGrnQcActualGsm(e.target.value)}
-                              className={`mt-0.5 w-full rounded border border-ds-line/40 bg-ds-main px-2 py-1 text-ds-ink text-xs ${ledgerMono}`}
+                              className={`mt-0.5 w-full rounded bg-ds-main px-2 py-1 text-ds-ink text-xs ${ledgerMono}`}
                             />
                           </label>
                           <label className="flex items-center gap-2 text-xs text-ds-ink-muted">
@@ -2964,7 +2964,7 @@ export default function ProcurementWorkbenchPage() {
                               value={grnQcRemarks}
                               onChange={(e) => setGrnQcRemarks(e.target.value)}
                               rows={2}
-                              className="mt-0.5 w-full rounded border border-ds-line/40 bg-background px-2 py-1 text-xs text-ds-ink"
+                              className="mt-0.5 w-full rounded bg-background px-2 py-1 text-xs text-ds-ink"
                             />
                           </label>
                           <div className="flex flex-wrap gap-2">
@@ -2972,7 +2972,7 @@ export default function ProcurementWorkbenchPage() {
                               type="button"
                               disabled={grnQcSaving}
                               onClick={() => void submitGrnQcSplit()}
-                              className="flex-1 rounded-ds-sm border border-ds-warning/50 bg-ds-warning/10 py-1.5 text-xs font-bold text-ds-ink hover:bg-ds-warning/10 disabled:opacity-50"
+                              className="flex-1 rounded-ds-sm bg-ds-warning/10 py-1.5 text-xs font-bold text-ds-ink hover:bg-ds-warning/10 disabled:opacity-50"
                             >
                               {grnQcSaving ? '…' : 'Submit QC gate'}
                             </button>
@@ -2980,7 +2980,7 @@ export default function ProcurementWorkbenchPage() {
                               type="button"
                               disabled={grnQcSaving}
                               onClick={() => setGrnQcReceiptId(null)}
-                              className="rounded-ds-sm border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-neutral-500"
+                              className="rounded-ds-sm bg-background px-2 py-1.5 text-xs text-neutral-500"
                             >
                               Cancel
                             </button>
@@ -2990,7 +2990,7 @@ export default function ProcurementWorkbenchPage() {
                       {grnLedger.receipts.some(
                         (r) => r.qcStatus === 'PASSED_WITH_PENALTY' && r.penaltyProofLines?.length,
                       ) ? (
-                        <div className="rounded-ds-md border border-ds-line/40 bg-background p-2 space-y-2">
+                        <div className="rounded-ds-md bg-background p-2 space-y-2 shadow-ds-depth-sm">
                           <p className="text-xs uppercase tracking-wide text-ds-warning/90 font-bold">
                             Vendor-facing penalty proof (export / email)
                           </p>
@@ -2999,14 +2999,14 @@ export default function ProcurementWorkbenchPage() {
                             .map((r) => (
                               <pre
                                 key={r.id}
-                                className={`whitespace-pre-wrap rounded border border-ds-line/30 bg-ds-main/80 p-2 text-xs text-ds-ink-muted leading-relaxed ${ledgerMono}`}
+                                className={`whitespace-pre-wrap rounded bg-ds-main/80 p-2 text-xs text-ds-ink-muted leading-relaxed ${ledgerMono}`}
                               >
                                 {`Slip ${r.scaleSlipId} · vehicle ${r.vehicleNumber}\n${(r.penaltyProofLines ?? []).join('\n')}${r.qualityDebitNote ? `\n\nLedger: ${r.qualityDebitNote.status.replace(/_/g, ' ')}` : ''}`}
                               </pre>
                             ))}
                         </div>
                       ) : null}
-                      <div className="rounded border border-ds-line/40 bg-background px-2 py-2 space-y-1.5">
+                      <div className="rounded bg-background px-2 py-2 space-y-1.5">
                         <p className="text-xs uppercase tracking-wide text-neutral-600 font-bold">Summary</p>
                         <p
                           className={`text-xs text-neutral-500 leading-snug ${ledgerMono}`}
@@ -3089,13 +3089,13 @@ export default function ProcurementWorkbenchPage() {
                                 )
                               }
                             }}
-                            className="w-full rounded-ds-sm border border-[var(--success)]/40 bg-[var(--success-bg)] py-1.5 text-xs font-bold text-[var(--success)]/95 hover:bg-[var(--success-bg)]"
+                            className="w-full rounded-ds-sm bg-[var(--success-bg)] py-1.5 text-xs font-bold text-[var(--success)]/95 hover:bg-[var(--success-bg)]"
                           >
                             {grnExpanded ? 'Hide add receipt' : '+ Add receipt'}
                           </button>
                           {grnExpanded ? (
                             <div
-                              className="space-y-2 rounded border border-ds-line/40 bg-ds-main/40 p-2"
+                              className="space-y-2 rounded bg-ds-main/40 p-2"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <label className="block text-xs text-neutral-500">
@@ -3104,7 +3104,7 @@ export default function ProcurementWorkbenchPage() {
                                   type="datetime-local"
                                   value={grnReceiptDate}
                                   onChange={(e) => setGrnReceiptDate(e.target.value)}
-                                  className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1 text-ds-ink text-xs ${ledgerMono}`}
+                                  className={`mt-0.5 w-full rounded bg-background px-2 py-1 text-ds-ink text-xs ${ledgerMono}`}
                                 />
                               </label>
                               <label className="block text-xs text-neutral-500">
@@ -3115,7 +3115,7 @@ export default function ProcurementWorkbenchPage() {
                                   min={0}
                                   value={grnReceivedQty}
                                   onChange={(e) => setGrnReceivedQty(e.target.value)}
-                                  className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1 text-[var(--success)] text-xs font-semibold ${ledgerMono}`}
+                                  className={`mt-0.5 w-full rounded bg-background px-2 py-1 text-[var(--success)] text-xs font-semibold ${ledgerMono}`}
                                 />
                               </label>
                               <label className="block text-xs text-neutral-500">
@@ -3123,7 +3123,7 @@ export default function ProcurementWorkbenchPage() {
                                 <input
                                   value={grnVehicle}
                                   onChange={(e) => setGrnVehicle(e.target.value.toUpperCase())}
-                                  className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1 text-ds-ink text-xs ${ledgerMono}`}
+                                  className={`mt-0.5 w-full rounded bg-background px-2 py-1 text-ds-ink text-xs ${ledgerMono}`}
                                 />
                               </label>
                               <label className="block text-xs text-neutral-500">
@@ -3131,14 +3131,14 @@ export default function ProcurementWorkbenchPage() {
                                 <input
                                   value={grnScaleSlip}
                                   onChange={(e) => setGrnScaleSlip(e.target.value)}
-                                  className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1 text-ds-ink text-xs ${ledgerMono}`}
+                                  className={`mt-0.5 w-full rounded bg-background px-2 py-1 text-ds-ink text-xs ${ledgerMono}`}
                                 />
                               </label>
                               <button
                                 type="button"
                                 disabled={grnSaving}
                                 onClick={() => void submitGrnReceipt()}
-                                className="w-full rounded-ds-sm border border-[var(--success)]/50 bg-[var(--success-bg)] py-2 text-xs font-bold text-[var(--success)] hover:bg-[var(--success-bg)] disabled:opacity-50"
+                                className="w-full rounded-ds-sm bg-[var(--success-bg)] py-2 text-xs font-bold text-[var(--success)] hover:bg-[var(--success-bg)] disabled:opacity-50"
                               >
                                 {grnSaving ? 'Saving…' : 'Log receipt (timestamped)'}
                               </button>
@@ -3167,17 +3167,17 @@ export default function ProcurementWorkbenchPage() {
                   Lead-time buffer (factory IST)
                 </p>
                 <div
-                  className={`rounded-ds-md border p-2.5 space-y-2 ${
+                  className={`rounded-ds-md p-2.5 space-y-2 ${
                     spotlightRow.leadBuffer.level === 'critical'
-                      ? 'border-[var(--error)]/50 bg-[var(--error-bg)]'
+                      ? 'bg-[var(--error-bg)]'
                       : spotlightRow.leadBuffer.level === 'at_risk'
-                        ? 'border-ds-warning/45 bg-ds-warning/8'
-                        : 'border-ds-line/50 bg-ds-main/40'
+                        ? 'bg-ds-warning/8'
+                        : 'bg-ds-main/40'
                   }`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span
-                      className={`inline-flex rounded-ds-sm border px-2 py-0.5 text-xs font-bold ${leadBufferBadgeClass(spotlightRow.leadBuffer.level)}`}
+                      className={`inline-flex rounded-ds-sm px-2 py-0.5 text-xs font-bold ${leadBufferBadgeClass(spotlightRow.leadBuffer.level)}`}
                     >
                       {spotlightRow.leadBuffer.level === 'critical'
                         ? 'Critical delay'
@@ -3211,7 +3211,7 @@ export default function ProcurementWorkbenchPage() {
                         e.stopPropagation()
                         void sendDelayWarning()
                       }}
-                      className="w-full rounded-ds-md border border-[var(--error)]/55 bg-[var(--error-bg)] px-3 py-2 text-xs font-bold text-[var(--error)] hover:bg-[var(--error-bg)] disabled:opacity-50"
+                      className="w-full rounded-ds-md bg-[var(--error-bg)] px-3 py-2 text-xs font-bold text-[var(--error)] hover:bg-[var(--error-bg)] disabled:opacity-50"
                     >
                       {warningSending ? 'Sending…' : 'Generate delay warning'}
                     </button>
@@ -3226,7 +3226,7 @@ export default function ProcurementWorkbenchPage() {
 
             {spotlightRow.suggestedSupplierId ? (
               <div
-                className={`rounded-ds-md border p-3 space-y-3 ${STRATEGIC_SOURCING_GOLD_BORDER} ${STRATEGIC_SOURCING_GOLD_SOFT}`}
+                className={`rounded-ds-md p-3 space-y-3 ${STRATEGIC_SOURCING_GOLD_SOFT}`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className={`text-xs uppercase tracking-wide font-semibold ${STRATEGIC_SOURCING_GOLD}`}>
@@ -3252,7 +3252,7 @@ export default function ProcurementWorkbenchPage() {
                     </p>
                     <div className="grid grid-cols-1 gap-2 text-xs">
                       <div
-                        className={`rounded-ds-sm border px-2.5 py-2 ${STRATEGIC_SOURCING_GOLD_BORDER} bg-background/40`}
+                        className={`rounded-ds-sm px-2.5 py-2 bg-background/40`}
                       >
                         <p className="text-neutral-500 text-xs uppercase tracking-wide font-semibold">
                           Total weight loss (cumulative)
@@ -3265,7 +3265,7 @@ export default function ProcurementWorkbenchPage() {
                         </p>
                       </div>
                       <div
-                        className={`rounded-ds-sm border px-2.5 py-2 ${STRATEGIC_SOURCING_GOLD_BORDER} bg-background/40`}
+                        className={`rounded-ds-sm px-2.5 py-2 bg-background/40`}
                       >
                         <p className="text-neutral-500 text-xs uppercase tracking-wide font-semibold">
                           Average lead time
@@ -3331,7 +3331,7 @@ export default function ProcurementWorkbenchPage() {
                       return (
                         <li
                           key={c.poLineItemId}
-                          className="rounded-ds-md border border-ds-line/40 bg-ds-main/40 p-2.5 space-y-2"
+                          className="rounded-ds-md bg-ds-main/40 p-2.5 space-y-2"
                         >
                           <p className="text-xs text-ds-ink font-medium">
                             {c.poNumber} · {c.cartonName}
@@ -3350,7 +3350,7 @@ export default function ProcurementWorkbenchPage() {
                                     [c.poLineItemId]: e.target.value,
                                   }))
                                 }
-                                className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1 font-mono text-ds-ink text-xs"
+                                className="mt-0.5 w-full rounded bg-background px-2 py-1 font-mono text-ds-ink text-xs"
                               />
                             </label>
                             <label className="text-ds-ink-faint">
@@ -3366,7 +3366,7 @@ export default function ProcurementWorkbenchPage() {
                                     [c.poLineItemId]: e.target.value,
                                   }))
                                 }
-                                className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1 font-mono text-ds-ink text-xs"
+                                className="mt-0.5 w-full rounded bg-background px-2 py-1 font-mono text-ds-ink text-xs"
                               />
                             </label>
                           </div>
@@ -3416,7 +3416,7 @@ export default function ProcurementWorkbenchPage() {
                               e.stopPropagation()
                               void saveWeightReceipt(c.poLineItemId)
                             }}
-                            className="w-full rounded-ds-sm border border-ds-line/50 bg-ds-card py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-elevated disabled:opacity-50"
+                            className="w-full rounded-ds-sm bg-ds-card py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-elevated disabled:opacity-50"
                           >
                             {receiptSavingId === c.poLineItemId ? 'Saving…' : 'Save weights & variance'}
                           </button>
@@ -3428,7 +3428,7 @@ export default function ProcurementWorkbenchPage() {
                                 e.stopPropagation()
                                 void draftDebitNoteForLine(c.poLineItemId)
                               }}
-                              className="w-full rounded-ds-sm border border-[var(--error)]/50 bg-[var(--error-bg)] py-1.5 text-xs font-bold text-[var(--error)] hover:bg-[var(--error-bg)] disabled:opacity-50"
+                              className="w-full rounded-ds-sm bg-[var(--error-bg)] py-1.5 text-xs font-bold text-[var(--error)] hover:bg-[var(--error-bg)] disabled:opacity-50"
                             >
                               {debitDraftingId === c.poLineItemId
                                 ? 'Drafting…'
@@ -3437,7 +3437,7 @@ export default function ProcurementWorkbenchPage() {
                           ) : null}
                           {rec?.debitNoteDraftText ? (
                             <div>
-                              <pre className="whitespace-pre-wrap rounded border border-ds-line/40 bg-background p-2 text-xs font-mono text-ds-ink-muted leading-relaxed">
+                              <pre className="whitespace-pre-wrap rounded bg-background p-2 text-xs font-mono text-ds-ink-muted leading-relaxed">
                                 {rec.debitNoteDraftText}
                               </pre>
                               <p className="text-xs text-neutral-500 mt-1 leading-snug">{DEBIT_NOTE_DRAFT_SIGNATURE}</p>
@@ -3457,7 +3457,7 @@ export default function ProcurementWorkbenchPage() {
               {priceIntelLoading ? (
                 <p className="text-ds-ink-faint text-xs">Loading…</p>
               ) : priceIntel?.benchmark30d ? (
-                <div className="space-y-2 rounded-ds-md border border-ds-line/40 bg-ds-main/50 p-2">
+                <div className="space-y-2 rounded-ds-md bg-ds-main/50 p-2">
                   <div className="flex flex-wrap items-center gap-2 justify-between">
                     <p className="text-xs text-ds-ink-muted leading-snug min-w-0 flex-1">
                       Market best (30d):{' '}
@@ -3512,7 +3512,7 @@ export default function ProcurementWorkbenchPage() {
               )}
             </div>
 
-            <div className="rounded-ds-md border border-ds-line/40 bg-background p-3 space-y-2">
+            <div className="rounded-ds-md bg-background p-3 space-y-2 shadow-ds-depth-sm">
               <p className="text-xs uppercase tracking-wide text-ds-ink-faint font-semibold">
                 Financial impact
               </p>
@@ -3556,7 +3556,7 @@ export default function ProcurementWorkbenchPage() {
                       </p>
                     )}
                     {cf.alternativeBetterTerms ? (
-                      <p className="text-xs text-[var(--info)]/90 leading-snug border-t border-ds-line/50 pt-2 mt-1">
+                      <p className="text-xs text-[var(--info)]/90 leading-snug pt-2 mt-1">
                         Alternative: {cf.alternativeBetterTerms.supplierName} offers{' '}
                         <span className="font-mono tabular-nums">
                           {cf.alternativeBetterTerms.extraDays}
@@ -3589,7 +3589,7 @@ export default function ProcurementWorkbenchPage() {
               {priceIntelLoading ? (
                 <p className="text-ds-ink-faint">Loading…</p>
               ) : priceIntel && priceIntel.history.length > 0 ? (
-                <ul className="space-y-1.5 rounded-ds-md border border-ds-line/40 bg-ds-main/50 p-2">
+                <ul className="space-y-1.5 rounded-ds-md bg-ds-main/50 p-2">
                   {priceIntel.history.map((h, i) => (
                     <li key={`${h.poNumber}-${i}`} className="flex justify-between gap-2 text-xs">
                       <span className="text-ds-ink-muted">
@@ -3621,9 +3621,9 @@ export default function ProcurementWorkbenchPage() {
               <p className="text-xs uppercase tracking-wide text-ds-ink-faint font-semibold mb-1">
                 Linked demand (customer POs)
               </p>
-              <ul className="max-h-48 overflow-y-auto space-y-1.5 rounded-ds-md border border-ds-line/40 bg-ds-main/50 p-2">
+              <ul className="max-h-48 overflow-y-auto space-y-1.5 rounded-ds-md bg-ds-main/50 p-2">
                 {spotlightRow.contributions.map((c) => (
-                  <li key={c.poLineItemId} className="text-xs leading-snug border-b border-ds-line/50 pb-1.5 last:border-0">
+                  <li key={c.poLineItemId} className="text-xs leading-snug pb-1.5">
                     <span className="font-mono text-ds-warning/80">{c.poNumber}</span>
                     <span className="text-neutral-600"> · </span>
                     {qTrim ? spotlightHighlightText(c.cartonName, qTrim) : c.cartonName}
@@ -3665,7 +3665,7 @@ export default function ProcurementWorkbenchPage() {
           aria-modal="true"
           aria-label="Vendor PO draft"
         >
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-ds-lg border border-ds-line/60 bg-ds-main p-4 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-ds-lg bg-ds-main p-4 shadow-2xl">
             <div className="flex items-start justify-between gap-2 mb-3">
               <div>
                 <h2 className="text-sm font-semibold text-foreground">
@@ -3694,7 +3694,7 @@ export default function ProcurementWorkbenchPage() {
             ) : (
               <div className="space-y-3 text-xs">
                 {draft.dispatchedAt ? (
-                  <p className="rounded-ds-sm border border-[var(--info)]/60 bg-[var(--info-bg)] px-2 py-1.5 text-xs text-[var(--info)]/95 leading-snug">
+                  <p className="rounded-ds-sm bg-[var(--info-bg)] px-2 py-1.5 text-xs text-[var(--info)]/95 leading-snug">
                     Dispatched{' '}
                     {new Date(draft.dispatchedAt).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}
                     {draft.dispatchActor ? ` · ${draft.dispatchActor}` : ''}. PDF (email) and WhatsApp were sent; audit
@@ -3716,7 +3716,7 @@ export default function ProcurementWorkbenchPage() {
                       value={draft.signatoryName}
                       onChange={(e) => setDraft({ ...draft, signatoryName: e.target.value })}
                       disabled={!!draft.dispatchedAt}
-                      className="mt-0.5 w-full rounded border border-ds-line/60 bg-ds-card px-2 py-1 text-foreground disabled:opacity-50"
+                      className="mt-0.5 w-full rounded bg-ds-card px-2 py-1 text-foreground disabled:opacity-50"
                     />
                   </div>
                 </div>
@@ -3729,7 +3729,7 @@ export default function ProcurementWorkbenchPage() {
                     {' — '}per-line rates use 30d market low when loaded; {'>'}2% vs benchmark highlights in rose.
                   </p>
                 ) : null}
-                <ul className="space-y-2 border border-ds-line/40 rounded-ds-sm p-2">
+                <ul className="space-y-2 rounded-ds-sm p-2">
                   {draft.lines.map((ln) => {
                     const lineKey = `${ln.boardGrade}|${ln.gsm}`
                     const intelLine = benchByLineKey[lineKey] ?? emptyPriceIntelBundle()
@@ -3762,7 +3762,7 @@ export default function ProcurementWorkbenchPage() {
                         ? Math.round((num - bench!.ratePerKg) * kg * 100) / 100
                         : null
                     return (
-                      <li key={ln.id} className="border-b border-ds-line/50 pb-2 last:border-0 last:pb-0">
+                      <li key={ln.id} className="pb-2 last:pb-0">
                         <p className="font-medium text-ds-ink">
                           {ln.boardGrade} · {ln.gsm} GSM · {ln.grainDirection}
                         </p>
@@ -3783,10 +3783,10 @@ export default function ProcurementWorkbenchPage() {
                               setLineRates((prev) => ({ ...prev, [ln.id]: e.target.value }))
                             }
                             disabled={!!draft.dispatchedAt}
-                            className={`w-28 rounded border px-1.5 py-0.5 font-mono tabular-nums text-foreground disabled:opacity-50 ${
+                            className={`w-28 rounded px-1.5 py-0.5 font-mono tabular-nums text-foreground disabled:opacity-50 ${
                               hot
-                                ? 'border-[var(--error)]/70 bg-[var(--error-bg)] ring-1 ring-[var(--error)]/30'
-                                : 'border-ds-line/60 bg-ds-card'
+                                ? 'bg-[var(--error-bg)] ring-1 ring-[var(--error)]/30'
+                                : 'bg-ds-card'
                             }`}
                           />
                           <PriceTrendSparkline
@@ -3795,7 +3795,7 @@ export default function ProcurementWorkbenchPage() {
                           />
                         </label>
                         {showWarn ? (
-                          <div className="mt-1.5 rounded-ds-sm border border-[var(--error)]/25 bg-[var(--error-bg)] px-2 py-1.5 text-xs text-[var(--error)] leading-snug">
+                          <div className="mt-1.5 rounded-ds-sm bg-[var(--error-bg)] px-2 py-1.5 text-xs text-[var(--error)] leading-snug">
                             <p>
                               Rate is {varPct!.toFixed(1)}% above market best (₹{bench!.ratePerKg.toFixed(2)}{' '}
                               from {bench!.supplierName}).
@@ -3823,7 +3823,7 @@ export default function ProcurementWorkbenchPage() {
                       setDraft(null)
                       setLastPurchaseBenchmark(null)
                     }}
-                    className="rounded-ds-sm border border-ds-line/60 px-3 py-1.5 text-ds-ink-muted hover:bg-ds-elevated"
+                    className="rounded-ds-sm px-3 py-1.5 text-ds-ink-muted hover:bg-ds-elevated"
                   >
                     Close
                   </button>
@@ -3856,7 +3856,7 @@ export default function ProcurementWorkbenchPage() {
           aria-label="Short-close vendor PO"
         >
           <div
-            className={`w-full max-w-md rounded-ds-lg border bg-background p-4 shadow-2xl ring-1 ring-ds-warning/35 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
+            className={`w-full max-w-md rounded-ds-lg bg-background p-4 shadow-2xl ring-1 ring-ds-warning/35`}
           >
             <h3 className={`text-sm font-bold tracking-tight ${STRATEGIC_SOURCING_GOLD}`}>
               Short-close vendor PO
@@ -3867,7 +3867,7 @@ export default function ProcurementWorkbenchPage() {
               reason + remarks).
             </p>
             <div
-              className={`mt-3 space-y-1.5 rounded-ds-md border border-ds-line/30 ${STRATEGIC_SOURCING_GOLD_SOFT} p-2.5 text-xs`}
+              className={`mt-3 space-y-1.5 rounded-ds-md ${STRATEGIC_SOURCING_GOLD_SOFT} p-2.5 text-xs`}
             >
               <div className="flex justify-between gap-2 text-neutral-500">
                 <span>Ordered (kg)</span>
@@ -3885,7 +3885,7 @@ export default function ProcurementWorkbenchPage() {
                   })}
                 </span>
               </div>
-              <div className="flex justify-between gap-2 text-ds-ink/95 font-semibold border-t border-ds-line/50 pt-1.5">
+              <div className="flex justify-between gap-2 text-ds-ink/95 font-semibold pt-1.5">
                 <span>Balance / completion</span>
                 <span className={`tabular-nums ${industrialMono}`}>
                   {(
@@ -3901,7 +3901,7 @@ export default function ProcurementWorkbenchPage() {
               <select
                 value={shortCloseReasonPick}
                 onChange={(e) => setShortCloseReasonPick(e.target.value as ShortCloseReason)}
-                className="mt-1 w-full rounded-ds-sm border border-ds-line/40 bg-ds-main px-2 py-1.5 text-ds-ink text-xs normal-case font-medium"
+                className="mt-1 w-full rounded-ds-sm bg-ds-main px-2 py-1.5 text-ds-ink text-xs normal-case font-medium"
               >
                 {SHORT_CLOSE_REASONS.map((r) => (
                   <option key={r} value={r}>
@@ -3916,7 +3916,7 @@ export default function ProcurementWorkbenchPage() {
                 value={shortCloseRemarks}
                 onChange={(e) => setShortCloseRemarks(e.target.value)}
                 rows={3}
-                className="mt-1 w-full rounded-ds-sm border border-ds-line/40 bg-background px-2 py-1.5 text-xs text-ds-ink placeholder:text-neutral-700"
+                className="mt-1 w-full rounded-ds-sm bg-background px-2 py-1.5 text-xs text-ds-ink placeholder:text-neutral-700"
                 placeholder="Document context for audit (e.g. variance detail, director instruction)…"
               />
             </label>
@@ -3924,7 +3924,7 @@ export default function ProcurementWorkbenchPage() {
               <button
                 type="button"
                 onClick={() => setShortCloseModalOpen(false)}
-                className="rounded-ds-sm border border-ds-line/40 bg-background px-3 py-1.5 text-xs text-ds-ink-muted hover:border-ds-line/50 hover:text-ds-ink"
+                className="rounded-ds-sm bg-background px-3 py-1.5 text-xs text-ds-ink-muted hover:text-ds-ink"
               >
                 Cancel
               </button>
@@ -3950,7 +3950,7 @@ export default function ProcurementWorkbenchPage() {
           aria-label="Shortage action required"
         >
           <div
-            className={`w-full max-w-md rounded-ds-lg border bg-background p-4 shadow-2xl ring-1 ring-ds-warning/35 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
+            className={`w-full max-w-md rounded-ds-lg bg-background p-4 shadow-2xl ring-1 ring-ds-warning/35`}
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className={`text-sm font-bold tracking-tight leading-snug ${STRATEGIC_SOURCING_GOLD}`}>
@@ -3993,7 +3993,7 @@ export default function ProcurementWorkbenchPage() {
                 type="datetime-local"
                 value={shortageReplacementEta}
                 onChange={(e) => setShortageReplacementEta(e.target.value)}
-                className={`mt-1 w-full rounded-ds-sm border border-ds-line/40 bg-ds-main px-2 py-2 text-xs text-ds-ink ${ledgerMono}`}
+                className={`mt-1 w-full rounded-ds-sm bg-ds-main px-2 py-2 text-xs text-ds-ink ${ledgerMono}`}
               />
             </label>
             <label className="mt-2 block text-xs text-neutral-500 font-bold uppercase tracking-wide">
@@ -4002,7 +4002,7 @@ export default function ProcurementWorkbenchPage() {
                 value={shortageShortCloseRemarks}
                 onChange={(e) => setShortageShortCloseRemarks(e.target.value)}
                 rows={2}
-                className="mt-1 w-full rounded-ds-sm border border-ds-line/40 bg-background px-2 py-1.5 text-xs text-ds-ink placeholder:text-neutral-700"
+                className="mt-1 w-full rounded-ds-sm bg-background px-2 py-1.5 text-xs text-ds-ink placeholder:text-neutral-700"
                 placeholder="Closed — short received after rejection (audit)…"
               />
             </label>
@@ -4023,7 +4023,7 @@ export default function ProcurementWorkbenchPage() {
           aria-label="Quality penalty and debit draft"
         >
           <div
-            className={`w-full max-w-md rounded-ds-lg border bg-background p-4 shadow-2xl ring-1 ring-ds-warning/35 ${STRATEGIC_SOURCING_GOLD_BORDER}`}
+            className={`w-full max-w-md rounded-ds-lg bg-background p-4 shadow-2xl ring-1 ring-ds-warning/35`}
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className={`text-xs font-bold tracking-tight ${STRATEGIC_SOURCING_GOLD}`}>
@@ -4032,7 +4032,7 @@ export default function ProcurementWorkbenchPage() {
             <p className="text-xs text-neutral-600 mt-1 leading-snug">
               Technical variance when Actual GSM &lt; Ordered GSM. Pure black record; mono for GSM and ₹.
             </p>
-            <div className="mt-3 space-y-2 rounded-ds-md border border-ds-line/30 bg-ds-main/40 p-2.5 text-xs">
+            <div className="mt-3 space-y-2 rounded-ds-md bg-ds-main/40 p-2.5 text-xs">
               <div className={`flex justify-between gap-2 text-neutral-500 ${ledgerMono}`}>
                 <span>Ordered GSM vs Actual</span>
                 <span className="text-ds-ink/95 font-semibold">
@@ -4050,7 +4050,7 @@ export default function ProcurementWorkbenchPage() {
                 </span>
               </div>
               <pre
-                className={`mt-2 whitespace-pre-wrap border-t border-ds-line/40 pt-2 text-xs text-neutral-500 leading-relaxed ${ledgerMono}`}
+                className={`mt-2 whitespace-pre-wrap pt-2 text-xs text-neutral-500 leading-relaxed ${ledgerMono}`}
               >
                 {penaltyFlow.proofLines.join('\n')}
               </pre>
@@ -4069,7 +4069,7 @@ export default function ProcurementWorkbenchPage() {
                   type="button"
                   disabled={debitDraftSubmitting}
                   onClick={() => setPenaltyFlow(null)}
-                  className="rounded-ds-sm border border-ds-line/40 bg-background px-3 py-1.5 text-xs text-neutral-500"
+                  className="rounded-ds-sm bg-background px-3 py-1.5 text-xs text-neutral-500"
                 >
                   Close
                 </button>
@@ -4077,7 +4077,7 @@ export default function ProcurementWorkbenchPage() {
                   type="button"
                   disabled={debitDraftSubmitting}
                   onClick={() => void submitDebitDraft(penaltyFlow.receiptId)}
-                  className="inline-flex items-center gap-1.5 rounded-ds-sm border border-ds-warning/55 bg-ds-warning/10 px-3 py-1.5 text-xs font-bold text-ds-ink"
+                  className="inline-flex items-center gap-1.5 rounded-ds-sm bg-ds-warning/10 px-3 py-1.5 text-xs font-bold text-ds-ink"
                 >
                   <IndianRupee className="h-3.5 w-3.5" aria-hidden />
                   {debitDraftSubmitting ? 'Sending…' : 'Draft debit note'}

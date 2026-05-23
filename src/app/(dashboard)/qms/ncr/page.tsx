@@ -244,7 +244,7 @@ export default function NcrListPage() {
       {showForm && (
         <form
           onSubmit={handleCreate}
-          className="rounded-ds-lg bg-ds-card border border-ds-line p-4 space-y-3"
+          className="rounded-ds-lg bg-ds-card p-4 space-y-3"
         >
           <h2 className="text-sm font-semibold text-ds-ink">Raise NCR</h2>
           <div className="grid md:grid-cols-2 gap-3 text-sm">
@@ -253,7 +253,7 @@ export default function NcrListPage() {
               <select
                 value={form.jobId}
                 onChange={e => setForm(f => ({ ...f, jobId: e.target.value }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 <option value="">Select job…</option>
                 {jobs.map(j => (
@@ -266,7 +266,7 @@ export default function NcrListPage() {
               <select
                 value={form.trigger}
                 onChange={e => setForm(f => ({ ...f, trigger: e.target.value }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 {TRIGGERS.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
               </select>
@@ -276,7 +276,7 @@ export default function NcrListPage() {
               <select
                 value={form.severity}
                 onChange={e => setForm(f => ({ ...f, severity: e.target.value as 'critical' | 'major' | 'minor' }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 <option value="critical">Critical</option>
                 <option value="major">Major</option>
@@ -290,7 +290,7 @@ export default function NcrListPage() {
                 min={0}
                 value={form.quantityAffected}
                 onChange={e => setForm(f => ({ ...f, quantityAffected: e.target.value }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
             <div className="md:col-span-2">
@@ -299,7 +299,7 @@ export default function NcrListPage() {
                 value={form.description}
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                 rows={2}
-                className="w-full rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
           </div>
@@ -320,7 +320,7 @@ export default function NcrListPage() {
         <select
           value={jobFilter}
           onChange={e => { setJobFilter(e.target.value); setPage(1) }}
-          className="min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+          className="min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
         >
           <option value="">All jobs</option>
           {jobs.map(j => <option key={j.id} value={j.id}>{j.jobNumber}</option>)}
@@ -328,7 +328,7 @@ export default function NcrListPage() {
         <select
           value={statusFilter}
           onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
-          className="min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+          className="min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
         >
           {STATUS_OPTIONS.map(o => (
             <option key={o.value} value={o.value}>{o.label}</option>

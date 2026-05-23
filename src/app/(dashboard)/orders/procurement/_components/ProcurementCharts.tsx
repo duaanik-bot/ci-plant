@@ -40,7 +40,7 @@ export function PriceTrendSparkline({
           <Tooltip
             cursor={{ stroke: '#f59e0b', strokeOpacity: 0.35 }}
             content={() => (
-              <div className="rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink shadow-xl space-y-0.5">
+              <div className="rounded bg-background px-2 py-1.5 text-xs text-ds-ink shadow-xl space-y-0.5">
                 <div className="font-mono tabular-nums">
                   High:{' '}
                   {tooltip.high != null ? `₹${tooltip.high.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}

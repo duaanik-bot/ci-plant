@@ -139,7 +139,7 @@ export function ReservationsPanel({
       {loading && <div className="text-center text-ds-ink-muted py-8">Loading…</div>}
 
       {data && data.ghostCount > 0 && (
-        <div className="mb-3 p-3 rounded border border-ds-danger/40 bg-ds-danger/10 text-[13px] text-ds-danger flex gap-2">
+        <div className="mb-3 p-3 rounded bg-ds-danger/10 text-[13px] text-ds-danger flex gap-2">
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
           <div>
             <strong>
@@ -160,10 +160,10 @@ export function ReservationsPanel({
         {data?.reservations.map((r) => (
           <div
             key={r.id}
-            className={`rounded border p-3 ${
+            className={`rounded p-3 ${
               r.isGhost
-                ? 'border-l-4 border-l-ds-danger border-ds-danger/30 bg-ds-danger/5'
-                : 'border-l-4 border-l-[var(--border)] border-[var(--border)] bg-[var(--bg-elevated)]'
+                ? 'bg-ds-danger/5'
+                : 'bg-[var(--bg-elevated)]'
             }`}
           >
             <div className="flex items-center justify-between mb-1">
@@ -211,7 +211,7 @@ export function ReservationsPanel({
                 <button
                   onClick={() => releaseActive(r.id)}
                   disabled={releasingId === r.id}
-                  className="rounded border border-[var(--border)] text-[var(--text-primary)] text-[12px] px-3 py-1 hover:bg-[var(--bg-elevated)] disabled:opacity-50"
+                  className="rounded bg-[var(--bg-elevated)] text-[var(--text-primary)] text-[12px] px-3 py-1 hover:bg-[var(--bg-elevated)]/80 disabled:opacity-50"
                 >
                   Release
                 </button>

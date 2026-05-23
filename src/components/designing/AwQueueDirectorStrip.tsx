@@ -25,9 +25,9 @@ export function AwQueueDirectorStrip({
   const [recallOpen, setRecallOpen] = useState(false)
 
   return (
-    <div className="border-b border-ds-line/40 bg-background px-3 py-1.5">
+    <div className="bg-background px-3 py-1.5">
       <div className="max-w-7xl mx-auto w-full flex flex-wrap items-center gap-2">
-          <label className="inline-flex items-center gap-2 rounded-ds-sm border border-ds-line/40 bg-background px-2.5 py-1.5 text-xs font-semibold text-ds-ink cursor-pointer select-none">
+          <label className="inline-flex items-center gap-2 rounded-ds-sm bg-ds-elevated px-2.5 py-1.5 text-xs font-semibold text-ds-ink cursor-pointer select-none">
             <input
               type="checkbox"
               className="rounded border-ds-warning/60 h-3.5 w-3.5 accent-ds-warning"
@@ -60,7 +60,7 @@ export function AwQueueDirectorStrip({
                   <div className="flex w-full justify-end gap-2">
                     <button
                       type="button"
-                      className="rounded-ds-sm border border-ds-line/60 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-elevated"
+                      className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-elevated/80"
                       onClick={() => setRecallOpen(false)}
                     >
                       Cancel

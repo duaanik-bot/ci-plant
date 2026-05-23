@@ -659,14 +659,14 @@ function InventoryPageContent() {
   if (loading) {
     return (
       <div className="w-full px-4 py-3">
-        <div className="rounded-ds-lg border border-ds-line/40 bg-background p-4">
+        <div className="rounded-ds-lg bg-background p-4">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
             {Array.from({ length: 12 }).map((_, i) => (
-              <div key={i} className="h-16 animate-pulse rounded-ds-md border border-ds-line/30 bg-ds-elevated/30" />
+              <div key={i} className="h-16 animate-pulse rounded-ds-md bg-ds-elevated/30" />
             ))}
           </div>
-          <div className="mt-4 h-10 animate-pulse rounded-ds-md border border-ds-line/30 bg-ds-elevated/30" />
-          <div className="mt-3 h-64 animate-pulse rounded-ds-md border border-ds-line/30 bg-ds-elevated/30" />
+          <div className="mt-4 h-10 animate-pulse rounded-ds-md bg-ds-elevated/30" />
+          <div className="mt-3 h-64 animate-pulse rounded-ds-md bg-ds-elevated/30" />
         </div>
       </div>
     )
@@ -1143,7 +1143,7 @@ function InventoryPageContent() {
       <div className="w-full px-4 py-3">
         <section
           id="paper-ledger"
-          className="rounded-ds-lg border border-ds-line/40 overflow-hidden bg-background text-ds-ink"
+          className="rounded-ds-lg overflow-hidden bg-background text-ds-ink shadow-ds-depth-sm"
         >
           <div className="p-4 md:p-6">
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1162,7 +1162,7 @@ function InventoryPageContent() {
                 <button
                   type="button"
                   onClick={() => setAdjustOpen(true)}
-                  className="rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                  className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
                 >
                   Adjust Stock
                 </button>
@@ -1181,19 +1181,19 @@ function InventoryPageContent() {
                     setBulkAdjustInput(lines)
                     setAdjustOpen(true)
                   }}
-                  className="rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                  className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
                 >
                   Bulk Add/Remove
                 </button>
                 <Link
                   href="/inventory/flow"
-                  className="rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                  className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
                 >
                   Inventory Flow
                 </Link>
                 <Link
                   href="/inventory/purchase-requisitions"
-                  className="rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/40"
+                  className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
                 >
                   Purchase Requisitions
                 </Link>
@@ -1223,7 +1223,7 @@ function InventoryPageContent() {
             />
 
             {/* Warehouse tab navigation */}
-            <div className="flex gap-0 border-b border-ds-line/25 mb-4">
+            <div className="flex gap-0 mb-4">
               {(['stock', 'open-pos', 'incoming', 'reports'] as const).map((tab) => (
                 <button
                   key={tab}
@@ -1274,7 +1274,7 @@ function InventoryPageContent() {
         >
           {materialDrawerRow ? (
             <div className={`flex h-full flex-col text-xs text-ds-ink-muted ${ledgerMono}`}>
-              <div className="sticky top-0 z-10 border-b border-ds-line/40 bg-background px-4 py-3">
+              <div className="sticky top-0 z-10 bg-background px-4 py-3">
                 <p className="text-xs uppercase tracking-wide text-ds-ink-faint">
                   {materialDrawerView === 'reserved'
                     ? 'Reserved Stock'
@@ -1289,7 +1289,7 @@ function InventoryPageContent() {
                 <p className="text-sm font-semibold text-ds-ink">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p>
               </div>
               <div className="flex-1 overflow-y-auto space-y-4 px-4 py-3">
-                <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+                <div className="grid grid-cols-2 gap-2 rounded bg-ds-elevated/20 p-2">
                   <div><span className="text-ds-ink-muted">Material Code</span><p className="font-semibold text-ds-ink">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p></div>
                   <div><span className="text-ds-ink-muted">Board Type</span><p className="text-ds-ink">{materialDrawerData?.material.boardType ?? materialDrawerRow.board_type_id ?? '-'}</p></div>
                   <div><span className="text-ds-ink-muted">Classification</span><p className="text-ds-ink">{materialDrawerData?.material.boardClassification ?? materialDrawerRow.board_classification_id ?? '-'}</p></div>
@@ -1300,12 +1300,12 @@ function InventoryPageContent() {
                   <div><span className="text-ds-ink-muted">Free Stock</span><p className={`font-semibold ${(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? 'text-[var(--error)]' : 'text-cyan-700'}`}>{fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p></div>
                 </div>
                 {materialDrawerData?.material.sourceTraceability ? (
-                  <p className="rounded border border-ds-line/40 bg-ds-elevated/20 px-2 py-1 text-ds-ink-faint">
+                  <p className="rounded bg-ds-elevated/20 px-2 py-1 text-ds-ink-faint">
                     {materialDrawerData.material.sourceTraceability}
                   </p>
                 ) : null}
                 {materialDrawerData?.material.leftoverMeta?.isLeftover ? (
-                  <div className="rounded border border-ds-brand/30 bg-ds-brand/5 p-2">
+                  <div className="rounded bg-[var(--brand-bg-soft)] p-2">
                     <p className="text-xs uppercase tracking-wide text-ds-brand">Leftover Stock</p>
                     <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
                       <div><span className="text-ds-ink-faint">Source Planning</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.sourcePlanningId || '-'}</p></div>
@@ -1331,7 +1331,7 @@ function InventoryPageContent() {
                     ) : (
                       <ul className="space-y-2">
                         {materialDrawerData.reservations.map((r) => (
-                          <li key={r.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                          <li key={r.id} className="rounded px-2 py-1.5">
                             <p className="text-ds-ink">
                               {(r.planningId ? `PL#${r.planningId.slice(0, 8)}` : '-')}{r.jobCard?.jobCardNumber ? ` · JC#${r.jobCard.jobCardNumber}` : ''}
                             </p>
@@ -1348,7 +1348,7 @@ function InventoryPageContent() {
                                   requiredSheets: r.requiredSheets,
                                   currentReserved: r.reservedSheets,
                                 })}
-                                className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
+                                className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
                               >
                                 Adjust Reservation
                               </button>
@@ -1363,12 +1363,12 @@ function InventoryPageContent() {
                                   requiredSheets: r.requiredSheets,
                                   currentReserved: r.reservedSheets,
                                 })}
-                                className="rounded border border-ds-warning/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-40"
+                                className="rounded bg-[var(--warning-bg)] px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-40"
                               >
                                 Release / Unreserve
                               </button>
                               {r.planningId ? (
-                                <Link href={`/orders/planning?lineId=${encodeURIComponent(r.planningId)}`} className="rounded border border-ds-brand/40 px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/10">
+                                <Link href={`/orders/planning?lineId=${encodeURIComponent(r.planningId)}`} className="rounded bg-[var(--brand-bg-soft)] px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/10">
                                   View Planning / Job
                                 </Link>
                               ) : null}
@@ -1383,7 +1383,7 @@ function InventoryPageContent() {
                 {materialDrawerView === 'available' ? (
                   <div className="space-y-2">
                     <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Available stock guidance</p>
-                    <div className="rounded border border-ds-line/40 p-2 text-ds-ink-faint">
+                    <div className="rounded bg-ds-elevated/20 p-2 text-ds-ink-faint">
                       <p>Incoming: {fmt(materialDrawerRow.incoming_sheets)}</p>
                       <p>Free Stock: {fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p>
                     </div>
@@ -1391,7 +1391,7 @@ function InventoryPageContent() {
                       <button
                         type="button"
                         onClick={() => toast.info('Open a planning line to reserve this stock.')}
-                        className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                        className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                       >
                         Reserve for Planning
                       </button>
@@ -1404,14 +1404,14 @@ function InventoryPageContent() {
                           setAdjustDirection('add')
                           setAdjustOpen(true)
                         }}
-                        className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                        className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                       >
                         Adjust Stock
                       </button>
                       <button
                         type="button"
                         onClick={() => setMaterialDrawerView('history')}
-                        className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                        className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                       >
                         View History
                       </button>
@@ -1429,21 +1429,21 @@ function InventoryPageContent() {
                     ) : (
                       <ul className="space-y-2">
                         {materialDrawerData.shortages.map((s) => (
-                          <li key={s.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                          <li key={s.id} className="rounded px-2 py-1.5">
                             <p className="text-ds-ink">{s.planningId ? `PL#${s.planningId.slice(0, 8)}` : s.jobCardId} {s.jobCardNumber ? `· JC#${s.jobCardNumber}` : ''}</p>
                             <p className="text-ds-ink-faint">Pending {fmt(s.pendingShortage)} / Required {fmt(s.requiredQty)}</p>
                             <p className="text-ds-ink-faint">PR Status: {s.prStatus || '-'}</p>
                             <div className="mt-1 flex flex-wrap gap-2">
                               {s.prId ? (
                                 <>
-                                  <Link href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(s.prId)}`} className="rounded border border-ds-brand/40 px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/10">View PR</Link>
-                                  <button type="button" onClick={() => s.prId && (window.location.href = `/inventory/purchase-requisitions?prId=${encodeURIComponent(s.prId)}`)} className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40">Adjust PR</button>
+                                  <Link href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(s.prId)}`} className="rounded px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/10">View PR</Link>
+                                  <button type="button" onClick={() => s.prId && (window.location.href = `/inventory/purchase-requisitions?prId=${encodeURIComponent(s.prId)}`)} className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40">Adjust PR</button>
                                 </>
                               ) : (
                                 <button
                                   type="button"
                                   onClick={() => void generatePrFromDrawerShortage(s.id, s.pendingShortage)}
-                                  className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-2 py-1 text-xs text-[var(--error)] hover:bg-[var(--error-bg)]"
+                                  className="rounded bg-[var(--error-bg)] px-2 py-1 text-xs text-[var(--error)] hover:bg-[var(--error-bg)]"
                                 >
                                   Generate PR
                                 </button>
@@ -1457,7 +1457,7 @@ function InventoryPageContent() {
                 ) : null}
 
                 {materialDrawerView === 'free' ? (
-                  <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+                  <div className="rounded bg-ds-elevated/20 p-2">
                     <p className="text-ds-ink">Free stock = Available - Reserved = {fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p>
                     {(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? (
                       <p className="mt-1 text-[var(--error)]">
@@ -1476,7 +1476,7 @@ function InventoryPageContent() {
                   ) : (
                     <ul className="space-y-2">
                       {materialDrawerData.logs.slice(0, 20).map((log) => (
-                        <li key={log.id} className="rounded border border-ds-line/40 px-2 py-1.5">
+                        <li key={log.id} className="rounded px-2 py-1.5">
                           <p className="text-ds-ink">{log.movementType} · {log.qty.toLocaleString('en-IN')}</p>
                           {log.reservationContext ? (
                             <div className="mt-0.5 space-y-0.5 text-ds-ink-faint">
@@ -1501,18 +1501,18 @@ function InventoryPageContent() {
                   )}
                 </div>
               </div>
-              <div className="sticky bottom-0 border-t border-ds-line/40 bg-background px-4 py-3">
+              <div className="sticky bottom-0 bg-background px-4 py-3">
                 <div className="flex items-center justify-between gap-2">
                   <button
                     type="button"
                     onClick={() => setMaterialDrawerView('history')}
-                    className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                    className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                   >
                     Show full history
                   </button>
                   <Link
                     href="/inventory"
-                    className="rounded border border-ds-brand/35 bg-ds-brand/10 px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/20"
+                    className="rounded bg-ds-brand/10 px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/20"
                   >
                     Open Warehouse
                   </Link>
@@ -1533,14 +1533,14 @@ function InventoryPageContent() {
               <p className="text-ds-ink-faint">-</p>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2">
+                <div className="grid grid-cols-2 gap-2 rounded bg-ds-elevated/20 p-2">
                   <div><span className="text-ds-ink-muted">Material</span><p className={ledgerMono}>{procureState.materialCode}</p></div>
                   <div><span className="text-ds-ink-muted">Board Type</span><p>{procureState.boardType || '-'}</p></div>
                   <div><span className="text-ds-ink-muted">Size</span><p className={ledgerMono}>{procureState.size || '-'}</p></div>
                   <div><span className="text-ds-ink-muted">GSM</span><p className={ledgerMono}>{procureState.gsm ?? '-'}</p></div>
                 </div>
                 {procureState.mode === 'manual' ? (
-                  <p className="rounded border border-ds-brand/30 bg-ds-brand/10 px-2 py-1.5 text-ds-brand">
+                  <p className="rounded bg-[var(--brand-bg-soft)] px-2 py-1.5 text-ds-brand">
                     Manual reorder — raises a Purchase Requisition not tied to any job shortage.
                   </p>
                 ) : (
@@ -1554,7 +1554,7 @@ function InventoryPageContent() {
                         const hit = procureState.shortages.find((s) => s.id === id)
                         if (hit) setProcurePrQty(String(Math.max(0, hit.pendingShortage)))
                       }}
-                      className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                      className="mt-1 w-full rounded bg-background px-2 py-2 text-xs"
                     >
                       {procureState.shortages.map((s) => (
                         <option key={s.id} value={s.id}>
@@ -1572,7 +1572,7 @@ function InventoryPageContent() {
                     step="1"
                     value={procurePrQty}
                     onChange={(e) => setProcurePrQty(e.target.value)}
-                    className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                    className="mt-1 w-full rounded bg-background px-2 py-2 text-xs"
                   />
                 </label>
                 <label className="flex items-center gap-2 text-xs text-ds-ink-muted">
@@ -1580,17 +1580,17 @@ function InventoryPageContent() {
                     type="checkbox"
                     checked={procureBuffer}
                     onChange={(e) => setProcureBuffer(e.target.checked)}
-                    className="rounded border-ds-line/50"
+                    className="rounded"
                   />
                   Add 10% buffer
                 </label>
                 {procureError ? (
-                  <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-2 py-1 text-[var(--error)]">{procureError}</div>
+                  <div className="rounded bg-[var(--error-bg)] px-2 py-1 text-[var(--error)]">{procureError}</div>
                 ) : null}
                 <div className="flex items-center justify-end gap-2">
                   <button
                     type="button"
-                    className="rounded border border-ds-line/50 px-3 py-1.5 text-xs"
+                    className="rounded px-3 py-1.5 text-xs"
                     onClick={() => setProcureOpen(false)}
                     disabled={procureBusy}
                   >
@@ -1617,7 +1617,7 @@ function InventoryPageContent() {
           widthClass="max-w-md"
         >
           <div className="space-y-3 px-1 text-sm">
-            <div className="inline-flex rounded-ds-md border border-ds-line/50 bg-background p-1">
+            <div className="inline-flex rounded-ds-md bg-background p-1">
               <button
                 type="button"
                 onClick={() => setAdjustMode('single')}
@@ -1641,7 +1641,7 @@ function InventoryPageContent() {
                   <select
                     value={adjustMaterialId}
                     onChange={(e) => setAdjustMaterialId(e.target.value)}
-                    className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                    className="mt-1 w-full rounded bg-background px-2 py-2 text-xs"
                   >
                     <option value="">Select material</option>
                     {items.map((i) => (
@@ -1657,7 +1657,7 @@ function InventoryPageContent() {
                     <select
                       value={adjustDirection}
                       onChange={(e) => setAdjustDirection(e.target.value as 'add' | 'subtract')}
-                      className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                      className="mt-1 w-full rounded bg-background px-2 py-2 text-xs"
                     >
                       <option value="add">Add (+)</option>
                       <option value="subtract">Subtract (-)</option>
@@ -1672,7 +1672,7 @@ function InventoryPageContent() {
                           e.target.value as 'quarantine' | 'available' | 'reserved' | 'fg',
                         )
                       }
-                      className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                      className="mt-1 w-full rounded bg-background px-2 py-2 text-xs"
                     >
                       <option value="quarantine">Quarantine</option>
                       <option value="available">Available</option>
@@ -1689,7 +1689,7 @@ function InventoryPageContent() {
                     step="0.001"
                     value={adjustQty}
                     onChange={(e) => setAdjustQty(e.target.value)}
-                    className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                    className="mt-1 w-full rounded bg-background px-2 py-2 text-xs"
                   />
                 </label>
                 <label className="block text-xs text-ds-ink-faint">
@@ -1698,7 +1698,7 @@ function InventoryPageContent() {
                     type="text"
                     value={adjustReason}
                     onChange={(e) => setAdjustReason(e.target.value)}
-                    className="mt-1 w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                    className="mt-1 w-full rounded bg-background px-2 py-2 text-xs"
                     placeholder="e.g. count_correction"
                   />
                 </label>
@@ -1707,7 +1707,7 @@ function InventoryPageContent() {
                   <textarea
                     value={adjustRemarks}
                     onChange={(e) => setAdjustRemarks(e.target.value)}
-                    className="mt-1 min-h-[90px] w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                    className="mt-1 min-h-[90px] w-full rounded bg-background px-2 py-2 text-xs"
                   />
                 </label>
                 <button
@@ -1728,7 +1728,7 @@ function InventoryPageContent() {
                   value={bulkAdjustInput}
                   onChange={(e) => setBulkAdjustInput(e.target.value)}
                   placeholder={`TEST-MAT-123, 100, add, available, trial_load, Trial load opening stock\nTEST-MAT-123, 20, subtract, available`}
-                  className="min-h-[180px] w-full rounded border border-ds-line/50 bg-background px-2 py-2 text-xs"
+                  className="min-h-[180px] w-full rounded bg-background px-2 py-2 text-xs"
                 />
                 <button
                   type="button"

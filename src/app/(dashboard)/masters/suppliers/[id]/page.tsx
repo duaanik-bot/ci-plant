@@ -124,8 +124,8 @@ export default function EditSupplierPage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground ${
+              fieldErrors.name ? 'bg-[var(--error-bg)]' : ''
             }`}
           />
           {fieldErrors.name && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.name}</p>}
@@ -135,7 +135,7 @@ export default function EditSupplierPage() {
           <input
             value={gstNumber}
             onChange={(e) => setGstNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -144,7 +144,7 @@ export default function EditSupplierPage() {
             <input
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -152,7 +152,7 @@ export default function EditSupplierPage() {
             <input
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
         </div>
@@ -162,7 +162,7 @@ export default function EditSupplierPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -171,7 +171,7 @@ export default function EditSupplierPage() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -183,7 +183,7 @@ export default function EditSupplierPage() {
                   type="checkbox"
                   checked={materialTypes.includes(t)}
                   onChange={() => toggleType(t)}
-                  className="rounded border-ds-line/60"
+                  className="rounded"
                 />
                 {t}
               </label>
@@ -197,7 +197,7 @@ export default function EditSupplierPage() {
             min={0}
             value={leadTimeDays}
             onChange={(e) => setLeadTimeDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -208,7 +208,7 @@ export default function EditSupplierPage() {
             value={paymentTermsDays}
             onChange={(e) => setPaymentTermsDays(e.target.value)}
             placeholder="0 = advance, 30 = Net 30"
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground font-mono tabular-nums"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground font-mono tabular-nums"
           />
           <p className="mt-1 text-xs text-ds-ink-faint">
             Drives projected payment date from GRN receipt (calendar days).
@@ -219,7 +219,7 @@ export default function EditSupplierPage() {
           <input
             value={paymentTerms}
             onChange={(e) => setPaymentTerms(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -228,7 +228,7 @@ export default function EditSupplierPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-ds-line/60"
+            className="rounded"
           />
           <label htmlFor="active" className="text-sm text-ds-ink-muted">Active</label>
         </div>

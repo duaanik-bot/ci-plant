@@ -252,7 +252,7 @@ function CommandPaletteModal({
     >
       <div
         ref={panelRef}
-        className="flex h-[min(70vh,560px)] w-full max-w-xl flex-col overflow-hidden rounded-ds-lg border border-border bg-card shadow-2xl ring-1 ring-ring/20 backdrop-blur-xl"
+        className="flex h-[min(70vh,560px)] w-full max-w-xl flex-col overflow-hidden rounded-ds-lg bg-card shadow-2xl ring-1 ring-ring/20 backdrop-blur-xl"
         onKeyDown={onPaletteKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
@@ -468,8 +468,8 @@ export function CommandPaletteTrigger({
         className={clsx(
           'hidden rounded px-1.5 py-0.5 text-xs font-mono sm:inline',
           variant === 'navbar'
-            ? 'border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-secondary)]'
-            : 'border border-ds-line/60 bg-ds-main/80 text-ds-ink-faint',
+            ? 'bg-[var(--bg-main)] text-[var(--text-secondary)]'
+            : 'bg-ds-main/80 text-ds-ink-faint',
         )}
       >
         {kbdHint}

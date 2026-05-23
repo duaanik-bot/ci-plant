@@ -111,10 +111,10 @@ export function DieTriageCard({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
       transition={{ duration: 0.2 }}
-      className={`rounded-lg border bg-background p-2 overflow-visible ${
+      className={`rounded-lg bg-background p-2 overflow-visible ${
         onHold
-          ? 'border-[var(--warning)]/70 shadow-[0_0_16px_rgba(245,158,11,0.22)] ring-2 ring-[var(--warning)]/35'
-          : 'border-ds-line/40'
+          ? 'shadow-[0_0_16px_rgba(245,158,11,0.22)] ring-2 ring-[var(--warning)]/35'
+          : ''
       }`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -133,7 +133,7 @@ export function DieTriageCard({
             type="button"
             disabled={saving}
             title="Undo last hub action"
-            className="text-xs font-bold uppercase tracking-wide text-ds-warning border border-ds-warning/30 rounded px-1.5 py-0.5 hover:bg-ds-warning/10 disabled:opacity-50 whitespace-nowrap"
+            className="text-xs font-bold uppercase tracking-wide text-ds-warning rounded px-1.5 py-0.5 hover:bg-ds-warning/10 disabled:opacity-50 whitespace-nowrap"
             onClick={onReverse}
           >
             ↺ Reverse
@@ -142,7 +142,7 @@ export function DieTriageCard({
             <button
               type="button"
               onClick={onSimilarClick}
-              className="text-xs font-bold uppercase tracking-wider text-[var(--error)] border border-[var(--error)]/60 rounded px-1.5 py-0.5 hover:bg-[var(--error-bg)]"
+              className="text-xs font-bold uppercase tracking-wider text-[var(--error)] rounded px-1.5 py-0.5 hover:bg-[var(--error-bg)]"
             >
               Type mismatch
             </button>
@@ -150,7 +150,7 @@ export function DieTriageCard({
             <button
               type="button"
               onClick={onSimilarClick}
-              className="text-xs font-bold uppercase tracking-wider text-ds-warning border border-ds-warning/50 rounded px-1.5 py-0.5 hover:bg-ds-warning/10"
+              className="text-xs font-bold uppercase tracking-wider text-ds-warning rounded px-1.5 py-0.5 hover:bg-ds-warning/10"
             >
               Similar
             </button>
@@ -168,7 +168,7 @@ export function DieTriageCard({
         </p>
       ) : null}
       {r.hubConditionPoor ? (
-        <p className="mt-1 text-xs font-bold uppercase tracking-wider text-[var(--error)] border border-[var(--error)]/60 rounded px-1.5 py-0.5 w-fit">
+        <p className="mt-1 text-xs font-bold uppercase tracking-wider text-[var(--error)] bg-[var(--error-bg)] rounded px-1.5 py-0.5 w-fit">
           Poor condition
         </p>
       ) : null}
@@ -195,14 +195,14 @@ export function DieTriageCard({
           <button
             type="button"
             disabled={triageLocked}
-            className="py-1.5 rounded-md border border-ds-line/50 bg-ds-card hover:bg-ds-elevated text-ds-ink text-xs font-semibold disabled:opacity-50"
+            className="py-1.5 rounded-md bg-ds-card hover:bg-ds-elevated text-ds-ink text-xs font-semibold disabled:opacity-50"
             onClick={onTakeFromStock}
           >
             Pull from rack
           </button>
         </div>
 
-        <div className={`rounded-md border border-ds-line/50 bg-ds-main/80 p-2 ${triageLocked ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className={`rounded-md bg-ds-main/80 p-2 ${triageLocked ? 'opacity-50 pointer-events-none' : ''}`}>
           <p className="text-xs font-semibold text-neutral-500 mb-1">Manual link (any rack die)</p>
           <input
             value={manualQ}
@@ -211,10 +211,10 @@ export function DieTriageCard({
             onBlur={() => window.setTimeout(() => setManualFocused(false), 160)}
             disabled={triageLocked}
             placeholder="Search DYE #, dimensions, pasting…"
-            className="w-full px-2 py-1.5 rounded border border-ds-line/50 bg-background text-foreground text-xs placeholder:text-neutral-600"
+            className="w-full px-2 py-1.5 rounded bg-background text-foreground text-xs placeholder:text-neutral-600"
           />
           {manualFocused && (pickLoading || pickItems.length > 0) ? (
-            <ul className="mt-1 max-h-36 overflow-y-auto rounded border border-ds-line/40 bg-background text-xs">
+            <ul className="mt-1 max-h-36 overflow-y-auto rounded bg-background text-xs">
               {pickLoading && pickItems.length === 0 ? (
                 <li className="px-2 py-2 text-neutral-500">Searching…</li>
               ) : null}
@@ -223,7 +223,7 @@ export function DieTriageCard({
                   <button
                     type="button"
                     disabled={triageLocked}
-                    className="w-full text-left px-2 py-1.5 hover:bg-ds-card border-b border-ds-line/30 last:border-0"
+                    className="w-full text-left px-2 py-1.5 hover:bg-ds-card"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       onManualLink(it.id)
@@ -240,12 +240,12 @@ export function DieTriageCard({
           ) : null}
         </div>
 
-        <div className="rounded-md border border-[var(--warning)]/50 bg-[var(--warning-bg)] p-2 space-y-2">
+        <div className="rounded-md bg-[var(--warning-bg)] p-2 space-y-2">
           {onHold ? (
             <button
               type="button"
               disabled={saving}
-              className="w-full py-1.5 rounded-md border border-[var(--warning)]/70 bg-[var(--warning-bg)] text-[var(--warning)] text-xs font-bold hover:opacity-90 disabled:opacity-50"
+              className="w-full py-1.5 rounded-md bg-[var(--warning-bg)] text-[var(--warning)] text-xs font-bold hover:opacity-90 disabled:opacity-50"
               onClick={() => onTriageHold(false)}
             >
               Release on-hold
@@ -259,7 +259,7 @@ export function DieTriageCard({
                   onChange={(e) => setHoldReasonDraft(e.target.value)}
                   rows={2}
                   disabled={saving}
-                  className="mt-1 w-full px-2 py-1.5 rounded border border-ds-line/50 bg-background text-foreground text-xs"
+                  className="mt-1 w-full px-2 py-1.5 rounded bg-background text-foreground text-xs"
                 />
               </label>
               <button

@@ -111,7 +111,7 @@ export function PmSpotlightDrawer({
           <p className="text-[var(--text-secondary)] text-sm">Loading…</p>
         ) : data ? (
           <>
-            <div className="flex items-center gap-4 rounded-xl border border-ds-line/40 bg-ds-main/80 px-3 py-3">
+            <div className="flex items-center gap-4 rounded-xl bg-ds-main/80 px-3 py-3">
               <MachineHealthMeter
                 healthPct={data.health.healthPct}
                 hasSchedule={data.health.hasSchedule}
@@ -143,7 +143,7 @@ export function PmSpotlightDrawer({
                   {data.serviceHistory.map((h) => (
                     <li
                       key={h.verifiedAt}
-                      className="rounded-lg border border-ds-line/40 bg-background px-2 py-2 text-xs text-[var(--text-secondary)]"
+                      className="rounded-lg bg-background px-2 py-2 text-xs text-[var(--text-secondary)]"
                     >
                       <span className="text-ds-ink">{new Date(h.verifiedAt).toLocaleString()}</span>
                       <p className="mt-0.5 text-[var(--text-secondary)]">{h.signedOffNote}</p>

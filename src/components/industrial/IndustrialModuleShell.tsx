@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 const TABLE_SHELL =
-  'overflow-x-auto rounded-lg border border-ds-line/50 bg-card ring-1 ring-ring/20'
+  'overflow-x-auto rounded-lg bg-card ring-1 ring-ring/20'
 
 export function industrialTableClassName(): string {
   return TABLE_SHELL

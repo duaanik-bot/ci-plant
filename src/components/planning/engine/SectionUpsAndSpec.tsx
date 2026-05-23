@@ -25,7 +25,7 @@ const MetricTile = memo(function MetricTile({
   emphasisClass?: string
 }) {
   return (
-    <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
+    <div className="bg-ds-elevated rounded-ds-md p-3">
       <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
         {label}
       </div>

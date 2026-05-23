@@ -25,7 +25,7 @@ const variants: Record<Variant, string> = {
   secondary: 'bg-ds-elevated text-ds-ink hover:bg-ds-elevated/80 disabled:opacity-50',
   danger:    'bg-ds-error text-white hover:opacity-90 disabled:opacity-50',
   ghost:     'text-ds-ink-muted hover:bg-ds-elevated disabled:opacity-50',
-  outline:   'border border-ds-line text-ds-ink bg-ds-card hover:bg-ds-elevated disabled:opacity-50',
+  outline:   'bg-[var(--bg-elevated)] text-ds-ink hover:bg-[var(--bg-muted)] disabled:opacity-50',
 }
 
 const sizes: Record<Size, string> = {

@@ -151,7 +151,7 @@ const DimInput = memo(function DimInput({
   onCommit: () => void
 }) {
   return (
-    <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
+    <div className="bg-ds-elevated rounded-ds-md p-3">
       <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
         {label}
       </div>
@@ -187,7 +187,7 @@ const DerivedTile = memo(function DerivedTile({
   locked?: boolean
 }) {
   return (
-    <div className="bg-ds-elevated/60 rounded-ds-md border border-ds-line/40 p-3">
+    <div className="bg-ds-elevated/60 rounded-ds-md p-3">
       <div className="flex items-center justify-between mb-1">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
         {locked ? (
@@ -299,13 +299,13 @@ export const SheetCutSpec = memo(function SheetCutSpec({ line, onPatch }: Props)
   const upsIsAuto = meta?.upsSource !== 'manual' && !!upsDraft
 
   return (
-    <div className="mt-3 rounded-ds-md border border-ds-line/40 bg-ds-elevated/30 p-3">
+    <div className="mt-3 rounded-ds-md bg-ds-elevated/30 p-3">
       <div className="flex items-center justify-between mb-2">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
           Sheet &amp; cut spec
         </div>
         {/* Unit toggle */}
-        <div className="inline-flex overflow-hidden rounded-full border border-ds-line/50 text-[11px]">
+        <div className="inline-flex overflow-hidden rounded-full bg-ds-elevated text-[11px]">
           {(['in', 'mm'] as const).map((u) => (
             <button
               key={u}
@@ -338,7 +338,7 @@ export const SheetCutSpec = memo(function SheetCutSpec({ line, onPatch }: Props)
           onChange={setWidth}
           onCommit={commitDims}
         />
-        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
+        <div className="bg-ds-elevated rounded-ds-md p-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
             Cut type
           </div>
@@ -400,7 +400,7 @@ export const SheetCutSpec = memo(function SheetCutSpec({ line, onPatch }: Props)
           value={derivedParent ? formatSizeDisplay(derivedParent.lengthMm, derivedParent.widthMm, unit) : '—'}
         />
         {/* UPS — editable, writes to meta.ups + specPack.sheet.ups */}
-        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
+        <div className="bg-ds-elevated rounded-ds-md p-3">
           <div className="flex items-center justify-between mb-1">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
               Units per sheet

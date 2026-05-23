@@ -32,7 +32,7 @@ export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onAccept, o
 
   if (suggestions.length === 0) {
     return (
-      <div className="rounded-ds-md border border-ds-line/55 bg-ds-card/30 px-3 py-2 text-center text-xs text-ds-ink-faint">
+      <div className="rounded-ds-md bg-ds-card/30 px-3 py-2 text-center text-xs text-ds-ink-faint">
         No group suggestions for the current view.
       </div>
     )
@@ -51,7 +51,7 @@ export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onAccept, o
         {suggestions.map((b) => (
           <article
             key={b.id}
-            className="flex w-full min-w-[16rem] max-w-sm flex-1 flex-col rounded-ds-lg border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-sm sm:min-w-[18rem]"
+            className="flex w-full min-w-[16rem] max-w-sm flex-1 flex-col rounded-ds-lg bg-[var(--bg-card)] p-3 shadow-ds-depth-sm sm:min-w-[18rem]"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -78,7 +78,7 @@ export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onAccept, o
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <ul className="mt-3 max-h-28 space-y-1 overflow-y-auto border-t border-ds-line/50 pt-2 text-xs text-ds-ink-muted">
+            <ul className="mt-3 max-h-28 space-y-1 overflow-y-auto pt-2 text-xs text-ds-ink-muted">
               {b.lineSummaries.map((l) => (
                 <li key={l.id} className="flex justify-between gap-2">
                   <span className="min-w-0 truncate" title={l.cartonLabel}>
@@ -105,7 +105,7 @@ export function PlanningSuggestedBatchesPanel({ lines, dismissedIds, onAccept, o
               <button
                 type="button"
                 onClick={() => onModify(b.lineIds)}
-                className="inline-flex flex-1 items-center justify-center gap-1 rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 px-3 py-2 text-xs font-medium text-ds-ink hover:bg-ds-elevated"
+                className="inline-flex flex-1 items-center justify-center gap-1 rounded-ds-md bg-ds-elevated/60 px-3 py-2 text-xs font-medium text-ds-ink hover:bg-ds-elevated"
               >
                 <Pencil className="h-3.5 w-3.5" aria-hidden />
                 Modify

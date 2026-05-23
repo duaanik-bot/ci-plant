@@ -76,7 +76,7 @@ export function PlanningProductDetailDrawer({
         {loading ? <p className="text-ds-ink-faint">Loading…</p> : null}
         {!loading && data && (
           <>
-            <div className="space-y-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 p-4">
+            <div className="space-y-2 rounded-ds-md bg-ds-elevated/40 p-4">
               <p className="text-xs font-medium uppercase tracking-wider text-ds-ink-faint">Master specs</p>
               <p>
                 <span className="text-ds-ink-faint">GSM:</span>{' '}
@@ -140,7 +140,7 @@ export function PlanningProductDetailDrawer({
                 {(data.lastRuns ?? []).map((r) => (
                   <li
                     key={r?.jobCardNumber}
-                    className="rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 px-3 py-2 text-ds-ink-muted"
+                    className="rounded-ds-md bg-ds-elevated/40 px-3 py-2 text-ds-ink-muted"
                   >
                     <p className={`${mono} text-ds-warning`}>JC #{r?.jobCardNumber ?? '—'}</p>
                     <p className="text-xs text-ds-ink-faint">

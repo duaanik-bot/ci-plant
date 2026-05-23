@@ -49,7 +49,7 @@ export function Toaster() {
           key={t.id}
           className={cn(
             'pointer-events-auto flex items-start gap-3',
-            'bg-ds-card rounded-ds-md border border-ds-line border-l-4',
+            'bg-ds-card rounded-ds-md shadow-ds-depth-sm border-l-4',
             'shadow-toast px-4 py-3',
             BORDERS[t.type] ?? BORDERS.info,
             'animate-in slide-in-from-right-4 duration-200',

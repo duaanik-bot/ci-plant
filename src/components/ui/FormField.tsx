@@ -15,7 +15,7 @@ export function FormField({ label, required, error, helper, children }: Props) {
         {label}
         {required ? <span className="ml-0.5 text-[var(--error)]">*</span> : null}
       </label>
-      <div className={error ? 'rounded-ds-sm border border-[var(--error)]/70 p-1' : ''}>{children}</div>
+      <div className={error ? 'rounded-ds-sm bg-[var(--error-bg)]/40 p-1' : ''}>{children}</div>
       {error ? <p className="text-xs text-[var(--error)]">{error}</p> : null}
       {!error && helper ? <p className="text-xs text-ds-ink-faint">{helper}</p> : null}
     </div>

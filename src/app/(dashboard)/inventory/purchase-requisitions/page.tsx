@@ -12,10 +12,10 @@ import { GeneratePoDialog, type GeneratePoSelection } from '@/components/invento
 type Stage = PrUiStage
 
 const STAGES: Array<{ key: Stage; label: string; accent: string }> = [
-  { key: 'draft', label: PR_STAGE_LABEL.draft, accent: 'border-[var(--brand-primary)]/50' },
-  { key: 'approved', label: PR_STAGE_LABEL.approved, accent: 'border-[var(--info)]/50' },
-  { key: 'ordered', label: PR_STAGE_LABEL.ordered, accent: 'border-[var(--info)]/50' },
-  { key: 'received', label: PR_STAGE_LABEL.received, accent: 'border-[var(--success)]/50' },
+  { key: 'draft', label: PR_STAGE_LABEL.draft, accent: '' },
+  { key: 'approved', label: PR_STAGE_LABEL.approved, accent: '' },
+  { key: 'ordered', label: PR_STAGE_LABEL.ordered, accent: '' },
+  { key: 'received', label: PR_STAGE_LABEL.received, accent: '' },
 ]
 
 export default function PurchaseRequisitionsPage() {
@@ -154,13 +154,13 @@ export default function PurchaseRequisitionsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search material / job / reason"
-          className="w-full max-w-sm rounded-ds-md border border-ds-line/60 bg-ds-card px-3 py-2 text-sm"
+          className="w-full max-w-sm rounded-ds-md bg-ds-card px-3 py-2 text-sm"
         />
         <button
           type="button"
           disabled={approvedSel.size === 0 || busy}
           onClick={() => void moveToOrdered(Array.from(approvedSel))}
-          className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40"
+          className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40"
         >
           Move Selected → Ordered ({approvedSel.size})
         </button>
@@ -168,7 +168,7 @@ export default function PurchaseRequisitionsPage() {
           type="button"
           disabled={orderedSel.size === 0}
           onClick={openGeneratePo}
-          className="rounded border border-[var(--success)]/40 bg-[var(--success-bg)] px-2 py-1 text-xs text-[var(--success)] disabled:opacity-40"
+          className="rounded bg-[var(--success-bg)] px-2 py-1 text-xs text-[var(--success)] disabled:opacity-40"
         >
           Generate PO ({orderedSel.size})
         </button>
@@ -179,10 +179,10 @@ export default function PurchaseRequisitionsPage() {
           const rows = grouped[stage.key]
           const count = stage.key === 'ordered' ? ordered.groups.length + ordered.poCards.length : rows.length
           return (
-            <div key={stage.key} className={`rounded-ds-lg border ${stage.accent} bg-ds-card/30 p-3`}>
+            <div key={stage.key} className={`rounded-ds-lg bg-ds-card/30 p-3 ${stage.accent}`}>
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-ds-ink">{stage.label}</h2>
-                <span className="rounded border border-ds-line/40 px-2 py-0.5 text-xs text-ds-ink-muted">{count}</span>
+                <span className="rounded px-2 py-0.5 text-xs text-ds-ink-muted">{count}</span>
               </div>
 
               <div className="space-y-2">

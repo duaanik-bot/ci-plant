@@ -1313,7 +1313,7 @@ export function PlanningJobDetailDrawer({
   const splitB = typeof splitA === 'number' && splitA > 0 && splitA < totalQty ? totalQty - splitA : null
 
   const fieldInput = 'ds-input mt-0.5 w-full text-sm py-2 [color-scheme:dark]'
-  const comboControl = 'border-ds-line/80 bg-ds-elevated/50'
+  const comboControl = 'bg-ds-elevated/50'
   const comboInput = 'text-sm text-ds-ink'
   const noMaterialSelected = !readinessLoading && !(selectedMaterialId || readiness?.materialId)
   const mappingLabel =
@@ -1328,12 +1328,12 @@ export function PlanningJobDetailDrawer({
             : '-'
   const statusTone =
     readiness?.status === 'green'
-      ? 'border-ds-success/35 bg-ds-success/10 text-ds-success'
+      ? 'bg-ds-success/10 text-ds-success'
       : readiness?.status === 'yellow'
-        ? 'border-ds-warning/35 bg-ds-warning/10 text-ds-warning'
+        ? 'bg-ds-warning/10 text-ds-warning'
         : readiness?.status === 'red'
-          ? 'border-ds-danger/35 bg-ds-danger/10 text-ds-danger'
-          : 'border-ds-line/60 bg-ds-elevated/40 text-ds-ink-muted'
+          ? 'bg-ds-danger/10 text-ds-danger'
+          : 'bg-ds-elevated/40 text-ds-ink-muted'
   const materialSummary = readiness
     ? readiness.status === 'green'
       ? `Required ${Math.max(0, readiness.requiredSheets).toLocaleString('en-IN')} sheets. ${Math.max(0, readiness.availableSheets).toLocaleString('en-IN')} available. Ready to reserve.`
@@ -1396,7 +1396,7 @@ export function PlanningJobDetailDrawer({
       }
       statusBar={
         <div className="flex items-center gap-3 text-xs">
-          <span className={`inline-flex items-center gap-1.5 rounded-ds-sm border px-2.5 py-1 font-medium ${statusTone}`}>
+          <span className={`inline-flex items-center gap-1.5 rounded-ds-sm px-2.5 py-1 font-medium ${statusTone}`}>
             {readinessLoading
               ? 'Checking material…'
               : readiness?.status === 'green'
@@ -1411,7 +1411,7 @@ export function PlanningJobDetailDrawer({
             <span className="text-ds-ink-faint truncate">{materialSummary}</span>
           ) : null}
           {visibleSuggestionCount > 0 && (
-            <span className="ml-auto shrink-0 rounded-ds-sm border border-ds-brand/40 bg-ds-brand/10 px-2 py-0.5 text-ds-brand font-medium">
+            <span className="ml-auto shrink-0 rounded-ds-sm bg-ds-brand/10 px-2 py-0.5 text-ds-brand font-medium">
               {visibleSuggestionCount} board option{visibleSuggestionCount > 1 ? 's' : ''}
             </span>
           )}
@@ -1537,7 +1537,7 @@ export function PlanningJobDetailDrawer({
         </CardSection>
 
         <CardSection title="Material Readiness" id="plan-drawer-material-readiness">
-          <div className={`rounded-ds-md border px-3 py-3 text-xs ${statusTone}`}>
+          <div className={`rounded-ds-md px-3 py-3 text-xs ${statusTone}`}>
             <p className="text-sm font-semibold text-ds-ink">Material Readiness</p>
             <p className="mt-1 text-xs text-ds-ink-muted">
               {readinessLoading ? 'Loading material readiness…' : noMaterialSelected ? 'No material selected.' : materialSummary}
@@ -1620,8 +1620,8 @@ export function PlanningJobDetailDrawer({
                   return (
                     <div
                       key={opt.materialId}
-                      className={`w-full rounded border px-2 py-2 text-left text-xs ${
-                        selected ? 'border-ds-warning/50 bg-ds-warning/10' : 'border-ds-line/40 bg-background'
+                      className={`w-full rounded px-2 py-2 text-left text-xs ${
+                        selected ? 'bg-ds-warning/10' : 'bg-background'
                       }`}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1675,20 +1675,20 @@ export function PlanningJobDetailDrawer({
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         {hasActiveReservation ? (
                           <>
-                            <span className="rounded border border-ds-success/40 bg-ds-success/10 px-2 py-1 text-[11px] text-ds-success">
+                            <span className="rounded bg-ds-success/10 px-2 py-1 text-[11px] text-ds-success">
                               Reserved
                             </span>
                             <button
                               type="button"
                               onClick={() => void openReservationControl('adjust', opt.materialId)}
-                              className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                              className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                             >
                               Adjust Reservation
                             </button>
                             <button
                               type="button"
                               onClick={() => void openReservationControl('release', opt.materialId)}
-                              className="rounded border border-ds-warning/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10"
+                              className="rounded bg-ds-warning/10 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/15"
                             >
                               Release / Unreserve
                             </button>
@@ -1707,7 +1707,7 @@ export function PlanningJobDetailDrawer({
                               type="button"
                               disabled={reserveBusy}
                               onClick={() => void lockSelectionOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
-                              className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
+                              className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
                             >
                               Lock Only
                             </button>
@@ -1728,7 +1728,7 @@ export function PlanningJobDetailDrawer({
                         </button>
                       </div>
                       {openOpt ? (
-                        <div className="mt-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2 text-xs">
+                        <div className="mt-2 rounded bg-ds-elevated/20 p-2 text-xs">
                           {optLoading ? (
                             <p className="text-ds-ink-faint">Loading…</p>
                           ) : !optDetails ? (
@@ -1749,7 +1749,7 @@ export function PlanningJobDetailDrawer({
                                 ) : (
                                   <ul className="space-y-1">
                                     {optDetails.logs.slice(0, 5).map((l) => (
-                                      <li key={l.id} className="rounded border border-ds-line/20 px-1.5 py-0.5">
+                                      <li key={l.id} className="rounded px-1.5 py-0.5">
                                         {new Date(l.createdAt).toLocaleString('en-IN')} · {l.movementType} · {Number(l.qty).toLocaleString('en-IN')}
                                       </li>
                                     ))}
@@ -1903,12 +1903,12 @@ export function PlanningJobDetailDrawer({
             </div>
           </div>
           {reserveInlineError ? (
-            <div className="mt-2 rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
+            <div className="mt-2 rounded bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
               {reserveInlineError}
             </div>
           ) : null}
           {stockDetailsOpen ? (
-            <div className="rounded-ds-md border border-ds-line/40 bg-ds-elevated/30 p-3 text-xs space-y-3">
+            <div className="rounded-ds-md bg-ds-elevated/30 p-3 text-xs space-y-3">
               {stockDetailsLoading ? (
                 <p className="text-ds-ink-faint">Loading stock details…</p>
               ) : !stockDetails ? (
@@ -1934,7 +1934,7 @@ export function PlanningJobDetailDrawer({
                     {(stockDetails.reservations || []).length === 0 ? <p className="text-ds-ink-faint">No active reservations.</p> : (
                       <ul className="space-y-1">
                         {stockDetails.reservations.slice(0, 5).map((r) => (
-                          <li key={r.id} className="rounded border border-ds-line/30 px-2 py-1">
+                          <li key={r.id} className="rounded px-2 py-1">
                             {r.jobCard ? `JC#${r.jobCard.jobCardNumber}` : `PL#${r.planningId || '-'}`} · {r.cartonName || '-'} · {Number(r.reservedSheets).toLocaleString('en-IN')} sh · {r.status || '-'}
                           </li>
                         ))}
@@ -1946,7 +1946,7 @@ export function PlanningJobDetailDrawer({
                     {(stockDetails.shortages || []).length === 0 ? <p className="text-ds-ink-faint">No open shortages.</p> : (
                       <ul className="space-y-1">
                         {stockDetails.shortages.slice(0, 5).map((s) => (
-                          <li key={s.id} className="rounded border border-ds-line/30 px-2 py-1">
+                          <li key={s.id} className="rounded px-2 py-1">
                             {s.id} · JC#{s.jobCardNumber ?? '-'} · {Number(s.pendingShortage).toLocaleString('en-IN')} sh · {s.priority}
                           </li>
                         ))}
@@ -1958,7 +1958,7 @@ export function PlanningJobDetailDrawer({
                     {(stockDetails.logs || []).length === 0 ? <p className="text-ds-ink-faint">No stock logs.</p> : (
                       <ul className="space-y-1">
                         {stockDetails.logs.slice(0, 8).map((l) => (
-                          <li key={l.id} className="rounded border border-ds-line/30 px-2 py-1">
+                          <li key={l.id} className="rounded px-2 py-1">
                             {new Date(l.createdAt).toLocaleString('en-IN')} · {l.movementType} · {Number(l.qty).toLocaleString('en-IN')} · {l.refType || '-'} {l.refId ? `(${l.refId.slice(0, 8)})` : ''}
                           </li>
                         ))}
@@ -2139,7 +2139,7 @@ export function PlanningJobDetailDrawer({
                 min={1}
                 step={1}
                 placeholder="Enter ups"
-                className={`${fieldInput} max-w-[8rem] ${gangUpsStr ? 'border-ds-success/50 bg-ds-success/10' : ''}`}
+                className={`${fieldInput} max-w-[8rem] ${gangUpsStr ? 'bg-ds-success/10' : ''}`}
                 value={gangUpsStr}
                 onChange={(e) => {
                   const v = e.target.value.trim()
@@ -2172,7 +2172,7 @@ export function PlanningJobDetailDrawer({
           </div>
         </CardSection>
 
-        <CardSection title="Costing" id="plan-drawer-costing" className="border-ds-success/25 bg-ds-elevated/40">
+        <CardSection title="Costing" id="plan-drawer-costing" className="bg-[var(--success-bg)]/8 bg-ds-elevated/40">
           <div className="space-y-4">
             <div>
               <p className="ds-typo-label">Rate (per unit, ex-GST)</p>
@@ -2194,7 +2194,7 @@ export function PlanningJobDetailDrawer({
                 onBlur={() => void onSaveLine(line.id, { rate: line.rate ?? null })}
               />
             </div>
-            <div className="rounded-ds-md border border-ds-success/30 bg-ds-success/5 p-4 md:p-5">
+            <div className="rounded-ds-md bg-ds-success/5 p-4 md:p-5">
               <p className="text-xs font-medium text-ds-ink-muted">Line amount (ex-GST)</p>
               <p className="mt-2 text-2xl font-bold leading-tight text-ds-success tabular-nums md:text-2xl">
                 ₹ {amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -2216,7 +2216,7 @@ export function PlanningJobDetailDrawer({
                 {splitOpen ? 'Hide split' : 'Split (intent)'}
               </Button>
               {splitOpen ? (
-                <div className="mt-2 space-y-2 rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3">
+                <div className="mt-2 space-y-2 rounded-ds-md bg-ds-elevated/30 p-3">
                   <p className="text-xs leading-snug text-ds-ink-faint">Notional split — coordinate with Accounts for PO changes.</p>
                   <label className="ds-typo-label block">First job qty</label>
                   <input
@@ -2274,7 +2274,7 @@ export function PlanningJobDetailDrawer({
           </div>
         </CardSection>
 
-        <div className="space-y-2 border-t border-ds-line/50 pt-6">
+        <div className="space-y-2 pt-6">
           <Button
             type="button"
             variant="secondary"
@@ -2309,7 +2309,7 @@ export function PlanningJobDetailDrawer({
         }}
       >
         <div className="space-y-3 text-xs text-ds-ink">
-          <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+          <div className="rounded bg-ds-elevated/20 p-2">
             <p>
               Required size: <span className={mono}>{resolvedSheetSize || '-'}</span> · Qty/UPS: <span className={mono}>{calcQty}/{calcUps}</span> · Required sheets: <span className={mono}>{calcRequiredSheets}</span>
             </p>
@@ -2317,7 +2317,7 @@ export function PlanningJobDetailDrawer({
               Strategy: {readiness?.mappingSafety?.strategyUsed || '-'} | Requested board type: {readiness?.mappingSafety?.requestedBoardType || '-'}
             </p>
           </div>
-          <div className="overflow-x-auto rounded border border-ds-line/40">
+          <div className="overflow-x-auto rounded">
             <table className="w-full min-w-[1080px] table-auto text-left">
               <thead className="bg-ds-elevated/30 text-[11px] uppercase tracking-wide text-ds-ink-faint">
                 <tr>
@@ -2380,7 +2380,7 @@ export function PlanningJobDetailDrawer({
                   const optLoading = !!optionDetailsLoading[opt.materialId]
                   return (
                   <Fragment key={`ws-${opt.materialId}`}>
-                  <tr className="border-t border-ds-line/30">
+                  <tr>
                     <td className={`px-2 py-2 ${mono}`}>{Number(opt.fitScore ?? 0).toFixed(1)}%</td>
                     <td className="px-2 py-2">
                       <p className={mono}>{opt.materialCode}</p>
@@ -2415,20 +2415,20 @@ export function PlanningJobDetailDrawer({
                         </Button>
                         {Math.max(0, Number(readiness?.reservedByMaterial?.[opt.materialId] || 0)) > 0 ? (
                           <>
-                            <span className="rounded border border-ds-success/40 bg-ds-success/10 px-2 py-1 text-[11px] text-ds-success">
+                            <span className="rounded bg-ds-success/10 px-2 py-1 text-[11px] text-ds-success">
                               Reserved
                             </span>
                             <button
                               type="button"
                               onClick={() => void openReservationControl('adjust', opt.materialId)}
-                              className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                              className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                             >
                               Adjust Reservation
                             </button>
                             <button
                               type="button"
                               onClick={() => void openReservationControl('release', opt.materialId)}
-                              className="rounded border border-ds-warning/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10"
+                              className="rounded bg-ds-warning/10 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/15"
                             >
                               Release / Unreserve
                             </button>
@@ -2460,7 +2460,7 @@ export function PlanningJobDetailDrawer({
                     </td>
                   </tr>
                   {openOpt ? (
-                    <tr className="border-t border-ds-line/20 bg-ds-elevated/20">
+                    <tr className="bg-ds-elevated/20">
                       <td className="px-2 py-2 text-xs text-ds-ink-faint" colSpan={14}>
                         {optLoading ? (
                           <p>Loading…</p>
@@ -2486,12 +2486,12 @@ export function PlanningJobDetailDrawer({
       </PlanningEngineModal>
       {reserveConfirmOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
-          <div className="w-full max-w-3xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
+          <div className="w-full max-w-3xl overflow-hidden rounded-ds-lg bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <h3 className="text-sm font-semibold text-ds-ink">Confirm Material Reservation</h3>
               <button
                 type="button"
-                className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                 disabled={reserveBusy}
                 onClick={() => setReserveConfirmOpen(false)}
               >
@@ -2503,7 +2503,7 @@ export function PlanningJobDetailDrawer({
                 <p className="text-xs text-ds-ink-faint">No material selected.</p>
               ) : (
                 <div className="space-y-3 text-xs">
-                  <div className="sticky top-0 z-10 rounded border border-ds-line/50 bg-background/95 px-3 py-2 backdrop-blur">
+                  <div className="sticky top-0 z-10 rounded bg-background/95 px-3 py-2 backdrop-blur">
                     <p className="mb-1 text-[11px] uppercase tracking-wide text-ds-ink-faint">Decision Summary</p>
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] md:grid-cols-4">
                       <span>Material: <span className={`${mono} text-ds-ink`}>{reserveConfirm.materialCode || '-'}</span></span>
@@ -2575,7 +2575,7 @@ export function PlanningJobDetailDrawer({
                     <div><span className="text-ds-ink-muted">Already Reserved Sheets</span><p className={mono}>{reserveConfirm.alreadyReservedSheets}</p></div>
                     <div><span className="text-ds-ink-muted">Current Shortage Sheets</span><p className={mono}>{reserveConfirm.currentShortageSheets}</p></div>
                   </div>
-                  <div className="grid grid-cols-1 gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2">
+                  <div className="grid grid-cols-1 gap-2 rounded bg-ds-elevated/20 p-2">
                     <label className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -2604,17 +2604,17 @@ export function PlanningJobDetailDrawer({
                     </p>
                   </div>
                   {reserveConfirm.freeSheets <= 0 ? (
-                    <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
+                    <p className="rounded bg-ds-warning/10 px-2 py-1 text-ds-warning">
                       Stock is over-reserved. Release stock or create PR.
                     </p>
                   ) : null}
                   {readiness?.prId ? (
-                    <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
+                    <p className="rounded bg-ds-warning/10 px-2 py-1 text-ds-warning">
                       PR already exists for this line ({readiness.prStatus || 'open'}).
                     </p>
                   ) : null}
                   {(optionDetailsByMaterial[reserveConfirm.materialId]?.reservations || []).length > 1 ? (
-                    <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
+                    <p className="rounded bg-ds-warning/10 px-2 py-1 text-ds-warning">
                       Stock is currently used by multiple jobs/lines. Verify before reserving.
                     </p>
                   ) : null}
@@ -2689,7 +2689,7 @@ export function PlanningJobDetailDrawer({
                     <div><span className="text-ds-ink-muted">Shortage Qty</span><p className={`${mono} text-ds-ink`}>{reserveConfirm.shortageQty}</p></div>
                     <div><span className="text-ds-ink-muted">Leftover Available After Reserve</span><p className={`${mono} text-ds-ink`}>{reserveConfirm.leftoverAvailableAfterReserve}</p></div>
                   </div>
-                  <div className="space-y-2 rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+                  <div className="space-y-2 rounded bg-ds-elevated/20 p-2">
                     <p className="text-ds-ink-muted">Leftover / Offcut Details</p>
                     <div className="grid grid-cols-2 gap-2">
                       <div><span className="text-ds-ink-faint">Parent Sheet Size</span><p className={mono}>{reserveConfirm.parentSize || '-'}</p></div>
@@ -2778,14 +2778,14 @@ export function PlanningJobDetailDrawer({
                       }
                     />
                   </div>
-                  <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
+                  <div className="rounded bg-ds-elevated/20 p-2">
                     <p className="mb-1 text-ds-ink-muted">Already Reserved Under This Material</p>
                     {(optionDetailsByMaterial[reserveConfirm.materialId]?.reservations || []).length === 0 ? (
                       <p className="text-ds-ink-faint">No active reservations for this material.</p>
                     ) : (
                       <ul className="space-y-1">
                         {(optionDetailsByMaterial[reserveConfirm.materialId]?.reservations || []).slice(0, 8).map((r) => (
-                          <li key={r.id} className="rounded border border-ds-line/30 px-2 py-1">
+                          <li key={r.id} className="rounded px-2 py-1">
                             {r.jobCard ? `Job Card #${r.jobCard.jobCardNumber}` : `Planning Line ${r.planningId || '-'}`} · {r.cartonName || '-'} · {Number(r.reservedSheets || 0).toLocaleString('en-IN')} · {r.reservedAt ? new Date(r.reservedAt).toLocaleString('en-IN') : '-'} · {r.status || '-'}
                           </li>
                         ))}
@@ -2799,7 +2799,7 @@ export function PlanningJobDetailDrawer({
                     <p className="text-ds-warning">Shortage will remain without PR.</p>
                   ) : null}
                   {reserveModalError ? (
-                    <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
+                    <div className="rounded bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
                       {reserveModalError}
                     </div>
                   ) : null}
@@ -2835,7 +2835,7 @@ export function PlanningJobDetailDrawer({
       ) : null}
       {reservationControlOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
-          <div className="w-full max-w-2xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
+          <div className="w-full max-w-2xl overflow-hidden rounded-ds-lg bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <h3 className="text-sm font-semibold text-ds-ink">
                 {reservationControl?.mode === 'adjust'
@@ -2846,7 +2846,7 @@ export function PlanningJobDetailDrawer({
               </h3>
               <button
                 type="button"
-                className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                 disabled={reservationControlBusy}
                 onClick={() => setReservationControlOpen(false)}
               >
@@ -2968,7 +2968,7 @@ export function PlanningJobDetailDrawer({
                       </select>
                     </label>
                   ) : null}
-                  <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2">
+                  <div className="grid grid-cols-2 gap-2 rounded bg-ds-elevated/20 p-2">
                     <div><span className="text-ds-ink-muted">Shortage Qty</span><p className={mono}>{reservationControl.shortageQty}</p></div>
                     <div><span className="text-ds-ink-muted">Leftover Available</span><p className={mono}>{reservationControl.leftoverAvailableAfterReserve}</p></div>
                   </div>
@@ -2981,7 +2981,7 @@ export function PlanningJobDetailDrawer({
                     <p className="text-ds-warning">{reservationControl.warningMessage}</p>
                   ) : null}
                   {reservationControlError ? (
-                    <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
+                    <div className="rounded bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
                       {reservationControlError}
                     </div>
                   ) : null}

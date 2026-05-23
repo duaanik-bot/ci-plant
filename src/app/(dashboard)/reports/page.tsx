@@ -30,7 +30,7 @@ export default function ReportsIndexPage() {
               <Link
                 key={r.id}
                 href={`/reports/${r.id}`}
-                className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 hover:border-ds-warning/60 hover:bg-ds-elevated/50 transition-colors"
+                className="rounded-ds-lg bg-ds-card p-4 shadow-ds-depth-sm hover:bg-ds-elevated/50 transition-colors"
               >
                 <p className="text-sm font-semibold text-ds-ink">{r.title}</p>
                 <p className="text-xs text-ds-ink-muted mt-1">{r.kpi}</p>

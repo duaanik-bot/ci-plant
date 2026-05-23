@@ -52,8 +52,8 @@ export function SmartMatchDieModal({
       aria-modal="true"
       aria-labelledby="smart-match-title"
     >
-      <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-ds-lg border border-border/15 bg-background shadow-2xl ring-1 ring-ring/10">
-        <div className="flex items-start justify-between gap-3 border-b border-border/10 px-3 py-2 shrink-0">
+      <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-ds-lg bg-background shadow-2xl ring-1 ring-ring/10">
+        <div className="flex items-start justify-between gap-3 px-3 py-2 shrink-0">
           <div>
             <h2 id="smart-match-title" className="text-sm font-semibold text-ds-warning">
               Smart Match — Die inventory
@@ -77,7 +77,7 @@ export function SmartMatchDieModal({
             <p className="p-6 text-center text-sm text-ds-ink-faint">No dies within tolerance.</p>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="sticky top-0 bg-ds-main/95 border-b border-border/10 text-ds-ink-faint uppercase tracking-wide">
+              <thead className="sticky top-0 bg-ds-main/95 text-ds-ink-faint uppercase tracking-wide">
                 <tr>
                   <th className="px-2 py-1.5 font-semibold">Serial #</th>
                   <th className="px-2 py-1.5 font-semibold">Type</th>
@@ -92,7 +92,7 @@ export function SmartMatchDieModal({
                 {rows.map((r) => (
                   <tr
                     key={r.id}
-                    className="border-b border-border/5 hover:bg-card/[0.04]"
+                    className="hover:bg-card/[0.04]"
                   >
                     <td className="px-2 py-1 font-mono tabular-nums text-ds-warning">
                       {r.serialNumber}

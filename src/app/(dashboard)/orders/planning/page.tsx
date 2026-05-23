@@ -1109,7 +1109,7 @@ export default function PlanningPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-ds-main text-ds-ink">
-      <div className="shrink-0 border-b border-ds-line/60 bg-ds-main/95 px-4 py-2">
+      <div className="shrink-0 bg-ds-main/95 px-4 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className={`shrink-0 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Planning</span>
           <LaneCounterChips
@@ -1138,7 +1138,7 @@ export default function PlanningPage() {
               value={planningSearchQuery}
               onChange={(e) => setPlanningSearchQuery(e.target.value)}
               placeholder="Search in planning (carton / PO #)"
-              className="h-8 w-full rounded-ds-sm border border-ds-line/60 bg-ds-elevated/35 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+              className="h-8 w-full rounded-ds-sm bg-ds-elevated/35 px-2.5 text-sm text-ds-ink outline-none transition focus:ring-1 focus:ring-ds-brand/30"
             />
           </div>
           <BulkActionBar
@@ -1149,7 +1149,7 @@ export default function PlanningPage() {
               setShowSelectedOnly((prev) => !prev)
             }}
             selectedActive={showSelectedOnly}
-            className="w-full md:w-auto md:sticky md:bottom-auto md:bg-transparent md:shadow-none md:border-0 md:p-0"
+            className="w-full md:w-auto md:sticky md:bottom-auto md:bg-transparent md:shadow-none md:p-0"
             left={
               <Button
                 type="button"
@@ -1225,7 +1225,7 @@ export default function PlanningPage() {
       </div>
 
       <footer
-        className={`shrink-0 border-t border-ds-line/50 py-2 text-center text-xs text-ds-ink-faint ${mono}`}
+        className={`shrink-0 py-2 text-center text-xs text-ds-ink-faint ${mono}`}
       >
         Planning workspace
       </footer>

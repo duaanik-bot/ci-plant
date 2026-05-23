@@ -31,10 +31,10 @@ type Plate = {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  in_use: 'bg-[var(--info-bg)] text-[var(--info)] border-[var(--info)]',
-  stored: 'bg-[var(--success-bg)] text-[var(--success)] border-[var(--success)]',
-  destroyed: 'bg-[var(--error-bg)] text-[var(--error)] border-[var(--error)]',
-  missing: 'bg-ds-warning/12 text-ds-warning border-ds-warning',
+  in_use: 'bg-[var(--info-bg)] text-[var(--info)]',
+  stored: 'bg-[var(--success-bg)] text-[var(--success)]',
+  destroyed: 'bg-[var(--error-bg)] text-[var(--error)]',
+  missing: 'bg-ds-warning/12 text-ds-warning',
 }
 
 export default function PlateStoreDetailPage() {
@@ -218,7 +218,7 @@ export default function PlateStoreDetailPage() {
           <p className="text-ds-ink-muted">{plate.cartonName}</p>
           <p className="text-sm text-ds-ink-faint">{plate.customer?.name ?? '—'}</p>
         </div>
-        <span className={`px-2 py-1 rounded text-xs border ${STATUS_BADGE[plate.status] ?? 'bg-ds-elevated'}`}>
+        <span className={`px-2 py-1 rounded text-xs ${STATUS_BADGE[plate.status] ?? 'bg-ds-elevated'}`}>
           {plate.status}
         </span>
       </div>
@@ -230,14 +230,14 @@ export default function PlateStoreDetailPage() {
           { key: 'history', label: 'History' },
           { key: 'audit', label: 'Audit Log' },
         ].map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key as typeof tab)} className={`px-3 py-1.5 rounded text-xs border ${tab === t.key ? 'bg-ds-warning border-ds-warning text-primary-foreground' : 'border-ds-line/50 text-ds-ink-muted'}`}>
+          <button key={t.key} onClick={() => setTab(t.key as typeof tab)} className={`px-3 py-1.5 rounded text-xs ${tab === t.key ? 'bg-ds-warning text-primary-foreground' : 'bg-ds-elevated text-ds-ink-muted'}`}>
             {t.label}
           </button>
         ))}
       </div>
 
       {tab === 'overview' && (
-        <div className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 space-y-3 text-sm">
+        <div className="rounded-ds-lg bg-ds-card p-4 space-y-3 text-sm shadow-ds-depth-sm">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div><span className="text-ds-ink-faint">Artwork</span> {plate.artworkCode ?? '—'}</div>
             <div><span className="text-ds-ink-faint">Version</span> {plate.artworkVersion ?? '—'}</div>
@@ -252,7 +252,7 @@ export default function PlateStoreDetailPage() {
             <p className="text-ds-ink-muted mb-1">Colour Inventory</p>
             <div className="space-y-1">
               {colours.map((c) => (
-                <div key={c.name} className="flex items-center justify-between rounded bg-ds-elevated/60 border border-ds-line/50 px-2 py-1">
+                <div key={c.name} className="flex items-center justify-between rounded bg-ds-elevated/60 px-2 py-1">
                   <span className="text-ds-ink">{c.name}</span>
                   <span className="text-ds-ink-muted">{c.type || 'process'}</span>
                   <span className="text-ds-ink-muted">{c.status}</span>
@@ -264,23 +264,23 @@ export default function PlateStoreDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <a href={`/api/plate-store/${id}/label`} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded bg-ds-warning hover:bg-ds-warning text-primary-foreground text-xs">Print Label</a>
-            <button onClick={handleRackUpdate} disabled={savingRack} className="px-3 py-1.5 rounded border border-ds-line/60 text-ds-ink text-xs">{savingRack ? 'Saving…' : 'Update Rack Location'}</button>
-            <input value={rackLocation} onChange={(e) => setRackLocation(e.target.value)} placeholder="Rack" className="px-2 py-1 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-xs" />
-            <input value={slotNumber} onChange={(e) => setSlotNumber(e.target.value)} placeholder="Slot" className="px-2 py-1 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-xs" />
+            <button onClick={handleRackUpdate} disabled={savingRack} className="px-3 py-1.5 rounded bg-ds-elevated text-ds-ink text-xs">{savingRack ? 'Saving…' : 'Update Rack Location'}</button>
+            <input value={rackLocation} onChange={(e) => setRackLocation(e.target.value)} placeholder="Rack" className="px-2 py-1 rounded bg-ds-elevated text-foreground text-xs" />
+            <input value={slotNumber} onChange={(e) => setSlotNumber(e.target.value)} placeholder="Slot" className="px-2 py-1 rounded bg-ds-elevated text-foreground text-xs" />
           </div>
         </div>
       )}
 
       {tab === 'issue' && (
-        <div className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 grid md:grid-cols-2 gap-4">
+        <div className="rounded-ds-lg bg-ds-card p-4 grid md:grid-cols-2 gap-4 shadow-ds-depth-sm">
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-ds-ink">Issue Form</h2>
-            <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm" />
-            <select value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm">
+            <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />
+            <select value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm">
               <option value="">Issue to operator</option>
               {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
             </select>
-            <select value={purpose} onChange={(e) => setPurpose(e.target.value as typeof purpose)} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm">
+            <select value={purpose} onChange={(e) => setPurpose(e.target.value as typeof purpose)} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm">
               <option value="production">Production</option>
               <option value="reprint">Reprint</option>
               <option value="sample">Sample</option>
@@ -298,33 +298,33 @@ export default function PlateStoreDetailPage() {
           </div>
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-ds-ink">Return Form</h2>
-            <select value={returnIssueId} onChange={(e) => setReturnIssueId(e.target.value)} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm">
+            <select value={returnIssueId} onChange={(e) => setReturnIssueId(e.target.value)} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm">
               <option value="">Select issue record</option>
               {(plate.issueRecords || []).map((r) => <option key={r.id} value={r.id}>{r.jobCardNumber ? `Job ${r.jobCardNumber}` : r.id.slice(0, 8)} · {r.status}</option>)}
             </select>
-            <input value={returnRack} onChange={(e) => setReturnRack(e.target.value)} placeholder="Rack location" className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm" />
-            <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Return notes" className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm" />
-            <button onClick={handleReturn} disabled={saving} className="px-3 py-1.5 rounded border border-ds-line/60 text-ds-ink text-xs">{saving ? 'Returning…' : 'Confirm Return'}</button>
-            <div className="pt-2 border-t border-ds-line/50">
+            <input value={returnRack} onChange={(e) => setReturnRack(e.target.value)} placeholder="Rack location" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />
+            <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Return notes" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />
+            <button onClick={handleReturn} disabled={saving} className="px-3 py-1.5 rounded bg-ds-elevated text-ds-ink text-xs">{saving ? 'Returning…' : 'Confirm Return'}</button>
+            <div className="pt-2">
               <h3 className="text-xs text-ds-ink-muted mb-2">Destroy Colour</h3>
-              <select value={destroyColour} onChange={(e) => setDestroyColour(e.target.value)} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm mb-2">
+              <select value={destroyColour} onChange={(e) => setDestroyColour(e.target.value)} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm mb-2">
                 {availableColours.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
-              <input value={destroyReason} onChange={(e) => setDestroyReason(e.target.value)} placeholder="Reason" className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm mb-2" />
-              <select value={destroyedBy} onChange={(e) => setDestroyedBy(e.target.value)} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm mb-2">
+              <input value={destroyReason} onChange={(e) => setDestroyReason(e.target.value)} placeholder="Reason" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm mb-2" />
+              <select value={destroyedBy} onChange={(e) => setDestroyedBy(e.target.value)} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm mb-2">
                 <option value="">Destroyed by</option>
                 {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
               </select>
-              <button onClick={handleDestroyColour} disabled={saving} className="px-3 py-1.5 rounded border border-[var(--error)] text-[var(--error)] text-xs">{saving ? 'Saving…' : 'Destroy Colour'}</button>
+              <button onClick={handleDestroyColour} disabled={saving} className="px-3 py-1.5 rounded bg-[var(--error-bg)] text-[var(--error)] text-xs">{saving ? 'Saving…' : 'Destroy Colour'}</button>
             </div>
           </div>
         </div>
       )}
 
       {tab === 'history' && (
-        <div className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 space-y-2">
+        <div className="rounded-ds-lg bg-ds-card p-4 space-y-2 shadow-ds-depth-sm">
           {(plate.issueRecords || []).map((h) => (
-            <div key={h.id} className="rounded border border-ds-line/50 bg-ds-elevated/50 p-2 text-sm">
+            <div key={h.id} className="rounded bg-ds-elevated/50 p-2 text-sm">
               <p className="text-ds-ink">{new Date(h.issuedAt).toLocaleString('en-IN')} · {h.status}</p>
               <p className="text-ds-ink-muted">To {h.issuedTo} {h.jobCardNumber ? `· Job ${h.jobCardNumber}` : ''}</p>
               {h.returnNotes ? <p className="text-ds-ink-faint text-xs">{h.returnNotes}</p> : null}
@@ -334,12 +334,12 @@ export default function PlateStoreDetailPage() {
       )}
 
       {tab === 'audit' && (
-        <div className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4">
-          <div className="grid grid-cols-4 gap-2 text-xs text-ds-ink-muted border-b border-ds-line/50 pb-2 mb-2">
+        <div className="rounded-ds-lg bg-ds-card p-4 shadow-ds-depth-sm">
+          <div className="grid grid-cols-4 gap-2 text-xs text-ds-ink-muted pb-2 mb-2">
             <span>Timestamp</span><span>Action</span><span>By</span><span>Details</span>
           </div>
           {(plate.auditLog || []).map((a) => (
-            <div key={a.id} className="grid grid-cols-4 gap-2 text-xs text-ds-ink-muted py-2 border-b border-ds-line/40">
+            <div key={a.id} className="grid grid-cols-4 gap-2 text-xs text-ds-ink-muted py-2">
               <span>{new Date(a.performedAt).toLocaleString('en-IN')}</span>
               <span>{a.action}</span>
               <span>{a.performedBy}</span>

@@ -284,9 +284,9 @@ export default function StageTriageBoardPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search Job/Client/Product/PO/Set"
-              className="w-56 rounded-ds-md border border-ds-line/60 bg-ds-main px-2.5 py-1.5 text-xs text-ds-ink"
+              className="w-56 rounded-ds-md bg-ds-main px-2.5 py-1.5 text-xs text-ds-ink"
             />
-            <div className="inline-flex rounded-ds-md border border-ds-line/60 bg-ds-main p-0.5 text-xs">
+            <div className="inline-flex rounded-ds-md bg-ds-main p-0.5 text-xs">
               {(['compact', 'comfortable', 'detailed'] as const).map((d) => (
                 <button
                   key={d}
@@ -309,7 +309,7 @@ export default function StageTriageBoardPage() {
           </div>
         </div>
         {groupingHints.length > 0 ? (
-          <div className="rounded-ds-md border border-ds-warning/40 bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning space-y-1">
+          <div className="rounded-ds-md bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning space-y-1">
             {groupingHints.map((h) => (
               <div key={h}>{h}</div>
             ))}
@@ -323,7 +323,7 @@ export default function StageTriageBoardPage() {
             return (
               <div
                 key={col.key}
-                className="rounded-ds-lg border border-ds-line/50 bg-ds-main min-h-[260px]"
+                className="rounded-ds-lg bg-ds-main min-h-[260px] shadow-ds-depth-sm"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={async () => {
                   if (!dragId) return
@@ -333,7 +333,7 @@ export default function StageTriageBoardPage() {
                   setDragId(null)
                 }}
               >
-                <div className="border-b border-ds-line/50 px-3 py-2 text-xs font-semibold text-ds-ink-muted flex items-center justify-between">
+                <div className="px-3 py-2 text-xs font-semibold text-ds-ink-muted flex items-center justify-between">
                   <span>{col.label} ({list.length})</span>
                   <span className="rounded-full bg-ds-card px-2 py-0.5 text-[10px] text-ds-ink">WIP {wip.toLocaleString('en-IN')}</span>
                 </div>
@@ -344,7 +344,7 @@ export default function StageTriageBoardPage() {
                       draggable
                       onDragStart={() => setDragId(c.row.stageRecord.id)}
                       onClick={() => setSpotlight(c.row)}
-                      className={`rounded-ds-md border border-ds-line/50 bg-ds-card text-xs cursor-grab active:cursor-grabbing hover:border-ds-warning/40 ${
+                      className={`rounded-ds-md bg-ds-card text-xs cursor-grab active:cursor-grabbing ${
                         density === 'compact' ? 'p-1.5' : density === 'detailed' ? 'p-3' : 'p-2'
                       }`}
                     >
@@ -357,17 +357,17 @@ export default function StageTriageBoardPage() {
                       <div className="mt-1 text-ds-ink-faint">Qty {Number(c.row.jobCard.poMeta?.quantity ?? 0).toLocaleString('en-IN')}</div>
                       <div className="mt-1 text-ds-ink-faint">ETA {c.triage.expectedArrivalTime ? new Date(c.triage.expectedArrivalTime).toLocaleTimeString() : '-'}</div>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        <span className="rounded-full border border-ds-line/60 px-1.5 py-0.5 text-[10px] text-ds-ink-muted">Queue #{c.triage.sequenceNo}</span>
-                        <span className="rounded-full border border-ds-line/60 px-1.5 py-0.5 text-[10px] text-ds-ink-muted">Machine slot {c.triage.plannedStartTime ? new Date(c.triage.plannedStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</span>
+                        <span className="rounded-full bg-ds-main px-1.5 py-0.5 text-[10px] text-ds-ink-muted">Queue #{c.triage.sequenceNo}</span>
+                        <span className="rounded-full bg-ds-main px-1.5 py-0.5 text-[10px] text-ds-ink-muted">Machine slot {c.triage.plannedStartTime ? new Date(c.triage.plannedStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</span>
                         {c.row.jobCard.industrialPriority ? (
-                          <span className="rounded-full border border-[var(--error)]/60 bg-[var(--error-bg)] px-1.5 py-0.5 text-[10px] text-[var(--error)]">Urgent</span>
+                          <span className="rounded-full bg-[var(--error-bg)] px-1.5 py-0.5 text-[10px] text-[var(--error)]">Urgent</span>
                         ) : null}
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-1">
                         <button
                           type="button"
                           disabled={busy}
-                          className="rounded border border-ds-line/60 px-1.5 py-0.5 text-[11px] hover:bg-ds-main disabled:opacity-50"
+                          className="rounded bg-ds-elevated px-1.5 py-0.5 text-[11px] hover:bg-ds-main disabled:opacity-50"
                           onClick={(e) => {
                             e.stopPropagation()
                             void patchCard(c.row, { sequenceNo: Math.max(1, c.triage.sequenceNo - 1) })
@@ -378,7 +378,7 @@ export default function StageTriageBoardPage() {
                         <button
                           type="button"
                           disabled={busy}
-                          className="rounded border border-ds-line/60 px-1.5 py-0.5 text-[11px] hover:bg-ds-main disabled:opacity-50"
+                          className="rounded bg-ds-elevated px-1.5 py-0.5 text-[11px] hover:bg-ds-main disabled:opacity-50"
                           onClick={(e) => {
                             e.stopPropagation()
                             void patchCard(c.row, { sequenceNo: c.triage.sequenceNo + 1 })
@@ -389,7 +389,7 @@ export default function StageTriageBoardPage() {
                         <button
                           type="button"
                           disabled={busy}
-                          className="rounded border border-[var(--warning)]/40 px-1.5 py-0.5 text-[11px] text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-50"
+                          className="rounded bg-[var(--warning-bg)] px-1.5 py-0.5 text-[11px] text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-50"
                           onClick={(e) => {
                             e.stopPropagation()
                             void patchCard(c.row, { status: 'make_ready_alert' })
@@ -398,7 +398,7 @@ export default function StageTriageBoardPage() {
                           Make-ready
                         </button>
                       </div>
-                      {idx < list.length - 1 ? <div className="mt-2 border-b border-ds-line/30" /> : null}
+                      {idx < list.length - 1 ? <div className="mt-2" /> : null}
                     </div>
                   ))}
                 </div>
@@ -415,16 +415,16 @@ export default function StageTriageBoardPage() {
       >
         {spotlight ? (
           <div className="space-y-3 text-sm">
-            <div className="sticky top-0 z-20 rounded-ds-md border border-ds-line/60 bg-ds-main px-3 py-2 shadow-sm">
+            <div className="sticky top-0 z-20 rounded-ds-md bg-ds-main px-3 py-2 shadow-ds-depth-sm">
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-designing-queue text-ds-warning">JC #{spotlight.jobCard.jobCardNumber}</span>
                 <span className="text-ds-ink">{spotlight.jobCard.productName ?? spotlight.jobCard.poMeta?.cartonName ?? '-'}</span>
                 <span className="text-ds-ink-muted">| {spotlight.jobCard.customer.name}</span>
-                <span className="rounded-full border border-ds-line/60 px-2 py-0.5 text-[10px] text-ds-ink-muted">Stage {stageLabel}</span>
-                <span className="rounded-full border border-ds-line/60 px-2 py-0.5 text-[10px] text-ds-ink-muted">ETA {triageMeta(spotlight, stageKey).expectedArrivalTime ? new Date(triageMeta(spotlight, stageKey).expectedArrivalTime!).toLocaleTimeString() : '-'}</span>
+                <span className="rounded-full bg-ds-main px-2 py-0.5 text-[10px] text-ds-ink-muted">Stage {stageLabel}</span>
+                <span className="rounded-full bg-ds-main px-2 py-0.5 text-[10px] text-ds-ink-muted">ETA {triageMeta(spotlight, stageKey).expectedArrivalTime ? new Date(triageMeta(spotlight, stageKey).expectedArrivalTime!).toLocaleTimeString() : '-'}</span>
               </div>
             </div>
-            <div className="rounded-ds-md border border-ds-line/50 bg-ds-main p-3">
+            <div className="rounded-ds-md bg-ds-main p-3">
               <button type="button" className="w-full text-left text-xs text-ds-ink-faint" onClick={() => toggleSection('snapshot')}>Job Snapshot</button>
               {expanded.snapshot !== false ? (
                 <div className="mt-2 text-xs text-ds-ink-muted space-y-1">
@@ -436,7 +436,7 @@ export default function StageTriageBoardPage() {
               ) : null}
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div className="rounded-ds-md border border-ds-line/50 bg-ds-main p-3">
+              <div className="rounded-ds-md bg-ds-main p-3">
                 <button type="button" className="w-full text-left text-xs text-ds-ink-faint" onClick={() => toggleSection('flow')}>Stage Flow</button>
                 {expanded.flow !== false ? (
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -449,7 +449,7 @@ export default function StageTriageBoardPage() {
                   </div>
                 ) : null}
               </div>
-              <div className="rounded-ds-md border border-ds-line/50 bg-ds-main p-3">
+              <div className="rounded-ds-md bg-ds-main p-3">
                 <button type="button" className="w-full text-left text-xs text-ds-ink-faint" onClick={() => toggleSection('warnings')}>Inline Warnings</button>
                 {expanded.warnings !== false ? (
                   <div className="mt-2 space-y-1 text-xs">
@@ -461,7 +461,7 @@ export default function StageTriageBoardPage() {
                 ) : null}
               </div>
             </div>
-            <div className="rounded-ds-md border border-ds-line/50 bg-ds-main p-3">
+            <div className="rounded-ds-md bg-ds-main p-3">
               <button type="button" className="w-full text-left text-xs text-ds-ink-faint" onClick={() => toggleSection('activity')}>Live Activity Feed</button>
               {expanded.activity !== false ? (
                 <div className="mt-2 max-h-40 overflow-auto space-y-1">
@@ -474,14 +474,14 @@ export default function StageTriageBoardPage() {
                 </div>
               ) : null}
             </div>
-            <div className="sticky bottom-0 z-20 rounded-ds-md border border-ds-line/60 bg-ds-main px-2 py-2 shadow-md">
+            <div className="sticky bottom-0 z-20 rounded-ds-md bg-ds-main px-2 py-2 shadow-ds-depth-sm">
               <div className="grid grid-cols-2 gap-2">
-                <button className="rounded border border-[var(--info)]/40 px-2 py-1 text-xs text-[var(--info)] hover:bg-[var(--info-bg)]" onClick={() => void patchCard(spotlight, { status: 'in_progress' })}>Start</button>
-                <button className="rounded border border-[var(--warning)]/40 px-2 py-1 text-xs text-[var(--warning)] hover:bg-[var(--warning-bg)]" onClick={() => void patchCard(spotlight, { status: 'make_ready_alert' })}>Make-Ready</button>
-                <button className="rounded border border-cyan-600/40 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-900/20" onClick={() => void patchCard(spotlight, { status: 'ready_to_receive' })}>Ready Receive</button>
-                <button className="rounded border border-zinc-500/40 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900/20" onClick={() => void patchCard(spotlight, { status: 'hold' })}>Hold</button>
-                <button className="rounded border border-[var(--success)]/40 px-2 py-1 text-xs text-[var(--success)] hover:bg-[var(--success-bg)]" onClick={() => void patchCard(spotlight, { status: 'completed' })}>Complete</button>
-                <button className="rounded border border-ds-line/60 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card" onClick={() => void patchCard(spotlight, { status: 'pending' })}>Reset</button>
+                <button className="rounded bg-[var(--info-bg)] px-2 py-1 text-xs text-[var(--info)] hover:bg-[var(--info-bg)]" onClick={() => void patchCard(spotlight, { status: 'in_progress' })}>Start</button>
+                <button className="rounded bg-[var(--warning-bg)] px-2 py-1 text-xs text-[var(--warning)] hover:bg-[var(--warning-bg)]" onClick={() => void patchCard(spotlight, { status: 'make_ready_alert' })}>Make-Ready</button>
+                <button className="rounded bg-cyan-900/20 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-900/20" onClick={() => void patchCard(spotlight, { status: 'ready_to_receive' })}>Ready Receive</button>
+                <button className="rounded bg-zinc-900/20 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900/20" onClick={() => void patchCard(spotlight, { status: 'hold' })}>Hold</button>
+                <button className="rounded bg-[var(--success-bg)] px-2 py-1 text-xs text-[var(--success)] hover:bg-[var(--success-bg)]" onClick={() => void patchCard(spotlight, { status: 'completed' })}>Complete</button>
+                <button className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-card" onClick={() => void patchCard(spotlight, { status: 'pending' })}>Reset</button>
               </div>
             </div>
           </div>

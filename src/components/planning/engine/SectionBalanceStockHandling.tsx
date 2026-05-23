@@ -111,10 +111,10 @@ const ActionCard = memo(function ActionCard({
       onClick={onClick}
       aria-pressed={selected}
       className={[
-        'flex flex-col gap-1.5 rounded-ds-md border p-3 text-left transition-colors',
+        'flex flex-col gap-1.5 rounded-ds-md p-3 text-left transition-colors',
         selected
-          ? 'border-ds-brand/60 bg-ds-brand/10'
-          : 'border-ds-line/40 bg-ds-elevated hover:border-ds-line/70',
+          ? 'bg-ds-brand/10 ring-1 ring-[var(--brand-primary)]/30'
+          : 'bg-ds-elevated hover:bg-ds-elevated/80',
       ].join(' ')}
     >
       <div className="flex items-center gap-2">
@@ -155,7 +155,7 @@ const MatchingStockCheck = memo(function MatchingStockCheck({
   const gsmLabel = gsm != null ? `${gsm} GSM` : '—'
 
   return (
-    <div className="mt-3 rounded-ds-md border border-ds-line/40 bg-ds-elevated/60 p-3 space-y-2">
+    <div className="mt-3 rounded-ds-md bg-ds-elevated/60 p-3 space-y-2">
       <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
         Matching Stock Check
       </div>
@@ -286,7 +286,7 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
   return (
     <CardSection title="BALANCE STOCK HANDLING">
       {/* ── Header info ── */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-ds-md border border-ds-line/40 bg-ds-elevated px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-ds-md bg-ds-elevated px-3 py-2.5">
         <div className="text-xs text-ds-ink-muted">
           <span className="font-semibold uppercase tracking-wider text-ds-ink-faint mr-1.5">
             Balance per board:
@@ -322,7 +322,7 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
 
       {/* ── Stock after action preview ── */}
       {balanceAction ? (
-        <div className="rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 px-4 py-3">
+        <div className="rounded-ds-md bg-ds-elevated/40 px-4 py-3">
           <div className="grid grid-cols-3 gap-4 text-xs">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">

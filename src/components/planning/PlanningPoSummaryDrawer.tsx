@@ -93,10 +93,10 @@ export function PlanningPoSummaryDrawer({
               <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ds-ink-faint">
                 PO line items
               </p>
-              <div className="overflow-hidden rounded-ds-md border border-ds-line/40">
+              <div className="overflow-hidden rounded-ds-md">
                 <table className="w-full text-left text-sm">
                   <thead>
-                    <tr className="border-b border-ds-line/40 bg-ds-elevated text-ds-ink-muted">
+                    <tr className="bg-ds-elevated text-ds-ink-muted">
                       <th className="px-2 py-2 font-medium">Product</th>
                       <th className="px-2 py-2 text-right">Qty</th>
                       <th className="px-2 py-2 text-right">Rate</th>
@@ -104,7 +104,7 @@ export function PlanningPoSummaryDrawer({
                   </thead>
                   <tbody>
                     {(data.lineItems ?? []).map((row) => (
-                      <tr key={row.id} className="border-b border-ds-line/30 last:border-0">
+                      <tr key={row.id}>
                         <td className="px-2 py-2 text-ds-ink">{row?.cartonName ?? '—'}</td>
                         <td className={`px-2 py-2 text-right ${mono}`}>
                           {row?.quantity != null ? row.quantity.toLocaleString('en-IN') : '—'}

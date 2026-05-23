@@ -64,7 +64,7 @@ const TABS: [TabKey, string][] = [
 ]
 
 const inputCls =
-  'min-h-[40px] min-w-[80px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand'
+  'min-h-[40px] min-w-[80px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand'
 
 /* ── LifeBar ─────────────────────────────────────────────────────────────── */
 function LifeBar({ pct }: { pct: number }) {
@@ -121,7 +121,7 @@ export default function EmbossBlocksListPage() {
     <div className="p-6 space-y-6">
 
       {/* ── Info banner ───────────────────────────────────────────────── */}
-      <div className="rounded-ds-md border border-ds-brand/30 bg-ds-brand/5 p-3 text-sm text-ds-brand">
+      <div className="rounded-ds-md bg-[var(--brand-bg-soft)] p-3 text-sm text-ds-brand">
         This module activates automatically when Embossing Required = Yes in Carton Master.
       </div>
 
@@ -142,13 +142,13 @@ export default function EmbossBlocksListPage() {
           <div className="flex items-center gap-2">
             <Link
               href="/masters/emboss-blocks/location-view"
-              className="rounded-ds-md border border-ds-line px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated transition-colors"
+              className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink hover:bg-ds-line/30 transition-colors"
             >
               Block Location View
             </Link>
             <Link
               href="/masters/emboss-blocks/vendor-orders"
-              className="rounded-ds-md border border-ds-line px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated transition-colors"
+              className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink hover:bg-ds-line/30 transition-colors"
             >
               Block Vendor Orders
             </Link>
@@ -166,10 +166,10 @@ export default function EmbossBlocksListPage() {
             key={k}
             type="button"
             onClick={() => setTab(k)}
-            className={`rounded-ds-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`rounded-ds-md px-3 py-1.5 text-xs font-medium transition-colors ${
               tab === k
-                ? 'border-ds-brand bg-ds-brand text-white'
-                : 'border-ds-line text-ds-ink-muted hover:border-ds-brand/50 hover:text-ds-ink'
+                ? 'bg-ds-brand text-white'
+                : 'bg-ds-elevated/60 text-ds-ink-muted hover:text-ds-ink'
             }`}
           >
             {l}

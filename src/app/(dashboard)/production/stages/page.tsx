@@ -16,7 +16,7 @@ export default function ProductionStagesHubPage() {
           </div>
           <Link
             href="/production/job-cards"
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink transition hover:border-ds-brand/40 hover:text-ds-brand"
+            className="rounded-ds-md bg-ds-elevated px-3 py-1.5 text-sm text-ds-ink transition hover:text-ds-brand"
           >
             Go to Job Cards
           </Link>
@@ -24,7 +24,7 @@ export default function ProductionStagesHubPage() {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {PRODUCTION_STAGES.map((stage, index) => (
-            <div key={stage.key} className="rounded-ds-lg border border-ds-line/40 bg-ds-main p-4">
+            <div key={stage.key} className="rounded-ds-lg bg-ds-main p-4 shadow-ds-depth-sm">
               <div className="flex items-center gap-3">
                 <span className={`flex h-10 w-10 items-center justify-center rounded-ds-md bg-ds-card text-ds-brand ${mono} text-sm`}>
                   {index + 1}
@@ -37,13 +37,13 @@ export default function ProductionStagesHubPage() {
               <div className="mt-3 flex items-center gap-2">
                 <Link
                   href={stage.key === 'cutting' ? '/production/cutting-queue' : `/production/stages/${stage.key}`}
-                  className="rounded-ds-md border border-ds-line/60 px-2.5 py-1.5 text-xs text-ds-ink transition hover:border-ds-brand/40 hover:text-ds-brand"
+                  className="rounded-ds-md bg-ds-elevated px-2.5 py-1.5 text-xs text-ds-ink transition hover:text-ds-brand"
                 >
                   Execution
                 </Link>
                 <Link
                   href={`/production/stages/${stage.key}/triage`}
-                  className="rounded-ds-md border border-ds-line/60 px-2.5 py-1.5 text-xs text-ds-ink transition hover:border-ds-brand/40 hover:text-ds-brand"
+                  className="rounded-ds-md bg-ds-elevated px-2.5 py-1.5 text-xs text-ds-ink transition hover:text-ds-brand"
                 >
                   Triage
                 </Link>

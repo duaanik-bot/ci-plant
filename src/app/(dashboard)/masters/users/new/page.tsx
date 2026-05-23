@@ -85,8 +85,8 @@ export default function NewUserPage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+              fieldErrors.name ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
             }`}
           />
           {fieldErrors.name && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.name}</p>}
@@ -97,8 +97,8 @@ export default function NewUserPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.email ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+              fieldErrors.email ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
             }`}
           />
           {fieldErrors.email && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.email}</p>}
@@ -111,8 +111,8 @@ export default function NewUserPage() {
             onChange={(e) => setPin(e.target.value)}
             maxLength={6}
             placeholder="••••••"
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.pin ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+              fieldErrors.pin ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
             }`}
           />
           {fieldErrors.pin && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.pin}</p>}
@@ -122,7 +122,7 @@ export default function NewUserPage() {
           <select
             value={roleId}
             onChange={(e) => setRoleId(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           >
             <option value="">Select role</option>
             {roles.map((r) => (
@@ -139,7 +139,7 @@ export default function NewUserPage() {
                   type="checkbox"
                   checked={machineAccess.includes(m.id)}
                   onChange={() => toggleMachine(m.id)}
-                  className="rounded border-ds-line/60"
+                  className="rounded"
                 />
                 {m.name} ({m.machineCode})
               </label>
@@ -152,7 +152,7 @@ export default function NewUserPage() {
             value={whatsappNumber}
             onChange={(e) => setWhatsappNumber(e.target.value)}
             placeholder="+91..."
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -161,7 +161,7 @@ export default function NewUserPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-ds-line/60"
+            className="rounded"
           />
           <label htmlFor="active" className="text-sm text-ds-ink-muted">Active</label>
         </div>

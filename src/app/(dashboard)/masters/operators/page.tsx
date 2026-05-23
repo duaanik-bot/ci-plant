@@ -129,7 +129,7 @@ export default function MastersOperatorsPage() {
       {status === 'loading' ? (
         <p className="text-sm text-ds-ink-faint">Loading…</p>
       ) : !isAdmin ? (
-        <div className="rounded-ds-md border border-ds-line bg-ds-card p-4 text-sm text-ds-ink-faint">
+        <div className="rounded-ds-md bg-ds-card p-4 text-sm text-ds-ink-faint shadow-ds-depth-sm">
           Only administrators can manage Operator Master records. Floor staff can still select operators
           inside Die Hub and Shade Card Hub flows.
           <p className="mt-2">
@@ -140,14 +140,14 @@ export default function MastersOperatorsPage() {
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-3 rounded-ds-md border border-ds-line bg-ds-card p-3">
+          <div className="flex flex-wrap items-center gap-3 rounded-ds-md bg-ds-card p-3 shadow-ds-depth-sm">
             <div className="relative min-w-[220px] flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ds-ink-faint" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name or station…"
-                className="h-8 w-full rounded-ds-sm border border-ds-line bg-ds-bg pl-8 pr-3 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:border-ds-brand focus:outline-none"
+                className="h-8 w-full rounded-ds-sm bg-ds-bg pl-8 pr-3 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:border-ds-brand focus:outline-none"
               />
             </div>
             <label className="flex items-center gap-1.5 text-xs text-ds-ink-muted">
@@ -160,14 +160,14 @@ export default function MastersOperatorsPage() {
             </label>
           </div>
 
-          <div className="flex flex-wrap items-end gap-2 rounded-ds-md border border-ds-line bg-ds-card p-3">
+          <div className="flex flex-wrap items-end gap-2 rounded-ds-md bg-ds-card p-3 shadow-ds-depth-sm">
             <label className="flex flex-col gap-1 text-xs font-medium text-ds-ink-muted">
               Add operator
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Ravi Kumar"
-                className="h-8 w-64 rounded-ds-sm border border-ds-line bg-ds-bg px-3 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:border-ds-brand focus:outline-none"
+                className="h-8 w-64 rounded-ds-sm bg-ds-bg px-3 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:border-ds-brand focus:outline-none"
               />
             </label>
             <button
@@ -180,7 +180,7 @@ export default function MastersOperatorsPage() {
             </button>
           </div>
 
-          <div className="overflow-hidden rounded-ds-md border border-ds-line bg-ds-card">
+          <div className="overflow-hidden rounded-ds-md bg-ds-card shadow-ds-depth-sm">
             <table className="w-full text-sm">
               <thead className="bg-ds-bg-muted text-left text-xs uppercase tracking-wide text-ds-ink-faint">
                 <tr>
@@ -190,7 +190,7 @@ export default function MastersOperatorsPage() {
                   <th className="px-3 py-2 font-medium text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-ds-line">
+              <tbody>
                 {loading ? (
                   <tr>
                     <td colSpan={4} className="px-3 py-6 text-center text-ds-ink-faint">
@@ -217,7 +217,7 @@ export default function MastersOperatorsPage() {
                             {o.stageKeys.map((k) => (
                               <span
                                 key={k}
-                                className="inline-flex items-center rounded-ds-sm border border-ds-line bg-ds-bg-muted px-1.5 py-0.5 text-[11px] font-medium text-ds-ink"
+                                className="inline-flex items-center rounded-ds-sm bg-ds-bg-muted px-1.5 py-0.5 text-[11px] font-medium text-ds-ink"
                               >
                                 {k}
                               </span>
@@ -241,10 +241,10 @@ export default function MastersOperatorsPage() {
                           type="button"
                           disabled={saving}
                           onClick={() => void toggleActive(o.id, !o.isActive)}
-                          className={`inline-flex h-7 items-center rounded-ds-sm border px-2 text-[11px] font-semibold transition ${
+                          className={`inline-flex h-7 items-center rounded-ds-sm px-2 text-[11px] font-semibold transition ${
                             o.isActive
-                              ? 'border-ds-line text-ds-ink-muted hover:bg-ds-bg-muted'
-                              : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                              ? 'bg-ds-bg-muted/60 text-ds-ink-muted hover:bg-ds-bg-muted'
+                              : 'bg-[var(--success-bg)] text-emerald-700 hover:bg-emerald-50'
                           }`}
                         >
                           {o.isActive ? 'Deactivate' : 'Activate'}

@@ -78,7 +78,7 @@ export function EmbossHubSpotlightDrawer({
           <p className="text-neutral-500 font-sans">Loading…</p>
         ) : data && b ? (
           <>
-            <section className="rounded-xl border border-ds-line/40 bg-ds-main/80 px-3 py-3 space-y-2">
+            <section className="rounded-xl bg-ds-main/80 px-3 py-3 space-y-2">
               <p className="text-neutral-500 text-xs uppercase tracking-wider font-sans">Rich identity</p>
               {b.linkedProductId ? (
                 <Link
@@ -108,7 +108,7 @@ export function EmbossHubSpotlightDrawer({
               </p>
             </section>
 
-            <section className="rounded-xl border border-ds-line/40 bg-ds-main/80 px-3 py-3 space-y-2">
+            <section className="rounded-xl bg-ds-main/80 px-3 py-3 space-y-2">
               <p className="text-neutral-500 text-xs uppercase tracking-wider font-sans">Current mount</p>
               {b.currentMachine ? (
                 <Link
@@ -138,7 +138,7 @@ export function EmbossHubSpotlightDrawer({
               {data.timeline.length === 0 ? (
                 <p className="text-neutral-600 text-xs font-sans">No timeline events yet.</p>
               ) : (
-                <ol className="relative border-s border-ds-line/40 ms-2 ps-4 space-y-4 max-h-[52vh] overflow-y-auto">
+                <ol className="relative ms-2 ps-4 space-y-4 max-h-[52vh] overflow-y-auto">
                   {data.timeline.map((e) => (
                     <li key={e.id} className="relative">
                       <span

@@ -60,7 +60,7 @@ export function OpenPosTab() {
             onClick={() => setFilter(f)}
             className={cn(
               'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-              filter === f ? 'bg-ds-primary text-white' : 'border border-ds-line/40 text-ds-ink-muted hover:text-ds-ink',
+              filter === f ? 'bg-ds-primary text-white' : 'bg-ds-elevated text-ds-ink-muted hover:text-ds-ink',
             )}
           >
             {f}
@@ -71,7 +71,7 @@ export function OpenPosTab() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search PO or vendor…"
-          className="ml-auto w-48 rounded-ds-md border border-ds-line/40 bg-ds-card px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ds-primary"
+          className="ml-auto w-48 rounded-ds-md bg-ds-elevated px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ds-primary"
         />
       </div>
 
@@ -80,7 +80,7 @@ export function OpenPosTab() {
       ) : (
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-ds-line/25 text-left text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
               <th className="pb-2 pr-4">PO Number</th>
               <th className="pb-2 pr-4">Vendor</th>
               <th className="pb-2 pr-4">Material</th>
@@ -99,7 +99,7 @@ export function OpenPosTab() {
                 <tr
                   key={r.id}
                   className={cn(
-                    'border-b border-ds-line/10',
+                    '',
                     isOverdue && 'bg-ds-error/5',
                   )}
                 >

@@ -58,7 +58,7 @@ export function KpiCard({
 
   return (
     <div className={cn(
-      'bg-ds-card rounded-ds-md border border-ds-line p-5 flex items-start gap-4 shadow-card',
+      'bg-ds-card rounded-ds-md p-5 flex items-start gap-4 shadow-card',
       className,
     )}>
       {/* Icon tile */}

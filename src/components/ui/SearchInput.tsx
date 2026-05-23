@@ -37,9 +37,9 @@ export function SearchInput({
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
         className="
-          w-full pl-9 pr-8 py-2 text-sm rounded-ds-sm border border-ds-line outline-none
+          w-full pl-9 pr-8 py-2 text-sm rounded-ds-sm outline-none
           bg-ds-card text-ds-ink placeholder:text-ds-ink-faint
-          focus:border-ds-brand focus:ring-2 focus:ring-ds-brand/15 transition-colors
+          focus:ring-2 focus:ring-ds-brand/15 transition-colors
         "
       />
       {value && (

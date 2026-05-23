@@ -93,7 +93,7 @@ export default function PressValidatePage() {
               onChange={(e) => setManualBarcode(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && validatePlate(manualBarcode)}
               placeholder="e.g. PLT-CI-JOB-2025-0001-XXXX"
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground font-mono"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground font-mono"
             />
             <button
               type="button"
@@ -108,8 +108,8 @@ export default function PressValidatePage() {
         <div
           className={`flex-1 flex flex-col items-center justify-center p-6 rounded-ds-lg text-center min-h-[60vh] ${
             result.valid
-              ? 'bg-[var(--success-bg)] border-2 border-[var(--success)]'
-              : 'bg-[var(--error-bg)] border-2 border-[var(--error)]'
+              ? 'bg-[var(--success-bg)]'
+              : 'bg-[var(--error-bg)]'
           }`}
         >
           <p className="text-3xl font-bold mb-4 whitespace-pre-wrap">

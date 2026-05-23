@@ -164,7 +164,7 @@ export function MasterLedgerTable({
               return (
                 <tr
                   key={`${r.entity}-${r.id}`}
-                  className={`${enterpriseTrClass} border-b border-neutral-200 dark:border-ds-line/40 ${pri}`}
+                  className={`${enterpriseTrClass} ${pri}`}
                 >
                   <td className="px-4 py-3 font-designing-queue text-xs font-medium whitespace-nowrap text-ds-warning dark:text-ds-warning">
                     {r.jobId}
@@ -207,7 +207,7 @@ export function MasterLedgerTable({
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <span
-                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${r.zoneBadgeClass}`}
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${r.zoneBadgeClass}`}
                     >
                       {r.zoneLabel}
                     </span>

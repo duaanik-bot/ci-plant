@@ -110,7 +110,7 @@ export default function EditUserPage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -121,8 +121,8 @@ export default function EditUserPage() {
             onChange={(e) => setPin(e.target.value)}
             maxLength={6}
             placeholder="••••••"
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.pin ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+              fieldErrors.pin ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
             }`}
           />
           {fieldErrors.pin && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.pin}</p>}
@@ -132,7 +132,7 @@ export default function EditUserPage() {
           <select
             value={roleId}
             onChange={(e) => setRoleId(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           >
             {roles.map((r) => (
               <option key={r.id} value={r.id}>{r.roleName}</option>
@@ -148,7 +148,7 @@ export default function EditUserPage() {
                   type="checkbox"
                   checked={machineAccess.includes(m.id)}
                   onChange={() => toggleMachine(m.id)}
-                  className="rounded border-ds-line/60"
+                  className="rounded"
                 />
                 {m.name} ({m.machineCode})
               </label>
@@ -160,7 +160,7 @@ export default function EditUserPage() {
           <input
             value={whatsappNumber}
             onChange={(e) => setWhatsappNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -169,7 +169,7 @@ export default function EditUserPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-ds-line/60"
+            className="rounded"
           />
           <label htmlFor="active" className="text-sm text-ds-ink-muted">Active</label>
         </div>

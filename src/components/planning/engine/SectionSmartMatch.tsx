@@ -79,8 +79,8 @@ function OptionCard({
     <div
       className={
         best
-          ? 'rounded-ds-md border border-emerald-500/40 bg-emerald-500/[0.06] p-3'
-          : 'rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-3'
+          ? 'rounded-ds-md bg-emerald-500/[0.06] p-3 ring-1 ring-emerald-500/25'
+          : 'rounded-ds-md bg-ds-elevated/60 p-3'
       }
     >
       <div className="flex items-start justify-between gap-3 mb-1.5">
@@ -108,7 +108,7 @@ function OptionCard({
           <span
             key={tag}
             title={TAG_WHY[tag] ?? tag}
-            className="rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 px-1.5 py-0.5 text-[9px] font-medium"
+            className="rounded-full bg-emerald-500/10 text-emerald-300 px-1.5 py-0.5 text-[9px] font-medium"
           >
             {tag}
           </span>
@@ -132,7 +132,7 @@ function OptionCard({
         ) : <span />}
       </div>
 
-      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-ds-line/30">
+      <div className="flex items-center justify-between gap-2 pt-1.5">
         <div className="text-[11px] text-ds-ink-faint tabular-nums">
           Avail <span className="text-ds-ink">{nf.format(opt.availableSheets)}</span>
           {' · '}Rsvd <span className="text-ds-ink">{nf.format(opt.reservedSheets)}</span>
@@ -142,7 +142,7 @@ function OptionCard({
           type="button"
           onClick={onUse}
           disabled={busy}
-          className="shrink-0 rounded-ds-sm border border-ds-brand/40 bg-ds-brand/10 px-2.5 py-1 text-[11px] font-semibold text-ds-brand hover:bg-ds-brand/20 disabled:opacity-50 transition-colors"
+          className="shrink-0 rounded-ds-sm bg-ds-brand/10 px-2.5 py-1 text-[11px] font-semibold text-ds-brand hover:bg-ds-brand/20 disabled:opacity-50 transition-colors"
         >
           {busy ? 'Applying…' : 'Use board'}
         </button>
@@ -184,7 +184,7 @@ export function SectionSmartMatch({ line, readiness, onPatch }: Props) {
   return (
     <CardSection title="SMART MATCH">
       {/* Requirement + mapping diagnostics (ported from previous logic) */}
-      <div className="rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 p-2.5 mb-2 text-[11px]">
+      <div className="rounded-ds-md bg-ds-elevated/40 p-2.5 mb-2 text-[11px]">
         <div className="flex items-center justify-between text-ds-ink">
           <span className="font-medium">
             {[readiness?.boardType, readiness?.gsm ? `${readiness.gsm}g` : null, readiness?.size]
@@ -204,7 +204,7 @@ export function SectionSmartMatch({ line, readiness, onPatch }: Props) {
       </div>
 
       {primary.length === 0 ? (
-        <div className="rounded-ds-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200 space-y-1">
+        <div className="rounded-ds-md bg-amber-500/10 p-3 text-xs text-amber-200 space-y-1">
           <div className="font-semibold">
             {readiness?.noMaterialsAtAll
               ? 'No materials exist in Paper Warehouse yet.'
@@ -223,7 +223,7 @@ export function SectionSmartMatch({ line, readiness, onPatch }: Props) {
       ) : (
         <>
           {readiness?.debugMessage ? (
-            <div className="mb-2 rounded-ds-sm border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
+            <div className="mb-2 rounded-ds-sm bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
               {readiness.debugMessage}
             </div>
           ) : null}

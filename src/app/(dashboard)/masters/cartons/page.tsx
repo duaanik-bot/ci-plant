@@ -124,7 +124,7 @@ export default function CartonMasterPage() {
           {row.source === 'po_import_ai' && (
             <span
               title="Auto-created from a PO PDF import — please verify before relying on for matching."
-              className="inline-flex items-center gap-0.5 rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300"
+              className="inline-flex items-center gap-0.5 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300"
             >
               <Sparkles size={9} />
               AI

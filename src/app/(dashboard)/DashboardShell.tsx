@@ -543,7 +543,7 @@ export function DashboardShell({
             </div>
           </div>
           {/* Row 2 — primary nav */}
-          <div className="hidden border-b border-[var(--border)] lg:block">
+          <div className="hidden lg:block">
             <nav className="mx-auto max-w-[1920px] px-4 sm:px-5">
               <ul className="flex h-12 items-center gap-0.5 whitespace-nowrap">
                 {menus.map((menu) => {
@@ -591,7 +591,7 @@ export function DashboardShell({
                       {'items' in menu && openMenu === menu.key ? (
                         <div className="absolute left-0 top-full z-[70] pt-1 transition-all duration-150 ease-out">
                           <div className={clsx(
-                            'rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_16px_48px_rgba(0,0,0,0.12),0_0_0_1px_rgba(37,99,235,0.08)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)]',
+                            'rounded-ds-md bg-[var(--bg-card)] p-3 shadow-[0_16px_48px_rgba(0,0,0,0.12),0_0_0_1px_rgba(37,99,235,0.08)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)]',
                             menu.key === 'live' || menu.key === 'production' || menu.key === 'masters'
                               ? 'w-[780px] max-w-[calc(100vw-2rem)]'
                               : 'w-[520px] max-w-[calc(100vw-2rem)]',
@@ -646,7 +646,7 @@ export function DashboardShell({
           </div>
         </header>
         {mobileOpen ? (
-          <div className="fixed inset-x-0 top-14 z-[999] border-b border-[var(--border)] bg-[var(--bg-main)] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.1)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)] lg:hidden">
+          <div className="fixed inset-x-0 top-14 z-[999] bg-[var(--bg-main)] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.1)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)] lg:hidden">
             <div className="space-y-1">
               {menus.map((menu) =>
                 'href' in menu ? (
@@ -664,7 +664,7 @@ export function DashboardShell({
                 ) : (
                   <div
                     key={menu.key}
-                    className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3"
+                    className="rounded-ds-md bg-[var(--bg-card)] p-3 shadow-ds-depth-sm"
                   >
                     <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
                       {menu.label}

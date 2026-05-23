@@ -322,7 +322,7 @@ function ActionsCell({
       </button>
       <button
         onClick={onDeleteRow}
-        className="px-2 py-1.5 text-xs rounded-ds-sm border border-[var(--error)]/40 text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]"
+        className="px-2 py-1.5 text-xs rounded-ds-sm bg-[var(--error-bg)] text-[var(--error)] hover:bg-[var(--error-bg)]/80 dark:text-[var(--error)]"
         title="Delete row"
       >
         Delete
@@ -333,7 +333,7 @@ function ActionsCell({
           ref={triggerRef}
           type="button"
           onClick={() => setHubsOpen((v) => !v)}
-          className="px-3 py-1.5 text-sm rounded-ds-sm border border-[var(--border)] text-[var(--text-primary)]"
+          className="px-3 py-1.5 text-sm rounded-ds-sm text-[var(--text-primary)]"
         >
           Push to Hubs ▾
         </button>
@@ -343,7 +343,7 @@ function ActionsCell({
         ? createPortal(
             <div
               ref={menuRef}
-              className="fixed w-[240px] rounded-ds-md bg-[var(--bg-elevated)] border border-[var(--border)] shadow-lg"
+              className="fixed w-[240px] rounded-ds-md bg-[var(--bg-elevated)] shadow-lg"
               style={{ top: menuPos.top, left: menuPos.left, zIndex: 9999 }}
             >
               <div className="p-2 flex flex-col gap-1">
@@ -383,7 +383,7 @@ function ActionsCell({
                   Shade Card
                 </button>
 
-                <div className="border-t border-[var(--border)] my-2" />
+                <div className="my-2" />
 
                 <button
                   onClick={() => {
@@ -404,7 +404,7 @@ function ActionsCell({
       <button
         onClick={onRecallPlanning}
         disabled={disableRecall}
-        className="px-3 py-1.5 text-sm rounded-ds-sm border border-[var(--border)] text-[var(--warning)] hover:bg-[var(--warning-bg)] disabled:opacity-40"
+        className="px-3 py-1.5 text-sm rounded-ds-sm bg-[var(--warning-bg)] text-[var(--warning)] hover:bg-[var(--warning-bg)]/80 disabled:opacity-40"
       >
         {recallLabel ?? 'Send Back'}
       </button>
@@ -463,7 +463,7 @@ function ArtworkPreviewCell({
   const [peek, setPeek] = useState(false)
 
   const thumbClass =
-    'h-12 w-12 shrink-0 overflow-hidden rounded-[4px] border border-ds-line/50 bg-background'
+    'h-12 w-12 shrink-0 overflow-hidden rounded-[4px] bg-background'
 
   if (!url || broken) {
     return (
@@ -508,7 +508,7 @@ function ArtworkPreviewCell({
               className="pointer-events-none fixed inset-0 z-[85] flex items-center justify-center bg-background/35 backdrop-blur-[2px]"
               aria-hidden
             >
-              <div className="h-[144px] w-[144px] overflow-hidden rounded-[4px] border border-ds-line/50 shadow-2xl ring-1 ring-ring/50">
+              <div className="h-[144px] w-[144px] overflow-hidden rounded-[4px] shadow-2xl ring-1 ring-ring/50">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={url} alt="" className="h-full w-full object-cover" />
               </div>
@@ -855,7 +855,7 @@ function LightboxModal({ src, alt, onClose }: { src: string | null; alt: string;
     >
       <button
         type="button"
-        className="absolute right-3 top-3 rounded-ds-md border border-border bg-card p-2 text-ds-ink-muted hover:text-foreground"
+        className="absolute right-3 top-3 rounded-ds-md bg-card p-2 text-ds-ink-muted hover:text-foreground"
         onClick={onClose}
         aria-label="Close preview"
       >
@@ -1943,14 +1943,14 @@ export default function DesigningQueuePage() {
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
       <div className="w-full space-y-4 p-4 pb-10">
-        <section className="rounded-ds-md border border-ds-line/40 bg-card p-4">
+        <section className="rounded-ds-md bg-card p-4 shadow-ds-depth-sm">
           <h1 className="text-[18px] font-semibold text-ds-ink">AW Queue</h1>
           <p className="mt-1 text-[13px] text-ds-ink-faint">
             {rows.length} Jobs • {readyCount} Ready • {Math.max(0, rows.length - readyCount)} Pending
           </p>
         </section>
 
-        <section className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3">
+        <section className="rounded-ds-md bg-[var(--bg-card)] px-4 py-3 shadow-ds-depth-sm">
           <div className="flex min-h-[56px] flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <div className="relative w-full max-w-[420px]">
@@ -1960,13 +1960,13 @@ export default function DesigningQueuePage() {
                   value={awSearchQuery}
                   onChange={(e) => setAwSearchQuery(e.target.value)}
                   placeholder="Search carton or PO #"
-                  className={`h-9 w-full rounded border border-ds-line/60 bg-ds-main pl-9 pr-3 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                  className={`h-9 w-full rounded bg-ds-main pl-9 pr-3 text-sm text-ds-ink outline-none transition focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
                 />
               </div>
               <select
                 value={designerFilter}
                 onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
-                className={`h-9 w-[180px] rounded border border-ds-line/60 bg-ds-main px-2 text-sm text-ds-ink ${mono}`}
+                className={`h-9 w-[180px] rounded bg-ds-main px-2 text-sm text-ds-ink ${mono}`}
               >
                 <option value="all">All designers</option>
                 <option value="unassigned">Unassigned</option>
@@ -1979,7 +1979,7 @@ export default function DesigningQueuePage() {
               <select
                 value={customerId}
                 onChange={(e) => setCustomerId(e.target.value)}
-                className={`h-9 w-[180px] rounded border border-ds-line/60 bg-ds-main px-2 text-sm text-ds-ink ${mono}`}
+                className={`h-9 w-[180px] rounded bg-ds-main px-2 text-sm text-ds-ink ${mono}`}
               >
                 <option value="">All customers</option>
                 {customers.map((c) => (
@@ -1997,7 +1997,7 @@ export default function DesigningQueuePage() {
                 type="button"
                 onClick={() => void bulkDeleteSelectedRows()}
                 disabled={selectedRowIds.size === 0 || bulkDeleting || bulkPushing || bulkToolingPushing != null}
-                className="h-9 px-3 text-xs border-[var(--error)]/40 text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]"
+                className="h-9 px-3 text-xs text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]"
               >
                 {bulkDeleting ? 'Deleting…' : 'Bulk Delete'}
               </Button>
@@ -2012,7 +2012,7 @@ export default function DesigningQueuePage() {
                   Push to Hubs
                 </Button>
                 {hubsMenuOpen ? (
-                  <div className="absolute right-0 top-10 z-20 min-w-[10rem] rounded-ds-md border border-ds-line/60 bg-card p-1 shadow-lg">
+                  <div className="absolute right-0 top-10 z-20 min-w-[10rem] rounded-ds-md bg-card p-1 shadow-lg">
                     <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToPlateHub() }}>Plate</button>
                     <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToToolingHub('DIE') }}>Die</button>
                     <button type="button" className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-ds-elevated/40" onClick={() => { setHubsMenuOpen(false); void bulkPushSelectedToToolingHub('BLOCK') }}>Emboss</button>
@@ -2033,7 +2033,7 @@ export default function DesigningQueuePage() {
           </div>
         </section>
 
-        <section className="rounded-ds-md border border-ds-line/40 bg-card p-4">
+        <section className="rounded-ds-md bg-card p-4 shadow-ds-depth-sm">
           <div className="flex flex-wrap items-center gap-2">
             {[
               { key: 'all' as const, label: 'All' },
@@ -2045,7 +2045,7 @@ export default function DesigningQueuePage() {
                 key={tab.key}
                 type="button"
                 onClick={() => setAwTab(tab.key)}
-                className={`rounded-full border px-3 py-1 text-xs ${awTab === tab.key ? 'border-ds-brand/45 bg-ds-brand/12 text-ds-brand' : 'border-ds-line/60 text-ds-ink-faint hover:text-ds-ink'}`}
+                className={`rounded-full px-3 py-1 text-xs ${awTab === tab.key ? 'bg-ds-brand/12 text-ds-brand' : 'bg-ds-elevated text-ds-ink-faint hover:text-ds-ink'}`}
               >
                 {tab.label}
               </button>
@@ -2053,7 +2053,7 @@ export default function DesigningQueuePage() {
           </div>
         </section>
         {sortedRows.length === 0 ? (
-          <section className="flex min-h-[420px] items-center justify-center rounded-ds-md border border-ds-line/40 bg-card p-4">
+          <section className="flex min-h-[420px] items-center justify-center rounded-ds-md bg-card p-4 shadow-ds-depth-sm">
             <div className="text-center">
               <ImageOff className="mx-auto h-10 w-10 text-ds-ink-faint" />
               <h3 className="mt-3 text-base font-semibold text-ds-ink">No artwork jobs yet</h3>
@@ -2070,10 +2070,10 @@ export default function DesigningQueuePage() {
             </div>
           </section>
         ) : (
-        <section className="rounded-ds-md border border-ds-line/40 bg-card p-4">
+        <section className="rounded-ds-md bg-card p-4 shadow-ds-depth-sm">
         <EnterpriseTableShell>
           <table className="w-full min-w-[1020px] table-fixed border-collapse text-left text-xs">
-            <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
+            <thead className="bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
                 <th className="w-10 px-2 py-2 text-center">
                   <input
@@ -2195,7 +2195,7 @@ export default function DesigningQueuePage() {
                           />
                         </td>
                         <td className="px-2 py-1.5 align-middle text-xs leading-snug text-neutral-900 dark:text-ds-ink">
-                          <div className="mb-0.5 inline-flex items-center gap-1 rounded border border-[var(--info)]/40 bg-[var(--info-bg)] px-1 py-0.5 text-xs font-bold uppercase text-[var(--info)] dark:text-[var(--info)]">
+                          <div className="mb-0.5 inline-flex items-center gap-1 rounded bg-[var(--info-bg)] px-1 py-0.5 text-xs font-bold uppercase text-[var(--info)] dark:text-[var(--info)]">
                             <Layers className="h-3 w-3 shrink-0" aria-hidden /> Gang · {groupRows.length}
                           </div>
                           <div className="flex min-w-0 items-center gap-1 text-xs text-ds-ink-muted">
@@ -2231,7 +2231,7 @@ export default function DesigningQueuePage() {
                           </span>
                           {groupPushAge ? (
                             <div className="mt-0.5">
-                              <span className={groupCompleted ? PUSHED_CHIP_CLASS : 'rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-xs text-ds-ink-faint'}>
+                              <span className={groupCompleted ? PUSHED_CHIP_CLASS : 'rounded bg-ds-elevated px-1.5 py-0.5 text-xs text-ds-ink-faint'}>
                                 {groupCompleted ? `Pushed ${groupPushAge}` : `Plate pushed ${groupPushAge}`}
                               </span>
                             </div>
@@ -2239,11 +2239,11 @@ export default function DesigningQueuePage() {
                         </td>
                         <td className="px-2 py-1.5 align-middle">
                           {groupJobCardReady === groupRows.length ? (
-                            <span className="rounded border border-[var(--success)]/40 bg-[var(--success-bg)] px-1.5 py-0.5 text-xs text-[var(--success)]">
+                            <span className="rounded bg-[var(--success-bg)] px-1.5 py-0.5 text-xs text-[var(--success)]">
                               Ready ({groupJobCardReady}/{groupRows.length})
                             </span>
                           ) : (
-                            <span className="rounded border border-ds-line/60 bg-ds-elevated px-1.5 py-0.5 text-xs text-ds-ink-faint">
+                            <span className="rounded bg-ds-elevated px-1.5 py-0.5 text-xs text-ds-ink-faint">
                               Pending ({groupRows.length - groupJobCardReady}/{groupRows.length})
                             </span>
                           )}
@@ -2260,20 +2260,20 @@ export default function DesigningQueuePage() {
                                   return next
                                 })
                               }}
-                              className="inline-flex items-center gap-0.5 rounded border border-[var(--info)]/40 bg-[var(--info-bg)] px-2 py-0.5 text-xs font-medium text-[var(--info)] hover:bg-[var(--info-bg)] dark:text-[var(--info)]"
+                              className="inline-flex items-center gap-0.5 rounded bg-[var(--info-bg)] px-2 py-0.5 text-xs font-medium text-[var(--info)] hover:bg-[var(--info-bg)] dark:text-[var(--info)]"
                             >
                               {isExpanded ? '▲ Collapse' : `▼ ${groupRows.length} items`}
                             </button>
                             <button
                               type="button"
                               onClick={() => setActiveGroupEdit({ groupId, rows: groupRows })}
-                              className="inline-flex items-center justify-center gap-1 rounded border border-ds-warning/40 bg-ds-warning/8 px-2 py-0.5 text-xs font-medium text-ds-warning hover:bg-ds-warning/15 dark:border-ds-warning/40 dark:text-ds-warning"
+                              className="inline-flex items-center justify-center gap-1 rounded bg-ds-warning/8 px-2 py-0.5 text-xs font-medium text-ds-warning hover:bg-ds-warning/15 dark:text-ds-warning"
                             >
                               <Pencil className="h-3 w-3 opacity-80" aria-hidden />
                               Edit group
                             </button>
                             {groupMissingSheetCount > 0 ? (
-                              <span className="rounded border border-orange-500/35 bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300">
+                              <span className="rounded bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300">
                                 Missing sheet size ({groupMissingSheetCount})
                               </span>
                             ) : null}
@@ -2286,10 +2286,10 @@ export default function DesigningQueuePage() {
                                   ? `Push ${groupFinalizeEligibleCount} eligible item${groupFinalizeEligibleCount > 1 ? 's' : ''} to Plate Hub`
                                   : 'No eligible items in this gang for Plate Hub push'
                               }
-                              className={`rounded border px-2 py-0.5 text-xs disabled:opacity-40 ${
+                              className={`rounded px-2 py-0.5 text-xs disabled:opacity-40 ${
                                 groupFinalizeEligibleCount > 0
-                                  ? 'border-[var(--success)]/40 text-[var(--success)] hover:bg-[var(--success-bg)] dark:text-[var(--success)]'
-                                  : 'border-ds-line text-ds-warning hover:bg-ds-warning/10'
+                                  ? 'text-[var(--success)] hover:bg-[var(--success-bg)] dark:text-[var(--success)]'
+                                  : 'text-ds-warning hover:bg-ds-warning/10'
                               }`}
                             >
                               {finalizingGroupId === groupId
@@ -2305,10 +2305,10 @@ export default function DesigningQueuePage() {
                                   ? `Recall ${groupRecallEligibleCount} eligible item${groupRecallEligibleCount > 1 ? 's' : ''} to Planning`
                                   : 'Recall is allowed only before machine allocation / production'
                               }
-                              className={`rounded border px-2 py-0.5 text-xs disabled:opacity-40 ${
+                              className={`rounded px-2 py-0.5 text-xs disabled:opacity-40 ${
                                 groupRecallEligibleCount > 0
-                                  ? 'border-[var(--error)]/35 text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]'
-                                  : 'border-ds-line text-ds-warning hover:bg-ds-warning/10'
+                                  ? 'text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]'
+                                  : 'text-ds-warning hover:bg-ds-warning/10'
                               }`}
                             >
                               {recallingGroupId === groupId ? '…' : `Recall group${groupRecallEligibleCount > 0 ? ` (${groupRecallEligibleCount})` : ''}`}
@@ -2405,12 +2405,12 @@ export default function DesigningQueuePage() {
                             <td className="px-2 py-1 align-middle">
                               <div className="flex flex-wrap items-center gap-1">
                                 {phase === 'awaiting_client' ? (
-                                  <span className="rounded border border-[var(--info)]/45 bg-[var(--info-bg)] px-1.5 py-0.5 text-xs text-[var(--info)] dark:text-[var(--info)]">
+                                  <span className="rounded bg-[var(--info-bg)] px-1.5 py-0.5 text-xs text-[var(--info)] dark:text-[var(--info)]">
                                     Awaiting client
                                   </span>
                                 ) : null}
                                 {missingSheetSize ? (
-                                  <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
+                                  <span className="rounded bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
                                     Sheet size missing
                                   </span>
                                 ) : null}
@@ -2419,7 +2419,7 @@ export default function DesigningQueuePage() {
                             <td className="px-2 py-1 align-middle">
                               <div className="flex items-center justify-between gap-2">
                                 {jcState === 'ready' ? (
-                                  <span className="rounded border border-[var(--success)]/40 bg-[var(--success-bg)] px-1.5 py-0.5 text-xs text-[var(--success)]">
+                                  <span className="rounded bg-[var(--success-bg)] px-1.5 py-0.5 text-xs text-[var(--success)]">
                                     Ready
                                   </span>
                                 ) : (
@@ -2561,11 +2561,11 @@ export default function DesigningQueuePage() {
                             {r.cartonName ?? '—'}
                           </button>
                           {readPlanningCore(spec).layoutType === 'gang' ? (
-                            <span className="mt-0.5 inline-block w-fit rounded border border-[var(--info)]/45 bg-[var(--info-bg)] px-1 py-0.5 text-xs font-semibold uppercase text-[var(--info)] dark:text-[var(--info)]">
+                            <span className="mt-0.5 inline-block w-fit rounded bg-[var(--info-bg)] px-1 py-0.5 text-xs font-semibold uppercase text-[var(--info)] dark:text-[var(--info)]">
                               Gang print
                             </span>
                           ) : readPlanningCore(spec).savedAt ? (
-                            <span className="mt-0.5 inline-block w-fit rounded border border-neutral-300 px-1 py-0.5 text-xs text-ds-ink-faint dark:border-ds-line/60">
+                            <span className="mt-0.5 inline-block w-fit rounded px-1 py-0.5 text-xs text-ds-ink-faint">
                               Single
                             </span>
                           ) : null}
@@ -2617,12 +2617,12 @@ export default function DesigningQueuePage() {
                     <td className="px-2 py-2 align-middle">
                       <div className="flex flex-wrap items-center gap-1">
                         {phase === 'awaiting_client' ? (
-                          <span className="rounded border border-[var(--info)]/45 bg-[var(--info-bg)] px-1.5 py-0.5 text-xs text-[var(--info)] dark:text-[var(--info)]">
+                          <span className="rounded bg-[var(--info-bg)] px-1.5 py-0.5 text-xs text-[var(--info)] dark:text-[var(--info)]">
                             Awaiting client
                           </span>
                         ) : null}
                         {missingSheetSize ? (
-                          <span className="rounded border border-orange-500/35 bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
+                          <span className="rounded bg-orange-500/10 px-1.5 py-0.5 text-xs text-orange-700 dark:text-orange-300">
                             Sheet size missing
                           </span>
                         ) : null}
@@ -2631,7 +2631,7 @@ export default function DesigningQueuePage() {
                     <td className="px-2 py-2 align-middle">
                       <div className="flex items-center justify-between gap-2">
                         {jcState === 'ready' ? (
-                          <span className="rounded border border-[var(--success)]/40 bg-[var(--success-bg)] px-1.5 py-0.5 text-xs text-[var(--success)]">
+                          <span className="rounded bg-[var(--success-bg)] px-1.5 py-0.5 text-xs text-[var(--success)]">
                             Ready
                           </span>
                         ) : (
@@ -2682,7 +2682,7 @@ export default function DesigningQueuePage() {
           role="presentation"
         >
           <aside
-            className="absolute right-0 top-0 flex h-full w-[min(96vw,820px)] max-w-[820px] flex-col overflow-y-auto border-l border-ds-line/40 bg-card p-4"
+            className="absolute right-0 top-0 flex h-full w-[min(96vw,820px)] max-w-[820px] flex-col overflow-y-auto bg-card p-4 shadow-ds-depth-sm"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
@@ -2717,7 +2717,7 @@ export default function DesigningQueuePage() {
               return (
                 <div className="flex min-h-0 flex-1 flex-col text-xs">
                   <div className="space-y-3 overflow-y-auto pr-1 pb-24">
-                  <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/40 p-3">
+                  <div className="grid grid-cols-2 gap-2 rounded bg-ds-elevated/20 p-3">
                     <div><p className="text-ds-ink-faint">Product</p><p className="text-ds-ink">{activeRowDrawer.cartonName || '-'}</p></div>
                     <div><p className="text-ds-ink-faint">Customer</p><p className="text-ds-ink">{activeRowDrawer.po.customer.name || '-'}</p></div>
                     <div><p className="text-ds-ink-faint">PO Ref</p><p className="text-ds-ink">{activeRowDrawer.po.poNumber || '-'}</p></div>
@@ -2733,8 +2733,8 @@ export default function DesigningQueuePage() {
                   </div>
 
                   {drawerForm ? (
-                    <div className="space-y-2 rounded border border-ds-line/40 p-3">
-                      <div className="rounded border border-ds-line/50 bg-ds-elevated/20 p-2">
+                    <div className="space-y-2 rounded bg-ds-elevated/20 p-3">
+                      <div className="rounded bg-ds-elevated/30 p-2">
                         <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">AW Push Readiness Checklist</p>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                           {checklist.map((item) => (
@@ -2751,19 +2751,19 @@ export default function DesigningQueuePage() {
 
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">Editable Carton & Specs</p>
                       <div className="grid grid-cols-2 gap-2">
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Carton</span><input value={drawerForm.cartonName} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, cartonName: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Qty</span><input value={drawerForm.quantity} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, quantity: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Sheet Size</span><input value={drawerForm.sheetSize} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, sheetSize: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">UPS</span><input value={drawerForm.ups} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, ups: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Board Type</span><input value={drawerForm.boardType} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, boardType: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">GSM</span><input value={drawerForm.gsm} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, gsm: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Coating</span><input value={drawerForm.coating} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, coating: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Emboss / Foil</span><input value={drawerForm.embossing} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossing: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Colour / Spec</span><input value={drawerForm.colorSpec} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, colorSpec: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Artwork Code</span><input value={drawerForm.artworkCode} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, artworkCode: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Set Number</span><div className="flex gap-1"><input value={drawerForm.setNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /><button type="button" className="rounded border border-ds-line/60 px-2 text-[11px]" onClick={() => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: autoSetNumber(activeRowDrawer.id) }) : prev)}>Auto</button></div></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Die Number</span><input value={drawerForm.dieNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, dieNumber: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Emboss Block Number</span><input value={drawerForm.embossBlockNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossBlockNumber: e.target.value }) : prev)} className="h-8 w-full rounded border border-ds-line/50 bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Carton</span><input value={drawerForm.cartonName} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, cartonName: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Qty</span><input value={drawerForm.quantity} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, quantity: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Sheet Size</span><input value={drawerForm.sheetSize} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, sheetSize: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">UPS</span><input value={drawerForm.ups} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, ups: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Board Type</span><input value={drawerForm.boardType} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, boardType: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">GSM</span><input value={drawerForm.gsm} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, gsm: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Coating</span><input value={drawerForm.coating} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, coating: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Emboss / Foil</span><input value={drawerForm.embossing} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossing: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Colour / Spec</span><input value={drawerForm.colorSpec} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, colorSpec: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Artwork Code</span><input value={drawerForm.artworkCode} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, artworkCode: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Set Number</span><div className="flex gap-1"><input value={drawerForm.setNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /><button type="button" className="rounded px-2 text-[11px]" onClick={() => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: autoSetNumber(activeRowDrawer.id) }) : prev)}>Auto</button></div></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Die Number</span><input value={drawerForm.dieNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, dieNumber: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                        <label className="space-y-1"><span className="text-ds-ink-faint">Emboss Block Number</span><input value={drawerForm.embossBlockNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossBlockNumber: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
                       </div>
                       <div className="flex items-center gap-2">
                         <Button variant="secondary" className="h-8" onClick={() => void saveDrawerDetails()} disabled={drawerSaving}>
@@ -2781,7 +2781,7 @@ export default function DesigningQueuePage() {
                     </div>
                   ) : null}
 
-                  <div className="space-y-1 rounded border border-ds-line/40 p-3">
+                  <div className="space-y-1 rounded bg-ds-elevated/20 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">Tooling Push Tracker</p>
                     <div className="grid grid-cols-5 gap-1">
                       {(['plate', 'die', 'emboss', 'shade', 'jobCard'] as DrawerPushStep[]).map((step) => {
@@ -2789,21 +2789,21 @@ export default function DesigningQueuePage() {
                         const label = step === 'jobCard' ? 'Job Card' : step.charAt(0).toUpperCase() + step.slice(1)
                         const cls =
                           state === 'ok'
-                            ? 'border-[var(--success)] bg-emerald-50 text-[var(--success)]'
+                            ? 'bg-[var(--success-bg)] text-[var(--success)]'
                             : state === 'failed'
-                              ? 'border-[var(--error)] bg-rose-50 text-[var(--error)]'
+                              ? 'bg-[var(--error-bg)] text-[var(--error)]'
                               : state === 'skipped'
-                                ? 'border-ds-line/50 bg-ds-elevated/20 text-ds-ink-faint'
-                                : 'border-ds-line/50 bg-ds-main text-ds-ink-faint'
+                                ? 'bg-ds-elevated/20 text-ds-ink-faint'
+                                : 'bg-ds-main text-ds-ink-faint'
                         return (
-                          <div key={step} className={`rounded border px-2 py-1 text-center text-[11px] ${cls}`}>
+                          <div key={step} className={`rounded px-2 py-1 text-center text-[11px] ${cls}`}>
                             {label}: {state}
                           </div>
                         )
                       })}
                     </div>
                     {Object.values(drawerPushStates).some((s) => s === 'failed') ? (
-                      <div className="rounded border border-[var(--error)] bg-rose-50 p-2">
+                      <div className="rounded bg-[var(--error-bg)] p-2">
                         <p className="mb-1 text-[11px] font-medium text-[var(--error)]">Failure Recovery</p>
                         <div className="flex flex-wrap gap-1.5">
                           {(Object.entries(drawerPushStates) as [DrawerPushStep, DrawerPushState][])
@@ -2812,7 +2812,7 @@ export default function DesigningQueuePage() {
                               <button
                                 key={step}
                                 type="button"
-                                className="rounded border border-[var(--error)] px-2 py-1 text-[11px] text-[var(--error)] hover:bg-[var(--error-bg)]"
+                                className="rounded px-2 py-1 text-[11px] text-[var(--error)] hover:bg-[var(--error-bg)]"
                                 onClick={() => void retryDrawerStep(step)}
                               >
                                 Retry {step}
@@ -2829,7 +2829,7 @@ export default function DesigningQueuePage() {
                   </div>
 
                   </div>
-                  <div className="mt-2 border-t border-ds-line/40 pt-3">
+                  <div className="mt-2 pt-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Button
                         className="h-8"

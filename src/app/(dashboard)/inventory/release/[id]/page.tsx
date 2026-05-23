@@ -84,7 +84,7 @@ export default function ReleasePage() {
             value={qty}
             onChange={(e) => setQty(e.target.value)}
             required
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -94,7 +94,7 @@ export default function ReleasePage() {
             onChange={(e) => setReadings(e.target.value)}
             rows={3}
             placeholder="e.g. Caliper 0.28mm, GSM 350"
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <button

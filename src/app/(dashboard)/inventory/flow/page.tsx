@@ -59,49 +59,49 @@ export default function InventoryFlowPage() {
       </div>
 
       <div className="space-y-3 text-sm">
-        <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-3">
+        <div className="rounded-ds-md bg-ds-elevated/50 p-3">
           <p className="text-ds-ink-muted">Approved suppliers</p>
           <p className="text-xl font-semibold text-foreground">{summary.approvedSuppliers} active</p>
         </div>
         <p className="text-ds-ink-faint text-center">↓</p>
-        <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-3">
+        <div className="rounded-ds-md bg-ds-elevated/50 p-3">
           <p className="text-ds-ink-muted">GRN this month</p>
           <p className="text-xl font-semibold text-foreground">{summary.grnThisMonth} receipts · {fmtRupee(summary.grnValueReceived)}</p>
         </div>
         <p className="text-ds-ink-faint text-center">↓</p>
-        <div className="rounded-ds-md border border-[var(--error)]/50 bg-[var(--error-bg)] p-3">
+        <div className="rounded-ds-md bg-[var(--error-bg)] p-3">
           <p className="text-[var(--error)]">Quarantine</p>
           <p className="text-xl font-semibold text-foreground">{summary.quarantineLots} lots · {fmt(summary.quarantineTotal)} total</p>
         </div>
         <p className="text-ds-ink-faint text-center">↓ QA Released</p>
-        <div className="rounded-ds-md border border-[var(--success)]/50 bg-[var(--success-bg)] p-3">
+        <div className="rounded-ds-md bg-[var(--success-bg)] p-3">
           <p className="text-[var(--success)]">Available stock</p>
           <p className="text-xl font-semibold text-foreground">{summary.availableMaterials} materials · {fmtRupee(summary.availableValue)}</p>
         </div>
         <p className="text-ds-ink-faint text-center">↓ Work order</p>
-        <div className="rounded-ds-md border border-ds-warning/30 bg-ds-warning/8 p-3">
+        <div className="rounded-ds-md bg-ds-warning/8 p-3">
           <p className="text-ds-warning">Reserved / WIP</p>
           <p className="text-xl font-semibold text-foreground">{fmtRupee(summary.reservedValue)}</p>
         </div>
         <p className="text-ds-ink-faint text-center">↓ Production complete</p>
-        <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-3">
+        <div className="rounded-ds-md bg-ds-elevated/50 p-3">
           <p className="text-ds-ink-muted">Good output → FG</p>
           <p className="text-foreground">{fmt(summary.fgCartons)} cartons</p>
           <p className="text-ds-ink-faint text-xs">Waste → Ledger: {summary.wasteLedgerPct}%</p>
         </div>
         <p className="text-ds-ink-faint text-center">↓</p>
-        <div className="rounded-ds-md border border-[var(--info)]/50 bg-[var(--info-bg)] p-3">
+        <div className="rounded-ds-md bg-[var(--info-bg)] p-3">
           <p className="text-[var(--info)]">Finished goods</p>
           <p className="text-foreground">{summary.fgPallets} pallets · Available: {summary.fgAvailable} · On hold: {summary.fgOnHold} · Blocked: {summary.fgBlocked}</p>
         </div>
         <p className="text-ds-ink-faint text-center">↓</p>
-        <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-3">
+        <div className="rounded-ds-md bg-ds-elevated/50 p-3">
           <p className="text-ds-ink-muted">Dispatched this month</p>
           <p className="text-xl font-semibold text-foreground">{fmt(summary.dispatchedThisMonth)} cartons · {fmtRupee(summary.dispatchedValue)}</p>
         </div>
       </div>
 
-      <div className="mt-10 rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-4">
+      <div className="mt-10 rounded-ds-md bg-ds-elevated/30 p-4">
         <h2 className="font-semibold text-ds-ink-muted mb-2">Lot traceability</h2>
         <p className="text-ds-ink-faint text-xs mb-2">Enter batch number, job number, or material lot. Query time &lt; 2s.</p>
         <div className="flex gap-2">
@@ -111,7 +111,7 @@ export default function InventoryFlowPage() {
             onChange={(e) => setTraceQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && runTrace()}
             placeholder="Batch / Job / Material"
-            className="flex-1 px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="flex-1 px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
           <button
             type="button"

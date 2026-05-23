@@ -57,12 +57,12 @@ export default function EmbossBlockDetailPage() {
       </div>
       <div className="flex gap-2">
         {(['overview', 'issue', 'vendor', 'history', 'audit'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded border text-xs ${tab === t ? 'bg-ds-warning border-ds-warning text-primary-foreground' : 'border-ds-line/50 text-ds-ink-muted'}`}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded text-xs ${tab === t ? 'bg-ds-warning text-primary-foreground' : 'bg-ds-elevated/60 text-ds-ink-muted'}`}>{t}</button>
         ))}
       </div>
 
       {tab === 'overview' && (
-        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm">
+        <div className="rounded-ds-lg bg-ds-card shadow-ds-depth-sm p-4 space-y-3 text-sm">
           <div className="grid md:grid-cols-4 gap-2">
             <Info k="Type" v={block.blockType} /><Info k="Material" v={block.blockMaterial} />
             <Info k="Size" v={`${block.blockSizeL ?? '-'} × ${block.blockSizeW ?? '-'}`} />
@@ -89,23 +89,23 @@ export default function EmbossBlockDetailPage() {
       {tab === 'issue' && <IssueReturn block={block} />}
 
       {tab === 'vendor' && (
-        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
+        <div className="rounded-ds-lg bg-ds-card shadow-ds-depth-sm p-4">
           <table className="w-full text-xs">
             <thead className="text-ds-ink-muted"><tr><th className="text-left">Order</th><th className="text-left">Type</th><th className="text-left">Vendor</th><th className="text-left">Status</th></tr></thead>
-            <tbody>{block.vendorOrders.map((o) => <tr key={o.id} className="border-t border-ds-line/40"><td className="py-1">{o.orderCode}</td><td>{o.orderType}</td><td>{o.vendorName}</td><td>{o.status}</td></tr>)}</tbody>
+            <tbody>{block.vendorOrders.map((o) => <tr key={o.id}><td className="py-1">{o.orderCode}</td><td>{o.orderType}</td><td>{o.vendorName}</td><td>{o.status}</td></tr>)}</tbody>
           </table>
         </div>
       )}
 
       {tab === 'history' && (
-        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
-          {block.issueRecords.map((r) => <div key={r.id} className="border border-ds-line/40 rounded p-2">Issued to {r.issuedTo} · {new Date(r.issuedAt).toLocaleString('en-IN')} · {r.status}</div>)}
+        <div className="rounded-ds-lg bg-ds-card shadow-ds-depth-sm p-4 space-y-2 text-sm">
+          {block.issueRecords.map((r) => <div key={r.id} className="bg-ds-elevated/50 rounded p-2">Issued to {r.issuedTo} · {new Date(r.issuedAt).toLocaleString('en-IN')} · {r.status}</div>)}
         </div>
       )}
 
       {tab === 'audit' && (
-        <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-xs">
-          {block.auditLog.map((a) => <div key={a.id} className="grid grid-cols-3 border-b border-ds-line/40 pb-1"><span>{new Date(a.performedAt).toLocaleString('en-IN')}</span><span>{a.action}</span><span>{a.performedBy}</span></div>)}
+        <div className="rounded-ds-lg bg-ds-card shadow-ds-depth-sm p-4 space-y-2 text-xs">
+          {block.auditLog.map((a) => <div key={a.id} className="grid grid-cols-3 pb-1"><span>{new Date(a.performedAt).toLocaleString('en-IN')}</span><span>{a.action}</span><span>{a.performedBy}</span></div>)}
         </div>
       )}
     </div>
@@ -155,25 +155,25 @@ function IssueReturn({ block }: { block: BlockDetail }) {
   }
 
   return block.status === 'issued' ? (
-    <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
+    <div className="rounded-ds-lg bg-ds-card shadow-ds-depth-sm p-4 space-y-2 text-sm">
       <p className="text-ds-ink-muted">Currently issued. Return required.</p>
-      <input value={impressionsThisRun} onChange={(e) => setImpressionsThisRun(e.target.value)} placeholder="Impressions this run" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <select value={returnCondition} onChange={(e) => setReturnCondition(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full">
+      <input value={impressionsThisRun} onChange={(e) => setImpressionsThisRun(e.target.value)} placeholder="Impressions this run" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <select value={returnCondition} onChange={(e) => setReturnCondition(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full">
         <option>Good</option><option>Fair</option><option>Needs Polish</option><option>Damaged</option>
       </select>
-      <select value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full">
+      <select value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full">
         <option value="store">store</option><option value="sent_for_polishing">sent_for_polishing</option><option value="scrapped">scrapped</option>
       </select>
-      <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Storage location" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
+      <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Storage location" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
       <button onClick={ret} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Confirm Return</button>
     </div>
   ) : (
-    <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-2 text-sm">
-      <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full" />
-      <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm w-full"><option>EMB-01</option><option>EMB-02</option></select>
+    <div className="rounded-ds-lg bg-ds-card shadow-ds-depth-sm p-4 space-y-2 text-sm">
+      <input value={jobCardId} onChange={(e) => setJobCardId(e.target.value)} placeholder="Job Card ID" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
+      <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full"><option>EMB-01</option><option>EMB-02</option></select>
       <button onClick={issue} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Issue Block</button>
     </div>
   )

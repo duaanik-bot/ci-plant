@@ -26,10 +26,10 @@ export function Input({ label, error, className, ...props }: InputProps) {
       )}
       <input
         className={cn(
-          'w-full px-3 py-2 text-sm rounded-ds-sm border outline-none transition-colors bg-ds-card text-ds-ink placeholder:text-ds-ink-faint',
+          'w-full px-3 py-2 text-sm rounded-ds-sm outline-none transition-colors bg-ds-card text-ds-ink placeholder:text-ds-ink-faint',
           error
-            ? 'border-ds-error focus:ring-2 focus:ring-ds-error/20'
-            : 'border-ds-line focus:border-ds-brand focus:ring-2 focus:ring-ds-brand/15',
+            ? 'bg-[var(--error-bg)] focus:ring-2 focus:ring-ds-error/20'
+            : 'focus:ring-2 focus:ring-ds-brand/15',
           'disabled:bg-ds-elevated disabled:text-ds-ink-faint disabled:cursor-not-allowed',
           className,
         )}

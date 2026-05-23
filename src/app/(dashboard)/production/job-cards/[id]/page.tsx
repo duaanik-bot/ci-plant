@@ -191,15 +191,15 @@ function formatDateDisplay(value: string | Date | null | undefined): string {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'border-ds-line/50 text-neutral-500',
-  ready: 'border-ds-warning text-ds-warning',
-  in_progress: 'border-[var(--info)] text-[var(--info)]',
-  completed: 'border-[var(--success)] text-[var(--success)]',
+  pending: 'bg-ds-elevated text-neutral-500',
+  ready: 'bg-ds-warning/10 text-ds-warning',
+  in_progress: 'bg-[var(--info-bg)] text-[var(--info)]',
+  completed: 'bg-[var(--success-bg)] text-[var(--success)]',
 }
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const fieldClass =
-  'w-full rounded border border-ds-line/50 bg-ds-main px-2 py-1.5 text-xs text-ds-ink transition focus:outline-none focus:ring-1 focus:ring-ds-brand/40 hover:border-ds-line'
+  'w-full rounded bg-ds-main px-2 py-1.5 text-xs text-ds-ink transition focus:outline-none focus:ring-1 focus:ring-ds-brand/40'
 
 const POST_PRESS_LABELS: { key: keyof PostPressRouting; label: string }[] = [
   { key: 'chemicalCoating', label: 'Chemical coating' },
@@ -1006,15 +1006,15 @@ export default function JobCardDetailPage() {
   const statusLabel = jc.status === 'qa_released' || jc.status === 'closed' ? 'Released' : jc.status === 'in_progress' || jc.status === 'final_qc' ? 'Ready' : 'Draft'
   const statusTone =
     statusLabel === 'Released'
-      ? 'border-[var(--success)]/40 bg-[var(--success-bg)] text-[var(--success)]'
+      ? 'bg-[var(--success-bg)] text-[var(--success)]'
       : statusLabel === 'Ready'
-        ? 'border-ds-warning/40 bg-ds-warning/10 text-ds-warning'
-        : 'border-ds-line/50 bg-ds-main text-ds-ink-faint'
+        ? 'bg-ds-warning/10 text-ds-warning'
+        : 'bg-ds-main text-ds-ink-faint'
 
   return (
     <div className="min-h-screen bg-background text-ds-ink pb-24">
       <div className="max-w-7xl mx-auto px-4 py-3 space-y-4">
-        <div className="rounded-ds-lg border border-ds-line/40 bg-card px-4 py-3">
+        <div className="rounded-ds-lg bg-card px-4 py-3 shadow-ds-depth-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <button type="button" onClick={() => router.push(returnTo)} className="mb-2 text-xs text-ds-ink-faint hover:text-ds-ink">← Back to Job Cards</button>
@@ -1023,9 +1023,9 @@ export default function JobCardDetailPage() {
               <p className="text-xs text-ds-ink-faint">{jc.customer.name} | PO {jc.poLine?.po.poNumber ?? '—'} | Set {jc.setNumber ?? '—'}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded border px-2 py-0.5 text-xs ${statusTone}`}>{statusLabel}</span>
+              <span className={`rounded px-2 py-0.5 text-xs ${statusTone}`}>{statusLabel}</span>
               <select
-                className="rounded border border-ds-line/50 bg-ds-main px-2 py-1.5 text-xs text-ds-ink transition focus:outline-none focus:ring-1 focus:ring-ds-brand/40 hover:border-ds-line"
+                className="rounded bg-ds-main px-2 py-1.5 text-xs text-ds-ink transition focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
                 value={designerUserId}
                 onChange={(e) => setDesignerUserId(e.target.value)}
               >
@@ -1048,18 +1048,18 @@ export default function JobCardDetailPage() {
                 />{' '}
                 QA OK
               </label>
-              <a href={`/api/designing/po-lines/${jc.poLine?.id}/job-spec-pdf`} target="_blank" rel="noopener noreferrer" className="rounded border border-ds-line/50 px-3 py-1.5 text-xs">Job spec PDF</a>
-              <button type="button" disabled={hubPushing} onClick={() => void pushToHubsFromJobCard()} className="rounded border border-ds-line/50 px-3 py-1.5 text-xs disabled:opacity-50">
+              <a href={`/api/designing/po-lines/${jc.poLine?.id}/job-spec-pdf`} target="_blank" rel="noopener noreferrer" className="rounded bg-ds-elevated px-3 py-1.5 text-xs">Job spec PDF</a>
+              <button type="button" disabled={hubPushing} onClick={() => void pushToHubsFromJobCard()} className="rounded bg-ds-elevated px-3 py-1.5 text-xs disabled:opacity-50">
                 {hubPushing ? 'Pushing hubs…' : 'Push to Hubs'}
               </button>
-              <Link href="/orders/purchase-orders" className="rounded border border-ds-line/50 px-3 py-1.5 text-xs">Open PO</Link>
-              <button type="button" onClick={() => window.print()} className="rounded border border-ds-line px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40">Print</button>
+              <Link href="/orders/purchase-orders" className="rounded bg-ds-elevated px-3 py-1.5 text-xs">Open PO</Link>
+              <button type="button" onClick={() => window.print()} className="rounded bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40">Print</button>
               <span className="text-xs text-ds-ink-faint">{isDirty ? 'Unsaved changes' : lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'No pending changes'}</span>
             </div>
           </div>
         </div>
 
-        <div className="sticky top-16 z-20 rounded-ds-md border border-ds-line/40 bg-ds-card/95 px-3 py-2 backdrop-blur">
+        <div className="sticky top-16 z-20 rounded-ds-md bg-ds-card/95 px-3 py-2 backdrop-blur shadow-ds-depth-sm">
           <div className="flex flex-wrap gap-2">
             {[
               ['summary', 'Job Summary', 'summary'],
@@ -1078,7 +1078,7 @@ export default function JobCardDetailPage() {
                   sectionRefs.current[refKey]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                 }}
                 className={`rounded px-2 py-1 text-xs transition ${
-                  activeSection === key ? 'bg-ds-brand text-white' : 'border border-ds-line/50 text-ds-ink hover:bg-ds-main'
+                  activeSection === key ? 'bg-ds-brand text-white' : 'bg-ds-elevated text-ds-ink hover:bg-ds-main'
                 }`}
               >
                 {label}
@@ -1087,7 +1087,7 @@ export default function JobCardDetailPage() {
           </div>
         </div>
 
-        <div className="rounded-ds-md border border-ds-line/40 bg-card px-3 py-2.5">
+        <div className="rounded-ds-md bg-card px-3 py-2.5 shadow-ds-depth-sm">
           <p className="text-[11px] uppercase tracking-wide text-ds-ink-faint mb-2">Production Queue Flow</p>
           <div className="flex flex-wrap gap-2">
             {[
@@ -1108,7 +1108,7 @@ export default function JobCardDetailPage() {
                 type="button"
                 onClick={() => void pushQueueStep(k)}
                 disabled={saving || enqueueingCut || livePushing || queuePushing !== null}
-                className="rounded border border-ds-line/50 bg-ds-main px-2.5 py-1 text-xs text-ds-ink transition hover:bg-ds-main/70 disabled:opacity-50"
+                className="rounded bg-ds-main px-2.5 py-1 text-xs text-ds-ink transition hover:bg-ds-main/70 disabled:opacity-50"
               >
                 {queuePushing === k ? 'Pushing…' : label}
               </button>
@@ -1131,14 +1131,14 @@ export default function JobCardDetailPage() {
               ['Priority', priority],
               ['Status', statusLabel],
             ].map(([k, v]) => (
-              <div key={k} className="rounded-ds-md border border-ds-line/40 bg-card px-3 py-2.5">
+              <div key={k} className="rounded-ds-md bg-card px-3 py-2.5 shadow-ds-depth-sm">
                 <p className="text-xs uppercase tracking-wide text-ds-ink-faint">{k}</p>
                 <p className="text-sm mt-1">{v}</p>
               </div>
             ))}
           </div>
           {fgUseEnabled && fgUsed > 0 ? (
-            <div className="rounded-ds-md border border-[var(--success)]/40 bg-[var(--success-bg)]/20 px-3 py-2.5">
+            <div className="rounded-ds-md bg-[var(--success-bg)]/20 px-3 py-2.5">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--success)]">Existing FG stock used</p>
               <p className="mt-1 text-sm text-ds-ink">
                 Fulfilling <span className="font-semibold tabular-nums">{fgUsed.toLocaleString('en-IN')}</span> pcs from finished-goods stock —
@@ -1151,7 +1151,7 @@ export default function JobCardDetailPage() {
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
           <div className="xl:col-span-2 space-y-4">
-            <div ref={(el) => { sectionRefs.current.spec = el }} className="rounded-ds-lg border border-ds-line/40 bg-card p-4 space-y-2.5">
+            <div ref={(el) => { sectionRefs.current.spec = el }} className="rounded-ds-lg bg-card p-4 space-y-2.5 shadow-ds-depth-sm">
               <h2 className="text-sm font-semibold text-ds-ink">Printing & Finishing</h2>
               <div className="mb-4">
                 <SpecPackPanel
@@ -1189,14 +1189,14 @@ export default function JobCardDetailPage() {
               </div>
               <div>
                 <label className="block text-xs text-ds-ink-faint mb-1">Notes</label>
-                <textarea value={prePressRemarks} onChange={(e) => setPrePressRemarks(e.target.value)} className="w-full rounded border border-ds-line/50 bg-ds-main px-3 py-2 text-xs text-ds-ink transition focus:outline-none focus:ring-1 focus:ring-ds-brand/40 hover:border-ds-line" rows={3} />
+                <textarea value={prePressRemarks} onChange={(e) => setPrePressRemarks(e.target.value)} className="w-full rounded bg-ds-main px-3 py-2 text-xs text-ds-ink transition focus:outline-none focus:ring-1 focus:ring-ds-brand/40" rows={3} />
               </div>
             </div>
 
-            <div ref={(el) => { sectionRefs.current.execution = el }} className="rounded-ds-lg border border-ds-line/40 bg-card p-4 space-y-2.5">
+            <div ref={(el) => { sectionRefs.current.execution = el }} className="rounded-ds-lg bg-card p-4 space-y-2.5 shadow-ds-depth-sm">
               <div className="space-y-2">
                 <h2 className="text-sm font-semibold text-ds-ink">Operations</h2>
-              <div className="overflow-x-auto rounded border border-ds-line/40">
+              <div className="overflow-x-auto rounded">
                 <table className="min-w-full text-xs">
                   <thead className="bg-ds-main/40 text-ds-ink-faint">
                     <tr>
@@ -1209,7 +1209,7 @@ export default function JobCardDetailPage() {
                   </thead>
                   <tbody>
                     {stageChain.slice(0, 6).map((row) => (
-                      <tr key={row.stage.id} className="border-t border-ds-line/30">
+                      <tr key={row.stage.id}>
                         <td className="px-2 py-2">{row.stage.stageName}</td>
                         <td className="px-2 py-2">{jc.postPressRouting?.printPlan?.machineId || '—'}</td>
                         <td className={`px-2 py-2 text-right ${mono}`}>{Number(jc.poLine?.quantity || 0).toLocaleString('en-IN')}</td>
@@ -1225,7 +1225,7 @@ export default function JobCardDetailPage() {
           </div>
 
           <div className="space-y-4">
-            <div ref={(el) => { sectionRefs.current.board = el }} className="rounded-ds-lg border border-ds-line/40 bg-card p-4 space-y-2.5">
+            <div ref={(el) => { sectionRefs.current.board = el }} className="rounded-ds-lg bg-card p-4 space-y-2.5 shadow-ds-depth-sm">
               <h2 className="text-sm font-semibold text-ds-ink">Material & Sheet Config</h2>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div><p className="text-ds-ink-faint mb-1">Choose Paper</p><p>{paperDisplay}</p></div>
@@ -1247,15 +1247,15 @@ export default function JobCardDetailPage() {
                     key={key}
                     type="button"
                     onClick={() => setBoardReadiness(key as 'ready' | 'waiting' | 'not_ready')}
-                    className={`rounded border px-2 py-1 ${
-                      boardStatus === key ? 'border-ds-warning bg-ds-warning/10 text-ds-warning' : 'border-ds-line/40'
+                    className={`rounded px-2 py-1 ${
+                      boardStatus === key ? 'bg-ds-warning/10 text-ds-warning' : 'bg-ds-elevated text-ds-ink-muted'
                     } transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40`}
                   >
                     {label}
                   </button>
                 ))}
               </div>
-              <div className="rounded-ds-md border border-ds-line/40 bg-ds-main/30 p-3">
+              <div className="rounded-ds-md bg-ds-main/30 p-3">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">Material Readiness</p>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>Required Sheets: <span className="text-ds-ink">{requiredDisplay}</span></div>
@@ -1267,7 +1267,7 @@ export default function JobCardDetailPage() {
                 </div>
                 <div className="mt-3">
                   <p className="mb-1 text-[11px] uppercase tracking-wide text-ds-ink-faint">History</p>
-                  <div className="max-h-44 space-y-1 overflow-auto rounded border border-ds-line/30 bg-background/40 p-2">
+                  <div className="max-h-44 space-y-1 overflow-auto rounded bg-background/40 p-2">
                     {materialTimeline.length === 0 ? (
                       <p className="text-xs text-ds-ink-faint">No material timeline events yet.</p>
                     ) : (
@@ -1282,10 +1282,10 @@ export default function JobCardDetailPage() {
                   </div>
                 </div>
               </div>
-              {boardStatus !== 'ready' ? <div className="rounded border border-ds-warning/40 bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning">Expected board delivery: {jc.boardMaterial?.warehouseHandshake?.issuedAt ? new Date(jc.boardMaterial.warehouseHandshake.issuedAt).toLocaleDateString() : 'TBD'}</div> : null}
+              {boardStatus !== 'ready' ? <div className="rounded bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning">Expected board delivery: {jc.boardMaterial?.warehouseHandshake?.issuedAt ? new Date(jc.boardMaterial.warehouseHandshake.issuedAt).toLocaleDateString() : 'TBD'}</div> : null}
             </div>
 
-            <div ref={(el) => { sectionRefs.current.validation = el }} className="rounded-ds-lg border border-ds-line/40 bg-card p-4 space-y-3">
+            <div ref={(el) => { sectionRefs.current.validation = el }} className="rounded-ds-lg bg-card p-4 space-y-3 shadow-ds-depth-sm">
               <h2 className="text-sm font-semibold text-ds-ink">Media Files</h2>
               <div className="flex flex-wrap gap-2 text-xs">
                 {[
@@ -1295,7 +1295,7 @@ export default function JobCardDetailPage() {
                 ]
                   .filter((x): x is string => !!x)
                   .map((f) => (
-                    <span key={f} className="rounded border border-ds-line/50 bg-ds-main px-3 py-1">{f}</span>
+                    <span key={f} className="rounded bg-ds-main px-3 py-1">{f}</span>
                   ))}
               </div>
             </div>
@@ -1303,13 +1303,13 @@ export default function JobCardDetailPage() {
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 border-t border-ds-line/40 bg-card/95 backdrop-blur px-4 py-2.5">
+      <div className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur px-4 py-2.5 shadow-ds-depth-sm">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             disabled={saving || enqueueingCut || livePushing || queuePushing !== null}
             onClick={() => void pushQueueStep('printing')}
-            className="rounded-ds-sm border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50"
+            className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50"
           >
             {queuePushing === 'printing' ? 'Pushing Print Planning…' : 'Push to Print Planning'}
           </button>
@@ -1317,7 +1317,7 @@ export default function JobCardDetailPage() {
             type="button"
             disabled={enqueueingCut || livePushing || queuePushing !== null}
             onClick={() => void enqueueCutting()}
-            className="rounded-ds-sm border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50"
+            className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50"
           >
             {enqueueingCut ? 'Pushing Cutting…' : 'Push to Cutting'}
           </button>
@@ -1329,8 +1329,8 @@ export default function JobCardDetailPage() {
           >
             {livePushing ? 'Pushing Live…' : 'Push to Print Planning + Cutting'}
           </button>
-          <button type="button" disabled={saving} onClick={() => void saveExecution(false)} className="rounded-ds-sm border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50">Save Job Card</button>
-          <button type="button" onClick={() => window.print()} className="rounded-ds-sm border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40">Print Job Card</button>
+          <button type="button" disabled={saving} onClick={() => void saveExecution(false)} className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50">Save Job Card</button>
+          <button type="button" onClick={() => window.print()} className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40">Print Job Card</button>
           <button type="button" disabled={releaseBlocked || saving} onClick={() => void saveExecution(true)} className="rounded-ds-sm bg-ds-brand px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-95 focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-40">Release to Production</button>
         </div>
       </div>

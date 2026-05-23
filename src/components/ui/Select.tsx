@@ -37,11 +37,11 @@ export function Select({ label, error, options = [], className, ...props }: Sele
       <div className="relative">
         <select
           className={cn(
-            'w-full px-3 py-2 pr-8 text-sm rounded-ds-sm border outline-none',
+            'w-full px-3 py-2 pr-8 text-sm rounded-ds-sm outline-none',
             'appearance-none bg-ds-card text-ds-ink transition-colors cursor-pointer',
             error
-              ? 'border-ds-error focus:ring-2 focus:ring-ds-error/20'
-              : 'border-ds-line focus:border-ds-brand focus:ring-2 focus:ring-ds-brand/15',
+              ? 'bg-[var(--error-bg)] focus:ring-2 focus:ring-ds-error/20'
+              : 'focus:ring-2 focus:ring-ds-brand/15',
             'disabled:bg-ds-elevated disabled:text-ds-ink-faint disabled:cursor-not-allowed',
             className,
           )}

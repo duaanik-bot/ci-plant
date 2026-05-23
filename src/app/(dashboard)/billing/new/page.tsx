@@ -384,7 +384,7 @@ export default function NewBillPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-[var(--border)] text-[11px] font-semibold uppercase tracking-wider text-ds-ink-muted">
+                  <tr className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-muted">
                     <th className="px-4 py-2.5 text-left">Carton</th>
                     <th className="px-3 py-2.5 text-left">PO #</th>
                     <th className="px-3 py-2.5 text-right">PO Qty</th>
@@ -395,7 +395,7 @@ export default function NewBillPage() {
                     <th className="px-3 py-2.5 text-center">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[var(--border)]">
+                <tbody className="">
                   {reconRows.map((row, idx) => {
                     const varianceClass =
                       row.varianceQty < 0
@@ -481,7 +481,7 @@ export default function NewBillPage() {
 
   return (
     <form onSubmit={handleSubmit} className="mx-auto max-w-[1400px] space-y-6 p-4 pb-32">
-      <div className="sticky top-0 z-40 -mx-4 border-b border-ds-line/80 bg-ds-main/90 px-4 py-3 backdrop-blur-md">
+      <div className="sticky top-0 z-40 -mx-4 bg-ds-main/90 px-4 py-3 backdrop-blur-md">
         <PageHeader
           className="border-0 pb-0"
           title="New tax invoice"
@@ -501,7 +501,7 @@ export default function NewBillPage() {
       </div>
 
       {/* Header — customer + meta */}
-      <div className="space-y-4 rounded-ds-lg border border-ds-line/80 bg-ds-card/40 p-4 text-sm shadow-sm">
+      <div className="space-y-4 rounded-ds-lg bg-ds-card/40 p-4 text-sm shadow-sm">
         <div className="flex items-center justify-between">
           <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">Invoice header</p>
           <p className="text-xs text-ds-ink-faint">
@@ -536,7 +536,7 @@ export default function NewBillPage() {
               emptyMessage="No customer found."
             />
             {customer ? (
-              <div className="mt-2 rounded-ds-sm border border-ds-line/60 bg-ds-elevated/40 px-3 py-2 text-xs text-ds-ink-muted">
+              <div className="mt-2 rounded-ds-sm bg-ds-elevated/40 px-3 py-2 text-xs text-ds-ink-muted">
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
                   {customer.gstNumber ? (
                     <span>
@@ -585,7 +585,7 @@ export default function NewBillPage() {
 
       {/* Line items + totals */}
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-3 rounded-ds-lg border border-ds-line/80 bg-ds-card/30 p-4 shadow-sm">
+        <div className="space-y-3 rounded-ds-lg bg-ds-card/30 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">
               Line items · {lines.length}
@@ -598,7 +598,7 @@ export default function NewBillPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-ds-line/60 text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+                <tr className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
                   <th className="w-8 px-2 py-2 text-left">#</th>
                   <th className="px-2 py-2 text-left" style={{ minWidth: 260 }}>Item / Description</th>
                   <th className="px-2 py-2 text-left">HSN</th>
@@ -614,7 +614,7 @@ export default function NewBillPage() {
                   <th className="w-16 px-2 py-2"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-ds-line/40">
+              <tbody>
                 {lines.map((l, idx) => {
                   const calc = lineCalcs[idx]
                   const cartonPickQuery = cartonQueries[idx] ?? ''
@@ -805,7 +805,7 @@ export default function NewBillPage() {
 
         {/* Sticky totals panel */}
         <aside className="space-y-3">
-          <div className="sticky top-24 space-y-3 rounded-ds-lg border border-ds-line/80 bg-ds-card/40 p-4 text-sm shadow-sm">
+          <div className="sticky top-24 space-y-3 rounded-ds-lg bg-ds-card/40 p-4 text-sm shadow-sm">
             <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">
               Invoice totals
             </p>
@@ -838,14 +838,14 @@ export default function NewBillPage() {
                   {fmtINR(totals.roundOff, { withSymbol: false })}
                 </span>
               </div>
-              <div className="mt-2 flex items-center justify-between border-t border-ds-line pt-2">
+              <div className="mt-2 flex items-center justify-between pt-2">
                 <span className="text-sm font-semibold text-ds-ink">Grand total</span>
                 <span className="text-lg font-bold tabular-nums text-[var(--brand-primary)]">
                   {fmtINR(totals.grand)}
                 </span>
               </div>
             </div>
-            <div className="rounded-ds-sm border border-ds-line/60 bg-ds-elevated/40 px-3 py-2 text-xs leading-snug text-ds-ink-muted">
+            <div className="rounded-ds-sm bg-ds-elevated/40 px-3 py-2 text-xs leading-snug text-ds-ink-muted">
               <span className="block text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
                 Amount in words
               </span>

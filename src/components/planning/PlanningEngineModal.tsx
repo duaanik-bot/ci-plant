@@ -153,7 +153,7 @@ export function PlanningEngineModal({
             'pe-modal-enter pointer-events-auto',
             'relative flex flex-col w-[65vw] min-w-[640px]',
             widthClass,
-            'rounded-ds-xl border border-ds-line',
+            'rounded-ds-xl',
             'bg-ds-main shadow-[0_32px_80px_rgba(0,0,0,0.6)]',
             'max-h-[calc(100vh-3rem)] my-auto',
           )}
@@ -163,7 +163,7 @@ export function PlanningEngineModal({
           <div className="shrink-0 flex items-start justify-between gap-3 border-b border-ds-line/40 bg-black/35 px-5 py-3.5 rounded-t-ds-xl">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint bg-ds-elevated border border-ds-line/40 px-2 py-0.5 rounded-ds-sm">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint bg-ds-elevated px-2 py-0.5 rounded-ds-sm">
                   Planning engine
                 </span>
               </div>

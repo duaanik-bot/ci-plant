@@ -97,7 +97,7 @@ export function PackingConfigEditor({
         <Plus className="h-3.5 w-3.5" /> Add row
       </Button>
 
-      <div className="mt-3 flex items-center justify-between rounded-ds-sm border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-xs">
+      <div className="mt-3 flex items-center justify-between rounded-ds-sm bg-[var(--bg-elevated)] px-3 py-2 text-xs">
         <span className="text-ds-ink-muted">Total Packed</span>
         <span className="font-semibold tabular-nums text-ds-ink">
           {total.toLocaleString('en-IN')}

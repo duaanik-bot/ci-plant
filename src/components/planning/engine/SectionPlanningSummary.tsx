@@ -53,7 +53,7 @@ const Row = memo(function Row({
   mono?: boolean
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 py-1 border-b border-ds-line/20 last:border-0">
+    <div className="flex items-start justify-between gap-3 py-1">
       <span className="text-xs text-ds-ink-faint shrink-0 w-36">{label}</span>
       <span
         className={`text-xs font-semibold text-right ${mono ? 'font-mono tabular-nums' : ''} ${valueClass ?? 'text-ds-ink'}`}
@@ -72,8 +72,8 @@ const SummaryBlock = memo(function SummaryBlock({
   children: React.ReactNode
 }) {
   return (
-    <div className="rounded-ds-md border border-ds-line/40 bg-ds-elevated/50 p-3 space-y-0.5">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint pb-1.5 mb-1 border-b border-ds-line/30">
+    <div className="rounded-ds-md bg-ds-elevated/50 p-3 space-y-0.5">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint pb-1.5 mb-1">
         {title}
       </div>
       {children}

@@ -125,7 +125,7 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
     <div className="flex h-full flex-col gap-3 overflow-y-auto overflow-x-hidden px-2.5 py-3 text-ds-ink">
 
       {/* ── Queue health ── */}
-      <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/20 p-3">
+      <div className="rounded-ds-md bg-ds-elevated/20 p-3">
         <SectionTitle icon={BarChart2} label="Queue health" />
         <div className="space-y-2">
           {Object.entries(STATUS_META).map(([st, meta]) => {
@@ -156,23 +156,23 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
       </div>
 
       {/* ── Readiness KPIs ── */}
-      <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/20 p-3">
+      <div className="rounded-ds-md bg-ds-elevated/20 p-3">
         <SectionTitle icon={CheckCircle2} label="Readiness" />
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-ds-sm border border-ds-success/20 bg-ds-success/5 px-2.5 py-2 text-center">
+          <div className="rounded-ds-sm bg-ds-success/5 px-2.5 py-2 text-center">
             <p className={`text-2xl font-bold leading-none text-ds-success ${mono}`}>
               {readyToScheduleCount}
             </p>
             <p className="mt-0.5 text-xs text-ds-ink-faint">Ready to schedule</p>
           </div>
-          <div className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated/30 px-2.5 py-2 text-center">
+          <div className="rounded-ds-sm bg-ds-elevated/30 px-2.5 py-2 text-center">
             <p className={`text-2xl font-bold leading-none text-ds-ink ${mono}`}>
               {totalRows - readyToScheduleCount - (statusCounts['closed']?.count || 0)}
             </p>
             <p className="mt-0.5 text-xs text-ds-ink-faint">Needs attention</p>
           </div>
           {priorityCount > 0 && (
-            <div className="rounded-ds-sm border border-[var(--warning)]/30 bg-[var(--warning-bg)]/5 px-2.5 py-2 text-center">
+            <div className="rounded-ds-sm bg-[var(--warning-bg)]/5 px-2.5 py-2 text-center">
               <p className={`text-2xl font-bold leading-none text-[var(--warning)] ${mono}`}>
                 {priorityCount}
               </p>
@@ -180,7 +180,7 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
             </div>
           )}
           {holdCount > 0 && (
-            <div className="rounded-ds-sm border border-ds-error/20 bg-ds-error/5 px-2.5 py-2 text-center">
+            <div className="rounded-ds-sm bg-ds-error/5 px-2.5 py-2 text-center">
               <p className={`text-2xl font-bold leading-none text-ds-error ${mono}`}>
                 {holdCount}
               </p>
@@ -192,7 +192,7 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
 
       {/* ── Top blockers ── */}
       {topBlockers.length > 0 && (
-        <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/20 p-3">
+        <div className="rounded-ds-md bg-ds-elevated/20 p-3">
           <SectionTitle icon={AlertTriangle} label="Top blockers" />
           <div className="space-y-1.5">
             {topBlockers.map((b, i) => (
@@ -217,7 +217,7 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
 
       {/* ── Batch status ── */}
       {Object.keys(batchCounts).length > 0 && (
-        <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/20 p-3">
+        <div className="rounded-ds-md bg-ds-elevated/20 p-3">
           <SectionTitle icon={Layers} label="Batch status" />
           <div className="space-y-1.5">
             {Object.entries(BATCH_META).map(([key, meta]) => {
@@ -243,7 +243,7 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
 
       {/* ── Designer workload ── */}
       {(designerCounts.length > 0 || unassignedCount > 0) && (
-        <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/20 p-3">
+        <div className="rounded-ds-md bg-ds-elevated/20 p-3">
           <SectionTitle icon={Clock} label="Designer workload" />
           <div className="space-y-1">
             {designerCounts.map(([name, count]) => {
@@ -278,7 +278,7 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
       )}
 
       {/* ── Qty summary ── */}
-      <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/20 p-3">
+      <div className="rounded-ds-md bg-ds-elevated/20 p-3">
         <SectionTitle icon={Star} label="Qty summary" />
         <div className="space-y-1.5">
           {Object.entries(STATUS_META).map(([st, meta]) => {
@@ -296,7 +296,7 @@ export function PlanningSummaryPanel({ rows, blockerData, readyToScheduleCount, 
               </div>
             )
           })}
-          <div className="mt-1.5 border-t border-ds-line/40 pt-1.5">
+          <div className="mt-1.5 pt-1.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-ds-ink">Total</span>
               <span className={`text-sm font-bold text-ds-success ${mono}`}>

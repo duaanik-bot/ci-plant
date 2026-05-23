@@ -335,18 +335,18 @@ export default function JobCardsPage() {
       />
 
       {/* ── Filters ───────────────────────────────────────────────────── */}
-      <div className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-3 space-y-3">
+      <div className="rounded-ds-lg bg-ds-card p-3 space-y-3 shadow-ds-depth-sm">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by product/client/PO/job card"
-            className="md:col-span-2 px-3 py-2 rounded-ds-sm border border-ds-line/50 bg-background text-sm"
+            className="md:col-span-2 px-3 py-2 rounded-ds-sm bg-background text-sm"
           />
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as 'all' | UiStatus)}
-            className="px-3 py-2 rounded-ds-sm border border-ds-line/50 bg-background text-sm"
+            className="px-3 py-2 rounded-ds-sm bg-background text-sm"
           >
             <option value="all">All status</option>
             <option value="draft">Draft</option>
@@ -359,7 +359,7 @@ export default function JobCardsPage() {
           <select
             value={readinessFilter}
             onChange={(e) => setReadinessFilter(e.target.value as 'all' | Readiness)}
-            className="px-3 py-2 rounded-ds-sm border border-ds-line/50 bg-background text-sm"
+            className="px-3 py-2 rounded-ds-sm bg-background text-sm"
           >
             <option value="all">All board readiness</option>
             <option value="ready">Ready</option>
@@ -370,7 +370,7 @@ export default function JobCardsPage() {
           <select
             value={clientFilter}
             onChange={(e) => setClientFilter(e.target.value)}
-            className="px-3 py-2 rounded-ds-sm border border-ds-line/50 bg-background text-sm"
+            className="px-3 py-2 rounded-ds-sm bg-background text-sm"
           >
             <option value="all">All clients</option>
             {clients.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -379,7 +379,7 @@ export default function JobCardsPage() {
 
         {/* ── Bulk action bar ─────────────────────────────────────────── */}
         {selected.size > 0 && (
-          <div className="flex flex-wrap items-center gap-2 rounded-ds-sm border border-ds-line/50 bg-background px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 rounded-ds-sm bg-background px-3 py-2">
             <span className="text-sm">{selected.size} selected</span>
             <Button variant="secondary" onClick={bulkRelease}          disabled={busy}>Bulk Push / Release</Button>
             <Button variant="secondary" onClick={bulkArchive}          disabled={busy}>Bulk Delete</Button>
@@ -390,7 +390,7 @@ export default function JobCardsPage() {
         )}
 
         {/* ── Table ─────────────────────────────────────────────────── */}
-        <div className="overflow-auto rounded-ds-md border border-ds-line/50">
+        <div className="overflow-auto rounded-ds-md">
           <table className="w-full min-w-[1200px] text-sm">
             <thead className="bg-background">
               <tr className="text-left">
@@ -419,7 +419,7 @@ export default function JobCardsPage() {
                 const st = mapStatus(r)
                 const rd = mapReadiness(r)
                 return (
-                  <tr key={r.id} className="border-t border-ds-line/40 hover:bg-background">
+                  <tr key={r.id} className="hover:bg-background">
                     <td className="px-3 py-3">
                       <button type="button" onClick={() => toggleOne(r.id)}>
                         {selected.has(r.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
@@ -483,7 +483,7 @@ export default function JobCardsPage() {
       {/* ── Clear queue confirm modal ──────────────────────────────────── */}
       {clearConfirmOpen && (
         <div className="fixed inset-0 z-[120] bg-black/30 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-ds-lg bg-background border border-ds-line/50 p-4 space-y-3">
+          <div className="w-full max-w-lg rounded-ds-lg bg-background p-4 space-y-3 shadow-ds-depth-sm">
             <h3 className="text-base font-semibold">Clear Job Card Queue</h3>
             <p className="text-sm text-ds-ink-muted">
               This will remove draft/pending job cards only. Released/In Production job cards will not be deleted.

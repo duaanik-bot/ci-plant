@@ -27,9 +27,9 @@ export function PlanningDecisionLayerToolbar({
   onSetIdModeChange: (m: PlanningSetIdMode) => void
   saving?: boolean
 }) {
-  const panel = 'rounded-ds-md border border-ds-line/70 bg-ds-elevated/70 p-3 space-y-2.5 shadow-md ring-1 ring-ds-line/30'
+  const panel = 'rounded-ds-md bg-ds-elevated/70 p-3 space-y-2.5 shadow-md ring-1 ring-ds-line/30'
 
-  const selectCls = `h-9 w-full min-w-[12rem] max-w-[22rem] rounded border border-ds-brand/35 bg-ds-main/95 px-2 text-sm font-medium text-ds-ink shadow-sm transition focus:border-ds-brand focus:outline-none focus:ring-2 focus:ring-ds-brand/30 ${mono}`
+  const selectCls = `h-9 w-full min-w-[12rem] max-w-[22rem] rounded bg-ds-main/95 px-2 text-sm font-medium text-ds-ink shadow-sm transition focus:outline-none focus:ring-2 focus:ring-ds-brand/30 ${mono}`
 
   return (
     <div className={panel}>
@@ -46,7 +46,7 @@ export function PlanningDecisionLayerToolbar({
           type="button"
           disabled={saving}
           onClick={onSavePlanning}
-          className={`inline-flex items-center gap-1.5 rounded-ds-md border border-[var(--success)]/30 bg-[var(--success-bg)]/15 px-3 py-2 text-sm font-semibold text-[var(--success)] hover:opacity-90 disabled:opacity-40 ${mono}`}
+          className={`inline-flex items-center gap-1.5 rounded-ds-md bg-[var(--success-bg)]/15 px-3 py-2 text-sm font-semibold text-[var(--success)] hover:opacity-90 disabled:opacity-40 ${mono}`}
         >
           <Save className="h-3.5 w-3.5" aria-hidden />
           {saving ? 'Saving…' : 'Save planning'}
@@ -69,7 +69,7 @@ export function PlanningDecisionLayerToolbar({
           </select>
         </label>
 
-        <div className="flex rounded-ds-sm border border-ds-line/50 overflow-hidden">
+        <div className="flex rounded-ds-sm overflow-hidden bg-ds-main">
           <button
             type="button"
             onClick={() => onSetIdModeChange('auto')}
@@ -84,7 +84,7 @@ export function PlanningDecisionLayerToolbar({
           <button
             type="button"
             onClick={() => onSetIdModeChange('manual')}
-            className={`px-2.5 py-1.5 text-xs font-medium border-l border-ds-line/50 ${mono} ${
+            className={`px-2.5 py-1.5 text-xs font-medium ${mono} ${
               setIdMode === 'manual'
                 ? 'bg-ds-warning/8 text-ds-warning'
                 : 'bg-ds-main text-ds-ink-muted hover:bg-ds-elevated'
@@ -100,7 +100,7 @@ export function PlanningDecisionLayerToolbar({
             disabled={selectionCount < 2}
             onClick={onLinkAsMixSet}
             title="Link selected lines as one gang / mix-set"
-            className={`inline-flex items-center gap-1 rounded-ds-sm border border-ds-line/50 bg-ds-main px-2.5 py-1.5 text-xs font-medium text-[var(--info)] hover:bg-ds-elevated disabled:opacity-35 disabled:cursor-not-allowed ${mono}`}
+            className={`inline-flex items-center gap-1 rounded-ds-sm bg-ds-main px-2.5 py-1.5 text-xs font-medium text-[var(--info)] hover:bg-ds-elevated disabled:opacity-35 disabled:cursor-not-allowed ${mono}`}
           >
             <Link2 className="h-3.5 w-3.5" aria-hidden />
             Link as mix-set ({selectionCount})

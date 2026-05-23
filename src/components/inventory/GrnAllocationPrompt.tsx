@@ -49,16 +49,16 @@ export function GrnAllocationPrompt({ open, grnMovementId, materialCode, receive
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl rounded-ds-lg border border-ds-line/60 bg-ds-card p-4">
+      <div className="w-full max-w-2xl rounded-ds-lg bg-ds-card p-4">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-semibold text-ds-ink">Allocate GRN to shortages</h3>
             <p className="text-xs text-ds-ink-faint">Material: {materialCode} · Received qty: {receivedQty.toLocaleString('en-IN')}</p>
           </div>
-          <button onClick={onClose} className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-ink">Close</button>
+          <button onClick={onClose} className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink">Close</button>
         </div>
 
-        <div className="max-h-[360px] overflow-auto rounded border border-ds-line/40">
+        <div className="max-h-[360px] overflow-auto rounded">
           <table className="w-full text-sm">
             <thead className="bg-ds-elevated/30 text-left text-xs uppercase tracking-wide text-ds-ink-faint">
               <tr>
@@ -69,7 +69,7 @@ export function GrnAllocationPrompt({ open, grnMovementId, materialCode, receive
                 <th className="px-3 py-2">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-ds-line/30">
+            <tbody>
               {matches.map((m) => {
                 const allocQty = Math.min(receivedQty, m.remainingQty)
                 return (
@@ -82,7 +82,7 @@ export function GrnAllocationPrompt({ open, grnMovementId, materialCode, receive
                       <button
                         onClick={() => void allocate(m.shortageId)}
                         disabled={allocating != null}
-                        className="rounded border border-ds-line/50 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40"
+                        className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40"
                       >
                         {allocating === m.shortageId ? 'Allocating…' : 'Allocate'}
                       </button>

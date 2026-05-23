@@ -120,27 +120,27 @@ export default function ShadeCardHubSettingsPage() {
         {status === 'loading' ? (
           <p className="text-neutral-500">Loading…</p>
         ) : !isAdmin ? (
-          <p className="rounded-lg border border-ds-line/50 bg-ds-main p-4 text-sm text-neutral-500">
+          <p className="rounded-lg bg-ds-main p-4 text-sm text-neutral-500">
             Only administrators can manage Operator Master records. Floor staff can still select operators
             in the Shade Card Hub flow.
           </p>
         ) : loading ? (
           <p className="text-neutral-500">Loading staff…</p>
         ) : (
-          <section className="space-y-4 rounded-xl border border-ds-line/50 bg-ds-main p-4">
+          <section className="space-y-4 rounded-xl bg-ds-main p-4 shadow-ds-depth-sm">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">Staff management</h2>
             <p className="text-xs text-neutral-500">
               Active operators appear in issue and receive modals. Inactive names stay in audit history.
             </p>
 
-            <div className="space-y-2 rounded-lg border border-ds-line/40 bg-background/40 p-3">
+            <div className="space-y-2 rounded-lg bg-background/40 p-3">
               <h3 className="text-xs font-bold uppercase text-neutral-500">Add new operator</h3>
               <label className="block text-sm text-neutral-400">
                 Name
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-ds-line/50 bg-background px-3 py-2 text-foreground"
+                  className="mt-1 w-full rounded-md bg-background px-3 py-2 text-foreground"
                   placeholder="e.g. Jane Smith"
                 />
               </label>
@@ -154,7 +154,7 @@ export default function ShadeCardHubSettingsPage() {
               </button>
             </div>
 
-            <ul className="divide-y divide-ds-elevated overflow-hidden rounded-lg border border-ds-line/40">
+            <ul className="overflow-hidden rounded-lg">
               {operators.length === 0 ? (
                 <li className="px-3 py-6 text-center text-sm text-neutral-500">No operators yet.</li>
               ) : (
@@ -174,10 +174,10 @@ export default function ShadeCardHubSettingsPage() {
                       type="button"
                       disabled={saving}
                       onClick={() => void toggleActive(o.id, !o.isActive)}
-                      className={`rounded border px-2 py-1 text-xs font-bold ${
+                      className={`rounded px-2 py-1 text-xs font-bold ${
                         o.isActive
-                          ? 'border-ds-line/50 text-neutral-400 hover:bg-ds-card'
-                          : 'border-emerald-700 text-emerald-300 hover:bg-emerald-950/40'
+                          ? 'text-neutral-400 hover:bg-ds-card'
+                          : 'text-emerald-300 hover:bg-emerald-950/40'
                       }`}
                     >
                       {o.isActive ? 'Deactivate' : 'Activate'}

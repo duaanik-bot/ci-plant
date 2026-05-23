@@ -62,7 +62,7 @@ const TABS: [TabKey, string][] = [
 ]
 
 const inputCls =
-  'min-h-[40px] min-w-[80px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand'
+  'min-h-[40px] min-w-[80px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand'
 
 /* ── LifeBar ─────────────────────────────────────────────────────────────── */
 function LifeBar({ pct }: { pct: number }) {
@@ -135,13 +135,13 @@ export default function DiesPage() {
           <div className="flex items-center gap-2">
             <Link
               href="/masters/dies/location-view"
-              className="rounded-ds-md border border-ds-line px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated transition-colors"
+              className="rounded-ds-md px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated transition-colors"
             >
               Die Location View
             </Link>
             <Link
               href="/masters/dies/vendor-orders"
-              className="rounded-ds-md border border-ds-line px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated transition-colors"
+              className="rounded-ds-md px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated transition-colors"
             >
               Vendor Orders
             </Link>
@@ -159,10 +159,10 @@ export default function DiesPage() {
             key={k}
             type="button"
             onClick={() => setTab(k)}
-            className={`rounded-ds-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`rounded-ds-md px-3 py-1.5 text-xs font-medium transition-colors ${
               tab === k
-                ? 'border-ds-brand bg-ds-brand text-white'
-                : 'border-ds-line text-ds-ink-muted hover:border-ds-brand/50 hover:text-ds-ink'
+                ? 'bg-ds-brand text-white'
+                : 'bg-ds-elevated/60 text-ds-ink-muted hover:text-ds-ink'
             }`}
           >
             {l}

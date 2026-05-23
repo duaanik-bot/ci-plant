@@ -205,7 +205,7 @@ export default function ShortExcessPage() {
       ) : (
         <div className={industrialTableClassName()}>
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-[var(--border)] bg-[var(--bg-elevated)]">
+            <thead className="bg-[var(--bg-elevated)]">
               <tr className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-muted">
                 <th className="px-3 py-2.5">Product</th>
                 <th className="px-3 py-2.5">Customer</th>
@@ -219,7 +219,7 @@ export default function ShortExcessPage() {
                 <th className="px-3 py-2.5 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--border)]">
+            <tbody>
               {filtered.map((r) => {
                 const isExcess = r.varianceQty > 0
                 return (
@@ -349,7 +349,7 @@ export default function ShortExcessPage() {
       >
         {drawerRow && (
           <div className="space-y-3">
-            <div className="space-y-3 rounded-ds-md border border-[var(--brand-primary)]/25 bg-[var(--brand-bg-soft)] px-4 py-3.5">
+            <div className="space-y-3 rounded-ds-md bg-[var(--brand-bg-soft)] px-4 py-3.5">
               <SectionLabel accent>Variance Summary</SectionLabel>
               <InfoGrid
                 rows={[

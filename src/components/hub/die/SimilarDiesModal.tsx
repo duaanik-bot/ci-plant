@@ -46,7 +46,7 @@ export function SimilarDiesModal({
         className="ci-hub-modal-panel max-w-lg max-h-[85vh] flex flex-col !p-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-3.5 py-3 border-b border-ds-line/40 shrink-0">
+        <div className="px-3.5 py-3 shrink-0">
           <h2
             id="similar-dies-title"
             className={`ci-hub-modal-title border-0 pb-0 ${isMismatch ? '!text-[var(--error)]' : ''}`}
@@ -80,8 +80,8 @@ export function SimilarDiesModal({
             matches.map((m) => (
               <div
                 key={m.id}
-                className={`rounded-lg border px-3 py-2 text-xs ${
-                  isMismatch ? 'border-[var(--error)]/50 bg-[var(--error-bg)]' : 'border-ds-line/40 bg-background'
+                className={`rounded-lg px-3 py-2 text-xs ${
+                  isMismatch ? 'bg-[var(--error-bg)]' : 'bg-background'
                 }`}
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -105,10 +105,10 @@ export function SimilarDiesModal({
             ))
           )}
         </div>
-        <div className="px-4 py-2 border-t border-ds-line/40 shrink-0 flex justify-end">
+        <div className="px-4 py-2 shrink-0 flex justify-end">
           <button
             type="button"
-            className="px-3 py-1.5 rounded-md border border-ds-line/50 text-neutral-400 text-xs font-semibold hover:bg-ds-card"
+            className="px-3 py-1.5 rounded-md text-neutral-400 text-xs font-semibold hover:bg-ds-card"
             onClick={onClose}
           >
             Close

@@ -235,7 +235,7 @@ export default function QcRecordsPage() {
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          className="rounded-ds-lg bg-ds-card border border-ds-line p-4 space-y-3"
+          className="rounded-ds-lg bg-ds-card p-4 space-y-3"
         >
           <h2 className="text-sm font-semibold text-ds-ink">New QC Record</h2>
           <div className="grid md:grid-cols-2 gap-3 text-sm">
@@ -244,7 +244,7 @@ export default function QcRecordsPage() {
               <select
                 value={form.jobId}
                 onChange={e => setForm(f => ({ ...f, jobId: e.target.value }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 <option value="">Select job…</option>
                 {jobs.map(j => (
@@ -258,7 +258,7 @@ export default function QcRecordsPage() {
                 type="text"
                 value={form.checkType}
                 onChange={e => setForm(f => ({ ...f, checkType: e.target.value }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
             <div>
@@ -266,7 +266,7 @@ export default function QcRecordsPage() {
               <select
                 value={form.instrumentName}
                 onChange={e => setForm(f => ({ ...f, instrumentName: e.target.value }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 {QC_INSTRUMENTS.map(inst => <option key={inst} value={inst}>{inst}</option>)}
               </select>
@@ -276,7 +276,7 @@ export default function QcRecordsPage() {
               <select
                 value={form.result}
                 onChange={e => setForm(f => ({ ...f, result: e.target.value as 'PASS' | 'FAIL' }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 <option value="PASS">PASS</option>
                 <option value="FAIL">FAIL</option>
@@ -288,7 +288,7 @@ export default function QcRecordsPage() {
                 type="text"
                 value={form.measuredValue}
                 onChange={e => setForm(f => ({ ...f, measuredValue: e.target.value }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
             <div>
@@ -299,14 +299,14 @@ export default function QcRecordsPage() {
                   placeholder="Min"
                   value={form.specMin}
                   onChange={e => setForm(f => ({ ...f, specMin: e.target.value }))}
-                  className="flex-1 min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                  className="flex-1 min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
                 />
                 <input
                   type="text"
                   placeholder="Max"
                   value={form.specMax}
                   onChange={e => setForm(f => ({ ...f, specMax: e.target.value }))}
-                  className="flex-1 min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                  className="flex-1 min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
                 />
               </div>
             </div>
@@ -316,7 +316,7 @@ export default function QcRecordsPage() {
                 type="checkbox"
                 checked={form.isFirstArticle}
                 onChange={e => setForm(f => ({ ...f, isFirstArticle: e.target.checked }))}
-                className="rounded border-ds-line"
+                className="rounded"
               />
               <label htmlFor="fa-check" className="text-ds-ink-muted text-sm">First article</label>
             </div>
@@ -326,7 +326,7 @@ export default function QcRecordsPage() {
                 type="text"
                 value={form.notes}
                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                className="w-full min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
           </div>
@@ -347,7 +347,7 @@ export default function QcRecordsPage() {
         <select
           value={jobFilter}
           onChange={e => { setJobFilter(e.target.value); setPage(1) }}
-          className="min-h-[40px] rounded-ds-md border border-ds-line bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+          className="min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
         >
           <option value="">All jobs</option>
           {jobs.map(j => <option key={j.id} value={j.id}>{j.jobNumber}</option>)}

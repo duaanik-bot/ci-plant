@@ -84,7 +84,7 @@ export function GeneratePoDialog({
     }
   }
 
-  const field = 'w-full rounded-ds-md border border-ds-line/60 bg-ds-card px-2 py-1 text-sm'
+  const field = 'w-full rounded-ds-md bg-ds-card px-2 py-1 text-sm'
   const label = 'text-[11px] uppercase tracking-wide text-ds-ink-muted'
 
   return (
@@ -104,10 +104,10 @@ export function GeneratePoDialog({
       }}
     >
       <div className="space-y-4">
-        <section className="rounded border border-ds-line/40 p-3 text-xs">
+        <section className="rounded bg-ds-elevated/50 p-3 text-xs">
           <p className="mb-1 font-semibold text-ds-ink">Consolidation preview</p>
           {(selection?.summary ?? []).map((s, i) => (
-            <div key={i} className="rounded border border-ds-line/30 px-2 py-1 text-ds-ink-muted">
+            <div key={i} className="rounded px-2 py-1 text-ds-ink-muted">
               {s.materialCode} · {s.boardType ?? '—'} · {s.gsm ?? '—'}g · {s.sizeLabel ?? '—'} ·{' '}
               <span className="text-ds-ink">Total {s.totalQty.toLocaleString('en-IN')}</span> · {s.prCount} PR{s.prCount === 1 ? '' : 's'}
             </div>

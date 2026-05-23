@@ -17,7 +17,7 @@ export function StockTab({ rows, onRowClick }: Props) {
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-ds-line/25 text-left text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+          <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
             <th className="w-1 pb-2" /> {/* RAG border column */}
             <th className="pb-2 pr-4">Material</th>
             <th className="pb-2 pr-4">Board / GSM</th>
@@ -53,7 +53,7 @@ export function StockTab({ rows, onRowClick }: Props) {
                 key={row.material_id}
                 onClick={() => onRowClick(row)}
                 className={cn(
-                  'cursor-pointer border-b border-ds-line/10 hover:bg-ds-elevated/40',
+                  'cursor-pointer hover:bg-ds-elevated/40',
                   ragBorderClass(rag),
                 )}
               >

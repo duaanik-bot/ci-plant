@@ -62,32 +62,32 @@ export default function NewMachinePage() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1 block text-sm text-ds-ink-muted">Machine code *</label>
-          <input value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className={`w-full rounded-ds-md border px-3 py-2 text-foreground ${fieldErrors.machineCode ? 'border-[var(--error)] bg-ds-elevated' : 'border-ds-line/60 bg-ds-elevated'}`} />
+          <input value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className={`w-full rounded-ds-md px-3 py-2 text-foreground ${fieldErrors.machineCode ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'}`} />
           {fieldErrors.machineCode && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.machineCode}</p>}
         </div>
         <div>
           <label className="mb-1 block text-sm text-ds-ink-muted">Name *</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} className={`w-full rounded-ds-md border px-3 py-2 text-foreground ${fieldErrors.name ? 'border-[var(--error)] bg-ds-elevated' : 'border-ds-line/60 bg-ds-elevated'}`} />
+          <input value={name} onChange={(e) => setName(e.target.value)} className={`w-full rounded-ds-md px-3 py-2 text-foreground ${fieldErrors.name ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'}`} />
         </div>
         <div>
           <label className="mb-1 block text-sm text-ds-ink-muted">Make / model</label>
-          <input value={make} onChange={(e) => setMake(e.target.value)} className="w-full rounded-ds-md border border-ds-line/60 bg-ds-elevated px-3 py-2 text-foreground" />
+          <input value={make} onChange={(e) => setMake(e.target.value)} className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-foreground" />
         </div>
         <div>
           <label className="mb-1 block text-sm text-ds-ink-muted">Specification</label>
-          <input value={specification} onChange={(e) => setSpecification(e.target.value)} className="w-full rounded-ds-md border border-ds-line/60 bg-ds-elevated px-3 py-2 text-foreground" />
+          <input value={specification} onChange={(e) => setSpecification(e.target.value)} className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-foreground" />
         </div>
         <div>
           <label className="mb-1 block text-sm text-ds-ink-muted">Capacity per shift</label>
-          <input type="number" min={1} value={capacityPerShift} onChange={(e) => setCapacityPerShift(e.target.value)} className={`w-full rounded-ds-md border px-3 py-2 text-foreground ${fieldErrors.capacityPerShift ? 'border-[var(--error)] bg-ds-elevated' : 'border-ds-line/60 bg-ds-elevated'}`} />
+          <input type="number" min={1} value={capacityPerShift} onChange={(e) => setCapacityPerShift(e.target.value)} className={`w-full rounded-ds-md px-3 py-2 text-foreground ${fieldErrors.capacityPerShift ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'}`} />
         </div>
         <div>
           <label className="mb-1 block text-sm text-ds-ink-muted">Standard waste %</label>
-          <input type="number" min={0} step="0.1" value={stdWastePct} onChange={(e) => setStdWastePct(e.target.value)} className={`w-full rounded-ds-md border px-3 py-2 text-foreground ${fieldErrors.stdWastePct ? 'border-[var(--error)] bg-ds-elevated' : 'border-ds-line/60 bg-ds-elevated'}`} />
+          <input type="number" min={0} step="0.1" value={stdWastePct} onChange={(e) => setStdWastePct(e.target.value)} className={`w-full rounded-ds-md px-3 py-2 text-foreground ${fieldErrors.stdWastePct ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'}`} />
         </div>
         <div>
           <label className="mb-1 block text-sm text-ds-ink-muted">Status</label>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full rounded-ds-md border border-ds-line/60 bg-ds-elevated px-3 py-2 text-foreground">
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-foreground">
             <option value="active">Active</option>
             <option value="under_maintenance">Under maintenance</option>
             <option value="retired">Retired</option>
@@ -96,16 +96,16 @@ export default function NewMachinePage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="mb-1 block text-sm text-ds-ink-muted">Last PM date</label>
-            <input type="date" value={lastPmDate} onChange={(e) => setLastPmDate(e.target.value)} className="w-full rounded-ds-md border border-ds-line/60 bg-ds-elevated px-3 py-2 text-foreground" />
+            <input type="date" value={lastPmDate} onChange={(e) => setLastPmDate(e.target.value)} className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-foreground" />
           </div>
           <div>
             <label className="mb-1 block text-sm text-ds-ink-muted">Next PM due</label>
-            <input type="date" value={nextPmDue} onChange={(e) => setNextPmDue(e.target.value)} className="w-full rounded-ds-md border border-ds-line/60 bg-ds-elevated px-3 py-2 text-foreground" />
+            <input type="date" value={nextPmDue} onChange={(e) => setNextPmDue(e.target.value)} className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-foreground" />
           </div>
         </div>
         <div>
           <label className="mb-1 block text-sm text-ds-ink-muted">Notes</label>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full rounded-ds-md border border-ds-line/60 bg-ds-elevated px-3 py-2 text-foreground" />
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-foreground" />
         </div>
         <div className="flex gap-2">
           <button type="submit" disabled={submitting} className="rounded-ds-md bg-ds-warning px-4 py-2 text-primary-foreground disabled:bg-ds-line/30">

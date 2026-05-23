@@ -177,12 +177,12 @@ export function AwQueueCommandPanel({
   const closed = awPo === AW_PO_STATUS.CLOSED
 
   return (
-    <div className="border-b border-ds-line/40 bg-background px-3 py-2">
+    <div className="bg-background px-3 py-2">
       <div className="max-w-7xl mx-auto w-full space-y-2">
         <div
           className={clsx(
-            'flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between rounded-ds-md border px-2.5 py-2',
-            closed ? 'border-ds-line/50 bg-ds-main/50 opacity-80' : 'border-ds-line/40 bg-background',
+            'flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between rounded-ds-md px-2.5 py-2',
+            closed ? 'bg-ds-main/50 opacity-80' : 'bg-background',
           )}
         >
           <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -262,9 +262,9 @@ export function AwQueueCommandPanel({
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
-          <div className="rounded-ds-md border border-ds-line/40 bg-background p-2 space-y-2">
+          <div className="rounded-ds-md bg-background p-2 space-y-2">
             <p className="text-xs font-semibold uppercase text-ds-ink-faint">Push mode</p>
-            <div className="inline-flex rounded-ds-md border border-ds-line/50 overflow-hidden">
+            <div className="inline-flex rounded-ds-md bg-ds-elevated overflow-hidden">
               <button
                 type="button"
                 disabled={!!busy || closed}
@@ -283,7 +283,7 @@ export function AwQueueCommandPanel({
                 disabled={!!busy || closed}
                 onClick={() => void persistSpecPatch({ awPushMode: AW_PUSH_MODE.PARTIAL })}
                 className={clsx(
-                  'px-3 py-1.5 text-xs font-medium border-l border-ds-line/50',
+                  'px-3 py-1.5 text-xs font-medium',
                   pushMode === AW_PUSH_MODE.PARTIAL
                     ? 'bg-ds-warning text-primary-foreground'
                     : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card',
@@ -301,7 +301,7 @@ export function AwQueueCommandPanel({
                   disabled={!!busy || closed}
                   defaultValue={totalB || ''}
                   key={`t-${totalB}`}
-                  className={`mt-0.5 w-full rounded border border-ds-line/40 bg-background px-2 py-1 text-xs text-foreground ${mono}`}
+                  className={`mt-0.5 w-full rounded bg-ds-elevated px-2 py-1 text-xs text-foreground ${mono}`}
                   onBlur={(e) => {
                     const v = e.target.value === '' ? 0 : Number(e.target.value)
                     if (!Number.isFinite(v) || v < 0) return
@@ -317,7 +317,7 @@ export function AwQueueCommandPanel({
                   disabled={!!busy || closed}
                   defaultValue={typeof spec.awInProductionBatches === 'number' ? spec.awInProductionBatches : ''}
                   key={`ip-${String(spec.awInProductionBatches)}`}
-                  className={`mt-0.5 w-full rounded border border-ds-line/40 bg-background px-2 py-1 text-xs text-foreground ${mono}`}
+                  className={`mt-0.5 w-full rounded bg-ds-elevated px-2 py-1 text-xs text-foreground ${mono}`}
                   onBlur={(e) => {
                     const v = e.target.value === '' ? 0 : Number(e.target.value)
                     if (!Number.isFinite(v) || v < 0) return
@@ -331,7 +331,7 @@ export function AwQueueCommandPanel({
                 type="button"
                 disabled={!!busy || closed}
                 onClick={() => void logPartialPush()}
-                className="w-full rounded border border-ds-warning/50 bg-ds-warning/10 py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-warning/10 disabled:opacity-40"
+                className="w-full rounded bg-ds-warning/10 py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-warning/15 disabled:opacity-40"
               >
                 {busy === 'partial' ? 'Logging…' : 'Log partial push'}
               </button>
@@ -339,7 +339,7 @@ export function AwQueueCommandPanel({
             <button
               type="button"
               onClick={() => setLedgerOpen(true)}
-              className="inline-flex w-full items-center justify-center gap-1 rounded border border-ds-line/50 py-1 text-xs text-ds-ink-muted hover:bg-ds-card"
+              className="inline-flex w-full items-center justify-center gap-1 rounded bg-ds-elevated/50 py-1 text-xs text-ds-ink-muted hover:bg-ds-card"
             >
               Push history ({ledger.length})
               <ChevronDown className="h-3 w-3" />
@@ -352,7 +352,7 @@ export function AwQueueCommandPanel({
               footer={
                 <button
                   type="button"
-                  className="w-full rounded-ds-sm border border-ds-line/50 py-2 text-xs text-ds-ink-muted transition hover:bg-ds-elevated"
+                  className="w-full rounded-ds-sm bg-ds-elevated/50 py-2 text-xs text-ds-ink-muted transition hover:bg-ds-elevated"
                   onClick={() => setLedgerOpen(false)}
                 >
                   Close
@@ -360,7 +360,7 @@ export function AwQueueCommandPanel({
               }
             >
               <p className="text-xs text-ds-ink-faint">Timestamp · batches · job card · operator</p>
-              <ul className="mt-2 max-h-[50vh] overflow-auto divide-y divide-ds-line/30 text-xs sm:max-h-[min(60vh,28rem)]">
+              <ul className="mt-2 max-h-[50vh] overflow-auto text-xs sm:max-h-[min(60vh,28rem)]">
                 {ledger.length === 0 ? (
                   <li className="py-4 text-ds-ink-faint">No entries yet.</li>
                 ) : (
@@ -387,7 +387,7 @@ export function AwQueueCommandPanel({
             </SlideOverPanel>
           </div>
 
-          <div className="rounded-ds-md border border-ds-line/40 bg-background p-2 space-y-2">
+          <div className="rounded-ds-md bg-background p-2 space-y-2">
             <p className="text-xs font-semibold uppercase text-ds-ink-faint flex items-center gap-1">
               <Package className="h-3 w-3" aria-hidden />
               Material handshake
@@ -411,7 +411,7 @@ export function AwQueueCommandPanel({
                   type="button"
                   disabled={!!busy || closed || !jobCardId}
                   onClick={() => void applyInventoryToJobCard()}
-                  className="mt-1 w-full rounded border border-cyan-700/60 bg-cyan-950/30 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-950/50 disabled:opacity-40"
+                  className="mt-1 w-full rounded bg-cyan-950/30 py-1 text-xs font-semibold text-cyan-100 hover:bg-cyan-950/50 disabled:opacity-40"
                 >
                   {busy === 'inv' ? 'Applying…' : 'Apply to job card'}
                 </button>

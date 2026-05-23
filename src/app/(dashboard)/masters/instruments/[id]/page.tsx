@@ -109,7 +109,7 @@ export default function EditInstrumentPage() {
           <input
             value={instrumentName}
             onChange={(e) => setInstrumentName(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -117,7 +117,7 @@ export default function EditInstrumentPage() {
           <input
             value={specification}
             onChange={(e) => setSpecification(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -125,7 +125,7 @@ export default function EditInstrumentPage() {
           <input
             value={range}
             onChange={(e) => setRange(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -133,7 +133,7 @@ export default function EditInstrumentPage() {
           <input
             value={frequency}
             onChange={(e) => setFrequency(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -141,7 +141,7 @@ export default function EditInstrumentPage() {
           <input
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -151,7 +151,7 @@ export default function EditInstrumentPage() {
               type="date"
               value={lastCalibration}
               onChange={(e) => setLastCalibration(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -160,7 +160,7 @@ export default function EditInstrumentPage() {
               type="date"
               value={calibrationDue}
               onChange={(e) => setCalibrationDue(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
         </div>
@@ -171,7 +171,7 @@ export default function EditInstrumentPage() {
             min={1}
             value={calibrationFreqDays}
             onChange={(e) => setCalibrationFreqDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -180,7 +180,7 @@ export default function EditInstrumentPage() {
             value={certificateUrl}
             onChange={(e) => setCertificateUrl(e.target.value)}
             placeholder="https://..."
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -189,7 +189,7 @@ export default function EditInstrumentPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-ds-line/60"
+            className="rounded"
           />
           <label htmlFor="active" className="text-sm text-ds-ink-muted">Active</label>
         </div>

@@ -109,7 +109,7 @@ export function MaterialDrawer({ row, isOpen, onClose, onPrCreated, onPoCreated 
         size="lg"
       >
         {/* Tab bar */}
-        <div className="-mx-4 mb-4 flex gap-0 border-b border-ds-line/25 px-4 md:-mx-6 md:px-6">
+        <div className="-mx-4 mb-4 flex gap-0 px-4 md:-mx-6 md:px-6">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -143,14 +143,14 @@ export function MaterialDrawer({ row, isOpen, onClose, onPrCreated, onPoCreated 
                 { label: 'Days of Cover', value: row.daysOfCover != null ? `${row.daysOfCover}d` : '—' },
                 { label: 'Reorder Level', value: nf.format(row.reorder_level) + ' sh' },
               ].map(({ label, value }) => (
-                <div key={label} className="rounded-ds-md border border-ds-line/30 bg-ds-elevated/60 p-3">
+                <div key={label} className="rounded-ds-md bg-ds-elevated/60 p-3">
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
                   <div className="mt-0.5 font-semibold tabular-nums text-ds-ink">{value}</div>
                 </div>
               ))}
             </div>
             {suggestion && (
-              <div className="flex items-center justify-between rounded-ds-md border border-ds-warning/30 bg-ds-warning/5 px-4 py-3">
+              <div className="flex items-center justify-between rounded-ds-md bg-ds-warning/5 px-4 py-3">
                 <div>
                   <span className="mr-2 text-ds-warning">⚡</span>
                   <span className="text-sm font-medium text-ds-ink">
@@ -169,7 +169,7 @@ export function MaterialDrawer({ row, isOpen, onClose, onPrCreated, onPoCreated 
                       })
                       onPrCreated()
                     }}
-                    className="rounded-ds-sm border border-ds-line/40 px-3 py-1 text-xs font-medium text-ds-ink hover:bg-ds-elevated"
+                    className="rounded-ds-sm bg-ds-elevated px-3 py-1 text-xs font-medium text-ds-ink hover:bg-ds-elevated/80"
                   >
                     Create PR
                   </button>
@@ -193,7 +193,7 @@ export function MaterialDrawer({ row, isOpen, onClose, onPrCreated, onPoCreated 
               <p className="text-sm text-ds-ink-muted">No reservations.</p>
             ) : (
               reservations.map((r) => (
-                <div key={r.id} className="flex items-center justify-between rounded-ds-md border border-ds-line/25 px-3 py-2 text-sm">
+                <div key={r.id} className="flex items-center justify-between rounded-ds-md px-3 py-2 text-sm">
                   <div>
                     <span className="font-medium text-ds-ink">JC-{r.jobCardNumber}</span>
                     {r.productName && <span className="ml-2 text-ds-ink-muted">{r.productName}</span>}
@@ -212,7 +212,7 @@ export function MaterialDrawer({ row, isOpen, onClose, onPrCreated, onPoCreated 
               <p className="text-sm text-ds-ink-muted">No open purchase requisitions.</p>
             ) : (
               openPrs.map((pr) => (
-                <div key={pr.id} className="flex items-center justify-between rounded-ds-md border border-ds-line/25 px-3 py-2 text-sm">
+                <div key={pr.id} className="flex items-center justify-between rounded-ds-md bg-ds-elevated/40 px-3 py-2 text-sm">
                   <div>
                     <span className="rounded-full bg-ds-elevated px-2 py-0.5 text-xs font-medium text-ds-ink-muted capitalize">{pr.status}</span>
                     <span className="ml-2 tabular-nums text-ds-ink">{nf.format(Number(pr.qtyRequired))} kg</span>
@@ -244,7 +244,7 @@ export function MaterialDrawer({ row, isOpen, onClose, onPrCreated, onPoCreated 
               openPos.map((po) => {
                 const pct = po.orderedKg > 0 ? (po.receivedKg / po.orderedKg) * 100 : 0
                 return (
-                  <div key={po.id} className="rounded-ds-md border border-ds-line/25 px-3 py-2 text-sm">
+                  <div key={po.id} className="rounded-ds-md px-3 py-2 text-sm">
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-ds-ink">{po.poNumber}</span>
                       <span className="text-ds-ink-muted">{po.vendorName}</span>

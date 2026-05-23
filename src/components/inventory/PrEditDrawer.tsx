@@ -142,15 +142,15 @@ export function PrEditDrawer({
     }
   }
 
-  const field = 'w-full rounded-ds-md border border-ds-line/60 bg-ds-card px-2 py-1 text-sm'
+  const field = 'w-full rounded-ds-md bg-ds-card px-2 py-1 text-sm'
   const label = 'text-[11px] uppercase tracking-wide text-ds-ink-muted'
 
   const footer =
     detail && isDraft ? (
       <div className="flex flex-wrap gap-2">
-        <button type="button" disabled={busy} onClick={() => void save()} className="rounded border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40">Save Draft</button>
-        <button type="button" disabled={busy} onClick={() => void approve()} className="rounded border border-[var(--success)]/40 bg-[var(--success-bg)] px-3 py-1.5 text-xs text-[var(--success)] disabled:opacity-40">Approve</button>
-        <button type="button" disabled={busy} onClick={() => void remove()} className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)] px-3 py-1.5 text-xs text-[var(--error)] disabled:opacity-40">Delete</button>
+        <button type="button" disabled={busy} onClick={() => void save()} className="rounded px-3 py-1.5 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40">Save Draft</button>
+        <button type="button" disabled={busy} onClick={() => void approve()} className="rounded bg-[var(--success-bg)] px-3 py-1.5 text-xs text-[var(--success)] disabled:opacity-40">Approve</button>
+        <button type="button" disabled={busy} onClick={() => void remove()} className="rounded bg-[var(--error-bg)] px-3 py-1.5 text-xs text-[var(--error)] disabled:opacity-40">Delete</button>
       </div>
     ) : detail ? (
       <p className="text-[11px] text-ds-ink-faint">Fields locked — this PR is no longer a draft.</p>
@@ -204,7 +204,7 @@ export function PrEditDrawer({
             </div>
           </section>
 
-          <section className="rounded border border-ds-line/40 p-3 text-xs">
+          <section className="rounded bg-ds-elevated/50 p-3 text-xs">
             <p className="mb-1 font-semibold text-ds-ink">Reservation</p>
             <div className="mb-1 flex gap-3 text-ds-ink-muted">
               <span>Required <span className="text-ds-ink">{detail.reservation.requiredQty.toLocaleString('en-IN')}</span></span>
@@ -216,7 +216,7 @@ export function PrEditDrawer({
             ) : (
               <ul className="space-y-1">
                 {detail.reservation.links.map((l, i) => (
-                  <li key={i} className="rounded border border-ds-line/30 px-2 py-1 text-ds-ink-muted">
+                  <li key={i} className="rounded px-2 py-1 text-ds-ink-muted">
                     JC#{l.jobCardNumber ?? '—'} · Req {l.requiredQty.toLocaleString('en-IN')} · Short {l.pendingShortage.toLocaleString('en-IN')}
                     {l.requiredByDate ? ` · ${new Date(l.requiredByDate).toLocaleDateString('en-IN')}` : ''}
                   </li>
@@ -225,14 +225,14 @@ export function PrEditDrawer({
             )}
           </section>
 
-          <section className="rounded border border-ds-line/40 p-3 text-xs">
+          <section className="rounded bg-ds-elevated/50 p-3 text-xs">
             <p className="mb-1 font-semibold text-ds-ink">Revision History</p>
             {detail.revisions.length === 0 ? (
               <p className="text-ds-ink-faint">No revisions yet.</p>
             ) : (
               <ul className="space-y-1">
                 {detail.revisions.map((r) => (
-                  <li key={r.revision} className="rounded border border-ds-line/30 px-2 py-1 text-ds-ink-muted">
+                  <li key={r.revision} className="rounded px-2 py-1 text-ds-ink-muted">
                     #{r.revision} · {new Date(r.at).toLocaleString('en-IN')} · <span className="text-ds-ink">{r.field}</span>: {String(r.oldValue ?? '—')} → {String(r.newValue ?? '—')}
                   </li>
                 ))}

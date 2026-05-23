@@ -55,12 +55,12 @@ type DrawerPayload = {
 
 function statusChip(status: string): { label: string; cls: string } {
   if (status === 'qa_released' || status === 'closed') {
-    return { label: 'Released', cls: 'border-[var(--success)]/40 bg-[var(--success-bg)]/10 text-[var(--success)]' }
+    return { label: 'Released', cls: 'bg-[var(--success-bg)]/10 text-[var(--success)]' }
   }
   if (status === 'in_progress' || status === 'final_qc') {
-    return { label: 'Ready', cls: 'border-[var(--warning)]/40 bg-[var(--warning-bg)]/10 text-[var(--warning)]' }
+    return { label: 'Ready', cls: 'bg-[var(--warning-bg)]/10 text-[var(--warning)]' }
   }
-  return { label: 'Draft', cls: 'border-ds-line/50 bg-ds-main text-ds-ink-muted' }
+  return { label: 'Draft', cls: 'bg-ds-main text-ds-ink-muted' }
 }
 
 function readinessMeta(ok: boolean | null): { label: string; dot: string; hint: string } {
@@ -228,7 +228,7 @@ export function JobCardHubAuditDrawer({
         data ? (
           <span className="text-xs text-ds-ink-faint">
             {data.customer?.name ?? '—'} · {data.poLine?.po?.poNumber ?? '—'}
-            <span className={clsx('ml-2 rounded border px-1.5 py-0.5 text-[10px]', chip.cls)}>
+            <span className={clsx('ml-2 rounded px-1.5 py-0.5 text-[10px]', chip.cls)}>
               {chip.label}
             </span>
           </span>
@@ -275,7 +275,7 @@ export function JobCardHubAuditDrawer({
                   onChange={(e) => setSheetSizeOverride(e.target.value)}
                   disabled={isReleased || hasBaseSheet}
                   placeholder="L x W mm"
-                  className="mt-0.5 w-full rounded border border-ds-line bg-ds-main px-2 py-1 text-xs text-ds-ink disabled:opacity-50"
+                  className="mt-0.5 w-full rounded bg-ds-main px-2 py-1 text-xs text-ds-ink disabled:opacity-50"
                 />
               </div>
             </div>
@@ -304,7 +304,7 @@ export function JobCardHubAuditDrawer({
               value={machineId}
               onChange={(e) => setMachineId(e.target.value)}
               disabled={isReleased}
-              className="w-full rounded border border-ds-line bg-ds-main px-3 py-2 text-sm text-ds-ink disabled:opacity-50"
+              className="w-full rounded bg-ds-main px-3 py-2 text-sm text-ds-ink disabled:opacity-50"
             >
               <option value="">Select Machine</option>
               {machines.map((m) => (

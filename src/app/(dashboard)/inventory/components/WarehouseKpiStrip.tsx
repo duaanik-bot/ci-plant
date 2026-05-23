@@ -17,7 +17,7 @@ function KpiTile({ label, value, colorClass, onClick }: KpiTileProps) {
       onClick={onClick}
       disabled={!onClick}
       className={cn(
-        'flex flex-col gap-0.5 rounded-ds-md border border-ds-line/30 bg-ds-elevated/60 px-4 py-3 text-left',
+        'flex flex-col gap-0.5 rounded-ds-md bg-ds-elevated/60 px-4 py-3 text-left',
         onClick && 'cursor-pointer hover:bg-ds-elevated transition-colors',
         !onClick && 'cursor-default',
       )}

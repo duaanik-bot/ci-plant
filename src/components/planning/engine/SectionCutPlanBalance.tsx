@@ -205,7 +205,7 @@ const CalcRow = memo(function CalcRow({
   large,
 }: CalcRowProps) {
   if (separator) {
-    return <div className="border-t border-ds-line/30 my-1" />
+    return <div className="my-1 opacity-20 h-px bg-ds-ink-faint" />
   }
   return (
     <div className="flex items-center justify-between gap-2 py-0.5">
@@ -489,7 +489,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
               Cutting Configuration
             </div>
             {/* Unit toggle */}
-            <div className="inline-flex overflow-hidden rounded-full border border-ds-line/50 text-[11px]">
+            <div className="inline-flex overflow-hidden rounded-full bg-ds-elevated text-[11px]">
               {(['in', 'mm'] as const).map((u) => (
                 <button
                   key={u}
@@ -507,7 +507,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           </div>
 
           {/* Direction toggle */}
-          <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
+          <div className="bg-ds-elevated rounded-ds-md p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-2">
               Cutting Direction
             </div>
@@ -522,8 +522,8 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                   }}
                   className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
                     direction === d
-                      ? 'bg-ds-brand/20 text-ds-brand border border-ds-brand/30'
-                      : 'border border-ds-line/40 text-ds-ink-muted hover:text-ds-ink bg-ds-main'
+                      ? 'bg-ds-brand/20 text-ds-brand ring-1 ring-[var(--brand-primary)]/25'
+                      : 'text-ds-ink-muted hover:text-ds-ink bg-ds-main'
                   }`}
                 >
                   {d === 'length' ? 'Length-wise' : 'Width-wise'}
@@ -536,7 +536,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           {childDrafts.map((draft, idx) => (
             <div
               key={draft.id}
-              className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3 space-y-2"
+              className="bg-ds-elevated rounded-ds-md p-3 space-y-2"
             >
               <div className="flex items-center justify-between">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
@@ -631,7 +631,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           </button>
 
           {/* Make-ready sheets */}
-          <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
+          <div className="bg-ds-elevated rounded-ds-md p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
               Make-ready Sheets
             </div>
@@ -653,7 +653,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
           {/* Overflow warning */}
           {sizeExceeds ? (
-            <div className="rounded-ds-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            <div className="rounded-ds-md bg-red-500/10 px-3 py-2 text-xs text-red-300">
               Cut sizes exceed parent sheet dimensions
             </div>
           ) : null}
@@ -670,7 +670,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             </Badge>
           </div>
 
-          <div className="bg-ds-elevated/60 rounded-ds-md border border-ds-line/40 overflow-hidden">
+          <div className="bg-ds-elevated/60 rounded-ds-md overflow-hidden">
             {!parentDims ? (
               <div className="flex items-center justify-center h-[300px] px-6 text-center">
                 <p className="text-xs text-ds-ink-faint leading-relaxed">
@@ -816,7 +816,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             ) : null}
             {wastePct != null && wastePct > 0.5 ? (
               <span className="flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-500/20 border border-red-500/40" />
+                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-500/30" />
                 <span className="text-ds-ink-faint">Waste</span>
               </span>
             ) : null}
@@ -906,7 +906,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
           {/* Balance stock KPI */}
           {balanceSizeMm && baseSheets != null ? (
-            <div className="mt-3 rounded-ds-md border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 space-y-1">
+            <div className="mt-3 rounded-ds-md bg-amber-500/10 px-3 py-2.5 space-y-1">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-300/80 mb-1">
                 Balance Stock
               </div>

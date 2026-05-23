@@ -61,7 +61,7 @@ function MachineCard({
     <div
       ref={cardRef}
       data-machine-flow-id={m.id}
-      className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-3 min-w-[140px]"
+      className="rounded-ds-md bg-ds-elevated/50 p-3 min-w-[140px] shadow-ds-depth-sm"
     >
       <p className="font-mono text-ds-warning text-sm">{m.machineCode}</p>
       <p className="text-ds-ink-muted text-xs truncate">{m.name}</p>
@@ -80,7 +80,7 @@ function MachineCard({
       ) : null}
       {isPress && m.oee != null && (
         <div className="flex items-center gap-1 mt-1">
-          <div className="w-8 h-8 rounded-full border-2 border-ds-line/50 flex items-center justify-center text-xs">
+          <div className="w-8 h-8 rounded-full bg-ds-elevated flex items-center justify-center text-xs">
             {m.oee}%
           </div>
           <span className="text-ds-ink-faint text-xs">
@@ -176,7 +176,7 @@ export default function MachineFlowPage() {
           <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">QC & Dispatch</h2>
           <div className="flex flex-wrap gap-2">
             {['Final QC Bench', 'Auto Counter', 'Packing Line', 'FG Warehouse', 'Dispatch Bay'].map((label) => (
-              <div key={label} className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
+              <div key={label} className="rounded-ds-md bg-ds-elevated/30 p-3 min-w-[100px] text-center">
                 <p className="text-ds-ink-muted text-xs">{label}</p>
               </div>
             ))}
@@ -184,7 +184,7 @@ export default function MachineFlowPage() {
         </section>
       </div>
 
-      <div className="mt-8 overflow-x-auto rounded-ds-lg border border-ds-line/40 bg-background ring-1 ring-ring/5">
+      <div className="mt-8 overflow-x-auto rounded-ds-lg bg-background ring-1 ring-ring/5">
         <h2 className="text-sm font-semibold text-ds-ink-muted mb-2 px-4 pt-4">Machine ledger — changeover & PM health</h2>
         <table className={`w-full text-sm ${mono}`}>
           <thead className="bg-ds-main text-left text-neutral-500 text-xs uppercase tracking-wider">

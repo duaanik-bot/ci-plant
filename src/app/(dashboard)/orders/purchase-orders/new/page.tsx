@@ -1424,7 +1424,7 @@ export default function NewPurchaseOrderPage() {
       onSubmit={handleSubmit}
       className="mx-auto max-w-[1600px] space-y-6 p-4 pb-32"
     >
-      <div className="sticky top-0 z-40 -mx-4 border-b border-ds-line/80 bg-ds-main/90 px-4 py-3 backdrop-blur-md">
+      <div className="sticky top-0 z-40 -mx-4 bg-ds-main/90 px-4 py-3 backdrop-blur-md">
         <PageHeader
           className="border-0 pb-0"
           title="New purchase order"
@@ -1443,7 +1443,7 @@ export default function NewPurchaseOrderPage() {
         />
       </div>
 
-      <div className="space-y-6 rounded-ds-lg border border-ds-line/80 bg-ds-card/40 p-4 text-sm shadow-sm transition-colors">
+      <div className="space-y-6 rounded-ds-lg bg-ds-card/40 p-4 text-sm shadow-ds-depth-sm transition-colors">
         <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">Header</p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="md:col-span-1">
@@ -1508,7 +1508,7 @@ export default function NewPurchaseOrderPage() {
           </div>
           <div>
             <label className="ds-typo-label mb-1.5 block">PO number</label>
-            <p className="rounded-ds-sm border border-ds-line/60 bg-ds-elevated/50 px-3 py-2.5 text-sm leading-normal text-ds-ink">
+            <p className="rounded-ds-sm bg-ds-elevated/50 px-3 py-2.5 text-sm leading-normal text-ds-ink">
               {customPoNumber.trim() || <span className="text-ds-ink-faint">Auto on save (CI-PO-YYYY-####)</span>}
             </p>
           </div>
@@ -1553,7 +1553,7 @@ export default function NewPurchaseOrderPage() {
                 aria-label={
                   isPriority ? 'PO is high priority' : 'Mark PO as high priority for Planning and CTP'
                 }
-                className="flex h-auto w-10 shrink-0 items-center justify-center rounded-ds-sm border border-ds-line bg-ds-elevated/80 transition-colors duration-200 hover:bg-ds-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-brand/30"
+                className="flex h-auto w-10 shrink-0 items-center justify-center rounded-ds-sm bg-ds-elevated/80 transition-colors duration-200 hover:bg-ds-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-brand/30"
               >
                 <Star
                   className={`h-5 w-5 ${isPriority ? 'fill-ds-warning text-ds-warning' : 'text-ds-ink-faint'}`}
@@ -1600,7 +1600,7 @@ export default function NewPurchaseOrderPage() {
         </div>
       </div>
 
-      <div className="space-y-4 rounded-ds-lg border border-ds-line/80 bg-ds-card/30 p-4 text-sm shadow-sm">
+      <div className="space-y-4 rounded-ds-lg bg-ds-card/30 p-4 text-sm shadow-ds-depth-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">Line items</p>
           <Button type="button" variant="secondary" onClick={addLine}>
@@ -1609,7 +1609,7 @@ export default function NewPurchaseOrderPage() {
         </div>
         {fieldErrors.lines && <p className="text-xs text-ds-error">{fieldErrors.lines}</p>}
 
-        <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/20 p-4">
+        <div className="rounded-ds-md bg-ds-elevated/20 p-4">
           <div className="grid items-center gap-x-3 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted" style={{ gridTemplateColumns: '48px minmax(340px,1.8fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}>
             <div className="text-center">S.No</div>
             <div>Carton</div>
@@ -1641,7 +1641,7 @@ export default function NewPurchaseOrderPage() {
                       setDetailLineIdx(idx)
                     }}
                     title="Click or Enter — line details & costing (Tab in drawer for fields)"
-                    className={`group grid cursor-pointer items-start gap-x-3 rounded-ds-md border border-ds-line/40 px-3 py-2 ${rowStripe} ${
+                    className={`group grid cursor-pointer items-start gap-x-3 rounded-ds-md px-3 py-2 ${rowStripe} ${
                       toolingRowPulse === idx ? 'po-tooling-row-sync-pulse' : ''
                     } ${rowRing} ${
                       detailLineIdx === null && kbRowIndex === idx
@@ -1684,7 +1684,7 @@ export default function NewPurchaseOrderPage() {
                         {stockInsightByIdx[idx]?.matches?.[0] ? (
                           <button
                             type="button"
-                            className="mt-1 w-full rounded border border-[var(--success)]/35 bg-[var(--success-bg)] px-2 py-1 text-left text-xs text-[var(--success)]"
+                            className="mt-1 w-full rounded bg-[var(--success-bg)] px-2 py-1 text-left text-xs text-[var(--success)]"
                             onClick={(e) => {
                               e.stopPropagation()
                               setDetailLineIdx(idx)
@@ -1788,7 +1788,7 @@ export default function NewPurchaseOrderPage() {
       </div>
 
       <div
-        className="fixed bottom-0 left-0 right-0 z-40 border-t border-ds-line/80 bg-ds-card/90 backdrop-blur-md supports-[backdrop-filter]:bg-ds-card/80"
+        className="fixed bottom-0 left-0 right-0 z-40 bg-ds-card/90 backdrop-blur-md supports-[backdrop-filter]:bg-ds-card/80"
         aria-live="polite"
         aria-label="Purchase order financial summary"
       >
@@ -1853,20 +1853,20 @@ export default function NewPurchaseOrderPage() {
               type="text"
               value={qcCustomer.name}
               onChange={(e) => setQcCustomer((prev) => ({ ...prev, name: e.target.value }))}
-              className={`w-full px-3 py-2 rounded bg-ds-elevated border ${qcErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'} text-foreground`}
+              className={`w-full px-3 py-2 rounded bg-ds-elevated text-foreground ${qcErrors.name ? 'ring-1 ring-[var(--error)]' : ''}`}
             />
             {qcErrors.name && <p className="text-xs text-[var(--error)] mt-1">{qcErrors.name}</p>}
           </div>
           <div>
             <label className="block text-xs text-ds-ink-muted mb-1">GST</label>
-            <input type="text" value={qcCustomer.gstNumber} onChange={(e) => setQcCustomer((prev) => ({ ...prev, gstNumber: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground" />
+            <input type="text" value={qcCustomer.gstNumber} onChange={(e) => setQcCustomer((prev) => ({ ...prev, gstNumber: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground" />
           </div>
           <div>
             <label className="block text-xs text-ds-ink-muted mb-1">Contact / Phone / Email / Address</label>
-            <input type="text" value={qcCustomer.contactName} onChange={(e) => setQcCustomer((prev) => ({ ...prev, contactName: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground mb-1" placeholder="Contact" />
-            <input type="text" value={qcCustomer.contactPhone} onChange={(e) => setQcCustomer((prev) => ({ ...prev, contactPhone: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground mb-1" placeholder="Phone" />
-            <input type="email" value={qcCustomer.email} onChange={(e) => setQcCustomer((prev) => ({ ...prev, email: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground mb-1" placeholder="Email" />
-            <textarea rows={2} value={qcCustomer.address} onChange={(e) => setQcCustomer((prev) => ({ ...prev, address: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground" placeholder="Address" />
+            <input type="text" value={qcCustomer.contactName} onChange={(e) => setQcCustomer((prev) => ({ ...prev, contactName: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground mb-1" placeholder="Contact" />
+            <input type="text" value={qcCustomer.contactPhone} onChange={(e) => setQcCustomer((prev) => ({ ...prev, contactPhone: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground mb-1" placeholder="Phone" />
+            <input type="email" value={qcCustomer.email} onChange={(e) => setQcCustomer((prev) => ({ ...prev, email: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground mb-1" placeholder="Email" />
+            <textarea rows={2} value={qcCustomer.address} onChange={(e) => setQcCustomer((prev) => ({ ...prev, address: e.target.value }))} className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground" placeholder="Address" />
           </div>
           <div className="flex items-center gap-2">
             <input id="qc-artwork" type="checkbox" checked={qcCustomer.requiresArtworkApproval} onChange={(e) => setQcCustomer((prev) => ({ ...prev, requiresArtworkApproval: e.target.checked }))} className="h-4 w-4 rounded border-ds-line/50 bg-ds-elevated" />

@@ -26,14 +26,14 @@ import { ACTION_PILL_BASE, ICON_BUTTON_BASE, PUSHED_CHIP_CLASS, STATUS_CHIP_BASE
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 import { useUiDensity } from '@/lib/ui-density'
 
-const cellBase = `align-middle border-b border-ds-line/30 text-sm text-ds-ink min-h-[40px] px-2 py-2`
+const cellBase = `align-middle text-sm text-ds-ink min-h-[40px] px-2 py-2`
 const filterGhost = dataTable.filter.input
 
 const inp =
-  'h-8 w-full min-w-0 rounded-ds-sm border border-ds-line bg-ds-elevated/90 px-2 text-sm text-ds-ink tabular-nums transition-[border-color,box-shadow] duration-150 ease-out disabled:opacity-50 focus:border-ds-brand focus:outline-none focus:shadow-ds-focus'
+  'h-8 w-full min-w-0 rounded-ds-sm bg-ds-elevated/90 px-2 text-sm text-ds-ink tabular-nums transition-[box-shadow] duration-150 ease-out disabled:opacity-50 focus:outline-none focus:shadow-ds-focus'
 
 const batchActionSelect =
-  'h-9 min-w-[8rem] rounded-full border border-ds-line/60 bg-ds-elevated px-2 text-xs leading-5 font-medium text-ds-ink placeholder:text-ds-ink-faint outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30'
+  'h-9 min-w-[8rem] rounded-full bg-ds-elevated px-2 text-xs leading-5 font-medium text-ds-ink placeholder:text-ds-ink-faint outline-none transition focus:ring-1 focus:ring-ds-brand/30'
 const batchActionApply =
   `${ACTION_PILL_BASE} h-9 min-w-0 rounded-full border-ds-brand/40 bg-ds-brand/15 px-2 py-1 text-xs text-ds-ink hover:bg-ds-brand/25 disabled:cursor-not-allowed`
 
@@ -217,7 +217,7 @@ function resolveDesignerKey(spec: Record<string, unknown>, planCore: ReturnType<
 /** UI-only: gang-print ups saved with meta.ups ≥ 1 reads as a final planner decision. */
 function markFieldAsFinal(field: string, active: boolean): string {
   if (field !== 'ups' || !active) return ''
-  return 'border border-ds-success/40 bg-ds-success/10'
+  return 'bg-ds-success/10'
 }
 
 export function boardLabel(r: PlanningGridLine): string {
@@ -289,12 +289,12 @@ function sheetSizeLabel(r: PlanningGridLine): string {
 
 function stockSignalMeta(signal: 'green' | 'yellow' | 'red'): { label: string; cls: string } {
   if (signal === 'green') {
-    return { label: 'Available', cls: 'border-[var(--success)]/35 bg-[var(--success-bg)]/15 text-[var(--success)] dark:text-[var(--success)]' }
+    return { label: 'Available', cls: 'bg-[var(--success-bg)]/15 text-[var(--success)] dark:text-[var(--success)]' }
   }
   if (signal === 'yellow') {
-    return { label: 'Partial', cls: 'border-[var(--warning)]/35 bg-[var(--warning-bg)]/15 text-[var(--warning)] dark:text-[var(--warning)]' }
+    return { label: 'Partial', cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)] dark:text-[var(--warning)]' }
   }
-  return { label: 'Shortage', cls: 'border-[var(--error)]/35 bg-[var(--error-bg)]/15 text-[var(--error)] dark:text-[var(--error)]' }
+  return { label: 'Shortage', cls: 'bg-[var(--error-bg)]/15 text-[var(--error)] dark:text-[var(--error)]' }
 }
 
 function readinessMeta(
@@ -302,11 +302,11 @@ function readinessMeta(
   hasMaterialHint: boolean,
 ): { label: string; cls: string } {
   if (!hasMaterialHint) {
-    return { label: 'No material', cls: 'border-ds-line/50 bg-ds-elevated/40 text-ds-ink-faint' }
+    return { label: 'No material', cls: 'bg-ds-elevated/40 text-ds-ink-faint' }
   }
-  if (signal === 'green') return { label: 'Ready', cls: 'border-[var(--success)]/35 bg-[var(--success-bg)]/15 text-[var(--success)] dark:text-[var(--success)]' }
-  if (signal === 'yellow') return { label: 'Partial', cls: 'border-[var(--warning)]/35 bg-[var(--warning-bg)]/15 text-[var(--warning)] dark:text-[var(--warning)]' }
-  return { label: 'Shortage', cls: 'border-[var(--error)]/35 bg-[var(--error-bg)]/15 text-[var(--error)] dark:text-[var(--error)]' }
+  if (signal === 'green') return { label: 'Ready', cls: 'bg-[var(--success-bg)]/15 text-[var(--success)] dark:text-[var(--success)]' }
+  if (signal === 'yellow') return { label: 'Partial', cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)] dark:text-[var(--warning)]' }
+  return { label: 'Shortage', cls: 'bg-[var(--error-bg)]/15 text-[var(--error)] dark:text-[var(--error)]' }
 }
 
 function planningPriorityMeta(input: {
@@ -317,12 +317,12 @@ function planningPriorityMeta(input: {
   const dueMs = input.poDate ? new Date(input.poDate).getTime() : NaN
   const isUrgentDate = Number.isFinite(dueMs) && (dueMs - now) / 86400000 <= 2
   if (input.signal === 'red' || isUrgentDate) {
-    return { label: 'High', cls: 'border-[var(--error)]/35 bg-[var(--error-bg)]/15 text-[var(--error)] dark:text-[var(--error)]' }
+    return { label: 'High', cls: 'bg-[var(--error-bg)]/15 text-[var(--error)] dark:text-[var(--error)]' }
   }
   if (input.signal === 'yellow') {
-    return { label: 'Medium', cls: 'border-[var(--warning)]/35 bg-[var(--warning-bg)]/15 text-[var(--warning)] dark:text-[var(--warning)]' }
+    return { label: 'Medium', cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)] dark:text-[var(--warning)]' }
   }
-  return { label: 'Low', cls: 'border-[var(--success)]/35 bg-[var(--success-bg)]/15 text-[var(--success)] dark:text-[var(--success)]' }
+  return { label: 'Low', cls: 'bg-[var(--success-bg)]/15 text-[var(--success)] dark:text-[var(--success)]' }
 }
 
 type SortKey = 'cartonName' | 'cartonSize' | 'qty' | 'board' | 'gsm' | 'coating' | 'batch'
@@ -861,7 +861,7 @@ export function PlanningDecisionGrid({
           </p>
         ) : null}
         <div className="flex min-w-0 flex-wrap items-center justify-start gap-1">
-          <div className="inline-flex items-center gap-1 rounded-full border border-ds-line/50 bg-ds-main/40 p-1">
+          <div className="inline-flex items-center gap-1 rounded-full bg-ds-main/40 p-1">
             <select
               value={selectedAction}
               onChange={(e) =>
@@ -907,7 +907,7 @@ export function PlanningDecisionGrid({
         {holdIsOpen ? (
           <span className="flex w-full min-w-0 flex-nowrap items-center justify-start gap-1">
             <input
-              className="min-w-0 max-w-[10rem] flex-1 rounded border border-ds-warning/30 bg-ds-main px-1.5 py-px text-xs text-ds-ink"
+              className="min-w-0 max-w-[10rem] flex-1 rounded bg-[var(--warning-bg)]/10 bg-ds-main px-1.5 py-px text-xs text-ds-ink"
               placeholder="Reason required"
               value={reasonVal}
               onChange={(e) => setReasonVal(e.target.value)}
@@ -990,9 +990,9 @@ export function PlanningDecisionGrid({
   }, [paginated, expandedGroups, groupByKey])
 
   return (
-    <DataTableFrame className="h-full border-ds-line/80 bg-ds-elevated/20">
+    <DataTableFrame className="h-full bg-ds-elevated/20">
       {mixAdvisoryNote ? (
-        <div className="shrink-0 border-b border-ds-warning/25 bg-ds-warning/10 px-3 py-2 text-xs text-ds-ink">
+        <div className="shrink-0 bg-ds-warning/10 px-3 py-2 text-xs text-ds-ink">
           {mixAdvisoryNote}
         </div>
       ) : null}
@@ -1009,7 +1009,7 @@ export function PlanningDecisionGrid({
       {planningSelection.size > 1 ? (
         <div
           id="fix-bulk-bar"
-          className="shrink-0 border-b border-ds-line/50 bg-ds-elevated/35 px-2 py-2"
+          className="shrink-0 bg-ds-elevated/35 px-2 py-2"
           data-batch-actions
           onClick={(e) => e.stopPropagation()}
         >
@@ -1035,7 +1035,7 @@ export function PlanningDecisionGrid({
       ) : null}
 
       <div className={`${dataTable.wrap} overflow-x-auto`}>
-        <div className="shrink-0 border-y border-ds-line/30 bg-ds-elevated/25 px-3 py-2">
+        <div className="shrink-0 bg-ds-elevated/25 px-3 py-2">
           <div className="flex items-center justify-between gap-2 text-xs">
             <button
               type="button"
@@ -1085,7 +1085,7 @@ export function PlanningDecisionGrid({
                   ) : null}
                   {planningSelection.size > 0 ? (
                     <span
-                      className="rounded border border-ds-brand/35 bg-ds-brand/10 px-1 py-0 text-xs font-medium text-ds-brand"
+                      className="rounded bg-ds-brand/10 px-1 py-0 text-xs font-medium text-ds-brand"
                       title={`${planningSelection.size} selected`}
                     >
                       {planningSelection.size}
@@ -1134,7 +1134,7 @@ export function PlanningDecisionGrid({
               </th>
             </tr>
             {showColumnFilters ? (
-            <tr className="border-b border-ds-line/50 bg-ds-card/20">
+            <tr className="bg-ds-card/20">
               <th className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 bg-ds-elevated px-0 py-1`} />
               <th className="px-2 py-1">
                 <input
@@ -1259,7 +1259,7 @@ export function PlanningDecisionGrid({
                     >
                       {/* # + group checkbox */}
                       <td
-                        className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 border-b border-ds-line/30 border-r border-ds-line/50 bg-ds-brand/10 px-0 text-center`}
+                        className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 bg-ds-brand/10 px-0 text-center`}
                       >
                         <div className="flex flex-col items-center gap-0.5">
                           <span className="text-xs font-bold text-ds-brand">{pIdx + 1}</span>
@@ -1267,7 +1267,7 @@ export function PlanningDecisionGrid({
                             <button
                               type="button"
                               title="Recall full group from AW — returns all group lines to pending planning"
-                              className={`${ICON_BUTTON_BASE} h-7 w-7 rounded-ds-sm border border-ds-success/40 bg-ds-success/10 text-ds-ink duration-200 hover:border-ds-success/60 hover:bg-ds-success/15`}
+                              className={`${ICON_BUTTON_BASE} h-7 w-7 rounded-ds-sm bg-ds-success/10 text-ds-ink duration-200 hover:bg-ds-success/15`}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 void recallGroupToPlanning(groupRows)
@@ -1298,7 +1298,7 @@ export function PlanningDecisionGrid({
                       <td className={`${cellBase} min-w-0`}>
                         <div className="flex min-w-0 flex-col gap-0.5">
                           <div className="flex items-center gap-1">
-                            <span className="inline-flex items-center gap-0.5 rounded border border-ds-brand/40 bg-ds-brand/15 px-1 py-px text-xs font-bold text-ds-brand">
+                            <span className="inline-flex items-center gap-0.5 rounded bg-ds-brand/15 px-1 py-px text-xs font-bold text-ds-brand">
                               <Layers className="h-2.5 w-2.5" aria-hidden /> GANG · {groupRows.length} items
                             </span>
                             <span className="text-xs text-ds-ink-faint">{firstRow.po.customer.name}</span>
@@ -1350,7 +1350,7 @@ export function PlanningDecisionGrid({
                           <span className={`text-xs ${allSheetSizes.length > 1 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
                             {sheetDisplay}
                           </span>
-                          <span className={`inline-flex rounded border px-1 py-px text-[10px] ${groupReadiness.cls}`}>
+                          <span className={`inline-flex rounded px-1 py-px text-[10px] ${groupReadiness.cls}`}>
                             {groupReadiness.label}
                           </span>
                         </div>
@@ -1384,14 +1384,14 @@ export function PlanningDecisionGrid({
 
                       {/* Set type */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className="inline-flex items-center rounded border border-ds-brand/35 bg-ds-brand/10 px-1.5 py-px text-xs font-semibold text-ds-brand">
+                        <span className="inline-flex items-center rounded bg-ds-brand/10 px-1.5 py-px text-xs font-semibold text-ds-brand">
                           Gang
                         </span>
                       </td>
 
                       {/* Group actions + expand */}
-                      <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible border-l border-ds-line/30 bg-inherit`}>
-                        <div className="w-full rounded-ds-sm border border-ds-line/35 bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
+                      <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible bg-inherit`}>
+                        <div className="w-full rounded-ds-sm bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
                           <div className="mb-1 flex min-w-0 flex-wrap items-center justify-start gap-1">
                             <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus0]}`}>
                               {BATCH_STATUS_LABEL[bStatus0]}
@@ -1409,7 +1409,7 @@ export function PlanningDecisionGrid({
                                 return next
                               })
                             }}
-                            className="mt-0.5 flex items-center gap-0.5 rounded border border-ds-brand/30 bg-ds-brand/8 px-1.5 py-px text-xs font-medium text-ds-brand hover:bg-ds-brand/15 transition-colors"
+                            className="mt-0.5 flex items-center gap-0.5 rounded bg-ds-brand/8 px-1.5 py-px text-xs font-medium text-ds-brand hover:bg-ds-brand/15 transition-colors"
                           >
                             {isExpanded ? '▲ Hide items' : `▼ Show ${groupRows.length} items`}
                           </button>
@@ -1451,14 +1451,14 @@ export function PlanningDecisionGrid({
                       }`}
                     >
                       <td
-                        className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 border-b border-ds-line/20 border-r border-ds-brand/20 bg-ds-brand/5 px-0 text-center`}
+                        className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 min-w-0 max-w-10 bg-ds-brand/5 px-0 text-center`}
                       >
                         <div className="flex flex-col items-center gap-0.5">
                           <span className="text-xs text-ds-brand/60">↳</span>
                           <span className="text-xs font-medium text-ds-ink-faint">{entry.subIdx + 1}</span>
                         </div>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0 pl-3`}>
+                      <td className={`${cellBase} min-w-0 pl-3`}>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); onRowBackgroundClick(r.id) }}
@@ -1473,43 +1473,43 @@ export function PlanningDecisionGrid({
                           <span className="text-xs text-ds-ink-faint">{r.po.poNumber}</span>
                         </button>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                      <td className={`${cellBase} min-w-0`}>
                         <span className="text-xs text-ds-ink-muted">{r.cartonSize ?? '—'}</span>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0 text-center`}>
+                      <td className={`${cellBase} min-w-0 text-center`}>
                         <span className="text-xs font-semibold tabular-nums text-ds-ink">{r.quantity.toLocaleString('en-IN')}</span>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                      <td className={`${cellBase} min-w-0`}>
                         <span className="text-xs font-semibold tabular-nums text-ds-ink-muted">
                           {fgAvailable.toLocaleString('en-IN')}
                         </span>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                      <td className={`${cellBase} min-w-0`}>
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs text-ds-ink-muted">{sheetSize}</span>
-                          <span className={`inline-flex rounded border px-1 py-px text-[10px] ${subReadiness.cls}`}>
+                          <span className={`inline-flex rounded px-1 py-px text-[10px] ${subReadiness.cls}`}>
                             {subReadiness.label}
                           </span>
                         </div>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0 text-center`}>
+                      <td className={`${cellBase} min-w-0 text-center`}>
                         <span className="text-xs font-medium text-ds-brand">{upsNum != null ? `×${upsNum}` : '—'}</span>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                      <td className={`${cellBase} min-w-0`}>
                         <span className="text-xs text-ds-ink-muted">{gsm}</span>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                      <td className={`${cellBase} min-w-0`}>
                         <span className="line-clamp-2 break-words text-xs leading-tight text-ds-ink-muted">{coating}</span>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`}>
+                      <td className={`${cellBase} min-w-0`}>
                         <span className="text-xs text-ds-ink-muted">{designerLabelSub || '—'}</span>
                       </td>
-                      <td className={`${cellBase} border-b border-ds-line/20 min-w-0`} />
-                      <td className={`${cellBase} sticky right-0 z-10 min-w-0 border-b border-ds-line/20 border-l border-ds-line/30 bg-inherit text-left`}>
+                      <td className={`${cellBase} min-w-0`} />
+                      <td className={`${cellBase} sticky right-0 z-10 min-w-0 bg-inherit text-left`}>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); onRowBackgroundClick(r.id) }}
-                          className="rounded border border-ds-line/50 px-1.5 py-px text-xs text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+                          className="rounded bg-ds-elevated/30 px-1.5 py-px text-xs text-ds-ink-muted hover:text-ds-brand transition-colors"
                         >
                           Spec ↗
                         </button>
@@ -1595,10 +1595,10 @@ export function PlanningDecisionGrid({
                           : idx % 2 === 0
                             ? 'bg-ds-main/20'
                             : 'bg-ds-elevated/15'
-                    } ${isNewBatch ? 'border-t border-ds-line' : ''}`}
+                    }`}
                   >
                     <td
-                      className={`${dataTable.th} sticky left-0 z-10 w-10 min-w-0 max-w-10 border-b border-ds-line/30 border-r border-ds-line/50 px-0 text-center ${
+                      className={`${dataTable.th} sticky left-0 z-10 w-10 min-w-0 max-w-10 px-0 text-center ${
                         recallHighlight
                           ? 'bg-ds-success/15'
                           : completedRow
@@ -1612,7 +1612,7 @@ export function PlanningDecisionGrid({
                           <button
                             type="button"
                             title="Recall from AW — returns line to pending planning"
-                            className={`${ICON_BUTTON_BASE} h-7 w-7 rounded-ds-sm border border-ds-success/40 bg-ds-success/10 text-ds-ink duration-200 hover:border-ds-success/60 hover:bg-ds-success/15`}
+                            className={`${ICON_BUTTON_BASE} h-7 w-7 rounded-ds-sm bg-ds-success/10 text-ds-ink duration-200 hover:bg-ds-success/15`}
                             onClick={(e) => {
                               e.stopPropagation()
                               void onRecallLine(r.id)
@@ -1640,7 +1640,7 @@ export function PlanningDecisionGrid({
                             <button
                               type="button"
                               title="Delete line"
-                              className={`${ICON_BUTTON_BASE} h-6 w-6 rounded-ds-sm border border-[var(--error)]/35 bg-[var(--error-bg)]/10 text-[var(--error)] duration-200 hover:border-[var(--error)]/60 hover:bg-[var(--error-bg)]/15 dark:text-[var(--error)]`}
+                              className={`${ICON_BUTTON_BASE} h-6 w-6 rounded-ds-sm bg-[var(--error-bg)]/10 text-[var(--error)] duration-200 hover:bg-[var(--error-bg)]/15 dark:text-[var(--error)]`}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 void onDeleteLine(r.id)
@@ -1767,7 +1767,7 @@ export function PlanningDecisionGrid({
                         <p className="truncate text-xs font-medium text-ds-ink-muted" title={sheetSize}>
                           {sheetSize}
                         </p>
-                        <span className={`inline-flex rounded border px-1 py-px text-[10px] ${rowReadiness.cls}`}>
+                        <span className={`inline-flex rounded px-1 py-px text-[10px] ${rowReadiness.cls}`}>
                           {rowReadiness.label}
                         </span>
                       </div>
@@ -1848,11 +1848,11 @@ export function PlanningDecisionGrid({
                         <option value="batch">Group</option>
                       </select>
                     </td>
-                    <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible border-l border-ds-line/30 bg-inherit`}>
+                    <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible bg-inherit`}>
                       {/* ── DC-style compact action cell ── */}
-                      <div className="w-full rounded-ds-sm border border-ds-line/35 bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="w-full rounded-ds-sm bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
                         <div className="mb-1">
-                          <span className={`inline-flex rounded border px-1 py-px text-[10px] ${rowPriority.cls}`}>
+                          <span className={`inline-flex rounded px-1 py-px text-[10px] ${rowPriority.cls}`}>
                             Priority {rowPriority.label}
                           </span>
                         </div>
@@ -1897,7 +1897,7 @@ export function PlanningDecisionGrid({
       </div>
 
       {/* ── Pagination bar ── */}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-ds-line/50 bg-ds-elevated/30 px-4 py-2 text-xs text-ds-ink-muted">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-ds-elevated/30 px-4 py-2 text-xs text-ds-ink-muted">
         {/* Left: rows-per-page selector */}
         <div className="flex items-center gap-2">
           <span className="text-ds-ink-faint">Rows per page:</span>

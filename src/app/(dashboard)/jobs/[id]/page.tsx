@@ -133,10 +133,10 @@ export default function JobDetailPage() {
       {tab === 'Materials' && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="text-left border-b border-ds-line/50"><th className="py-2">Material</th><th className="py-2">Net</th><th className="py-2">Approved</th><th className="py-2">Issued</th><th className="py-2">Unit</th></tr></thead>
+            <thead><tr className="text-left"><th className="py-2">Material</th><th className="py-2">Net</th><th className="py-2">Approved</th><th className="py-2">Issued</th><th className="py-2">Unit</th></tr></thead>
             <tbody>
               {job.bomLines.map((line) => (
-                <tr key={line.id} className="border-b border-ds-line/50">
+                <tr key={line.id} className="">
                   <td className="py-2">{line.material.materialCode} — {line.material.description}</td>
                   <td className="py-2">{Number(line.netQty)}</td>
                   <td className="py-2">{Number(line.qtyApproved)}</td>

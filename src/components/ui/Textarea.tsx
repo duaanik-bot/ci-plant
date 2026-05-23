@@ -25,11 +25,11 @@ export function Textarea({ label, error, className, rows = 3, ...props }: Textar
       <textarea
         rows={rows}
         className={cn(
-          'w-full px-3 py-2 text-sm rounded-ds-sm border outline-none resize-none transition-colors',
+          'w-full px-3 py-2 text-sm rounded-ds-sm outline-none resize-none transition-colors',
           'bg-ds-card text-ds-ink placeholder:text-ds-ink-faint',
           error
-            ? 'border-ds-error focus:ring-2 focus:ring-ds-error/20'
-            : 'border-ds-line focus:border-ds-brand focus:ring-2 focus:ring-ds-brand/15',
+            ? 'bg-[var(--error-bg)] focus:ring-2 focus:ring-ds-error/20'
+            : 'focus:ring-2 focus:ring-ds-brand/15',
           'disabled:bg-ds-elevated disabled:cursor-not-allowed',
           className,
         )}

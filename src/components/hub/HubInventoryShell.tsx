@@ -671,7 +671,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
           <h1 className="text-xl font-bold text-ds-warning">{title}</h1>
           {toolType === 'shade_cards' ? (
             <div
-              className={`rounded-lg border border-[var(--warning)]/40 bg-ds-main px-3 py-2 ${shadeMono}`}
+              className={`rounded-lg bg-ds-main px-3 py-2 ${shadeMono}`}
               title="ΔE Limit Enforced < 2.0"
             >
               <p className="text-xs uppercase tracking-wider text-neutral-500">Fading Standards</p>
@@ -733,7 +733,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search…"
-            className={`px-3 py-2 rounded bg-background border border-input text-foreground text-sm max-w-md ${
+            className={`px-3 py-2 rounded bg-background text-foreground text-sm max-w-md ${
               toolType === 'shade_cards' ? shadeMono : ''
             }`}
           />
@@ -759,7 +759,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       ) : toolType === 'dies' ? (
         <EnterpriseTableShell>
           <table className="w-full border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
-            <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
+            <thead className="bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
                 <th className="px-4 py-3">ID</th>
                 <th className="px-4 py-3">Carton</th>
@@ -784,7 +784,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   <td className="px-4 py-3">{(d.impressionCount ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <span
-                      className={`inline-block rounded border px-2 py-0.5 text-xs ${custodyBadgeClass(d.custodyStatus ?? '')}`}
+                      className={`inline-block rounded px-2 py-0.5 text-xs ${custodyBadgeClass(d.custodyStatus ?? '')}`}
                     >
                       {custodyLabel(d.custodyStatus ?? '')}
                     </span>
@@ -823,7 +823,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       ) : toolType === 'blocks' ? (
         <EnterpriseTableShell>
           <table className="w-full border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
-            <thead className="border-b border-border bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
+            <thead className="bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
                 <th className="px-4 py-3">ID</th>
                 <th className="px-4 py-3">Type</th>
@@ -844,7 +844,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   <td className="px-4 py-3">{(b.impressionCount ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <span
-                      className={`inline-block rounded border px-2 py-0.5 text-xs ${custodyBadgeClass(b.custodyStatus ?? '')}`}
+                      className={`inline-block rounded px-2 py-0.5 text-xs ${custodyBadgeClass(b.custodyStatus ?? '')}`}
                     >
                       {custodyLabel(b.custodyStatus ?? '')}
                     </span>
@@ -883,7 +883,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       ) : (
         <EnterpriseTableShell className="bg-card ring-border">
           <table className={`w-full border-collapse bg-card text-left text-sm leading-tight text-card-foreground ${shadeMono}`}>
-            <thead className="bg-card border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+            <thead className="bg-card text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-2 h-[44px] align-middle whitespace-nowrap">MFG / entry</th>
                 <th className="px-2 h-[44px] align-middle min-w-[10rem] font-sans">Client / product</th>
@@ -894,7 +894,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 <th className="px-2 h-[44px] align-middle w-[72px] text-right"> </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border bg-card">
+            <tbody className="bg-card">
               {filteredShades.map((s) => {
                 const status = s.custodyStatus ?? ''
                 const entry = s.entryDate ?? (s.createdAt ? s.createdAt.slice(0, 10) : '—')
@@ -970,7 +970,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                         <span className={`inline-flex items-center gap-1 text-xs font-medium text-ds-warning ${shadeMono}`}>
                           {shadeCardIsApproachingHardExpiry(months) ? (
                             <span
-                              className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full border border-ds-warning/60 bg-ds-warning/8 px-0.5 text-xs font-black text-ds-warning animate-pulse"
+                              className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-ds-warning/8 px-0.5 text-xs font-black text-ds-warning animate-pulse"
                               title="Approaching 12-month expiry. Prepare replacement."
                             >
                               !
@@ -989,16 +989,16 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                     <td className="px-2 align-middle">
                       <div className="flex flex-wrap gap-1">
                         <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium border font-sans ${
+                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium font-sans ${
                             tier === 'expired'
-                              ? 'bg-[var(--error-bg)] text-[var(--error)] border-[var(--error)]/40'
-                              : 'bg-ds-elevated text-ds-ink border-ds-line/50'
+                              ? 'bg-[var(--error-bg)] text-[var(--error)]'
+                              : 'bg-ds-elevated text-ds-ink'
                           }`}
                         >
                           {label}
                         </span>
                         <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-ds-elevated text-neutral-400 border border-ds-line/50 ${shadeMono}`}
+                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-ds-elevated text-neutral-400 ${shadeMono}`}
                         >
                           {loc}
                         </span>
@@ -1044,7 +1044,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       {issueOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4">
           <div
-            className={`w-full max-w-md rounded-lg border border-ds-line/60 bg-ds-card p-4 space-y-3 text-sm ${
+            className={`w-full max-w-md rounded-lg bg-ds-card p-4 space-y-3 text-sm ${
               toolType === 'shade_cards' ? shadeMono : ''
             }`}
           >
@@ -1063,7 +1063,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                       setIssueJobCardNumber(null)
                     }}
                     placeholder="Search # or customer…"
-                    className="mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground"
+                    className="mt-1 w-full px-2 py-2 rounded bg-background text-foreground"
                   />
                 </label>
                 {issueJobCardId && issueJobCardNumber != null ? (
@@ -1084,7 +1084,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 ) : null}
                 {jobCardLoading ? <p className="text-xs text-ds-ink-faint font-sans">Searching…</p> : null}
                 {!issueJobCardId && jobCardHits.length > 0 ? (
-                  <ul className="max-h-32 overflow-y-auto rounded border border-ds-line/50 divide-y divide-ds-line/30 text-xs font-sans">
+                  <ul className="max-h-32 overflow-y-auto rounded text-xs font-sans">
                     {jobCardHits.map((jc) => (
                       <li key={jc.id}>
                         <button
@@ -1112,7 +1112,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               <select
                 value={machineId}
                 onChange={(e) => setMachineId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground"
+                className="mt-1 w-full px-2 py-2 rounded bg-background text-foreground"
               >
                 <option value="">Select machine</option>
                 {machines.map((m) => (
@@ -1130,7 +1130,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   onChange={(e) =>
                     setShadeIssueInitialCondition(e.target.value as 'mint' | 'used' | 'minor_damage')
                   }
-                  className={`mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground ${shadeMono}`}
+                  className={`mt-1 w-full px-2 py-2 rounded bg-background text-foreground ${shadeMono}`}
                 >
                   <option value="mint">{shadeCardPhysicalLabel('mint')}</option>
                   <option value="used">{shadeCardPhysicalLabel('used')}</option>
@@ -1145,7 +1145,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   value={issueOperatorSearch}
                   onChange={(e) => setIssueOperatorSearch(e.target.value)}
                   placeholder="Filter staff…"
-                  className={`mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground ${shadeMono}`}
+                  className={`mt-1 w-full px-2 py-2 rounded bg-background text-foreground ${shadeMono}`}
                 />
               </label>
             ) : null}
@@ -1154,7 +1154,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               <select
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
-                className="mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground"
+                className="mt-1 w-full px-2 py-2 rounded bg-background text-foreground"
               >
                 <option value="">Select operator</option>
                 {(toolType === 'shade_cards' ? filteredIssueOperators : users).map((u) => (
@@ -1170,7 +1170,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               </p>
             ) : null}
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setIssueOpen(false)} className="px-3 py-1.5 rounded border border-ds-line/60 text-ds-ink font-sans">
+              <button type="button" onClick={() => setIssueOpen(false)} className="px-3 py-1.5 rounded text-ds-ink font-sans">
                 Cancel
               </button>
               <button type="button" onClick={() => void submitIssue()} className="px-3 py-1.5 rounded bg-primary text-primary-foreground font-sans">
@@ -1183,7 +1183,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
 
       {vendorOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4">
-          <div className="w-full max-w-md rounded-lg border border-ds-warning/30 bg-ds-card p-4 space-y-3 text-sm">
+          <div className="w-full max-w-md rounded-lg bg-ds-card p-4 space-y-3 text-sm">
             <h2 className="text-lg font-semibold text-foreground">Receive from vendor</h2>
             <p className="text-ds-ink-muted text-xs">Confirms the tool is back from the vendor and returns it to <span className="text-[var(--success)]">In Stock</span>.</p>
             <label className="block text-ds-ink-muted">
@@ -1193,7 +1193,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 onChange={(e) => setVendorNotes(e.target.value)}
                 rows={3}
                 placeholder="PO ref, triage notes…"
-                className="mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground resize-y"
+                className="mt-1 w-full px-2 py-2 rounded bg-background text-foreground resize-y"
               />
             </label>
             {toolType !== 'shade_cards' && (
@@ -1202,7 +1202,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 <select
                   value={vendorCondition}
                   onChange={(e) => setVendorCondition(e.target.value as (typeof RECEIVE_CONDITIONS)[number])}
-                  className="mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground"
+                  className="mt-1 w-full px-2 py-2 rounded bg-background text-foreground"
                 >
                   {RECEIVE_CONDITIONS.map((c) => (
                     <option key={c} value={c}>
@@ -1213,7 +1213,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               </label>
             )}
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setVendorOpen(false)} className="px-3 py-1.5 rounded border border-ds-line/60 text-ds-ink">
+              <button type="button" onClick={() => setVendorOpen(false)} className="px-3 py-1.5 rounded text-ds-ink">
                 Cancel
               </button>
               <button type="button" onClick={() => void submitVendorReceive()} className="px-3 py-1.5 rounded bg-primary text-primary-foreground">
@@ -1226,7 +1226,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
 
       {receiveOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4">
-          <div className="w-full max-w-md rounded-lg border border-ds-line/60 bg-ds-card p-4 space-y-3 text-sm">
+          <div className="w-full max-w-md rounded-lg bg-ds-card p-4 space-y-3 text-sm">
             <h2 className="text-lg font-semibold text-foreground">Receive to rack</h2>
             {toolType !== 'shade_cards' && (
               <>
@@ -1237,7 +1237,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                     min={0}
                     value={finalImpressions}
                     onChange={(e) => setFinalImpressions(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground"
+                    className="mt-1 w-full px-2 py-2 rounded bg-background text-foreground"
                   />
                 </label>
                 <label className="block text-ds-ink-muted">
@@ -1245,7 +1245,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   <select
                     value={receiveCondition}
                     onChange={(e) => setReceiveCondition(e.target.value as (typeof RECEIVE_CONDITIONS)[number])}
-                    className="mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground"
+                    className="mt-1 w-full px-2 py-2 rounded bg-background text-foreground"
                   >
                     {RECEIVE_CONDITIONS.map((c) => (
                       <option key={c} value={c}>
@@ -1265,7 +1265,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                     value={receiveOperatorSearch}
                     onChange={(e) => setReceiveOperatorSearch(e.target.value)}
                     placeholder="Search staff…"
-                    className={`mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground ${shadeMono}`}
+                    className={`mt-1 w-full px-2 py-2 rounded bg-background text-foreground ${shadeMono}`}
                   />
                 </label>
                 <label className="block text-ds-ink-muted text-sm">
@@ -1273,7 +1273,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   <select
                     value={receiveOperatorId}
                     onChange={(e) => setReceiveOperatorId(e.target.value)}
-                    className="mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground"
+                    className="mt-1 w-full px-2 py-2 rounded bg-background text-foreground"
                   >
                     <option value="">Select operator</option>
                     {filteredReceiveOperators.map((u) => (
@@ -1290,7 +1290,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                     onChange={(e) =>
                       setShadeReceiveEndCondition(e.target.value as 'mint' | 'used' | 'minor_damage')
                     }
-                    className={`mt-1 w-full px-2 py-2 rounded bg-background border border-input text-foreground ${shadeMono}`}
+                    className={`mt-1 w-full px-2 py-2 rounded bg-background text-foreground ${shadeMono}`}
                   >
                     <option value="mint">{shadeCardPhysicalLabel('mint')}</option>
                     <option value="used">{shadeCardPhysicalLabel('used')}</option>
@@ -1302,13 +1302,13 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   <input
                     readOnly
                     value={SHADE_MASTER_RACK_LOCATION}
-                    className={`mt-1 w-full px-2 py-2 rounded bg-ds-main border border-ds-line/60 text-ds-ink-muted ${shadeMono}`}
+                    className={`mt-1 w-full px-2 py-2 rounded bg-ds-main text-ds-ink-muted ${shadeMono}`}
                   />
                 </label>
               </div>
             )}
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setReceiveOpen(false)} className="px-3 py-1.5 rounded border border-ds-line/60 text-ds-ink">
+              <button type="button" onClick={() => setReceiveOpen(false)} className="px-3 py-1.5 rounded text-ds-ink">
                 Cancel
               </button>
               <button type="button" onClick={() => void submitReceive()} className="px-3 py-1.5 rounded bg-primary text-primary-foreground">
@@ -1322,7 +1322,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       {addShadeOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
           <div
-            className={`w-full max-w-lg rounded-xl border border-border bg-card p-4 space-y-3 text-sm max-h-[90vh] overflow-y-auto ${shadeMono}`}
+            className={`w-full max-w-lg rounded-xl bg-card p-4 space-y-3 text-sm max-h-[90vh] overflow-y-auto ${shadeMono}`}
           >
             <h2 className="text-lg font-semibold text-ds-warning">Add shade card</h2>
             <p className="text-xs text-neutral-500">
@@ -1336,7 +1336,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 required
                 value={addMfgDate}
                 onChange={(e) => setAddMfgDate(e.target.value)}
-                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background border border-input text-foreground ${shadeMono}`}
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background text-foreground ${shadeMono}`}
               />
             </label>
             <label className="block text-neutral-400 font-sans">
@@ -1345,12 +1345,12 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 value={cartonQuery}
                 onChange={(e) => setCartonQuery(e.target.value)}
                 placeholder="Search by product or customer (2+ characters)…"
-                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background border border-input text-foreground ${shadeMono}`}
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background text-foreground ${shadeMono}`}
               />
             </label>
             {cartonSearchLoading && <p className="text-xs text-neutral-500 font-sans">Searching…</p>}
             {cartonHits.length > 0 && (
-              <ul className="max-h-36 overflow-y-auto rounded-lg border border-ds-line/40 divide-y divide-ds-card text-xs font-sans">
+              <ul className="max-h-36 overflow-y-auto rounded-lg text-xs font-sans">
                 {cartonHits.map((c) => (
                   <li key={c.id}>
                     <button
@@ -1374,7 +1374,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               </ul>
             )}
             {addProductId ? (
-              <p className="text-xs text-neutral-500 font-sans rounded-lg border border-ds-line/40 bg-ds-main/80 px-2 py-1.5">
+              <p className="text-xs text-neutral-500 font-sans rounded-lg bg-ds-main/80 px-2 py-1.5">
                 Selected: <span className="text-ds-ink">{addSelectedLabel}</span>
                 <span className={`block mt-0.5 text-xs text-neutral-600 ${shadeMono}`}>ID: {addProductId}</span>
               </p>
@@ -1386,7 +1386,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               <select
                 value={addSubstrate}
                 onChange={(e) => setAddSubstrate(e.target.value as (typeof SHADE_SUBSTRATE_VALUES)[number])}
-                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background border border-input text-foreground ${shadeMono}`}
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background text-foreground ${shadeMono}`}
               >
                 {SHADE_SUBSTRATE_VALUES.map((v) => (
                   <option key={v} value={v}>
@@ -1403,7 +1403,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   onChange={(e) => setAddLabL(e.target.value)}
                   inputMode="decimal"
                   placeholder="e.g. 82.4"
-                  className={`mt-1 w-full px-2 py-2 rounded-lg bg-background border border-input text-foreground ${shadeMono}`}
+                  className={`mt-1 w-full px-2 py-2 rounded-lg bg-background text-foreground ${shadeMono}`}
                 />
               </label>
               <label className="block text-neutral-400 font-sans col-span-1">
@@ -1413,7 +1413,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   onChange={(e) => setAddLabA(e.target.value)}
                   inputMode="decimal"
                   placeholder="e.g. 2.1"
-                  className={`mt-1 w-full px-2 py-2 rounded-lg bg-background border border-input text-foreground ${shadeMono}`}
+                  className={`mt-1 w-full px-2 py-2 rounded-lg bg-background text-foreground ${shadeMono}`}
                 />
               </label>
               <label className="block text-neutral-400 font-sans col-span-1">
@@ -1423,7 +1423,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                   onChange={(e) => setAddLabB(e.target.value)}
                   inputMode="decimal"
                   placeholder="e.g. -4.2"
-                  className={`mt-1 w-full px-2 py-2 rounded-lg bg-background border border-input text-foreground ${shadeMono}`}
+                  className={`mt-1 w-full px-2 py-2 rounded-lg bg-background text-foreground ${shadeMono}`}
                 />
               </label>
             </div>
@@ -1433,7 +1433,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 value={addAwCode}
                 onChange={(e) => setAddAwCode(e.target.value)}
                 placeholder="Defaults from product master"
-                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background border border-input text-foreground ${shadeMono}`}
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background text-foreground ${shadeMono}`}
               />
             </label>
             <label className="block text-neutral-400 font-sans">
@@ -1444,7 +1444,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 max={99}
                 value={addQuantity}
                 onChange={(e) => setAddQuantity(Math.min(99, Math.max(1, Number(e.target.value) || 1)))}
-                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background border border-input text-foreground ${shadeMono}`}
+                className={`mt-1 w-full px-2 py-2 rounded-lg bg-background text-foreground ${shadeMono}`}
               />
             </label>
             <label className="block text-neutral-400 font-sans">
@@ -1454,17 +1454,17 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 onChange={(e) => setAddRemarks(e.target.value)}
                 rows={3}
                 placeholder="Lab notes, batch, etc."
-                className="mt-1 w-full px-2 py-2 rounded-lg bg-ds-main border border-ds-line/50 text-ds-ink resize-y font-sans"
+                className="mt-1 w-full px-2 py-2 rounded-lg bg-ds-main text-ds-ink resize-y font-sans"
               />
             </label>
-            <p className="text-xs text-neutral-600 font-sans border-t border-ds-line/30 pt-2">
+            <p className="text-xs text-neutral-600 font-sans pt-2">
               Color Integrity Audit Enabled - 12 Month Limit Enforced.
             </p>
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setAddShadeOpen(false)}
-                className="px-3 py-1.5 rounded-lg border border-ds-line/50 text-neutral-400 hover:bg-ds-card font-sans"
+                className="px-3 py-1.5 rounded-lg text-neutral-400 hover:bg-ds-card font-sans"
               >
                 Cancel
               </button>
@@ -1482,7 +1482,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
 
       {auditOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4">
-          <div className="w-full max-w-md rounded-lg border border-ds-line/60 bg-ds-card p-4 space-y-3 text-sm max-h-[85vh] overflow-y-auto">
+          <div className="w-full max-w-md rounded-lg bg-ds-card p-4 space-y-3 text-sm max-h-[85vh] overflow-y-auto">
             <h2 className="text-lg font-semibold text-foreground">Shade card history</h2>
             {auditLoading && <p className="text-ds-ink-muted text-xs">Loading…</p>}
             {!auditLoading && auditPayload && (
@@ -1494,9 +1494,9 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
                 {auditPayload.events.length === 0 ? (
                   <p className="text-ds-ink-faint text-xs">No events yet.</p>
                 ) : (
-                  <ul className="space-y-2 text-xs border-t border-ds-line/40 pt-2">
+                  <ul className="space-y-2 text-xs pt-2">
                     {auditPayload.events.map((ev) => (
-                      <li key={ev.id} className="border-b border-ds-line/50 pb-2">
+                      <li key={ev.id} className="pb-2">
                         <div className="text-ds-ink-faint">{new Date(ev.createdAt).toLocaleString()}</div>
                         <div className="text-ds-ink">{shadeEventSummary(ev)}</div>
                       </li>
@@ -1506,7 +1506,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
               </>
             )}
             <div className="flex justify-end pt-2">
-              <button type="button" onClick={() => setAuditOpen(false)} className="px-3 py-1.5 rounded border border-ds-line/60 text-ds-ink">
+              <button type="button" onClick={() => setAuditOpen(false)} className="px-3 py-1.5 rounded text-ds-ink">
                 Close
               </button>
             </div>
@@ -1515,7 +1515,7 @@ export default function HubInventoryShell({ toolType }: { toolType: Exclude<HubT
       )}
 
       {toolType === 'shade_cards' ? (
-        <p className="text-center text-xs text-neutral-600 pt-6 border-t border-ds-line/30 font-sans">
+        <p className="text-center text-xs text-neutral-600 pt-6 font-sans">
           Color Integrity Audit Enabled - 12 Month Limit Enforced.
         </p>
       ) : null}

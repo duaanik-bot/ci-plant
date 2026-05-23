@@ -239,7 +239,7 @@ export default function BillingPage() {
       >
         {/* Pending Invoice Queue — dispatches flipped to sent_to_billing by Dispatch operators. */}
         {queue.length > 0 && (
-          <div className="mb-4 space-y-2 rounded-ds-md border border-[var(--brand-primary)]/25 bg-[var(--brand-bg-soft)] p-3">
+          <div className="mb-4 space-y-2 rounded-ds-md bg-[var(--brand-bg-soft)] p-3">
             <div className="flex items-center justify-between px-1">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--brand-primary)]">
                 Pending Invoice Queue
@@ -254,7 +254,7 @@ export default function BillingPage() {
               {queue.map((g) => (
                 <div
                   key={g.customerId}
-                  className="flex items-center justify-between gap-3 rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2.5"
+                  className="flex items-center justify-between gap-3 rounded-ds-sm bg-[var(--bg-card)] px-3 py-2.5"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
@@ -344,7 +344,7 @@ export default function BillingPage() {
         ) : (
           <div className={industrialTableClassName()}>
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-[var(--border)] bg-[var(--bg-elevated)]">
+              <thead className="bg-[var(--bg-elevated)]">
                 <tr className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-muted">
                   <th className="px-3 py-2.5">Bill #</th>
                   <th className="px-3 py-2.5">Customer</th>
@@ -358,7 +358,7 @@ export default function BillingPage() {
                   <th className="px-3 py-2.5 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--border)]">
+              <tbody className="">
                 {filtered.map((b) => {
                   const firstItem = b.lineItems[0]
                   const totalQty = b.lineItems.reduce((s, li) => s + li.quantity, 0)
@@ -454,7 +454,7 @@ function BillDrawerBody({ bill }: { bill: Bill }) {
   return (
     <div className="space-y-4 pb-2">
       {/* Bill summary strip */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-ds-md border border-[var(--brand-primary)]/20 bg-[var(--brand-bg-soft)] px-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-ds-md bg-[var(--brand-bg-soft)] px-4 py-3.5">
         <div>
           <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-[var(--brand-primary)]">Bill #</p>
           <p className="font-mono text-sm font-bold text-ds-ink">{bill.billNumber}</p>
@@ -478,7 +478,7 @@ function BillDrawerBody({ bill }: { bill: Bill }) {
         <div className="-mx-4 overflow-x-auto px-4">
           <table className="mt-2 w-full text-xs">
             <thead>
-              <tr className="border-b border-[var(--border)] text-[10px] font-semibold uppercase tracking-wider text-ds-ink-muted">
+              <tr className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-muted">
                 <th className="pr-3 py-1.5 text-left font-semibold">Description</th>
                 <th className="px-2 py-1.5 text-right font-semibold">Qty</th>
                 <th className="px-2 py-1.5 text-right font-semibold">Rate</th>
@@ -486,7 +486,7 @@ function BillDrawerBody({ bill }: { bill: Bill }) {
                 <th className="pl-2 py-1.5 text-right font-semibold">Amount</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--border)]">
+            <tbody className="">
               {bill.lineItems.map((li) => (
                 <tr key={li.id} className="text-ds-ink-muted">
                   <td className="pr-3 py-2">
@@ -534,7 +534,7 @@ function BillDrawerBody({ bill }: { bill: Bill }) {
               <span className="font-medium tabular-nums text-ds-ink">{fmtAmount(bill.gstAmount)}</span>
             </div>
           )}
-          <div className="mt-1 flex items-center justify-between border-t border-[var(--border)] pt-2">
+          <div className="mt-1 flex items-center justify-between pt-2">
             <span className="flex items-center gap-1.5 text-sm font-semibold text-ds-ink">
               <Receipt className="h-3.5 w-3.5 text-[var(--brand-primary)]" />
               Total Amount
@@ -542,7 +542,7 @@ function BillDrawerBody({ bill }: { bill: Bill }) {
             <span className="text-base font-bold tabular-nums text-[var(--brand-primary)]">{fmtAmount(bill.totalAmount)}</span>
           </div>
           {bill.ewayApplicable && (
-            <div className="mt-1 rounded-ds-sm border border-[var(--warning)]/40 bg-[var(--warning-bg)] px-2 py-1 text-[11px] text-[var(--warning)]">
+            <div className="mt-1 rounded-ds-sm bg-[var(--warning-bg)] px-2 py-1 text-[11px] text-[var(--warning)]">
               E-way bill applicable (≥ ₹50,000 with transport mode set)
             </div>
           )}

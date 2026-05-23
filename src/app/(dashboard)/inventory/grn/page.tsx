@@ -204,7 +204,7 @@ export default function GrnPage() {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground text-sm'
+  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground text-sm'
 
   return (
     <div className="p-4 max-w-2xl mx-auto">
@@ -221,7 +221,7 @@ export default function GrnPage() {
       <form onSubmit={handleSubmit} className="space-y-5">
 
         {/* Material Search */}
-        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4">
+        <div className="bg-ds-card rounded-ds-md p-4">
           <MasterSearchSelect
             label="Material"
             required
@@ -284,14 +284,14 @@ export default function GrnPage() {
           )}
 
           {selectedMaterial ? (
-            <div className="mt-3 rounded-ds-md border border-ds-line/50 bg-ds-elevated/40 p-3">
+            <div className="mt-3 rounded-ds-md bg-ds-elevated/40 p-3">
               <p className="text-xs uppercase tracking-wide text-ds-ink-faint mb-2">Open Shortages</p>
               {openShortages.length === 0 ? (
                 <p className="text-xs text-ds-ink-faint">No open shortages for this material.</p>
               ) : (
                 <ul className="space-y-1.5 text-xs">
                   {openShortages.map((s) => (
-                    <li key={s.shortageId} className="flex flex-wrap items-center justify-between gap-2 rounded border border-ds-line/40 px-2 py-1.5">
+                    <li key={s.shortageId} className="flex flex-wrap items-center justify-between gap-2 rounded px-2 py-1.5">
                       <span className="text-ds-ink">
                         Job {s.jobCardId} {s.jobCardNumber ? `· JC#${s.jobCardNumber}` : ''}
                       </span>
@@ -307,7 +307,7 @@ export default function GrnPage() {
         </div>
 
         {/* Quantity Entry */}
-        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 space-y-3">
+        <div className="bg-ds-card rounded-ds-md p-4 space-y-3">
           <h3 className="text-ds-ink-muted text-sm font-medium">Received Quantity</h3>
 
           {/* Unit Toggle (only for board types) */}
@@ -357,20 +357,20 @@ export default function GrnPage() {
 
         {/* Tolerance Warning */}
         {toleranceWarning && (
-          <div className="bg-[var(--error-bg)] border border-[var(--error)] rounded-ds-md p-3 text-sm space-y-2">
+          <div className="bg-[var(--error-bg)] rounded-ds-md p-3 text-sm space-y-2">
             <div className="flex items-center gap-2">
               <span className="text-[var(--error)] text-lg">&#9888;</span>
               <span className="text-[var(--error)]">{toleranceWarning}</span>
             </div>
             <div className="flex items-center gap-2">
-              <input type="checkbox" id="approvalOverride" checked={approvalOverride} onChange={(e) => setApprovalOverride(e.target.checked)} className="rounded border-ds-line/60" />
+              <input type="checkbox" id="approvalOverride" checked={approvalOverride} onChange={(e) => setApprovalOverride(e.target.checked)} className="rounded" />
               <label htmlFor="approvalOverride" className="text-[var(--error)] text-xs">Manager approval granted &mdash; proceed with GRN</label>
             </div>
           </div>
         )}
 
         {/* Pricing */}
-        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 space-y-3">
+        <div className="bg-ds-card rounded-ds-md p-4 space-y-3">
           <h3 className="text-ds-ink-muted text-sm font-medium">Pricing</h3>
           <div className="grid grid-cols-2 gap-3">
             {isBoardType ? (
@@ -395,7 +395,7 @@ export default function GrnPage() {
         </div>
 
         {/* Batch & Pallet Tracking */}
-        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 space-y-3">
+        <div className="bg-ds-card rounded-ds-md p-4 space-y-3">
           <h3 className="text-ds-ink-muted text-sm font-medium">Batch & Pallet Tracking</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>

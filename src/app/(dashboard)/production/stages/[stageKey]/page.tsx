@@ -699,15 +699,15 @@ export default function ProductionStagePage() {
 
   function statusClass(status: string): string {
     const s = status.toLowerCase()
-    if (s === 'make_ready_alert') return 'border-[var(--warning)]/45 bg-[var(--warning-bg)] text-[var(--warning)]'
-    if (s === 'make_ready_started') return 'border-[var(--info)]/45 bg-[var(--info-bg)] text-[var(--info)]'
-    if (s === 'ready_to_receive') return 'border-cyan-500/45 bg-cyan-500/12 text-cyan-700'
-    if (s === 'partial_running') return 'border-orange-500/45 bg-orange-500/12 text-orange-700'
-    if (s === 'in_progress') return 'border-[var(--info)]/45 bg-[var(--info-bg)] text-[var(--info)]'
-    if (s === 'completed') return 'border-[var(--success)]/45 bg-[var(--success-bg)] text-[var(--success)]'
-    if (s === 'hold' || s === 'blocked') return 'border-slate-500/45 bg-slate-500/12 text-slate-700'
-    if (s === 'rework') return 'border-[var(--error)]/45 bg-[var(--error-bg)] text-[var(--error)]'
-    return 'border-ds-line/70 bg-ds-elevated text-ds-ink-muted'
+    if (s === 'make_ready_alert') return 'bg-[var(--warning-bg)] text-[var(--warning)]'
+    if (s === 'make_ready_started') return 'bg-[var(--info-bg)] text-[var(--info)]'
+    if (s === 'ready_to_receive') return 'bg-cyan-500/12 text-cyan-700'
+    if (s === 'partial_running') return 'bg-orange-500/12 text-orange-700'
+    if (s === 'in_progress') return 'bg-[var(--info-bg)] text-[var(--info)]'
+    if (s === 'completed') return 'bg-[var(--success-bg)] text-[var(--success)]'
+    if (s === 'hold' || s === 'blocked') return 'bg-slate-500/12 text-slate-700'
+    if (s === 'rework') return 'bg-[var(--error-bg)] text-[var(--error)]'
+    return 'bg-ds-elevated text-ds-ink-muted'
   }
 
   function previousRequiredStageKey(row: Payload['jobCards'][number]): string | null {
@@ -1574,14 +1574,14 @@ export default function ProductionStagePage() {
           <span className="text-ds-line/60 text-xs select-none">·</span>
           <Link
             href={`/production/stages/${stageKey}/triage`}
-            className="inline-flex items-center gap-1.5 rounded-ds-sm border border-ds-warning/30 bg-ds-warning/8 px-3 py-1.5 text-xs font-medium text-ds-warning hover:bg-ds-warning/15 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-ds-sm bg-ds-warning/8 px-3 py-1.5 text-xs font-medium text-ds-warning hover:bg-ds-warning/15 transition-colors"
           >
             Open Triage
           </Link>
         </div>
         <Link
           href="/production/job-cards"
-          className="inline-flex items-center gap-1.5 rounded-ds-sm border border-ds-line/50 bg-ds-elevated/60 px-3 py-1.5 text-xs text-ds-ink-muted hover:border-ds-warning/30 hover:text-ds-warning transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-ds-sm bg-ds-elevated/60 px-3 py-1.5 text-xs text-ds-ink-muted hover:text-ds-warning transition-colors"
         >
           Job Cards
         </Link>
@@ -1610,7 +1610,7 @@ export default function ProductionStagePage() {
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`rounded-full border px-3 py-1 text-xs ${tab === t ? 'border-ds-warning text-ds-warning bg-ds-warning/10' : 'border-ds-line/60 text-ds-ink-muted hover:bg-ds-card'}`}
+              className={`rounded-full px-3 py-1 text-xs ${tab === t ? 'text-ds-warning bg-ds-warning/10' : 'text-ds-ink-muted hover:bg-ds-card'}`}
             >
               {t.replace('_', ' ')}: {count}
             </button>
@@ -1623,7 +1623,7 @@ export default function ProductionStagePage() {
           type="button"
           disabled={bulkBusy || visibleList.length === 0}
           onClick={() => selectAllInCurrentTab()}
-          className="rounded-ds-sm border border-ds-line/50 px-2.5 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated disabled:opacity-40"
+          className="rounded-ds-sm bg-ds-elevated px-2.5 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated/80 disabled:opacity-40"
         >
           Select All (Tab)
         </button>
@@ -1635,7 +1635,7 @@ export default function ProductionStagePage() {
               await saveStageInline(row, { status: 'in_progress', skipReload: true })
             })
           }
-          className="rounded-ds-sm border border-ds-warning/35 px-2.5 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-40"
+          className="rounded-ds-sm bg-ds-warning/10 px-2.5 py-1 text-xs text-ds-warning hover:bg-ds-warning/15 disabled:opacity-40"
         >
           Bulk Start
         </button>
@@ -1647,15 +1647,15 @@ export default function ProductionStagePage() {
               await completeAndPushNext(row, true)
             })
           }
-          className="rounded-ds-sm border border-[var(--success)]/40 px-2.5 py-1 text-xs text-[var(--success)] hover:bg-[var(--success-bg)] disabled:opacity-40"
+          className="rounded-ds-sm bg-[var(--success-bg)] px-2.5 py-1 text-xs text-[var(--success)] hover:bg-[var(--success-bg)]/80 disabled:opacity-40"
         >
           Bulk Complete
         </button>
         <details className="relative">
-          <summary className="list-none cursor-pointer rounded-ds-sm border border-ds-line/50 px-2.5 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated">
+          <summary className="list-none cursor-pointer rounded-ds-sm bg-ds-elevated px-2.5 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated/80">
             More
           </summary>
-          <div className="absolute right-0 z-20 mt-1 w-56 rounded-ds-sm border border-ds-line/70 bg-white p-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-56 rounded-ds-sm bg-white p-1 shadow-lg">
             <button
               type="button"
               disabled={bulkBusy || selectedCount === 0}
@@ -1709,7 +1709,7 @@ export default function ProductionStagePage() {
           type="button"
           disabled={bulkBusy || selectedCount === 0}
           onClick={() => setSelectedStageRecordIds(new Set())}
-          className="rounded-ds-sm border border-ds-line/50 px-2.5 py-1 text-xs text-ds-ink-faint hover:bg-ds-elevated disabled:opacity-40"
+          className="rounded-ds-sm bg-ds-elevated px-2.5 py-1 text-xs text-ds-ink-faint hover:bg-ds-elevated/80 disabled:opacity-40"
         >
           Clear Selection
         </button>
@@ -1717,7 +1717,7 @@ export default function ProductionStagePage() {
 
       <div className={industrialTableClassName()}>
         <table className="w-full min-w-full table-fixed border-collapse text-left text-sm leading-tight md:min-w-[1180px]">
-          <thead className="sticky top-0 z-[30] border-b border-ds-line/40 bg-ds-main/95 text-ds-ink-muted backdrop-blur">
+          <thead className="sticky top-0 z-[30] bg-ds-main/95 text-ds-ink-muted backdrop-blur">
             <tr>
               <th className={`${stageHeadCell} w-8 text-center`}>
                 <input
@@ -1743,7 +1743,7 @@ export default function ProductionStagePage() {
               <th className={`${stageHeadCell} sticky right-0 z-[31] w-[5.5rem] bg-ds-main/95 text-right sm:w-[7.5rem]`}>Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-ds-line/30">
+          <tbody>
             {visibleList.map((row) => {
               const { stageRecord, jobCard } = row
               const received = getUpstreamSheets(row)
@@ -1880,7 +1880,7 @@ export default function ProductionStagePage() {
                       className={statusClass(String(progress.status ?? stageRecord.status ?? 'pending'))}
                     />
                     {alreadyPushedQty > 0 && alreadyPushedQty < completedQty ? (
-                      <span className="ml-1 rounded-full border border-[var(--warning)]/60 bg-[var(--warning-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--warning)]">
+                      <span className="ml-1 rounded-full bg-[var(--warning-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--warning)]">
                         partially_pushed
                       </span>
                     ) : null}
@@ -1907,7 +1907,7 @@ export default function ProductionStagePage() {
                         title="Open decisions drawer"
                         aria-label="Open decisions drawer"
                         onClick={() => setSpotlight(row)}
-                        className="inline-flex items-center justify-center rounded-ds-sm border border-ds-warning/45 bg-ds-warning/10 p-1 text-ds-warning hover:bg-ds-warning/15 disabled:opacity-50"
+                        className="inline-flex items-center justify-center rounded-ds-sm bg-ds-warning/10 p-1 text-ds-warning hover:bg-ds-warning/15 disabled:opacity-50"
                       >
                         <PanelRightOpen className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -1915,7 +1915,7 @@ export default function ProductionStagePage() {
                         href={`/production/job-cards/${jobCard.id}`}
                         title="Open job card"
                         aria-label={`Open job card ${jobCard.jobCardNumber}`}
-                        className={`${ICON_BUTTON_BASE} border border-ds-line/40 bg-ds-card/40 text-ds-ink-muted hover:border-ds-warning/45 hover:bg-ds-warning/8 hover:text-ds-warning`}
+                        className={`${ICON_BUTTON_BASE} bg-ds-card/40 text-ds-ink-muted hover:bg-ds-warning/8 hover:text-ds-warning`}
                       >
                         <FileText className="h-3.5 w-3.5" strokeWidth={2} />
                       </Link>
@@ -1948,7 +1948,7 @@ export default function ProductionStagePage() {
         </table>
       </div>
       {stageKey === 'dye_cutting' && list.some((x) => x.stageRecord.status === 'completed') ? (
-        <div className="rounded-ds-lg border border-ds-warning/50 bg-ds-warning/10 p-4">
+        <div className="rounded-ds-lg bg-ds-warning/10 p-4">
           <p className="text-ds-warning font-medium">⚠ DIE RETURN REQUIRED</p>
           <p className="text-xs text-ds-warning mt-1">
             Die Cutting completed jobs should return dies immediately with run impressions and condition.
@@ -1960,7 +1960,7 @@ export default function ProductionStagePage() {
       ) : null}
 
       {stageKey === 'embossing' && list.some((x) => x.stageRecord.status === 'completed') ? (
-        <div className="rounded-ds-lg border border-ds-warning/50 bg-ds-warning/10 p-4">
+        <div className="rounded-ds-lg bg-ds-warning/10 p-4">
           <p className="text-ds-warning font-medium">⚠ EMBOSS BLOCK RETURN REQUIRED</p>
           <p className="text-xs text-ds-warning mt-1">
             Embossing completed jobs should return blocks immediately with impressions and condition.
@@ -1991,7 +1991,7 @@ export default function ProductionStagePage() {
       {spotlight ? (
         <div className="space-y-3 text-sm text-ds-ink-muted">
           {/* OEE card */}
-          <div className="rounded-ds-lg border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5 space-y-3">
+          <div className="rounded-ds-lg bg-ds-elevated/30 px-4 py-3.5 space-y-3">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-warning">Live OEE</p>
             {spotlight.jobCard.oee ? (
               <>
@@ -1999,15 +1999,15 @@ export default function ProductionStagePage() {
                   OEE {spotlight.jobCard.oee.oee}%
                 </p>
                 <div className={`grid grid-cols-3 gap-2 text-xs ${mono}`}>
-                  <div className="rounded-ds-md border border-ds-line/30 bg-ds-card/60 px-2 py-1.5 text-center">
+                  <div className="rounded-ds-md bg-ds-card/60 px-2 py-1.5 text-center">
                     <div className="text-ds-ink-faint text-[10px] mb-0.5">Availability</div>
                     <div className="text-ds-ink font-semibold">{spotlight.jobCard.oee.availability}%</div>
                   </div>
-                  <div className="rounded-ds-md border border-ds-line/30 bg-ds-card/60 px-2 py-1.5 text-center">
+                  <div className="rounded-ds-md bg-ds-card/60 px-2 py-1.5 text-center">
                     <div className="text-ds-ink-faint text-[10px] mb-0.5">Performance</div>
                     <div className="text-ds-ink font-semibold">{spotlight.jobCard.oee.performance}%</div>
                   </div>
-                  <div className="rounded-ds-md border border-ds-line/30 bg-ds-card/60 px-2 py-1.5 text-center">
+                  <div className="rounded-ds-md bg-ds-card/60 px-2 py-1.5 text-center">
                     <div className="text-ds-ink-faint text-[10px] mb-0.5">Quality</div>
                     <div className="text-ds-ink font-semibold">{spotlight.jobCard.oee.quality}%</div>
                   </div>
@@ -2016,7 +2016,7 @@ export default function ProductionStagePage() {
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-ds-ink-faint mb-1.5">
                     Live speedometer (sheets/h)
                   </p>
-                  <div className="h-2 w-full rounded-full bg-ds-card border border-ds-line/40 overflow-hidden">
+                  <div className="h-2 w-full rounded-full bg-ds-card overflow-hidden">
                     <div
                       className="h-full bg-ds-warning transition-all duration-500"
                       style={{
@@ -2058,7 +2058,7 @@ export default function ProductionStagePage() {
             )}
           </div>
           {spotlight.jobCard.incentiveLedger?.incentiveEligible ? (
-            <div className="rounded-ds-lg border border-[var(--success)]/30 bg-[var(--success-bg)] px-4 py-3.5">
+            <div className="rounded-ds-lg bg-[var(--success-bg)] px-4 py-3.5">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-[var(--success)] mb-2.5">Incentive Earned</p>
               <div className="flex items-start gap-3">
                 <CircleDollarSign className="h-6 w-6 text-[var(--success)] shrink-0 mt-0.5" strokeWidth={1.75} />
@@ -2112,12 +2112,12 @@ export default function ProductionStagePage() {
             const nextStarted = nextStageState?.status === 'in_progress' || nextStageState?.status === 'completed'
 
             return (
-              <div className="rounded-ds-lg border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5 space-y-3">
+              <div className="rounded-ds-lg bg-ds-elevated/30 px-4 py-3.5 space-y-3">
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-warning">{stageMeta?.label ?? 'Stage'} Decisions</p>
 
                 {/* ── Pasting: Expected outcome strip (shown FIRST) ── */}
                 {stageKey === 'pasting' ? (
-                  <div className="rounded-ds-md border border-ds-warning/20 bg-ds-warning/5 px-3 py-2.5 space-y-1.5">
+                  <div className="rounded-ds-md bg-ds-warning/5 px-3 py-2.5 space-y-1.5">
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-ds-warning/70">Expected Outcome</p>
                     <div className={`flex items-center gap-2 flex-wrap text-xs ${mono}`}>
                       <span className="text-ds-ink-faint">Sheets in:</span>
@@ -2147,7 +2147,7 @@ export default function ProductionStagePage() {
                         setPushDrafts((prev) => ({ ...prev, [row.stageRecord.id]: String(auto.pushQty) }))
                         setWastageDrafts((prev) => ({ ...prev, [row.stageRecord.id]: String(auto.wastage) }))
                       }}
-                      className={`w-full rounded-ds-md border border-ds-warning/30 bg-ds-card px-3 py-2.5 text-right text-xl font-bold text-ds-ink focus:border-ds-warning/60 focus:outline-none ${mono}`}
+                      className={`w-full rounded-ds-md bg-ds-card px-3 py-2.5 text-right text-xl font-bold text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-warning/40 ${mono}`}
                       placeholder="0"
                       inputMode="numeric"
                     />
@@ -2161,7 +2161,7 @@ export default function ProductionStagePage() {
                         <select
                           value={getRowOperator(row)}
                           onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                          className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                          className="w-full rounded bg-ds-card px-2 py-1 text-xs text-ds-ink"
                         >
                           <option value="">Select operator</option>
                           {stationOperators.map((op) => (
@@ -2173,21 +2173,21 @@ export default function ProductionStagePage() {
                           value={getRowOperator(row)}
                           onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
                           placeholder="Operator"
-                          className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                          className="w-full rounded bg-ds-card px-2 py-1 text-xs text-ds-ink"
                         />
                       )}
                     </label>
                     {terminalRule.machineAutoFromOperator ? (
                       <label className="space-y-1">
                         <span className="text-ds-ink-faint">Machine</span>
-                        <div className="w-full rounded border border-ds-line/30 bg-ds-card/60 px-2 py-1 text-xs text-ds-ink">
+                        <div className="w-full rounded bg-ds-card/60 px-2 py-1 text-xs text-ds-ink">
                           {resolvePrintingMachine(getRowOperator(row)) ?? '—'} <span className="text-ds-ink-faint">(auto)</span>
                         </div>
                       </label>
                     ) : terminalRule.fixedMachineCode ? (
                       <label className="space-y-1">
                         <span className="text-ds-ink-faint">Machine</span>
-                        <div className="w-full rounded border border-ds-line/30 bg-ds-card/60 px-2 py-1 text-xs text-ds-ink">
+                        <div className="w-full rounded bg-ds-card/60 px-2 py-1 text-xs text-ds-ink">
                           {terminalRule.fixedMachineCode} <span className="text-ds-ink-faint">(fixed)</span>
                         </div>
                       </label>
@@ -2197,7 +2197,7 @@ export default function ProductionStagePage() {
                         <select
                           value={getRowMachine(row)}
                           onChange={(e) => setMachineDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                          className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                          className="w-full rounded bg-ds-card px-2 py-1 text-xs text-ds-ink"
                         >
                           <option value="">Select machine</option>
                           {terminalRule.machineCodes.map((mc) => (
@@ -2217,7 +2217,7 @@ export default function ProductionStagePage() {
                           setPushDrafts((prev) => ({ ...prev, [row.stageRecord.id]: String(auto.pushQty) }))
                           setWastageDrafts((prev) => ({ ...prev, [row.stageRecord.id]: String(auto.wastage) }))
                         }}
-                        className={`w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
+                        className={`w-full rounded bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
                         placeholder="0"
                       />
                     </label>
@@ -2226,7 +2226,7 @@ export default function ProductionStagePage() {
                       <input
                         value={pushDrafts[row.stageRecord.id] ?? String(autoFromCounter.pushQty)}
                         onChange={(e) => setPushDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                        className={`w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
+                        className={`w-full rounded bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
                         placeholder={String(autoFromCounter.pushQty)}
                       />
                     </label>
@@ -2235,7 +2235,7 @@ export default function ProductionStagePage() {
                       <input
                         value={wastageDrafts[row.stageRecord.id] ?? String(computeAutoFromCounter(row, getRowCounter(row)).wastage)}
                         readOnly
-                        className={`w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
+                        className={`w-full rounded bg-ds-card px-2 py-1 text-right text-xs text-ds-ink ${mono}`}
                         placeholder="0"
                       />
                     </label>
@@ -2245,15 +2245,15 @@ export default function ProductionStagePage() {
                 {/* ── Pasting: computed results row ── */}
                 {stageKey === 'pasting' && Number(getRowCounter(row)) > 0 ? (
                   <div className={`grid grid-cols-3 gap-2 text-xs ${mono}`}>
-                    <div className="rounded-ds-md border border-ds-line/30 bg-ds-card/60 px-2.5 py-2 text-center">
+                    <div className="rounded-ds-md bg-ds-card/60 px-2.5 py-2 text-center">
                       <p className="text-ds-ink-faint text-[10px] mb-0.5">Push Qty</p>
                       <p className="text-ds-ink font-semibold">{autoFromCounter.pushQty.toLocaleString('en-IN')}</p>
                     </div>
-                    <div className={`rounded-ds-md border px-2.5 py-2 text-center ${wastageCartons > 0 ? 'border-[var(--error)]/20 bg-[var(--error-bg)]' : 'border-ds-line/30 bg-ds-card/60'}`}>
+                    <div className={`rounded-ds-md px-2.5 py-2 text-center ${wastageCartons > 0 ? 'bg-[var(--error-bg)]' : 'bg-ds-card/60'}`}>
                       <p className="text-ds-ink-faint text-[10px] mb-0.5">Wastage (cartons)</p>
                       <p className={wastageCartons > 0 ? 'text-[var(--error)] font-semibold' : 'text-ds-ink font-semibold'}>{wastageCartons.toLocaleString('en-IN')}</p>
                     </div>
-                    <div className={`rounded-ds-md border px-2.5 py-2 text-center ${wastageSheetsFromCartons > 0 ? 'border-[var(--error)]/20 bg-[var(--error-bg)]' : 'border-ds-line/30 bg-ds-card/60'}`}>
+                    <div className={`rounded-ds-md px-2.5 py-2 text-center ${wastageSheetsFromCartons > 0 ? 'bg-[var(--error-bg)]' : 'bg-ds-card/60'}`}>
                       <p className="text-ds-ink-faint text-[10px] mb-0.5">Wastage (sheets)</p>
                       <p className={wastageSheetsFromCartons > 0 ? 'text-[var(--error)] font-semibold' : 'text-ds-ink font-semibold'}>{upsForPasting > 0 ? wastageSheetsFromCartons.toLocaleString('en-IN') : '—'}</p>
                     </div>
@@ -2269,7 +2269,7 @@ export default function ProductionStagePage() {
                         <select
                           value={getRowOperator(row)}
                           onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                          className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                          className="flex-1 rounded bg-ds-card px-2 py-1 text-xs text-ds-ink"
                         >
                           <option value="">Select operator</option>
                           {stationOperators.map((op) => (
@@ -2281,7 +2281,7 @@ export default function ProductionStagePage() {
                           value={getRowOperator(row)}
                           onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
                           placeholder="Operator"
-                          className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                          className="flex-1 rounded bg-ds-card px-2 py-1 text-xs text-ds-ink"
                         />
                       )}
                     </label>
@@ -2291,7 +2291,7 @@ export default function ProductionStagePage() {
                         <select
                           value={getRowMachine(row)}
                           onChange={(e) => setMachineDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                          className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                          className="flex-1 rounded bg-ds-card px-2 py-1 text-xs text-ds-ink"
                         >
                           <option value="">Select machine</option>
                           {terminalRule.machineCodes.map((mc) => (
@@ -2323,7 +2323,7 @@ export default function ProductionStagePage() {
                         type="button"
                         disabled={savingStageId === row.stageRecord.id || !!nextStarted}
                         onClick={() => void saveStageInline(row, { status: 'pending' })}
-                        className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning disabled:opacity-40 transition-colors"
+                        className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:text-ds-warning disabled:opacity-40 transition-colors"
                         title={nextStarted ? 'Next station already started' : 'Reopen this stage'}
                       >
                         Reopen
@@ -2331,14 +2331,14 @@ export default function ProductionStagePage() {
                       {nextKey ? (
                         <Link
                           href={`/production/stages/${nextKey}`}
-                          className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
+                          className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink hover:text-ds-warning transition-colors"
                         >
                           View Next Stage →
                         </Link>
                       ) : stageKey === 'pasting' ? (
                         <Link
                           href="/dispatch"
-                          className="rounded-ds-sm border border-[var(--success)]/40 bg-[var(--success-bg)] px-3 py-1.5 text-xs text-[var(--success)] hover:bg-[var(--success-bg)] transition-colors font-medium"
+                          className="rounded-ds-sm bg-[var(--success-bg)] px-3 py-1.5 text-xs text-[var(--success)] hover:bg-[var(--success-bg)]/80 transition-colors font-medium"
                         >
                           Go to Dispatch →
                         </Link>
@@ -2367,7 +2367,7 @@ export default function ProductionStagePage() {
                           type="button"
                           disabled={savingStageId === row.stageRecord.id || !Number.isFinite(pushQty) || pushQty <= 0 || pushQty > availableToPush}
                           onClick={() => void pushToNext(row, pushQty, false)}
-                          className="rounded-ds-sm border border-ds-warning/40 px-3 py-1.5 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-40 transition-colors"
+                          className="rounded-ds-sm bg-ds-warning/10 px-3 py-1.5 text-xs text-ds-warning hover:bg-ds-warning/15 disabled:opacity-40 transition-colors"
                         >
                           Partial Push
                         </button>
@@ -2378,7 +2378,7 @@ export default function ProductionStagePage() {
                             type="button"
                             disabled={savingStageId === row.stageRecord.id}
                             onClick={() => void setApproval(row, 'approved', null)}
-                            className="rounded-ds-sm border border-[var(--tooling,#7c3aed)]/40 px-3 py-1.5 text-xs text-[var(--tooling,#7c3aed)] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] disabled:opacity-40 transition-colors"
+                            className="rounded-ds-sm bg-[var(--tooling-bg,rgba(124,58,237,0.12))] px-3 py-1.5 text-xs text-[var(--tooling,#7c3aed)] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.18))] disabled:opacity-40 transition-colors"
                           >
                             Approve
                           </button>
@@ -2389,7 +2389,7 @@ export default function ProductionStagePage() {
                               const remarks = prompt('Reject remarks', '')?.trim() ?? ''
                               void setApproval(row, 'rejected', remarks || null)
                             }}
-                            className="rounded-ds-sm border border-[var(--tooling,#7c3aed)]/40 px-3 py-1.5 text-xs text-[var(--tooling,#7c3aed)] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] disabled:opacity-40 transition-colors"
+                            className="rounded-ds-sm bg-[var(--tooling-bg,rgba(124,58,237,0.12))] px-3 py-1.5 text-xs text-[var(--tooling,#7c3aed)] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.18))] disabled:opacity-40 transition-colors"
                           >
                             Reject
                           </button>
@@ -2429,7 +2429,7 @@ export default function ProductionStagePage() {
                           type="button"
                           disabled={savingStageId === row.stageRecord.id}
                           onClick={() => void bringBackFromNextStage(row)}
-                          className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning disabled:opacity-40 transition-colors"
+                          className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:text-ds-warning disabled:opacity-40 transition-colors"
                         >
                           Undo Last Push
                         </button>
@@ -2438,7 +2438,7 @@ export default function ProductionStagePage() {
                         type="button"
                         disabled={savingStageId === row.stageRecord.id}
                         onClick={() => void sendRework(row)}
-                        className="rounded-ds-sm border border-[var(--error)]/40 px-3 py-1.5 text-xs text-[var(--error)] hover:bg-[var(--error-bg)] disabled:opacity-40 transition-colors"
+                        className="rounded-ds-sm bg-[var(--error-bg)] px-3 py-1.5 text-xs text-[var(--error)] hover:bg-[var(--error-bg)]/80 disabled:opacity-40 transition-colors"
                       >
                         Send Rework
                       </button>
@@ -2448,7 +2448,7 @@ export default function ProductionStagePage() {
               </div>
             )
           })()}
-          <div className="rounded-ds-lg border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5">
+          <div className="rounded-ds-lg bg-ds-elevated/30 px-4 py-3.5">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-warning mb-3">Quality Checkpoint</p>
             {(() => {
               const keys = stationChecklistKeys(stageKey)
@@ -2461,7 +2461,7 @@ export default function ProductionStagePage() {
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
+                      className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-ds-warning transition-colors"
                       onClick={() =>
                         setChecklistDrafts((prev) => ({
                           ...prev,
@@ -2473,7 +2473,7 @@ export default function ProductionStagePage() {
                     </button>
                     <button
                       type="button"
-                      className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:border-[var(--error)]/30 hover:text-[var(--error)] transition-colors"
+                      className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-[var(--error)] transition-colors"
                       onClick={() =>
                         setChecklistDrafts((prev) => ({
                           ...prev,
@@ -2493,10 +2493,10 @@ export default function ProductionStagePage() {
                 return (
                   <label
                     key={item}
-                    className={`flex cursor-pointer items-center gap-2.5 rounded-ds-md border px-3 py-2 text-xs transition-colors ${
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-ds-md px-3 py-2 text-xs transition-colors ${
                       current
-                        ? 'border-[var(--success)]/40 bg-[var(--success-bg)] text-[var(--success)]'
-                        : 'border-ds-line/40 bg-ds-elevated/40 text-ds-ink hover:border-ds-warning/30'
+                        ? 'bg-[var(--success-bg)] text-[var(--success)]'
+                        : 'bg-ds-elevated/40 text-ds-ink hover:bg-ds-elevated'
                     }`}
                   >
                     <input
@@ -2522,13 +2522,13 @@ export default function ProductionStagePage() {
               All checks required before Complete Push.
             </p>
           </div>
-          <div className="rounded-ds-lg border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5">
+          <div className="rounded-ds-lg bg-ds-elevated/30 px-4 py-3.5">
             <div className="flex items-center justify-between mb-2">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-ink-faint">Downtime</p>
               <button
                 type="button"
                 onClick={() => setShowDowntime((v) => !v)}
-                className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
+                className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-ds-warning transition-colors"
               >
                 {showDowntime ? 'Collapse' : 'Log Downtime'}
               </button>
@@ -2537,7 +2537,7 @@ export default function ProductionStagePage() {
               <>
             <button
               type="button"
-              className="rounded border border-ds-line/60 px-2 py-1 text-xs hover:bg-ds-card"
+              className="rounded bg-ds-elevated px-2 py-1 text-xs hover:bg-ds-card"
               onClick={async () => {
                 const machine = prompt('Machine', spotlight.jobCard.machine?.machineCode ?? '')?.trim() ?? ''
                 const reason = prompt('Downtime reason (breakdown/plate/die/material/operator/power/quality/other)', '')?.trim() ?? ''
@@ -2607,13 +2607,13 @@ export default function ProductionStagePage() {
               </>
             ) : null}
           </div>
-          <div className="rounded-ds-lg border border-ds-line/40 bg-ds-elevated/30 px-4 py-3.5">
+          <div className="rounded-ds-lg bg-ds-elevated/30 px-4 py-3.5">
             <div className="flex items-center justify-between mb-2">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-ink-faint">Production Timeline</p>
               <button
                 type="button"
                 onClick={() => setShowTimeline((v) => !v)}
-                className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:border-ds-warning/40 hover:text-ds-warning transition-colors"
+                className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-ds-warning transition-colors"
               >
                 {showTimeline ? 'Collapse' : 'Show'}
               </button>
@@ -2698,7 +2698,7 @@ export default function ProductionStagePage() {
     >
       {pastingPackDraft && (
         <div className="space-y-4">
-          <div className="space-y-3 rounded-ds-md border border-[var(--brand-primary)]/25 bg-[var(--brand-bg-soft)] px-4 py-3.5">
+          <div className="space-y-3 rounded-ds-md bg-[var(--brand-bg-soft)] px-4 py-3.5">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--brand-primary)]">
               Job Card Summary
             </div>

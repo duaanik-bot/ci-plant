@@ -86,14 +86,14 @@ export function TableExportMenu<T>({
         disabled={disabled || empty}
         onClick={() => setOpen((v) => !v)}
         title={empty ? 'No rows to export' : 'Export current table'}
-        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-ds-line/50 bg-ds-card text-ds-ink text-xs font-semibold hover:bg-ds-elevated disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${buttonClassName}`}
+        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-ds-card text-ds-ink text-xs font-semibold hover:bg-ds-elevated disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${buttonClassName}`}
       >
         <span aria-hidden>⬇️</span>
         Export
       </button>
       {open && !empty && (
         <div
-          className={`absolute right-0 mt-1 min-w-[14rem] rounded-lg border border-ds-line/50 bg-ds-main py-1 shadow-xl z-50 ${menuClassName}`}
+          className={`absolute right-0 mt-1 min-w-[14rem] rounded-lg bg-ds-main py-1 shadow-xl z-50 ${menuClassName}`}
           role="menu"
         >
           <button

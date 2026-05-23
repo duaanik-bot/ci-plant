@@ -188,12 +188,12 @@ export default function RfqDetailPage() {
             {rfq.productName} · {rfq.packType}
           </p>
         </div>
-        <span className="px-3 py-1 rounded-full bg-ds-elevated border border-ds-line/60 text-xs text-ds-ink">
+        <span className="px-3 py-1 rounded-full bg-ds-elevated text-xs text-ds-ink">
           {rfq.status}
         </span>
       </div>
 
-      <section className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-4">
+      <section className="rounded-ds-md bg-ds-elevated/60 p-4">
         <h2 className="font-semibold text-ds-ink mb-2">Stage 1 — RFQ</h2>
         <p className="text-sm text-ds-ink-muted">
           Estimated volume:{' '}
@@ -204,7 +204,7 @@ export default function RfqDetailPage() {
         </p>
       </section>
 
-      <section className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-4">
+      <section className="rounded-ds-md bg-ds-elevated/60 p-4">
         <h2 className="font-semibold text-ds-ink mb-2">Stage 2 — Feasibility</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div>
@@ -212,7 +212,7 @@ export default function RfqDetailPage() {
             <input
               value={feas.boardSpec}
               onChange={(e) => setFeas((p) => ({ ...p, boardSpec: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
               placeholder="e.g. FBB 300gsm + matte lamination"
             />
           </div>
@@ -221,7 +221,7 @@ export default function RfqDetailPage() {
             <input
               value={feas.printProcess}
               onChange={(e) => setFeas((p) => ({ ...p, printProcess: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
               placeholder="e.g. Offset + Aqueous Varnish"
             />
           </div>
@@ -232,7 +232,7 @@ export default function RfqDetailPage() {
               min={0}
               value={feas.estimatedCostPer1000}
               onChange={(e) => setFeas((p) => ({ ...p, estimatedCostPer1000: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             />
           </div>
           <div>
@@ -242,7 +242,7 @@ export default function RfqDetailPage() {
               min={0}
               value={feas.toolingCost}
               onChange={(e) => setFeas((p) => ({ ...p, toolingCost: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             />
           </div>
           <div>
@@ -252,7 +252,7 @@ export default function RfqDetailPage() {
               min={0}
               value={feas.moq}
               onChange={(e) => setFeas((p) => ({ ...p, moq: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             />
           </div>
         </div>
@@ -275,7 +275,7 @@ export default function RfqDetailPage() {
         </div>
       </section>
 
-      <section className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-4">
+      <section className="rounded-ds-md bg-ds-elevated/60 p-4">
         <h2 className="font-semibold text-ds-ink mb-2">Stage 3 — Quotation</h2>
         <div className="flex items-center justify-between mb-2">
           <p className="text-sm text-ds-ink-muted">
@@ -295,7 +295,7 @@ export default function RfqDetailPage() {
             <input
               value={quote.quotationNumber}
               onChange={(e) => setQuote((p) => ({ ...p, quotationNumber: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground font-mono"
+              className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground font-mono"
               placeholder="QT-YYYY-NNNN"
             />
           </div>
@@ -306,7 +306,7 @@ export default function RfqDetailPage() {
               min={0}
               value={quote.unitPrice}
               onChange={(e) => setQuote((p) => ({ ...p, unitPrice: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             />
           </div>
           <div>
@@ -316,7 +316,7 @@ export default function RfqDetailPage() {
               min={0}
               value={quote.tooling}
               onChange={(e) => setQuote((p) => ({ ...p, tooling: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             />
           </div>
           <div>
@@ -324,7 +324,7 @@ export default function RfqDetailPage() {
             <input
               value={quote.paymentTerms}
               onChange={(e) => setQuote((p) => ({ ...p, paymentTerms: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             />
           </div>
           <div>
@@ -332,7 +332,7 @@ export default function RfqDetailPage() {
             <input
               value={quote.validity}
               onChange={(e) => setQuote((p) => ({ ...p, validity: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
               placeholder="e.g. 30 days"
             />
           </div>
@@ -342,7 +342,7 @@ export default function RfqDetailPage() {
               rows={2}
               value={quote.notes}
               onChange={(e) => setQuote((p) => ({ ...p, notes: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             />
           </div>
           <div>
@@ -350,7 +350,7 @@ export default function RfqDetailPage() {
             <select
               value={quote.clientDecision}
               onChange={(e) => setQuote((p) => ({ ...p, clientDecision: e.target.value as any }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             >
               <option value="">—</option>
               <option value="approved">Client Approved</option>
@@ -363,7 +363,7 @@ export default function RfqDetailPage() {
               <input
                 value={quote.rejectReason}
                 onChange={(e) => setQuote((p) => ({ ...p, rejectReason: e.target.value }))}
-                className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
               />
             </div>
           )}
@@ -387,7 +387,7 @@ export default function RfqDetailPage() {
         </div>
       </section>
 
-      <section className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/60 p-4">
+      <section className="rounded-ds-md bg-ds-elevated/60 p-4">
         <h2 className="font-semibold text-ds-ink mb-2">Stage 4 — PO & Job</h2>
         <p className="text-sm text-ds-ink-muted">PO number: {rfq.poNumber || 'Not received'}</p>
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
@@ -396,7 +396,7 @@ export default function RfqDetailPage() {
             <input
               value={quote.poNumber}
               onChange={(e) => setQuote((p) => ({ ...p, poNumber: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             />
           </div>
           <div>
@@ -406,7 +406,7 @@ export default function RfqDetailPage() {
               min={0}
               value={quote.poValue}
               onChange={(e) => setQuote((p) => ({ ...p, poValue: e.target.value }))}
-              className="w-full px-3 py-2 rounded bg-ds-card border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded bg-ds-card text-foreground"
             />
           </div>
         </div>
