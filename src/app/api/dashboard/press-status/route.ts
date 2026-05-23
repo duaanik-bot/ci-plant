@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { calculateOEE } from '@/lib/helpers'
+import { PRESS_MACHINE_CODES } from '@/lib/master-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +11,7 @@ export async function GET() {
   if (error) return error
 
   const presses = await db.machine.findMany({
-    where: { machineCode: { in: ['CI-01', 'CI-02', 'CI-03'] } },
+    where: { machineCode: { in: PRESS_MACHINE_CODES } },
     orderBy: { machineCode: 'asc' },
   })
   const today = new Date()
