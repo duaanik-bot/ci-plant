@@ -100,7 +100,7 @@ export async function POST(
 
   await createAuditLog({
     userId: user!.id,
-    action: 'CREATE',
+    action: 'INSERT',
     tableName: 'vendor_material_purchase_orders',
     recordId: result.id,
     oldValue: null,
