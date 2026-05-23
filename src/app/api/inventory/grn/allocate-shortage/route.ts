@@ -11,7 +11,7 @@ const bodySchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
-  const { error } = await requireRole('stores', 'production_manager', 'operations_head', 'md')
+  const { error } = await requireRole('admin', 'plant_head', 'accounts')
   if (error) return error
 
   const raw = await req.json().catch(() => ({}))

@@ -4,7 +4,7 @@ import { requireRole } from '@/lib/helpers'
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const { error } = await requireRole('operations_head', 'md')
+  const { error } = await requireRole('admin', 'plant_head')
   if (error) return error
 
   const headers = [

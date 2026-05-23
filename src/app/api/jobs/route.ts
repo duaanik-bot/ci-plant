@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     where: {
       ...(status ? { status } : {}),
       ...(customerId ? { customerId } : {}),
-      ...(user!.role === 'press_operator' && user!.machineAccess?.length
+      ...(user!.role === 'production' && user!.machineAccess?.length
         ? { machineSequence: { hasSome: user!.machineAccess } }
         : {}),
     },

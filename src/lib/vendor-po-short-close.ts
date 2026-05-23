@@ -19,7 +19,7 @@ export const SHORT_CLOSE_REASONS = [
 export type ShortCloseReason = (typeof SHORT_CLOSE_REASONS)[number]
 
 /** Roles allowed to execute short-close (matches `roles.role_name`). */
-export const SHORT_CLOSE_EXECUTOR_ROLES = ['md', 'director', 'procurement_manager'] as const
+export const SHORT_CLOSE_EXECUTOR_ROLES = ['admin', 'plant_head'] as const
 
 export type VendorPoShortCloseSnapshot = {
   orderedKg: number
@@ -92,7 +92,7 @@ export function computeShortCloseSnapshot(
 export function canAuthorizeShortCloseRole(roleName: string | undefined | null): boolean {
   if (!roleName) return false
   const r = roleName.trim().toLowerCase()
-  return r === 'md' || r === 'director' || r === 'procurement_manager'
+  return r === 'admin' || r === 'plant_head'
 }
 
 /** Build map vendorPoId → snapshot for all POs in `vendorPos` (uses one recon query). */

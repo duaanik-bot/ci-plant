@@ -14,7 +14,7 @@ const schema = z.object({
 })
 
 export async function PUT(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const { error, user } = await requireRole('stores', 'production_manager', 'operations_head', 'md')
+  const { error, user } = await requireRole('admin', 'plant_head', 'accounts')
   if (error) return error
 
   const { id } = await context.params

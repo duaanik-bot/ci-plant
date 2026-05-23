@@ -38,7 +38,7 @@ export function userCanRevisePlanningDecision(user: {
   permissions?: unknown
 }): boolean {
   const r = (user.role ?? '').trim().toLowerCase()
-  if (['md', 'operations_head', 'production_manager'].includes(r)) return true
+  if (['admin', 'plant_head', 'production', 'design_planning'].includes(r)) return true
   const p = user.permissions
   if (p && typeof p === 'object' && !Array.isArray(p)) {
     const rec = p as Record<string, unknown>

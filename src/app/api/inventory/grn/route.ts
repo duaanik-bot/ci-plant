@@ -32,10 +32,9 @@ const bodySchema = z.object({
 
 export async function GET(req: NextRequest) {
   const { error } = await requireRole(
-    'stores',
-    'production_manager',
-    'operations_head',
-    'md',
+    'admin',
+    'plant_head',
+    'accounts',
   )
   if (error) return error
 
@@ -68,10 +67,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const { error, user } = await requireRole(
-    'stores',
-    'production_manager',
-    'operations_head',
-    'md',
+    'admin',
+    'plant_head',
+    'accounts',
   )
   if (error) return error
 
