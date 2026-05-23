@@ -843,7 +843,7 @@ export default function PurchaseOrdersPage() {
         title="Purchase Orders"
         subtitle="Manage customer purchase orders — track status, readiness, and delivery pipeline"
       />
-      <div className="sticky top-0 z-40 rounded-ds-sm border border-ds-line/60 bg-ds-main/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
+      <div className="sticky top-0 z-40 rounded-ds-sm bg-ds-main/95 px-3 py-2 shadow-ds-depth-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
         <div className="flex flex-wrap items-center gap-2">
           <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Customer POs
@@ -1000,7 +1000,7 @@ export default function PurchaseOrdersPage() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 md:gap-3">
-        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
           <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
             <ShoppingCart className="h-5 w-5 text-ds-brand" aria-hidden />
           </div>
@@ -1016,7 +1016,7 @@ export default function PurchaseOrdersPage() {
             </div>
           </div>
         </div>
-        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
           <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
             <ListChecks className="h-5 w-5 text-ds-brand" aria-hidden />
           </div>
@@ -1032,7 +1032,7 @@ export default function PurchaseOrdersPage() {
             </div>
           </div>
         </div>
-        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
           <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
             <Package className="h-5 w-5 text-ds-brand" aria-hidden />
           </div>
@@ -1048,7 +1048,7 @@ export default function PurchaseOrdersPage() {
             </div>
           </div>
         </div>
-        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
           <div className="shrink-0 rounded-ds-md bg-ds-success/10 p-2.5">
             <IndianRupee className="h-5 w-5 text-ds-success" aria-hidden />
           </div>
@@ -1064,7 +1064,7 @@ export default function PurchaseOrdersPage() {
             </div>
           </div>
         </div>
-        <div className="flex items-start gap-3 rounded-ds-lg border border-border bg-card p-4 shadow-card">
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
           <div className="shrink-0 rounded-ds-md bg-ds-warning/10 p-2.5">
             <Gauge className="h-5 w-5 text-ds-warning" aria-hidden />
           </div>
@@ -1087,7 +1087,7 @@ export default function PurchaseOrdersPage() {
       <EnterpriseTableShell>
         <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-sm leading-tight">
           <thead className="sticky top-0 z-[30]">
-            <tr className="border-b border-border bg-card text-muted-foreground backdrop-blur-md">
+            <tr className="bg-[var(--bg-elevated)] text-[var(--text-secondary)] backdrop-blur-md shadow-[0_1px_0_0_rgba(15,23,42,0.06)]">
               <th className="w-8 px-1 py-0.5 font-semibold text-center" aria-label="Select">
                 <input
                   type="checkbox"
@@ -1139,7 +1139,7 @@ export default function PurchaseOrdersPage() {
                     }
                   }}
                   onFocus={() => setSelectedPoId(po.id)}
-                  className={`group/po cursor-pointer border-b border-ds-line/50 transition-[background,box-shadow] duration-150 ${
+                  className={`group/po cursor-pointer transition-[background,box-shadow] duration-150 ${
                     po.isPriority === true
                       ? INDUSTRIAL_PRIORITY_ROW_CLASS
                       : pushedToPlanning
