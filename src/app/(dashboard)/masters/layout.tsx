@@ -12,7 +12,7 @@ export default async function MastersLayout({
   const session = await getServerSession(authOptions)
   if (!session) redirect('/login')
   const role = (session.user as { role?: string })?.role
-  if (role !== 'operations_head' && role !== 'md') {
+  if (role !== 'admin' && role !== 'plant_head') {
     redirect('/')
   }
 
