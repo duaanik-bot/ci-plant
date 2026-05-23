@@ -62,8 +62,16 @@ export async function POST(
   const supplier = await db.supplier.findFirst({ where: { id: supplierId, active: true } })
   if (!supplier) return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
 
+  // Capture date once so prefix generation and lookup use the same base
+  const now = new Date()
+  const yyyymmdd =
+    `${now.getFullYear()}` +
+    `${String(now.getMonth() + 1).padStart(2, '0')}` +
+    `${String(now.getDate()).padStart(2, '0')}`
+  const todayPrefix = `PO-${yyyymmdd}-`
+
   const result = await db.$transaction(async (tx) => {
-    const prefix = `PO-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-`
+    const prefix = todayPrefix
     const latest = await tx.vendorMaterialPurchaseOrder.findFirst({
       where: { poNumber: { startsWith: prefix } },
       orderBy: { poNumber: 'desc' },

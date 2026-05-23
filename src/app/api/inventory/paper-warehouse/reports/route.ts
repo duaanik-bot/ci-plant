@@ -17,8 +17,8 @@ export async function GET(_req: NextRequest) {
       supplier: { select: { name: true } },
       lines: { select: { totalWeightKg: true, ratePerKg: true } },
       receipts: {
-        select: { createdAt: true },
-        orderBy: { createdAt: 'asc' },
+        select: { receiptDate: true },
+        orderBy: { receiptDate: 'asc' },
         take: 1,
       },
     },
@@ -64,7 +64,7 @@ export async function GET(_req: NextRequest) {
     const firstReceipt = po.receipts[0]
     if (!firstReceipt) continue
     const days = Math.floor(
-      (firstReceipt.createdAt.getTime() - po.orderDate.getTime()) / 86_400_000,
+      (firstReceipt.receiptDate.getTime() - po.orderDate.getTime()) / 86_400_000,
     )
     if (days < 0) continue
     const month = po.orderDate.toISOString().slice(0, 7) // "2026-05"
