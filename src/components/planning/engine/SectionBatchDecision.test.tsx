@@ -18,7 +18,7 @@ const baseLine = {
       { id: 'u2', name: 'Shamsher Inder' },
     ],
     designerId: 'u2',
-    pressAssignment: { code: 'CI-02', deckLabel: '6-colour bed', size: '1020×760 mm', loadPct: 48, runHours: 5.2, smartPicked: true },
+    pressAssignment: { code: 'PRN-02', deckLabel: '6-colour bed', size: '1020×760 mm', loadPct: 48, runHours: 5.2, smartPicked: true },
     readinessFive: { allReady: false, blockers: ['PA shortage'] },
   },
 } as unknown as PlanningEngineLine
@@ -31,7 +31,7 @@ describe('SectionBatchDecision', () => {
 
   it('shows press assignment with Smart pick chip', () => {
     render(<SectionBatchDecision line={baseLine} onPatch={async () => true} onLock={async () => {}} />)
-    expect(screen.getByText('CI-02')).toBeInTheDocument()
+    expect(screen.getByText('PRN-02')).toBeInTheDocument()
     expect(screen.getByText('Smart pick')).toBeInTheDocument()
     expect(screen.getByText('~5.2h run')).toBeInTheDocument()
     expect(screen.getByText('48%')).toBeInTheDocument()
