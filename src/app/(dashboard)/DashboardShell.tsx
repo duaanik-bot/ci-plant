@@ -160,7 +160,7 @@ export function DashboardShell({
   const userName = session?.user?.name ?? null
   const userRole = session?.user?.role as string | undefined
   const userImage = (session?.user as { image?: string | null } | undefined)?.image ?? null
-  const canSeeMasters = userRole === 'operations_head' || userRole === 'md'
+  const canSeeMasters = userRole === 'admin' || userRole === 'plant_head'
   const navRef = useRef<HTMLDivElement | null>(null)
   const [uiDensity, setUiDensity] = useUiDensity()
 
