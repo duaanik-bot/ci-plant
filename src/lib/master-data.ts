@@ -64,6 +64,7 @@ export const OPERATORS: OperatorSeed[] = [
 export type LoginUserSeed = { name: string; email: string; roleSlug: string }
 
 export const LOGIN_USERS: LoginUserSeed[] = [
+  { name: 'Anik Dua', email: 'anik@ci.local', roleSlug: 'admin' },
   { name: 'Ravi', email: 'ravi@ci.local', roleSlug: 'admin' },
   { name: 'Shamsheer Inder', email: 'shamsheer@ci.local', roleSlug: 'admin' },
   { name: 'Manish Admin', email: 'manish@ci.local', roleSlug: 'admin' },
