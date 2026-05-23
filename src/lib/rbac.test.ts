@@ -1,6 +1,6 @@
 // src/lib/rbac.test.ts
 import { describe, it, expect } from 'vitest'
-import { ROLE_SLUGS, ROLE_LABELS, hasModuleAccess, roleHasFullSystem } from './rbac'
+import { ROLE_SLUGS, ROLE_LABELS, hasModuleAccess, roleHasFullSystem, rolesWithModule } from './rbac'
 
 describe('rbac', () => {
   it('defines exactly the five roles', () => {
@@ -48,5 +48,15 @@ describe('rbac', () => {
     expect(ROLE_LABELS.admin).toBe('Admin')
     expect(ROLE_LABELS.plant_head).toBe('Plant Head')
     expect(ROLE_LABELS.design_planning).toBe('Design & Planning')
+  })
+
+  it('rolesWithModule returns every role that can reach a module', () => {
+    expect(rolesWithModule('customer_po').sort()).toEqual(
+      ['accounts', 'admin', 'design_planning', 'plant_head'].sort(),
+    )
+    expect(rolesWithModule('reports').sort()).toEqual(['admin', 'plant_head'].sort())
+    expect(rolesWithModule('cutting').sort()).toEqual(
+      ['admin', 'design_planning', 'plant_head', 'production'].sort(),
+    )
   })
 })
