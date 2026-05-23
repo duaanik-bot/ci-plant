@@ -21,6 +21,7 @@ import { ICON_BUTTON_BASE } from '@/components/design-system/tokens'
 import { PackingConfigEditor } from '@/components/industrial/PackingConfigEditor'
 import { normalizePackingConfig, packingTotal, type PackingConfig } from '@/lib/dispatch-packing'
 import { Package } from 'lucide-react'
+import { getTerminalRule, resolvePrintingMachine } from '@/lib/production-terminal-rules'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const stageCellPad = 'px-1.5 py-1 align-middle'
@@ -37,6 +38,7 @@ type StageRecord = {
   createdAt: string
   lastProductionTickAt: string | null
   inProgressSince: string | null
+  machineCode?: string | null
 }
 
 type YieldM = {
@@ -237,6 +239,30 @@ export default function ProductionStagePage() {
   const [pastingPackSaving, setPastingPackSaving] = useState(false)
 
   const stageMeta = PRODUCTION_STAGES.find((s) => s.key === stageKey)
+  const terminalRule = getTerminalRule(stageKey)
+  const [stationOperators, setStationOperators] = useState<{ id: string; name: string }[]>([])
+  const [machineDrafts, setMachineDrafts] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (!stageKey) return
+    fetch(`/api/operator-master?activeOnly=1&stageKey=${stageKey}`)
+      .then((r) => r.json())
+      .then((data: { operators?: { id: string; name: string }[] }) => {
+        setStationOperators((data.operators ?? []).map((o) => ({ id: o.id, name: o.name })))
+      })
+      .catch(() => setStationOperators([]))
+  }, [stageKey])
+
+  function getRowMachine(row: Payload['jobCards'][number]): string {
+    return machineDrafts[row.stageRecord.id] ?? row.stageRecord.machineCode ?? (terminalRule.fixedMachineCode ?? '')
+  }
+
+  function effMachineForRow(row: Payload['jobCards'][number]): string | null {
+    const op = getRowOperator(row).trim()
+    if (terminalRule.machineAutoFromOperator) return resolvePrintingMachine(op)
+    if (terminalRule.fixedMachineCode) return terminalRule.fixedMachineCode
+    return machineDrafts[row.stageRecord.id] ?? row.stageRecord.machineCode ?? null
+  }
 
   // Tracks whether the first load has landed — used to choose between full
   // loading gate and background refresh without putting `data` in `load`'s deps
@@ -773,6 +799,7 @@ export default function ProductionStagePage() {
             id: row.stageRecord.id,
             operator: getRowOperator(row).trim() || null,
             counter: counter != null ? Math.floor(counter) : null,
+            machineCode: effMachineForRow(row),
             ...(opts?.status ? { status: opts.status } : {}),
           },
         ],
@@ -1125,6 +1152,7 @@ export default function ProductionStagePage() {
           id: row.stageRecord.id,
           operator: getRowOperator(row).trim() || null,
           counter: updatedCompleted,
+          machineCode: effMachineForRow(row),
           status: stationFinished ? 'completed' : 'in_progress',
         },
       ] as Array<Record<string, unknown>>
@@ -2129,13 +2157,46 @@ export default function ProductionStagePage() {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <label className="space-y-1">
                       <span className="text-ds-ink-faint">Operator</span>
-                      <input
+                      <select
                         value={getRowOperator(row)}
                         onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
                         className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
-                        placeholder="Operator"
-                      />
+                      >
+                        <option value="">Select operator</option>
+                        {stationOperators.map((op) => (
+                          <option key={op.id} value={op.name}>{op.name}</option>
+                        ))}
+                      </select>
                     </label>
+                    {terminalRule.machineAutoFromOperator ? (
+                      <label className="space-y-1">
+                        <span className="text-ds-ink-faint">Machine</span>
+                        <div className="w-full rounded border border-ds-line/30 bg-ds-card/60 px-2 py-1 text-xs text-ds-ink">
+                          {resolvePrintingMachine(getRowOperator(row)) ?? '—'} <span className="text-ds-ink-faint">(auto)</span>
+                        </div>
+                      </label>
+                    ) : terminalRule.fixedMachineCode ? (
+                      <label className="space-y-1">
+                        <span className="text-ds-ink-faint">Machine</span>
+                        <div className="w-full rounded border border-ds-line/30 bg-ds-card/60 px-2 py-1 text-xs text-ds-ink">
+                          {terminalRule.fixedMachineCode} <span className="text-ds-ink-faint">(fixed)</span>
+                        </div>
+                      </label>
+                    ) : terminalRule.machineSelectable && terminalRule.machineCodes.length > 0 ? (
+                      <label className="space-y-1">
+                        <span className="text-ds-ink-faint">Machine</span>
+                        <select
+                          value={getRowMachine(row)}
+                          onChange={(e) => setMachineDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                          className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                        >
+                          <option value="">Select machine</option>
+                          {terminalRule.machineCodes.map((mc) => (
+                            <option key={mc} value={mc}>{mc}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                     <label className="space-y-1">
                       <span className="text-ds-ink-faint">Actual Counter</span>
                       <input
@@ -2190,17 +2251,38 @@ export default function ProductionStagePage() {
                   </div>
                 ) : null}
 
-                {/* ── Pasting: operator (secondary, below numbers) ── */}
+                {/* ── Pasting: operator + machine (secondary, below numbers) ── */}
                 {stageKey === 'pasting' ? (
-                  <label className="flex items-center gap-2 text-xs">
-                    <span className="text-ds-ink-faint w-16 shrink-0">Operator</span>
-                    <input
-                      value={getRowOperator(row)}
-                      onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                      className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
-                      placeholder="Operator name"
-                    />
-                  </label>
+                  <div className="space-y-1.5">
+                    <label className="flex items-center gap-2 text-xs">
+                      <span className="text-ds-ink-faint w-16 shrink-0">Operator</span>
+                      <select
+                        value={getRowOperator(row)}
+                        onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                        className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                      >
+                        <option value="">Select operator</option>
+                        {stationOperators.map((op) => (
+                          <option key={op.id} value={op.name}>{op.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {terminalRule.machineSelectable && terminalRule.machineCodes.length > 0 ? (
+                      <label className="flex items-center gap-2 text-xs">
+                        <span className="text-ds-ink-faint w-16 shrink-0">Machine</span>
+                        <select
+                          value={getRowMachine(row)}
+                          onChange={(e) => setMachineDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                          className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                        >
+                          <option value="">Select machine</option>
+                          {terminalRule.machineCodes.map((mc) => (
+                            <option key={mc} value={mc}>{mc}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                  </div>
                 ) : null}
 
                 {/* ── Status line ── */}
@@ -2246,16 +2328,22 @@ export default function ProductionStagePage() {
                     </>
                   ) : (
                     <>
-                      {currentStatus !== 'in_progress' ? (
-                        <button
-                          type="button"
-                          disabled={savingStageId === row.stageRecord.id}
-                          onClick={() => void saveStageInline(row, { status: 'in_progress' })}
-                          className="rounded-ds-sm bg-ds-warning px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
-                        >
-                          Start Production
-                        </button>
-                      ) : null}
+                      {(() => {
+                        const _operatorOk = !terminalRule.operatorRequired || !!getRowOperator(row).trim()
+                        const _machineOk = !terminalRule.machineRequired || !!effMachineForRow(row)
+                        const _rulesMet = _operatorOk && _machineOk
+                        return currentStatus !== 'in_progress' ? (
+                          <button
+                            type="button"
+                            disabled={savingStageId === row.stageRecord.id || !_rulesMet}
+                            onClick={() => void saveStageInline(row, { status: 'in_progress' })}
+                            className="rounded-ds-sm bg-ds-warning px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
+                            title={!_rulesMet ? (!_operatorOk ? 'Select operator first' : 'Select machine first') : undefined}
+                          >
+                            Start Production
+                          </button>
+                        ) : null
+                      })()}
                       {availableToPush > 0 ? (
                         <button
                           type="button"
