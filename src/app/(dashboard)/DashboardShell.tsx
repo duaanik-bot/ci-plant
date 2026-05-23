@@ -191,7 +191,6 @@ export function DashboardShell({
   const userName = session?.user?.name ?? null
   const userRole = session?.user?.role as string | undefined
   const userImage = (session?.user as { image?: string | null } | undefined)?.image ?? null
-  const canSeeMasters = userRole === 'admin' || userRole === 'plant_head'
   const allowHref = (href: string) => {
     const mod = HREF_MODULE[href]
     return !mod || hasModuleAccess(userRole, mod)
