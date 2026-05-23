@@ -28,7 +28,6 @@ type MachineFlowItem = {
   }
 }
 
-const PREPRESS: string[] = []
 const PRESS = ['PRN-01', 'PRN-02', 'PRN-03']
 const POSTPRESS = ['COT-01', 'COT-02']
 const FINISHING = ['DIE-A01', 'DIE-A02', 'DIE-A03', 'DIE-M01', 'DIE-M02', 'PST-01', 'PST-02', 'PST-03', 'CUT-01']
@@ -117,7 +116,6 @@ export default function MachineFlowPage() {
     return { label, items: items.length ? items : machines.filter((m) => codes.some((c) => m.machineCode === c || m.name.includes(c))) }
   }
 
-  const prepressItems: typeof machines = []
   const pressItems = machines.filter((m) => PRESS.includes(m.machineCode))
   const postpressItems = machines.filter((m) => POSTPRESS.includes(m.machineCode))
   const finishingItems = machines.filter((m) => FINISHING.includes(m.machineCode))
@@ -132,26 +130,6 @@ export default function MachineFlowPage() {
       </div>
 
       <div className="space-y-6">
-        <section>
-          <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">Pre-press</h2>
-          <div className="flex flex-wrap gap-2">
-            <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
-              <p className="text-ds-ink-muted text-xs">Board Store</p>
-            </div>
-            {prepressItems.map((m) => (
-              <MachineCard
-                key={m.id}
-                m={m}
-                onPmClick={setPmMachineId}
-                highlight={highlightMachineId === m.id}
-              />
-            ))}
-            <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
-              <p className="text-ds-ink-muted text-xs">Plate QC & Store</p>
-            </div>
-          </div>
-        </section>
-
         <section>
           <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">Press</h2>
           <div className="flex flex-wrap gap-2">
