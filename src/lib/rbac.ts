@@ -1,8 +1,9 @@
 // src/lib/rbac.ts
-// Role-based access control for the 5 canonical plant roles.
+// Role-based access control for the canonical plant roles.
 
 export const ROLE_SLUGS = [
   'admin',
+  'md',
   'plant_head',
   'accounts',
   'design_planning',
@@ -13,6 +14,7 @@ export type RoleSlug = (typeof ROLE_SLUGS)[number]
 
 export const ROLE_LABELS: Record<RoleSlug, string> = {
   admin: 'Admin',
+  md: 'MD',
   plant_head: 'Plant Head',
   accounts: 'Accounts',
   design_planning: 'Design & Planning',
@@ -28,7 +30,7 @@ export type ModuleKey =
   | 'job_cards'
   | 'cutting'
   | 'printing'
-  // full-system-only modules (admin / plant_head)
+  // full-system-only modules (admin / plant_head / md)
   | 'tooling_hub'
   | 'inventory'
   | 'stores'
@@ -43,6 +45,7 @@ const FULL = '*' as const
 /** Role → modules. '*' means full system (every module). */
 export const ROLE_MODULES: Record<RoleSlug, ModuleKey[] | typeof FULL> = {
   admin: FULL,
+  md: FULL,
   plant_head: FULL,
   accounts: ['customer_po', 'paper_warehouse'],
   design_planning: ['customer_po', 'planning', 'artwork_queue', 'job_cards', 'cutting', 'printing'],
