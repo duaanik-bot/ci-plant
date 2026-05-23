@@ -41,20 +41,20 @@
   --text-secondary: #475569;
   --text-muted: #94a3b8;
 
-  --bg-main: #ffffff;
+  --bg-main: #f8fafc;
   --bg-card: #ffffff;
-  --bg-muted: #f8fafc;
-  --bg-elevated: #f1f5f9;
+  --bg-muted: #f1f5f9;
+  --bg-elevated: #e9eef4;
 
   --border: rgba(15, 23, 42, 0.08);
 
   /* —— ds-* mirrors (Tailwind theme) —— LIGHT */
   --ds-bg-main: var(--bg-main);
-  --ds-bg-main-rgb: 255 255 255;
+  --ds-bg-main-rgb: 248 250 252;
   --ds-bg-card: var(--bg-card);
   --ds-bg-card-rgb: 255 255 255;
   --ds-bg-elevated: var(--bg-elevated);
-  --ds-bg-elevated-rgb: 241 245 249;
+  --ds-bg-elevated-rgb: 233 238 244;
 
   --ds-border-subtle: var(--border);
   --ds-border-subtle-rgb: 15 23 42;

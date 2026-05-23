@@ -28,8 +28,8 @@ const config: Config = {
       },
       boxShadow: {
         /** Unified depth — neutral only */
-        'ds-depth': '0 4px 24px rgba(15,23,42,0.08)',
-        'ds-depth-sm': '0 1px 3px rgba(15,23,42,0.06)',
+        'ds-depth': '0 1px 3px rgba(15,23,42,0.06),0 4px 16px rgba(15,23,42,0.07)',
+        'ds-depth-sm': '0 1px 2px rgba(15,23,42,0.05),0 2px 6px rgba(15,23,42,0.05)',
         'ds-drawer': '0 8px 32px rgba(15,23,42,0.12)',
         'ds-drawer-foot': '0 -4px 20px rgba(15,23,42,0.08)',
         'ds-focus': '0 0 0 3px rgba(37, 99, 235, 0.2)',
