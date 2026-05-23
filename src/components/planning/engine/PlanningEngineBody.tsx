@@ -83,7 +83,7 @@ export function PlanningEngineBody({
         </aside>
 
         {/* Center: Scrollable main content */}
-        <main className="flex-1 min-w-0 overflow-x-hidden">
+        <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto">
           <div className="p-4 lg:p-5 space-y-4 max-w-4xl">
 
             {/* Step 1 — Board Allocation */}

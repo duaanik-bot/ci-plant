@@ -59,11 +59,11 @@ export const SectionUpsAndSpec = memo(function SectionUpsAndSpec({ line }: Props
   return (
     <CardSection title="SHEET METRICS">
       <div className="grid grid-cols-2 gap-3">
-        {/* UPS — read-only here; editable in Board Allocation (adjacent to sheet size). */}
+        {/* UPS — read-only here; editable in Cut Plan & Layout above. */}
         <MetricTile
           label="Units per sheet"
           value={ups != null ? ups : '—'}
-          hint="Edit in Board Allocation"
+          hint="Edit in Cut Plan & Layout ↑"
         />
         <MetricTile
           label="Sheet yield"

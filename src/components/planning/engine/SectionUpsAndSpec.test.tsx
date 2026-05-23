@@ -24,11 +24,11 @@ const baseLine = {
 } as unknown as PlanningEngineLine
 
 describe('SectionUpsAndSpec', () => {
-  it('shows UPS read-only (edited in Board Allocation) and sheet yield', () => {
+  it('shows UPS read-only (edited in Cut Plan & Layout) and sheet yield', () => {
     render(<SectionUpsAndSpec line={baseLine} onPatch={async () => true} />)
-    // UPS is now a read-only metric here — the editable input lives in Board Allocation.
+    // UPS is now a read-only metric here — the editable input lives in Cut Plan & Layout above.
     expect(screen.getByText('Units per sheet')).toBeInTheDocument()
-    expect(screen.getByText('Edit in Board Allocation')).toBeInTheDocument()
+    expect(screen.getByText('Edit in Cut Plan & Layout ↑')).toBeInTheDocument()
     expect(screen.getByText('74.3%')).toBeInTheDocument()
   })
 
