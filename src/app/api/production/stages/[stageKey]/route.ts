@@ -562,6 +562,9 @@ async function fetchStageData(stageKey: string) {
         createdAt: r.createdAt.toISOString(),
         lastProductionTickAt: r.lastProductionTickAt?.toISOString() ?? null,
         inProgressSince: r.inProgressSince?.toISOString() ?? null,
+        machineCode: (r.stageData && typeof r.stageData === 'object'
+          ? ((r.stageData as Record<string, unknown>).machineCode ?? null)
+          : null) as string | null,
       },
       idleHours,
       jobCard: jc

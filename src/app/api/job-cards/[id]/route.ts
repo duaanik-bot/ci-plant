@@ -16,6 +16,8 @@ import {
   releaseReservationsForJob,
   recalculateMaterialShortage,
 } from '@/lib/reservation-release'
+import { getTerminalRule, resolvePrintingMachine } from '@/lib/production-terminal-rules'
+import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,6 +72,7 @@ const stageUpdateSchema = z.object({
   counter: z.number().int().optional().nullable(),
   sheetSize: z.string().optional().nullable(),
   excessSheets: z.number().int().min(0).optional().nullable(),
+  machineCode: z.string().optional().nullable(),
 })
 
 const updateSchema = z.object({
@@ -461,6 +464,60 @@ export async function PUT(
     )
   }
 
+  // ── Terminal-rule enforcement: validate before any DB writes ─────────────
+  if (data.stages?.length) {
+    const terminalErrors: string[] = []
+    for (const s of data.stages) {
+      if (s.status !== 'in_progress' && s.status !== 'completed') continue
+      const byId = s.id ? existing.stages.find((r) => r.id === s.id) : null
+      const byName = !byId && s.stageName ? existing.stages.find((r) => r.stageName === s.stageName) : null
+      const target = byId ?? byName
+      const tStageName = target?.stageName ?? s.stageName ?? null
+      if (!tStageName) continue
+      const stageKey = stageKeyByLabel[tStageName]
+      if (!stageKey) continue
+      const rule = getTerminalRule(stageKey)
+      if (!rule.operatorRequired && !rule.machineRequired) continue
+
+      const effectiveOperator =
+        s.operator !== undefined ? (s.operator ?? null) : (target?.operator ?? null)
+      const prevData =
+        target?.stageData && typeof target.stageData === 'object'
+          ? (target.stageData as Record<string, unknown>)
+          : {}
+      const clientMachineCode =
+        s.machineCode !== undefined ? (s.machineCode ?? null) : ((prevData.machineCode as string | null) ?? null)
+
+      if (rule.operatorRequired && !effectiveOperator) {
+        terminalErrors.push(`${tStageName}: operator is required`)
+      }
+
+      if (rule.machineRequired) {
+        if (rule.machineAutoFromOperator) {
+          // printing: machine derived from operator
+          if (effectiveOperator) {
+            const resolved = resolvePrintingMachine(effectiveOperator)
+            if (!resolved) {
+              terminalErrors.push(`${tStageName}: select a valid printing operator (machine auto-assigned)`)
+            }
+          }
+          // if no operator, the operatorRequired check above already fires
+        } else if (rule.fixedMachineCode) {
+          // cutting: always satisfied by CUT-01 — no check needed
+        } else if (rule.machineSelectable) {
+          // chemical_coating, dye_cutting, pasting: explicit machine required
+          if (!clientMachineCode) {
+            terminalErrors.push(`${tStageName}: machine is required`)
+          }
+        }
+      }
+    }
+    if (terminalErrors.length > 0) {
+      return NextResponse.json({ error: terminalErrors.join('; ') }, { status: 400 })
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   const updated = await db.$transaction(async (tx) => {
     const header = await tx.productionJobCard.update({
       where: { id },
@@ -540,6 +597,28 @@ export async function PUT(
             s.status !== 'in_progress' &&
             prev?.status === 'in_progress'
 
+          // ── Compute machineCode to persist into stageData ──────────────────
+          const prevData =
+            prev?.stageData && typeof prev.stageData === 'object'
+              ? (prev.stageData as Record<string, unknown>)
+              : {}
+          const effectiveOperator =
+            s.operator !== undefined ? (s.operator ?? null) : (prev?.operator ?? null)
+          const stageKey = targetStageName ? stageKeyByLabel[targetStageName] : undefined
+          let machineCodeToStore: string | null | undefined = undefined
+          if (stageKey === 'printing') {
+            machineCodeToStore = effectiveOperator ? resolvePrintingMachine(effectiveOperator) : null
+          } else if (stageKey === 'cutting') {
+            machineCodeToStore = 'CUT-01'
+          } else if (s.machineCode !== undefined) {
+            machineCodeToStore = s.machineCode ?? null
+          }
+          const stageDataPatch: Prisma.InputJsonValue | undefined =
+            machineCodeToStore !== undefined
+              ? ({ ...prevData, machineCode: machineCodeToStore } as Prisma.InputJsonValue)
+              : undefined
+          // ──────────────────────────────────────────────────────────────────
+
           const payload = {
             ...(s.status !== undefined ? { status: s.status } : {}),
             ...(s.operator !== undefined ? { operator: s.operator } : {}),
@@ -550,6 +629,7 @@ export async function PUT(
             ...(counterTicked ? { lastProductionTickAt: new Date() } : {}),
             ...(becameInProgress ? { inProgressSince: new Date() } : {}),
             ...(leftInProgress ? { inProgressSince: null } : {}),
+            ...(stageDataPatch !== undefined ? { stageData: stageDataPatch } : {}),
           }
           if (targetId) {
             return tx.productionStageRecord.update({
@@ -565,6 +645,7 @@ export async function PUT(
               operator: payload.operator ?? null,
               counter: payload.counter ?? 0,
               sheetSize: payload.sheetSize ?? null,
+              ...(stageDataPatch !== undefined ? { stageData: stageDataPatch } : {}),
               ...(payload.completedAt ? { completedAt: payload.completedAt } : {}),
               ...(payload.lastProductionTickAt ? { lastProductionTickAt: payload.lastProductionTickAt } : {}),
               ...(payload.inProgressSince ? { inProgressSince: payload.inProgressSince } : {}),
