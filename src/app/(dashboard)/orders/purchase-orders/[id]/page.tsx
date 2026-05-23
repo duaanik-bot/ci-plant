@@ -1215,7 +1215,7 @@ export default function EditPurchaseOrderPage() {
                   type="button"
                   onClick={releaseToPlanning}
                   disabled={!canReleaseToPlanning || releasingToPlanning}
-                  className="w-full rounded-ds-md bg-ds-warning px-3 py-2 text-xs font-bold text-white shadow transition-colors hover:bg-ds-warning disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                  className="w-full rounded-ds-md bg-[var(--brand-primary)] px-3 py-2 text-xs font-bold text-white shadow transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
                 >
                   {releasingToPlanning ? 'Releasing…' : 'Release to Planning'}
                 </button>
