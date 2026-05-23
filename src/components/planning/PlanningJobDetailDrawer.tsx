@@ -9,8 +9,7 @@ import { INDUSTRIAL_PRIORITY_STAR_ICON_CLASS } from '@/lib/industrial-priority-u
 import {
   MASTER_EMBOSSING_AND_LEAFING,
 } from '@/lib/master-enums'
-import { useMaster } from '@/components/masters/MastersProvider'
-import { MASTER } from '@/lib/masters/registry'
+import { fetchMiniMasterOptions } from '@/lib/minimasters-options'
 import { mergePlanningMetaUps, readPlanningMeta } from '@/lib/planning-decision-spec'
 import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
@@ -350,8 +349,7 @@ export function PlanningJobDetailDrawer({
   const [sheetWidthMm, setSheetWidthMm] = useState('')
   const [wastageSheetsInput, setWastageSheetsInput] = useState('150')
   const [boardTypeOptions, setBoardTypeOptions] = useState<string[]>([])
-  const coatingMaster = useMaster(MASTER.COATING)
-  const coatingOptions = coatingMaster.options.map((o) => o.label)
+  const [coatingOptions, setCoatingOptions] = useState<string[]>([])
   const [readiness, setReadiness] = useState<MaterialReadinessPanelData | null>(null)
   const [readinessLoading, setReadinessLoading] = useState(false)
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>('')
@@ -415,8 +413,12 @@ export function PlanningJobDetailDrawer({
     let cancelled = false
     ;(async () => {
       try {
-        const materialsRes = await fetch('/api/masters/materials', { cache: 'no-store' })
+        const [coating, materialsRes] = await Promise.all([
+          fetchMiniMasterOptions('Coating'),
+          fetch('/api/masters/materials', { cache: 'no-store' }),
+        ])
         if (cancelled) return
+        if (coating.length > 0) setCoatingOptions(coating)
         if (materialsRes.ok) {
           const data = (await materialsRes.json()) as Array<{ boardType?: string | null }>
           const values = Array.from(
@@ -1278,107 +1280,6 @@ export function PlanningJobDetailDrawer({
     }
   }, [line, sheetLengthMm, sheetWidthMm])
 
-  // ── Stable Planning-Engine callbacks ─────────────────────────────────────
-  // Wrapped in useCallback so React.memo on child sections is effective —
-  // anonymous inline functions create new references on every render.
-  // NOTE: these must stay above the `if (!line || !open) return null` guard —
-  // hooks may never sit after an early return (React error #310).
-
-  /** Optimistically reflect spec edits in the grid row, then persist. */
-  const handleEnginePatch = useCallback(
-    async (patch: PlanningLineFieldPatch) => {
-      if (!line) return false
-      updateRow(line.id, patch as Partial<PlanningGridLine>)
-      return onSaveLine(line.id, patch)
-    },
-    [line, updateRow, onSaveLine],
-  )
-
-  /** Link a board material — saves to specOverrides and reloads readiness. */
-  const handleEngineSelectBoard = useCallback(
-    async (materialId: string) => {
-      await lockSelectionOnly(materialId)
-    },
-    [lockSelectionOnly],
-  )
-
-  /** Lock the batch decision — delegates to onSave (writes lock timestamp). */
-  const handleEngineLock = useCallback(async () => {
-    if (!line) return
-    await onSave(line.id)
-  }, [line, onSave])
-
-  /**
-   * Reserve the matched material against this line's requirement.
-   * Opens the existing confirmation modal so the planner can verify
-   * sheets, cuts, leftover, and PR quantity before committing.
-   * Button is shown only when shortage === 0 (stock covers requirement).
-   */
-  const handleEngineReserve = useCallback(async () => {
-    openReserveConfirmation()
-  }, [openReserveConfirmation])
-
-  /**
-   * Release the reservation held against this line (full unreserve).
-   * Wires to POST reservation-control with action='release'. Button shows
-   * only when reservedForLine > 0.
-   */
-  const handleEngineUnreserve = useCallback(async () => {
-    if (!line) return
-    const materialId = readiness?.materialId
-    const reserved = Math.max(0, Number(readiness?.reservedForLine || 0))
-    if (!materialId || reserved <= 0) {
-      toast.error('Nothing reserved for this line.')
-      return
-    }
-    try {
-      const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'release',
-          materialId,
-          requiredSheets: Math.max(0, Number(readiness?.requiredSheets || 0)),
-          releaseQty: reserved,
-          prImpactAction: 'reduce',
-        }),
-      })
-      const data = (await res.json().catch(() => ({}))) as { success?: boolean; message?: string }
-      if (!res.ok || data.success === false) throw new Error(data.message || 'Unreserve failed')
-      toast.success('Reservation released.')
-      await loadReadiness()
-      window.dispatchEvent(new Event('planning:refresh'))
-      window.dispatchEvent(new Event('inventory:refresh'))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to unreserve')
-    }
-  }, [line, readiness?.materialId, readiness?.reservedForLine, readiness?.requiredSheets, loadReadiness])
-
-  /**
-   * Raise a Purchase Request for the open shortage on this line.
-   * Uses the shortageId already stored in readiness (set by the API when
-   * the reserve-material call finds insufficient stock).
-   * Button is shown only when shortage > 0 and no PR exists yet.
-   */
-  const handleEngineRaisePR = useCallback(async () => {
-    const sid = readiness?.shortageId
-    if (!sid) {
-      toast.error('No shortage record found. Reserve material first to generate a PR.')
-      return
-    }
-    try {
-      const res = await fetch(`/api/material-shortages/${sid}/create-pr`, { method: 'POST' })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to create PR')
-      toast.success('Purchase Request created for shortage.')
-      await loadReadiness()
-      window.dispatchEvent(new Event('planning:refresh'))
-      window.dispatchEvent(new Event('inventory:refresh'))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to create PR')
-    }
-  }, [readiness?.shortageId, loadReadiness])
-
   if (!line || !open) return null
 
   const spec = (line.specOverrides || {}) as Record<string, unknown>
@@ -1461,59 +1362,36 @@ export function PlanningJobDetailDrawer({
     <PlanningEngineModal
       isOpen={open}
       onClose={onClose}
-      zIndexClass="z-[200]"
+      zIndexClass="z-[70]"
       widthClass="max-w-[1180px]"
       title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
-        <div className="space-y-1 mt-0.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-id-mono text-xs text-ds-warning">{line.po.poNumber}</span>
-            <span className="text-ds-line/60">·</span>
-            <span className="text-xs text-ds-ink-faint">{line.planningStatus}</span>
-            <span className="text-ds-line/60">·</span>
-            <span className="text-xs text-ds-ink-faint truncate max-w-[18rem]">{line.po.customer.name}</span>
-            {line.po.isPriority ? (
-              <Badge
-                tone="warning"
-                className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
-              >
-                <Star className="h-3 w-3 fill-current" aria-hidden />
-                PO Priority
-              </Badge>
-            ) : null}
-            {line.directorPriority ? <Badge tone="brand" className="text-xs">Line priority</Badge> : null}
-            {line.directorHold ? <Badge tone="warning" className="text-xs">On hold</Badge> : null}
-            {line.cartonId && onViewProductDetail ? (
-              <button
-                type="button"
-                onClick={onViewProductDetail}
-                className="text-xs font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
-              >
-                Product sheet
-              </button>
-            ) : null}
-          </div>
-          {/* Product identity strip — AW code, board, GSM, carton size, required qty */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
-            {(
-              [
-                line.artworkCode ? { k: 'AW', v: line.artworkCode, mono: true } : null,
-                line.paperType ? { k: 'Board', v: line.paperType, mono: false } : null,
-                line.gsm != null ? { k: 'GSM', v: String(line.gsm), mono: false } : null,
-                line.cartonSize ? { k: 'Size', v: line.cartonSize, mono: false } : null,
-                line.quantity != null
-                  ? { k: 'Qty', v: Number(line.quantity).toLocaleString('en-IN'), mono: false }
-                  : null,
-              ] as Array<{ k: string; v: string; mono: boolean } | null>
-            )
-              .filter((x): x is { k: string; v: string; mono: boolean } => x != null)
-              .map((f) => (
-                <span key={f.k} className="inline-flex items-center gap-1">
-                  <span className="uppercase tracking-wider text-ds-ink-faint/70">{f.k}</span>
-                  <span className={`text-ds-ink-muted ${f.mono ? 'font-id-mono' : ''} tabular-nums`}>{f.v}</span>
-                </span>
-              ))}
-          </div>
+        <div className="flex flex-wrap items-center gap-2 mt-0.5">
+          <span className="font-id-mono text-xs text-ds-warning">{line.po.poNumber}</span>
+          <span className="text-ds-line/60">·</span>
+          <span className="text-xs text-ds-ink-faint">{line.planningStatus}</span>
+          <span className="text-ds-line/60">·</span>
+          <span className="text-xs text-ds-ink-faint truncate max-w-[18rem]">{line.po.customer.name}</span>
+          {line.po.isPriority ? (
+            <Badge
+              tone="warning"
+              className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
+            >
+              <Star className="h-3 w-3 fill-current" aria-hidden />
+              PO Priority
+            </Badge>
+          ) : null}
+          {line.directorPriority ? <Badge tone="brand" className="text-xs">Line priority</Badge> : null}
+          {line.directorHold ? <Badge tone="warning" className="text-xs">On hold</Badge> : null}
+          {line.cartonId && onViewProductDetail ? (
+            <button
+              type="button"
+              onClick={onViewProductDetail}
+              className="text-xs font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
+            >
+              Product sheet
+            </button>
+          ) : null}
         </div>
       }
       statusBar={
@@ -1555,12 +1433,11 @@ export function PlanningJobDetailDrawer({
         line={line as unknown as PlanningEngineLine}
         readiness={readiness as unknown as PlanningEngineReadiness | null}
         readinessLoading={readinessLoading}
-        onPatch={handleEnginePatch}
-        onSelectBoard={handleEngineSelectBoard}
-        onLock={handleEngineLock}
-        onReserve={handleEngineReserve}
-        onUnreserve={handleEngineUnreserve}
-        onRaisePR={handleEngineRaisePR}
+        onPatch={async (patch) => onSaveLine(line.id, patch)}
+        onLock={async () => {
+          // Phase 2.4 wires this to /api/planning/po-lines/:id/lock-decision.
+          await onSave(line.id)
+        }}
       />
       {false && (
       <div className="space-y-3 text-sm text-ds-ink" aria-label="Job detail">

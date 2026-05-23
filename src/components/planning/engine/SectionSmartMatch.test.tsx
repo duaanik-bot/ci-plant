@@ -1,112 +1,97 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { SectionSmartMatch } from './SectionSmartMatch'
-import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
-
-const readiness: PlanningEngineReadiness = {
-  materialId: 'm1', materialCode: 'ITC-FBB-100',
-  boardType: 'FBB', boardClassification: null, size: '720×1020', gsm: 100,
-  requiredSheets: 4800, availableSheets: 1240, reservedSheets: 3100,
-  incomingSheets: 0, shortageSheets: 3560, prStatus: 'not_created', grnEta: null,
-}
+import type { PlanningEngineBoardOption, PlanningEngineLine, PlanningEngineReadiness } from './types'
 
 const baseLine = {
   id: 'L1', cartonId: null, cartonName: 'X', cartonSize: null, quantity: 18000,
   artworkCode: null, coatingType: null, otherCoating: null, embossingLeafing: null,
   paperType: null, gsm: null, remarks: null, planningStatus: 'planning', specOverrides: null,
   po: { id: 'PO1', poNumber: 'PO1', poDate: '2026-05-10', customer: { id: 'C1', name: 'X' } },
-  smartMatch: {
-    boardMatchConfidence: 0.94,
-    materialCode: 'ITC-FBB-100',
-    matchedOn: 'FBB / 100g / 4C UV',
-    suggestions: [
-      { label: 'A', tier: 'High' as const, composite: 82.4, sizeScore: 81, wasteScore: 79, urgencyScore: 72, toolScore: 80,
-        poRefs: ['PO-2024-0829', 'PO-2024-0831'], linesIncluded: 3, totalPcs: 52000, avgYieldPct: 77.1, totalSheets: 340 },
-      { label: 'B', tier: 'Medium' as const, composite: 58.1, sizeScore: 60, wasteScore: 55, urgencyScore: 50, toolScore: 65,
-        poRefs: ['PO-2024-0801'], linesIncluded: 2, totalPcs: 31000, avgYieldPct: 64.8, totalSheets: 220 },
-    ],
-  },
 } as unknown as PlanningEngineLine
 
+function opt(over: Partial<PlanningEngineBoardOption>): PlanningEngineBoardOption {
+  return {
+    materialId: 'm1', materialCode: 'ITC-FBB-100', boardType: 'FBB', boardClassification: null,
+    gsm: 100, size: '720×1020', availableSheets: 4200, reservedSheets: 1000, freeSheets: 3200,
+    cutsPerSheet: 2, requiredParentSheets: 340, shortageParentSheets: 0, wastagePct: 7.4,
+    sizeDeviationPct: 0, fitScore: 82, yieldPct: 77.1, orientation: 'LxW',
+    matchType: 'Direct Size', status: 'Ready', tags: [], gsmDelta: 0, matchRank: 1,
+    boardMatchMode: 'exact',
+    ...over,
+  }
+}
+
+const readiness: PlanningEngineReadiness = {
+  materialId: 'm1', materialCode: 'ITC-FBB-100', boardType: 'FBB', boardClassification: null,
+  size: '720×1020', gsm: 100, requiredSheets: 4800, availableSheets: 4200, reservedSheets: 1000,
+  incomingSheets: 0, shortageSheets: 0, prStatus: 'not_created', grnEta: null, status: 'green',
+  gsmTolerance: 10,
+  mappingSafety: { requestedBoardType: 'FBB', requestedBoardClassification: null, candidatePoolCount: 12, strictPoolCount: 2, strategyUsed: 'strict' },
+  suggestionDebug: { requiredSize: '720×1020', requiredGsm: 100, tolerance: 10, materialsFetched: 40, afterGsmFilter: 18, afterSizeFit: 6, finalSuggestions: 2 },
+  suggestedBoardOptions: [
+    opt({ materialId: 'm1', materialCode: 'ITC-FBB-100', fitScore: 82, status: 'Ready', tags: ['Best Yield'] }),
+    opt({ materialId: 'm2', materialCode: 'ITC-FBB-100B', fitScore: 61, status: 'Partial', matchRank: 2, requiredParentSheets: 420, wastagePct: 9.2, matchType: 'Cut Fit' }),
+  ],
+  closestAvailableOptions: [
+    opt({ materialId: 'm3', materialCode: 'WLC-90', gsm: 90, gsmDelta: -10, fitScore: 44, status: 'Shortage', matchType: 'GSM Tolerance', matchRank: 1 }),
+  ],
+}
+
 describe('SectionSmartMatch', () => {
-  it('renders top suggestion with composite, tier and sub-score bars', () => {
+  it('renders the mapping diagnostics line (strategy + pool + funnel)', () => {
     render(<SectionSmartMatch line={baseLine} readiness={readiness} onPatch={async () => true} />)
-    expect(screen.getByText('Suggestion A')).toBeInTheDocument()
-    expect(screen.getByText('82.4')).toBeInTheDocument()
-    expect(screen.getByText(/High \·/)).toBeInTheDocument()
-    expect(screen.getByLabelText('Size sub-score 81')).toBeInTheDocument()
-    expect(screen.getByLabelText('Waste sub-score 79')).toBeInTheDocument()
-    expect(screen.getByLabelText('Urgency sub-score 72')).toBeInTheDocument()
-    expect(screen.getByLabelText('Tool sub-score 80')).toBeInTheDocument()
+    expect(screen.getByText(/Mapping: Strict match/)).toBeInTheDocument()
+    expect(screen.getByText(/candidates 12 · strict 2 · funnel 40→18→6→2/)).toBeInTheDocument()
   })
 
-  it('renders board-match confidence + material code', () => {
+  it('renders strict board options with size, requirement, fit, wastage and tags', () => {
     render(<SectionSmartMatch line={baseLine} readiness={readiness} onPatch={async () => true} />)
-    expect(screen.getByText('94%')).toBeInTheDocument()
-    expect(screen.getByText(/material code ITC-FBB-100/)).toBeInTheDocument()
-  })
-
-  it('renders no-stock empty state when material linked but no options', () => {
-    const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
-    render(<SectionSmartMatch line={empty} readiness={readiness} onPatch={async () => true} />)
-    expect(screen.getByText(/No matching board in current stock/i)).toBeInTheDocument()
-    expect(screen.getAllByText(/Suggested procurement/i).length).toBeGreaterThan(0)
-  })
-
-  it('renders spec-incomplete empty state when spec pack is missing fields', () => {
-    const empty = {
-      ...baseLine,
-      smartMatch: undefined,
-      planningLedger: {
-        boardStockInsight: {
-          specComplete: false,
-          specIncompleteReason: 'Missing UPS in spec pack',
-        },
-      },
-    } as unknown as PlanningEngineLine
-    render(<SectionSmartMatch line={empty} readiness={readiness} onPatch={async () => true} />)
-    expect(screen.getByText(/Spec incomplete/i)).toBeInTheDocument()
-    expect(screen.getByText(/Missing UPS in spec pack/i)).toBeInTheDocument()
-  })
-
-  it('falls back to readiness board options when no scored suggestions', () => {
-    const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
-    const withOptions: PlanningEngineReadiness = {
-      ...readiness,
-      suggestedBoardOptions: [
-        {
-          materialId: 'opt1', materialCode: 'ITC-FBB-100', boardType: 'FBB', gsm: 100,
-          size: '720×1020', freeSheets: 1240, availableSheets: 1240, requiredParentSheets: 4800,
-          shortageParentSheets: 3560, wastagePct: 12, yieldPct: 78, cutsPerSheet: 6,
-          matchType: 'Direct Size', status: 'Partial', tags: ['Best Yield'], gsmDelta: 0,
-        },
-      ],
-    }
-    render(<SectionSmartMatch line={empty} readiness={withOptions} onPatch={async () => true} />)
-    // Ranked into a labelled bucket (#1 Best Match) with the board label below it.
-    expect(screen.getByText(/#1 · Best Match/)).toBeInTheDocument()
-    expect(screen.getByText('FBB · 100 gsm')).toBeInTheDocument()
+    expect(screen.getByText('ITC-FBB-100')).toBeInTheDocument()
+    expect(screen.getByText('Fit 82')).toBeInTheDocument()
     expect(screen.getByText('Best Yield')).toBeInTheDocument()
-    expect(screen.getByLabelText('Yield sub-score 78')).toBeInTheDocument()
+    expect(screen.getByText('Direct Size')).toBeInTheDocument()
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0)
   })
 
-  it('calls onSelectBoard when a board option card is clicked', () => {
-    const onSelectBoard = vi.fn().mockResolvedValue(undefined)
-    const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
-    const withOptions: PlanningEngineReadiness = {
-      ...readiness,
-      materialId: null,
-      suggestedBoardOptions: [
-        {
-          materialId: 'opt1', materialCode: 'ITC-FBB-100', boardType: 'FBB', gsm: 100,
-          size: '720×1020', freeSheets: 1240, availableSheets: 1240, requiredParentSheets: 4800,
-          shortageParentSheets: 3560, wastagePct: 12, yieldPct: 78, cutsPerSheet: 6,
-          matchType: 'Direct Size', status: 'Partial', tags: ['Best Yield'], gsmDelta: 0,
-        },
-      ],
+  it('toggles compatible alternatives', () => {
+    render(<SectionSmartMatch line={baseLine} readiness={readiness} onPatch={async () => true} />)
+    const toggle = screen.getByText(/compatible alternative/i)
+    fireEvent.click(toggle)
+    expect(screen.getByText('WLC-90')).toBeInTheDocument()
+  })
+
+  it('patches the selected board onto the line spec when "Use board" is clicked', async () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    render(<SectionSmartMatch line={baseLine} readiness={readiness} onPatch={onPatch} />)
+    fireEvent.click(screen.getAllByRole('button', { name: /Use board/i })[0])
+    await Promise.resolve()
+    expect(onPatch).toHaveBeenCalledTimes(1)
+    const arg = onPatch.mock.calls[0][0] as { specOverrides: Record<string, unknown> }
+    expect(arg.specOverrides.selectedBoardMaterialId).toBe('m1')
+  })
+
+  it('shows the "no materials in warehouse" diagnostic empty state', () => {
+    const empty = {
+      ...readiness, suggestedBoardOptions: [], closestAvailableOptions: [],
+      noMaterialsAtAll: true, debugMessage: 'Warehouse seed pending',
     }
-    render(<SectionSmartMatch line={empty} readiness={withOptions} onPatch={async () => true} onSelectBoard={onSelectBoard} />)
-    fireEvent.click(screen.getByRole('button', { name: /Select board FBB/ }))
-    expect(onSelectBoard).toHaveBeenCalledWith('opt1')
+    render(<SectionSmartMatch line={baseLine} readiness={empty} onPatch={async () => true} />)
+    expect(screen.getByText(/No materials exist in Paper Warehouse yet/i)).toBeInTheDocument()
+    expect(screen.getByText('Warehouse seed pending')).toBeInTheDocument()
+  })
+
+  it('shows "raise a PR" empty state when stock is missing but warehouse has materials', () => {
+    const empty = { ...readiness, suggestedBoardOptions: [], closestAvailableOptions: [], shortageSheets: 2150, requiredSheets: 2150 }
+    render(<SectionSmartMatch line={baseLine} readiness={empty} onPatch={async () => true} />)
+    expect(screen.getByText(/No suitable stock found — raise a PR/i)).toBeInTheDocument()
+    expect(screen.getByText(/shortfall 2,150 sheets/i)).toBeInTheDocument()
+  })
+
+  it('falls back to closest options when no strict matches', () => {
+    const fallback = { ...readiness, suggestedBoardOptions: [] }
+    render(<SectionSmartMatch line={baseLine} readiness={fallback} onPatch={async () => true} />)
+    expect(screen.getByText('WLC-90')).toBeInTheDocument()
+    expect(screen.getAllByText(/Not ideal — check manually/i).length).toBeGreaterThan(0)
   })
 })
