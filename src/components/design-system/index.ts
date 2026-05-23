@@ -4,8 +4,8 @@
  *   Buttons        → <Button variant="primary|secondary|ghost|danger|success|warning|info|icon|utility" />
  *   Text input     → <InputField label hint error /> or className="ds-input"
  *   Select         → <SelectDropdown label /> or <select className="ds-input">
- *   Right-rail     → <StandardDrawer primaryAction secondaryAction /> (no fixed inset-0 modals)
- *   Right-rail+    → <Drawer> / SlideOverPanel for custom footers
+ *   Modals         → <GlobalPopoutModal size="sm|md|lg|xl|fullscreen" /> (centered — all shared drawers delegate here)
+ *   Legacy adapters → <StandardDrawer /> <Drawer /> <SlideOverPanel /> all render as centered modals now
  *   Status pill    → <StatusBadge status="…" /> or <Badge tone="success|warning|danger|info|neutral|tooling|brand" />
  *   Section card   → <CardSection title="…"> {children} </CardSection>
  *   Section label  → <SectionLabel accent? />

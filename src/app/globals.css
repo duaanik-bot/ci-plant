@@ -127,9 +127,6 @@
   * {
     border-color: color-mix(in srgb, var(--border) 22%, transparent);
   }
-  :root {
-    --font-designing-queue: var(--font-body);
-  }
   body {
     @apply min-h-screen text-ds-ink antialiased;
     font-family: var(--font-body);
@@ -138,6 +135,7 @@
     color: var(--text-primary);
     background-color: var(--bg-main);
     background-image: none;
+    transition: background-color 200ms ease, color 200ms ease;
   }
 
   h1 {

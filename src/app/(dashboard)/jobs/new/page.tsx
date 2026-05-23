@@ -48,7 +48,7 @@ export default function NewJobPage() {
     ? Math.ceil(Number(qtyOrdered) / Number(imposition))
     : 0
   const pressMachine = machineOrder.length
-    ? machines.find((m) => m.machineCode.match(/^CI-0[123]$/) && machineOrder.includes(m.id))
+    ? machines.find((m) => m.machineCode.startsWith('PRN-') && machineOrder.includes(m.id))
     : null
   const wastePct = pressMachine ? Number(pressMachine.stdWastePct) : 0
   const approvedSheets = netSheets > 0 ? Math.ceil(netSheets * (1 + wastePct / 100)) : 0

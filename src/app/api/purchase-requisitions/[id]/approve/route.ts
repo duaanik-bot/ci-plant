@@ -10,10 +10,9 @@ export async function PUT(
   context: { params: Promise<{ id: string }> }
 ) {
   const { error, user } = await requireRole(
-    'stores',
-    'production_manager',
-    'operations_head',
-    'md'
+    'admin',
+    'plant_head',
+    'accounts'
   )
   if (error) return error
 
@@ -34,9 +33,9 @@ export async function PUT(
     where: { id: user!.id },
     include: { role: true },
   })
-  if (needsOpsHead && approver?.role?.roleName !== 'operations_head' && approver?.role?.roleName !== 'md') {
+  if (needsOpsHead && approver?.role?.roleName !== 'plant_head' && approver?.role?.roleName !== 'admin') {
     return NextResponse.json(
-      { error: 'PR value > ₹50,000 requires Operations Head or MD approval' },
+      { error: 'PR value > ₹50,000 requires Plant Head or Admin approval' },
       { status: 403 }
     )
   }

@@ -40,6 +40,7 @@ import {
 } from '@/lib/accent-theme'
 import { useUiDensity } from '@/lib/ui-density'
 import { Toaster } from '@/components/ui/Toaster'
+import { hasModuleAccess, type ModuleKey } from '@/lib/rbac'
 
 type MegaNavItem = {
   label: string
@@ -50,6 +51,36 @@ type MegaNavItem = {
 }
 type SimpleNavItem = { label: string; href: string; description?: string; Icon?: LucideIcon }
 type MenuItem = SimpleNavItem | MegaNavItem
+
+const HREF_MODULE: Record<string, ModuleKey> = {
+  '/director/command-center': 'reports',
+  '/orders/purchase-orders': 'customer_po',
+  '/orders/planning': 'planning',
+  '/orders/designing': 'artwork_queue',
+  '/production/job-cards': 'job_cards',
+  '/production/print-planning': 'planning',
+  '/production/cutting-queue': 'cutting',
+  '/production/stages/printing': 'printing',
+  '/production/stages/chemical_coating': 'inventory',
+  '/production/stages/dye_cutting': 'inventory',
+  '/production/stages/pasting': 'inventory',
+  '/dispatch': 'dispatch',
+  '/billing': 'dispatch',
+  '/stores/short-excess': 'stores',
+  '/inventory#paper-ledger': 'paper_warehouse',
+  '/inventory/fg-warehouse': 'inventory',
+  '/hub/plates': 'tooling_hub',
+  '/hub/dies': 'tooling_hub',
+  '/hub/blocks': 'tooling_hub',
+  '/hub/shade-card-hub': 'tooling_hub',
+  '/stores/issue': 'stores',
+  '/stores/approve-excess': 'stores',
+  '/qms/qc': 'quality',
+  '/reports/dashboard': 'reports',
+  '/reports/production': 'reports',
+  '/reports/wastage': 'reports',
+  '/masters': 'masters',
+}
 
 function BrandLogoMark({ className }: { className?: string }) {
   return (
@@ -161,7 +192,10 @@ export function DashboardShell({
   const userName = session?.user?.name ?? null
   const userRole = session?.user?.role as string | undefined
   const userImage = (session?.user as { image?: string | null } | undefined)?.image ?? null
-  const canSeeMasters = userRole === 'operations_head' || userRole === 'md'
+  const allowHref = (href: string) => {
+    const mod = HREF_MODULE[href]
+    return !mod || hasModuleAccess(userRole, mod)
+  }
   const navRef = useRef<HTMLDivElement | null>(null)
   const [uiDensity, setUiDensity] = useUiDensity()
 
@@ -197,139 +231,158 @@ export function DashboardShell({
     return () => document.removeEventListener('mousedown', onDown)
   }, [openMenu])
 
-  const menus = useMemo(
-    () =>
-      [
-        {
-          key: 'orders',
-          label: 'Orders',
-          items: [
-            { label: 'Customer POs', href: '/orders/purchase-orders' },
-            { label: 'Planning', href: '/orders/planning', description: 'Plan print jobs and scheduling' },
-            { label: 'Artwork Queue', href: '/orders/designing', description: 'Artwork readiness and job prep' },
-            { label: 'Job Cards', href: '/production/job-cards', description: 'Create and track job cards' },
-          ],
-        },
-        {
-          key: 'tooling',
-          label: 'Tooling Hub',
-          items: [
-            { label: 'Plates', href: '/hub/plates', description: 'CTP and plate workflow', Icon: Printer },
-            { label: 'Dies', href: '/hub/dies', description: 'Die readiness and issuance', Icon: Scissors },
-            { label: 'Embossing Blocks', href: '/hub/blocks', description: 'Emboss block tracking', Icon: Layers },
-            { label: 'Shade Cards', href: '/hub/shade-card-hub', description: 'Shade approvals and control', Icon: Droplets },
-          ],
-        },
-        {
-          key: 'production',
-          label: 'Print Planning',
-          items: [
-            {
-              label: 'Print Planning',
-              href: '/production/print-planning',
-              description: 'Plan and schedule print jobs',
-              Icon: ClipboardPaste,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-          ],
-        },
-        {
-          key: 'live',
-          label: 'Live Production',
-          items: [
-            {
-              label: 'Cutting',
-              href: '/production/cutting-queue',
-              description: 'Cutting queue and floor sequence',
-              Icon: LayoutGrid,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Printing',
-              href: '/production/stages/printing',
-              description: 'Press floor — ink on sheet',
-              Icon: Printer,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Coating',
-              href: '/production/stages/chemical_coating',
-              description: 'Coating line execution',
-              Icon: Layers,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Die',
-              href: '/production/stages/dye_cutting',
-              description: 'Die cutting & blanking',
-              Icon: Scissors,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Pasting',
-              href: '/production/stages/pasting',
-              description: 'Folder-gluer and pasting',
-              Icon: ClipboardCheck,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Dispatch',
-              href: '/dispatch',
-              description: 'FG movement and dispatches',
-              Icon: Truck,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Billing',
-              href: '/billing',
-              description: 'Invoicing and billing desk',
-              Icon: FileText,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Short & Excess',
-              href: '/stores/short-excess',
-              description: 'Reconcile shorts and warehouse excess',
-              Icon: Scale,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-          ],
-        },
-        {
-          key: 'inventory',
-          label: 'Inventory',
-          items: [
-            { label: 'Paper Warehouse', href: '/inventory#paper-ledger', description: 'Raw paper/board stock only' },
-            { label: 'FG Warehouse', href: '/inventory/fg-warehouse', description: 'Finished goods stock ledger' },
-          ],
-        },
-        {
-          key: 'stores',
-          label: 'Stores',
-          items: [
-            { label: 'Issue Sheets', href: '/stores/issue', description: 'Material issue and consumption' },
-            { label: 'Approve Excess', href: '/stores/approve-excess', description: 'Short and excess approvals' },
-          ],
-        },
-        { key: 'quality', label: 'Quality', items: [{ label: 'Quality Control', href: '/qms/qc', description: 'QC checks and logs', Icon: ClipboardCheck }] },
-        {
-          key: 'reports',
-          label: 'Reports',
-          items: [
-            { label: 'MD Dashboard', href: '/reports/oee', description: 'OEE and executive production view', Icon: LayoutGrid },
-            { label: 'Production Summary', href: '/reports/yield', description: 'Output, yield and run summary', Icon: FileText },
-            { label: 'Wastage Report', href: '/reports/wastage', description: 'Wastage trends and losses', Icon: Scale },
-          ],
-        },
-        {
-          key: 'masters',
-          label: 'Masters',
-          hidden: !canSeeMasters,
-          href: '/masters',
-        },
-      ].filter((m) => !('hidden' in m && m.hidden)),
-    [canSeeMasters],
-  )
+  const menus = useMemo(() => {
+    const allMenus = [
+      {
+        key: 'director',
+        label: 'Director Command Centre',
+        href: '/director/command-center',
+      },
+      {
+        key: 'orders',
+        label: 'Orders',
+        items: [
+          { label: 'Customer POs', href: '/orders/purchase-orders' },
+          { label: 'Planning', href: '/orders/planning', description: 'Plan print jobs and scheduling' },
+          { label: 'Artwork Queue', href: '/orders/designing', description: 'Artwork readiness and job prep' },
+          { label: 'Job Cards', href: '/production/job-cards', description: 'Create and track job cards' },
+        ],
+      },
+      {
+        key: 'tooling',
+        label: 'Tooling Hub',
+        items: [
+          { label: 'Plates', href: '/hub/plates', description: 'CTP and plate workflow', Icon: Printer },
+          { label: 'Dies', href: '/hub/dies', description: 'Die readiness and issuance', Icon: Scissors },
+          { label: 'Embossing Blocks', href: '/hub/blocks', description: 'Emboss block tracking', Icon: Layers },
+          { label: 'Shade Cards', href: '/hub/shade-card-hub', description: 'Shade approvals and control', Icon: Droplets },
+        ],
+      },
+      {
+        key: 'production',
+        label: 'Print Planning',
+        items: [
+          {
+            label: 'Print Planning',
+            href: '/production/print-planning',
+            description: 'Plan and schedule print jobs',
+            Icon: ClipboardPaste,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+        ],
+      },
+      {
+        key: 'live',
+        label: 'Live Production',
+        items: [
+          {
+            label: 'Cutting',
+            href: '/production/cutting-queue',
+            description: 'Cutting queue and floor sequence',
+            Icon: LayoutGrid,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Printing',
+            href: '/production/stages/printing',
+            description: 'Press floor — ink on sheet',
+            Icon: Printer,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Coating',
+            href: '/production/stages/chemical_coating',
+            description: 'Coating line execution',
+            Icon: Layers,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Die',
+            href: '/production/stages/dye_cutting',
+            description: 'Die cutting & blanking',
+            Icon: Scissors,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Pasting',
+            href: '/production/stages/pasting',
+            description: 'Folder-gluer and pasting',
+            Icon: ClipboardCheck,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Dispatch',
+            href: '/dispatch',
+            description: 'FG movement and dispatches',
+            Icon: Truck,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Billing',
+            href: '/billing',
+            description: 'Invoicing and billing desk',
+            Icon: FileText,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Short & Excess',
+            href: '/stores/short-excess',
+            description: 'Reconcile shorts and warehouse excess',
+            Icon: Scale,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+        ],
+      },
+      {
+        key: 'inventory',
+        label: 'Inventory',
+        items: [
+          { label: 'Paper Warehouse', href: '/inventory#paper-ledger', description: 'Raw paper/board stock only' },
+          { label: 'FG Warehouse', href: '/inventory/fg-warehouse', description: 'Finished goods stock ledger' },
+        ],
+      },
+      {
+        key: 'stores',
+        label: 'Stores',
+        items: [
+          { label: 'Issue Sheets', href: '/stores/issue', description: 'Material issue and consumption' },
+          { label: 'Approve Excess', href: '/stores/approve-excess', description: 'Short and excess approvals' },
+        ],
+      },
+      { key: 'quality', label: 'Quality', items: [{ label: 'Quality Control', href: '/qms/qc', description: 'QC checks and logs', Icon: ClipboardCheck }] },
+      {
+        key: 'reports',
+        label: 'Reports',
+        items: [
+          { label: 'MD Dashboard', href: '/reports/oee', description: 'OEE and executive production view', Icon: LayoutGrid },
+          { label: 'Production Summary', href: '/reports/yield', description: 'Output, yield and run summary', Icon: FileText },
+          { label: 'Wastage Report', href: '/reports/wastage', description: 'Wastage trends and losses', Icon: Scale },
+        ],
+      },
+      {
+        key: 'masters',
+        label: 'Masters',
+        href: '/masters',
+      },
+    ]
+
+    type AllMenu = (typeof allMenus)[number]
+    const filtered: AllMenu[] = []
+    for (const menu of allMenus) {
+      if ('items' in menu) {
+        const filteredItems = menu.items.filter((item) => allowHref(item.href))
+        if (filteredItems.length > 0) {
+          filtered.push({ ...menu, items: filteredItems } as typeof menu)
+        }
+      } else {
+        if (allowHref(menu.href)) {
+          filtered.push(menu)
+        }
+      }
+    }
+    return filtered
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userRole])
 
   const isActiveMenu = (menu: (typeof menus)[number]) => {
     if (!('href' in menu)) {

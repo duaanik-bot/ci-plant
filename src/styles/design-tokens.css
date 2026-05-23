@@ -124,4 +124,10 @@
   --ds-text-muted-rgb: 107 114 128;
 
   --ds-shadow-elevated: 0 8px 28px rgba(0, 0, 0, 0.45);
+
+  --brand-primary: #3B82F6;
+  --brand-primary-hover: #2563EB;
+  --ds-accent-rgb: 59 130 246;
+  --ds-accent-hover-rgb: 37 99 235;
+  --ds-kpi-rgb: 59 130 246;
 }

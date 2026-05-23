@@ -28,7 +28,7 @@ const createSchema = z.object({
 })
 
 export async function GET(req: NextRequest) {
-  const { error } = await requireRole('operations_head', 'md')
+  const { error } = await requireRole('admin', 'plant_head')
   if (error) return error
 
   const { searchParams } = new URL(req.url)
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { error, user } = await requireRole('operations_head', 'md')
+  const { error, user } = await requireRole('admin', 'plant_head')
   if (error) return error
 
   const body = await req.json().catch(() => ({}))

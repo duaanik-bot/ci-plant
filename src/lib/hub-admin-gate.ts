@@ -1,5 +1,6 @@
-/** Tooling Hub staff / settings — coarse role check (matches DB role_name text). */
+import { roleHasFullSystem } from '@/lib/rbac'
+
+/** Tooling Hub staff / settings — full-system roles only (admin, plant_head). */
 export function isHubStaffAdmin(role: string | undefined): boolean {
-  const r = (role ?? '').toLowerCase()
-  return r.includes('admin')
+  return roleHasFullSystem(role)
 }

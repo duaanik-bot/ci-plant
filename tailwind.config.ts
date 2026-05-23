@@ -10,10 +10,11 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        'po-dashboard': ['var(--font-po-predictive)', 'ui-monospace', 'monospace'],
-        'director-cc': ['var(--font-director-cc)', 'ui-monospace', 'monospace'],
-        'designing-queue': ['var(--font-designing-queue)', 'ui-monospace', 'monospace'],
+        sans: ['var(--font-geist-sans)', 'Inter', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
+        'po-dashboard': ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
+        'director-cc': ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
+        'designing-queue': ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
       },
       borderRadius: {
         lg: 'var(--radius)',
@@ -22,6 +23,8 @@ const config: Config = {
         'ds-sm': '6px',
         'ds-md': '10px',
         'ds-lg': '12px',
+        'ds-card': '16px',
+        'ds-modal': '18px',
       },
       boxShadow: {
         /** Unified depth — neutral only */
@@ -57,6 +60,16 @@ const config: Config = {
           from: { opacity: '0' },
           to:   { opacity: '1' },
         },
+        'ds-modal-in': {
+          from: { opacity: '0', transform: 'scale(0.98)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
+        'ds-modal-out': {
+          from: { opacity: '1', transform: 'scale(1)' },
+          to: { opacity: '0', transform: 'scale(0.98)' },
+        },
+        'ds-overlay-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'ds-overlay-out': { from: { opacity: '1' }, to: { opacity: '0' } },
       },
       animation: {
         'po-age-alert': 'po-age-alert 2.2s ease-in-out infinite',

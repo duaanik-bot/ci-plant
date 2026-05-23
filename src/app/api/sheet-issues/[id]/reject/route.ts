@@ -15,10 +15,10 @@ export async function PUT(
   context: { params: Promise<{ id: string }> }
 ) {
   const { error, user } = await requireRole(
-    'shift_supervisor',
-    'production_manager',
-    'operations_head',
-    'md'
+    'admin',
+    'plant_head',
+    'production',
+    'design_planning'
   )
   if (error) return error
 

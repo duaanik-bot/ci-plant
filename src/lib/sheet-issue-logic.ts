@@ -293,7 +293,7 @@ Approve: ${process.env.NEXT_PUBLIC_APP_URL || 'https://ci-plant.vercel.app'}/sto
   const approvers = await db.user.findMany({
     where: {
       active: true,
-      role: { roleName: { in: ['shift_supervisor', 'production_manager'] } },
+      role: { roleName: { in: ['production', 'design_planning'] } },
       whatsappNumber: { not: null },
     },
     select: { whatsappNumber: true },
@@ -313,10 +313,10 @@ async function notifyEscalation(data: {
   excessPct: number
 }) {
   const tierToRole: Record<number, string> = {
-    1: 'shift_supervisor',
-    2: 'production_manager',
-    3: 'operations_head',
-    4: 'md',
+    1: 'production',
+    2: 'design_planning',
+    3: 'plant_head',
+    4: 'admin',
   }
 
   const nextTierRole = tierToRole[data.currentTier + 1]
