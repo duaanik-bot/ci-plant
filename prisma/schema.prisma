@@ -283,6 +283,7 @@ model Inventory {
   bomLines             BomLine[]
   sheetIssues          SheetIssue[]
   purchaseRequisitions PurchaseRequisition[]
+  vendorMaterialPos    VendorMaterialPurchaseOrder[]
   materialReservations MaterialReservation[]
   materialShortages    MaterialShortage[]
   stockMovements       StockMovement[]
@@ -1150,18 +1151,23 @@ model VendorMaterialPurchaseOrder {
   replacementEtaAt         DateTime? @map("replacement_eta_at")
   /// Source PR if this PO was created via the convert-to-po flow.
   purchaseRequisitionId    String?   @map("purchase_requisition_id")
+  /// Direct FK to Inventory for fast-track POs created without a PR.
+  /// PR-linked POs leave this null — reached via VendorPoRequisitionLink instead.
+  materialId               String?   @map("material_id")
   createdBy                String    @map("created_by")
   createdAt                DateTime  @default(now()) @map("created_at")
   updatedAt                DateTime  @updatedAt @map("updated_at")
 
   supplier            Supplier                          @relation(fields: [supplierId], references: [id])
   purchaseRequisition PurchaseRequisition?              @relation(fields: [purchaseRequisitionId], references: [id], onDelete: SetNull)
+  material            Inventory?                        @relation(fields: [materialId], references: [id], onDelete: SetNull)
   lines               VendorMaterialPurchaseOrderLine[]
   receipts            VendorMaterialReceipt[]
   qualityDebitNotes   VendorQualityDebitNote[]
   requisitionLinks    VendorPoRequisitionLink[]
 
   @@index([purchaseRequisitionId])
+  @@index([materialId])
   @@map("vendor_material_purchase_orders")
 }
 
