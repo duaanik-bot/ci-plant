@@ -1139,6 +1139,7 @@ function InventoryPageContent() {
     }
   }
 
+
   return (
       <div className="w-full px-4 py-3">
         <section
@@ -1742,6 +1743,12 @@ function InventoryPageContent() {
             )}
           </div>
         </SlideOverPanel>
+        <ReservationsPanel
+          materialId={reservationsPanelMaterialId}
+          open={reservationsPanelMaterialId !== null}
+          onClose={() => setReservationsPanelMaterialId(null)}
+          onRefresh={() => loadPaperWarehouse('')}
+        />
       </div>
     )
 }
