@@ -2385,7 +2385,7 @@ export default function ProcurementWorkbenchPage() {
                         <span className="text-neutral-600 font-mono text-xs">—</span>
                       )}
                     </td>
-                    <td className="px-1.5 py-1 align-top text-right tabular-nums font-semibold text-ds-warning">
+                    <td className="px-1.5 py-1 align-top text-right tabular-nums font-semibold text-[var(--brand-primary)]">
                       {r.totalMetricTons.toLocaleString('en-IN', { maximumFractionDigits: 4 })}
                     </td>
                     <td
@@ -2427,7 +2427,7 @@ export default function ProcurementWorkbenchPage() {
             </div>
 
             <div className="rounded-ds-md bg-background p-3 space-y-3 ring-1 ring-ring/5 shadow-ds-depth-sm">
-              <p className="text-xs uppercase tracking-wide text-ds-warning/90 font-semibold">
+              <p className="text-xs uppercase tracking-wide text-[var(--brand-primary)]/90 font-semibold">
                 Dynamic reorder radar
               </p>
               <div className={`grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-ds-ink-muted ${ledgerMono}`}>
@@ -2489,7 +2489,7 @@ export default function ProcurementWorkbenchPage() {
                   type="button"
                   disabled={draftReorderSubmitting}
                   onClick={() => void draftReorderPoFromSpotlight()}
-                  className="w-full rounded-ds-sm bg-ds-warning/10 py-2 text-xs font-semibold text-ds-warning hover:bg-ds-warning/10 disabled:opacity-50"
+                  className="w-full rounded-ds-sm bg-ds-warning/10 py-2 text-xs font-semibold text-[var(--brand-primary)] hover:bg-ds-warning/10 disabled:opacity-50"
                 >
                   {draftReorderSubmitting
                     ? 'Drafting…'
@@ -2795,7 +2795,7 @@ export default function ProcurementWorkbenchPage() {
                                           <span className="inline-flex rounded bg-[var(--success-bg)] px-1.5 py-0.5 text-xs font-bold text-[var(--success)]">
                                             QC passed
                                           </span>
-                                          <span className="inline-flex items-center gap-0.5 rounded bg-ds-warning/15 px-1.5 py-0.5 text-xs font-bold text-ds-warning">
+                                          <span className="inline-flex items-center gap-0.5 rounded bg-ds-warning/15 px-1.5 py-0.5 text-xs font-bold text-[var(--brand-primary)]">
                                             <IndianRupee className="h-2.5 w-2.5 shrink-0 opacity-90" aria-hidden />
                                             Quality-adjusted
                                           </span>
@@ -2991,7 +2991,7 @@ export default function ProcurementWorkbenchPage() {
                         (r) => r.qcStatus === 'PASSED_WITH_PENALTY' && r.penaltyProofLines?.length,
                       ) ? (
                         <div className="rounded-ds-md bg-background p-2 space-y-2 shadow-ds-depth-sm">
-                          <p className="text-xs uppercase tracking-wide text-ds-warning/90 font-bold">
+                          <p className="text-xs uppercase tracking-wide text-[var(--brand-primary)]/90 font-bold">
                             Vendor-facing penalty proof (export / email)
                           </p>
                           {grnLedger.receipts
@@ -3405,7 +3405,7 @@ export default function ProcurementWorkbenchPage() {
                             </p>
                           </div>
                           {rec?.reconciliationStatus === 'reconciliation_pending' ? (
-                            <p className="text-xs font-semibold text-ds-warning/90">
+                            <p className="text-xs font-semibold text-[var(--brand-primary)]/90">
                               Reconciliation pending — debit path active
                             </p>
                           ) : null}
@@ -3645,7 +3645,7 @@ export default function ProcurementWorkbenchPage() {
               {supplierPerf && supplierPerf.sampleSize > 0 ? (
                 <p className="text-xs text-ds-ink">
                   Avg. days late (dispatch vs required):{' '}
-                  <span className="font-semibold tabular-nums text-ds-warning">
+                  <span className="font-semibold tabular-nums text-[var(--brand-primary)]">
                     {supplierPerf.avgDaysLate?.toFixed(1) ?? '—'}
                   </span>
                   <span className="text-ds-ink-faint"> · n={supplierPerf.sampleSize}</span>

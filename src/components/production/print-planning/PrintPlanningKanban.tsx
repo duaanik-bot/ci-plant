@@ -200,7 +200,7 @@ function Lane({
           isOver ? 'bg-ds-warning/10' : 'bg-ds-main/50'
         }`}
       >
-        <p className="text-xs font-semibold uppercase tracking-wide text-ds-warning">{title}</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--brand-primary)]">{title}</p>
         {subtitle ? <p className="text-xs text-ds-ink-faint truncate">{subtitle}</p> : null}
       </div>
       <div ref={setNodeRef} className="min-h-[12rem] flex-1 p-1.5">

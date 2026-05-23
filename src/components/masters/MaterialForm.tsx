@@ -283,7 +283,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
             type="submit"
             form="material-form"
             disabled={submitting}
-            className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+            className="px-4 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {submitting ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
           </button>
@@ -310,7 +310,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
             {mode === 'ADD' && (
               <button type="button" onClick={() => { setAutoCode((p) => !p); if (!autoCode) patch('materialCode', '') }} className="flex items-center gap-2 text-xs">
                 <span className="text-ds-ink-muted">Auto-generate</span>
-                <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoCode ? 'bg-ds-warning' : 'bg-ds-line/30'}`}>
+                <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoCode ? 'bg-[var(--brand-primary)]' : 'bg-ds-line/30'}`}>
                   <span className={`inline-block h-3.5 w-3.5 rounded-full bg-card transition-transform ${autoCode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
                 </span>
               </button>

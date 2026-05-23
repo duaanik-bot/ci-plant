@@ -532,7 +532,7 @@ export default function StoresIssuePage() {
       {/* Excess request form */}
       {excessForm && (
         <div className="fixed inset-0 z-50 bg-ds-card flex flex-col items-center justify-center p-6 overflow-y-auto">
-          <h2 className="text-lg font-bold text-ds-warning mb-4">Excess Request</h2>
+          <h2 className="text-lg font-bold text-[var(--brand-primary)] mb-4">Excess Request</h2>
           <div className="w-full max-w-sm space-y-4">
             <div>
               <label className="block text-sm text-ds-ink-muted mb-1">Reason (required)</label>
@@ -563,7 +563,7 @@ export default function StoresIssuePage() {
                 type="button"
                 onClick={handleExcessSubmit}
                 disabled={excessSubmitting || !excessForm.reasonCode}
-                className="flex-1 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium"
+                className="flex-1 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:opacity-90 disabled:opacity-50 text-primary-foreground font-medium"
               >
                 {excessSubmitting ? 'Sending…' : 'Submit'}
               </button>
@@ -594,7 +594,7 @@ export default function StoresIssuePage() {
               <button
                 type="button"
                 onClick={startScanner}
-                className="w-full py-3 px-4 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground font-medium"
+                className="w-full py-3 px-4 rounded-ds-md bg-[var(--brand-primary)] hover:opacity-90 text-primary-foreground font-medium"
               >
                 Scan job QR code
               </button>
@@ -644,7 +644,7 @@ export default function StoresIssuePage() {
       ) : (
         <>
           <div className="bg-ds-elevated rounded-ds-md p-4 mb-4">
-            <p className="font-semibold text-ds-warning">{jobContext.jobNumber}</p>
+            <p className="font-semibold text-[var(--brand-primary)]">{jobContext.jobNumber}</p>
             <p>{jobContext.productName}</p>
             <p className="text-ds-ink-muted text-sm">{jobContext.customerName}</p>
             {jobContext.type === 'job_card' && fifoJobCardCheck?.message && (
@@ -722,7 +722,7 @@ export default function StoresIssuePage() {
                         parseInt(issueQty[line.id], 10) > remaining ||
                         fifoBlocked
                       }
-                      className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium"
+                      className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:opacity-90 disabled:opacity-50 text-primary-foreground font-medium"
                     >
                       Issue
                     </button>

@@ -118,7 +118,7 @@ export default function NcrDetailPage() {
           <Link href="/qms/ncr" className="text-sm text-ds-ink-muted hover:text-foreground mb-1 inline-block">
             ← NCR list
           </Link>
-          <h1 className="text-xl font-bold text-ds-warning">NCR — {ncr.job.jobNumber}</h1>
+          <h1 className="text-xl font-bold text-[var(--brand-primary)]">NCR — {ncr.job.jobNumber}</h1>
           <p className="text-sm text-ds-ink-muted">
             {ncr.trigger} · {ncr.severity} · Raised by {ncr.raiser.name} ·{' '}
             {new Date(ncr.raisedAt).toLocaleString()}
@@ -212,7 +212,7 @@ export default function NcrDetailPage() {
         <button
           type="submit"
           disabled={saving}
-          className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+          className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium"
         >
           {saving ? 'Saving…' : 'Save CAPA'}
         </button>

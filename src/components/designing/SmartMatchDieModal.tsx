@@ -55,7 +55,7 @@ export function SmartMatchDieModal({
       <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-ds-lg bg-background shadow-2xl ring-1 ring-ring/10">
         <div className="flex items-start justify-between gap-3 px-3 py-2 shrink-0">
           <div>
-            <h2 id="smart-match-title" className="text-sm font-semibold text-ds-warning">
+            <h2 id="smart-match-title" className="text-sm font-semibold text-[var(--brand-primary)]">
               Smart Match — Die inventory
             </h2>
             <p className="text-xs text-ds-ink-faint mt-0.5 font-mono tabular-nums">

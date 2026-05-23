@@ -146,7 +146,7 @@ export default function DieHubSettingsPage() {
                 type="button"
                 disabled={saving || !name.trim()}
                 onClick={() => void addOperator()}
-                className="w-full py-2 rounded-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-bold disabled:opacity-50"
+                className="w-full py-2 rounded-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm font-bold disabled:opacity-50"
               >
                 Add operator
               </button>

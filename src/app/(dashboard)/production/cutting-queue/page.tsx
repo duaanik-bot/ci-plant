@@ -560,7 +560,7 @@ export default function CuttingQueuePage() {
             <div className="flex items-center justify-between px-4 py-2.5">
               <div>
                 <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Cutting decision</p>
-                <h2 className={`text-xs font-semibold text-ds-warning ${mono}`}>
+                <h2 className={`text-xs font-semibold text-[var(--brand-primary)] ${mono}`}>
                   JC #{activeRow.jobCardNumber}
                 </h2>
               </div>

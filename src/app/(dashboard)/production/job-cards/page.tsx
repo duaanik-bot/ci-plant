@@ -326,7 +326,7 @@ export default function JobCardsPage() {
             </Button>
             <Link
               href="/production/job-cards/new"
-              className="px-3 py-2 rounded-ds-sm bg-ds-warning text-primary-foreground text-sm"
+              className="px-3 py-2 rounded-ds-sm bg-[var(--brand-primary)] text-primary-foreground text-sm"
             >
               Add Job Card
             </Link>

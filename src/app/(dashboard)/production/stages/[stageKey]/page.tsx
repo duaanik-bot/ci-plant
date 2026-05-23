@@ -1810,10 +1810,10 @@ export default function ProductionStagePage() {
                   </td>
                   <td className={`${stageCellPad} hidden truncate text-xs text-ds-ink lg:table-cell`} title={getRowOperator(row) || undefined}>{getRowOperator(row) || '—'}</td>
                   <td className={`${stageCellPad} hidden truncate text-xs text-ds-ink-muted lg:table-cell`}>{jobCard.machine?.machineCode ?? '—'}</td>
-                  <td className={`${stageCellPad} hidden font-mono text-xs font-semibold text-ds-warning md:table-cell`}>{jobCard.jobCardNumber}</td>
+                  <td className={`${stageCellPad} hidden font-mono text-xs font-semibold text-[var(--brand-primary)] md:table-cell`}>{jobCard.jobCardNumber}</td>
                   <td className={stageCellPad}>
                     <div className="mb-0.5 flex min-w-0 items-center gap-1 md:hidden">
-                      <span className={`${mono} shrink-0 text-xs font-semibold text-ds-warning`}>JC-{jobCard.jobCardNumber}</span>
+                      <span className={`${mono} shrink-0 text-xs font-semibold text-[var(--brand-primary)]`}>JC-{jobCard.jobCardNumber}</span>
                       <span className="truncate text-[11px] text-ds-ink-faint">{jobCard.machine?.machineCode ?? 'No machine'}</span>
                     </div>
                     <div className="line-clamp-2 break-words text-xs font-medium text-ds-ink" title={jobCard.productName ?? poMeta?.cartonName ?? undefined}>{jobCard.productName ?? poMeta?.cartonName ?? '—'}</div>
@@ -1992,7 +1992,7 @@ export default function ProductionStagePage() {
         <div className="space-y-3 text-sm text-ds-ink-muted">
           {/* OEE card */}
           <div className="rounded-ds-lg bg-ds-elevated/30 px-4 py-3.5 space-y-3">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-warning">Live OEE</p>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-[var(--brand-primary)]">Live OEE</p>
             {spotlight.jobCard.oee ? (
               <>
                 <p className={`${mono} text-2xl font-bold ${oeeBandClass(spotlight.jobCard.oee.oee)}`}>
@@ -2113,12 +2113,12 @@ export default function ProductionStagePage() {
 
             return (
               <div className="rounded-ds-lg bg-ds-elevated/30 px-4 py-3.5 space-y-3">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-warning">{stageMeta?.label ?? 'Stage'} Decisions</p>
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-[var(--brand-primary)]">{stageMeta?.label ?? 'Stage'} Decisions</p>
 
                 {/* ── Pasting: Expected outcome strip (shown FIRST) ── */}
                 {stageKey === 'pasting' ? (
                   <div className="rounded-ds-md bg-ds-warning/5 px-3 py-2.5 space-y-1.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-ds-warning/70">Expected Outcome</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--brand-primary)]/70">Expected Outcome</p>
                     <div className={`flex items-center gap-2 flex-wrap text-xs ${mono}`}>
                       <span className="text-ds-ink-faint">Sheets in:</span>
                       <span className="text-ds-ink font-medium">{sheetInwardQty.toLocaleString('en-IN')}</span>
@@ -2449,7 +2449,7 @@ export default function ProductionStagePage() {
             )
           })()}
           <div className="rounded-ds-lg bg-ds-elevated/30 px-4 py-3.5">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-ds-warning mb-3">Quality Checkpoint</p>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-[var(--brand-primary)] mb-3">Quality Checkpoint</p>
             {(() => {
               const keys = stationChecklistKeys(stageKey)
               const selected = keys.filter((k) => checklistDrafts[spotlight.stageRecord.id]?.[k] === true).length

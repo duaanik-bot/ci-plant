@@ -85,7 +85,7 @@ export default function JobDetailPage() {
             type="button"
             onClick={() => setTab(t)}
             className={`px-3 py-1.5 rounded text-sm whitespace-nowrap ${
-              tab === t ? 'bg-ds-warning text-primary-foreground' : 'bg-ds-elevated text-ds-ink-muted hover:text-foreground'
+              tab === t ? 'bg-[var(--brand-primary)] text-primary-foreground' : 'bg-ds-elevated text-ds-ink-muted hover:text-foreground'
             }`}
           >
             {t}

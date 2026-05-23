@@ -314,11 +314,11 @@ export default function GrnPage() {
           {isBoardType && sheetWeightG > 0 && (
             <div className="flex gap-1 bg-ds-elevated rounded-ds-md p-0.5 w-fit text-sm">
               <button type="button" onClick={() => setEntryUnit('sheets')}
-                className={`px-3 py-1 rounded-ds-sm transition-colors ${entryUnit === 'sheets' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted hover:text-foreground'}`}>
+                className={`px-3 py-1 rounded-ds-sm transition-colors ${entryUnit === 'sheets' ? 'bg-[var(--brand-primary)] text-primary-foreground' : 'text-ds-ink-muted hover:text-foreground'}`}>
                 Sheets
               </button>
               <button type="button" onClick={() => setEntryUnit('kg')}
-                className={`px-3 py-1 rounded-ds-sm transition-colors ${entryUnit === 'kg' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted hover:text-foreground'}`}>
+                className={`px-3 py-1 rounded-ds-sm transition-colors ${entryUnit === 'kg' ? 'bg-[var(--brand-primary)] text-primary-foreground' : 'text-ds-ink-muted hover:text-foreground'}`}>
                 kg
               </button>
             </div>
@@ -423,7 +423,7 @@ export default function GrnPage() {
 
         {/* Submit */}
         <button type="submit" disabled={submitting || (toleranceWarning != null && !approvalOverride)}
-          className="w-full py-2.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium text-sm">
+          className="w-full py-2.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium text-sm">
           {submitting ? 'Posting...' : 'Post GRN'}
         </button>
       </form>

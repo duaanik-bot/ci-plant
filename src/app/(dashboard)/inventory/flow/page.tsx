@@ -54,7 +54,7 @@ export default function InventoryFlowPage() {
   return (
     <div className="p-4 max-w-2xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-ds-warning">Inventory Flow</h1>
+        <h1 className="text-xl font-bold text-[var(--brand-primary)]">Inventory Flow</h1>
         <Link href="/inventory" className="text-ds-ink-muted hover:text-foreground text-sm">← Stock States</Link>
       </div>
 
@@ -117,7 +117,7 @@ export default function InventoryFlowPage() {
             type="button"
             onClick={runTrace}
             disabled={traceLoading}
-            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium"
+            className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground font-medium"
           >
             {traceLoading ? '…' : 'Query'}
           </button>

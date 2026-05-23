@@ -1906,7 +1906,7 @@ export default function DesigningDetailPage() {
                   aria-label="Industrial priority"
                 />
               ) : null}
-              <h1 className="text-lg sm:text-xl font-bold text-ds-warning break-words leading-tight">
+              <h1 className="text-lg sm:text-xl font-bold text-[var(--brand-primary)] break-words leading-tight">
                 {line.cartonName}
               </h1>
             </div>
@@ -2094,7 +2094,7 @@ export default function DesigningDetailPage() {
                 type="button"
                 disabled={savingSpecs || specLocked}
                 onClick={() => void saveAllSpecs()}
-                className="px-2.5 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+                className="px-2.5 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium"
               >
                 {savingSpecs ? 'Saving…' : 'Save specs'}
               </button>
@@ -2195,7 +2195,7 @@ export default function DesigningDetailPage() {
                     onClick={() => void persistJobType('new')}
                     className={`px-3 py-1.5 text-xs font-medium ${
                       jobType === 'new'
-                        ? 'bg-ds-warning text-primary-foreground'
+                        ? 'bg-[var(--brand-primary)] text-primary-foreground'
                         : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                     }`}
                   >
@@ -2207,7 +2207,7 @@ export default function DesigningDetailPage() {
                     onClick={() => void persistJobType('repeat')}
                     className={`px-3 py-1.5 text-xs font-medium ${
                       jobType === 'repeat'
-                        ? 'bg-ds-warning text-primary-foreground'
+                        ? 'bg-[var(--brand-primary)] text-primary-foreground'
                         : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                     }`}
                   >
@@ -2260,7 +2260,7 @@ export default function DesigningDetailPage() {
                   onClick={() => void persistPreBatchPrinted(true)}
                   className={`px-3 py-1.5 text-xs font-medium ${
                     preBatchPrinted
-                      ? 'bg-ds-warning text-primary-foreground'
+                      ? 'bg-[var(--brand-primary)] text-primary-foreground'
                       : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                   }`}
                 >
@@ -2272,7 +2272,7 @@ export default function DesigningDetailPage() {
                   onClick={() => void persistPreBatchPrinted(false)}
                   className={`px-3 py-1.5 text-xs font-medium ${
                     !preBatchPrinted
-                      ? 'bg-ds-warning text-primary-foreground'
+                      ? 'bg-[var(--brand-primary)] text-primary-foreground'
                       : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                   }`}
                 >
@@ -2612,7 +2612,7 @@ export default function DesigningDetailPage() {
 
           <div className="grid md:grid-cols-2 gap-3">
             <div className="space-y-3 rounded-ds-md bg-card p-3 shadow-ds-depth-sm">
-              <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
+              <h3 className="text-xs font-semibold text-[var(--brand-primary)] uppercase tracking-wide">
                 Die inventory
               </h3>
               {designerCommand.dieSource ? (
@@ -2634,7 +2634,7 @@ export default function DesigningDetailPage() {
               />
               {line.dieMaster && designerCommand.dieSource === 'old' ? (
                 <div className="rounded-ds-sm bg-ds-warning/8 px-2.5 py-2 space-y-2">
-                  <p className="text-xs uppercase tracking-wide text-ds-warning font-semibold">
+                  <p className="text-xs uppercase tracking-wide text-[var(--brand-primary)] font-semibold">
                     Tooling handshake — die
                   </p>
                   <p className={`text-xs text-ds-ink leading-relaxed break-all ${techMono}`}>
@@ -2697,7 +2697,7 @@ export default function DesigningDetailPage() {
                           : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                       }
                       onClick={() => void diePushToHub()}
-                      className="px-2.5 py-1.5 rounded-ds-sm bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                      className="px-2.5 py-1.5 rounded-ds-sm bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
                       Push to Die Hub
                     </button>
@@ -2710,7 +2710,7 @@ export default function DesigningDetailPage() {
 
             {embossRequired ? (
               <div className="space-y-3 rounded-ds-md bg-card p-3 shadow-ds-depth-sm">
-                <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
+                <h3 className="text-xs font-semibold text-[var(--brand-primary)] uppercase tracking-wide">
                   Emboss blocks
                 </h3>
                 <ToolSourceRow
@@ -2722,7 +2722,7 @@ export default function DesigningDetailPage() {
                 />
                 {line.carton?.embossBlock && designerCommand.embossSource === 'old' ? (
                   <div className="rounded-ds-sm bg-ds-warning/8 px-2.5 py-2 space-y-2">
-                    <p className="text-xs uppercase tracking-wide text-ds-warning font-semibold">
+                    <p className="text-xs uppercase tracking-wide text-[var(--brand-primary)] font-semibold">
                       Tooling handshake — emboss block
                     </p>
                     <p className={`text-xs text-ds-ink leading-relaxed break-all ${techMono}`}>
@@ -2782,7 +2782,7 @@ export default function DesigningDetailPage() {
                             : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                         }
                         onClick={() => void embossPushToHub()}
-                        className="px-2.5 py-1.5 rounded-ds-sm bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                        className="px-2.5 py-1.5 rounded-ds-sm bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                       >
                         Push to Embossing Hub
                       </button>
@@ -2801,7 +2801,7 @@ export default function DesigningDetailPage() {
 
           <div className="space-y-3 rounded-ds-md bg-card p-3 shadow-ds-depth-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2">
-              <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
+              <h3 className="text-xs font-semibold text-[var(--brand-primary)] uppercase tracking-wide">
                 Plate hub — requirement
               </h3>
               <div className="flex flex-wrap items-center gap-2">

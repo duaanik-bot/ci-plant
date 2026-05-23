@@ -225,7 +225,7 @@ export default function DyeEditPage() {
       {tab === 'usage' && (
         <div>
           <div className="flex justify-end mb-2">
-            <button type="button" onClick={() => setShowUsage(true)} className="px-3 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">Add usage</button>
+            <button type="button" onClick={() => setShowUsage(true)} className="px-3 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm">Add usage</button>
           </div>
           <div className="overflow-x-auto rounded-ds-md shadow-ds-depth-sm">
             <table className="w-full text-sm">
@@ -285,7 +285,7 @@ export default function DyeEditPage() {
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button type="button" onClick={() => setShowUsage(false)} className="px-3 py-1.5 rounded-ds-md bg-ds-elevated text-ds-ink text-sm">Cancel</button>
-                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
+                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
                 </div>
               </form>
             </div>
@@ -297,7 +297,7 @@ export default function DyeEditPage() {
       {tab === 'maintenance' && (
         <div>
           <div className="flex justify-end mb-2">
-            <button type="button" onClick={() => setShowMaintenance(true)} className="px-3 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">Add maintenance</button>
+            <button type="button" onClick={() => setShowMaintenance(true)} className="px-3 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm">Add maintenance</button>
           </div>
           <div className="overflow-x-auto rounded-ds-md shadow-ds-depth-sm">
             <table className="w-full text-sm">
@@ -357,7 +357,7 @@ export default function DyeEditPage() {
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button type="button" onClick={() => setShowMaintenance(false)} className="px-3 py-1.5 rounded-ds-md bg-ds-elevated text-ds-ink text-sm">Cancel</button>
-                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
+                  <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm">{saving ? 'Saving...' : 'Add'}</button>
                 </div>
               </form>
             </div>

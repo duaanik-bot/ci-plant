@@ -272,7 +272,7 @@ export function AwQueueCommandPanel({
                 className={clsx(
                   'px-3 py-1.5 text-xs font-medium',
                   pushMode === AW_PUSH_MODE.ONE_GO
-                    ? 'bg-ds-warning text-primary-foreground'
+                    ? 'bg-[var(--brand-primary)] text-primary-foreground'
                     : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card',
                 )}
               >
@@ -285,7 +285,7 @@ export function AwQueueCommandPanel({
                 className={clsx(
                   'px-3 py-1.5 text-xs font-medium',
                   pushMode === AW_PUSH_MODE.PARTIAL
-                    ? 'bg-ds-warning text-primary-foreground'
+                    ? 'bg-[var(--brand-primary)] text-primary-foreground'
                     : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card',
                 )}
               >

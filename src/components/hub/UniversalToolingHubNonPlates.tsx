@@ -303,7 +303,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
             <HubDieDecisionStrip rackAnchorId="die-live-rack" vendorAnchorId="die-procurement" />
           ) : null}
           <div>
-            <h2 className="text-sm font-semibold text-ds-warning uppercase tracking-wide">1 · Incoming triage</h2>
+            <h2 className="text-sm font-semibold text-[var(--brand-primary)] uppercase tracking-wide">1 · Incoming triage</h2>
             <p className="text-xs text-ds-ink-faint mt-0.5">Staging from pre-press · choose flow</p>
           </div>
           <div
@@ -460,7 +460,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
           id="die-procurement"
           className="min-h-0 overflow-y-auto p-4 border-b xl:border-b-0 border-ds-line/40 scroll-mt-28"
         >
-          <h2 className="text-sm font-semibold text-ds-warning uppercase tracking-wide mb-2">2 · Procurement</h2>
+          <h2 className="text-sm font-semibold text-[var(--brand-primary)] uppercase tracking-wide mb-2">2 · Procurement</h2>
           <p className="text-xs text-ds-ink-faint mb-3">Vendor orders and physical sample gates.</p>
           <div className="space-y-2">
             {rows.length === 0 ? (
@@ -499,7 +499,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
           id="die-live-rack"
           className="min-h-0 overflow-y-auto p-4 border-b xl:border-b-0 border-ds-line/40 scroll-mt-28"
         >
-          <h2 className="text-sm font-semibold text-ds-warning uppercase tracking-wide mb-2">
+          <h2 className="text-sm font-semibold text-[var(--brand-primary)] uppercase tracking-wide mb-2">
             3 · Live inventory (rack)
           </h2>
           <label className="block text-xs text-ds-ink-muted mb-2">
@@ -570,7 +570,7 @@ export function UniversalToolingHubNonPlates({ toolType }: { toolType: Exclude<H
 
         {/* Zone 4 — Custody (floor) */}
         <section className="min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-ds-warning uppercase tracking-wide">4 · Custody (floor)</h2>
+          <h2 className="text-sm font-semibold text-[var(--brand-primary)] uppercase tracking-wide">4 · Custody (floor)</h2>
           {toolType === 'shade_cards' ? (
             <p className="text-xs text-ds-ink-faint">Machine custody and ink-lab checkouts.</p>
           ) : (

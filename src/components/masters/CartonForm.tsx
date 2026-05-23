@@ -513,7 +513,7 @@ export default function CartonForm({ mode, initialData }: Props) {
             </button>
           )}
           <button type='button' onClick={() => router.push('/masters/cartons')} className='px-3 py-1.5 rounded-ds-md bg-ds-elevated text-ds-ink text-sm'>Cancel</button>
-          <button type='submit' disabled={saving} className='px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium'>
+          <button type='submit' disabled={saving} className='px-4 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium'>
             {saving ? 'Saving...' : mode === 'ADD' ? 'Save' : 'Update'}
           </button>
         </div>

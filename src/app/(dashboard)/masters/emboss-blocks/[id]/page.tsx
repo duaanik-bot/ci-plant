@@ -52,12 +52,12 @@ export default function EmbossBlockDetailPage() {
     <div className="p-4 max-w-6xl mx-auto space-y-4">
       <Link href="/masters/emboss-blocks" className="text-ds-ink-muted hover:text-foreground text-sm">← Emboss Blocks</Link>
       <div>
-        <h1 className="text-xl font-bold text-ds-warning">{block.blockCode}</h1>
+        <h1 className="text-xl font-bold text-[var(--brand-primary)]">{block.blockCode}</h1>
         <p className="text-ds-ink-muted text-sm">Block No. {block.blockNumber ?? '-'} · {block.status}</p>
       </div>
       <div className="flex gap-2">
         {(['overview', 'issue', 'vendor', 'history', 'audit'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded text-xs ${tab === t ? 'bg-ds-warning text-primary-foreground' : 'bg-ds-elevated/60 text-ds-ink-muted'}`}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded text-xs ${tab === t ? 'bg-[var(--brand-primary)] text-primary-foreground' : 'bg-ds-elevated/60 text-ds-ink-muted'}`}>{t}</button>
         ))}
       </div>
 
@@ -166,7 +166,7 @@ function IssueReturn({ block }: { block: BlockDetail }) {
       </select>
       <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Storage location" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
       <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
-      <button onClick={ret} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Confirm Return</button>
+      <button onClick={ret} className="px-3 py-2 rounded bg-[var(--brand-primary)] text-primary-foreground text-xs">Confirm Return</button>
     </div>
   ) : (
     <div className="rounded-ds-lg bg-ds-card shadow-ds-depth-sm p-4 space-y-2 text-sm">
@@ -174,7 +174,7 @@ function IssueReturn({ block }: { block: BlockDetail }) {
       <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
       <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
       <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full"><option>EMB-01</option><option>EMB-02</option></select>
-      <button onClick={issue} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Issue Block</button>
+      <button onClick={issue} className="px-3 py-2 rounded bg-[var(--brand-primary)] text-primary-foreground text-xs">Issue Block</button>
     </div>
   )
 }

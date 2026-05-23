@@ -214,7 +214,7 @@ export default function PlateStoreDetailPage() {
       </Link>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-ds-warning">{plate.plateSetCode}</h1>
+          <h1 className="text-xl font-bold text-[var(--brand-primary)]">{plate.plateSetCode}</h1>
           <p className="text-ds-ink-muted">{plate.cartonName}</p>
           <p className="text-sm text-ds-ink-faint">{plate.customer?.name ?? '—'}</p>
         </div>
@@ -230,7 +230,7 @@ export default function PlateStoreDetailPage() {
           { key: 'history', label: 'History' },
           { key: 'audit', label: 'Audit Log' },
         ].map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key as typeof tab)} className={`px-3 py-1.5 rounded text-xs ${tab === t.key ? 'bg-ds-warning text-primary-foreground' : 'bg-ds-elevated text-ds-ink-muted'}`}>
+          <button key={t.key} onClick={() => setTab(t.key as typeof tab)} className={`px-3 py-1.5 rounded text-xs ${tab === t.key ? 'bg-[var(--brand-primary)] text-primary-foreground' : 'bg-ds-elevated text-ds-ink-muted'}`}>
             {t.label}
           </button>
         ))}
@@ -263,7 +263,7 @@ export default function PlateStoreDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <a href={`/api/plate-store/${id}/label`} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded bg-ds-warning hover:bg-ds-warning text-primary-foreground text-xs">Print Label</a>
+            <a href={`/api/plate-store/${id}/label`} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-xs">Print Label</a>
             <button onClick={handleRackUpdate} disabled={savingRack} className="px-3 py-1.5 rounded bg-ds-elevated text-ds-ink text-xs">{savingRack ? 'Saving…' : 'Update Rack Location'}</button>
             <input value={rackLocation} onChange={(e) => setRackLocation(e.target.value)} placeholder="Rack" className="px-2 py-1 rounded bg-ds-elevated text-foreground text-xs" />
             <input value={slotNumber} onChange={(e) => setSlotNumber(e.target.value)} placeholder="Slot" className="px-2 py-1 rounded bg-ds-elevated text-foreground text-xs" />
@@ -294,7 +294,7 @@ export default function PlateStoreDetailPage() {
                 </label>
               ))}
             </div>
-            <button onClick={handleIssue} disabled={saving} className="px-3 py-1.5 rounded bg-ds-warning hover:bg-ds-warning text-primary-foreground text-xs">{saving ? 'Issuing…' : 'Issue Plates'}</button>
+            <button onClick={handleIssue} disabled={saving} className="px-3 py-1.5 rounded bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-xs">{saving ? 'Issuing…' : 'Issue Plates'}</button>
           </div>
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-ds-ink">Return Form</h2>

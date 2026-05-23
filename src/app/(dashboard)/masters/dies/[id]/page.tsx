@@ -53,13 +53,13 @@ export default function DieDetailPage() {
       <Link href="/masters/dies" className="text-ds-ink-muted hover:text-foreground text-sm">← Die Store</Link>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-ds-warning">{die.dieCode}</h1>
+          <h1 className="text-xl font-bold text-[var(--brand-primary)]">{die.dieCode}</h1>
           <p className="text-ds-ink-muted">Die No. {die.dieNumber ?? '-'} · {die.status}</p>
         </div>
       </div>
       <div className="flex gap-2">
         {(['overview', 'issue', 'vendor', 'history', 'audit'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded text-xs ${tab === t ? 'bg-ds-warning text-primary-foreground' : 'bg-ds-elevated/60 text-ds-ink-muted'}`}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded text-xs ${tab === t ? 'bg-[var(--brand-primary)] text-primary-foreground' : 'bg-ds-elevated/60 text-ds-ink-muted'}`}>{t}</button>
         ))}
       </div>
 
@@ -162,7 +162,7 @@ function IssuePanel({ die }: { die: DieDetail }) {
       </select>
       <input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="Storage location" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
       <textarea value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} placeholder="Notes" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
-      <button onClick={ret} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Confirm Return</button>
+      <button onClick={ret} className="px-3 py-2 rounded bg-[var(--brand-primary)] text-primary-foreground text-xs">Confirm Return</button>
     </div>
   ) : (
     <div className="space-y-2 text-sm">
@@ -170,7 +170,7 @@ function IssuePanel({ die }: { die: DieDetail }) {
       <input value={jobCardNumber} onChange={(e) => setJobCardNumber(e.target.value)} placeholder="Job Card Number" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
       <input value={issuedTo} onChange={(e) => setIssuedTo(e.target.value)} placeholder="Issue to operator" className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full" />
       <select value={machineCode} onChange={(e) => setMachineCode(e.target.value)} className="px-3 py-2 rounded bg-ds-elevated text-foreground text-sm w-full"><option>DIE-A01</option><option>DIE-A02</option><option>DIE-A03</option><option>DIE-M01</option><option>DIE-M02</option></select>
-      <button onClick={issue} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-xs">Issue Die</button>
+      <button onClick={issue} className="px-3 py-2 rounded bg-[var(--brand-primary)] text-primary-foreground text-xs">Issue Die</button>
     </div>
   )
 }

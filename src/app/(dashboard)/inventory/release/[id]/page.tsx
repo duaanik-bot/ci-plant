@@ -71,7 +71,7 @@ export default function ReleasePage() {
   return (
     <div className="p-4 max-w-md mx-auto">
       <Link href="/inventory" className="text-ds-ink-muted hover:text-foreground text-sm mb-4 inline-block">← Inventory</Link>
-      <h1 className="text-xl font-bold text-ds-warning mb-2">QA release from quarantine</h1>
+      <h1 className="text-xl font-bold text-[var(--brand-primary)] mb-2">QA release from quarantine</h1>
       <p className="text-ds-ink-muted text-sm mb-4">{material.materialCode} — {material.description}</p>
       <p className="text-sm mb-4">In quarantine: <strong>{maxQty} {material.unit}</strong></p>
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -100,7 +100,7 @@ export default function ReleasePage() {
         <button
           type="submit"
           disabled={submitting}
-          className="w-full py-2.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground font-medium"
+          className="w-full py-2.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:bg-ds-line/30 text-primary-foreground font-medium"
         >
           {submitting ? 'Releasing…' : 'Release to available'}
         </button>

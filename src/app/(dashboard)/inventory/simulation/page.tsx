@@ -75,7 +75,7 @@ export default function SimulationPage() {
   return (
     <div className="p-4 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-ds-warning">Live Stock Simulation</h1>
+        <h1 className="text-xl font-bold text-[var(--brand-primary)]">Live Stock Simulation</h1>
         <Link href="/inventory" className="text-ds-ink-muted hover:text-foreground text-sm">
           ← Stock States
         </Link>
@@ -100,7 +100,7 @@ export default function SimulationPage() {
         <div className="flex items-end">
           <button
             type="button"
-            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm font-medium"
           >
             Simulate Stage Completion
           </button>
@@ -130,7 +130,7 @@ export default function SimulationPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="rounded-ds-md bg-ds-warning/8 p-4">
-          <h2 className="font-semibold text-ds-warning mb-2">WIP</h2>
+          <h2 className="font-semibold text-[var(--brand-primary)] mb-2">WIP</h2>
           <p className="text-2xl font-bold text-foreground">
             {wipQty.toLocaleString()} units
           </p>

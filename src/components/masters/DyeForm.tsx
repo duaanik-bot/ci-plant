@@ -135,7 +135,7 @@ export default function DyeForm({ mode, initialData }: Props) {
           {mode === 'ADD' && (
             <button type="button" onClick={toggleAutoGenerate} className="flex items-center gap-2 text-xs">
               <span className="text-ds-ink-muted">Auto-generate</span>
-              <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoGenerate ? 'bg-ds-warning' : 'bg-ds-line/30'}`}>
+              <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoGenerate ? 'bg-[var(--brand-primary)]' : 'bg-ds-line/30'}`}>
                 <span className={`inline-block h-3.5 w-3.5 rounded-full bg-card transition-transform ${autoGenerate ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
               </span>
             </button>
@@ -221,7 +221,7 @@ export default function DyeForm({ mode, initialData }: Props) {
 
       <div className="flex justify-end gap-2">
         <button type="button" onClick={() => router.push('/masters/dyes')} className="px-3 py-1.5 rounded-ds-md bg-ds-elevated text-ds-ink text-sm">Cancel</button>
-        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium">
+        <button type="submit" disabled={saving} className="px-4 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium">
           {saving ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
         </button>
       </div>

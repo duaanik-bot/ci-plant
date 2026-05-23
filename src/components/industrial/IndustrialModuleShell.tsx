@@ -28,7 +28,7 @@ export function IndustrialModuleShell({
       <div className="mx-auto w-full max-w-none space-y-3 px-2 py-3 pb-24 sm:px-3 md:px-4">
         <header className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <h1 className="text-lg md:text-xl font-bold tracking-tight text-ds-warning">{title}</h1>
+            <h1 className="text-lg md:text-xl font-bold tracking-tight text-[var(--brand-primary)]">{title}</h1>
             {subtitle ? <p className="text-xs text-ds-ink-faint">{subtitle}</p> : null}
           </div>
           {headerAction ? <div className="shrink-0">{headerAction}</div> : null}

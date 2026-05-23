@@ -226,7 +226,7 @@ export default function DispatchTrackingPage() {
                   className={`px-3 py-2 rounded-ds-md text-sm font-medium ${
                     r.status === 'pod_received'
                       ? 'bg-ds-elevated text-ds-ink-faint cursor-not-allowed'
-                      : 'bg-ds-warning hover:bg-ds-warning text-primary-foreground'
+                      : 'bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground'
                   }`}
                 >
                   Mark Delivered
@@ -307,7 +307,7 @@ export default function DispatchTrackingPage() {
               <button
                 type="button"
                 onClick={submitPod}
-                className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+                className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm font-medium"
               >
                 Confirm POD
               </button>

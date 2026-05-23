@@ -26,7 +26,7 @@ export default function EmbossLocationViewPage() {
   return (
     <div className="p-4 max-w-7xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-ds-warning">Block Location View</h1>
+        <h1 className="text-xl font-bold text-[var(--brand-primary)]">Block Location View</h1>
         <Link href="/masters/emboss-blocks" className="px-3 py-2 rounded bg-ds-elevated text-ds-ink text-sm">Back</Link>
       </div>
       <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search block or carton" className="w-full md:w-96 px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />

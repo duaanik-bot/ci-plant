@@ -331,7 +331,7 @@ export default function NewJobPage() {
         <button
           type="submit"
           disabled={submitting || !isFormValid}
-          className="w-full py-2.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium"
+          className="w-full py-2.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium"
         >
           {submitting ? 'Creating…' : isFormValid ? 'Create job' : 'Fill required fields to continue'}
         </button>

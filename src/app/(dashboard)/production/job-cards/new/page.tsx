@@ -292,7 +292,7 @@ export default function NewJobCardPage() {
       <div className="sticky bottom-2 z-20 rounded-ds-lg bg-background p-3 flex justify-end gap-2 shadow-ds-depth-sm">
         <button type="button" onClick={() => router.push('/production/job-cards')} className="px-4 py-2 rounded-ds-md bg-ds-elevated text-sm">Cancel</button>
         <button type="button" disabled={saving} onClick={() => void createJobCard(true)} className="px-4 py-2 rounded-ds-md bg-ds-elevated text-sm">Save Draft</button>
-        <button type="button" disabled={saving} onClick={() => void createJobCard(false)} className="px-4 py-2 rounded-ds-md bg-ds-warning text-primary-foreground text-sm">{saving ? 'Saving…' : 'Create Job Card'}</button>
+        <button type="button" disabled={saving} onClick={() => void createJobCard(false)} className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] text-primary-foreground text-sm">{saving ? 'Saving…' : 'Create Job Card'}</button>
       </div>
     </div>
   )

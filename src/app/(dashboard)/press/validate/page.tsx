@@ -81,7 +81,7 @@ export default function PressValidatePage() {
           <button
             type="button"
             onClick={startScanner}
-            className="w-full py-6 px-4 rounded-ds-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground font-bold text-lg mb-4"
+            className="w-full py-6 px-4 rounded-ds-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground font-bold text-lg mb-4"
           >
             TAP TO SCAN PLATE
           </button>

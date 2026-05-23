@@ -1165,7 +1165,7 @@ export default function EditPurchaseOrderPage() {
                   return next
                 })
               }}
-              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-ds-warning focus:border-ds-brand focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-[var(--error)]/60' : ''} ${poSentToPlanning ? 'cursor-not-allowed opacity-80' : ''}`}
+              className={`mt-0.5 w-full min-w-[10rem] max-w-[16rem] border-b-2 border-transparent bg-transparent font-mono text-lg font-bold text-[var(--brand-primary)] focus:border-ds-brand focus:outline-none ${fieldErrors.poNumber ? 'ring-1 ring-[var(--error)]/60' : ''} ${poSentToPlanning ? 'cursor-not-allowed opacity-80' : ''}`}
             />
             {fieldErrors.poNumber ? (
               <span className="mt-0.5 block text-xs text-[var(--error)]">{fieldErrors.poNumber}</span>
@@ -1223,7 +1223,7 @@ export default function EditPurchaseOrderPage() {
             ) : (
               <p className="text-right text-xs leading-snug text-[var(--success)]/90">
                 In Planning — lines are read-only.{' '}
-                <Link href="/orders/planning" className="font-semibold text-ds-warning underline underline-offset-2">
+                <Link href="/orders/planning" className="font-semibold text-[var(--brand-primary)] underline underline-offset-2">
                   Open queue
                 </Link>
                 .
@@ -1519,7 +1519,7 @@ export default function EditPurchaseOrderPage() {
 
       {lines.some((l) => !!l.fgReservation) ? (
         <div className="rounded-ds-lg bg-ds-elevated/30 p-3 shadow-ds-depth-sm">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ds-warning">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand-primary)]">
             FG reservation log
           </p>
           <div className="space-y-1.5 text-xs">

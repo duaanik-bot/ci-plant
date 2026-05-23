@@ -30,14 +30,14 @@ export default function DashboardError({
           <button
             type="button"
             onClick={reset}
-            className="rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
+            className="rounded-ds-sm bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] shadow-ds-depth-sm hover:bg-[var(--bg-muted)]"
           >
             Try again
           </button>
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
+            className="rounded-ds-sm bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] shadow-ds-depth-sm hover:bg-[var(--bg-muted)]"
           >
             Reload page
           </button>

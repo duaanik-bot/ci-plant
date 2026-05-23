@@ -159,7 +159,7 @@ function DieHubZoneSummaryBar({
       <Card
         label="Triage"
         count={triage}
-        dotClass="bg-ds-warning shadow-[0_0_10px_rgba(245,158,11,0.55)]"
+        dotClass="bg-[var(--brand-primary)] shadow-[0_0_10px_rgba(245,158,11,0.55)]"
       />
       <Card
         label="Outside vendor"
@@ -1698,7 +1698,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
             <button
               type="button"
               disabled={saving}
-              className="mt-1.5 w-full py-1.5 rounded bg-ds-warning hover:bg-ds-warning text-primary-foreground text-xs font-semibold disabled:opacity-50"
+              className="mt-1.5 w-full py-1.5 rounded bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-xs font-semibold disabled:opacity-50"
               onClick={() =>
                 void runTransition(
                   { action: 'triage_to_prep', tool: toolKind, id: r.id },
@@ -1858,7 +1858,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 onClick={() => setHubView('board')}
                 className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
                   hubView === 'board'
-                    ? 'bg-ds-warning text-primary-foreground'
+                    ? 'bg-[var(--brand-primary)] text-primary-foreground'
                     : 'text-[var(--text-secondary)] hover:text-foreground hover:bg-ds-elevated'
                 }`}
               >
@@ -1871,7 +1871,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 onClick={() => setHubView('table')}
                 className={`px-3 py-2 rounded-md text-xs font-bold transition-colors ${
                   hubView === 'table'
-                    ? 'bg-ds-warning text-primary-foreground'
+                    ? 'bg-[var(--brand-primary)] text-primary-foreground'
                     : 'text-[var(--text-secondary)] hover:text-foreground hover:bg-ds-elevated'
                 }`}
               >
@@ -2279,7 +2279,7 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                       returnCondition === c
                         ? c === 'Poor'
                           ? 'bg-[var(--error-bg)] text-[var(--error)]'
-                          : 'bg-ds-warning text-primary-foreground'
+                          : 'bg-[var(--brand-primary)] text-primary-foreground'
                         : 'text-[var(--text-secondary)] hover:text-ds-ink'
                     }`}
                   >

@@ -39,7 +39,7 @@ export default function NewDieStorePage() {
 
   return (
     <form onSubmit={submit} className="p-4 max-w-2xl mx-auto space-y-3">
-      <h1 className="text-xl font-bold text-ds-warning">Add Die Record</h1>
+      <h1 className="text-xl font-bold text-[var(--brand-primary)]">Add Die Record</h1>
       <input value={form.dieNumber} onChange={(e) => setForm((p) => ({ ...p, dieNumber: e.target.value }))} placeholder="Die Number" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />
       <input value={form.dieType} onChange={(e) => setForm((p) => ({ ...p, dieType: e.target.value }))} placeholder="Die Type" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />
       <input value={form.ups} onChange={(e) => setForm((p) => ({ ...p, ups: e.target.value }))} placeholder="UPS" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />
@@ -47,7 +47,7 @@ export default function NewDieStorePage() {
       <input value={form.cartonSize} onChange={(e) => setForm((p) => ({ ...p, cartonSize: e.target.value }))} placeholder="Carton Size" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />
       <input value={form.storageLocation} onChange={(e) => setForm((p) => ({ ...p, storageLocation: e.target.value }))} placeholder="Storage Location" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />
       <input value={form.compartment} onChange={(e) => setForm((p) => ({ ...p, compartment: e.target.value }))} placeholder="Compartment" className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground text-sm" />
-      <button disabled={saving} className="px-3 py-2 rounded bg-ds-warning text-primary-foreground text-sm">{saving ? 'Saving...' : 'Save'}</button>
+      <button disabled={saving} className="px-3 py-2 rounded bg-[var(--brand-primary)] text-primary-foreground text-sm">{saving ? 'Saving...' : 'Save'}</button>
     </form>
   )
 }

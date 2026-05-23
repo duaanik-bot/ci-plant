@@ -182,7 +182,7 @@ export default function RfqDetailPage() {
     <div className="p-4 max-w-3xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-ds-warning">{rfq.rfqNumber}</h1>
+          <h1 className="text-xl font-bold text-[var(--brand-primary)]">{rfq.rfqNumber}</h1>
           <p className="text-ds-ink-muted">{rfq.customer.name}</p>
           <p className="text-ds-ink-muted text-sm">
             {rfq.productName} · {rfq.packType}
@@ -268,7 +268,7 @@ export default function RfqDetailPage() {
           <button
             onClick={saveFeasibility}
             disabled={saving}
-            className="px-3 py-2 rounded bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm"
+            className="px-3 py-2 rounded bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm"
           >
             {saving ? 'Saving…' : 'Save Feasibility'}
           </button>
@@ -380,7 +380,7 @@ export default function RfqDetailPage() {
           <button
             onClick={saveQuotation}
             disabled={saving}
-            className="px-3 py-2 rounded bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm"
+            className="px-3 py-2 rounded bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm"
           >
             {saving ? 'Saving…' : 'Save Quotation'}
           </button>

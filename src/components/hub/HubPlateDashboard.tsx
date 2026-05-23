@@ -2751,7 +2751,7 @@ export default function HubPlateDashboard() {
             {/* ZONE 1 — Triage */}
             <section className="rounded-xl bg-ds-main p-3">
               <div className="flex flex-col gap-1 mb-2 min-w-0">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--brand-primary)]">
                   Incoming triage
                 </h2>
                 <ZoneCapacitySubheader
@@ -3217,7 +3217,7 @@ export default function HubPlateDashboard() {
               <section className="rounded-xl bg-ds-main p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-2 mb-2 min-w-0">
                   <div className="flex flex-col gap-1 min-w-0">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--brand-primary)]">
                       CTP queue
                     </h2>
                     <ZoneCapacitySubheader
@@ -3763,7 +3763,7 @@ export default function HubPlateDashboard() {
               {/* Inventory */}
               <section className="rounded-xl bg-ds-main p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-1 mb-2 min-w-0">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--brand-primary)]">
                     Live inventory
                   </h2>
                   <ZoneCapacitySubheader
@@ -3929,7 +3929,7 @@ export default function HubPlateDashboard() {
               {/* Custody */}
               <section className="rounded-xl bg-ds-main p-3 flex flex-col min-h-[280px] xl:min-h-0 xl:h-full">
                 <div className="flex flex-col gap-1 mb-0.5 min-w-0">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--brand-primary)]">
                     Custody floor
                   </h2>
                   <ZoneCapacitySubheader
@@ -4318,7 +4318,7 @@ export default function HubPlateDashboard() {
             </div>
             <div className="rounded-lg bg-background/50 px-3 py-2 flex items-center justify-between">
               <span className="text-sm text-[var(--text-secondary)]">Total plates required</span>
-              <span className="text-lg font-bold text-ds-warning tabular-nums">{addStockTotalPlates}</span>
+              <span className="text-lg font-bold text-[var(--brand-primary)] tabular-nums">{addStockTotalPlates}</span>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -5138,7 +5138,7 @@ export default function HubPlateDashboard() {
                   />
                   {returnSizePick !== returnSizeOriginal ? (
                     <div className="mt-2 pt-2 space-y-2 transition-all">
-                      <p className="text-xs font-semibold text-ds-warning">
+                      <p className="text-xs font-semibold text-[var(--brand-primary)]">
                         Reason for size modification?{' '}
                         <span className="text-[var(--error)]">*</span>
                       </p>

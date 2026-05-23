@@ -122,7 +122,7 @@ export default function NewPlateStorePage() {
       <Link href="/pre-press/plate-store" className="text-ds-ink-muted hover:text-foreground text-sm mb-4 inline-block">
         ← Plate store
       </Link>
-      <h1 className="text-xl font-bold text-ds-warning mb-4">Add plate record</h1>
+      <h1 className="text-xl font-bold text-[var(--brand-primary)] mb-4">Add plate record</h1>
 
       <form onSubmit={handleSubmit} className="space-y-4 rounded-ds-lg bg-ds-card p-4 shadow-ds-depth-sm">
         <div>
@@ -284,7 +284,7 @@ export default function NewPlateStorePage() {
           <button
             type="submit"
             disabled={saving}
-            className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+            className="px-4 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

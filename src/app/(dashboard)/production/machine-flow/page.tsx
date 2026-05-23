@@ -125,7 +125,7 @@ export default function MachineFlowPage() {
   return (
     <div className="p-4 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-ds-warning">Machine Flow</h1>
+        <h1 className="text-xl font-bold text-[var(--brand-primary)]">Machine Flow</h1>
         <Link href="/jobs" className="text-ds-ink-muted hover:text-foreground text-sm">Active Jobs</Link>
       </div>
 

@@ -1154,7 +1154,7 @@ export default function NewRfqPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-6 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground font-medium text-sm"
+            className="px-6 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground font-medium text-sm"
           >
             {submitting ? 'Saving…' : 'Create RFQ'}
           </button>
@@ -1261,7 +1261,7 @@ export default function NewRfqPage() {
             <button
               type="submit"
               disabled={qcSubmitting}
-              className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+              className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium"
             >
               {qcSubmitting ? 'Saving…' : 'Save Customer'}
             </button>

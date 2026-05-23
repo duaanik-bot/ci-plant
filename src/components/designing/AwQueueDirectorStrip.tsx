@@ -40,7 +40,7 @@ export function AwQueueDirectorStrip({
             <>
               <button
                 type="button"
-                className="rounded-ds-sm bg-ds-warning hover:bg-ds-warning px-2.5 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                className="rounded-ds-sm bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] px-2.5 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"
                 disabled={recallBusy}
                 onClick={() => setRecallOpen(true)}
               >
@@ -68,7 +68,7 @@ export function AwQueueDirectorStrip({
                     <button
                       type="button"
                       disabled={recallBusy}
-                      className="rounded-ds-sm bg-ds-warning px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:opacity-95 disabled:opacity-50"
+                      className="rounded-ds-sm bg-[var(--brand-primary)] px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:opacity-95 disabled:opacity-50"
                       onClick={() => {
                         void (async () => {
                           await onConfirmRecall()
@@ -116,7 +116,7 @@ export function PlateHubReadinessSparkline({ plateFlowStatus }: { plateFlowStatu
           className={clsx(
             'h-1 w-4 rounded-sm',
             i < active && 'bg-[var(--success-bg)]/70',
-            i === active && 'bg-ds-warning ring-1 ring-ds-warning/60',
+            i === active && 'bg-[var(--brand-primary)] ring-1 ring-ds-warning/60',
             i > active && 'bg-ds-elevated',
           )}
         />
