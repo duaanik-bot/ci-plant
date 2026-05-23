@@ -12,7 +12,7 @@
     @apply border-ds-brand/85 outline-none ring-2 ring-ds-brand/45;
   }
   .ds-input {
-    @apply w-full rounded-ds-sm border border-ds-line/60 bg-[var(--bg-card)] px-3 py-2.5 text-[14px] text-ds-ink shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out placeholder:text-ds-ink-faint;
+    @apply w-full rounded-ds-sm bg-[var(--bg-elevated)] px-3 py-2.5 text-[14px] text-ds-ink transition-[box-shadow] duration-150 ease-out placeholder:text-ds-ink-faint;
   }
   /** Tabular numerals for amounts and counts (line totals use .ds-typo-total for green). */
   .ds-input-num {
@@ -23,7 +23,7 @@
     @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(37,99,235,0.2),0_4px_12px_rgba(15,23,42,0.08)];
   }
   .ds-toolbar {
-    @apply flex flex-wrap items-center gap-2 rounded-ds-md bg-[var(--bg-card)] px-3 py-2 shadow-ds-depth-sm;
+    @apply flex flex-wrap items-center gap-2 py-1.5;
   }
   .ds-toolbar-search {
     @apply ds-input h-9 min-w-[260px] max-w-[460px] py-1.5;

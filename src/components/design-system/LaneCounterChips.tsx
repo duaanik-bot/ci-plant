@@ -11,21 +11,14 @@ export type LaneCounterChip = {
   tone?: Tone
 }
 
-function toneClass(tone: Tone, active: boolean): string {
-  if (!active) return 'border-ds-line/50 text-ds-ink-muted'
+function activeToneColor(tone: Tone): string {
   switch (tone) {
-    case 'brand':
-      return 'border-ds-brand/40 bg-ds-brand/10 text-ds-brand'
-    case 'success':
-      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-    case 'info':
-      return 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300'
-    case 'warning':
-      return 'border-ds-warning/40 bg-ds-warning/10 text-ds-warning'
-    case 'danger':
-      return 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-    default:
-      return 'border-ds-line/50 bg-ds-main/50 text-ds-ink'
+    case 'brand':    return 'text-[var(--brand-primary)]'
+    case 'success':  return 'text-[var(--success)]'
+    case 'info':     return 'text-[var(--info)]'
+    case 'warning':  return 'text-[var(--warning)]'
+    case 'danger':   return 'text-[var(--error)]'
+    default:         return 'text-[var(--brand-primary)]'
   }
 }
 
@@ -37,7 +30,7 @@ export function LaneCounterChips({
   className?: string
 }) {
   return (
-    <div className={`flex flex-wrap items-center gap-2 rounded-lg border border-ds-line/40 bg-ds-elevated/20 px-2.5 py-2 ${className}`}>
+    <div className={`flex flex-wrap items-center gap-0 ${className}`}>
       {chips.map((chip) => {
         const active = chip.active === true
         const tone = chip.tone ?? 'neutral'
@@ -46,7 +39,12 @@ export function LaneCounterChips({
             key={chip.key}
             type="button"
             onClick={chip.onClick}
-            className={`cursor-pointer rounded border px-2 py-0.5 text-xs transition-colors ${toneClass(tone, active)}`}
+            className={[
+              'relative px-3 py-2 text-sm font-medium transition-colors duration-150',
+              active
+                ? `${activeToneColor(tone)} after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:rounded-full after:bg-current`
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+            ].join(' ')}
           >
             {chip.label} ({chip.count})
           </button>

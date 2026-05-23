@@ -856,19 +856,19 @@ export default function PurchaseOrdersPage() {
               filterActive={listFilterQuery.trim().length >= 2}
             />
           </div>
-          <span className="rounded border border-ds-line/50 bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink-muted">
+          <span className="rounded-ds-sm px-2 py-1 text-xs text-ds-ink-muted">
             {resultSummary}
           </span>
           <div className="relative" data-po-menu-root>
             <button
               type="button"
               onClick={() => setShowColumnMenu((v) => !v)}
-              className="inline-flex h-8 items-center rounded-ds-sm border border-ds-line bg-ds-elevated/80 px-2 text-xs text-ds-ink shadow-sm"
+              className="inline-flex h-8 items-center rounded-ds-sm bg-[var(--bg-elevated)] px-2 text-xs text-ds-ink transition-colors hover:bg-[var(--bg-muted)]"
             >
               Columns
             </button>
             {showColumnMenu ? (
-              <div className="absolute right-0 z-50 mt-1 w-40 rounded-ds-sm border border-ds-line bg-ds-card p-2 text-xs shadow-lg">
+              <div className="absolute right-0 z-50 mt-1 w-40 rounded-ds-sm bg-[var(--bg-card)] p-2 text-xs shadow-ds-depth">
                 {(
                   [
                     ['age', 'Age'],
@@ -893,7 +893,7 @@ export default function PurchaseOrdersPage() {
           <button
             type="button"
             onClick={() => setImportDrawerOpen(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-ds-sm border border-ds-line bg-ds-card px-3 text-xs font-semibold text-ds-ink shadow-sm transition hover:bg-ds-bg-muted"
+            className="inline-flex h-8 items-center gap-1.5 rounded-ds-sm bg-[var(--bg-elevated)] px-3 text-xs font-semibold text-ds-ink transition-colors hover:bg-[var(--bg-muted)]"
             title="Upload a customer PO PDF — Claude extracts header + lines and matches them to your Carton master"
           >
             <Sparkles className="size-3.5 text-[var(--tooling,#7c3aed)]" />
@@ -937,21 +937,21 @@ export default function PurchaseOrdersPage() {
                   return next
                 })
               }
-              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
             >
               {allVisibleSelected ? 'Unselect visible' : 'Select visible'}
             </button>
             <button
               type="button"
               onClick={() => setSelectedPoIds(new Set(viewRows.filter((p) => p.status === 'draft').map((p) => p.id)))}
-              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
             >
               Select drafts
             </button>
             <button
               type="button"
               onClick={() => setSelectedPoIds(new Set())}
-              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
             >
               Clear
             </button>
@@ -963,7 +963,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkUpdateStatus('confirmed')}
               disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null || bulkRevertingDraft}
-              className="h-8 rounded-ds-sm border border-[var(--success)]/40 px-2.5 text-xs font-semibold text-[var(--success)] hover:bg-[var(--success-bg)] disabled:opacity-40 dark:text-[var(--success)]"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--success)] transition-colors hover:bg-[var(--success-bg)] disabled:opacity-40"
             >
               {bulkUpdatingStatus === 'confirmed' ? 'Confirming…' : 'Bulk confirm'}
             </button>
@@ -971,7 +971,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkRevertSelectedToDraft()}
               disabled={selectedPoIds.size === 0 || bulkRevertingDraft || bulkUpdatingStatus != null}
-              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-semibold text-ds-ink hover:bg-ds-elevated/80 disabled:opacity-40"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-40"
             >
               {bulkRevertingDraft ? 'Reverting…' : 'Bulk move to draft'}
             </button>
@@ -979,7 +979,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkUpdateStatus('approved')}
               disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null || bulkRevertingDraft}
-              className="h-8 rounded-ds-sm border border-[var(--info)]/40 px-2.5 text-xs font-semibold text-[var(--info)] hover:bg-[var(--info-bg)] disabled:opacity-40 dark:text-[var(--info)]"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--info)] transition-colors hover:bg-[var(--info-bg)] disabled:opacity-40"
             >
               {bulkUpdatingStatus === 'approved' ? 'Approving…' : 'Bulk approve'}
             </button>
@@ -991,7 +991,7 @@ export default function PurchaseOrdersPage() {
                 if (first) setDrawerPoId(first.id)
               }}
               disabled={selectedPoIds.size === 0}
-              className="h-8 rounded-ds-sm border border-ds-brand/40 px-2.5 text-xs font-semibold text-ds-brand disabled:opacity-40"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--brand-primary)] transition-colors hover:bg-[var(--brand-bg-soft)] disabled:opacity-40"
             >
               Open first selected
             </button>
