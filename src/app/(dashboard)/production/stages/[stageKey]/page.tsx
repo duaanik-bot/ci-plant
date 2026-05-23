@@ -522,7 +522,7 @@ export default function ProductionStagePage() {
     return (
       <IndustrialModuleShell title="Production stage" subtitle="">
         <p className="text-ds-ink-muted text-sm">Unknown stage.</p>
-        <Link href="/production/stages" className="text-ds-warning hover:underline mt-2 inline-block text-sm">
+        <Link href="/production/stages" className="text-[var(--brand-primary)] hover:underline mt-2 inline-block text-sm">
           ← All stages
         </Link>
       </IndustrialModuleShell>
@@ -1574,14 +1574,14 @@ export default function ProductionStagePage() {
           <span className="text-ds-line/60 text-xs select-none">·</span>
           <Link
             href={`/production/stages/${stageKey}/triage`}
-            className="inline-flex items-center gap-1.5 rounded-ds-sm bg-ds-warning/8 px-3 py-1.5 text-xs font-medium text-ds-warning hover:bg-ds-warning/15 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-ds-sm bg-[var(--brand-primary)]/8 px-3 py-1.5 text-xs font-medium text-[var(--brand-primary)] hover:bg-[var(--brand-primary)]/15 transition-colors"
           >
             Open Triage
           </Link>
         </div>
         <Link
           href="/production/job-cards"
-          className="inline-flex items-center gap-1.5 rounded-ds-sm bg-ds-elevated/60 px-3 py-1.5 text-xs text-ds-ink-muted hover:text-ds-warning transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-ds-sm bg-ds-elevated/60 px-3 py-1.5 text-xs text-ds-ink-muted hover:text-[var(--brand-primary)] transition-colors"
         >
           Job Cards
         </Link>
@@ -1610,7 +1610,7 @@ export default function ProductionStagePage() {
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`rounded-full px-3 py-1 text-xs ${tab === t ? 'text-ds-warning bg-ds-warning/10' : 'text-ds-ink-muted hover:bg-ds-card'}`}
+              className={`rounded-full px-3 py-1 text-xs ${tab === t ? 'text-[var(--brand-primary)] bg-[var(--brand-primary)]/10' : 'text-ds-ink-muted hover:bg-ds-card'}`}
             >
               {t.replace('_', ' ')}: {count}
             </button>
@@ -1635,7 +1635,7 @@ export default function ProductionStagePage() {
               await saveStageInline(row, { status: 'in_progress', skipReload: true })
             })
           }
-          className="rounded-ds-sm bg-ds-warning/10 px-2.5 py-1 text-xs text-ds-warning hover:bg-ds-warning/15 disabled:opacity-40"
+          className="rounded-ds-sm bg-[var(--brand-primary)]/10 px-2.5 py-1 text-xs text-[var(--brand-primary)] hover:bg-[var(--brand-primary)]/15 disabled:opacity-40"
         >
           Bulk Start
         </button>
@@ -1907,7 +1907,7 @@ export default function ProductionStagePage() {
                         title="Open decisions drawer"
                         aria-label="Open decisions drawer"
                         onClick={() => setSpotlight(row)}
-                        className="inline-flex items-center justify-center rounded-ds-sm bg-ds-warning/10 p-1 text-ds-warning hover:bg-ds-warning/15 disabled:opacity-50"
+                        className="inline-flex items-center justify-center rounded-ds-sm bg-[var(--brand-primary)]/10 p-1 text-[var(--brand-primary)] hover:bg-[var(--brand-primary)]/15 disabled:opacity-50"
                       >
                         <PanelRightOpen className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -1915,7 +1915,7 @@ export default function ProductionStagePage() {
                         href={`/production/job-cards/${jobCard.id}`}
                         title="Open job card"
                         aria-label={`Open job card ${jobCard.jobCardNumber}`}
-                        className={`${ICON_BUTTON_BASE} bg-ds-card/40 text-ds-ink-muted hover:bg-ds-warning/8 hover:text-ds-warning`}
+                        className={`${ICON_BUTTON_BASE} bg-ds-card/40 text-ds-ink-muted hover:bg-[var(--brand-primary)]/8 hover:text-[var(--brand-primary)]`}
                       >
                         <FileText className="h-3.5 w-3.5" strokeWidth={2} />
                       </Link>
@@ -2125,8 +2125,8 @@ export default function ProductionStagePage() {
                       <span className="text-ds-ink-faint">×</span>
                       <span className="text-ds-ink-faint">UPS:</span>
                       <span className="text-ds-ink font-medium">{upsForPasting > 0 ? upsForPasting : '—'}</span>
-                      <span className="text-ds-warning">→</span>
-                      <span className="text-ds-warning font-bold text-sm">{expectedCartons.toLocaleString('en-IN')} cartons</span>
+                      <span className="text-[var(--brand-primary)]">→</span>
+                      <span className="text-[var(--brand-primary)] font-bold text-sm">{expectedCartons.toLocaleString('en-IN')} cartons</span>
                     </div>
                     {pushedQty > 0 && availableToPush === 0 ? (
                       <p className="text-[11px] text-[var(--success)] font-medium">✓ Fully pushed to Dispatch</p>
@@ -2323,7 +2323,7 @@ export default function ProductionStagePage() {
                         type="button"
                         disabled={savingStageId === row.stageRecord.id || !!nextStarted}
                         onClick={() => void saveStageInline(row, { status: 'pending' })}
-                        className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:text-ds-warning disabled:opacity-40 transition-colors"
+                        className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:text-[var(--brand-primary)] disabled:opacity-40 transition-colors"
                         title={nextStarted ? 'Next station already started' : 'Reopen this stage'}
                       >
                         Reopen
@@ -2331,7 +2331,7 @@ export default function ProductionStagePage() {
                       {nextKey ? (
                         <Link
                           href={`/production/stages/${nextKey}`}
-                          className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink hover:text-ds-warning transition-colors"
+                          className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink hover:text-[var(--brand-primary)] transition-colors"
                         >
                           View Next Stage →
                         </Link>
@@ -2355,7 +2355,7 @@ export default function ProductionStagePage() {
                             type="button"
                             disabled={savingStageId === row.stageRecord.id || !_rulesMet}
                             onClick={() => void saveStageInline(row, { status: 'in_progress' })}
-                            className="rounded-ds-sm bg-ds-warning px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
+                            className="rounded-ds-sm bg-[var(--brand-primary)] px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
                             title={!_rulesMet ? (!_operatorOk ? 'Select operator first' : 'Select machine first') : undefined}
                           >
                             Start Production
@@ -2367,7 +2367,7 @@ export default function ProductionStagePage() {
                           type="button"
                           disabled={savingStageId === row.stageRecord.id || !Number.isFinite(pushQty) || pushQty <= 0 || pushQty > availableToPush}
                           onClick={() => void pushToNext(row, pushQty, false)}
-                          className="rounded-ds-sm bg-ds-warning/10 px-3 py-1.5 text-xs text-ds-warning hover:bg-ds-warning/15 disabled:opacity-40 transition-colors"
+                          className="rounded-ds-sm bg-[var(--brand-primary)]/10 px-3 py-1.5 text-xs text-[var(--brand-primary)] hover:bg-[var(--brand-primary)]/15 disabled:opacity-40 transition-colors"
                         >
                           Partial Push
                         </button>
@@ -2420,7 +2420,7 @@ export default function ProductionStagePage() {
                             void completeAndPushNext(row)
                           }
                         }}
-                        className="rounded-ds-sm bg-ds-warning px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
+                        className="rounded-ds-sm bg-[var(--brand-primary)] px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
                       >
                         {stageKey === 'pasting' ? 'Complete & Pack →' : 'Complete Push'}
                       </button>
@@ -2429,7 +2429,7 @@ export default function ProductionStagePage() {
                           type="button"
                           disabled={savingStageId === row.stageRecord.id}
                           onClick={() => void bringBackFromNextStage(row)}
-                          className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:text-ds-warning disabled:opacity-40 transition-colors"
+                          className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink-muted hover:text-[var(--brand-primary)] disabled:opacity-40 transition-colors"
                         >
                           Undo Last Push
                         </button>
@@ -2461,7 +2461,7 @@ export default function ProductionStagePage() {
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-ds-warning transition-colors"
+                      className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-[var(--brand-primary)] transition-colors"
                       onClick={() =>
                         setChecklistDrafts((prev) => ({
                           ...prev,
@@ -2528,7 +2528,7 @@ export default function ProductionStagePage() {
               <button
                 type="button"
                 onClick={() => setShowDowntime((v) => !v)}
-                className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-ds-warning transition-colors"
+                className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-[var(--brand-primary)] transition-colors"
               >
                 {showDowntime ? 'Collapse' : 'Log Downtime'}
               </button>
@@ -2613,7 +2613,7 @@ export default function ProductionStagePage() {
               <button
                 type="button"
                 onClick={() => setShowTimeline((v) => !v)}
-                className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-ds-warning transition-colors"
+                className="rounded-ds-sm bg-ds-elevated px-2.5 py-0.5 text-[11px] text-ds-ink-muted hover:text-[var(--brand-primary)] transition-colors"
               >
                 {showTimeline ? 'Collapse' : 'Show'}
               </button>

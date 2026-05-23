@@ -134,7 +134,7 @@ export default function SimulationPage() {
           <p className="text-2xl font-bold text-foreground">
             {wipQty.toLocaleString()} units
           </p>
-          <p className="text-ds-warning/80">Est. cost ₹{wipValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+          <p className="text-[var(--brand-primary)]/80">Est. cost ₹{wipValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
         </div>
         <div className="rounded-ds-md bg-[var(--info-bg)] p-4">
           <h2 className="font-semibold text-[var(--info)] mb-2">Finished Goods</h2>

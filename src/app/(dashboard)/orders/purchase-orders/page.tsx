@@ -1066,14 +1066,14 @@ export default function PurchaseOrdersPage() {
           </div>
         </div>
         <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
-          <div className="shrink-0 rounded-ds-md bg-ds-warning/10 p-2.5">
-            <Gauge className="h-5 w-5 text-ds-warning" aria-hidden />
+          <div className="shrink-0 rounded-ds-md bg-[var(--brand-primary)]/10 p-2.5">
+            <Gauge className="h-5 w-5 text-[var(--brand-primary)]" aria-hidden />
           </div>
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
               System velocity
             </div>
-            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-warning ${poMono}`}>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-[var(--brand-primary)] ${poMono}`}>
               {kpiLoading
                 ? '—'
                 : `${(kpi?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
@@ -1284,7 +1284,7 @@ export default function PurchaseOrdersPage() {
                         aria-label="Download PDF"
                         disabled={pdfLoadingId === po.id}
                         onClick={(e) => void downloadPoPdf(po, e)}
-                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted hover:bg-ds-elevated/90 hover:text-ds-warning`}
+                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted hover:bg-ds-elevated/90 hover:text-[var(--brand-primary)]`}
                       >
                         <FileDown className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -1296,7 +1296,7 @@ export default function PurchaseOrdersPage() {
                           e.stopPropagation()
                           setDrawerPoId(po.id)
                         }}
-                        className="inline-flex items-center justify-center rounded-ds-sm border border-ds-line/40 bg-ds-card/40 px-1.5 py-1 text-ds-ink-muted hover:border-ds-warning/45 hover:bg-ds-warning/8 hover:text-ds-warning"
+                        className="inline-flex items-center justify-center rounded-ds-sm border border-ds-line/40 bg-ds-card/40 px-1.5 py-1 text-ds-ink-muted hover:border-[var(--brand-primary)]/45 hover:bg-[var(--brand-primary)]/8 hover:text-[var(--brand-primary)]"
                       >
                         <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -1362,7 +1362,7 @@ export default function PurchaseOrdersPage() {
                 <div className="text-xs text-ds-ink-faint">Customer</div>
                 <div className="font-medium text-ds-ink">{drawerPo.customer?.name}</div>
               </div>
-              <div className={`text-right ${poMono} text-ds-warning`}>
+              <div className={`text-right ${poMono} text-[var(--brand-primary)]`}>
                 <div className="text-xs text-ds-ink-faint uppercase">Value</div>
                 {formatRupee(drawerPo.value)}
               </div>
@@ -1431,7 +1431,7 @@ export default function PurchaseOrdersPage() {
 
             <Link
               href={`/orders/purchase-orders/${drawerPo.id}`}
-              className="block w-full text-center text-xs text-ds-ink-faint hover:text-ds-warning underline-offset-2 hover:underline"
+              className="block w-full text-center text-xs text-ds-ink-faint hover:text-[var(--brand-primary)] underline-offset-2 hover:underline"
             >
               Open full-page editor (advanced)
             </Link>

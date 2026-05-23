@@ -108,7 +108,7 @@ export default function NewMachinePage() {
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-foreground" />
         </div>
         <div className="flex gap-2">
-          <button type="submit" disabled={submitting} className="rounded-ds-md bg-ds-warning px-4 py-2 text-primary-foreground disabled:bg-ds-line/30">
+          <button type="submit" disabled={submitting} className="rounded-ds-md bg-[var(--brand-primary)] px-4 py-2 text-primary-foreground disabled:bg-ds-line/30">
             {submitting ? 'Saving…' : 'Save'}
           </button>
           <Link href="/masters/machines" className="rounded-ds-md bg-ds-elevated px-4 py-2 text-foreground hover:bg-ds-line/30">

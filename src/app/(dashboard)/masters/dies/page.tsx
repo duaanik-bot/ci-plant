@@ -226,7 +226,7 @@ export default function DiesPage() {
                   : 0
               return (
                 <tr key={d.id} className={enterpriseTrClass}>
-                  <td className={`${enterpriseTdMonoClass} text-ds-warning`}>{d.dieCode ?? '—'}</td>
+                  <td className={`${enterpriseTdMonoClass} text-[var(--brand-primary)]`}>{d.dieCode ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{d.dieNumber ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{d.dieType ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{d.ups ?? '—'}</td>

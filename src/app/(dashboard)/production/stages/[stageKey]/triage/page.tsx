@@ -349,7 +349,7 @@ export default function StageTriageBoardPage() {
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-designing-queue text-ds-warning">JC #{c.row.jobCard.jobCardNumber}</span>
+                        <span className="font-designing-queue text-[var(--brand-primary)]">JC #{c.row.jobCard.jobCardNumber}</span>
                         <span className="text-ds-ink-faint">#{c.triage.sequenceNo}</span>
                       </div>
                       <div className="mt-1 text-ds-ink font-medium line-clamp-2">{c.row.jobCard.productName ?? c.row.jobCard.poMeta?.cartonName ?? '-'}</div>
@@ -417,7 +417,7 @@ export default function StageTriageBoardPage() {
           <div className="space-y-3 text-sm">
             <div className="sticky top-0 z-20 rounded-ds-md bg-ds-main px-3 py-2 shadow-ds-depth-sm">
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-designing-queue text-ds-warning">JC #{spotlight.jobCard.jobCardNumber}</span>
+                <span className="font-designing-queue text-[var(--brand-primary)]">JC #{spotlight.jobCard.jobCardNumber}</span>
                 <span className="text-ds-ink">{spotlight.jobCard.productName ?? spotlight.jobCard.poMeta?.cartonName ?? '-'}</span>
                 <span className="text-ds-ink-muted">| {spotlight.jobCard.customer.name}</span>
                 <span className="rounded-full bg-ds-main px-2 py-0.5 text-[10px] text-ds-ink-muted">Stage {stageLabel}</span>

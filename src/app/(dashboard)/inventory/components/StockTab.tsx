@@ -74,7 +74,7 @@ export function StockTab({ rows, onRowClick }: Props) {
                   <div className="flex items-center gap-2">
                     <span className={cn('h-2 w-2 rounded-full', ragDotClass(rag))} />
                     {suggestion && (
-                      <span className="text-[11px] text-ds-warning">
+                      <span className="text-[11px] text-[var(--brand-primary)]">
                         ⚡ ~{nf.format(Math.round(suggestion.suggestedKg))} kg
                       </span>
                     )}

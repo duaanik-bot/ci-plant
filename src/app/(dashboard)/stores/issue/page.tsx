@@ -469,7 +469,7 @@ export default function StoresIssuePage() {
                   key={b.id}
                   className="rounded-ds-md bg-background/40 px-3 py-2 font-mono text-xs text-ds-ink"
                 >
-                  <span className="text-ds-warning">Lot {b.lotNumber ?? '—'}</span>
+                  <span className="text-[var(--brand-primary)]">Lot {b.lotNumber ?? '—'}</span>
                   <span className="block text-ds-ink-muted">
                     {b.receiptDate} · {b.ageDays}d · {b.qtySheets} sh
                   </span>

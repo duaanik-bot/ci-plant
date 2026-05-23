@@ -148,7 +148,7 @@ export default function ShadeCardHubSettingsPage() {
                 type="button"
                 disabled={saving || !name.trim()}
                 onClick={() => void addOperator()}
-                className="w-full rounded-md bg-ds-warning py-2 text-sm font-bold text-primary-foreground disabled:opacity-50"
+                className="w-full rounded-md bg-[var(--brand-primary)] py-2 text-sm font-bold text-primary-foreground disabled:opacity-50"
               >
                 Add operator
               </button>

@@ -103,7 +103,7 @@ export default function NewInstrumentPage() {
           Active
         </label>
         <div className="flex gap-2">
-          <button type="submit" disabled={submitting} className="rounded-ds-md bg-ds-warning px-4 py-2 text-primary-foreground disabled:bg-ds-line/30">
+          <button type="submit" disabled={submitting} className="rounded-ds-md bg-[var(--brand-primary)] px-4 py-2 text-primary-foreground disabled:bg-ds-line/30">
             {submitting ? 'Saving…' : 'Save'}
           </button>
           <Link href="/masters/instruments" className="rounded-ds-md bg-ds-elevated px-4 py-2 text-foreground hover:bg-ds-line/30">

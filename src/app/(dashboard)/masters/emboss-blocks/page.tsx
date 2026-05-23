@@ -233,7 +233,7 @@ export default function EmbossBlocksListPage() {
                   : 0
               return (
                 <tr key={b.id} className={enterpriseTrClass}>
-                  <td className={`${enterpriseTdMonoClass} text-ds-warning`}>{b.blockCode ?? '—'}</td>
+                  <td className={`${enterpriseTdMonoClass} text-[var(--brand-primary)]`}>{b.blockCode ?? '—'}</td>
                   <td className={enterpriseTdMonoClass}>{b.blockNumber ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{b.blockType ?? '—'}</td>
                   <td className={enterpriseTdMutedClass}>{b.blockMaterial ?? '—'}</td>

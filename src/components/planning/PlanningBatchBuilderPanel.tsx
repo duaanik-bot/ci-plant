@@ -523,7 +523,7 @@ export function PlanningBatchBuilderPanel({
               })
             }}
             disabled={lines.length < 2}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-ds-md bg-ds-warning px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-warning/90"
+            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-ds-md bg-[var(--brand-primary)] px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:opacity-90"
           >
             <Plus className="h-4 w-4" aria-hidden />
             {lines.length < 2 ? 'Create group (select 2+)' : 'Create group'}

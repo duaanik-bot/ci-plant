@@ -270,7 +270,7 @@ export default function DispatchTrackingPage() {
                 type="checkbox"
                 checked={createDraftBill}
                 onChange={(e) => setCreateDraftBill(e.target.checked)}
-                className="rounded bg-ds-elevated text-ds-warning"
+                className="rounded bg-ds-elevated text-[var(--brand-primary)]"
               />
               Create draft bill from this dispatch
             </label>
