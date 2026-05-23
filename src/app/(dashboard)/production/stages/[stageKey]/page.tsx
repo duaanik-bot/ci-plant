@@ -2157,16 +2157,25 @@ export default function ProductionStagePage() {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <label className="space-y-1">
                       <span className="text-ds-ink-faint">Operator</span>
-                      <select
-                        value={getRowOperator(row)}
-                        onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                        className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
-                      >
-                        <option value="">Select operator</option>
-                        {stationOperators.map((op) => (
-                          <option key={op.id} value={op.name}>{op.name}</option>
-                        ))}
-                      </select>
+                      {stationOperators.length > 0 ? (
+                        <select
+                          value={getRowOperator(row)}
+                          onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                          className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                        >
+                          <option value="">Select operator</option>
+                          {stationOperators.map((op) => (
+                            <option key={op.id} value={op.name}>{op.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={getRowOperator(row)}
+                          onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                          placeholder="Operator"
+                          className="w-full rounded border border-ds-line/50 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                        />
+                      )}
                     </label>
                     {terminalRule.machineAutoFromOperator ? (
                       <label className="space-y-1">
@@ -2256,16 +2265,25 @@ export default function ProductionStagePage() {
                   <div className="space-y-1.5">
                     <label className="flex items-center gap-2 text-xs">
                       <span className="text-ds-ink-faint w-16 shrink-0">Operator</span>
-                      <select
-                        value={getRowOperator(row)}
-                        onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
-                        className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
-                      >
-                        <option value="">Select operator</option>
-                        {stationOperators.map((op) => (
-                          <option key={op.id} value={op.name}>{op.name}</option>
-                        ))}
-                      </select>
+                      {stationOperators.length > 0 ? (
+                        <select
+                          value={getRowOperator(row)}
+                          onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                          className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                        >
+                          <option value="">Select operator</option>
+                          {stationOperators.map((op) => (
+                            <option key={op.id} value={op.name}>{op.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={getRowOperator(row)}
+                          onChange={(e) => setOperatorDrafts((prev) => ({ ...prev, [row.stageRecord.id]: e.target.value }))}
+                          placeholder="Operator"
+                          className="flex-1 rounded border border-ds-line/40 bg-ds-card px-2 py-1 text-xs text-ds-ink"
+                        />
+                      )}
                     </label>
                     {terminalRule.machineSelectable && terminalRule.machineCodes.length > 0 ? (
                       <label className="flex items-center gap-2 text-xs">
