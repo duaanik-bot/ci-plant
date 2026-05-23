@@ -1148,12 +1148,12 @@ function InventoryPageContent() {
           <div className="p-4 md:p-6">
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-ds-warning">Paper Warehouse (Raw Materials)</h2>
+                <h2 className="text-lg font-semibold text-[var(--brand-primary)]">Paper Warehouse (Raw Materials)</h2>
                 <p className="text-xs text-ds-ink-faint mt-1 font-mono">
                   Master-driven paper stock only. Reservation, incoming, and shortage are synchronized with Planning and PR.
                 </p>
                 {(ledgerGsm || ledgerBoard) && (
-                  <p className={`text-xs text-ds-warning mt-2 ${ledgerMono}`}>
+                  <p className={`text-xs text-[var(--brand-primary)] mt-2 ${ledgerMono}`}>
                     Job card deep link · GSM {ledgerGsm || '—'} · Board {ledgerBoard || '—'}
                   </p>
                 )}
@@ -1199,7 +1199,7 @@ function InventoryPageContent() {
                 </Link>
                 <Link
                   href="/inventory/grn"
-                  className="rounded-ds-md bg-ds-warning px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-95"
+                  className="rounded-ds-md bg-[var(--brand-primary)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
                 >
                   Add Stock (GRN)
                 </Link>
@@ -1598,7 +1598,7 @@ function InventoryPageContent() {
                   </button>
                   <button
                     type="button"
-                    className="rounded bg-ds-warning px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                    className="rounded bg-[var(--brand-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                     onClick={() => void submitProcure()}
                     disabled={procureBusy}
                   >
@@ -1621,14 +1621,14 @@ function InventoryPageContent() {
               <button
                 type="button"
                 onClick={() => setAdjustMode('single')}
-                className={`rounded px-2.5 py-1.5 text-xs ${adjustMode === 'single' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted'}`}
+                className={`rounded px-2.5 py-1.5 text-xs ${adjustMode === 'single' ? 'bg-[var(--brand-primary)] text-white' : 'text-ds-ink-muted'}`}
               >
                 Single entry
               </button>
               <button
                 type="button"
                 onClick={() => setAdjustMode('bulk')}
-                className={`rounded px-2.5 py-1.5 text-xs ${adjustMode === 'bulk' ? 'bg-ds-warning text-primary-foreground' : 'text-ds-ink-muted'}`}
+                className={`rounded px-2.5 py-1.5 text-xs ${adjustMode === 'bulk' ? 'bg-[var(--brand-primary)] text-white' : 'text-ds-ink-muted'}`}
               >
                 Bulk entries
               </button>
@@ -1714,7 +1714,7 @@ function InventoryPageContent() {
                   type="button"
                   disabled={adjustSubmitting}
                   onClick={() => void submitAdjust()}
-                  className="w-full rounded bg-ds-warning px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                  className="w-full rounded bg-[var(--brand-primary)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                 >
                   {adjustSubmitting ? 'Saving...' : 'Save adjustment'}
                 </button>
@@ -1734,7 +1734,7 @@ function InventoryPageContent() {
                   type="button"
                   disabled={bulkAdjustSubmitting}
                   onClick={() => void submitBulkAdjust()}
-                  className="w-full rounded bg-ds-warning px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                  className="w-full rounded bg-[var(--brand-primary)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                 >
                   {bulkAdjustSubmitting ? 'Processing…' : 'Run bulk update'}
                 </button>

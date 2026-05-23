@@ -119,7 +119,7 @@ function MegaNavLink({ item }: { item: MegaNavItem }) {
   return (
     <Link
       href={item.href}
-      className="group flex items-center gap-3 rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3 transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
+      className="group flex items-center gap-3 rounded-ds-md bg-[var(--bg-card)] p-3 transition-all duration-150 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
     >
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ds-sm bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18 [&>svg]:h-[18px] [&>svg]:w-[18px]">
         <Icon aria-hidden />
@@ -152,7 +152,7 @@ function BlockNavLink({
     <button
       type="button"
       onClick={() => (onNavigate ? onNavigate(item.href) : undefined)}
-      className="group relative w-full overflow-hidden rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3 text-left transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
+      className="group relative w-full overflow-hidden rounded-ds-md bg-[var(--bg-card)] p-3 text-left transition-all duration-150 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
     >
       <div className="flex items-center gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ds-sm bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18">
@@ -419,7 +419,7 @@ export function DashboardShell({
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
+              className="rounded-ds-sm bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] shadow-ds-depth-sm hover:bg-[var(--bg-muted)]"
             >
               Reload
             </button>

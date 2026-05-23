@@ -522,7 +522,7 @@ export default function StoresIssuePage() {
               reasonDetail: '',
               additionalQty: '',
             })}
-            className="mt-4 px-6 py-3 rounded-ds-md bg-orange-600 hover:bg-orange-500 text-foreground font-medium"
+            className="mt-4 px-6 py-3 rounded-ds-md bg-[var(--brand-primary)] hover:opacity-90 text-white font-medium"
           >
             Request Excess Sheets
           </button>
